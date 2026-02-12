@@ -52,6 +52,7 @@ import Objects from './pages/Objects';
 import Personnel from './pages/Personnel';
 import CostSettings from './pages/CostSettings';
 import Routes from './pages/Routes';
+import utils from './pages/utils';
 import __Layout from './Layout.jsx';
 
 
@@ -61,6 +62,7 @@ export const PAGES = {
     "Personnel": Personnel,
     "CostSettings": CostSettings,
     "Routes": Routes,
+    "utils": utils,
 }
 
 export const pagesConfig = {
