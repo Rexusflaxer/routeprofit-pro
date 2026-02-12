@@ -1,6 +1,6 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
-import { createPageUrl } from "@/pages/utils";
+import { createPageUrl } from "./utils";
 import { LayoutDashboard, MapPin, Users, Route, Settings, Shield, Menu, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 

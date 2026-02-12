@@ -6,7 +6,7 @@ import RouteAnalysisCard from "../components/routes/RouteAnalysisCard";
 import EmptyState from "../components/ui-custom/EmptyState";
 import PageHeader from "../components/ui-custom/PageHeader";
 import { Link } from "react-router-dom";
-import { createPageUrl } from "@/pages/utils";
+import { createPageUrl } from "../utils";
 import { Button } from "@/components/ui/button";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
