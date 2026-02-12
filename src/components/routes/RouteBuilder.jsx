@@ -32,7 +32,6 @@ export default function RouteBuilder({ route, objects, personnel, onSave, onCanc
     personnel_calculation: "gemiddeld",
     shift_type: "nacht",
     weekdays: [1, 2, 3, 4, 5],
-    total_distance_km: 50,
     notes: "",
   });
 
@@ -68,19 +67,39 @@ export default function RouteBuilder({ route, objects, personnel, onSave, onCanc
     [objects, form.object_ids]
   );
 
-  // Bereken gemiddelde reistijd tussen alle object-paren (fictieve berekening: 5-15 min afhankelijk van volgorde)
-  const avgTravelMinutes = useMemo(() => {
-    if (selectedObjects.length < 2) return 0;
-    let totalPairs = 0;
-    let totalTime = 0;
-    for (let i = 0; i < selectedObjects.length; i++) {
-      for (let j = i + 1; j < selectedObjects.length; j++) {
-        totalPairs++;
-        // Fictieve berekening: random tijd tussen 5-15 min per paar
-        totalTime += 8 + (Math.abs(i - j) * 2);
+  // Bereken afstand tussen twee coördinaten (Haversine formule)
+  const calculateDistance = (lat1, lon1, lat2, lon2) => {
+    const R = 6371; // Earth radius in km
+    const dLat = (lat2 - lat1) * Math.PI / 180;
+    const dLon = (lon2 - lon1) * Math.PI / 180;
+    const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
+              Math.cos(lat1 * Math.PI / 180) * Math.cos(lat2 * Math.PI / 180) *
+              Math.sin(dLon/2) * Math.sin(dLon/2);
+    const c = 2 * Math.atan2(Math.sqrt(a), Math.sqrt(1-a));
+    return R * c;
+  };
+
+  // Bereken totale afstand en gemiddelde reistijd
+  const { totalDistanceKm, avgTravelMinutes } = useMemo(() => {
+    if (selectedObjects.length < 2) return { totalDistanceKm: 0, avgTravelMinutes: 0 };
+    
+    let totalDistance = 0;
+    // Bereken afstand tussen opeenvolgende objecten
+    for (let i = 0; i < selectedObjects.length - 1; i++) {
+      const obj1 = selectedObjects[i];
+      const obj2 = selectedObjects[i + 1];
+      if (obj1.latitude && obj1.longitude && obj2.latitude && obj2.longitude) {
+        totalDistance += calculateDistance(obj1.latitude, obj1.longitude, obj2.latitude, obj2.longitude);
       }
     }
-    return totalPairs > 0 ? Math.round(totalTime / totalPairs) : 0;
+    
+    // Gemiddelde reistijd: ~5 min per 10 km (aanname)
+    const avgTime = selectedObjects.length > 1 ? Math.round((totalDistance / (selectedObjects.length - 1)) * 5) : 0;
+    
+    return { 
+      totalDistanceKm: Math.round(totalDistance * 10) / 10, 
+      avgTravelMinutes: Math.max(5, avgTime) 
+    };
   }, [selectedObjects]);
 
   const totalServiceMinutes = selectedObjects.reduce((sum, o) => sum + (o.service_duration_minutes || 0), 0);
@@ -98,6 +117,7 @@ export default function RouteBuilder({ route, objects, personnel, onSave, onCanc
       ...form,
       total_service_minutes: totalServiceMinutes,
       avg_travel_minutes: avgTravelMinutes,
+      total_distance_km: totalDistanceKm,
       total_route_minutes: totalRouteMinutes,
       total_revenue: totalRevenuePerVisit * visitsPerMonth,
     });
@@ -130,20 +150,14 @@ export default function RouteBuilder({ route, objects, personnel, onSave, onCanc
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Type dienst</Label>
-              <Select value={form.shift_type} onValueChange={(v) => handleChange("shift_type", v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {SHIFT_TYPES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Geschatte totale afstand (km)</Label>
-              <Input type="number" min="0" value={form.total_distance_km} onChange={(e) => handleChange("total_distance_km", Number(e.target.value))} />
-            </div>
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Type dienst</Label>
+            <Select value={form.shift_type} onValueChange={(v) => handleChange("shift_type", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {SHIFT_TYPES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
           </div>
 
           <div className="space-y-3">
@@ -190,9 +204,14 @@ export default function RouteBuilder({ route, objects, personnel, onSave, onCanc
               ))}
             </div>
             {selectedObjects.length > 1 && (
-              <p className="text-xs text-slate-500">
-                Gem. reistijd tussen objecten: <span className="font-semibold text-slate-700">{avgTravelMinutes} min</span> (automatisch berekend)
-              </p>
+              <div className="space-y-1">
+                <p className="text-xs text-slate-500">
+                  Totale afstand: <span className="font-semibold text-slate-700">{totalDistanceKm} km</span> (automatisch berekend)
+                </p>
+                <p className="text-xs text-slate-500">
+                  Gem. reistijd tussen objecten: <span className="font-semibold text-slate-700">{avgTravelMinutes} min</span> (automatisch berekend)
+                </p>
+              </div>
             )}
           </div>
 
