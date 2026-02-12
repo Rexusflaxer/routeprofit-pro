@@ -21,11 +21,14 @@ Deno.serve(async (req) => {
         const response = await fetch(url);
         const data = await response.json();
 
-        const suggestions = (data.response?.docs || []).map(doc => ({
-            address: doc.weergavenaam || doc.straatnaam,
-            latitude: doc.centroide_ll ? parseFloat(doc.centroide_ll.split(' ')[0].replace('POINT(', '')) : null,
-            longitude: doc.centroide_ll ? parseFloat(doc.centroide_ll.split(' ')[1].replace(')', '')) : null,
-        }));
+        const suggestions = (data.response?.docs || []).map(doc => {
+            const coords = doc.centroide_ll ? doc.centroide_ll.replace('POINT(', '').replace(')', '').split(' ') : null;
+            return {
+                address: doc.weergavenaam || doc.straatnaam,
+                latitude: coords ? parseFloat(coords[1]) : null,
+                longitude: coords ? parseFloat(coords[0]) : null,
+            };
+        });
 
         return Response.json({ suggestions });
     } catch (error) {
