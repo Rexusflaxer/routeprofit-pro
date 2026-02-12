@@ -25,10 +25,11 @@ const WEEKDAYS = [
   { value: 7, label: "Zondag" },
 ];
 
-export default function RouteBuilder({ route, objects, personnel, onSave, onCancel }) {
+export default function RouteBuilder({ route, objects, personnel, vehicles, onSave, onCancel }) {
   const [form, setForm] = useState(route || {
     name: "",
     object_ids: [],
+    vehicle_id: "",
     personnel_calculation: "gemiddeld",
     shift_type: "nacht",
     weekdays: [1, 2, 3, 4, 5],
@@ -133,10 +134,23 @@ export default function RouteBuilder({ route, objects, personnel, onSave, onCanc
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Routenaam</Label>
               <Input value={form.name} onChange={(e) => handleChange("name", e.target.value)} placeholder="Bijv. Route Noord" required />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Voertuig</Label>
+              <Select value={form.vehicle_id} onValueChange={(v) => handleChange("vehicle_id", v)}>
+                <SelectTrigger><SelectValue placeholder="Selecteer voertuig" /></SelectTrigger>
+                <SelectContent>
+                  {vehicles.filter(v => v.is_active).map(v => (
+                    <SelectItem key={v.id} value={v.id}>
+                      {v.license_plate} - {v.brand} {v.model}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Personeelskosten</Label>

@@ -8,6 +8,7 @@ const NAV_ITEMS = [
   { name: "Dashboard", icon: LayoutDashboard, page: "Dashboard" },
   { name: "Objecten", icon: MapPin, page: "Objects" },
   { name: "Personeel", icon: Users, page: "Personnel" },
+  { name: "Voertuigen", icon: Settings, page: "Vehicles" },
   { name: "Routes", icon: Route, page: "Routes" },
   { name: "Kosten", icon: Settings, page: "CostSettings" },
 ];

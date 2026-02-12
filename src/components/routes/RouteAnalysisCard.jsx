@@ -87,6 +87,7 @@ export default function RouteAnalysisCard({ route, objects, personnel, costSetti
     return {
       routeObjects,
       personnelLabel,
+      vehicle,
       totalServiceMin,
       travelMin,
       totalRouteMin,
@@ -106,7 +107,7 @@ export default function RouteAnalysisCard({ route, objects, personnel, costSetti
       visitsPerMonth,
       monthlyKm,
     };
-  }, [route, objects, personnel, costSettings]);
+  }, [route, objects, personnel, vehicles, costSettings]);
 
   if (!analysis) return null;
 
@@ -131,6 +132,7 @@ export default function RouteAnalysisCard({ route, objects, personnel, costSetti
           </span>
           <span className="text-xs text-slate-500">
             {analysis.personnelLabel} · {route.shift_type} · {(route.weekdays || []).length}x/week
+            {analysis.vehicle && ` · ${analysis.vehicle.license_plate}`}
           </span>
         </div>
       </CardHeader>
