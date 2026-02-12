@@ -8,31 +8,59 @@ export default function RouteAnalysisCard({ route, objects, personnel, costSetti
     if (!route || !costSettings) return null;
 
     const routeObjects = objects.filter(o => (route.object_ids || []).includes(o.id));
-    const person = personnel.find(p => p.id === route.personnel_id);
-
+    
     // Service time
     const totalServiceMin = routeObjects.reduce((s, o) => s + (o.service_duration_minutes || 0), 0);
     const travelMin = routeObjects.length > 1 
-      ? (routeObjects.length) * (route.avg_travel_minutes || 0)
+      ? (routeObjects.length - 1) * (route.avg_travel_minutes || 0)
       : 0;
     const totalRouteMin = totalServiceMin + travelMin;
     const totalRouteHours = totalRouteMin / 60;
 
     // Revenue
     const revenuePerVisit = routeObjects.reduce((s, o) => s + (o.price_per_visit || 0), 0);
-    const visitsPerMonth = route.visits_per_month || 22;
+    const visitsPerMonth = (route.weekdays || []).length * 4;
     const monthlyRevenue = revenuePerVisit * visitsPerMonth;
 
-    // Personnel cost
+    // Personnel cost - berekenen op basis van keuze
     let surchargePct = 0;
-    if (route.shift_type === "avond") surchargePct = person?.evening_surcharge_pct || 30;
-    else if (route.shift_type === "nacht") surchargePct = person?.night_surcharge_pct || 50;
-    else if (route.shift_type === "weekend") surchargePct = person?.weekend_surcharge_pct || 50;
+    if (route.shift_type === "avond") surchargePct = 30;
+    else if (route.shift_type === "nacht") surchargePct = 50;
+    else if (route.shift_type === "weekend") surchargePct = 50;
 
-    const baseRate = person?.base_hourly_rate || 14;
-    const withSurcharge = baseRate * (1 + surchargePct / 100);
-    const withVacation = withSurcharge * (1 + (person?.vacation_allowance_pct || 8) / 100);
-    const effectiveRate = withVacation * (1 + (person?.employer_costs_pct || 32) / 100);
+    let effectiveRate = 0;
+    let personnelLabel = "";
+    
+    if (route.personnel_calculation === "duurste") {
+      // Vind duurste medewerker
+      let maxRate = 0;
+      let maxPerson = null;
+      personnel.forEach(p => {
+        const rate = p.base_hourly_rate || 0;
+        const withSurcharge = rate * (1 + surchargePct / 100);
+        const withVacation = withSurcharge * (1 + (p.vacation_allowance_pct || 8) / 100);
+        const effective = withVacation * (1 + (p.employer_costs_pct || 32) / 100);
+        if (effective > maxRate) {
+          maxRate = effective;
+          maxPerson = p;
+        }
+      });
+      effectiveRate = maxRate;
+      personnelLabel = maxPerson ? `${maxPerson.name} (duurste)` : "Duurste";
+    } else {
+      // Bereken gemiddelde
+      let totalRate = 0;
+      personnel.forEach(p => {
+        const rate = p.base_hourly_rate || 0;
+        const withSurcharge = rate * (1 + surchargePct / 100);
+        const withVacation = withSurcharge * (1 + (p.vacation_allowance_pct || 8) / 100);
+        const effective = withVacation * (1 + (p.employer_costs_pct || 32) / 100);
+        totalRate += effective;
+      });
+      effectiveRate = personnel.length > 0 ? totalRate / personnel.length : 0;
+      personnelLabel = "Gemiddelde";
+    }
+
     const personnelCostPerVisit = effectiveRate * totalRouteHours;
     const monthlyPersonnelCost = personnelCostPerVisit * visitsPerMonth;
 
@@ -58,7 +86,7 @@ export default function RouteAnalysisCard({ route, objects, personnel, costSetti
 
     return {
       routeObjects,
-      person,
+      personnelLabel,
       totalServiceMin,
       travelMin,
       totalRouteMin,
@@ -102,7 +130,7 @@ export default function RouteAnalysisCard({ route, objects, personnel, costSetti
             <Clock className="w-3 h-3" /> {analysis.totalRouteMin} min/bezoek
           </span>
           <span className="text-xs text-slate-500">
-            {analysis.person?.name || "Geen medewerker"} · {route.shift_type}
+            {analysis.personnelLabel} · {route.shift_type} · {(route.weekdays || []).length}x/week
           </span>
         </div>
       </CardHeader>

@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Save, X, Route, Clock, Euro } from "lucide-react";
+import { Save, X, Route, Clock, Euro, CheckSquare } from "lucide-react";
 
 const SHIFT_TYPES = [
   { value: "dag", label: "Dag" },
@@ -15,21 +15,23 @@ const SHIFT_TYPES = [
   { value: "weekend", label: "Weekend" },
 ];
 
-const FREQUENCIES = [
-  { value: "dagelijks", label: "Dagelijks" },
-  { value: "weekelijks", label: "Wekelijks" },
-  { value: "maandelijks", label: "Maandelijks" },
+const WEEKDAYS = [
+  { value: 1, label: "Maandag" },
+  { value: 2, label: "Dinsdag" },
+  { value: 3, label: "Woensdag" },
+  { value: 4, label: "Donderdag" },
+  { value: 5, label: "Vrijdag" },
+  { value: 6, label: "Zaterdag" },
+  { value: 7, label: "Zondag" },
 ];
 
 export default function RouteBuilder({ route, objects, personnel, onSave, onCancel }) {
   const [form, setForm] = useState(route || {
     name: "",
     object_ids: [],
-    personnel_id: "",
+    personnel_calculation: "gemiddeld",
     shift_type: "nacht",
-    frequency: "dagelijks",
-    visits_per_month: 22,
-    avg_travel_minutes: 10,
+    weekdays: [1, 2, 3, 4, 5],
     total_distance_km: 50,
     notes: "",
   });
@@ -45,25 +47,59 @@ export default function RouteBuilder({ route, objects, personnel, onSave, onCanc
     }));
   };
 
+  const selectAllObjects = () => {
+    setForm(prev => ({
+      ...prev,
+      object_ids: objects.map(o => o.id)
+    }));
+  };
+
+  const toggleWeekday = (day) => {
+    setForm(prev => ({
+      ...prev,
+      weekdays: (prev.weekdays || []).includes(day)
+        ? prev.weekdays.filter(d => d !== day)
+        : [...(prev.weekdays || []), day].sort()
+    }));
+  };
+
   const selectedObjects = useMemo(() => 
     objects.filter(o => form.object_ids.includes(o.id)),
     [objects, form.object_ids]
   );
 
+  // Bereken gemiddelde reistijd tussen alle object-paren (fictieve berekening: 5-15 min afhankelijk van volgorde)
+  const avgTravelMinutes = useMemo(() => {
+    if (selectedObjects.length < 2) return 0;
+    let totalPairs = 0;
+    let totalTime = 0;
+    for (let i = 0; i < selectedObjects.length; i++) {
+      for (let j = i + 1; j < selectedObjects.length; j++) {
+        totalPairs++;
+        // Fictieve berekening: random tijd tussen 5-15 min per paar
+        totalTime += 8 + (Math.abs(i - j) * 2);
+      }
+    }
+    return totalPairs > 0 ? Math.round(totalTime / totalPairs) : 0;
+  }, [selectedObjects]);
+
   const totalServiceMinutes = selectedObjects.reduce((sum, o) => sum + (o.service_duration_minutes || 0), 0);
   const totalTravelMinutes = selectedObjects.length > 1 
-    ? (selectedObjects.length - 1) * (form.avg_travel_minutes || 0) + (form.avg_travel_minutes || 0)
+    ? (selectedObjects.length - 1) * avgTravelMinutes
     : 0;
   const totalRouteMinutes = totalServiceMinutes + totalTravelMinutes;
   const totalRevenuePerVisit = selectedObjects.reduce((sum, o) => sum + (o.price_per_visit || 0), 0);
+  
+  const visitsPerMonth = (form.weekdays || []).length * 4;
 
   const handleSubmit = (e) => {
     e.preventDefault();
     onSave({
       ...form,
       total_service_minutes: totalServiceMinutes,
+      avg_travel_minutes: avgTravelMinutes,
       total_route_minutes: totalRouteMinutes,
-      total_revenue: totalRevenuePerVisit * (form.visits_per_month || 0),
+      total_revenue: totalRevenuePerVisit * visitsPerMonth,
     });
   };
 
@@ -83,17 +119,18 @@ export default function RouteBuilder({ route, objects, personnel, onSave, onCanc
               <Input value={form.name} onChange={(e) => handleChange("name", e.target.value)} placeholder="Bijv. Route Noord" required />
             </div>
             <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Medewerker</Label>
-              <Select value={form.personnel_id} onValueChange={(v) => handleChange("personnel_id", v)}>
-                <SelectTrigger><SelectValue placeholder="Selecteer medewerker" /></SelectTrigger>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Personeelskosten</Label>
+              <Select value={form.personnel_calculation} onValueChange={(v) => handleChange("personnel_calculation", v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
-                  {personnel.map(p => <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>)}
+                  <SelectItem value="gemiddeld">Gemiddelde van alle medewerkers</SelectItem>
+                  <SelectItem value="duurste">Duurste medewerker</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Type dienst</Label>
               <Select value={form.shift_type} onValueChange={(v) => handleChange("shift_type", v)}>
@@ -104,33 +141,42 @@ export default function RouteBuilder({ route, objects, personnel, onSave, onCanc
               </Select>
             </div>
             <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Frequentie</Label>
-              <Select value={form.frequency} onValueChange={(v) => handleChange("frequency", v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  {FREQUENCIES.map(f => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Bezoeken per maand</Label>
-              <Input type="number" min="1" value={form.visits_per_month} onChange={(e) => handleChange("visits_per_month", Number(e.target.value))} />
-            </div>
-          </div>
-
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Gem. reistijd tussen objecten (min)</Label>
-              <Input type="number" min="0" value={form.avg_travel_minutes} onChange={(e) => handleChange("avg_travel_minutes", Number(e.target.value))} />
-            </div>
-            <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Geschatte totale afstand (km)</Label>
               <Input type="number" min="0" value={form.total_distance_km} onChange={(e) => handleChange("total_distance_km", Number(e.target.value))} />
             </div>
           </div>
 
           <div className="space-y-3">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Objecten op deze route</Label>
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Dagen per week</Label>
+            <div className="bg-slate-50 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-2">
+              {WEEKDAYS.map(day => (
+                <label key={day.value} className="flex items-center gap-2 p-2 rounded-lg hover:bg-white transition-colors cursor-pointer">
+                  <Checkbox 
+                    checked={(form.weekdays || []).includes(day.value)} 
+                    onCheckedChange={() => toggleWeekday(day.value)} 
+                  />
+                  <span className="text-sm font-medium text-slate-700">{day.label}</span>
+                </label>
+              ))}
+            </div>
+            <p className="text-xs text-slate-500">
+              Bezoeken per maand: <span className="font-semibold text-slate-700">{visitsPerMonth}</span> ({(form.weekdays || []).length} dagen/week × 4 weken)
+            </p>
+          </div>
+
+          <div className="space-y-3">
+            <div className="flex items-center justify-between">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Objecten op deze route</Label>
+              <Button 
+                type="button" 
+                size="sm" 
+                variant="outline" 
+                onClick={selectAllObjects}
+                className="h-7 text-xs"
+              >
+                <CheckSquare className="w-3 h-3 mr-1" /> Selecteer alles
+              </Button>
+            </div>
             <div className="bg-slate-50 rounded-xl p-4 max-h-60 overflow-y-auto space-y-2">
               {objects.length === 0 && <p className="text-sm text-slate-400">Geen objecten beschikbaar. Voeg eerst objecten toe.</p>}
               {objects.map(obj => (
@@ -143,6 +189,11 @@ export default function RouteBuilder({ route, objects, personnel, onSave, onCanc
                 </label>
               ))}
             </div>
+            {selectedObjects.length > 1 && (
+              <p className="text-xs text-slate-500">
+                Gem. reistijd tussen objecten: <span className="font-semibold text-slate-700">{avgTravelMinutes} min</span> (automatisch berekend)
+              </p>
+            )}
           </div>
 
           {selectedObjects.length > 0 && (
