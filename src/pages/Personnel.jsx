@@ -2,6 +2,7 @@ import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { Plus, Users } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import PageHeader from "../components/ui-custom/PageHeader";
