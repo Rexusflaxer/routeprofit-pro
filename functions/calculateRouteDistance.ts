@@ -46,11 +46,17 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'route_id or object_ids is required' }, { status: 400 });
     }
 
+    console.log(`Found ${uniqueObjects.length} unique objects`);
+    uniqueObjects.forEach((obj, i) => {
+      console.log(`  ${i+1}. ${obj.name}: lat=${obj.latitude}, lon=${obj.longitude}`);
+    });
+
     if (uniqueObjects.length < 2) {
       return Response.json({
         total_distance_km: 0,
         avg_travel_minutes: 0,
-        number_of_pairs: 0
+        number_of_pairs: 0,
+        debug: `Only ${uniqueObjects.length} objects found`
       });
     }
 
@@ -58,6 +64,8 @@ Deno.serve(async (req) => {
     if (!googleMapsApiKey) {
       return Response.json({ error: 'Google Maps API key not configured' }, { status: 500 });
     }
+
+    console.log('Starting pair calculations...');
 
     // Calculate travel time for all unique pairs of objects
     let totalTravelMinutes = 0;
