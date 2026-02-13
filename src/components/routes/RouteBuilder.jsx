@@ -466,7 +466,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
                 </div>
                 <div>
                   <p className="text-xs text-slate-400">Omzet per route</p>
-                  <p className="text-xl font-bold">€{(totalRevenuePerVisit * totalVisitsPerMonth).toFixed(2)}</p>
+                  <p className="text-xl font-bold">€{totalRevenuePerVisit.toFixed(2)}</p>
                 </div>
               </div>
             </div>
