@@ -15,33 +15,36 @@ Deno.serve(async (req) => {
     const allTasks = await base44.entities.Task.list();
     const allObjects = await base44.entities.SurveillanceObject.list();
 
-    let routeTasks, route;
+    let uniqueObjects = [];
 
     if (route_id) {
       // Fetch route by ID
-      route = await base44.entities.Route.get(route_id);
+      const route = await base44.entities.Route.get(route_id);
       if (!route) {
         return Response.json({ error: 'Route not found' }, { status: 404 });
       }
       const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
-      routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
-    } else if (object_ids && Array.isArray(object_ids)) {
+      const routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
+      
+      const seenIds = new Set();
+      routeTasks.forEach(task => {
+        const obj = allObjects.find(o => o.id === task.object_id);
+        if (obj && obj.latitude && obj.longitude && !seenIds.has(obj.id)) {
+          uniqueObjects.push(obj);
+          seenIds.add(obj.id);
+        }
+      });
+    } else if (object_ids && Array.isArray(object_ids) && object_ids.length > 0) {
       // Direct object IDs provided (for form preview)
-      routeTasks = allTasks.filter(t => object_ids.includes(t.object_id));
+      object_ids.forEach(objId => {
+        const obj = allObjects.find(o => o.id === objId);
+        if (obj && obj.latitude && obj.longitude) {
+          uniqueObjects.push(obj);
+        }
+      });
     } else {
       return Response.json({ error: 'route_id or object_ids is required' }, { status: 400 });
     }
-
-    // Get unique objects for these tasks
-    const uniqueObjects = [];
-    const seenIds = new Set();
-    routeTasks.forEach(task => {
-      const obj = allObjects.find(o => o.id === task.object_id);
-      if (obj && obj.latitude && obj.longitude && !seenIds.has(obj.id)) {
-        uniqueObjects.push(obj);
-        seenIds.add(obj.id);
-      }
-    });
 
     if (uniqueObjects.length < 2) {
       return Response.json({
