@@ -350,17 +350,14 @@ Deno.serve(async (req) => {
         payslip.surcharges.new_years_eve_100.amount;
       
       // Voor oproepkrachten: vakantiegeld en eindejaarsuitkering direct uitbetaald
-      let vacationAllowanceAmount = 0;
-      let yearEndBonusAmount = 0;
-      
       if (isCallWorker) {
         // Bereken vakantiegeld en eindejaarsuitkering als percentage van basis + toeslagen
         const baseForAllowances = payslip.base_salary + totalSurcharges;
-        vacationAllowanceAmount = baseForAllowances * ((caoConfig.vacation_allowance || 8) / 100);
-        yearEndBonusAmount = baseForAllowances * ((caoConfig.year_end_bonus || 2.01) / 100);
+        payslip.accruals.vacation_allowance = baseForAllowances * ((caoConfig.vacation_allowance || 8) / 100);
+        payslip.accruals.year_end_bonus = baseForAllowances * ((caoConfig.year_end_bonus || 2.01) / 100);
         
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
-        payslip.total_gross = payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + vacationAllowanceAmount + yearEndBonusAmount;
+        payslip.total_gross = payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus;
       } else {
         payslip.total_gross = payslip.base_salary + totalSurcharges;
       }
