@@ -190,12 +190,15 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
                         value={form.cao_scale} 
                         onChange={(e) => {
                           const newScale = Number(e.target.value);
-                          const validRange = VALID_PERIODS_PER_SCALE[newScale];
-                          // Reset periode naar minimum van nieuwe schaal als huidige periode ongeldig is
-                          const newPeriod = (form.cao_period < validRange.min || form.cao_period > validRange.max) 
-                            ? validRange.min 
-                            : form.cao_period;
-                          setForm(prev => ({ ...prev, cao_scale: newScale, cao_period: newPeriod }));
+                          // Alleen updaten als schaal geldig is (2-7)
+                          if (newScale >= 2 && newScale <= 7) {
+                            const validRange = VALID_PERIODS_PER_SCALE[newScale];
+                            // Reset periode naar minimum van nieuwe schaal als huidige periode ongeldig is
+                            const newPeriod = (form.cao_period < validRange.min || form.cao_period > validRange.max) 
+                              ? validRange.min 
+                              : form.cao_period;
+                            setForm(prev => ({ ...prev, cao_scale: newScale, cao_period: newPeriod }));
+                          }
                         }} 
                       />
                       <p className="text-[10px] text-slate-400">Schaal bepaalt functieniveau</p>
