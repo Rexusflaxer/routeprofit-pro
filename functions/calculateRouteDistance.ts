@@ -9,25 +9,28 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { route_id } = await req.json();
-
-    if (!route_id) {
-      return Response.json({ error: 'route_id is required' }, { status: 400 });
-    }
-
-    // Fetch route
-    const route = await base44.entities.Route.get(route_id);
-    if (!route) {
-      return Response.json({ error: 'Route not found' }, { status: 404 });
-    }
+    const { route_id, object_ids } = await req.json();
 
     // Get all tasks and objects
     const allTasks = await base44.entities.Task.list();
     const allObjects = await base44.entities.SurveillanceObject.list();
 
-    // Get tasks assigned to this route
-    const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
-    const routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
+    let routeTasks, route;
+
+    if (route_id) {
+      // Fetch route by ID
+      route = await base44.entities.Route.get(route_id);
+      if (!route) {
+        return Response.json({ error: 'Route not found' }, { status: 404 });
+      }
+      const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
+      routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
+    } else if (object_ids && Array.isArray(object_ids)) {
+      // Direct object IDs provided (for form preview)
+      routeTasks = allTasks.filter(t => object_ids.includes(t.object_id));
+    } else {
+      return Response.json({ error: 'route_id or object_ids is required' }, { status: 400 });
+    }
 
     // Get objects for these tasks
     const routeObjects = routeTasks
