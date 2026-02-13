@@ -203,6 +203,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
           setGoogleMapsMetrics({
             totalDistanceKm: response.data.total_distance_km || 0,
             avgTravelMinutes: response.data.avg_travel_minutes || 0,
+            totalTravelMinutes: response.data.total_travel_minutes_all_pairs || 0,
             loading: false
           });
         }
