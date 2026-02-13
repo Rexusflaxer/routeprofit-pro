@@ -447,14 +447,10 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
           {selectedTasks.length > 0 && (
             <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white rounded-xl p-5">
               <p className="text-xs font-semibold uppercase tracking-wider text-amber-400 mb-3">Route samenvatting</p>
-              <div className="grid grid-cols-2 md:grid-cols-6 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div>
                   <p className="text-xs text-slate-400">Taken</p>
                   <p className="text-xl font-bold">{selectedTasks.length}</p>
-                </div>
-                <div>
-                  <p className="text-xs text-slate-400">Bezoeken/mnd</p>
-                  <p className="text-xl font-bold">{totalVisitsPerMonth}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-400">Totale taaktijd</p>
@@ -469,7 +465,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
                   <p className="text-xl font-bold">{totalRouteMinutes} min</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-400">Omzet/mnd</p>
+                  <p className="text-xs text-slate-400">Omzet per route</p>
                   <p className="text-xl font-bold">€{(totalRevenuePerVisit * totalVisitsPerMonth).toFixed(2)}</p>
                 </div>
               </div>
