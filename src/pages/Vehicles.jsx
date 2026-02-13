@@ -9,10 +9,14 @@ import EmptyState from "../components/ui-custom/EmptyState";
 import VehicleForm from "../components/vehicles/VehicleForm";
 import VehicleTable from "../components/vehicles/VehicleTable";
 import MileageTracker from "../components/vehicles/MileageTracker";
+import SellVehicleDialog from "../components/vehicles/SellVehicleDialog";
+import MileageDialog from "../components/vehicles/MileageDialog";
 
 export default function VehiclesPage() {
   const [showForm, setShowForm] = useState(false);
   const [editingVehicle, setEditingVehicle] = useState(null);
+  const [sellVehicle, setSellVehicle] = useState(null);
+  const [mileageVehicle, setMileageVehicle] = useState(null);
   const queryClient = useQueryClient();
 
   const { data: vehicles = [], isLoading } = useQuery({
@@ -43,6 +47,14 @@ export default function VehiclesPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["vehicles"] }),
   });
 
+  const addMileageMutation = useMutation({
+    mutationFn: (data) => base44.entities.VehicleMileage.create(data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["vehicleMileage"] });
+      setMileageVehicle(null);
+    },
+  });
+
   const handleSave = (data) => {
     if (editingVehicle) {
       updateMutation.mutate({ id: editingVehicle.id, data });
@@ -54,6 +66,23 @@ export default function VehiclesPage() {
   const handleEdit = (vehicle) => {
     setEditingVehicle(vehicle);
     setShowForm(true);
+  };
+
+  const handleSell = (vehicle) => {
+    setSellVehicle(vehicle);
+  };
+
+  const handleAddMileage = (vehicle) => {
+    setMileageVehicle(vehicle);
+  };
+
+  const handleSaveSell = (data) => {
+    updateMutation.mutate({ id: data.id, data });
+    setSellVehicle(null);
+  };
+
+  const handleSaveMileage = (data) => {
+    addMileageMutation.mutate(data);
   };
 
   if (isLoading) {
@@ -88,14 +117,19 @@ export default function VehiclesPage() {
                   setEditingVehicle(null);
                 }}
               />
-              {editingVehicle && editingVehicle.id && <MileageTracker vehicleId={editingVehicle.id} />}
             </div>
           </motion.div>
         )}
       </AnimatePresence>
 
       {vehicles.length > 0 ? (
-        <VehicleTable vehicles={vehicles} onEdit={handleEdit} onDelete={(id) => deleteMutation.mutate(id)} />
+        <VehicleTable 
+          vehicles={vehicles} 
+          onEdit={handleEdit} 
+          onDelete={(id) => deleteMutation.mutate(id)}
+          onSell={handleSell}
+          onAddMileage={handleAddMileage}
+        />
       ) : (
         !showForm && (
           <EmptyState
@@ -107,6 +141,20 @@ export default function VehiclesPage() {
           />
         )
       )}
+
+      <SellVehicleDialog 
+        vehicle={sellVehicle} 
+        open={!!sellVehicle} 
+        onClose={() => setSellVehicle(null)}
+        onSave={handleSaveSell}
+      />
+
+      <MileageDialog 
+        vehicleId={mileageVehicle?.id} 
+        open={!!mileageVehicle} 
+        onClose={() => setMileageVehicle(null)}
+        onSave={handleSaveMileage}
+      />
     </div>
   );
 }

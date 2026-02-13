@@ -192,54 +192,23 @@ export default function VehicleForm({ vehicle, onSave, onCancel }) {
             </div>
 
             {requiresPurchaseInfo && (
-              <>
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Aankoopprijs (€)</Label>
-                    <Input type="number" step="0.01" value={form.purchase_price} onChange={(e) => handleChange("purchase_price", parseFloat(e.target.value) || 0)} />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-                      Geschatte restwaarde (€)
-                    </Label>
-                    <Input type="number" step="0.01" value={form.residual_value} onChange={(e) => handleChange("residual_value", parseFloat(e.target.value) || 0)} />
-                    <p className="text-[10px] text-slate-400">Automatisch 30% van aankoopprijs</p>
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Afschrijving (jaren)</Label>
-                    <Input type="number" value={form.depreciation_years} onChange={(e) => handleChange("depreciation_years", Number(e.target.value))} />
-                  </div>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg">
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Aankoopprijs (€)</Label>
+                  <Input type="number" step="0.01" value={form.purchase_price} onChange={(e) => handleChange("purchase_price", parseFloat(e.target.value) || 0)} />
                 </div>
-
-                {/* Werkelijke waarden bij verkoop/vervanging */}
-                <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg space-y-3">
-                  <div className="flex items-center gap-2 mb-2">
-                    <Badge className="bg-amber-600 text-white text-[10px]">Optioneel</Badge>
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-amber-700">Definitieve waarden (bij verkoop/vervanging)</Label>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label className="text-xs text-amber-700">Daadwerkelijke restwaarde (€)</Label>
-                      <Input 
-                        type="number" 
-                        step="0.01" 
-                        value={form.actual_residual_value || ""} 
-                        onChange={(e) => handleChange("actual_residual_value", parseFloat(e.target.value) || 0)} 
-                        placeholder="Vul in bij verkoop"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label className="text-xs text-amber-700">Datum uit gebruik</Label>
-                      <Input 
-                        type="date" 
-                        value={form.disposal_date || ""} 
-                        onChange={(e) => handleChange("disposal_date", e.target.value)} 
-                      />
-                    </div>
-                  </div>
-                  <p className="text-[10px] text-amber-600">Vul deze velden in wanneer het voertuig verkocht of vervangen wordt voor precieze kostenberekening</p>
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                    Geschatte restwaarde (€)
+                  </Label>
+                  <Input type="number" step="0.01" value={form.residual_value} onChange={(e) => handleChange("residual_value", parseFloat(e.target.value) || 0)} />
+                  <p className="text-[10px] text-slate-400">Automatisch 30% van aankoopprijs</p>
                 </div>
-              </>
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Afschrijving (jaren)</Label>
+                  <Input type="number" value={form.depreciation_years} onChange={(e) => handleChange("depreciation_years", Number(e.target.value))} />
+                </div>
+              </div>
             )}
 
             {form.acquisition_type === "banklening" && (

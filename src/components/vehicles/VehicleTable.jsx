@@ -2,9 +2,9 @@ import React from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, Trash2, Car } from "lucide-react";
+import { Pencil, Trash2, Car, DollarSign, Gauge } from "lucide-react";
 
-export default function VehicleTable({ vehicles, onEdit, onDelete }) {
+export default function VehicleTable({ vehicles, onEdit, onDelete, onSell, onAddMileage }) {
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <Table>
@@ -84,10 +84,18 @@ export default function VehicleTable({ vehicles, onEdit, onDelete }) {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-2">
-                    <Button variant="ghost" size="icon" onClick={() => onEdit(vehicle)}>
+                    <Button variant="ghost" size="icon" onClick={() => onEdit(vehicle)} title="Wijzigen">
                       <Pencil className="w-4 h-4 text-slate-500" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => onDelete(vehicle.id)}>
+                    <Button variant="ghost" size="icon" onClick={() => onAddMileage(vehicle)} title="KM-stand toevoegen">
+                      <Gauge className="w-4 h-4 text-blue-500" />
+                    </Button>
+                    {!vehicle.disposal_date && (
+                      <Button variant="ghost" size="icon" onClick={() => onSell(vehicle)} title="Auto verkopen">
+                        <DollarSign className="w-4 h-4 text-amber-500" />
+                      </Button>
+                    )}
+                    <Button variant="ghost" size="icon" onClick={() => onDelete(vehicle.id)} title="Verwijderen">
                       <Trash2 className="w-4 h-4 text-red-500" />
                     </Button>
                   </div>
