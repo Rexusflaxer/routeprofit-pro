@@ -33,11 +33,27 @@ Deno.serve(async (req) => {
 
         const vehicle = data[0];
 
+        // Bepaal brandstoftype
+        let fuelType = null;
+        const brandstofOmschrijving = (vehicle.brandstof_omschrijving || '').toLowerCase();
+        if (brandstofOmschrijving.includes('elektr')) {
+            fuelType = 'elektrisch';
+        } else if (brandstofOmschrijving.includes('hybr')) {
+            fuelType = 'hybride';
+        } else if (brandstofOmschrijving.includes('benzine')) {
+            fuelType = 'benzine';
+        } else if (brandstofOmschrijving.includes('diesel')) {
+            fuelType = 'diesel';
+        } else if (brandstofOmschrijving.includes('lpg')) {
+            fuelType = 'lpg';
+        }
+
         return Response.json({
             found: true,
             brand: vehicle.merk || '',
             model: vehicle.handelsbenaming || '',
             year: vehicle.datum_eerste_toelating ? parseInt(vehicle.datum_eerste_toelating.substring(0, 4)) : null,
+            fuel_type: fuelType
         });
     } catch (error) {
         return Response.json({ error: error.message }, { status: 500 });

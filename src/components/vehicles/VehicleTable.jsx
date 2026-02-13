@@ -21,8 +21,22 @@ export default function VehicleTable({ vehicles, onEdit, onDelete }) {
         </TableHeader>
         <TableBody>
           {vehicles.map((vehicle) => {
-            const depreciationPerMonth = ((vehicle.purchase_price - vehicle.residual_value) / (vehicle.depreciation_years * 12)) || 0;
-            const variableCostPerKm = (vehicle.fuel_cost_per_km + vehicle.maintenance_cost_per_km + vehicle.tire_cost_per_km) || 0;
+            let monthlyFixed = 0;
+            if (vehicle.acquisition_type === "lease" || vehicle.acquisition_type === "private_lease") {
+              monthlyFixed = vehicle.monthly_lease_cost || 0;
+            } else if (vehicle.acquisition_type === "banklening") {
+              monthlyFixed = vehicle.monthly_loan_payment || 0;
+            } else {
+              monthlyFixed = ((vehicle.purchase_price - vehicle.residual_value) / (vehicle.depreciation_years * 12)) || 0;
+            }
+            
+            let variableCostPerKm = vehicle.fuel_cost_per_km || 0;
+            if (vehicle.maintenance_type === "per_km" && vehicle.maintenance_interval_km > 0) {
+              variableCostPerKm += (vehicle.maintenance_cost || 0) / vehicle.maintenance_interval_km;
+            }
+            if (vehicle.tire_type === "per_km" && vehicle.tire_interval_km > 0) {
+              variableCostPerKm += (vehicle.tire_cost || 0) / vehicle.tire_interval_km;
+            }
             
             return (
               <TableRow key={vehicle.id}>
@@ -32,11 +46,27 @@ export default function VehicleTable({ vehicles, onEdit, onDelete }) {
                     <Car className="w-4 h-4 text-slate-400" />
                     <div>
                       <div className="font-medium text-slate-900">{vehicle.brand} {vehicle.model}</div>
-                      {vehicle.year && <div className="text-xs text-slate-500">{vehicle.year}</div>}
+                      <div className="flex items-center gap-2 mt-0.5">
+                        {vehicle.year && <span className="text-xs text-slate-500">{vehicle.year}</span>}
+                        {vehicle.fuel_type && (
+                          <Badge variant="secondary" className="text-xs bg-slate-100 text-slate-600">
+                            {vehicle.fuel_type}
+                          </Badge>
+                        )}
+                      </div>
                     </div>
                   </div>
                 </TableCell>
-                <TableCell>€{depreciationPerMonth.toFixed(2)}</TableCell>
+                <TableCell>
+                  <div>
+                    <div className="font-medium text-slate-900">€{monthlyFixed.toFixed(2)}</div>
+                    <div className="text-xs text-slate-500">
+                      {vehicle.acquisition_type === "lease" ? "lease" : 
+                       vehicle.acquisition_type === "private_lease" ? "priv. lease" :
+                       vehicle.acquisition_type === "banklening" ? "aflossing" : "afschrijving"}
+                    </div>
+                  </div>
+                </TableCell>
                 <TableCell>€{variableCostPerKm.toFixed(2)}</TableCell>
                 <TableCell>€{(vehicle.insurance_per_month || 0).toFixed(2)}</TableCell>
                 <TableCell>

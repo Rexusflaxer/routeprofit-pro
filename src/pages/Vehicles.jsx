@@ -79,14 +79,17 @@ export default function VehiclesPage() {
       <AnimatePresence>
         {showForm && (
           <motion.div initial={{ opacity: 0, y: -20 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -20 }}>
-            <VehicleForm
-              vehicle={editingVehicle}
-              onSave={handleSave}
-              onCancel={() => {
-                setShowForm(false);
-                setEditingVehicle(null);
-              }}
-            />
+            <div className="space-y-6">
+              <VehicleForm
+                vehicle={editingVehicle}
+                onSave={handleSave}
+                onCancel={() => {
+                  setShowForm(false);
+                  setEditingVehicle(null);
+                }}
+              />
+              {editingVehicle && editingVehicle.id && <MileageTracker vehicleId={editingVehicle.id} />}
+            </div>
           </motion.div>
         )}
       </AnimatePresence>
