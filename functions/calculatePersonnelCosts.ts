@@ -144,10 +144,14 @@ Deno.serve(async (req) => {
       new_years_eve: 0
     };
 
+    // Check of dit een oproepkracht is
+    const isCallWorker = personnel.contract_type === '0_uren' || personnel.contract_type === 'oproep';
+    
     // Breakdown zoals op loonstrook
     let payslip = {
       // Bruto componenten
       base_salary: 0,
+      vacation_hours_call_worker: 0, // Vakantie-uren oproep (8% extra uren)
       vacation_paid: 0, // Doorbetaling verlof
       surcharges: {
         evening_10: { hours: 0, rate: 0, amount: 0 },
@@ -171,7 +175,7 @@ Deno.serve(async (req) => {
       // Pensioengrondslag berekening
       pension_base: 0,
       
-      // Reserveringen (niet uitbetaald, maar opgebouwd)
+      // Reserveringen (voor normale werknemers) of direct uitbetaald (voor oproepkrachten)
       accruals: {
         vacation_allowance: 0,
         year_end_bonus: 0
@@ -193,7 +197,10 @@ Deno.serve(async (req) => {
       total_cost_employer: 0,
       
       // Details per shift
-      shift_details: []
+      shift_details: [],
+      
+      // Metadata
+      is_call_worker: isCallWorker
     };
 
     // Bepaal basis uurloon
