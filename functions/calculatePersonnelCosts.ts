@@ -22,7 +22,7 @@ function isNewYearsEveAfter16(date) {
   return month === 12 && day === 31 && hours >= 16;
 }
 
-function getSurcharge(datetime, caoConfig) {
+function getSurchargeType(datetime, caoConfig) {
   const date = new Date(datetime);
   const dayOfWeek = date.getDay(); // 0=zondag, 6=zaterdag
   const hours = date.getHours();
@@ -30,31 +30,31 @@ function getSurcharge(datetime, caoConfig) {
 
   // Oudejaarsdag na 16:00 (hoogste toeslag)
   if (isNewYearsEveAfter16(date)) {
-    return caoConfig.surcharge_new_years_eve_after_16 || 100;
+    return { type: 'new_years_eve', percentage: caoConfig.surcharge_new_years_eve_after_16 || 100 };
   }
 
   // Feestdagen (50%)
   if (isHoliday(dateStr)) {
-    return caoConfig.surcharge_holiday || 50;
+    return { type: 'holiday', percentage: caoConfig.surcharge_holiday || 50 };
   }
 
   // Weekend (zaterdag 00:00 - zondag 24:00) = 35%
   if (dayOfWeek === 0 || dayOfWeek === 6) {
-    return caoConfig.surcharge_weekend || 35;
+    return { type: 'weekend', percentage: caoConfig.surcharge_weekend || 35 };
   }
 
   // Nacht ma-vr 00:00 - 07:00 = 20%
   if (hours >= 0 && hours < 7) {
-    return caoConfig.surcharge_night || 20;
+    return { type: 'night', percentage: caoConfig.surcharge_night || 20 };
   }
 
   // Avond ma-vr 18:00 - 24:00 = 10%
   if (hours >= 18) {
-    return caoConfig.surcharge_evening || 10;
+    return { type: 'evening', percentage: caoConfig.surcharge_evening || 10 };
   }
 
   // Dag = 0%
-  return 0;
+  return { type: 'day', percentage: 0 };
 }
 
 function getCAOHourlyRate(scale, period, caoConfig) {
@@ -66,6 +66,25 @@ function getCAOHourlyRate(scale, period, caoConfig) {
   }
   
   return 16.02; // Fallback naar schaal 2, periode 0
+}
+
+// Bereken loonheffing op basis van bruto loon
+function calculateTaxAmount(taxableAmount, caoConfig, annualSalaryEstimate) {
+  // Vereenvoudigde berekening: gebruik gemiddeld percentage op basis van jaarloon
+  // In werkelijkheid is dit complexer met staffels en heffingskortingen
+  
+  const yearlyIncome = annualSalaryEstimate || (taxableAmount * 13); // 13 periodes per jaar
+  
+  let taxRate = 0;
+  if (yearlyIncome <= (caoConfig.tax_bracket_1_limit || 38098)) {
+    taxRate = caoConfig.tax_rate_bracket_1 || 36.97;
+  } else if (yearlyIncome <= (caoConfig.tax_bracket_2_limit || 75518)) {
+    taxRate = caoConfig.tax_rate_bracket_2 || 36.97;
+  } else {
+    taxRate = caoConfig.tax_rate_bracket_3 || 49.5;
+  }
+  
+  return taxableAmount * (taxRate / 100);
 }
 
 Deno.serve(async (req) => {
@@ -98,29 +117,98 @@ Deno.serve(async (req) => {
       surcharge_new_years_eve_after_16: 100,
       vacation_allowance: 8,
       year_end_bonus: 2.01,
-      employer_costs_base: 25,
+      pension_premium_rate_total: 24.1,
+      pension_premium_employer: 60,
+      pension_premium_employee: 40,
+      pension_base_salary_threshold: 16164,
+      premium_sfpb: 0.061,
+      premium_paww_employee: 0.1,
+      premium_wga_employee: 0.81,
+      premium_awf_employer: 2.64,
+      premium_ww_employer_fixed: 0,
+      premium_ww_employer_variable: 1.5,
+      premium_wia_employer: 0.72,
+      premium_wga_employer: 1.5,
+      premium_zw_employer: 0,
+      tax_rate_bracket_1: 36.97,
       wage_scales: {}
     };
 
-    let totalCosts = 0;
     let totalHours = 0;
-    let breakdown = {
-      base_wage: 0,
-      surcharges: 0,
-      vacation_allowance: 0,
-      year_end_bonus: 0,
-      employer_costs: 0,
-      total: 0,
-      details: []
+    let hoursByType = {
+      day: 0,
+      evening: 0,
+      night: 0,
+      weekend: 0,
+      holiday: 0,
+      new_years_eve: 0
     };
+
+    // Breakdown zoals op loonstrook
+    let payslip = {
+      // Bruto componenten
+      base_salary: 0,
+      vacation_paid: 0, // Doorbetaling verlof
+      surcharges: {
+        evening_10: { hours: 0, rate: 0, amount: 0 },
+        night_20: { hours: 0, rate: 0, amount: 0 },
+        weekend_35: { hours: 0, rate: 0, amount: 0 },
+        holiday_50: { hours: 0, rate: 0, amount: 0 },
+        new_years_eve_100: { hours: 0, rate: 0, amount: 0 }
+      },
+      total_gross: 0,
+      
+      // Werknemersbijdragen (inhoudingen)
+      employee_deductions: {
+        premium_sfpb: 0,
+        premium_paww: 0,
+        pension_premium: 0,
+        premium_wga: 0,
+        tax_withheld: 0,
+        total: 0
+      },
+      
+      // Pensioengrondslag berekening
+      pension_base: 0,
+      
+      // Reserveringen (niet uitbetaald, maar opgebouwd)
+      accruals: {
+        vacation_allowance: 0,
+        year_end_bonus: 0
+      },
+      
+      // Werkgeverslasten (niet zichtbaar voor werknemer, maar wel kosten)
+      employer_costs: {
+        pension_premium: 0,
+        premium_awf: 0,
+        premium_ww: 0,
+        premium_wia: 0,
+        premium_wga: 0,
+        premium_zw: 0,
+        total: 0
+      },
+      
+      // Totalen
+      net_salary: 0,
+      total_cost_employer: 0,
+      
+      // Details per shift
+      shift_details: []
+    };
+
+    // Bepaal basis uurloon
+    let baseHourlyRate = 0;
+    if (personnel.employee_type === 'loondienst') {
+      if (personnel.cao === 'cao_particuliere_beveiliging') {
+        baseHourlyRate = getCAOHourlyRate(personnel.cao_scale || 3, personnel.cao_period || 0, caoConfig);
+      } else {
+        baseHourlyRate = personnel.custom_hourly_rate || 16;
+      }
+    }
 
     // Bereken per werkdag
     for (const shift of work_schedule) {
       const { date, start_time, end_time } = shift;
-      
-      // Parse start en eind tijden
-      const [startHour, startMin] = start_time.split(':').map(Number);
-      const [endHour, endMin] = end_time.split(':').map(Number);
       
       const startDate = new Date(`${date}T${start_time}:00`);
       const endDate = new Date(`${date}T${end_time}:00`);
@@ -131,14 +219,10 @@ Deno.serve(async (req) => {
       
       totalHours += hoursWorked;
 
-      // Bepaal basis uurloon
-      let baseHourlyRate = 0;
-      
       if (personnel.employee_type === 'zzp') {
-        // ZZP: gebruik opgegeven tarieven
-        baseHourlyRate = personnel.zzp_hourly_rate_excl_vat || 0;
+        // ZZP berekening (vereenvoudigd, zonder alle details)
+        let zzpRate = personnel.zzp_hourly_rate_excl_vat || 0;
         
-        // Bepaal welk ZZP tarief van toepassing is
         const dayOfWeek = startDate.getDay();
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
         const isHolidayDay = isHoliday(date);
@@ -147,83 +231,239 @@ Deno.serve(async (req) => {
         const isEvening = hours >= 18;
         
         if (isHolidayDay && personnel.zzp_holiday_rate) {
-          baseHourlyRate = personnel.zzp_holiday_rate;
+          zzpRate = personnel.zzp_holiday_rate;
         } else if (isWeekend && personnel.zzp_weekend_rate) {
-          baseHourlyRate = personnel.zzp_weekend_rate;
+          zzpRate = personnel.zzp_weekend_rate;
         } else if (isNight && personnel.zzp_night_rate) {
-          baseHourlyRate = personnel.zzp_night_rate;
+          zzpRate = personnel.zzp_night_rate;
         } else if (isEvening && personnel.zzp_evening_rate) {
-          baseHourlyRate = personnel.zzp_evening_rate;
+          zzpRate = personnel.zzp_evening_rate;
         }
         
-        // ZZP: geen extra toeslagen, BTW zit er niet bij
-        const hourCost = baseHourlyRate * 1.21; // + BTW
-        breakdown.base_wage += hourCost * hoursWorked;
+        const hourCostExclVat = zzpRate * hoursWorked;
+        const vatAmount = hourCostExclVat * 0.21;
         
-        breakdown.details.push({
+        payslip.base_salary += hourCostExclVat + vatAmount;
+        
+        payslip.shift_details.push({
           date,
           hours: hoursWorked,
-          rate_excl_vat: baseHourlyRate,
-          rate_incl_vat: hourCost,
+          rate_excl_vat: zzpRate,
+          vat: vatAmount,
           type: 'zzp',
-          cost: hourCost * hoursWorked
+          total: hourCostExclVat + vatAmount
         });
         
       } else {
-        // Loondienst: CAO of eigen tarief
-        if (personnel.cao === 'cao_particuliere_beveiliging') {
-          baseHourlyRate = getCAOHourlyRate(personnel.cao_scale || 3, personnel.cao_period || 0, caoConfig);
-        } else {
-          baseHourlyRate = personnel.custom_hourly_rate || 16;
+        // Loondienst berekening
+        const surchargeInfo = getSurchargeType(startDate, caoConfig);
+        const surchargeType = surchargeInfo.type;
+        const surchargePercentage = surchargeInfo.percentage;
+        
+        hoursByType[surchargeType] += hoursWorked;
+        
+        const grossWageThisShift = baseHourlyRate * hoursWorked;
+        payslip.base_salary += grossWageThisShift;
+        
+        // Bereken toeslag bedrag
+        const surchargeAmount = grossWageThisShift * (surchargePercentage / 100);
+        const surchargeRatePerHour = baseHourlyRate * (surchargePercentage / 100);
+        
+        // Categoriseer toeslagen
+        if (surchargeType === 'evening') {
+          payslip.surcharges.evening_10.hours += hoursWorked;
+          payslip.surcharges.evening_10.rate = surchargeRatePerHour;
+          payslip.surcharges.evening_10.amount += surchargeAmount;
+        } else if (surchargeType === 'night') {
+          payslip.surcharges.night_20.hours += hoursWorked;
+          payslip.surcharges.night_20.rate = surchargeRatePerHour;
+          payslip.surcharges.night_20.amount += surchargeAmount;
+        } else if (surchargeType === 'weekend') {
+          payslip.surcharges.weekend_35.hours += hoursWorked;
+          payslip.surcharges.weekend_35.rate = surchargeRatePerHour;
+          payslip.surcharges.weekend_35.amount += surchargeAmount;
+        } else if (surchargeType === 'holiday') {
+          payslip.surcharges.holiday_50.hours += hoursWorked;
+          payslip.surcharges.holiday_50.rate = surchargeRatePerHour;
+          payslip.surcharges.holiday_50.amount += surchargeAmount;
+        } else if (surchargeType === 'new_years_eve') {
+          payslip.surcharges.new_years_eve_100.hours += hoursWorked;
+          payslip.surcharges.new_years_eve_100.rate = surchargeRatePerHour;
+          payslip.surcharges.new_years_eve_100.amount += surchargeAmount;
         }
         
-        // Bereken gemiddelde toeslag voor deze shift (vereenvoudigd)
-        const avgSurcharge = getSurcharge(startDate, caoConfig);
-        
-        const grossWage = baseHourlyRate * hoursWorked;
-        const surchargeAmount = grossWage * (avgSurcharge / 100);
-        const vacationAllowance = (grossWage + surchargeAmount) * (caoConfig.vacation_allowance / 100);
-        const yearEndBonus = (grossWage + surchargeAmount) * (caoConfig.year_end_bonus / 100);
-        const employerCosts = (grossWage + surchargeAmount + vacationAllowance + yearEndBonus) * (caoConfig.employer_costs_base / 100);
-        
-        const totalShiftCost = grossWage + surchargeAmount + vacationAllowance + yearEndBonus + employerCosts;
-        
-        breakdown.base_wage += grossWage;
-        breakdown.surcharges += surchargeAmount;
-        breakdown.vacation_allowance += vacationAllowance;
-        breakdown.year_end_bonus += yearEndBonus;
-        breakdown.employer_costs += employerCosts;
-        
-        breakdown.details.push({
+        payslip.shift_details.push({
           date,
+          start_time,
+          end_time,
           hours: hoursWorked,
           base_rate: baseHourlyRate,
-          surcharge_pct: avgSurcharge,
-          gross_wage: grossWage,
-          surcharge: surchargeAmount,
-          vacation: vacationAllowance,
-          bonus: yearEndBonus,
-          employer: employerCosts,
-          total: totalShiftCost
+          surcharge_type: surchargeType,
+          surcharge_pct: surchargePercentage,
+          gross_wage: grossWageThisShift,
+          surcharge: surchargeAmount
         });
       }
     }
 
-    // Totaal
     if (personnel.employee_type === 'zzp') {
-      breakdown.total = breakdown.base_wage;
+      // ZZP: totaal is inclusief BTW
+      payslip.total_gross = payslip.base_salary;
+      payslip.net_salary = payslip.base_salary;
+      payslip.total_cost_employer = payslip.base_salary;
+      
     } else {
-      breakdown.total = breakdown.base_wage + breakdown.surcharges + breakdown.vacation_allowance + breakdown.year_end_bonus + breakdown.employer_costs;
+      // Loondienst: Bereken alle componenten
+      
+      // Totaal bruto loon = basis + toeslagen
+      const totalSurcharges = 
+        payslip.surcharges.evening_10.amount +
+        payslip.surcharges.night_20.amount +
+        payslip.surcharges.weekend_35.amount +
+        payslip.surcharges.holiday_50.amount +
+        payslip.surcharges.new_years_eve_100.amount;
+      
+      payslip.total_gross = payslip.base_salary + totalSurcharges;
+      
+      // Bereken pensioengrondslag (bruto loon + toeslagen - franchise)
+      // Franchise op jaarbasis, hier naar periode omrekenen
+      const franchiseThisPeriod = (caoConfig.pension_base_salary_threshold || 16164) / 13;
+      const pensionBase = Math.max(0, payslip.total_gross - franchiseThisPeriod);
+      payslip.pension_base = pensionBase;
+      
+      // Werknemersbijdragen
+      payslip.employee_deductions.premium_sfpb = payslip.total_gross * ((caoConfig.premium_sfpb || 0.061) / 100);
+      payslip.employee_deductions.premium_paww = payslip.total_gross * ((caoConfig.premium_paww_employee || 0.1) / 100);
+      
+      // Pensioenpremie werknemer (40% van totaal)
+      const totalPensionPremium = pensionBase * ((caoConfig.pension_premium_rate_total || 24.1) / 100);
+      payslip.employee_deductions.pension_premium = totalPensionPremium * ((caoConfig.pension_premium_employee || 40) / 100);
+      
+      payslip.employee_deductions.premium_wga = payslip.total_gross * ((caoConfig.premium_wga_employee || 0.81) / 100);
+      
+      // Bereken belastbaar loon (bruto - werknemersbijdragen)
+      const taxableIncome = payslip.total_gross 
+        - payslip.employee_deductions.pension_premium;
+      
+      // Schat jaarloon voor belastingberekening
+      const estimatedAnnualSalary = payslip.total_gross * 13;
+      payslip.employee_deductions.tax_withheld = calculateTaxAmount(taxableIncome, caoConfig, estimatedAnnualSalary);
+      
+      payslip.employee_deductions.total = 
+        payslip.employee_deductions.premium_sfpb +
+        payslip.employee_deductions.premium_paww +
+        payslip.employee_deductions.pension_premium +
+        payslip.employee_deductions.premium_wga +
+        payslip.employee_deductions.tax_withheld;
+      
+      // Reserveringen (opgebouwd, niet uitbetaald)
+      payslip.accruals.vacation_allowance = payslip.total_gross * ((caoConfig.vacation_allowance || 8) / 100);
+      payslip.accruals.year_end_bonus = payslip.total_gross * ((caoConfig.year_end_bonus || 2.01) / 100);
+      
+      // Netto loon
+      payslip.net_salary = payslip.total_gross - payslip.employee_deductions.total;
+      
+      // Werkgeverslasten
+      payslip.employer_costs.pension_premium = totalPensionPremium * ((caoConfig.pension_premium_employer || 60) / 100);
+      payslip.employer_costs.premium_awf = payslip.total_gross * ((caoConfig.premium_awf_employer || 2.64) / 100);
+      payslip.employer_costs.premium_ww = payslip.total_gross * (((caoConfig.premium_ww_employer_fixed || 0) + (caoConfig.premium_ww_employer_variable || 1.5)) / 100);
+      payslip.employer_costs.premium_wia = payslip.total_gross * ((caoConfig.premium_wia_employer || 0.72) / 100);
+      payslip.employer_costs.premium_wga = payslip.total_gross * ((caoConfig.premium_wga_employer || 1.5) / 100);
+      payslip.employer_costs.premium_zw = payslip.total_gross * ((caoConfig.premium_zw_employer || 0) / 100);
+      
+      payslip.employer_costs.total = 
+        payslip.employer_costs.pension_premium +
+        payslip.employer_costs.premium_awf +
+        payslip.employer_costs.premium_ww +
+        payslip.employer_costs.premium_wia +
+        payslip.employer_costs.premium_wga +
+        payslip.employer_costs.premium_zw;
+      
+      // Totale kosten werkgever = bruto + werkgeverslasten + reserveringen
+      payslip.total_cost_employer = 
+        payslip.total_gross +
+        payslip.employer_costs.total +
+        payslip.accruals.vacation_allowance +
+        payslip.accruals.year_end_bonus;
     }
 
     return Response.json({
       personnel_id,
       personnel_name: personnel.name,
       employee_type: personnel.employee_type,
-      total_hours: totalHours,
-      total_costs: breakdown.total,
-      avg_cost_per_hour: totalHours > 0 ? breakdown.total / totalHours : 0,
-      breakdown
+      cao_scale: personnel.cao_scale,
+      cao_period: personnel.cao_period,
+      base_hourly_rate: baseHourlyRate,
+      total_hours: Math.round(totalHours * 100) / 100,
+      hours_by_type: hoursByType,
+      payslip: {
+        // Bruto onderdeel
+        base_salary: Math.round(payslip.base_salary * 100) / 100,
+        vacation_paid: Math.round(payslip.vacation_paid * 100) / 100,
+        surcharges: {
+          evening_10: {
+            hours: Math.round(payslip.surcharges.evening_10.hours * 100) / 100,
+            rate: Math.round(payslip.surcharges.evening_10.rate * 100) / 100,
+            amount: Math.round(payslip.surcharges.evening_10.amount * 100) / 100
+          },
+          night_20: {
+            hours: Math.round(payslip.surcharges.night_20.hours * 100) / 100,
+            rate: Math.round(payslip.surcharges.night_20.rate * 100) / 100,
+            amount: Math.round(payslip.surcharges.night_20.amount * 100) / 100
+          },
+          weekend_35: {
+            hours: Math.round(payslip.surcharges.weekend_35.hours * 100) / 100,
+            rate: Math.round(payslip.surcharges.weekend_35.rate * 100) / 100,
+            amount: Math.round(payslip.surcharges.weekend_35.amount * 100) / 100
+          },
+          holiday_50: {
+            hours: Math.round(payslip.surcharges.holiday_50.hours * 100) / 100,
+            rate: Math.round(payslip.surcharges.holiday_50.rate * 100) / 100,
+            amount: Math.round(payslip.surcharges.holiday_50.amount * 100) / 100
+          },
+          new_years_eve_100: {
+            hours: Math.round(payslip.surcharges.new_years_eve_100.hours * 100) / 100,
+            rate: Math.round(payslip.surcharges.new_years_eve_100.rate * 100) / 100,
+            amount: Math.round(payslip.surcharges.new_years_eve_100.amount * 100) / 100
+          }
+        },
+        total_gross: Math.round(payslip.total_gross * 100) / 100,
+        
+        // Werknemersbijdragen
+        employee_deductions: {
+          premium_sfpb: Math.round(payslip.employee_deductions.premium_sfpb * 100) / 100,
+          premium_paww: Math.round(payslip.employee_deductions.premium_paww * 100) / 100,
+          pension_premium: Math.round(payslip.employee_deductions.pension_premium * 100) / 100,
+          premium_wga: Math.round(payslip.employee_deductions.premium_wga * 100) / 100,
+          tax_withheld: Math.round(payslip.employee_deductions.tax_withheld * 100) / 100,
+          total: Math.round(payslip.employee_deductions.total * 100) / 100
+        },
+        
+        pension_base: Math.round(payslip.pension_base * 100) / 100,
+        
+        // Reserveringen
+        accruals: {
+          vacation_allowance: Math.round(payslip.accruals.vacation_allowance * 100) / 100,
+          year_end_bonus: Math.round(payslip.accruals.year_end_bonus * 100) / 100
+        },
+        
+        // Werkgeverslasten
+        employer_costs: {
+          pension_premium: Math.round(payslip.employer_costs.pension_premium * 100) / 100,
+          premium_awf: Math.round(payslip.employer_costs.premium_awf * 100) / 100,
+          premium_ww: Math.round(payslip.employer_costs.premium_ww * 100) / 100,
+          premium_wia: Math.round(payslip.employer_costs.premium_wia * 100) / 100,
+          premium_wga: Math.round(payslip.employer_costs.premium_wga * 100) / 100,
+          premium_zw: Math.round(payslip.employer_costs.premium_zw * 100) / 100,
+          total: Math.round(payslip.employer_costs.total * 100) / 100
+        },
+        
+        // Totalen
+        net_salary: Math.round(payslip.net_salary * 100) / 100,
+        total_cost_employer: Math.round(payslip.total_cost_employer * 100) / 100,
+        avg_cost_per_hour: totalHours > 0 ? Math.round((payslip.total_cost_employer / totalHours) * 100) / 100 : 0
+      },
+      shift_details: payslip.shift_details
     });
 
   } catch (error) {
