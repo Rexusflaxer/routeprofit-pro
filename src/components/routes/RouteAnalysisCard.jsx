@@ -124,7 +124,6 @@ export default function RouteAnalysisCard({ route, vehicles, costSettings }) {
       travelMin,
       totalRouteMin,
       totalRouteHours,
-      revenuePerVisit,
       monthlyRevenue,
       monthlyVehicleVariable,
       monthlyVehicleFixed,
