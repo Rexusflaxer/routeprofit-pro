@@ -177,7 +177,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
   };
 
   // Fetch Google Maps route metrics
-  const [googleMapsMetrics, setGoogleMapsMetrics] = useState({ totalDistanceKm: 0, avgTravelMinutes: 0, loading: false });
+  const [googleMapsMetrics, setGoogleMapsMetrics] = useState({ totalDistanceKm: 0, avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
 
   useEffect(() => {
     const fetchRouteMetrics = async () => {
