@@ -262,41 +262,53 @@ Deno.serve(async (req) => {
         });
         
       } else {
-        // Loondienst berekening
-        const surchargeInfo = getSurchargeType(startDate, caoConfig);
-        const surchargeType = surchargeInfo.type;
-        const surchargePercentage = surchargeInfo.percentage;
+        // Loondienst berekening - verwerk dienst per uur voor correcte toeslagberekening
+        let currentTime = new Date(startDate);
+        const endTime = new Date(endDate);
         
-        hoursByType[surchargeType] += hoursWorked;
-        
-        const grossWageThisShift = baseHourlyRate * hoursWorked;
-        payslip.base_salary += grossWageThisShift;
-        
-        // Bereken toeslag bedrag
-        const surchargeAmount = grossWageThisShift * (surchargePercentage / 100);
-        const surchargeRatePerHour = baseHourlyRate * (surchargePercentage / 100);
-        
-        // Categoriseer toeslagen
-        if (surchargeType === 'evening') {
-          payslip.surcharges.evening_10.hours += hoursWorked;
-          payslip.surcharges.evening_10.rate = surchargeRatePerHour;
-          payslip.surcharges.evening_10.amount += surchargeAmount;
-        } else if (surchargeType === 'night') {
-          payslip.surcharges.night_20.hours += hoursWorked;
-          payslip.surcharges.night_20.rate = surchargeRatePerHour;
-          payslip.surcharges.night_20.amount += surchargeAmount;
-        } else if (surchargeType === 'weekend') {
-          payslip.surcharges.weekend_35.hours += hoursWorked;
-          payslip.surcharges.weekend_35.rate = surchargeRatePerHour;
-          payslip.surcharges.weekend_35.amount += surchargeAmount;
-        } else if (surchargeType === 'holiday') {
-          payslip.surcharges.holiday_50.hours += hoursWorked;
-          payslip.surcharges.holiday_50.rate = surchargeRatePerHour;
-          payslip.surcharges.holiday_50.amount += surchargeAmount;
-        } else if (surchargeType === 'new_years_eve') {
-          payslip.surcharges.new_years_eve_100.hours += hoursWorked;
-          payslip.surcharges.new_years_eve_100.rate = surchargeRatePerHour;
-          payslip.surcharges.new_years_eve_100.amount += surchargeAmount;
+        while (currentTime < endTime) {
+          const nextHour = new Date(currentTime);
+          nextHour.setHours(nextHour.getHours() + 1);
+          
+          const hoursThisSegment = nextHour <= endTime ? 1 : (endTime - currentTime) / (1000 * 60 * 60);
+          
+          const surchargeInfo = getSurchargeType(currentTime, caoConfig);
+          const surchargeType = surchargeInfo.type;
+          const surchargePercentage = surchargeInfo.percentage;
+          
+          hoursByType[surchargeType] += hoursThisSegment;
+          
+          const grossWageThisSegment = baseHourlyRate * hoursThisSegment;
+          payslip.base_salary += grossWageThisSegment;
+          
+          // Bereken toeslag bedrag
+          const surchargeAmount = grossWageThisSegment * (surchargePercentage / 100);
+          const surchargeRatePerHour = baseHourlyRate * (surchargePercentage / 100);
+          
+          // Categoriseer toeslagen
+          if (surchargeType === 'evening') {
+            payslip.surcharges.evening_10.hours += hoursThisSegment;
+            payslip.surcharges.evening_10.rate = surchargeRatePerHour;
+            payslip.surcharges.evening_10.amount += surchargeAmount;
+          } else if (surchargeType === 'night') {
+            payslip.surcharges.night_20.hours += hoursThisSegment;
+            payslip.surcharges.night_20.rate = surchargeRatePerHour;
+            payslip.surcharges.night_20.amount += surchargeAmount;
+          } else if (surchargeType === 'weekend') {
+            payslip.surcharges.weekend_35.hours += hoursThisSegment;
+            payslip.surcharges.weekend_35.rate = surchargeRatePerHour;
+            payslip.surcharges.weekend_35.amount += surchargeAmount;
+          } else if (surchargeType === 'holiday') {
+            payslip.surcharges.holiday_50.hours += hoursThisSegment;
+            payslip.surcharges.holiday_50.rate = surchargeRatePerHour;
+            payslip.surcharges.holiday_50.amount += surchargeAmount;
+          } else if (surchargeType === 'new_years_eve') {
+            payslip.surcharges.new_years_eve_100.hours += hoursThisSegment;
+            payslip.surcharges.new_years_eve_100.rate = surchargeRatePerHour;
+            payslip.surcharges.new_years_eve_100.amount += surchargeAmount;
+          }
+          
+          currentTime = nextHour;
         }
         
         payslip.shift_details.push({
@@ -304,11 +316,7 @@ Deno.serve(async (req) => {
           start_time,
           end_time,
           hours: hoursWorked,
-          base_rate: baseHourlyRate,
-          surcharge_type: surchargeType,
-          surcharge_pct: surchargePercentage,
-          gross_wage: grossWageThisShift,
-          surcharge: surchargeAmount
+          base_rate: baseHourlyRate
         });
       }
     }
