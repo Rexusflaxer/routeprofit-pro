@@ -138,6 +138,13 @@ export default function CostCalculator({ personnel }) {
                   </div>
                 )}
                 
+                {result.payslip.vacation_paid > 0 && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-600">Doorbetalen ORT verlof</span>
+                    <span className="font-medium">€{result.payslip.vacation_paid.toFixed(2)}</span>
+                  </div>
+                )}
+                
                 {result.payslip.is_call_worker && (
                   <>
                     <div className="flex justify-between items-center text-sm">
@@ -177,6 +184,12 @@ export default function CostCalculator({ personnel }) {
                         <span className="text-slate-600">Eindejaarsuitkering</span>
                         <span className="font-medium">€{result.payslip.accruals.year_end_bonus.toFixed(2)}</span>
                       </div>
+                      {result.payslip.vacation_paid > 0 && (
+                        <div className="flex justify-between items-center text-sm">
+                          <span className="text-slate-600">ORT verlof reservering</span>
+                          <span className="font-medium">€{result.payslip.vacation_paid.toFixed(2)}</span>
+                        </div>
+                      )}
                     </>
                   )}
                   <div className="flex justify-between items-center text-sm">
