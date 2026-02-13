@@ -9,6 +9,7 @@ export default function SellVehicleDialog({ vehicle, open, onClose, onSave }) {
   const [form, setForm] = useState({
     actual_residual_value: vehicle?.actual_residual_value || 0,
     disposal_date: vehicle?.disposal_date || new Date().toISOString().split('T')[0],
+    final_mileage: vehicle?.final_mileage || 0,
   });
 
   const handleSubmit = (e) => {
@@ -17,6 +18,7 @@ export default function SellVehicleDialog({ vehicle, open, onClose, onSave }) {
       ...vehicle,
       actual_residual_value: form.actual_residual_value,
       disposal_date: form.disposal_date,
+      final_mileage: form.final_mileage,
       is_active: false
     });
   };
@@ -50,6 +52,19 @@ export default function SellVehicleDialog({ vehicle, open, onClose, onSave }) {
               type="date" 
               value={form.disposal_date} 
               onChange={(e) => setForm(prev => ({ ...prev, disposal_date: e.target.value }))}
+              required
+            />
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+              Eind-kilometerstand
+            </Label>
+            <Input 
+              type="number" 
+              value={form.final_mileage} 
+              onChange={(e) => setForm(prev => ({ ...prev, final_mileage: parseFloat(e.target.value) || 0 }))}
+              placeholder="Kilometerstand bij verkoop"
               required
             />
           </div>
