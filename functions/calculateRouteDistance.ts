@@ -85,14 +85,12 @@ Deno.serve(async (req) => {
     }
 
     const totalDistanceKm = totalDistance / 1000;
-    const avgTravelMinutes = routeObjects.length > 1 
-      ? Math.round((totalDuration / 60) / (routeObjects.length - 1))
-      : 0;
+    const totalTravelMinutes = Math.round(totalDuration / 60);
 
     return Response.json({
       total_distance_km: Math.round(totalDistanceKm * 10) / 10, // Round to 1 decimal
-      avg_travel_minutes: avgTravelMinutes,
-      total_duration_minutes: Math.round(totalDuration / 60),
+      avg_travel_minutes: totalTravelMinutes,
+      total_duration_minutes: totalTravelMinutes,
       number_of_objects: routeObjects.length
     });
 
