@@ -222,12 +222,17 @@ Deno.serve(async (req) => {
     for (const shift of work_schedule) {
       const { date, start_time, end_time } = shift;
       
-      const startDate = new Date(`${date}T${start_time}:00`);
-      const endDate = new Date(`${date}T${end_time}:00`);
+      let startDate = new Date(`${date}T${start_time}:00`);
+      let endDate = new Date(`${date}T${end_time}:00`);
       
-      // Bereken uren
+      // Bereken uren - corrigeer voor overnight shifts
       let hoursWorked = (endDate - startDate) / (1000 * 60 * 60);
-      if (hoursWorked < 0) hoursWorked += 24; // Overnight shift
+      if (hoursWorked < 0) {
+        // Overnight shift - eindtijd is volgende dag
+        endDate = new Date(endDate);
+        endDate.setDate(endDate.getDate() + 1);
+        hoursWorked = (endDate - startDate) / (1000 * 60 * 60);
+      }
       
       totalHours += hoursWorked;
 
