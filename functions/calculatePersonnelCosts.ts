@@ -131,6 +131,11 @@ Deno.serve(async (req) => {
       premium_wga_employer: 1.5,
       premium_zw_employer: 0,
       tax_rate_bracket_1: 36.97,
+      tax_rate_bracket_2: 36.97,
+      tax_rate_bracket_3: 49.5,
+      tax_bracket_1_limit: 38098,
+      tax_bracket_2_limit: 75518,
+      labor_tax_credit_max: 5672,
       wage_scales: {}
     };
 
