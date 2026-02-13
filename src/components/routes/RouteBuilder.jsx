@@ -218,8 +218,9 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
   // Bereken route metrics
   const { totalDistanceKm, avgTravelMinutes, totalServiceMinutes, totalRouteMinutes, totalRevenuePerVisit, totalVisitsPerMonth } = useMemo(() => {
     const serviceMin = selectedTasks.reduce((s, t) => s + (t.duration_minutes || 0), 0);
-    const travelMin = googleMapsMetrics.avgTravelMinutes || 0;
-    const routeMin = serviceMin + travelMin;
+    const avgTravelMin = googleMapsMetrics.avgTravelMinutes || 0;
+    const totalTravelMin = googleMapsMetrics.totalTravelMinutes || 0;
+    const routeMin = serviceMin + totalTravelMin;
     
     // Bereken omzet per taak per bezoek, vermenigvuldigd met aantal keer per maand (52 weken/jaar)
     const weeksPerMonth = 52 / 12;
