@@ -1,4 +1,6 @@
 import React, { useState, useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -6,14 +8,8 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Save, X, Route, Clock, Euro, CheckSquare } from "lucide-react";
-
-const SHIFT_TYPES = [
-  { value: "dag", label: "Dag" },
-  { value: "avond", label: "Avond" },
-  { value: "nacht", label: "Nacht" },
-  { value: "weekend", label: "Weekend" },
-];
+import { Save, X, Route, Clock, Euro, CheckSquare, AlertCircle } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 
 const WEEKDAYS = [
   { value: 1, label: "Maandag" },
@@ -25,32 +21,35 @@ const WEEKDAYS = [
   { value: 7, label: "Zondag" },
 ];
 
-export default function RouteBuilder({ route, objects, personnel, vehicles, onSave, onCancel }) {
+export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel }) {
   const [form, setForm] = useState(route || {
     name: "",
-    object_ids: [],
+    task_ids: [],
     vehicle_id: "",
-    personnel_calculation: "gemiddeld",
-    shift_type: "nacht",
+    time_window_start: "",
+    time_window_end: "",
     weekdays: [1, 2, 3, 4, 5],
     notes: "",
   });
 
+  const { data: allTasks = [] } = useQuery({
+    queryKey: ['all-tasks'],
+    queryFn: () => base44.entities.Task.list(),
+  });
+
+  const { data: objects = [] } = useQuery({
+    queryKey: ['objects'],
+    queryFn: () => base44.entities.SurveillanceObject.list(),
+  });
+
   const handleChange = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
 
-  const toggleObject = (objectId) => {
+  const toggleTask = (taskId) => {
     setForm(prev => ({
       ...prev,
-      object_ids: prev.object_ids.includes(objectId)
-        ? prev.object_ids.filter(id => id !== objectId)
-        : [...prev.object_ids, objectId]
-    }));
-  };
-
-  const selectAllObjects = () => {
-    setForm(prev => ({
-      ...prev,
-      object_ids: objects.map(o => o.id)
+      task_ids: prev.task_ids.includes(taskId)
+        ? prev.task_ids.filter(id => id !== taskId)
+        : [...prev.task_ids, taskId]
     }));
   };
 
@@ -63,14 +62,54 @@ export default function RouteBuilder({ route, objects, personnel, vehicles, onSa
     }));
   };
 
-  const selectedObjects = useMemo(() => 
-    objects.filter(o => form.object_ids.includes(o.id)),
-    [objects, form.object_ids]
+  // Vind taken die al in andere routes zitten
+  const usedTaskIds = useMemo(() => {
+    const used = new Set();
+    routes.forEach(r => {
+      if (route && r.id === route.id) return; // Skip huidige route bij editen
+      (r.task_ids || []).forEach(tid => used.add(tid));
+    });
+    return used;
+  }, [routes, route]);
+
+  // Filter taken: binnen tijdsvenster en nog niet in gebruik
+  const { availableTasks, usedTasks } = useMemo(() => {
+    if (!form.time_window_start || !form.time_window_end) {
+      return { availableTasks: [], usedTasks: [] };
+    }
+
+    const available = [];
+    const used = [];
+
+    allTasks.forEach(task => {
+      const isUsed = usedTaskIds.has(task.id);
+      
+      // Check of taak binnen tijdsvenster past
+      const taskStart = task.time_window_start || "00:00";
+      const taskEnd = task.time_window_end || "23:59";
+      const routeStart = form.time_window_start;
+      const routeEnd = form.time_window_end;
+
+      const fitsInWindow = taskStart >= routeStart && taskEnd <= routeEnd;
+
+      if (isUsed) {
+        used.push(task);
+      } else if (fitsInWindow) {
+        available.push(task);
+      }
+    });
+
+    return { availableTasks: available, usedTasks: used };
+  }, [allTasks, form.time_window_start, form.time_window_end, usedTaskIds]);
+
+  const selectedTasks = useMemo(() => 
+    allTasks.filter(t => form.task_ids.includes(t.id)),
+    [allTasks, form.task_ids]
   );
 
   // Bereken afstand tussen twee coördinaten (Haversine formule)
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
-    const R = 6371; // Earth radius in km
+    const R = 6371;
     const dLat = (lat2 - lat1) * Math.PI / 180;
     const dLon = (lon2 - lon1) * Math.PI / 180;
     const a = Math.sin(dLat/2) * Math.sin(dLat/2) +
@@ -80,36 +119,43 @@ export default function RouteBuilder({ route, objects, personnel, vehicles, onSa
     return R * c;
   };
 
-  // Bereken totale afstand en gemiddelde reistijd
-  const { totalDistanceKm, avgTravelMinutes } = useMemo(() => {
-    if (selectedObjects.length < 2) return { totalDistanceKm: 0, avgTravelMinutes: 0 };
+  // Bereken route metrics
+  const { totalDistanceKm, avgTravelMinutes, totalServiceMinutes, totalRouteMinutes, totalRevenuePerVisit } = useMemo(() => {
+    const taskObjects = selectedTasks.map(t => objects.find(o => o.id === t.object_id)).filter(Boolean);
     
     let totalDistance = 0;
-    // Bereken afstand tussen opeenvolgende objecten
-    for (let i = 0; i < selectedObjects.length - 1; i++) {
-      const obj1 = selectedObjects[i];
-      const obj2 = selectedObjects[i + 1];
-      if (obj1.latitude && obj1.longitude && obj2.latitude && obj2.longitude) {
-        totalDistance += calculateDistance(obj1.latitude, obj1.longitude, obj2.latitude, obj2.longitude);
+    if (taskObjects.length > 1) {
+      for (let i = 0; i < taskObjects.length - 1; i++) {
+        const obj1 = taskObjects[i];
+        const obj2 = taskObjects[i + 1];
+        if (obj1.latitude && obj1.longitude && obj2.latitude && obj2.longitude) {
+          totalDistance += calculateDistance(obj1.latitude, obj1.longitude, obj2.latitude, obj2.longitude);
+        }
       }
     }
     
-    // Gemiddelde reistijd: ~5 min per 10 km (aanname)
-    const avgTime = selectedObjects.length > 1 ? Math.round((totalDistance / (selectedObjects.length - 1)) * 5) : 0;
+    const avgTime = taskObjects.length > 1 ? Math.round((totalDistance / (taskObjects.length - 1)) * 5) : 0;
+    const serviceMin = selectedTasks.reduce((s, t) => s + (t.duration_minutes || 0), 0);
+    const travelMin = taskObjects.length > 1 ? (taskObjects.length - 1) * Math.max(5, avgTime) : 0;
+    const routeMin = serviceMin + travelMin;
     
+    const revenue = selectedTasks.reduce((s, t) => {
+      if (t.pricing_type === 'per_minuut') {
+        return s + ((t.price_amount || 0) * (t.duration_minutes || 0));
+      } else {
+        return s + (t.price_amount || 0);
+      }
+    }, 0);
+
     return { 
       totalDistanceKm: Math.round(totalDistance * 10) / 10, 
-      avgTravelMinutes: Math.max(5, avgTime) 
+      avgTravelMinutes: Math.max(5, avgTime),
+      totalServiceMinutes: serviceMin,
+      totalRouteMinutes: routeMin,
+      totalRevenuePerVisit: revenue
     };
-  }, [selectedObjects]);
+  }, [selectedTasks, objects]);
 
-  const totalServiceMinutes = selectedObjects.reduce((sum, o) => sum + (o.service_duration_minutes || 0), 0);
-  const totalTravelMinutes = selectedObjects.length > 1 
-    ? (selectedObjects.length - 1) * avgTravelMinutes
-    : 0;
-  const totalRouteMinutes = totalServiceMinutes + totalTravelMinutes;
-  const totalRevenuePerVisit = selectedObjects.reduce((sum, o) => sum + (o.price_per_visit || 0), 0);
-  
   const visitsPerMonth = (form.weekdays || []).length * 4;
 
   const handleSubmit = (e) => {
@@ -124,6 +170,19 @@ export default function RouteBuilder({ route, objects, personnel, vehicles, onSa
     });
   };
 
+  const getObjectName = (task) => {
+    const obj = objects.find(o => o.id === task.object_id);
+    return obj ? obj.name : "Onbekend object";
+  };
+
+  const getPricePerMinute = (task) => {
+    if (task.pricing_type === 'per_minuut') {
+      return task.price_amount || 0;
+    } else {
+      return task.duration_minutes > 0 ? (task.price_amount || 0) / task.duration_minutes : 0;
+    }
+  };
+
   return (
     <Card className="border-0 shadow-lg">
       <CardHeader className="pb-4">
@@ -134,7 +193,7 @@ export default function RouteBuilder({ route, objects, personnel, vehicles, onSa
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Routenaam</Label>
               <Input value={form.name} onChange={(e) => handleChange("name", e.target.value)} placeholder="Bijv. Route Noord" required />
@@ -152,26 +211,27 @@ export default function RouteBuilder({ route, objects, personnel, vehicles, onSa
                 </SelectContent>
               </Select>
             </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Personeelskosten</Label>
-              <Select value={form.personnel_calculation} onValueChange={(v) => handleChange("personnel_calculation", v)}>
-                <SelectTrigger><SelectValue /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="gemiddeld">Gemiddelde van alle medewerkers</SelectItem>
-                  <SelectItem value="duurste">Duurste medewerker</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Type dienst</Label>
-            <Select value={form.shift_type} onValueChange={(v) => handleChange("shift_type", v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                {SHIFT_TYPES.map(s => <SelectItem key={s.value} value={s.value}>{s.label}</SelectItem>)}
-              </SelectContent>
-            </Select>
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tijdsvenster van</Label>
+              <Input 
+                type="time" 
+                value={form.time_window_start} 
+                onChange={(e) => handleChange("time_window_start", e.target.value)} 
+                required 
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tijdsvenster tot</Label>
+              <Input 
+                type="time" 
+                value={form.time_window_end} 
+                onChange={(e) => handleChange("time_window_end", e.target.value)} 
+                required 
+              />
+            </div>
           </div>
 
           <div className="space-y-3">
@@ -192,50 +252,88 @@ export default function RouteBuilder({ route, objects, personnel, vehicles, onSa
             </p>
           </div>
 
-          <div className="space-y-3">
-            <div className="flex items-center justify-between">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Objecten op deze route</Label>
-              <Button 
-                type="button" 
-                size="sm" 
-                variant="outline" 
-                onClick={selectAllObjects}
-                className="h-7 text-xs"
-              >
-                <CheckSquare className="w-3 h-3 mr-1" /> Selecteer alles
-              </Button>
-            </div>
-            <div className="bg-slate-50 rounded-xl p-4 max-h-60 overflow-y-auto space-y-2">
-              {objects.length === 0 && <p className="text-sm text-slate-400">Geen objecten beschikbaar. Voeg eerst objecten toe.</p>}
-              {objects.map(obj => (
-                <label key={obj.id} className="flex items-center gap-3 p-2 rounded-lg hover:bg-white transition-colors cursor-pointer">
-                  <Checkbox checked={form.object_ids.includes(obj.id)} onCheckedChange={() => toggleObject(obj.id)} />
-                  <div className="flex-1">
-                    <span className="text-sm font-medium text-slate-900">{obj.name}</span>
-                    <span className="text-xs text-slate-400 ml-2">{obj.service_duration_minutes} min — €{(obj.price_per_visit || 0).toFixed(2)}</span>
-                  </div>
-                </label>
-              ))}
-            </div>
-            {selectedObjects.length > 1 && (
-              <div className="space-y-1">
-                <p className="text-xs text-slate-500">
-                  Totale afstand: <span className="font-semibold text-slate-700">{totalDistanceKm} km</span> (automatisch berekend)
-                </p>
-                <p className="text-xs text-slate-500">
-                  Gem. reistijd tussen objecten: <span className="font-semibold text-slate-700">{avgTravelMinutes} min</span> (automatisch berekend)
-                </p>
+          {!form.time_window_start || !form.time_window_end ? (
+            <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 flex items-start gap-3">
+              <AlertCircle className="w-5 h-5 text-amber-600 flex-shrink-0 mt-0.5" />
+              <div>
+                <p className="text-sm font-medium text-amber-900">Tijdsvenster vereist</p>
+                <p className="text-xs text-amber-700 mt-1">Vul eerst het tijdsvenster in om taken te kunnen selecteren.</p>
               </div>
-            )}
-          </div>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Taken op deze route</Label>
+              
+              {availableTasks.length === 0 ? (
+                <div className="bg-slate-50 rounded-lg p-6 text-center">
+                  <p className="text-sm text-slate-500">Geen taken beschikbaar binnen dit tijdsvenster.</p>
+                </div>
+              ) : (
+                <div className="bg-slate-50 rounded-xl p-4 max-h-96 overflow-y-auto space-y-2">
+                  {availableTasks.map(task => (
+                    <label key={task.id} className="flex items-start gap-3 p-3 rounded-lg hover:bg-white transition-colors cursor-pointer border border-slate-200">
+                      <Checkbox checked={form.task_ids.includes(task.id)} onCheckedChange={() => toggleTask(task.id)} className="mt-1" />
+                      <div className="flex-1 min-w-0">
+                        <div className="flex items-center gap-2 mb-1">
+                          <span className="text-sm font-medium text-slate-900">{getObjectName(task)}</span>
+                          <Badge variant="secondary" className="text-xs bg-slate-200 text-slate-700">
+                            {task.task_type}
+                          </Badge>
+                        </div>
+                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
+                          <span className="flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {task.duration_minutes} min
+                          </span>
+                          <span className="flex items-center gap-1">
+                            <Euro className="w-3 h-3" />
+                            €{getPricePerMinute(task).toFixed(2)}/min
+                          </span>
+                          {task.time_window_start && task.time_window_end && (
+                            <span>{task.time_window_start} - {task.time_window_end}</span>
+                          )}
+                        </div>
+                      </div>
+                    </label>
+                  ))}
+                </div>
+              )}
 
-          {selectedObjects.length > 0 && (
+              {usedTasks.length > 0 && (
+                <div className="mt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Al toegewezen aan andere routes</p>
+                  <div className="bg-red-50 rounded-lg p-3 space-y-2">
+                    {usedTasks.map(task => (
+                      <div key={task.id} className="flex items-center gap-2 text-xs text-red-700">
+                        <AlertCircle className="w-3 h-3 flex-shrink-0" />
+                        <span className="font-medium">{getObjectName(task)}</span>
+                        <span className="text-red-600">- {task.task_type}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+              
+              {selectedTasks.length > 1 && (
+                <div className="space-y-1 pt-2">
+                  <p className="text-xs text-slate-500">
+                    Totale afstand: <span className="font-semibold text-slate-700">{totalDistanceKm} km</span> (automatisch berekend)
+                  </p>
+                  <p className="text-xs text-slate-500">
+                    Gem. reistijd tussen objecten: <span className="font-semibold text-slate-700">{avgTravelMinutes} min</span> (automatisch berekend)
+                  </p>
+                </div>
+              )}
+            </div>
+          )}
+
+          {selectedTasks.length > 0 && (
             <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white rounded-xl p-5">
               <p className="text-xs font-semibold uppercase tracking-wider text-amber-400 mb-3">Route samenvatting</p>
               <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
                 <div>
-                  <p className="text-xs text-slate-400">Objecten</p>
-                  <p className="text-xl font-bold">{selectedObjects.length}</p>
+                  <p className="text-xs text-slate-400">Taken</p>
+                  <p className="text-xl font-bold">{selectedTasks.length}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-400">Diensttijd</p>

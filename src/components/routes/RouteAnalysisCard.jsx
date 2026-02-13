@@ -1,82 +1,68 @@
 import React, { useMemo } from "react";
+import { useQuery } from "@tanstack/react-query";
+import { base44 } from "@/api/base44Client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { TrendingUp, TrendingDown, Clock, MapPin, Euro, AlertTriangle, CheckCircle } from "lucide-react";
 
-export default function RouteAnalysisCard({ route, objects, personnel, costSettings }) {
+export default function RouteAnalysisCard({ route, vehicles, costSettings }) {
+  const { data: allTasks = [] } = useQuery({
+    queryKey: ['all-tasks'],
+    queryFn: () => base44.entities.Task.list(),
+  });
+
+  const { data: objects = [] } = useQuery({
+    queryKey: ['objects'],
+    queryFn: () => base44.entities.SurveillanceObject.list(),
+  });
+
   const analysis = useMemo(() => {
     if (!route || !costSettings) return null;
 
-    const routeObjects = objects.filter(o => (route.object_ids || []).includes(o.id));
+    const routeTasks = allTasks.filter(t => (route.task_ids || []).includes(t.id));
     
     // Service time
-    const totalServiceMin = routeObjects.reduce((s, o) => s + (o.service_duration_minutes || 0), 0);
-    const travelMin = routeObjects.length > 1 
-      ? (routeObjects.length - 1) * (route.avg_travel_minutes || 0)
+    const totalServiceMin = routeTasks.reduce((s, t) => s + (t.duration_minutes || 0), 0);
+    const taskObjects = routeTasks.map(t => objects.find(o => o.id === t.object_id)).filter(Boolean);
+    const travelMin = taskObjects.length > 1 
+      ? (taskObjects.length - 1) * (route.avg_travel_minutes || 0)
       : 0;
     const totalRouteMin = totalServiceMin + travelMin;
     const totalRouteHours = totalRouteMin / 60;
 
     // Revenue
-    const revenuePerVisit = routeObjects.reduce((s, o) => s + (o.price_per_visit || 0), 0);
+    const revenuePerVisit = routeTasks.reduce((s, t) => {
+      if (t.pricing_type === 'per_minuut') {
+        return s + ((t.price_amount || 0) * (t.duration_minutes || 0));
+      } else {
+        return s + (t.price_amount || 0);
+      }
+    }, 0);
     const visitsPerMonth = (route.weekdays || []).length * 4;
     const monthlyRevenue = revenuePerVisit * visitsPerMonth;
 
-    // Personnel cost - berekenen op basis van keuze
-    let surchargePct = 0;
-    if (route.shift_type === "avond") surchargePct = 30;
-    else if (route.shift_type === "nacht") surchargePct = 50;
-    else if (route.shift_type === "weekend") surchargePct = 50;
-
-    let effectiveRate = 0;
-    let personnelLabel = "";
-    
-    if (route.personnel_calculation === "duurste") {
-      // Vind duurste medewerker
-      let maxRate = 0;
-      let maxPerson = null;
-      personnel.forEach(p => {
-        const rate = p.base_hourly_rate || 0;
-        const withSurcharge = rate * (1 + surchargePct / 100);
-        const withVacation = withSurcharge * (1 + (p.vacation_allowance_pct || 8) / 100);
-        const effective = withVacation * (1 + (p.employer_costs_pct || 32) / 100);
-        if (effective > maxRate) {
-          maxRate = effective;
-          maxPerson = p;
-        }
-      });
-      effectiveRate = maxRate;
-      personnelLabel = maxPerson ? `${maxPerson.name} (duurste)` : "Duurste";
-    } else {
-      // Bereken gemiddelde
-      let totalRate = 0;
-      personnel.forEach(p => {
-        const rate = p.base_hourly_rate || 0;
-        const withSurcharge = rate * (1 + surchargePct / 100);
-        const withVacation = withSurcharge * (1 + (p.vacation_allowance_pct || 8) / 100);
-        const effective = withVacation * (1 + (p.employer_costs_pct || 32) / 100);
-        totalRate += effective;
-      });
-      effectiveRate = personnel.length > 0 ? totalRate / personnel.length : 0;
-      personnelLabel = "Gemiddelde";
-    }
-
-    const personnelCostPerVisit = effectiveRate * totalRouteHours;
-    const monthlyPersonnelCost = personnelCostPerVisit * visitsPerMonth;
-
     // Vehicle costs
+    const vehicle = vehicles.find(v => v.id === route.vehicle_id);
     const cs = costSettings;
-    const depreciationPerMonth = ((cs.vehicle_purchase_price || 0) - (cs.vehicle_residual_value || 0)) / ((cs.vehicle_depreciation_years || 5) * 12);
-    const variableCostPerKm = (cs.fuel_cost_per_km || 0) + (cs.maintenance_cost_per_km || 0) + (cs.tire_cost_per_km || 0);
+    
+    let depreciationPerMonth = 0;
+    let variableCostPerKm = 0;
+    let monthlyVehicleFixed = 0;
+    
+    if (vehicle) {
+      depreciationPerMonth = ((vehicle.purchase_price || 0) - (vehicle.residual_value || 0)) / ((vehicle.depreciation_years || 5) * 12);
+      variableCostPerKm = (vehicle.fuel_cost_per_km || 0) + (vehicle.maintenance_cost_per_km || 0) + (vehicle.tire_cost_per_km || 0);
+      monthlyVehicleFixed = depreciationPerMonth + (vehicle.insurance_per_month || 0);
+    }
+    
     const monthlyKm = (route.total_distance_km || 0) * visitsPerMonth;
     const monthlyVehicleVariable = variableCostPerKm * monthlyKm;
-    const monthlyVehicleFixed = depreciationPerMonth + (cs.insurance_per_month || 0);
 
-    // Fixed overhead (proportion based on route time)
+    // Fixed overhead
     const totalFixedOverhead = (cs.office_costs_per_month || 0) + (cs.admin_salary_per_month || 0) + (cs.other_fixed_costs_per_month || 0);
 
-    // Total costs
-    const totalMonthlyCosts = monthlyPersonnelCost + monthlyVehicleVariable + monthlyVehicleFixed + totalFixedOverhead;
+    // Total costs (zonder personeel)
+    const totalMonthlyCosts = monthlyVehicleVariable + monthlyVehicleFixed + totalFixedOverhead;
     const profit = monthlyRevenue - totalMonthlyCosts;
     const margin = monthlyRevenue > 0 ? (profit / monthlyRevenue) * 100 : 0;
 
@@ -85,8 +71,8 @@ export default function RouteAnalysisCard({ route, objects, personnel, costSetti
     const currentPricePerMinute = totalRouteMin > 0 ? monthlyRevenue / (totalRouteMin * visitsPerMonth) : 0;
 
     return {
-      routeObjects,
-      personnelLabel,
+      routeTasks,
+      taskObjects,
       vehicle,
       totalServiceMin,
       travelMin,
@@ -94,8 +80,6 @@ export default function RouteAnalysisCard({ route, objects, personnel, costSetti
       totalRouteHours,
       revenuePerVisit,
       monthlyRevenue,
-      effectiveRate,
-      monthlyPersonnelCost,
       monthlyVehicleVariable,
       monthlyVehicleFixed,
       totalFixedOverhead,
@@ -107,7 +91,7 @@ export default function RouteAnalysisCard({ route, objects, personnel, costSetti
       visitsPerMonth,
       monthlyKm,
     };
-  }, [route, objects, personnel, vehicles, costSettings]);
+  }, [route, allTasks, objects, vehicles, costSettings]);
 
   if (!analysis) return null;
 
@@ -125,13 +109,13 @@ export default function RouteAnalysisCard({ route, objects, personnel, costSetti
         </div>
         <div className="flex flex-wrap gap-3 mt-2">
           <span className="text-xs text-slate-500 flex items-center gap-1">
-            <MapPin className="w-3 h-3" /> {analysis.routeObjects.length} objecten
+            <MapPin className="w-3 h-3" /> {analysis.routeTasks.length} taken
           </span>
           <span className="text-xs text-slate-500 flex items-center gap-1">
             <Clock className="w-3 h-3" /> {analysis.totalRouteMin} min/bezoek
           </span>
           <span className="text-xs text-slate-500">
-            {analysis.personnelLabel} · {route.shift_type} · {(route.weekdays || []).length}x/week
+            {route.time_window_start} - {route.time_window_end} · {(route.weekdays || []).length}x/week
             {analysis.vehicle && ` · ${analysis.vehicle.license_plate}`}
           </span>
         </div>
@@ -165,7 +149,6 @@ export default function RouteAnalysisCard({ route, objects, personnel, costSetti
         <div className="space-y-2">
           <p className="text-[10px] font-semibold uppercase tracking-wider text-slate-400">Kostenverdeling per maand</p>
           <div className="space-y-1.5">
-            <CostRow label="Personeel" value={analysis.monthlyPersonnelCost} total={analysis.totalMonthlyCosts} />
             <CostRow label="Voertuig variabel" value={analysis.monthlyVehicleVariable} total={analysis.totalMonthlyCosts} />
             <CostRow label="Voertuig vast" value={analysis.monthlyVehicleFixed} total={analysis.totalMonthlyCosts} />
             <CostRow label="Overhead" value={analysis.totalFixedOverhead} total={analysis.totalMonthlyCosts} />

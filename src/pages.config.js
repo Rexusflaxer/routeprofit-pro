@@ -47,20 +47,20 @@
  *
  * The mainPage value must match a key in the PAGES object exactly.
  */
+import CostSettings from './pages/CostSettings';
 import Dashboard from './pages/Dashboard';
 import Objects from './pages/Objects';
 import Personnel from './pages/Personnel';
-import CostSettings from './pages/CostSettings';
 import Routes from './pages/Routes';
 import Vehicles from './pages/Vehicles';
 import __Layout from './Layout.jsx';
 
 
 export const PAGES = {
+    "CostSettings": CostSettings,
     "Dashboard": Dashboard,
     "Objects": Objects,
     "Personnel": Personnel,
-    "CostSettings": CostSettings,
     "Routes": Routes,
     "Vehicles": Vehicles,
 }
