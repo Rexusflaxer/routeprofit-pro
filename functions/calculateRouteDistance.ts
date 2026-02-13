@@ -69,22 +69,31 @@ Deno.serve(async (req) => {
 
         const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${obj1.latitude},${obj1.longitude}&destination=${obj2.latitude},${obj2.longitude}&key=${googleMapsApiKey}`;
 
-        const response = await fetch(url);
-        const data = await response.json();
+        try {
+          const response = await fetch(url);
+          const data = await response.json();
 
-        if (data.status === 'OK' && data.routes && data.routes.length > 0) {
-          const route = data.routes[0];
-          let routeDistance = 0;
-          let routeDuration = 0;
+          console.log(`Pair ${i+1}-${j+1} (${obj1.name} to ${obj2.name}):`, data.status);
 
-          (route.legs || []).forEach(leg => {
-            routeDistance += leg.distance.value; // in meters
-            routeDuration += leg.duration.value; // in seconds
-          });
+          if (data.status === 'OK' && data.routes && data.routes.length > 0) {
+            const route = data.routes[0];
+            let routeDistance = 0;
+            let routeDuration = 0;
 
-          totalDistanceKm += routeDistance / 1000;
-          totalTravelMinutes += Math.round(routeDuration / 60);
-          pairCount++;
+            (route.legs || []).forEach(leg => {
+              routeDistance += leg.distance.value; // in meters
+              routeDuration += leg.duration.value; // in seconds
+            });
+
+            totalDistanceKm += routeDistance / 1000;
+            totalTravelMinutes += Math.round(routeDuration / 60);
+            pairCount++;
+            console.log(`  Added: ${Math.round(routeDuration / 60)} min, ${(routeDistance / 1000).toFixed(1)} km`);
+          } else {
+            console.log(`  Failed: ${data.error_message || 'Unknown error'}`);
+          }
+        } catch (err) {
+          console.log(`  Error fetching pair ${i+1}-${j+1}:`, err.message);
         }
       }
     }
