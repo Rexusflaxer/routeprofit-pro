@@ -93,35 +93,65 @@ export default function CostCalculator({ personnel }) {
               <>
                 <div className="flex justify-between items-center text-sm">
                   <span className="text-slate-600">Brutoloon</span>
-                  <span className="font-medium">€{result.breakdown.base_wage.toFixed(2)}</span>
+                  <span className="font-medium">€{result.payslip.base_salary.toFixed(2)}</span>
                 </div>
+                
+                {(result.payslip.surcharges.evening_10.amount > 0 || 
+                  result.payslip.surcharges.night_20.amount > 0 || 
+                  result.payslip.surcharges.weekend_35.amount > 0 || 
+                  result.payslip.surcharges.holiday_50.amount > 0) && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-600">Toeslagen</span>
+                    <span className="font-medium">€{(
+                      result.payslip.surcharges.evening_10.amount +
+                      result.payslip.surcharges.night_20.amount +
+                      result.payslip.surcharges.weekend_35.amount +
+                      result.payslip.surcharges.holiday_50.amount +
+                      result.payslip.surcharges.new_years_eve_100.amount
+                    ).toFixed(2)}</span>
+                  </div>
+                )}
+                
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-600">Toeslagen</span>
-                  <span className="font-medium">€{result.breakdown.surcharges.toFixed(2)}</span>
+                  <span className="text-slate-600">Bruto totaal</span>
+                  <span className="font-semibold">€{result.payslip.total_gross.toFixed(2)}</span>
                 </div>
+                
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-600">Vakantiegeld (8%)</span>
-                  <span className="font-medium">€{result.breakdown.vacation_allowance.toFixed(2)}</span>
+                  <span className="text-slate-600">Werknemersbijdragen</span>
+                  <span className="font-medium text-red-600">-€{result.payslip.employee_deductions.total.toFixed(2)}</span>
                 </div>
+                
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-600">Eindejaarsuitkering</span>
-                  <span className="font-medium">€{result.breakdown.year_end_bonus.toFixed(2)}</span>
+                  <span className="text-slate-600">Netto salaris</span>
+                  <span className="font-semibold text-green-600">€{result.payslip.net_salary.toFixed(2)}</span>
                 </div>
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-600">Werkgeverslasten</span>
-                  <span className="font-medium">€{result.breakdown.employer_costs.toFixed(2)}</span>
+                
+                <div className="pt-2 border-t border-slate-300 space-y-1">
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-600">Vakantiegeld (8%)</span>
+                    <span className="font-medium">€{result.payslip.accruals.vacation_allowance.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-600">Eindejaarsuitkering</span>
+                    <span className="font-medium">€{result.payslip.accruals.year_end_bonus.toFixed(2)}</span>
+                  </div>
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-600">Werkgeverslasten</span>
+                    <span className="font-medium">€{result.payslip.employer_costs.total.toFixed(2)}</span>
+                  </div>
                 </div>
               </>
             )}
 
             <div className="pt-3 border-t border-slate-200 flex justify-between items-center">
-              <span className="font-semibold text-slate-900">Totale kosten</span>
-              <span className="text-lg font-bold text-slate-900">€{result.total_costs.toFixed(2)}</span>
+              <span className="font-semibold text-slate-900">Totale kosten werkgever</span>
+              <span className="text-lg font-bold text-slate-900">€{result.payslip.total_cost_employer.toFixed(2)}</span>
             </div>
             
             <div className="flex justify-between items-center bg-amber-100 -mx-4 -mb-4 px-4 py-3 rounded-b-lg">
               <span className="text-sm font-semibold text-amber-900">Kosten per uur</span>
-              <span className="text-lg font-bold text-amber-900">€{result.avg_cost_per_hour.toFixed(2)}</span>
+              <span className="text-lg font-bold text-amber-900">€{result.payslip.avg_cost_per_hour.toFixed(2)}</span>
             </div>
           </div>
         )}
