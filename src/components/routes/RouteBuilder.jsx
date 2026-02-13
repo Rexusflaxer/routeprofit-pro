@@ -193,7 +193,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
         const objectIds = selectedTasks.map(t => t.object_id).filter(Boolean);
         
         if (objectIds.length < 2) {
-          setGoogleMapsMetrics({ totalDistanceKm: 0, avgTravelMinutes: 0, loading: false });
+          setGoogleMapsMetrics({ totalDistanceKm: 0, avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
           return;
         }
 
@@ -206,10 +206,13 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
             totalTravelMinutes: response.data.total_travel_minutes_all_pairs || 0,
             loading: false
           });
+        } else {
+          console.error('Invalid response data:', response.data);
+          setGoogleMapsMetrics({ totalDistanceKm: 0, avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
         }
       } catch (error) {
         console.error('Fout bij ophalen routemetreken:', error);
-        setGoogleMapsMetrics(prev => ({ ...prev, loading: false }));
+        setGoogleMapsMetrics({ totalDistanceKm: 0, avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
       }
     };
 
