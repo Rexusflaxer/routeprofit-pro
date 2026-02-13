@@ -46,7 +46,7 @@ Deno.serve(async (req) => {
     }
 
     // Build waypoints for Google Maps Directions API
-    const waypoints = routeObjects.map(obj => `${obj.latitude},${obj.longitude}`);
+    const waypoints = routeObjects.map(obj => `${obj.longitude},${obj.latitude}`);
     const origin = waypoints[0];
     const destination = waypoints[waypoints.length - 1];
     const intermediates = waypoints.slice(1, -1);
