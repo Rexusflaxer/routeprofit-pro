@@ -218,7 +218,7 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tijdsvenster van</Label>
               <Input 
                 type="time" 
-                value={form.time_window_start} 
+                value={form.time_window_start || ""} 
                 onChange={(e) => handleChange("time_window_start", e.target.value)} 
                 required 
               />
@@ -227,10 +227,14 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tijdsvenster tot</Label>
               <Input 
                 type="time" 
-                value={form.time_window_end} 
+                value={form.time_window_end || ""} 
                 onChange={(e) => handleChange("time_window_end", e.target.value)} 
+                min={form.time_window_start || undefined}
                 required 
               />
+              {form.time_window_start && form.time_window_end && form.time_window_end <= form.time_window_start && (
+                <p className="text-xs text-red-600">Eindtijd moet na starttijd liggen</p>
+              )}
             </div>
           </div>
 
