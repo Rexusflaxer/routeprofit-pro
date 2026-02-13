@@ -17,7 +17,7 @@ export default function RouteAnalysisCard({ route, vehicles, costSettings }) {
   });
 
   const analysis = useMemo(() => {
-    if (!route || !costSettings) return null;
+    if (!route || !costSettings || !vehicles) return null;
 
     // Haal taken op basis van assigned_tasks (nieuwe structuur)
     const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
