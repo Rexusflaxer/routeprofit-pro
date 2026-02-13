@@ -9,6 +9,7 @@ import EmptyState from "../components/ui-custom/EmptyState";
 import RouteBuilder from "../components/routes/RouteBuilder";
 import RouteAnalysisCard from "../components/routes/RouteAnalysisCard";
 import UnassignedTasks from "../components/routes/UnassignedTasks";
+import RouteFolderView from "../components/routes/RouteFolderView";
 
 export default function Routes() {
   const [showForm, setShowForm] = useState(false);
@@ -16,6 +17,7 @@ export default function Routes() {
   const queryClient = useQueryClient();
 
   const { data: routes = [] } = useQuery({ queryKey: ["routes"], queryFn: () => base44.entities.Route.list() });
+  const { data: folders = [] } = useQuery({ queryKey: ["folders"], queryFn: () => base44.entities.RouteFolder.list() });
   const { data: objects = [] } = useQuery({ queryKey: ["objects"], queryFn: () => base44.entities.SurveillanceObject.list() });
   const { data: personnel = [] } = useQuery({ queryKey: ["personnel"], queryFn: () => base44.entities.Personnel.list() });
   const { data: vehicles = [] } = useQuery({ queryKey: ["vehicles"], queryFn: () => base44.entities.Vehicle.list() });
@@ -59,7 +61,7 @@ export default function Routes() {
       <AnimatePresence>
         {showForm && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-            <RouteBuilder route={editing} vehicles={vehicles} routes={routes} onSave={handleSave} onCancel={() => { setShowForm(false); setEditing(null); }} />
+            <RouteBuilder route={editing} vehicles={vehicles} routes={routes} folders={folders} onSave={handleSave} onCancel={() => { setShowForm(false); setEditing(null); }} />
           </motion.div>
         )}
       </AnimatePresence>
@@ -67,21 +69,7 @@ export default function Routes() {
       <UnassignedTasks tasks={tasks} routes={routes} objects={objects} />
 
       {routes.length > 0 ? (
-        <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
-          {routes.map(route => (
-            <div key={route.id} className="relative group">
-              <RouteAnalysisCard route={route} vehicles={vehicles} costSettings={cs} />
-              <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                <Button variant="outline" size="icon" className="h-7 w-7 bg-white" onClick={() => { setEditing(route); setShowForm(true); }}>
-                  <Pencil className="w-3 h-3" />
-                </Button>
-                <Button variant="outline" size="icon" className="h-7 w-7 bg-white text-red-500 hover:text-red-700" onClick={() => deleteMutation.mutate(route.id)}>
-                  <Trash2 className="w-3 h-3" />
-                </Button>
-              </div>
-            </div>
-          ))}
-        </div>
+        <RouteFolderView routes={routes} folders={folders} vehicles={vehicles} costSettings={cs} onEdit={(route) => { setEditing(route); setShowForm(true); }} onDelete={(id) => deleteMutation.mutate(id)} />
       ) : !showForm && (
         <EmptyState icon={RouteIcon} title="Geen routes" description="Maak uw eerste surveillanceroute aan." actionLabel="Route aanmaken" onAction={() => setShowForm(true)} />
       )}

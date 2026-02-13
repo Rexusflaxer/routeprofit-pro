@@ -5,6 +5,7 @@ import StatCard from "../components/ui-custom/StatCard";
 import RouteAnalysisCard from "../components/routes/RouteAnalysisCard";
 import EmptyState from "../components/ui-custom/EmptyState";
 import PageHeader from "../components/ui-custom/PageHeader";
+import FolderManager from "../components/dashboard/FolderManager";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
 import { Button } from "@/components/ui/button";
@@ -81,6 +82,8 @@ export default function Dashboard() {
           trendLabel="marge"
         />
       </div>
+
+      <FolderManager />
 
       {routes.length > 0 && cs && (
         <Card className="border-0 shadow-sm">

@@ -21,9 +21,20 @@ const WEEKDAYS = [
   { value: 7, label: "Zondag" },
 ];
 
-export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel }) {
+const WEEKDAY_LABELS = {
+  1: "Maandag",
+  2: "Dinsdag",
+  3: "Woensdag",
+  4: "Donderdag",
+  5: "Vrijdag",
+  6: "Zaterdag",
+  7: "Zondag",
+};
+
+export default function RouteBuilder({ route, vehicles, routes, folders, onSave, onCancel }) {
   const [form, setForm] = useState(route || {
     name: "",
+    folder_id: "",
     assigned_tasks: [],
     vehicle_id: "",
     time_window_start: "",
@@ -65,9 +76,29 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
   };
 
   const selectWeekday = (day) => {
+    setForm(prev => {
+      const newWeekdays = [day];
+      // Auto-genereer routenaam als folder geselecteerd is
+      const folder = folders?.find(f => f.id === prev.folder_id);
+      const autoName = folder ? `${folder.name} - ${WEEKDAY_LABELS[day]}` : prev.name;
+      
+      return {
+        ...prev,
+        weekdays: newWeekdays,
+        name: autoName
+      };
+    });
+  };
+
+  const handleFolderChange = (folderId) => {
+    const folder = folders?.find(f => f.id === folderId);
+    const day = form.weekdays?.[0];
+    const autoName = folder && day ? `${folder.name} - ${WEEKDAY_LABELS[day]}` : form.name;
+    
     setForm(prev => ({
       ...prev,
-      weekdays: [day]
+      folder_id: folderId,
+      name: autoName
     }));
   };
 
@@ -195,6 +226,11 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
   const handleSubmit = (e) => {
     e.preventDefault();
     
+    if (!form.folder_id) {
+      alert("Selecteer een uitschuifmap");
+      return;
+    }
+    
     if (!form.weekdays || form.weekdays.length === 0) {
       alert("Selecteer een dag voor deze route");
       return;
@@ -235,8 +271,17 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
         <form onSubmit={handleSubmit} className="space-y-6">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Routenaam</Label>
-              <Input value={form.name} onChange={(e) => handleChange("name", e.target.value)} placeholder="Bijv. Route Noord" required />
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Uitschuifmap *</Label>
+              <Select value={form.folder_id} onValueChange={handleFolderChange} required>
+                <SelectTrigger><SelectValue placeholder="Selecteer map" /></SelectTrigger>
+                <SelectContent>
+                  {(folders || []).map(f => (
+                    <SelectItem key={f.id} value={f.id}>
+                      {f.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Voertuig</Label>
@@ -251,6 +296,12 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
                 </SelectContent>
               </Select>
             </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Routenaam</Label>
+            <Input value={form.name} onChange={(e) => handleChange("name", e.target.value)} placeholder="Wordt automatisch ingevuld" required disabled className="bg-slate-50" />
+            <p className="text-xs text-slate-500">Naam wordt automatisch gegenereerd: Map + Dag</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
