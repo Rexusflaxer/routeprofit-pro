@@ -354,15 +354,26 @@ Deno.serve(async (req) => {
         payslip.surcharges.holiday_50.amount +
         payslip.surcharges.new_years_eve_100.amount;
       
+      // Bereken gemiddelde ORT per uur (voor ORT verlof berekening)
+      const avgOrtPerHour = totalHours > 0 ? totalSurcharges / totalHours : 0;
+      
       // Voor oproepkrachten: vakantiegeld en eindejaarsuitkering direct uitbetaald
       if (isCallWorker) {
         // Bereken vakantiegeld en eindejaarsuitkering als percentage van basis + toeslagen
         const baseForAllowances = payslip.base_salary + totalSurcharges;
+        
+        // Bereken ORT verlof: vakantie-uren * gemiddelde ORT per uur
+        const vacationHours = totalHours * 0.08;
+        const ortVerlof = vacationHours * avgOrtPerHour;
+        
         payslip.accruals.vacation_allowance = baseForAllowances * ((caoConfig.vacation_allowance || 8) / 100);
         payslip.accruals.year_end_bonus = baseForAllowances * ((caoConfig.year_end_bonus || 2.01) / 100);
         
+        // Voeg ORT verlof toe aan doorbetaling verlof
+        payslip.vacation_paid = ortVerlof;
+        
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
-        payslip.total_gross = payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus;
+        payslip.total_gross = payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
       } else {
         payslip.total_gross = payslip.base_salary + totalSurcharges;
       }
@@ -375,7 +386,14 @@ Deno.serve(async (req) => {
       
       // Franchise op jaarbasis, hier naar periode omrekenen (4-wekelijks = 13 periodes)
       const franchiseThisPeriod = (caoConfig.pension_base_salary_threshold || 16164) / 13;
-      const pensionBase = Math.max(0, pensionBaseAmount - franchiseThisPeriod);
+      let pensionBase = Math.max(0, pensionBaseAmount - franchiseThisPeriod);
+      
+      // Voor lage inkomens: zorg dat er altijd minimaal pensioen wordt opgebouwd
+      // Als pensioengrondslag te laag is, neem een minimale basis aan
+      if (pensionBase > 0 && pensionBase < 100) {
+        pensionBase = Math.max(pensionBase, pensionBaseAmount * 0.1); // minimaal 10% van het loon
+      }
+      
       payslip.pension_base = pensionBase;
       
       // Werknemersbijdragen - basis is altijd bruto loon exclusief vakantiegeld/eindejaarsuitkering voor oproepkrachten
@@ -412,8 +430,18 @@ Deno.serve(async (req) => {
       
       // Reserveringen - voor normale werknemers
       if (!isCallWorker) {
+        // Bereken gemiddelde ORT per uur (voor ORT verlof berekening)
+        const avgOrtPerHour = totalHours > 0 ? totalSurcharges / totalHours : 0;
+        
+        // Schat jaarlijkse vakantie-uren (bijv. 25 dagen * 8 uur = 200 uur)
+        const estimatedAnnualVacationHours = 200;
+        const ortVerlofReservation = (estimatedAnnualVacationHours / 13) * avgOrtPerHour; // per 4 weken
+        
         payslip.accruals.vacation_allowance = payslip.total_gross * ((caoConfig.vacation_allowance || 8) / 100);
         payslip.accruals.year_end_bonus = payslip.total_gross * ((caoConfig.year_end_bonus || 2.01) / 100);
+        
+        // Voeg ORT verlof reservering toe
+        payslip.vacation_paid = ortVerlofReservation;
       }
       
       // Netto loon
@@ -440,12 +468,13 @@ Deno.serve(async (req) => {
         // Voor oproepkrachten: alles al in bruto opgenomen
         payslip.total_cost_employer = payslip.total_gross + payslip.employer_costs.total;
       } else {
-        // Voor normale werknemers: bruto + werkgeverslasten + reserveringen
+        // Voor normale werknemers: bruto + werkgeverslasten + reserveringen + ORT verlof
         payslip.total_cost_employer = 
           payslip.total_gross +
           payslip.employer_costs.total +
           payslip.accruals.vacation_allowance +
-          payslip.accruals.year_end_bonus;
+          payslip.accruals.year_end_bonus +
+          payslip.vacation_paid;
       }
     }
 
