@@ -10,7 +10,7 @@ import RouteBuilder from "../components/routes/RouteBuilder";
 import RouteAnalysisCard from "../components/routes/RouteAnalysisCard";
 import UnassignedTasks from "../components/routes/UnassignedTasks";
 import RouteFolderView from "../components/routes/RouteFolderView";
-import FolderManager from "../components/dashboard/FolderManager";
+import FolderManagementBar from "../components/routes/FolderManagementBar";
 
 export default function Routes() {
   const [showForm, setShowForm] = useState(false);
@@ -53,13 +53,14 @@ export default function Routes() {
         title="Routes"
         subtitle="Bouw routes en analyseer winstgevendheid"
         actions={
-          <Button onClick={() => { setEditing(null); setShowForm(true); }} className="bg-slate-900 hover:bg-slate-800">
-            <Plus className="w-4 h-4 mr-1" /> Nieuwe route
-          </Button>
+          <div className="flex gap-2">
+            <FolderManagementBar folders={folders} />
+            <Button onClick={() => { setEditing(null); setShowForm(true); }} className="bg-slate-900 hover:bg-slate-800">
+              <Plus className="w-4 h-4 mr-1" /> Nieuwe route
+            </Button>
+          </div>
         }
       />
-
-      <FolderManager />
 
       <AnimatePresence>
         {showForm && (
@@ -69,13 +70,17 @@ export default function Routes() {
         )}
       </AnimatePresence>
 
-      <UnassignedTasks tasks={tasks} routes={routes} objects={objects} />
+      {tasks && tasks.length > 0 && <UnassignedTasks tasks={tasks} routes={routes} objects={objects} />}
 
-      {routes.length > 0 ? (
-        <RouteFolderView routes={routes} folders={folders} vehicles={vehicles} costSettings={cs} onEdit={(route) => { setEditing(route); setShowForm(true); }} onDelete={(id) => deleteMutation.mutate(id)} />
-      ) : !showForm && (
-        <EmptyState icon={RouteIcon} title="Geen routes" description="Maak uw eerste surveillanceroute aan." actionLabel="Route aanmaken" onAction={() => setShowForm(true)} />
-      )}
+      <div className="border border-slate-200 rounded-xl bg-white p-6 min-h-[400px]">
+        {routes.length > 0 ? (
+          <RouteFolderView routes={routes} folders={folders} vehicles={vehicles} costSettings={cs} onEdit={(route) => { setEditing(route); setShowForm(true); }} onDelete={(id) => deleteMutation.mutate(id)} />
+        ) : !showForm && (
+          <div className="flex items-center justify-center h-[350px]">
+            <EmptyState icon={RouteIcon} title="Geen routes" description="Maak uw eerste surveillanceroute aan." actionLabel="Route aanmaken" onAction={() => setShowForm(true)} />
+          </div>
+        )}
+      </div>
     </div>
   );
 }
