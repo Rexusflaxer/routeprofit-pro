@@ -123,6 +123,64 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
   }, [routes, route]);
 
   // Filter taken: binnen tijdsvenster en beschikbaar op de geselecteerde dag
+  // Calculate distance when route objects change
+  useEffect(() => {
+    const calculateDistance = async () => {
+      if (!formData.assigned_tasks?.length || !formData.folder_id) return;
+
+      setDistanceInfo(prev => ({ ...prev, loading: true }));
+      
+      try {
+        // We need to temporarily save the route to calculate distance
+        // For new routes, create a temporary one first
+        let routeId = routeData?.id;
+
+        if (!routeId) {
+          // Create temporary route for calculation
+          const tempRoute = await base44.entities.Route.create({
+            name: formData.name || "Temp",
+            folder_id: formData.folder_id,
+            assigned_tasks: formData.assigned_tasks,
+            weekdays: formData.weekdays,
+            vehicle_id: formData.vehicle_id,
+            time_window_start: formData.time_window_start,
+            time_window_end: formData.time_window_end
+          });
+          routeId = tempRoute.id;
+        } else {
+          // Update existing route
+          await base44.entities.Route.update(routeId, {
+            assigned_tasks: formData.assigned_tasks,
+            weekdays: formData.weekdays,
+            vehicle_id: formData.vehicle_id,
+            time_window_start: formData.time_window_start,
+            time_window_end: formData.time_window_end
+          });
+        }
+
+        const result = await base44.functions.invoke('calculateRouteDistance', {
+          route_id: routeId
+        });
+
+        setDistanceInfo({
+          total_distance_km: result.data.total_distance_km || 0,
+          avg_travel_minutes: result.data.avg_travel_minutes || 0,
+          loading: false
+        });
+
+        // Delete temporary route if we created one
+        if (!routeData?.id) {
+          await base44.entities.Route.delete(routeId);
+        }
+      } catch (error) {
+        console.error('Error calculating distance:', error);
+        setDistanceInfo(prev => ({ ...prev, loading: false }));
+      }
+    };
+
+    calculateDistance();
+  }, [formData.assigned_tasks, formData.weekdays, formData.vehicle_id, routeData?.id]);
+
   const availableTasks = useMemo(() => {
     if (!form.time_window_start || !form.time_window_end || !form.weekdays || form.weekdays.length === 0) {
       return [];
