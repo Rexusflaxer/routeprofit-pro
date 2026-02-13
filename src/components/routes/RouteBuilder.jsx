@@ -457,7 +457,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
                   <p className="text-xl font-bold">{totalVisitsPerMonth}</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-400">Diensttijd</p>
+                  <p className="text-xs text-slate-400">Totale taaktijd</p>
                   <p className="text-xl font-bold">{totalServiceMinutes} min</p>
                 </div>
                 <div>
