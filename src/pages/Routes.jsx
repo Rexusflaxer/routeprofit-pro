@@ -10,6 +10,7 @@ import RouteBuilder from "../components/routes/RouteBuilder";
 import RouteAnalysisCard from "../components/routes/RouteAnalysisCard";
 import UnassignedTasks from "../components/routes/UnassignedTasks";
 import RouteFolderView from "../components/routes/RouteFolderView";
+import FolderManager from "../components/dashboard/FolderManager";
 
 export default function Routes() {
   const [showForm, setShowForm] = useState(false);
@@ -57,6 +58,8 @@ export default function Routes() {
           </Button>
         }
       />
+
+      <FolderManager />
 
       <AnimatePresence>
         {showForm && (
