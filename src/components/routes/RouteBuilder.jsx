@@ -298,11 +298,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
             </div>
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Routenaam</Label>
-            <Input value={form.name} onChange={(e) => handleChange("name", e.target.value)} placeholder="Wordt automatisch ingevuld" required disabled className="bg-slate-50" />
-            <p className="text-xs text-slate-500">Naam wordt automatisch gegenereerd: Map + Dag</p>
-          </div>
+
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
