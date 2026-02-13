@@ -8,10 +8,12 @@ import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
 import PersonnelForm from "../components/personnel/PersonnelForm";
 import PersonnelTable from "../components/personnel/PersonnelTable";
+import CostCalculator from "../components/personnel/CostCalculator";
 
 export default function Personnel() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [selectedForCalc, setSelectedForCalc] = useState(null);
   const queryClient = useQueryClient();
 
   const { data: personnel = [] } = useQuery({
@@ -59,11 +61,32 @@ export default function Personnel() {
         )}
       </AnimatePresence>
 
-      {personnel.length > 0 ? (
-        <PersonnelTable personnel={personnel} onEdit={(p) => { setEditing(p); setShowForm(true); }} onDelete={(id) => deleteMutation.mutate(id)} />
-      ) : !showForm && (
-        <EmptyState icon={Users} title="Geen medewerkers" description="Voeg uw eerste medewerker toe." actionLabel="Medewerker toevoegen" onAction={() => setShowForm(true)} />
-      )}
+      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="lg:col-span-2">
+          {personnel.length > 0 ? (
+            <PersonnelTable 
+              personnel={personnel} 
+              onEdit={(p) => { setEditing(p); setShowForm(true); setSelectedForCalc(null); }} 
+              onDelete={(id) => deleteMutation.mutate(id)}
+              onCalculate={(p) => { setSelectedForCalc(p); setShowForm(false); setEditing(null); }}
+            />
+          ) : !showForm && (
+            <EmptyState icon={Users} title="Geen medewerkers" description="Voeg uw eerste medewerker toe." actionLabel="Medewerker toevoegen" onAction={() => setShowForm(true)} />
+          )}
+        </div>
+        
+        <div className="lg:col-span-1">
+          {selectedForCalc ? (
+            <CostCalculator personnel={selectedForCalc} />
+          ) : (
+            <Card className="border-slate-200 bg-slate-50">
+              <CardContent className="pt-6 text-center text-sm text-slate-500">
+                Selecteer een medewerker om kosten te berekenen
+              </CardContent>
+            </Card>
+          )}
+        </div>
+      </div>
     </div>
   );
 }

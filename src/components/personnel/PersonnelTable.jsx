@@ -2,9 +2,9 @@ import React from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, Trash2, User, Briefcase } from "lucide-react";
+import { Pencil, Trash2, User, Briefcase, Calculator } from "lucide-react";
 
-export default function PersonnelTable({ personnel, onEdit, onDelete }) {
+export default function PersonnelTable({ personnel, onEdit, onDelete, onCalculate }) {
   const getDisplayInfo = (p) => {
     if (p.employee_type === "zzp") {
       return {
@@ -76,6 +76,11 @@ export default function PersonnelTable({ personnel, onEdit, onDelete }) {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
+                    {onCalculate && (
+                      <Button variant="ghost" size="icon" onClick={() => onCalculate(p)} className="h-8 w-8 text-slate-400 hover:text-amber-600">
+                        <Calculator className="w-3.5 h-3.5" />
+                      </Button>
+                    )}
                     <Button variant="ghost" size="icon" onClick={() => onEdit(p)} className="h-8 w-8 text-slate-400 hover:text-slate-700">
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
