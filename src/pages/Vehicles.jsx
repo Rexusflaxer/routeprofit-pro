@@ -10,7 +10,7 @@ import VehicleForm from "../components/vehicles/VehicleForm";
 import VehicleTable from "../components/vehicles/VehicleTable";
 import MileageTracker from "../components/vehicles/MileageTracker";
 import SellVehicleDialog from "../components/vehicles/SellVehicleDialog";
-import MileageDialog from "../components/vehicles/MileageDialog";
+import MileageHistoryDialog from "../components/vehicles/MileageHistoryDialog";
 
 export default function VehiclesPage() {
   const [showForm, setShowForm] = useState(false);
@@ -47,13 +47,7 @@ export default function VehiclesPage() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["vehicles"] }),
   });
 
-  const addMileageMutation = useMutation({
-    mutationFn: (data) => base44.entities.VehicleMileage.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["vehicleMileage"] });
-      setMileageVehicle(null);
-    },
-  });
+
 
   const handleSave = (data) => {
     if (editingVehicle) {
@@ -81,9 +75,7 @@ export default function VehiclesPage() {
     setSellVehicle(null);
   };
 
-  const handleSaveMileage = (data) => {
-    addMileageMutation.mutate(data);
-  };
+
 
   if (isLoading) {
     return (
@@ -149,11 +141,10 @@ export default function VehiclesPage() {
         onSave={handleSaveSell}
       />
 
-      <MileageDialog 
-        vehicleId={mileageVehicle?.id} 
+      <MileageHistoryDialog 
+        vehicle={mileageVehicle} 
         open={!!mileageVehicle} 
         onClose={() => setMileageVehicle(null)}
-        onSave={handleSaveMileage}
       />
     </div>
   );
