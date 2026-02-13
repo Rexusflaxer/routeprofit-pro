@@ -459,6 +459,7 @@ Deno.serve(async (req) => {
       payslip: {
         // Bruto onderdeel
         base_salary: Math.round(payslip.base_salary * 100) / 100,
+        vacation_hours_call_worker: Math.round(payslip.vacation_hours_call_worker * 100) / 100,
         vacation_paid: Math.round(payslip.vacation_paid * 100) / 100,
         surcharges: {
           evening_10: {
@@ -488,6 +489,7 @@ Deno.serve(async (req) => {
           }
         },
         total_gross: Math.round(payslip.total_gross * 100) / 100,
+        is_call_worker: payslip.is_call_worker,
         
         // Werknemersbijdragen
         employee_deductions: {
