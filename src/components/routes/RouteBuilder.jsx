@@ -181,7 +181,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
 
   useEffect(() => {
     const fetchRouteMetrics = async () => {
-      if (!form.folder_id || !form.assigned_tasks || form.assigned_tasks.length < 2) {
+      if (!form.assigned_tasks || form.assigned_tasks.length < 2) {
         setGoogleMapsMetrics({ totalDistanceKm: 0, avgTravelMinutes: 0, loading: false });
         return;
       }
@@ -189,9 +189,15 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
       setGoogleMapsMetrics(prev => ({ ...prev, loading: true }));
       
       try {
-        // Maak een temporaire route object voor de berekening
-        const tempRoute = { assigned_tasks: form.assigned_tasks };
-        const response = await base44.functions.invoke('calculateRouteDistance', { route_id: null, route: tempRoute });
+        // Haal object IDs van taken
+        const objectIds = selectedTasks.map(t => t.object_id).filter(Boolean);
+        
+        if (objectIds.length < 2) {
+          setGoogleMapsMetrics({ totalDistanceKm: 0, avgTravelMinutes: 0, loading: false });
+          return;
+        }
+
+        const response = await base44.functions.invoke('calculateRouteDistance', { object_ids: objectIds });
         
         if (response.data && response.data.avg_travel_minutes !== undefined) {
           setGoogleMapsMetrics({
@@ -207,7 +213,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
     };
 
     fetchRouteMetrics();
-  }, [form.assigned_tasks, form.folder_id]);
+  }, [selectedTasks]);
 
   // Bereken route metrics
   const { totalDistanceKm, avgTravelMinutes, totalServiceMinutes, totalRouteMinutes, totalRevenuePerVisit, totalVisitsPerMonth } = useMemo(() => {
