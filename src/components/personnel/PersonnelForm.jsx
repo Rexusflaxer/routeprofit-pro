@@ -2,20 +2,27 @@ import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
 import { X, Save } from "lucide-react";
 
+const CONTRACT_TYPES = [
+  { value: "fulltime", label: "Fulltime" },
+  { value: "parttime", label: "Parttime" },
+  { value: "0_uren", label: "0-urencontract" },
+  { value: "min_max", label: "Min-max contract" },
+];
+
 export default function PersonnelForm({ person, onSave, onCancel }) {
   const [form, setForm] = useState(person || {
     name: "",
-    base_hourly_rate: 14,
-    evening_surcharge_pct: 30,
-    night_surcharge_pct: 50,
-    weekend_surcharge_pct: 50,
-    holiday_surcharge_pct: 100,
-    employer_costs_pct: 32,
-    vacation_allowance_pct: 8,
+    function_type: "surveillant",
+    employee_type: "loondienst",
+    contract_type: "fulltime",
+    cao: "cao_particuliere_beveiliging",
+    cao_scale: 3,
+    cao_period: 0,
     is_active: true,
   });
 
@@ -26,13 +33,9 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
     onSave(form);
   };
 
-  const effectiveRate = (surcharge) => {
-    const base = form.base_hourly_rate || 0;
-    const withSurcharge = base * (1 + (surcharge || 0) / 100);
-    const withVacation = withSurcharge * (1 + (form.vacation_allowance_pct || 0) / 100);
-    const withEmployer = withVacation * (1 + (form.employer_costs_pct || 0) / 100);
-    return withEmployer;
-  };
+  const isZZP = form.employee_type === "zzp";
+  const isLoondienst = form.employee_type === "loondienst";
+  const usesCAO = form.cao === "cao_particuliere_beveiliging";
 
   return (
     <Card className="border-0 shadow-lg">
@@ -40,81 +43,156 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
         <CardTitle className="text-lg">{person ? "Medewerker bewerken" : "Nieuwe medewerker"}</CardTitle>
       </CardHeader>
       <CardContent>
-        <form onSubmit={handleSubmit} className="space-y-5">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Naam</Label>
-              <Input value={form.name} onChange={(e) => handleChange("name", e.target.value)} placeholder="Volledige naam" required />
-            </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Basisuurloon (€)</Label>
-              <Input type="number" step="0.01" min="0" value={form.base_hourly_rate} onChange={(e) => handleChange("base_hourly_rate", Number(e.target.value))} required />
-            </div>
-          </div>
-
-          <div className="bg-slate-50 rounded-xl p-5 space-y-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Toeslagen (%)</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-slate-500">Avond</Label>
-                <Input type="number" min="0" value={form.evening_surcharge_pct} onChange={(e) => handleChange("evening_surcharge_pct", Number(e.target.value))} />
+        <form onSubmit={handleSubmit} className="space-y-6">
+          {/* Basis */}
+          <div className="space-y-4">
+            <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">Basisgegevens</h3>
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Naam</Label>
+                <Input value={form.name} onChange={(e) => handleChange("name", e.target.value)} placeholder="Volledige naam" required />
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-slate-500">Nacht</Label>
-                <Input type="number" min="0" value={form.night_surcharge_pct} onChange={(e) => handleChange("night_surcharge_pct", Number(e.target.value))} />
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Functie</Label>
+                <Select value={form.function_type} onValueChange={(v) => handleChange("function_type", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="surveillant">Surveillant</SelectItem>
+                    <SelectItem value="binnendienst">Binnendienst</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-slate-500">Weekend</Label>
-                <Input type="number" min="0" value={form.weekend_surcharge_pct} onChange={(e) => handleChange("weekend_surcharge_pct", Number(e.target.value))} />
-              </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-slate-500">Feestdag</Label>
-                <Input type="number" min="0" value={form.holiday_surcharge_pct} onChange={(e) => handleChange("holiday_surcharge_pct", Number(e.target.value))} />
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Type</Label>
+                <Select value={form.employee_type} onValueChange={(v) => handleChange("employee_type", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="zzp">ZZP'er</SelectItem>
+                    <SelectItem value="loondienst">Loondienst</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
             </div>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Werkgeverslasten (%)</Label>
-              <Input type="number" min="0" value={form.employer_costs_pct} onChange={(e) => handleChange("employer_costs_pct", Number(e.target.value))} />
+          {/* ZZP Tarieven */}
+          {isZZP && (
+            <div className="space-y-4 pt-4 border-t">
+              <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">ZZP Tarieven (excl. BTW)</h3>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Standaard uurloon (€)</Label>
+                  <Input type="number" step="0.01" value={form.zzp_hourly_rate_excl_vat || ""} onChange={(e) => handleChange("zzp_hourly_rate_excl_vat", parseFloat(e.target.value) || 0)} required />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-600">Avond (optioneel)</Label>
+                  <Input type="number" step="0.01" value={form.zzp_evening_rate || ""} onChange={(e) => handleChange("zzp_evening_rate", parseFloat(e.target.value) || 0)} placeholder="Laat leeg voor standaard" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-600">Nacht (optioneel)</Label>
+                  <Input type="number" step="0.01" value={form.zzp_night_rate || ""} onChange={(e) => handleChange("zzp_night_rate", parseFloat(e.target.value) || 0)} placeholder="Laat leeg voor standaard" />
+                </div>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-600">Weekend (optioneel)</Label>
+                  <Input type="number" step="0.01" value={form.zzp_weekend_rate || ""} onChange={(e) => handleChange("zzp_weekend_rate", parseFloat(e.target.value) || 0)} placeholder="Laat leeg voor standaard" />
+                </div>
+                <div className="space-y-2">
+                  <Label className="text-xs text-slate-600">Feestdag (optioneel)</Label>
+                  <Input type="number" step="0.01" value={form.zzp_holiday_rate || ""} onChange={(e) => handleChange("zzp_holiday_rate", parseFloat(e.target.value) || 0)} placeholder="Laat leeg voor standaard" />
+                </div>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Vakantiegeld (%)</Label>
-              <Input type="number" min="0" value={form.vacation_allowance_pct} onChange={(e) => handleChange("vacation_allowance_pct", Number(e.target.value))} />
-            </div>
-          </div>
+          )}
 
-          <div className="bg-amber-50 rounded-xl p-4">
-            <p className="text-xs font-semibold uppercase tracking-wider text-amber-700 mb-3">Effectieve uurkosten (incl. alle lasten)</p>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-3">
-              <div className="text-center">
-                <p className="text-xs text-amber-600">Dag</p>
-                <p className="text-lg font-bold text-amber-900">€{effectiveRate(0).toFixed(2)}</p>
+          {/* Loondienst */}
+          {isLoondienst && (
+            <div className="space-y-4 pt-4 border-t">
+              <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider">Loondienst</h3>
+              
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Contract type</Label>
+                  <Select value={form.contract_type} onValueChange={(v) => handleChange("contract_type", v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CONTRACT_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {form.contract_type === "parttime" && (
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Uren per week</Label>
+                    <Input type="number" value={form.parttime_hours || ""} onChange={(e) => handleChange("parttime_hours", Number(e.target.value))} required />
+                  </div>
+                )}
+
+                {form.contract_type === "min_max" && (
+                  <>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Min uren</Label>
+                      <Input type="number" value={form.min_hours || ""} onChange={(e) => handleChange("min_hours", Number(e.target.value))} required />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Max uren</Label>
+                      <Input type="number" value={form.max_hours || ""} onChange={(e) => handleChange("max_hours", Number(e.target.value))} required />
+                    </div>
+                  </>
+                )}
               </div>
-              <div className="text-center">
-                <p className="text-xs text-amber-600">Avond</p>
-                <p className="text-lg font-bold text-amber-900">€{effectiveRate(form.evening_surcharge_pct).toFixed(2)}</p>
-              </div>
-              <div className="text-center">
-                <p className="text-xs text-amber-600">Nacht</p>
-                <p className="text-lg font-bold text-amber-900">€{effectiveRate(form.night_surcharge_pct).toFixed(2)}</p>
-              </div>
-              <div className="text-center">
-                <p className="text-xs text-amber-600">Weekend</p>
-                <p className="text-lg font-bold text-amber-900">€{effectiveRate(form.weekend_surcharge_pct).toFixed(2)}</p>
+
+              {/* CAO of eigen tarief */}
+              <div className="bg-slate-50 rounded-xl p-4 space-y-4">
+                <div className="space-y-2">
+                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tariefbepaling</Label>
+                  <Select value={form.cao} onValueChange={(v) => handleChange("cao", v)}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="cao_particuliere_beveiliging">CAO Particuliere Beveiliging</SelectItem>
+                      <SelectItem value="eigen_tarief">Eigen uurtarief</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+
+                {usesCAO && (
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Loonschaal (2-7)</Label>
+                      <Input type="number" min="2" max="7" value={form.cao_scale} onChange={(e) => handleChange("cao_scale", Number(e.target.value))} />
+                      <p className="text-[10px] text-slate-400">Schaal bepaalt functieniveau</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Periode (0-16)</Label>
+                      <Input type="number" min="0" max="16" value={form.cao_period} onChange={(e) => handleChange("cao_period", Number(e.target.value))} />
+                      <p className="text-[10px] text-slate-400">Periode = dienstjaren</p>
+                    </div>
+                  </div>
+                )}
+
+                {!usesCAO && (
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-600">Uurtarief (€)</Label>
+                    <Input type="number" step="0.01" value={form.custom_hourly_rate || ""} onChange={(e) => handleChange("custom_hourly_rate", parseFloat(e.target.value) || 0)} required />
+                  </div>
+                )}
               </div>
             </div>
-          </div>
+          )}
 
-          <div className="flex items-center gap-3">
+          <div className="flex items-center gap-3 pt-4 border-t">
             <Switch checked={form.is_active} onCheckedChange={(v) => handleChange("is_active", v)} />
             <Label>Actief</Label>
           </div>
 
-          <div className="flex justify-end gap-3 pt-2">
-            <Button type="button" variant="outline" onClick={onCancel}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
-            <Button type="submit" className="bg-slate-900 hover:bg-slate-800"><Save className="w-4 h-4 mr-1" /> Opslaan</Button>
+          <div className="flex justify-end gap-3">
+            <Button type="button" variant="outline" onClick={onCancel}>
+              <X className="w-4 h-4 mr-1" /> Annuleren
+            </Button>
+            <Button type="submit" className="bg-slate-900 hover:bg-slate-800">
+              <Save className="w-4 h-4 mr-1" /> Opslaan
+            </Button>
           </div>
         </form>
       </CardContent>
