@@ -140,7 +140,7 @@ export default function TaskForm({ task, onSave, onCancel }) {
               step="0.01" 
               min="0" 
               value={form.price_amount} 
-              onChange={(e) => handleChange("price_amount", Number(e.target.value))} 
+              onChange={(e) => handleChange("price_amount", parseFloat(e.target.value) || 0)} 
               required 
             />
           </div>
