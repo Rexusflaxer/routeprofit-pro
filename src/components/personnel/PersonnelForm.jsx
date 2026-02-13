@@ -14,6 +14,16 @@ const CONTRACT_TYPES = [
   { value: "min_max", label: "Min-max contract" },
 ];
 
+// CAO Particuliere Beveiliging - Bijlage 4: Geldige perioden per schaal
+const VALID_PERIODS_PER_SCALE = {
+  2: { min: 0, max: 1 },
+  3: { min: 1, max: 10 },
+  4: { min: 2, max: 12 },
+  5: { min: 4, max: 13 },
+  6: { min: 5, max: 14 },
+  7: { min: 6, max: 16 }
+};
+
 export default function PersonnelForm({ person, onSave, onCancel }) {
   const [form, setForm] = useState(person || {
     name: "",
@@ -30,6 +40,19 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    
+    // Valideer CAO periode indien CAO is gekozen
+    if (form.employee_type === 'loondienst' && form.cao === 'cao_particuliere_beveiliging') {
+      const scale = form.cao_scale || 3;
+      const period = form.cao_period || 0;
+      const validRange = VALID_PERIODS_PER_SCALE[scale];
+      
+      if (period < validRange.min || period > validRange.max) {
+        alert(`Ongeldige periode: Voor schaal ${scale} zijn alleen perioden ${validRange.min} t/m ${validRange.max} toegestaan volgens de CAO.`);
+        return;
+      }
+    }
+    
     onSave(form);
   };
 
@@ -160,12 +183,34 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label className="text-xs text-slate-600">Loonschaal (2-7)</Label>
-                      <Input type="number" min="2" max="7" value={form.cao_scale} onChange={(e) => handleChange("cao_scale", Number(e.target.value))} />
+                      <Input 
+                        type="number" 
+                        min="2" 
+                        max="7" 
+                        value={form.cao_scale} 
+                        onChange={(e) => {
+                          const newScale = Number(e.target.value);
+                          const validRange = VALID_PERIODS_PER_SCALE[newScale];
+                          // Reset periode naar minimum van nieuwe schaal als huidige periode ongeldig is
+                          const newPeriod = (form.cao_period < validRange.min || form.cao_period > validRange.max) 
+                            ? validRange.min 
+                            : form.cao_period;
+                          setForm(prev => ({ ...prev, cao_scale: newScale, cao_period: newPeriod }));
+                        }} 
+                      />
                       <p className="text-[10px] text-slate-400">Schaal bepaalt functieniveau</p>
                     </div>
                     <div className="space-y-2">
-                      <Label className="text-xs text-slate-600">Periode (0-16)</Label>
-                      <Input type="number" min="0" max="16" value={form.cao_period} onChange={(e) => handleChange("cao_period", Number(e.target.value))} />
+                      <Label className="text-xs text-slate-600">
+                        Periode ({VALID_PERIODS_PER_SCALE[form.cao_scale || 3].min}-{VALID_PERIODS_PER_SCALE[form.cao_scale || 3].max})
+                      </Label>
+                      <Input 
+                        type="number" 
+                        min={VALID_PERIODS_PER_SCALE[form.cao_scale || 3].min} 
+                        max={VALID_PERIODS_PER_SCALE[form.cao_scale || 3].max} 
+                        value={form.cao_period} 
+                        onChange={(e) => handleChange("cao_period", Number(e.target.value))} 
+                      />
                       <p className="text-[10px] text-slate-400">Periode = dienstjaren</p>
                     </div>
                   </div>
