@@ -1,9 +1,9 @@
 import React, { useState, useMemo } from "react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
-import { ChevronRight, ChevronDown, Folder, Pencil, Trash2 } from "lucide-react";
-import RouteAnalysisCard from "./RouteAnalysisCard";
+import { ChevronRight, ChevronDown, Folder, Pencil, Trash2, MapPin, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import RouteDetailDialog from "./RouteDetailDialog";
 
 const COLORS = {
   slate: "bg-slate-500",
@@ -15,8 +15,10 @@ const COLORS = {
   pink: "bg-pink-500",
 };
 
-export default function RouteFolderView({ routes, folders, vehicles, costSettings, onEdit, onDelete }) {
+export default function RouteFolderView({ routes, folders, vehicles, onEdit, onDelete }) {
   const [expandedFolders, setExpandedFolders] = useState(new Set());
+  const [selectedRoute, setSelectedRoute] = useState(null);
+  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 
   const groupedRoutes = useMemo(() => {
     const grouped = {};
@@ -53,8 +55,9 @@ export default function RouteFolderView({ routes, folders, vehicles, costSetting
   };
 
   return (
-    <div className="space-y-3">
-      {Object.entries(groupedRoutes).map(([folderId, data]) => {
+    <>
+      <div className="space-y-3">
+        {Object.entries(groupedRoutes).map(([folderId, data]) => {
         const isExpanded = expandedFolders.has(folderId);
         const colorClass = COLORS[data.folder.color] || COLORS.slate;
         
@@ -84,15 +87,47 @@ export default function RouteFolderView({ routes, folders, vehicles, costSetting
             
             {isExpanded && data.routes.length > 0 && (
               <CardContent className="pt-0 pb-4 px-4">
-                <div className="grid grid-cols-1 lg:grid-cols-2 gap-3 ml-8">
+                <div className="space-y-2 ml-8">
                   {data.routes.map(route => (
-                    <div key={route.id} className="relative group">
-                      <RouteAnalysisCard route={route} vehicles={vehicles} costSettings={costSettings} />
-                      <div className="absolute top-4 right-4 opacity-0 group-hover:opacity-100 transition-opacity flex gap-1">
-                        <Button variant="outline" size="icon" className="h-7 w-7 bg-white" onClick={() => onEdit(route)}>
+                    <div 
+                      key={route.id} 
+                      className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors group"
+                      onClick={() => { setSelectedRoute(route); setDetailDialogOpen(true); }}
+                    >
+                      <MapPin className="w-4 h-4 text-slate-400 flex-shrink-0" />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-900 truncate">{route.name}</p>
+                        <div className="flex flex-wrap gap-2 mt-1">
+                          <span className="text-xs text-slate-500 flex items-center gap-1">
+                            <MapPin className="w-3 h-3" />
+                            {route.assigned_tasks?.length || 0} taken
+                          </span>
+                          <span className="text-xs text-slate-500 flex items-center gap-1">
+                            <Clock className="w-3 h-3" />
+                            {route.time_window_start} - {route.time_window_end}
+                          </span>
+                          {vehicles?.find(v => v.id === route.vehicle_id)?.license_plate && (
+                            <Badge variant="secondary" className="text-xs">
+                              {vehicles.find(v => v.id === route.vehicle_id)?.license_plate}
+                            </Badge>
+                          )}
+                        </div>
+                      </div>
+                      <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 flex-shrink-0">
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          className="h-7 w-7" 
+                          onClick={(e) => { e.stopPropagation(); onEdit(route); }}
+                        >
                           <Pencil className="w-3 h-3" />
                         </Button>
-                        <Button variant="outline" size="icon" className="h-7 w-7 bg-white text-red-500 hover:text-red-700" onClick={() => onDelete(route.id)}>
+                        <Button 
+                          variant="outline" 
+                          size="icon" 
+                          className="h-7 w-7 text-red-500 hover:text-red-700" 
+                          onClick={(e) => { e.stopPropagation(); onDelete(route.id); }}
+                        >
                           <Trash2 className="w-3 h-3" />
                         </Button>
                       </div>
@@ -104,6 +139,17 @@ export default function RouteFolderView({ routes, folders, vehicles, costSetting
           </Card>
         );
       })}
-    </div>
+      </div>
+      
+      {selectedRoute && (
+        <RouteDetailDialog 
+          route={selectedRoute} 
+          open={detailDialogOpen} 
+          onOpenChange={setDetailDialogOpen}
+          onEdit={onEdit}
+          vehicles={vehicles}
+        />
+      )}
+    </>
   );
 }
