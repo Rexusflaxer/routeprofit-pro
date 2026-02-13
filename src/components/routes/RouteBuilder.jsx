@@ -221,9 +221,10 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
     const travelMin = googleMapsMetrics.avgTravelMinutes || 0;
     const routeMin = serviceMin + travelMin;
     
-    // Bereken omzet per taak per bezoek, vermenigvuldigd met aantal keer per maand
+    // Bereken omzet per taak per bezoek, vermenigvuldigd met aantal keer per maand (52 weken/jaar)
+    const weeksPerMonth = 52 / 12;
     const revenue = selectedTasks.reduce((s, t) => {
-      const visitsPerTask = (t.assignedDays?.length || 0) * 4; // aantal dagen per week * 4 weken
+      const visitsPerTask = (t.assignedDays?.length || 0) * weeksPerMonth;
       const pricePerVisit = t.pricing_type === 'per_minuut' 
         ? (t.price_amount || 0) * (t.duration_minutes || 0)
         : (t.price_amount || 0);
@@ -235,7 +236,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
     selectedTasks.forEach(t => {
       (t.assignedDays || []).forEach(d => uniqueDays.add(d));
     });
-    const visitsPerMonth = uniqueDays.size * 4;
+    const visitsPerMonth = Math.round(uniqueDays.size * weeksPerMonth * 10) / 10;
 
     return { 
       totalDistanceKm: googleMapsMetrics.totalDistanceKm, 
