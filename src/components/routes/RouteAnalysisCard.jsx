@@ -45,14 +45,45 @@ export default function RouteAnalysisCard({ route, vehicles, costSettings }) {
     const vehicle = vehicles.find(v => v.id === route.vehicle_id);
     const cs = costSettings;
     
-    let depreciationPerMonth = 0;
-    let variableCostPerKm = 0;
     let monthlyVehicleFixed = 0;
+    let variableCostPerKm = 0;
     
     if (vehicle) {
-      depreciationPerMonth = ((vehicle.purchase_price || 0) - (vehicle.residual_value || 0)) / ((vehicle.depreciation_years || 5) * 12);
-      variableCostPerKm = (vehicle.fuel_cost_per_km || 0) + (vehicle.maintenance_cost_per_km || 0) + (vehicle.tire_cost_per_km || 0);
-      monthlyVehicleFixed = depreciationPerMonth + (vehicle.insurance_per_month || 0);
+      // Vaste kosten per maand
+      if (vehicle.acquisition_type === "lease" || vehicle.acquisition_type === "private_lease") {
+        monthlyVehicleFixed = (vehicle.monthly_lease_cost || 0) + (vehicle.insurance_per_month || 0);
+      } else if (vehicle.acquisition_type === "banklening") {
+        const depreciation = ((vehicle.purchase_price || 0) - (vehicle.residual_value || 0)) / ((vehicle.depreciation_years || 5) * 12);
+        monthlyVehicleFixed = depreciation + (vehicle.monthly_loan_payment || 0) + (vehicle.insurance_per_month || 0);
+      } else { // aankoop
+        const depreciation = ((vehicle.purchase_price || 0) - (vehicle.residual_value || 0)) / ((vehicle.depreciation_years || 5) * 12);
+        monthlyVehicleFixed = depreciation + (vehicle.insurance_per_month || 0);
+      }
+      
+      // Variabele kosten per km
+      variableCostPerKm = vehicle.fuel_cost_per_km || 0;
+      
+      // Onderhoud per km
+      if (vehicle.maintenance_type === "per_km" && vehicle.maintenance_interval_km > 0) {
+        variableCostPerKm += (vehicle.maintenance_cost || 0) / vehicle.maintenance_interval_km;
+      } else if (vehicle.maintenance_type === "per_month") {
+        monthlyVehicleFixed += vehicle.maintenance_cost || 0;
+      } else if (vehicle.maintenance_type === "per_quarter") {
+        monthlyVehicleFixed += (vehicle.maintenance_cost || 0) / 3;
+      } else if (vehicle.maintenance_type === "per_year") {
+        monthlyVehicleFixed += (vehicle.maintenance_cost || 0) / 12;
+      }
+      
+      // Banden per km
+      if (vehicle.tire_type === "per_km" && vehicle.tire_interval_km > 0) {
+        variableCostPerKm += (vehicle.tire_cost || 0) / vehicle.tire_interval_km;
+      } else if (vehicle.tire_type === "per_month") {
+        monthlyVehicleFixed += vehicle.tire_cost || 0;
+      } else if (vehicle.tire_type === "per_quarter") {
+        monthlyVehicleFixed += (vehicle.tire_cost || 0) / 3;
+      } else if (vehicle.tire_type === "per_year") {
+        monthlyVehicleFixed += (vehicle.tire_cost || 0) / 12;
+      }
     }
     
     const monthlyKm = (route.total_distance_km || 0) * visitsPerMonth;

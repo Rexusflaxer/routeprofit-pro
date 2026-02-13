@@ -8,6 +8,7 @@ import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
 import VehicleForm from "../components/vehicles/VehicleForm";
 import VehicleTable from "../components/vehicles/VehicleTable";
+import MileageTracker from "../components/vehicles/MileageTracker";
 
 export default function VehiclesPage() {
   const [showForm, setShowForm] = useState(false);
