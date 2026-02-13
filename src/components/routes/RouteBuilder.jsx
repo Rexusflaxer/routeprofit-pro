@@ -62,28 +62,35 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
     }));
   };
 
-  // Vind taken die al in andere routes zitten
-  const usedTaskIds = useMemo(() => {
-    const used = new Set();
+  // Vind op welke dagen taken al in andere routes zitten
+  const taskDayUsage = useMemo(() => {
+    const usage = {}; // { taskId: [1, 2, 3] } = dagen waarop taak al gebruikt is
+    
     routes.forEach(r => {
       if (route && r.id === route.id) return; // Skip huidige route bij editen
-      (r.task_ids || []).forEach(tid => used.add(tid));
+      
+      (r.task_ids || []).forEach(tid => {
+        if (!usage[tid]) usage[tid] = [];
+        (r.weekdays || []).forEach(day => {
+          if (!usage[tid].includes(day)) {
+            usage[tid].push(day);
+          }
+        });
+      });
     });
-    return used;
+    
+    return usage;
   }, [routes, route]);
 
-  // Filter taken: binnen tijdsvenster en nog niet in gebruik
-  const { availableTasks, usedTasks } = useMemo(() => {
-    if (!form.time_window_start || !form.time_window_end) {
-      return { availableTasks: [], usedTasks: [] };
+  // Filter taken: binnen tijdsvenster en beschikbaar op minstens 1 dag van deze route
+  const availableTasks = useMemo(() => {
+    if (!form.time_window_start || !form.time_window_end || !form.weekdays || form.weekdays.length === 0) {
+      return [];
     }
 
     const available = [];
-    const used = [];
 
     allTasks.forEach(task => {
-      const isUsed = usedTaskIds.has(task.id);
-      
       // Check of taak binnen tijdsvenster past
       const taskStart = task.time_window_start || "00:00";
       const taskEnd = task.time_window_end || "23:59";
@@ -91,16 +98,32 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
       const routeEnd = form.time_window_end;
 
       const fitsInWindow = taskStart >= routeStart && taskEnd <= routeEnd;
+      if (!fitsInWindow) return;
 
-      if (isUsed) {
-        used.push(task);
-      } else if (fitsInWindow) {
-        available.push(task);
+      // Check of taak op deze dagen mag (overlap met taak weekdays EN beschikbaar)
+      const taskWeekdays = task.weekdays || [];
+      const routeWeekdays = form.weekdays || [];
+      const usedDays = taskDayUsage[task.id] || [];
+      
+      // Vind overlappende dagen tussen route en taak
+      const overlappingDays = routeWeekdays.filter(d => taskWeekdays.includes(d));
+      
+      // Vind welke van die dagen NOG beschikbaar zijn (niet al gebruikt)
+      const availableDays = overlappingDays.filter(d => !usedDays.includes(d));
+      
+      // Als er minstens 1 dag beschikbaar is, toon de taak
+      if (availableDays.length > 0) {
+        available.push({
+          ...task,
+          availableDays,
+          usedDays,
+          overlappingDays
+        });
       }
     });
 
-    return { availableTasks: available, usedTasks: used };
-  }, [allTasks, form.time_window_start, form.time_window_end, usedTaskIds]);
+    return available;
+  }, [allTasks, form.time_window_start, form.time_window_end, form.weekdays, taskDayUsage]);
 
   const selectedTasks = useMemo(() => 
     allTasks.filter(t => form.task_ids.includes(t.id)),
@@ -270,51 +293,75 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
               
               {availableTasks.length === 0 ? (
                 <div className="bg-slate-50 rounded-lg p-6 text-center">
-                  <p className="text-sm text-slate-500">Geen taken beschikbaar binnen dit tijdsvenster.</p>
+                  <p className="text-sm text-slate-500">
+                    {!form.weekdays || form.weekdays.length === 0 
+                      ? "Selecteer eerst dagen voor deze route"
+                      : "Geen taken beschikbaar binnen dit tijdsvenster en deze dagen."}
+                  </p>
                 </div>
               ) : (
                 <div className="bg-slate-50 rounded-xl p-4 max-h-96 overflow-y-auto space-y-2">
-                  {availableTasks.map(task => (
-                    <label key={task.id} className="flex items-start gap-3 p-3 rounded-lg hover:bg-white transition-colors cursor-pointer border border-slate-200">
-                      <Checkbox checked={form.task_ids.includes(task.id)} onCheckedChange={() => toggleTask(task.id)} className="mt-1" />
-                      <div className="flex-1 min-w-0">
-                        <div className="flex items-center gap-2 mb-1">
-                          <span className="text-sm font-medium text-slate-900">{getObjectName(task)}</span>
-                          <Badge variant="secondary" className="text-xs bg-slate-200 text-slate-700">
-                            {task.task_type}
-                          </Badge>
+                  {availableTasks.map(task => {
+                    const hasConflict = task.usedDays && task.usedDays.length > 0;
+                    
+                    return (
+                      <label key={task.id} className="flex items-start gap-3 p-3 rounded-lg hover:bg-white transition-colors cursor-pointer border border-slate-200">
+                        <Checkbox checked={form.task_ids.includes(task.id)} onCheckedChange={() => toggleTask(task.id)} className="mt-1" />
+                        <div className="flex-1 min-w-0">
+                          <div className="flex items-center gap-2 mb-1 flex-wrap">
+                            <span className="text-sm font-medium text-slate-900">{getObjectName(task)}</span>
+                            <Badge variant="secondary" className="text-xs bg-slate-200 text-slate-700">
+                              {task.task_type}
+                            </Badge>
+                            {hasConflict && (
+                              <Badge className="text-xs bg-amber-100 text-amber-800 border-amber-300">
+                                Deels bezet
+                              </Badge>
+                            )}
+                          </div>
+                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 mb-2">
+                            <span className="flex items-center gap-1">
+                              <Clock className="w-3 h-3" />
+                              {task.duration_minutes} min
+                            </span>
+                            <span className="flex items-center gap-1">
+                              <Euro className="w-3 h-3" />
+                              €{getPricePerMinute(task).toFixed(2)}/min
+                            </span>
+                            {task.time_window_start && task.time_window_end && (
+                              <span>{task.time_window_start} - {task.time_window_end}</span>
+                            )}
+                          </div>
+                          <div className="flex items-center gap-2 text-xs">
+                            {task.availableDays && task.availableDays.length > 0 && (
+                              <div className="flex items-center gap-1">
+                                <span className="text-green-700 font-medium">Beschikbaar:</span>
+                                <div className="flex gap-1">
+                                  {task.availableDays.map(d => (
+                                    <Badge key={d} className="text-[10px] bg-green-100 text-green-800 px-1.5 py-0">
+                                      {WEEKDAYS.find(w => w.value === d)?.label.substring(0, 2)}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {task.usedDays && task.usedDays.length > 0 && (
+                              <div className="flex items-center gap-1">
+                                <span className="text-amber-700 font-medium">Al bezet:</span>
+                                <div className="flex gap-1">
+                                  {task.usedDays.map(d => (
+                                    <Badge key={d} className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0">
+                                      {WEEKDAYS.find(w => w.value === d)?.label.substring(0, 2)}
+                                    </Badge>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
                         </div>
-                        <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500">
-                          <span className="flex items-center gap-1">
-                            <Clock className="w-3 h-3" />
-                            {task.duration_minutes} min
-                          </span>
-                          <span className="flex items-center gap-1">
-                            <Euro className="w-3 h-3" />
-                            €{getPricePerMinute(task).toFixed(2)}/min
-                          </span>
-                          {task.time_window_start && task.time_window_end && (
-                            <span>{task.time_window_start} - {task.time_window_end}</span>
-                          )}
-                        </div>
-                      </div>
-                    </label>
-                  ))}
-                </div>
-              )}
-
-              {usedTasks.length > 0 && (
-                <div className="mt-4">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-400 mb-2">Al toegewezen aan andere routes</p>
-                  <div className="bg-red-50 rounded-lg p-3 space-y-2">
-                    {usedTasks.map(task => (
-                      <div key={task.id} className="flex items-center gap-2 text-xs text-red-700">
-                        <AlertCircle className="w-3 h-3 flex-shrink-0" />
-                        <span className="font-medium">{getObjectName(task)}</span>
-                        <span className="text-red-600">- {task.task_type}</span>
-                      </div>
-                    ))}
-                  </div>
+                      </label>
+                    );
+                  })}
                 </div>
               )}
               
