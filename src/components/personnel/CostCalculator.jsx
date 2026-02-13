@@ -92,28 +92,67 @@ export default function CostCalculator({ personnel }) {
             {result.employee_type === 'loondienst' && (
               <>
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-600">Brutoloon</span>
+                  <span className="text-slate-600">Salaris</span>
                   <span className="font-medium">€{result.payslip.base_salary.toFixed(2)}</span>
                 </div>
                 
-                {(result.payslip.surcharges.evening_10.amount > 0 || 
-                  result.payslip.surcharges.night_20.amount > 0 || 
-                  result.payslip.surcharges.weekend_35.amount > 0 || 
-                  result.payslip.surcharges.holiday_50.amount > 0) && (
+                {result.payslip.vacation_hours_call_worker > 0 && (
                   <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-600">Toeslagen</span>
-                    <span className="font-medium">€{(
-                      result.payslip.surcharges.evening_10.amount +
-                      result.payslip.surcharges.night_20.amount +
-                      result.payslip.surcharges.weekend_35.amount +
-                      result.payslip.surcharges.holiday_50.amount +
-                      result.payslip.surcharges.new_years_eve_100.amount
-                    ).toFixed(2)}</span>
+                    <span className="text-slate-600">Vakantie-uren oproep</span>
+                    <span className="font-medium">€{result.payslip.vacation_hours_call_worker.toFixed(2)}</span>
                   </div>
                 )}
                 
-                <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-600">Bruto totaal</span>
+                {result.payslip.surcharges.evening_10.amount > 0 && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-600">Toeslag avond 10%</span>
+                    <span className="font-medium">€{result.payslip.surcharges.evening_10.amount.toFixed(2)}</span>
+                  </div>
+                )}
+                
+                {result.payslip.surcharges.night_20.amount > 0 && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-600">Toeslag nacht 20%</span>
+                    <span className="font-medium">€{result.payslip.surcharges.night_20.amount.toFixed(2)}</span>
+                  </div>
+                )}
+                
+                {result.payslip.surcharges.weekend_35.amount > 0 && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-600">Toeslag weekend 35%</span>
+                    <span className="font-medium">€{result.payslip.surcharges.weekend_35.amount.toFixed(2)}</span>
+                  </div>
+                )}
+                
+                {result.payslip.surcharges.holiday_50.amount > 0 && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-600">Toeslag feestdag 50%</span>
+                    <span className="font-medium">€{result.payslip.surcharges.holiday_50.amount.toFixed(2)}</span>
+                  </div>
+                )}
+                
+                {result.payslip.surcharges.new_years_eve_100.amount > 0 && (
+                  <div className="flex justify-between items-center text-sm">
+                    <span className="text-slate-600">Toeslag oudejaarsdag 100%</span>
+                    <span className="font-medium">€{result.payslip.surcharges.new_years_eve_100.amount.toFixed(2)}</span>
+                  </div>
+                )}
+                
+                {result.payslip.is_call_worker && (
+                  <>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-slate-600">Vakantietoeslag</span>
+                      <span className="font-medium">€{result.payslip.accruals.vacation_allowance.toFixed(2)}</span>
+                    </div>
+                    <div className="flex justify-between items-center text-sm">
+                      <span className="text-slate-600">Eindejaarsuitkering</span>
+                      <span className="font-medium">€{result.payslip.accruals.year_end_bonus.toFixed(2)}</span>
+                    </div>
+                  </>
+                )}
+                
+                <div className="pt-2 border-t border-slate-300 flex justify-between items-center text-sm">
+                  <span className="text-slate-600 font-semibold">Bruto totaal</span>
                   <span className="font-semibold">€{result.payslip.total_gross.toFixed(2)}</span>
                 </div>
                 
@@ -123,19 +162,23 @@ export default function CostCalculator({ personnel }) {
                 </div>
                 
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-600">Netto salaris</span>
+                  <span className="text-slate-600 font-semibold">Netto salaris</span>
                   <span className="font-semibold text-green-600">€{result.payslip.net_salary.toFixed(2)}</span>
                 </div>
                 
                 <div className="pt-2 border-t border-slate-300 space-y-1">
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-600">Vakantiegeld (8%)</span>
-                    <span className="font-medium">€{result.payslip.accruals.vacation_allowance.toFixed(2)}</span>
-                  </div>
-                  <div className="flex justify-between items-center text-sm">
-                    <span className="text-slate-600">Eindejaarsuitkering</span>
-                    <span className="font-medium">€{result.payslip.accruals.year_end_bonus.toFixed(2)}</span>
-                  </div>
+                  {!result.payslip.is_call_worker && (
+                    <>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-slate-600">Vakantiegeld (8%)</span>
+                        <span className="font-medium">€{result.payslip.accruals.vacation_allowance.toFixed(2)}</span>
+                      </div>
+                      <div className="flex justify-between items-center text-sm">
+                        <span className="text-slate-600">Eindejaarsuitkering</span>
+                        <span className="font-medium">€{result.payslip.accruals.year_end_bonus.toFixed(2)}</span>
+                      </div>
+                    </>
+                  )}
                   <div className="flex justify-between items-center text-sm">
                     <span className="text-slate-600">Werkgeverslasten</span>
                     <span className="font-medium">€{result.payslip.employer_costs.total.toFixed(2)}</span>
