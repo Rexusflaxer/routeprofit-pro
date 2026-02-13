@@ -24,7 +24,7 @@ const WEEKDAYS = [
 export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel }) {
   const [form, setForm] = useState(route || {
     name: "",
-    task_ids: [],
+    assigned_tasks: [],
     vehicle_id: "",
     time_window_start: "",
     time_window_end: "",
@@ -44,13 +44,49 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
 
   const handleChange = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
 
-  const toggleTask = (taskId) => {
-    setForm(prev => ({
-      ...prev,
-      task_ids: prev.task_ids.includes(taskId)
-        ? prev.task_ids.filter(id => id !== taskId)
-        : [...prev.task_ids, taskId]
-    }));
+  const toggleTask = (taskId, availableDays) => {
+    const assigned = form.assigned_tasks || [];
+    const existing = assigned.find(t => t.task_id === taskId);
+    
+    if (existing) {
+      // Verwijder taak
+      setForm(prev => ({
+        ...prev,
+        assigned_tasks: assigned.filter(t => t.task_id !== taskId)
+      }));
+    } else {
+      // Voeg taak toe met alle beschikbare dagen
+      setForm(prev => ({
+        ...prev,
+        assigned_tasks: [...assigned, { task_id: taskId, days: availableDays }]
+      }));
+    }
+  };
+
+  const toggleTaskDay = (taskId, day) => {
+    const assigned = form.assigned_tasks || [];
+    const existing = assigned.find(t => t.task_id === taskId);
+    
+    if (!existing) return;
+    
+    const newDays = existing.days.includes(day)
+      ? existing.days.filter(d => d !== day)
+      : [...existing.days, day].sort();
+    
+    if (newDays.length === 0) {
+      // Geen dagen meer, verwijder taak
+      setForm(prev => ({
+        ...prev,
+        assigned_tasks: assigned.filter(t => t.task_id !== taskId)
+      }));
+    } else {
+      setForm(prev => ({
+        ...prev,
+        assigned_tasks: assigned.map(t => 
+          t.task_id === taskId ? { ...t, days: newDays } : t
+        )
+      }));
+    }
   };
 
   const toggleWeekday = (day) => {
@@ -69,11 +105,11 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
     routes.forEach(r => {
       if (route && r.id === route.id) return; // Skip huidige route bij editen
       
-      (r.task_ids || []).forEach(tid => {
-        if (!usage[tid]) usage[tid] = [];
-        (r.weekdays || []).forEach(day => {
-          if (!usage[tid].includes(day)) {
-            usage[tid].push(day);
+      (r.assigned_tasks || []).forEach(at => {
+        if (!usage[at.task_id]) usage[at.task_id] = [];
+        (at.days || []).forEach(day => {
+          if (!usage[at.task_id].includes(day)) {
+            usage[at.task_id].push(day);
           }
         });
       });
@@ -125,10 +161,15 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
     return available;
   }, [allTasks, form.time_window_start, form.time_window_end, form.weekdays, taskDayUsage]);
 
-  const selectedTasks = useMemo(() => 
-    allTasks.filter(t => form.task_ids.includes(t.id)),
-    [allTasks, form.task_ids]
-  );
+  const selectedTasks = useMemo(() => {
+    const assigned = form.assigned_tasks || [];
+    return allTasks
+      .filter(t => assigned.some(at => at.task_id === t.id))
+      .map(t => {
+        const assignment = assigned.find(at => at.task_id === t.id);
+        return { ...t, assignedDays: assignment?.days || [] };
+      });
+  }, [allTasks, form.assigned_tasks]);
 
   // Bereken afstand tussen twee coördinaten (Haversine formule)
   const calculateDistance = (lat1, lon1, lat2, lon2) => {
@@ -143,7 +184,7 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
   };
 
   // Bereken route metrics
-  const { totalDistanceKm, avgTravelMinutes, totalServiceMinutes, totalRouteMinutes, totalRevenuePerVisit } = useMemo(() => {
+  const { totalDistanceKm, avgTravelMinutes, totalServiceMinutes, totalRouteMinutes, totalRevenuePerVisit, totalVisitsPerMonth } = useMemo(() => {
     const taskObjects = selectedTasks.map(t => objects.find(o => o.id === t.object_id)).filter(Boolean);
     
     let totalDistance = 0;
@@ -162,34 +203,49 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
     const travelMin = taskObjects.length > 1 ? (taskObjects.length - 1) * Math.max(5, avgTime) : 0;
     const routeMin = serviceMin + travelMin;
     
+    // Bereken omzet per taak per bezoek, vermenigvuldigd met aantal keer per maand
     const revenue = selectedTasks.reduce((s, t) => {
-      if (t.pricing_type === 'per_minuut') {
-        return s + ((t.price_amount || 0) * (t.duration_minutes || 0));
-      } else {
-        return s + (t.price_amount || 0);
-      }
+      const visitsPerTask = (t.assignedDays?.length || 0) * 4; // aantal dagen per week * 4 weken
+      const pricePerVisit = t.pricing_type === 'per_minuut' 
+        ? (t.price_amount || 0) * (t.duration_minutes || 0)
+        : (t.price_amount || 0);
+      return s + (pricePerVisit * visitsPerTask);
     }, 0);
+
+    // Bereken totaal aantal route-bezoeken per maand
+    const uniqueDays = new Set();
+    selectedTasks.forEach(t => {
+      (t.assignedDays || []).forEach(d => uniqueDays.add(d));
+    });
+    const visitsPerMonth = uniqueDays.size * 4;
 
     return { 
       totalDistanceKm: Math.round(totalDistance * 10) / 10, 
       avgTravelMinutes: Math.max(5, avgTime),
       totalServiceMinutes: serviceMin,
       totalRouteMinutes: routeMin,
-      totalRevenuePerVisit: revenue
+      totalRevenuePerVisit: revenue / Math.max(1, visitsPerMonth), // gemiddelde per bezoek
+      totalVisitsPerMonth: visitsPerMonth
     };
   }, [selectedTasks, objects]);
 
-  const visitsPerMonth = (form.weekdays || []).length * 4;
-
   const handleSubmit = (e) => {
     e.preventDefault();
+    
+    // Valideer dat alle toegewezen taken minstens 1 dag hebben
+    const invalidTasks = (form.assigned_tasks || []).filter(at => !at.days || at.days.length === 0);
+    if (invalidTasks.length > 0) {
+      alert("Selecteer minstens 1 dag voor elke toegewezen taak");
+      return;
+    }
+    
     onSave({
       ...form,
       total_service_minutes: totalServiceMinutes,
       avg_travel_minutes: avgTravelMinutes,
       total_distance_km: totalDistanceKm,
       total_route_minutes: totalRouteMinutes,
-      total_revenue: totalRevenuePerVisit * visitsPerMonth,
+      total_revenue: totalRevenuePerVisit * totalVisitsPerMonth,
     });
   };
 
@@ -262,21 +318,21 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
           </div>
 
           <div className="space-y-3">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Dagen per week</Label>
-            <div className="bg-slate-50 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-2">
-              {WEEKDAYS.map(day => (
-                <label key={day.value} className="flex items-center gap-2 p-2 rounded-lg hover:bg-white transition-colors cursor-pointer">
-                  <Checkbox 
-                    checked={(form.weekdays || []).includes(day.value)} 
-                    onCheckedChange={() => toggleWeekday(day.value)} 
-                  />
-                  <span className="text-sm font-medium text-slate-700">{day.label}</span>
-                </label>
-              ))}
-            </div>
-            <p className="text-xs text-slate-500">
-              Bezoeken per maand: <span className="font-semibold text-slate-700">{visitsPerMonth}</span> ({(form.weekdays || []).length} dagen/week × 4 weken)
-            </p>
+          <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Dagen waarop route actief is</Label>
+          <div className="bg-slate-50 rounded-xl p-4 grid grid-cols-2 md:grid-cols-4 gap-2">
+            {WEEKDAYS.map(day => (
+              <label key={day.value} className="flex items-center gap-2 p-2 rounded-lg hover:bg-white transition-colors cursor-pointer">
+                <Checkbox 
+                  checked={(form.weekdays || []).includes(day.value)} 
+                  onCheckedChange={() => toggleWeekday(day.value)} 
+                />
+                <span className="text-sm font-medium text-slate-700">{day.label}</span>
+              </label>
+            ))}
+          </div>
+          <p className="text-xs text-slate-500">
+            Deze dagen bepalen wanneer de route gereden kan worden. Per taak kun je vervolgens specifieke dagen selecteren.
+          </p>
           </div>
 
           {!form.time_window_start || !form.time_window_end ? (
@@ -300,66 +356,98 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
                   </p>
                 </div>
               ) : (
-                <div className="bg-slate-50 rounded-xl p-4 max-h-96 overflow-y-auto space-y-2">
+                <div className="bg-slate-50 rounded-xl p-4 max-h-96 overflow-y-auto space-y-3">
                   {availableTasks.map(task => {
                     const hasConflict = task.usedDays && task.usedDays.length > 0;
+                    const assigned = (form.assigned_tasks || []).find(at => at.task_id === task.id);
+                    const isSelected = !!assigned;
                     
                     return (
-                      <label key={task.id} className="flex items-start gap-3 p-3 rounded-lg hover:bg-white transition-colors cursor-pointer border border-slate-200">
-                        <Checkbox checked={form.task_ids.includes(task.id)} onCheckedChange={() => toggleTask(task.id)} className="mt-1" />
-                        <div className="flex-1 min-w-0">
-                          <div className="flex items-center gap-2 mb-1 flex-wrap">
-                            <span className="text-sm font-medium text-slate-900">{getObjectName(task)}</span>
-                            <Badge variant="secondary" className="text-xs bg-slate-200 text-slate-700">
-                              {task.task_type}
-                            </Badge>
-                            {hasConflict && (
-                              <Badge className="text-xs bg-amber-100 text-amber-800 border-amber-300">
-                                Deels bezet
+                      <div key={task.id} className={`p-3 rounded-lg border-2 transition-all ${
+                        isSelected ? 'border-slate-900 bg-white' : 'border-slate-200 bg-white'
+                      }`}>
+                        <label className="flex items-start gap-3 cursor-pointer">
+                          <Checkbox 
+                            checked={isSelected} 
+                            onCheckedChange={() => toggleTask(task.id, task.availableDays)} 
+                            className="mt-1" 
+                          />
+                          <div className="flex-1 min-w-0">
+                            <div className="flex items-center gap-2 mb-1 flex-wrap">
+                              <span className="text-sm font-medium text-slate-900">{getObjectName(task)}</span>
+                              <Badge variant="secondary" className="text-xs bg-slate-200 text-slate-700">
+                                {task.task_type}
                               </Badge>
-                            )}
-                          </div>
-                          <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 mb-2">
-                            <span className="flex items-center gap-1">
-                              <Clock className="w-3 h-3" />
-                              {task.duration_minutes} min
-                            </span>
-                            <span className="flex items-center gap-1">
-                              <Euro className="w-3 h-3" />
-                              €{getPricePerMinute(task).toFixed(2)}/min
-                            </span>
-                            {task.time_window_start && task.time_window_end && (
-                              <span>{task.time_window_start} - {task.time_window_end}</span>
-                            )}
-                          </div>
-                          <div className="flex items-center gap-2 text-xs">
-                            {task.availableDays && task.availableDays.length > 0 && (
-                              <div className="flex items-center gap-1">
-                                <span className="text-green-700 font-medium">Beschikbaar:</span>
-                                <div className="flex gap-1">
-                                  {task.availableDays.map(d => (
-                                    <Badge key={d} className="text-[10px] bg-green-100 text-green-800 px-1.5 py-0">
-                                      {WEEKDAYS.find(w => w.value === d)?.label.substring(0, 2)}
-                                    </Badge>
-                                  ))}
+                              {hasConflict && (
+                                <Badge className="text-xs bg-amber-100 text-amber-800 border-amber-300">
+                                  Deels bezet
+                                </Badge>
+                              )}
+                            </div>
+                            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 mb-2">
+                              <span className="flex items-center gap-1">
+                                <Clock className="w-3 h-3" />
+                                {task.duration_minutes} min
+                              </span>
+                              <span className="flex items-center gap-1">
+                                <Euro className="w-3 h-3" />
+                                €{getPricePerMinute(task).toFixed(2)}/min
+                              </span>
+                              {task.time_window_start && task.time_window_end && (
+                                <span>{task.time_window_start} - {task.time_window_end}</span>
+                              )}
+                            </div>
+                            <div className="flex items-center gap-2 text-xs mb-2">
+                              {task.availableDays && task.availableDays.length > 0 && (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-green-700 font-medium">Beschikbaar:</span>
+                                  <div className="flex gap-1">
+                                    {task.availableDays.map(d => (
+                                      <Badge key={d} className="text-[10px] bg-green-100 text-green-800 px-1.5 py-0">
+                                        {WEEKDAYS.find(w => w.value === d)?.label.substring(0, 2)}
+                                      </Badge>
+                                    ))}
+                                  </div>
                                 </div>
-                              </div>
-                            )}
-                            {task.usedDays && task.usedDays.length > 0 && (
-                              <div className="flex items-center gap-1">
-                                <span className="text-amber-700 font-medium">Al bezet:</span>
-                                <div className="flex gap-1">
-                                  {task.usedDays.map(d => (
-                                    <Badge key={d} className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0">
-                                      {WEEKDAYS.find(w => w.value === d)?.label.substring(0, 2)}
-                                    </Badge>
-                                  ))}
+                              )}
+                              {task.usedDays && task.usedDays.length > 0 && (
+                                <div className="flex items-center gap-1">
+                                  <span className="text-amber-700 font-medium">Al bezet:</span>
+                                  <div className="flex gap-1">
+                                    {task.usedDays.map(d => (
+                                      <Badge key={d} className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0">
+                                        {WEEKDAYS.find(w => w.value === d)?.label.substring(0, 2)}
+                                      </Badge>
+                                    ))}
+                                  </div>
                                 </div>
-                              </div>
+                              )}
+                            </div>
+                          </div>
+                        </label>
+                        
+                        {isSelected && (
+                          <div className="mt-3 pt-3 border-t border-slate-200">
+                            <p className="text-xs font-semibold text-slate-700 mb-2">Selecteer dagen voor deze taak op deze route:</p>
+                            <div className="flex flex-wrap gap-2">
+                              {task.availableDays.map(day => (
+                                <label key={day} className="flex items-center gap-1.5 cursor-pointer">
+                                  <Checkbox
+                                    checked={(assigned?.days || []).includes(day)}
+                                    onCheckedChange={() => toggleTaskDay(task.id, day)}
+                                  />
+                                  <span className="text-xs font-medium text-slate-700">
+                                    {WEEKDAYS.find(w => w.value === day)?.label}
+                                  </span>
+                                </label>
+                              ))}
+                            </div>
+                            {assigned && assigned.days.length === 0 && (
+                              <p className="text-xs text-red-600 mt-2">Selecteer minstens 1 dag</p>
                             )}
                           </div>
-                        </div>
-                      </label>
+                        )}
+                      </div>
                     );
                   })}
                 </div>
@@ -381,10 +469,14 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
           {selectedTasks.length > 0 && (
             <div className="bg-gradient-to-r from-slate-800 to-slate-900 text-white rounded-xl p-5">
               <p className="text-xs font-semibold uppercase tracking-wider text-amber-400 mb-3">Route samenvatting</p>
-              <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+              <div className="grid grid-cols-2 md:grid-cols-5 gap-4">
                 <div>
                   <p className="text-xs text-slate-400">Taken</p>
                   <p className="text-xl font-bold">{selectedTasks.length}</p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-400">Bezoeken/mnd</p>
+                  <p className="text-xl font-bold">{totalVisitsPerMonth}</p>
                 </div>
                 <div>
                   <p className="text-xs text-slate-400">Diensttijd</p>
@@ -395,8 +487,8 @@ export default function RouteBuilder({ route, vehicles, routes, onSave, onCancel
                   <p className="text-xl font-bold">{totalRouteMinutes} min</p>
                 </div>
                 <div>
-                  <p className="text-xs text-slate-400">Omzet/bezoek</p>
-                  <p className="text-xl font-bold">€{totalRevenuePerVisit.toFixed(2)}</p>
+                  <p className="text-xs text-slate-400">Omzet/mnd</p>
+                  <p className="text-xl font-bold">€{(totalRevenuePerVisit * totalVisitsPerMonth).toFixed(2)}</p>
                 </div>
               </div>
             </div>

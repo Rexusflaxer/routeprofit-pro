@@ -8,6 +8,7 @@ import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
 import RouteBuilder from "../components/routes/RouteBuilder";
 import RouteAnalysisCard from "../components/routes/RouteAnalysisCard";
+import UnassignedTasks from "../components/routes/UnassignedTasks";
 
 export default function Routes() {
   const [showForm, setShowForm] = useState(false);
@@ -19,6 +20,7 @@ export default function Routes() {
   const { data: personnel = [] } = useQuery({ queryKey: ["personnel"], queryFn: () => base44.entities.Personnel.list() });
   const { data: vehicles = [] } = useQuery({ queryKey: ["vehicles"], queryFn: () => base44.entities.Vehicle.list() });
   const { data: costSettings = [] } = useQuery({ queryKey: ["costSettings"], queryFn: () => base44.entities.CostSettings.list() });
+  const { data: tasks = [] } = useQuery({ queryKey: ["all-tasks"], queryFn: () => base44.entities.Task.list() });
 
   const cs = costSettings[0];
 
@@ -61,6 +63,8 @@ export default function Routes() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <UnassignedTasks tasks={tasks} routes={routes} objects={objects} />
 
       {routes.length > 0 ? (
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
