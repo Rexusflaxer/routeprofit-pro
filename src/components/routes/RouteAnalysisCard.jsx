@@ -53,10 +53,14 @@ export default function RouteAnalysisCard({ route, vehicles, costSettings }) {
       if (vehicle.acquisition_type === "lease" || vehicle.acquisition_type === "private_lease") {
         monthlyVehicleFixed = (vehicle.monthly_lease_cost || 0) + (vehicle.insurance_per_month || 0);
       } else if (vehicle.acquisition_type === "banklening") {
-        const depreciation = ((vehicle.purchase_price || 0) - (vehicle.residual_value || 0)) / ((vehicle.depreciation_years || 5) * 12);
+        // Gebruik werkelijke restwaarde indien ingevuld, anders geschatte
+        const effectiveResidual = vehicle.actual_residual_value || vehicle.residual_value || 0;
+        const depreciation = ((vehicle.purchase_price || 0) - effectiveResidual) / ((vehicle.depreciation_years || 5) * 12);
         monthlyVehicleFixed = depreciation + (vehicle.monthly_loan_payment || 0) + (vehicle.insurance_per_month || 0);
       } else { // aankoop
-        const depreciation = ((vehicle.purchase_price || 0) - (vehicle.residual_value || 0)) / ((vehicle.depreciation_years || 5) * 12);
+        // Gebruik werkelijke restwaarde indien ingevuld, anders geschatte
+        const effectiveResidual = vehicle.actual_residual_value || vehicle.residual_value || 0;
+        const depreciation = ((vehicle.purchase_price || 0) - effectiveResidual) / ((vehicle.depreciation_years || 5) * 12);
         monthlyVehicleFixed = depreciation + (vehicle.insurance_per_month || 0);
       }
       

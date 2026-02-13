@@ -37,34 +37,56 @@ const INSURANCE_TYPES = [
 ];
 
 export default function VehicleForm({ vehicle, onSave, onCancel }) {
-  const [form, setForm] = useState(vehicle || {
-    license_plate: "",
-    brand: "",
-    model: "",
-    year: new Date().getFullYear(),
-    fuel_type: "benzine",
-    acquisition_type: "aankoop",
-    purchase_price: 0,
-    residual_value: 0,
-    depreciation_years: 5,
-    monthly_lease_cost: 0,
-    monthly_loan_payment: 0,
-    fuel_cost_per_km: 0,
-    maintenance_type: "per_km",
-    maintenance_cost: 0,
-    maintenance_interval_km: 10000,
-    tire_type: "per_year",
-    tire_cost: 0,
-    tire_interval_km: 50000,
-    insurance_type: "wa",
-    insurance_per_month: 0,
-    insurance_deductible: 0,
-    is_active: true,
+  const [form, setForm] = useState(() => {
+    const base = vehicle || {
+      license_plate: "",
+      brand: "",
+      model: "",
+      year: new Date().getFullYear(),
+      fuel_type: "benzine",
+      acquisition_type: "aankoop",
+      purchase_price: 0,
+      residual_value: 0,
+      depreciation_years: 5,
+      monthly_lease_cost: 0,
+      monthly_loan_payment: 0,
+      fuel_cost_per_km: 0,
+      maintenance_type: "per_km",
+      maintenance_cost: 0,
+      maintenance_interval_km: 10000,
+      tire_type: "per_year",
+      tire_cost: 0,
+      tire_interval_km: 50000,
+      insurance_type: "wa",
+      insurance_per_month: 0,
+      insurance_deductible: 0,
+      is_active: true,
+      actual_residual_value: 0,
+      disposal_date: "",
+    };
+    
+    // Auto-schatting restwaarde bij nieuwe voertuigen (30% van aankoopprijs)
+    if (!vehicle && base.purchase_price > 0 && !base.residual_value) {
+      base.residual_value = Math.round(base.purchase_price * 0.3);
+    }
+    
+    return base;
   });
 
   const [lookingUp, setLookingUp] = useState(false);
 
-  const handleChange = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
+  const handleChange = (field, value) => {
+    setForm(prev => {
+      const updated = { ...prev, [field]: value };
+      
+      // Auto-schatting restwaarde bij aankoopprijs wijziging
+      if (field === "purchase_price" && !prev.actual_residual_value) {
+        updated.residual_value = Math.round(value * 0.3);
+      }
+      
+      return updated;
+    });
+  };
 
   const handleLicensePlateLookup = async () => {
     if (!form.license_plate) return;
@@ -170,20 +192,54 @@ export default function VehicleForm({ vehicle, onSave, onCancel }) {
             </div>
 
             {requiresPurchaseInfo && (
-              <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg">
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Aankoopprijs (€)</Label>
-                  <Input type="number" step="0.01" value={form.purchase_price} onChange={(e) => handleChange("purchase_price", parseFloat(e.target.value) || 0)} />
+              <>
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4 bg-slate-50 p-4 rounded-lg">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Aankoopprijs (€)</Label>
+                    <Input type="number" step="0.01" value={form.purchase_price} onChange={(e) => handleChange("purchase_price", parseFloat(e.target.value) || 0)} />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
+                      Geschatte restwaarde (€)
+                    </Label>
+                    <Input type="number" step="0.01" value={form.residual_value} onChange={(e) => handleChange("residual_value", parseFloat(e.target.value) || 0)} />
+                    <p className="text-[10px] text-slate-400">Automatisch 30% van aankoopprijs</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Afschrijving (jaren)</Label>
+                    <Input type="number" value={form.depreciation_years} onChange={(e) => handleChange("depreciation_years", Number(e.target.value))} />
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Restwaarde (€)</Label>
-                  <Input type="number" step="0.01" value={form.residual_value} onChange={(e) => handleChange("residual_value", parseFloat(e.target.value) || 0)} />
+
+                {/* Werkelijke waarden bij verkoop/vervanging */}
+                <div className="bg-amber-50 border border-amber-200 p-4 rounded-lg space-y-3">
+                  <div className="flex items-center gap-2 mb-2">
+                    <Badge className="bg-amber-600 text-white text-[10px]">Optioneel</Badge>
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-amber-700">Definitieve waarden (bij verkoop/vervanging)</Label>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-amber-700">Daadwerkelijke restwaarde (€)</Label>
+                      <Input 
+                        type="number" 
+                        step="0.01" 
+                        value={form.actual_residual_value || ""} 
+                        onChange={(e) => handleChange("actual_residual_value", parseFloat(e.target.value) || 0)} 
+                        placeholder="Vul in bij verkoop"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-amber-700">Datum uit gebruik</Label>
+                      <Input 
+                        type="date" 
+                        value={form.disposal_date || ""} 
+                        onChange={(e) => handleChange("disposal_date", e.target.value)} 
+                      />
+                    </div>
+                  </div>
+                  <p className="text-[10px] text-amber-600">Vul deze velden in wanneer het voertuig verkocht of vervangen wordt voor precieze kostenberekening</p>
                 </div>
-                <div className="space-y-2">
-                  <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Afschrijving (jaren)</Label>
-                  <Input type="number" value={form.depreciation_years} onChange={(e) => handleChange("depreciation_years", Number(e.target.value))} />
-                </div>
-              </div>
+              </>
             )}
 
             {form.acquisition_type === "banklening" && (

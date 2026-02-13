@@ -27,7 +27,8 @@ export default function VehicleTable({ vehicles, onEdit, onDelete }) {
             } else if (vehicle.acquisition_type === "banklening") {
               monthlyFixed = vehicle.monthly_loan_payment || 0;
             } else {
-              monthlyFixed = ((vehicle.purchase_price - vehicle.residual_value) / (vehicle.depreciation_years * 12)) || 0;
+              const effectiveResidual = vehicle.actual_residual_value || vehicle.residual_value || 0;
+              monthlyFixed = ((vehicle.purchase_price - effectiveResidual) / (vehicle.depreciation_years * 12)) || 0;
             }
             
             let variableCostPerKm = vehicle.fuel_cost_per_km || 0;
@@ -70,9 +71,16 @@ export default function VehicleTable({ vehicles, onEdit, onDelete }) {
                 <TableCell>€{variableCostPerKm.toFixed(2)}</TableCell>
                 <TableCell>€{(vehicle.insurance_per_month || 0).toFixed(2)}</TableCell>
                 <TableCell>
-                  <Badge className={vehicle.is_active ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-600"}>
-                    {vehicle.is_active ? "Actief" : "Inactief"}
-                  </Badge>
+                  <div className="flex flex-col gap-1">
+                    <Badge className={vehicle.is_active ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-600"}>
+                      {vehicle.is_active ? "Actief" : "Inactief"}
+                    </Badge>
+                    {vehicle.disposal_date && (
+                      <Badge className="bg-amber-100 text-amber-800 text-[10px]">
+                        Verkocht {new Date(vehicle.disposal_date).toLocaleDateString('nl-NL')}
+                      </Badge>
+                    )}
+                  </div>
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-2">
