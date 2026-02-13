@@ -230,24 +230,24 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
         ? (t.price_amount || 0) * (t.duration_minutes || 0)
         : (t.price_amount || 0);
       return s + (pricePerVisit * visitsPerTask);
-    }, 0);
+      }, 0);
 
-    // Bereken totaal aantal route-bezoeken per maand
-    const uniqueDays = new Set();
-    selectedTasks.forEach(t => {
+      // Bereken totaal aantal route-bezoeken per maand
+      const uniqueDays = new Set();
+      selectedTasks.forEach(t => {
       (t.assignedDays || []).forEach(d => uniqueDays.add(d));
-    });
-    const visitsPerMonth = Math.round(uniqueDays.size * weeksPerMonth * 10) / 10;
+      });
+      const visitsPerMonth = Math.round(uniqueDays.size * weeksPerMonth * 10) / 10;
 
-    return { 
+      return { 
       totalDistanceKm: googleMapsMetrics.totalDistanceKm, 
-      avgTravelMinutes: googleMapsMetrics.avgTravelMinutes,
+      avgTravelMinutes: avgTravelMin,
       totalServiceMinutes: serviceMin,
       totalRouteMinutes: routeMin,
       totalRevenuePerVisit: revenue / Math.max(1, visitsPerMonth),
       totalVisitsPerMonth: visitsPerMonth
-    };
-  }, [selectedTasks, googleMapsMetrics]);
+      };
+      }, [selectedTasks, googleMapsMetrics]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
