@@ -176,24 +176,43 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
     return R * c;
   };
 
+  // Fetch Google Maps route metrics
+  const [googleMapsMetrics, setGoogleMapsMetrics] = useState({ totalDistanceKm: 0, avgTravelMinutes: 0, loading: false });
+
+  useEffect(() => {
+    const fetchRouteMetrics = async () => {
+      if (!form.folder_id || !form.assigned_tasks || form.assigned_tasks.length < 2) {
+        setGoogleMapsMetrics({ totalDistanceKm: 0, avgTravelMinutes: 0, loading: false });
+        return;
+      }
+
+      setGoogleMapsMetrics(prev => ({ ...prev, loading: true }));
+      
+      try {
+        // Maak een temporaire route object voor de berekening
+        const tempRoute = { assigned_tasks: form.assigned_tasks };
+        const response = await base44.functions.invoke('calculateRouteDistance', { route_id: null, route: tempRoute });
+        
+        if (response.data && response.data.avg_travel_minutes !== undefined) {
+          setGoogleMapsMetrics({
+            totalDistanceKm: response.data.total_distance_km || 0,
+            avgTravelMinutes: response.data.avg_travel_minutes || 0,
+            loading: false
+          });
+        }
+      } catch (error) {
+        console.error('Fout bij ophalen routemetreken:', error);
+        setGoogleMapsMetrics(prev => ({ ...prev, loading: false }));
+      }
+    };
+
+    fetchRouteMetrics();
+  }, [form.assigned_tasks, form.folder_id]);
+
   // Bereken route metrics
   const { totalDistanceKm, avgTravelMinutes, totalServiceMinutes, totalRouteMinutes, totalRevenuePerVisit, totalVisitsPerMonth } = useMemo(() => {
-    const taskObjects = selectedTasks.map(t => objects.find(o => o.id === t.object_id)).filter(Boolean);
-    
-    let totalDistance = 0;
-    if (taskObjects.length > 1) {
-      for (let i = 0; i < taskObjects.length - 1; i++) {
-        const obj1 = taskObjects[i];
-        const obj2 = taskObjects[i + 1];
-        if (obj1.latitude && obj1.longitude && obj2.latitude && obj2.longitude) {
-          totalDistance += calculateDistance(obj1.latitude, obj1.longitude, obj2.latitude, obj2.longitude);
-        }
-      }
-    }
-    
-    const avgTime = taskObjects.length > 1 ? Math.round((totalDistance / (taskObjects.length - 1)) * 5) : 0;
     const serviceMin = selectedTasks.reduce((s, t) => s + (t.duration_minutes || 0), 0);
-    const travelMin = taskObjects.length > 1 ? (taskObjects.length - 1) * Math.max(5, avgTime) : 0;
+    const travelMin = googleMapsMetrics.avgTravelMinutes || 0;
     const routeMin = serviceMin + travelMin;
     
     // Bereken omzet per taak per bezoek, vermenigvuldigd met aantal keer per maand
@@ -213,14 +232,14 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
     const visitsPerMonth = uniqueDays.size * 4;
 
     return { 
-      totalDistanceKm: Math.round(totalDistance * 10) / 10, 
-      avgTravelMinutes: Math.max(5, avgTime),
+      totalDistanceKm: googleMapsMetrics.totalDistanceKm, 
+      avgTravelMinutes: googleMapsMetrics.avgTravelMinutes,
       totalServiceMinutes: serviceMin,
       totalRouteMinutes: routeMin,
-      totalRevenuePerVisit: revenue / Math.max(1, visitsPerMonth), // gemiddelde per bezoek
+      totalRevenuePerVisit: revenue / Math.max(1, visitsPerMonth),
       totalVisitsPerMonth: visitsPerMonth
     };
-  }, [selectedTasks, objects]);
+  }, [selectedTasks, googleMapsMetrics]);
 
   const handleSubmit = (e) => {
     e.preventDefault();
