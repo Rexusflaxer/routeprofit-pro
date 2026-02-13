@@ -330,7 +330,13 @@ Deno.serve(async (req) => {
     } else {
       // Loondienst: Bereken alle componenten
       
-      // Totaal bruto loon = basis + toeslagen
+      // Voor oproepkrachten: bereken vakantie-uren (8% extra uren die uitbetaald worden)
+      if (isCallWorker) {
+        const vacationHours = totalHours * 0.08;
+        payslip.vacation_hours_call_worker = vacationHours * baseHourlyRate;
+      }
+      
+      // Totaal bruto loon = basis + vakantie-uren oproep + toeslagen
       const totalSurcharges = 
         payslip.surcharges.evening_10.amount +
         payslip.surcharges.night_20.amount +
@@ -338,31 +344,57 @@ Deno.serve(async (req) => {
         payslip.surcharges.holiday_50.amount +
         payslip.surcharges.new_years_eve_100.amount;
       
-      payslip.total_gross = payslip.base_salary + totalSurcharges;
+      // Voor oproepkrachten: vakantiegeld en eindejaarsuitkering direct uitbetaald
+      let vacationAllowanceAmount = 0;
+      let yearEndBonusAmount = 0;
       
-      // Bereken pensioengrondslag (bruto loon + toeslagen - franchise)
-      // Franchise op jaarbasis, hier naar periode omrekenen
+      if (isCallWorker) {
+        // Bereken vakantiegeld en eindejaarsuitkering als percentage van basis + toeslagen
+        const baseForAllowances = payslip.base_salary + totalSurcharges;
+        vacationAllowanceAmount = baseForAllowances * ((caoConfig.vacation_allowance || 8) / 100);
+        yearEndBonusAmount = baseForAllowances * ((caoConfig.year_end_bonus || 2.01) / 100);
+        
+        // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
+        payslip.total_gross = payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + vacationAllowanceAmount + yearEndBonusAmount;
+      } else {
+        payslip.total_gross = payslip.base_salary + totalSurcharges;
+      }
+      
+      // Bereken pensioengrondslag (bruto loon - vakantiegeld/eindejaarsuitkering - franchise)
+      // Voor oproepkrachten: basis + toeslagen (zonder vakantiegeld/eindejaarsuitkering)
+      const pensionBaseAmount = isCallWorker 
+        ? (payslip.base_salary + totalSurcharges)
+        : payslip.total_gross;
+      
+      // Franchise op jaarbasis, hier naar periode omrekenen (4-wekelijks = 13 periodes)
       const franchiseThisPeriod = (caoConfig.pension_base_salary_threshold || 16164) / 13;
-      const pensionBase = Math.max(0, payslip.total_gross - franchiseThisPeriod);
+      const pensionBase = Math.max(0, pensionBaseAmount - franchiseThisPeriod);
       payslip.pension_base = pensionBase;
       
-      // Werknemersbijdragen
-      payslip.employee_deductions.premium_sfpb = payslip.total_gross * ((caoConfig.premium_sfpb || 0.061) / 100);
-      payslip.employee_deductions.premium_paww = payslip.total_gross * ((caoConfig.premium_paww_employee || 0.1) / 100);
+      // Werknemersbijdragen - basis is altijd bruto loon exclusief vakantiegeld/eindejaarsuitkering voor oproepkrachten
+      const basisForPremiums = isCallWorker ? (payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges) : payslip.total_gross;
+      
+      payslip.employee_deductions.premium_sfpb = basisForPremiums * ((caoConfig.premium_sfpb || 0.061) / 100);
+      payslip.employee_deductions.premium_paww = basisForPremiums * ((caoConfig.premium_paww_employee || 0.1) / 100);
       
       // Pensioenpremie werknemer (40% van totaal)
       const totalPensionPremium = pensionBase * ((caoConfig.pension_premium_rate_total || 24.1) / 100);
       payslip.employee_deductions.pension_premium = totalPensionPremium * ((caoConfig.pension_premium_employee || 40) / 100);
       
-      payslip.employee_deductions.premium_wga = payslip.total_gross * ((caoConfig.premium_wga_employee || 0.81) / 100);
+      payslip.employee_deductions.premium_wga = basisForPremiums * ((caoConfig.premium_wga_employee || 0.81) / 100);
       
-      // Bereken belastbaar loon (bruto - werknemersbijdragen)
-      const taxableIncome = payslip.total_gross 
-        - payslip.employee_deductions.pension_premium;
+      // Belastingberekening
+      const taxableIncome = payslip.total_gross - payslip.employee_deductions.pension_premium;
       
-      // Schat jaarloon voor belastingberekening
-      const estimatedAnnualSalary = payslip.total_gross * 13;
-      payslip.employee_deductions.tax_withheld = calculateTaxAmount(taxableIncome, caoConfig, estimatedAnnualSalary);
+      // Schat jaarloon - voor oproepkrachten conservatief schatten
+      const estimatedAnnualSalary = basisForPremiums * 13;
+      
+      // Als jaarloon te laag is (onder grens), geen loonheffing
+      if (estimatedAnnualSalary < 12000) {
+        payslip.employee_deductions.tax_withheld = 0;
+      } else {
+        payslip.employee_deductions.tax_withheld = calculateTaxAmount(taxableIncome, caoConfig, estimatedAnnualSalary);
+      }
       
       payslip.employee_deductions.total = 
         payslip.employee_deductions.premium_sfpb +
@@ -371,20 +403,27 @@ Deno.serve(async (req) => {
         payslip.employee_deductions.premium_wga +
         payslip.employee_deductions.tax_withheld;
       
-      // Reserveringen (opgebouwd, niet uitbetaald)
-      payslip.accruals.vacation_allowance = payslip.total_gross * ((caoConfig.vacation_allowance || 8) / 100);
-      payslip.accruals.year_end_bonus = payslip.total_gross * ((caoConfig.year_end_bonus || 2.01) / 100);
+      // Reserveringen of direct uitbetaald
+      if (isCallWorker) {
+        // Voor oproepkrachten: al opgenomen in bruto, dus accruals = 0
+        payslip.accruals.vacation_allowance = 0;
+        payslip.accruals.year_end_bonus = 0;
+      } else {
+        // Voor normale werknemers: reserveringen
+        payslip.accruals.vacation_allowance = payslip.total_gross * ((caoConfig.vacation_allowance || 8) / 100);
+        payslip.accruals.year_end_bonus = payslip.total_gross * ((caoConfig.year_end_bonus || 2.01) / 100);
+      }
       
       // Netto loon
       payslip.net_salary = payslip.total_gross - payslip.employee_deductions.total;
       
-      // Werkgeverslasten
+      // Werkgeverslasten - basis is altijd exclusief vakantiegeld/eindejaarsuitkering
       payslip.employer_costs.pension_premium = totalPensionPremium * ((caoConfig.pension_premium_employer || 60) / 100);
-      payslip.employer_costs.premium_awf = payslip.total_gross * ((caoConfig.premium_awf_employer || 2.64) / 100);
-      payslip.employer_costs.premium_ww = payslip.total_gross * (((caoConfig.premium_ww_employer_fixed || 0) + (caoConfig.premium_ww_employer_variable || 1.5)) / 100);
-      payslip.employer_costs.premium_wia = payslip.total_gross * ((caoConfig.premium_wia_employer || 0.72) / 100);
-      payslip.employer_costs.premium_wga = payslip.total_gross * ((caoConfig.premium_wga_employer || 1.5) / 100);
-      payslip.employer_costs.premium_zw = payslip.total_gross * ((caoConfig.premium_zw_employer || 0) / 100);
+      payslip.employer_costs.premium_awf = basisForPremiums * ((caoConfig.premium_awf_employer || 2.64) / 100);
+      payslip.employer_costs.premium_ww = basisForPremiums * (((caoConfig.premium_ww_employer_fixed || 0) + (caoConfig.premium_ww_employer_variable || 1.5)) / 100);
+      payslip.employer_costs.premium_wia = basisForPremiums * ((caoConfig.premium_wia_employer || 0.72) / 100);
+      payslip.employer_costs.premium_wga = basisForPremiums * ((caoConfig.premium_wga_employer || 1.5) / 100);
+      payslip.employer_costs.premium_zw = basisForPremiums * ((caoConfig.premium_zw_employer || 0) / 100);
       
       payslip.employer_costs.total = 
         payslip.employer_costs.pension_premium +
@@ -394,12 +433,18 @@ Deno.serve(async (req) => {
         payslip.employer_costs.premium_wga +
         payslip.employer_costs.premium_zw;
       
-      // Totale kosten werkgever = bruto + werkgeverslasten + reserveringen
-      payslip.total_cost_employer = 
-        payslip.total_gross +
-        payslip.employer_costs.total +
-        payslip.accruals.vacation_allowance +
-        payslip.accruals.year_end_bonus;
+      // Totale kosten werkgever
+      if (isCallWorker) {
+        // Voor oproepkrachten: alles al in bruto opgenomen
+        payslip.total_cost_employer = payslip.total_gross + payslip.employer_costs.total;
+      } else {
+        // Voor normale werknemers: bruto + werkgeverslasten + reserveringen
+        payslip.total_cost_employer = 
+          payslip.total_gross +
+          payslip.employer_costs.total +
+          payslip.accruals.vacation_allowance +
+          payslip.accruals.year_end_bonus;
+      }
     }
 
     return Response.json({
