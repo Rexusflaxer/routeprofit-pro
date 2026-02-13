@@ -32,71 +32,72 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'route_id or object_ids is required' }, { status: 400 });
     }
 
-    // Get objects for these tasks
-    const routeObjects = routeTasks
-      .map(task => allObjects.find(obj => obj.id === task.object_id))
-      .filter(obj => obj && obj.latitude && obj.longitude);
+    // Get unique objects for these tasks
+    const uniqueObjects = [];
+    const seenIds = new Set();
+    routeTasks.forEach(task => {
+      const obj = allObjects.find(o => o.id === task.object_id);
+      if (obj && obj.latitude && obj.longitude && !seenIds.has(obj.id)) {
+        uniqueObjects.push(obj);
+        seenIds.add(obj.id);
+      }
+    });
 
-    if (routeObjects.length < 2) {
+    if (uniqueObjects.length < 2) {
       return Response.json({
         total_distance_km: 0,
         avg_travel_minutes: 0,
-        error: 'Not enough objects with valid coordinates'
+        number_of_pairs: 0
       });
     }
 
-    // Build waypoints for Google Maps Directions API
-    const waypoints = routeObjects.map(obj => `${obj.longitude},${obj.latitude}`);
-    const origin = waypoints[0];
-    const destination = waypoints[waypoints.length - 1];
-    const intermediates = waypoints.slice(1, -1);
-
-    // Build Google Maps URL
     const googleMapsApiKey = Deno.env.get('GOOGLE_MAPS_API_KEY');
     if (!googleMapsApiKey) {
-      console.error('GOOGLE_MAPS_API_KEY not found in environment');
-      console.error('Available env vars:', Object.keys(Deno.env.toObject()));
       return Response.json({ error: 'Google Maps API key not configured' }, { status: 500 });
     }
 
-    let url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&key=${googleMapsApiKey}`;
+    // Calculate travel time for all unique pairs of objects
+    let totalTravelMinutes = 0;
+    let totalDistanceKm = 0;
+    let pairCount = 0;
 
-    if (intermediates.length > 0) {
-      url += `&waypoints=${intermediates.join('|')}`;
+    // Generate all unique pairs
+    for (let i = 0; i < uniqueObjects.length; i++) {
+      for (let j = i + 1; j < uniqueObjects.length; j++) {
+        const obj1 = uniqueObjects[i];
+        const obj2 = uniqueObjects[j];
+
+        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${obj1.latitude},${obj1.longitude}&destination=${obj2.latitude},${obj2.longitude}&key=${googleMapsApiKey}`;
+
+        const response = await fetch(url);
+        const data = await response.json();
+
+        if (data.status === 'OK' && data.routes && data.routes.length > 0) {
+          const route = data.routes[0];
+          let routeDistance = 0;
+          let routeDuration = 0;
+
+          (route.legs || []).forEach(leg => {
+            routeDistance += leg.distance.value; // in meters
+            routeDuration += leg.duration.value; // in seconds
+          });
+
+          totalDistanceKm += routeDistance / 1000;
+          totalTravelMinutes += Math.round(routeDuration / 60);
+          pairCount++;
+        }
+      }
     }
 
-    // Call Google Maps API
-    const response = await fetch(url);
-    const data = await response.json();
-
-    if (data.status !== 'OK') {
-      return Response.json({ 
-        error: `Google Maps API error: ${data.status}`,
-        message: data.error_message 
-      }, { status: 400 });
-    }
-
-    // Calculate totals from route legs
-    let totalDistance = 0;
-    let totalDuration = 0;
-
-    if (data.routes && data.routes.length > 0) {
-      const route = data.routes[0];
-      
-      (route.legs || []).forEach(leg => {
-        totalDistance += leg.distance.value; // in meters
-        totalDuration += leg.duration.value; // in seconds
-      });
-    }
-
-    const totalDistanceKm = totalDistance / 1000;
-    const totalTravelMinutes = Math.round(totalDuration / 60);
+    // Calculate average travel time per pair
+    const avgTravelMinutes = pairCount > 0 ? Math.round(totalTravelMinutes / pairCount) : 0;
 
     return Response.json({
-      total_distance_km: Math.round(totalDistanceKm * 10) / 10, // Round to 1 decimal
-      avg_travel_minutes: totalTravelMinutes,
-      total_duration_minutes: totalTravelMinutes,
-      number_of_objects: routeObjects.length
+      total_distance_km: Math.round(totalDistanceKm * 10) / 10,
+      avg_travel_minutes: avgTravelMinutes,
+      total_travel_minutes_all_pairs: totalTravelMinutes,
+      number_of_objects: uniqueObjects.length,
+      number_of_pairs: pairCount
     });
 
   } catch (error) {
