@@ -19,7 +19,9 @@ export default function RouteAnalysisCard({ route, vehicles, costSettings }) {
   const analysis = useMemo(() => {
     if (!route || !costSettings) return null;
 
-    const routeTasks = allTasks.filter(t => (route.task_ids || []).includes(t.id));
+    // Haal taken op basis van assigned_tasks (nieuwe structuur)
+    const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
+    const routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
     
     // Service time
     const totalServiceMin = routeTasks.reduce((s, t) => s + (t.duration_minutes || 0), 0);
@@ -30,16 +32,25 @@ export default function RouteAnalysisCard({ route, vehicles, costSettings }) {
     const totalRouteMin = totalServiceMin + travelMin;
     const totalRouteHours = totalRouteMin / 60;
 
-    // Revenue
-    const revenuePerVisit = routeTasks.reduce((s, t) => {
-      if (t.pricing_type === 'per_minuut') {
-        return s + ((t.price_amount || 0) * (t.duration_minutes || 0));
-      } else {
-        return s + (t.price_amount || 0);
-      }
+    // Revenue - bereken per taak op basis van toegewezen dagen
+    const monthlyRevenue = routeTasks.reduce((total, task) => {
+      const assignment = (route.assigned_tasks || []).find(at => at.task_id === task.id);
+      const taskDays = assignment?.days?.length || 0;
+      const visitsPerMonth = taskDays * 4;
+      
+      const pricePerVisit = task.pricing_type === 'per_minuut' 
+        ? (task.price_amount || 0) * (task.duration_minutes || 0)
+        : (task.price_amount || 0);
+      
+      return total + (pricePerVisit * visitsPerMonth);
     }, 0);
-    const visitsPerMonth = (route.weekdays || []).length * 4;
-    const monthlyRevenue = revenuePerVisit * visitsPerMonth;
+    
+    // Bereken unieke dagen waarop route rijdt
+    const uniqueDays = new Set();
+    (route.assigned_tasks || []).forEach(at => {
+      (at.days || []).forEach(d => uniqueDays.add(d));
+    });
+    const visitsPerMonth = uniqueDays.size * 4;
 
     // Vehicle costs
     const vehicle = vehicles.find(v => v.id === route.vehicle_id);
