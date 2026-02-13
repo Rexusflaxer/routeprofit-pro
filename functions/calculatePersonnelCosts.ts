@@ -405,13 +405,8 @@ Deno.serve(async (req) => {
         payslip.employee_deductions.premium_wga +
         payslip.employee_deductions.tax_withheld;
       
-      // Reserveringen of direct uitbetaald
-      if (isCallWorker) {
-        // Voor oproepkrachten: al opgenomen in bruto, dus accruals = 0
-        payslip.accruals.vacation_allowance = 0;
-        payslip.accruals.year_end_bonus = 0;
-      } else {
-        // Voor normale werknemers: reserveringen
+      // Reserveringen - voor normale werknemers
+      if (!isCallWorker) {
         payslip.accruals.vacation_allowance = payslip.total_gross * ((caoConfig.vacation_allowance || 8) / 100);
         payslip.accruals.year_end_bonus = payslip.total_gross * ((caoConfig.year_end_bonus || 2.01) / 100);
       }
