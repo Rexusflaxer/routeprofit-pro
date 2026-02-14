@@ -9,10 +9,12 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { route_id, object_ids } = await req.json();
+    const { route_id, object_ids, start_location_id, end_location_id } = await req.json();
 
-    // Get all objects
+    // Get all objects and offices
     const allObjects = await base44.entities.SurveillanceObject.list();
+    const allOffices = await base44.entities.Office.list();
+    const allLocations = [...allObjects, ...allOffices];
 
     let uniqueObjects = [];
 
@@ -44,6 +46,22 @@ Deno.serve(async (req) => {
       });
     } else {
       return Response.json({ error: 'route_id or object_ids is required' }, { status: 400 });
+    }
+
+    // Add start location at the beginning if provided
+    if (start_location_id) {
+      const startLoc = allLocations.find(loc => loc.id === start_location_id);
+      if (startLoc && startLoc.latitude && startLoc.longitude) {
+        uniqueObjects.unshift(startLoc);
+      }
+    }
+    
+    // Add end location at the end if provided
+    if (end_location_id) {
+      const endLoc = allLocations.find(loc => loc.id === end_location_id);
+      if (endLoc && endLoc.latitude && endLoc.longitude) {
+        uniqueObjects.push(endLoc);
+      }
     }
 
     if (uniqueObjects.length < 2) {
