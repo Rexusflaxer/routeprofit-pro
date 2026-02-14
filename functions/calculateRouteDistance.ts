@@ -19,33 +19,14 @@ Deno.serve(async (req) => {
     let uniqueObjects = [];
     let numberOfTasks = 0;
 
-    // Build conceptual stops array (includes duplicates as separate stops)
-    const conceptualStops = [];
-    
-    // Add start location if provided (always as first conceptual stop)
-    if (start_location_id) {
-      const startLoc = allLocations.find(loc => loc.id === start_location_id);
-      if (startLoc && startLoc.latitude && startLoc.longitude) {
-        conceptualStops.push({ ...startLoc, _conceptual_id: 'start_1', _label: 'Start locatie 1' });
-      }
-    }
-    
-    // Add end location if provided (always as second conceptual stop, even if same ID)
-    if (end_location_id) {
-      const endLoc = allLocations.find(loc => loc.id === end_location_id);
-      if (endLoc && endLoc.latitude && endLoc.longitude) {
-        conceptualStops.push({ ...endLoc, _conceptual_id: 'start_2', _label: 'Start locatie 2' });
-      }
-    }
-
-    // Add task objects
+    // Add task objects first
     if (object_ids && Array.isArray(object_ids) && object_ids.length > 0) {
       // Direct object IDs provided (for form preview or testing)
       numberOfTasks = object_ids.length;
       object_ids.forEach(objId => {
         const obj = allObjects.find(o => o.id === objId);
         if (obj && obj.latitude && obj.longitude) {
-          conceptualStops.push(obj);
+          uniqueObjects.push(obj);
         }
       });
     } else if (route_id) {
@@ -64,12 +45,34 @@ Deno.serve(async (req) => {
       routeTasks.forEach(task => {
         const obj = allObjects.find(o => o.id === task.object_id);
         if (obj && obj.latitude && obj.longitude) {
-          conceptualStops.push(obj);
+          uniqueObjects.push(obj);
         }
       });
     } else {
       return Response.json({ error: 'route_id or object_ids is required' }, { status: 400 });
     }
+    
+    // Build conceptual stops array (includes start and end as separate stops)
+    const conceptualStops = [];
+    
+    // Add start location if provided (always as first conceptual stop)
+    if (start_location_id) {
+      const startLoc = allLocations.find(loc => loc.id === start_location_id);
+      if (startLoc && startLoc.latitude && startLoc.longitude) {
+        conceptualStops.push({ ...startLoc, _conceptual_id: 'start_1', _label: 'Start locatie 1' });
+      }
+    }
+    
+    // Add end location if provided (always as second conceptual stop, even if same ID)
+    if (end_location_id) {
+      const endLoc = allLocations.find(loc => loc.id === end_location_id);
+      if (endLoc && endLoc.latitude && endLoc.longitude) {
+        conceptualStops.push({ ...endLoc, _conceptual_id: 'start_2', _label: 'Start locatie 2' });
+      }
+    }
+    
+    // Add all task objects to conceptual stops
+    conceptualStops.push(...uniqueObjects);
     
     uniqueObjects = conceptualStops;
 
