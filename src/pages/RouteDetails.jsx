@@ -62,13 +62,51 @@ export default function RouteDetails() {
   });
 
   const removeTaskMutation = useMutation({
-    mutationFn: ({ routeId, taskId }) => {
+    mutationFn: async ({ routeId, taskId }) => {
       const updatedTasks = (route?.assigned_tasks || []).filter(at => at.task_id !== taskId);
-      return base44.entities.Route.update(routeId, { assigned_tasks: updatedTasks });
+      
+      // Bereken nieuwe totale taaktijd
+      const allTaskIds = updatedTasks.map(at => at.task_id);
+      const routeTasksData = tasks.filter(t => allTaskIds.includes(t.id));
+      const totalServiceMinutes = routeTasksData.reduce((sum, t) => sum + (t.duration_minutes || 0), 0);
+      
+      // Update route met nieuwe taken en taaktijd
+      await base44.entities.Route.update(routeId, { 
+        assigned_tasks: updatedTasks,
+        total_service_minutes: totalServiceMinutes
+      });
+      
+      // Als er nog taken zijn, bereken reistijd
+      if (updatedTasks.length > 0) {
+        const distanceResponse = await base44.functions.invoke('calculateRouteDistance', {
+          route_id: routeId
+        });
+        
+        await base44.entities.Route.update(routeId, {
+          avg_travel_minutes: distanceResponse.data?.avg_travel_minutes || 0,
+          total_distance_km: distanceResponse.data?.total_distance_km || 0
+        });
+
+        // Bereken route optimalisatie
+        const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: routeId });
+        return optimizationResponse.data;
+      } else {
+        // Geen taken meer, reset statistieken
+        await base44.entities.Route.update(routeId, {
+          avg_travel_minutes: 0,
+          total_distance_km: 0
+        });
+        return null;
+      }
     },
-    onSuccess: () => {
+    onSuccess: (optimizedData) => {
       queryClient.invalidateQueries({ queryKey: ["routes"] });
       queryClient.invalidateQueries({ queryKey: ["route", routeId] });
+      if (optimizedData) {
+        setOptimizedRoute(optimizedData);
+      } else {
+        setOptimizedRoute(null);
+      }
     },
   });
 
@@ -239,7 +277,14 @@ export default function RouteDetails() {
                 <CardTitle className="text-sm font-medium text-slate-500">Taken</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-bold">{routeTasks.length}</p>
+                {(addTaskMutation.isPending || removeTaskMutation.isPending) ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                    <span className="text-sm text-slate-500">Berekenen...</span>
+                  </div>
+                ) : (
+                  <p className="text-2xl font-bold">{routeTasks.length}</p>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -247,7 +292,14 @@ export default function RouteDetails() {
                 <CardTitle className="text-sm font-medium text-slate-500">Totale taaktijd</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-bold">{totalServiceMinutes} min</p>
+                {(addTaskMutation.isPending || removeTaskMutation.isPending) ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                    <span className="text-sm text-slate-500">Berekenen...</span>
+                  </div>
+                ) : (
+                  <p className="text-2xl font-bold">{totalServiceMinutes} min</p>
+                )}
               </CardContent>
             </Card>
             <Card>
@@ -255,7 +307,14 @@ export default function RouteDetails() {
                 <CardTitle className="text-sm font-medium text-slate-500">Gem. reistijd per object</CardTitle>
               </CardHeader>
               <CardContent>
-                <p className="text-2xl font-bold">{avgTravelMinutes} min</p>
+                {(addTaskMutation.isPending || removeTaskMutation.isPending) ? (
+                  <div className="flex items-center gap-2">
+                    <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
+                    <span className="text-sm text-slate-500">Berekenen...</span>
+                  </div>
+                ) : (
+                  <p className="text-2xl font-bold">{avgTravelMinutes} min</p>
+                )}
               </CardContent>
             </Card>
           </div>
