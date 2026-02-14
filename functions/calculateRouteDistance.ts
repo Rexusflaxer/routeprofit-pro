@@ -64,6 +64,16 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Remove duplicates based on ID
+    const seenIds = new Set();
+    uniqueObjects = uniqueObjects.filter(obj => {
+      if (seenIds.has(obj.id)) {
+        return false;
+      }
+      seenIds.add(obj.id);
+      return true;
+    });
+
     if (uniqueObjects.length < 2) {
       return Response.json({
         total_distance_km: 0,
