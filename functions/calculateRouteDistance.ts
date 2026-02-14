@@ -54,22 +54,33 @@ Deno.serve(async (req) => {
     
     // Add start location
     if (start_location_id) {
+      console.error(`Looking for start location: ${start_location_id}`);
       const startLoc = allLocations.find(loc => loc.id === start_location_id);
+      console.error(`Start location found:`, startLoc ? { id: startLoc.id, name: startLoc.name, lat: startLoc.latitude, lng: startLoc.longitude } : 'NOT FOUND');
       if (startLoc && startLoc.latitude && startLoc.longitude) {
         allConceptualStops.push({ ...startLoc, _conceptual_id: 'start', _label: 'Startlocatie' });
+        console.error(`Added start location to array`);
+      } else {
+        console.error(`Start location NOT added - missing coordinates`);
       }
     }
     
     // Add end location (even if same as start)
     if (end_location_id) {
+      console.error(`Looking for end location: ${end_location_id}`);
       const endLoc = allLocations.find(loc => loc.id === end_location_id);
+      console.error(`End location found:`, endLoc ? { id: endLoc.id, name: endLoc.name, lat: endLoc.latitude, lng: endLoc.longitude } : 'NOT FOUND');
       if (endLoc && endLoc.latitude && endLoc.longitude) {
         allConceptualStops.push({ ...endLoc, _conceptual_id: 'end', _label: 'Eindlocatie' });
+        console.error(`Added end location to array`);
+      } else {
+        console.error(`End location NOT added - missing coordinates`);
       }
     }
     
     // Add all task objects
     allConceptualStops.push(...taskObjects);
+    console.error(`Total conceptual stops in array: ${allConceptualStops.length}`);
 
     if (allConceptualStops.length < 2) {
       return Response.json({
