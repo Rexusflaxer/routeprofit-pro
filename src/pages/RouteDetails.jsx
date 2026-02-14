@@ -1,10 +1,10 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Route as RouteIcon, Clock, MapPin, Calendar, Euro, TrendingUp, TrendingDown, Edit, Trash2 } from "lucide-react";
+import { ArrowLeft, Route as RouteIcon, Clock, MapPin, Calendar, Euro, Edit, Trash2, Navigation, Loader2 } from "lucide-react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
 import RouteBuilder from "../components/routes/RouteBuilder";
@@ -17,6 +17,8 @@ const WEEKDAY_LABELS = {
 
 export default function RouteDetails() {
   const [editing, setEditing] = useState(false);
+  const [optimizedRoute, setOptimizedRoute] = useState(null);
+  const [loadingOptimization, setLoadingOptimization] = useState(false);
   const queryClient = useQueryClient();
 
   const urlParams = new URLSearchParams(window.location.search);
@@ -88,16 +90,8 @@ export default function RouteDetails() {
   const vehicle = vehicles.find(v => v.id === route.vehicle_id);
   const routeTasks = tasks.filter(t => (route.assigned_tasks || []).some(at => at.task_id === t.id));
 
-  const cs = costSettings[0];
-
-  // Bereken financiële metrics
+  // Bereken omzet
   const weeksPerMonth = 52 / 12;
-  const uniqueDays = new Set();
-  (route.assigned_tasks || []).forEach(at => {
-    (at.days || []).forEach(d => uniqueDays.add(d));
-  });
-  const visitsPerMonth = Math.round(uniqueDays.size * weeksPerMonth * 10) / 10;
-
   let totalRevenue = 0;
   routeTasks.forEach(t => {
     const assignment = route.assigned_tasks?.find(at => at.task_id === t.id);
@@ -108,59 +102,27 @@ export default function RouteDetails() {
     totalRevenue += pricePerVisit * visitsPerTask;
   });
 
-  // Voertuigkosten berekening
-  let vehicleFixedCosts = 0;
-  let vehicleVariableCosts = 0;
-
-  if (vehicle) {
-    const totalRouteMinutes = route.total_route_minutes || 0;
-    const totalKmPerMonth = (totalRouteMinutes / 60) * 30 * visitsPerMonth;
-
-    if (vehicle.acquisition_type === 'aankoop' || vehicle.acquisition_type === 'banklening') {
-      const monthlyDepreciation = ((vehicle.purchase_price || 0) - (vehicle.residual_value || 0)) / ((vehicle.depreciation_years || 5) * 12);
-      vehicleFixedCosts += monthlyDepreciation;
-    }
-
-    if (vehicle.acquisition_type === 'lease' || vehicle.acquisition_type === 'private_lease') {
-      vehicleFixedCosts += vehicle.monthly_lease_cost || 0;
-    }
-
-    if (vehicle.acquisition_type === 'banklening') {
-      vehicleFixedCosts += vehicle.monthly_loan_payment || 0;
-    }
-
-    vehicleFixedCosts += vehicle.insurance_per_month || 0;
-
-    vehicleVariableCosts += (vehicle.fuel_cost_per_km || 0) * totalKmPerMonth;
-
-    if (vehicle.maintenance_type === 'per_km') {
-      vehicleVariableCosts += (vehicle.maintenance_cost || 0) * totalKmPerMonth / (vehicle.maintenance_interval_km || 1);
-    } else if (vehicle.maintenance_type === 'per_month') {
-      vehicleFixedCosts += vehicle.maintenance_cost || 0;
-    }
-
-    if (vehicle.tire_type === 'per_km') {
-      vehicleVariableCosts += (vehicle.tire_cost || 0) * totalKmPerMonth / (vehicle.tire_interval_km || 1);
-    } else if (vehicle.tire_type === 'per_month') {
-      vehicleFixedCosts += vehicle.tire_cost || 0;
-    }
-  }
-
-  const overheadCosts = (cs?.office_costs_per_month || 0) + (cs?.admin_salary_per_month || 0) + (cs?.other_fixed_costs_per_month || 0);
-  const totalCosts = vehicleFixedCosts + vehicleVariableCosts + overheadCosts;
-  const profit = totalRevenue - totalCosts;
-  const margin = totalRevenue > 0 ? (profit / totalRevenue) * 100 : 0;
-
   const totalServiceMinutes = route.total_service_minutes || 0;
   const avgTravelMinutes = route.avg_travel_minutes || 0;
-  const breakEvenPricePerMinute = totalServiceMinutes > 0 ? totalCosts / (totalServiceMinutes * visitsPerMonth) : 0;
 
-  let avgPricePerMinute = 0;
-  routeTasks.forEach(t => {
-    const pricePerMin = t.pricing_type === 'per_minuut' ? (t.price_amount || 0) : (t.duration_minutes > 0 ? (t.price_amount || 0) / t.duration_minutes : 0);
-    avgPricePerMinute += pricePerMin * (t.duration_minutes || 0);
-  });
-  avgPricePerMinute = totalServiceMinutes > 0 ? avgPricePerMinute / totalServiceMinutes : 0;
+  // Fetch route optimization
+  useEffect(() => {
+    const fetchOptimization = async () => {
+      if (!route || routeTasks.length < 2) return;
+      
+      setLoadingOptimization(true);
+      try {
+        const response = await base44.functions.invoke('optimizeRoute', { route_id: route.id });
+        setOptimizedRoute(response.data);
+      } catch (error) {
+        console.error('Fout bij route optimalisatie:', error);
+      } finally {
+        setLoadingOptimization(false);
+      }
+    };
+
+    fetchOptimization();
+  }, [route, routeTasks.length]);
 
   return (
     <div className="space-y-6">
@@ -208,7 +170,7 @@ export default function RouteDetails() {
       {!editing && (
         <>
           {/* Overzicht kaarten */}
-          <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-slate-500">Taken</CardTitle>
@@ -227,104 +189,91 @@ export default function RouteDetails() {
             </Card>
             <Card>
               <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-slate-500">Gem. reistijd</CardTitle>
+                <CardTitle className="text-sm font-medium text-slate-500">Gem. reistijd per object</CardTitle>
               </CardHeader>
               <CardContent>
                 <p className="text-2xl font-bold">{avgTravelMinutes} min</p>
               </CardContent>
             </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm font-medium text-slate-500">Bezoeken/maand</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-2xl font-bold">{visitsPerMonth}</p>
-              </CardContent>
-            </Card>
           </div>
 
-          {/* Financiële samenvatting */}
-          <Card className={`border-2 ${profit > 0 ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+          {/* Omzet */}
+          <Card className="border-2 border-green-200 bg-green-50">
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
-                {profit > 0 ? <TrendingUp className="w-5 h-5 text-green-600" /> : <TrendingDown className="w-5 h-5 text-red-600" />}
-                Financieel overzicht
+                <Euro className="w-5 h-5 text-green-600" />
+                Opbrengst per route
               </CardTitle>
             </CardHeader>
             <CardContent>
-              <div className="grid grid-cols-1 md:grid-cols-4 gap-6">
-                <div>
-                  <p className="text-sm text-slate-600 mb-1">Omzet per maand</p>
-                  <p className="text-2xl font-bold text-green-700">€{totalRevenue.toFixed(2)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-600 mb-1">Kosten per maand</p>
-                  <p className="text-2xl font-bold text-red-700">€{totalCosts.toFixed(2)}</p>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-600 mb-1">Winst per maand</p>
-                  <p className={`text-2xl font-bold ${profit > 0 ? 'text-green-700' : 'text-red-700'}`}>
-                    €{profit.toFixed(2)}
-                  </p>
-                </div>
-                <div>
-                  <p className="text-sm text-slate-600 mb-1">Marge</p>
-                  <p className={`text-2xl font-bold ${margin > 0 ? 'text-green-700' : 'text-red-700'}`}>
-                    {margin.toFixed(1)}%
-                  </p>
-                </div>
-              </div>
+              <p className="text-3xl font-bold text-green-700">€{totalRevenue.toFixed(2)}</p>
+              <p className="text-sm text-slate-600 mt-1">Per maand (4x per week)</p>
             </CardContent>
           </Card>
 
-          {/* Kosten breakdown */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Voertuig variabel</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xl font-bold">€{vehicleVariableCosts.toFixed(2)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Voertuig vast</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xl font-bold">€{vehicleFixedCosts.toFixed(2)}</p>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardHeader className="pb-2">
-                <CardTitle className="text-sm">Overhead</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-xl font-bold">€{overheadCosts.toFixed(2)}</p>
-              </CardContent>
-            </Card>
-          </div>
-
-          {/* Break-even analyse */}
+          {/* Routeoptimalisatie */}
           <Card>
             <CardHeader>
-              <CardTitle>Break-even analyse</CardTitle>
+              <CardTitle className="flex items-center gap-2">
+                <Navigation className="w-5 h-5 text-blue-600" />
+                Routeoptimalisatie
+              </CardTitle>
             </CardHeader>
-            <CardContent className="space-y-3">
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-slate-600">Break-even prijs per minuut</span>
-                <span className="font-semibold">€{breakEvenPricePerMinute.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between items-center">
-                <span className="text-sm text-slate-600">Huidige prijs per minuut</span>
-                <span className="font-semibold">€{avgPricePerMinute.toFixed(2)}</span>
-              </div>
-              <div className="flex justify-between items-center pt-2 border-t">
-                <span className="text-sm font-medium">Verschil</span>
-                <span className={`font-bold ${avgPricePerMinute >= breakEvenPricePerMinute ? 'text-green-600' : 'text-red-600'}`}>
-                  €{(avgPricePerMinute - breakEvenPricePerMinute).toFixed(2)}
-                </span>
-              </div>
+            <CardContent>
+              {loadingOptimization ? (
+                <div className="flex items-center justify-center py-8">
+                  <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+                  <span className="ml-2 text-sm text-slate-500">Route berekenen...</span>
+                </div>
+              ) : optimizedRoute ? (
+                <div className="space-y-4">
+                  <div className="grid grid-cols-3 gap-4 p-4 bg-blue-50 rounded-lg">
+                    <div>
+                      <p className="text-xs text-slate-600 mb-1">Totale routetijd</p>
+                      <p className="text-xl font-bold text-blue-700">{optimizedRoute.total_route_time} min</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-600 mb-1">Reistijd</p>
+                      <p className="text-xl font-bold">{optimizedRoute.total_travel_time} min</p>
+                    </div>
+                    <div>
+                      <p className="text-xs text-slate-600 mb-1">Taaktijd</p>
+                      <p className="text-xl font-bold">{optimizedRoute.total_service_time} min</p>
+                    </div>
+                  </div>
+
+                  <div>
+                    <p className="text-sm font-semibold text-slate-700 mb-3">Optimale volgorde:</p>
+                    <div className="space-y-2">
+                      {optimizedRoute.optimized_order?.map((item, index) => (
+                        <div key={item.task_id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
+                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold">
+                            {index + 1}
+                          </div>
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-medium text-slate-900">{item.name}</p>
+                            <p className="text-xs text-slate-500">{item.address}</p>
+                          </div>
+                          <div className="text-right">
+                            <p className="text-xs text-slate-600">{item.time_window_start} - {item.time_window_end}</p>
+                            <p className="text-xs font-medium text-slate-700">{item.duration_minutes} min</p>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  {optimizedRoute.tasks_skipped > 0 && (
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                      <p className="text-sm text-amber-800">
+                        <strong>Let op:</strong> {optimizedRoute.tasks_skipped} {optimizedRoute.tasks_skipped === 1 ? 'taak' : 'taken'} niet opgenomen vanwege tijdsbeperkingen.
+                      </p>
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-500 text-center py-4">Geen routeoptimalisatie beschikbaar</p>
+              )}
             </CardContent>
           </Card>
 
