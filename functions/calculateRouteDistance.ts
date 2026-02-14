@@ -89,9 +89,14 @@ Deno.serve(async (req) => {
             totalDistanceKm += routeDistance / 1000;
             totalTravelMinutes += Math.round(routeDuration / 60);
             pairCount++;
+          } else {
+            console.error(`Google Maps error for pair ${i}-${j}: ${data.status}`);
+            if (data.error_message) {
+              console.error(`  Message: ${data.error_message}`);
+            }
           }
         } catch (err) {
-          // Continue on error
+          console.error(`Fetch error for pair ${i}-${j}:`, err.message);
         }
       }
     }
