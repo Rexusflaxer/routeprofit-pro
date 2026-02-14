@@ -16,17 +16,33 @@ Deno.serve(async (req) => {
     const allOffices = await base44.entities.Office.list();
     const allLocations = [...allObjects, ...allOffices];
 
-    let uniqueObjects = [];
     let numberOfTasks = 0;
+    const conceptualStops = [];
+    
+    // Add start location if provided (always as first conceptual stop)
+    if (start_location_id) {
+      const startLoc = allLocations.find(loc => loc.id === start_location_id);
+      if (startLoc && startLoc.latitude && startLoc.longitude) {
+        conceptualStops.push({ ...startLoc, _conceptual_id: 'start_1', _label: 'Start locatie 1' });
+      }
+    }
+    
+    // Add end location if provided (always as second conceptual stop, even if same ID)
+    if (end_location_id) {
+      const endLoc = allLocations.find(loc => loc.id === end_location_id);
+      if (endLoc && endLoc.latitude && endLoc.longitude) {
+        conceptualStops.push({ ...endLoc, _conceptual_id: 'start_2', _label: 'Start locatie 2' });
+      }
+    }
 
-    // Add task objects first
+    // Add task objects
     if (object_ids && Array.isArray(object_ids) && object_ids.length > 0) {
       // Direct object IDs provided (for form preview or testing)
       numberOfTasks = object_ids.length;
       object_ids.forEach(objId => {
         const obj = allObjects.find(o => o.id === objId);
         if (obj && obj.latitude && obj.longitude) {
-          uniqueObjects.push(obj);
+          conceptualStops.push(obj);
         }
       });
     } else if (route_id) {
@@ -45,43 +61,19 @@ Deno.serve(async (req) => {
       routeTasks.forEach(task => {
         const obj = allObjects.find(o => o.id === task.object_id);
         if (obj && obj.latitude && obj.longitude) {
-          uniqueObjects.push(obj);
+          conceptualStops.push(obj);
         }
       });
     } else {
       return Response.json({ error: 'route_id or object_ids is required' }, { status: 400 });
     }
-    
-    // Build conceptual stops array (includes start and end as separate stops)
-    const conceptualStops = [];
-    
-    // Add start location if provided (always as first conceptual stop)
-    if (start_location_id) {
-      const startLoc = allLocations.find(loc => loc.id === start_location_id);
-      if (startLoc && startLoc.latitude && startLoc.longitude) {
-        conceptualStops.push({ ...startLoc, _conceptual_id: 'start_1', _label: 'Start locatie 1' });
-      }
-    }
-    
-    // Add end location if provided (always as second conceptual stop, even if same ID)
-    if (end_location_id) {
-      const endLoc = allLocations.find(loc => loc.id === end_location_id);
-      if (endLoc && endLoc.latitude && endLoc.longitude) {
-        conceptualStops.push({ ...endLoc, _conceptual_id: 'start_2', _label: 'Start locatie 2' });
-      }
-    }
-    
-    // Add all task objects to conceptual stops
-    conceptualStops.push(...uniqueObjects);
-    
-    uniqueObjects = conceptualStops;
 
-    if (uniqueObjects.length < 2) {
+    if (conceptualStops.length < 2) {
       return Response.json({
         total_distance_km: 0,
         avg_travel_minutes: 0,
         number_of_pairs: 0,
-        debug: `Only ${uniqueObjects.length} objects`
+        debug: `Only ${conceptualStops.length} stops`
       });
     }
 
@@ -90,19 +82,19 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Google Maps API key not configured' }, { status: 500 });
     }
 
-    // Calculate travel time for all unique pairs of objects
+    // Calculate travel time for all unique pairs of stops
     let totalTravelMinutes = 0;
     let totalDistanceKm = 0;
     let pairCount = 0;
 
-    console.error(`Starting pair calculation for ${uniqueObjects.length} objects`);
-    console.error(`Objects:`, uniqueObjects.map(o => ({ id: o.id, name: o.name || o._label, lat: o.latitude, lng: o.longitude, _conceptual_id: o._conceptual_id })));
+    console.error(`Starting pair calculation for ${conceptualStops.length} stops`);
+    console.error(`Stops:`, conceptualStops.map(o => ({ id: o.id, name: o.name || o._label, lat: o.latitude, lng: o.longitude, _conceptual_id: o._conceptual_id })));
 
     // Generate all unique pairs
-    for (let i = 0; i < uniqueObjects.length; i++) {
-      for (let j = i + 1; j < uniqueObjects.length; j++) {
-        const obj1 = uniqueObjects[i];
-        const obj2 = uniqueObjects[j];
+    for (let i = 0; i < conceptualStops.length; i++) {
+      for (let j = i + 1; j < conceptualStops.length; j++) {
+        const obj1 = conceptualStops[i];
+        const obj2 = conceptualStops[j];
         
         const name1 = obj1.name || obj1._label || 'Unknown';
         const name2 = obj2.name || obj2._label || 'Unknown';
