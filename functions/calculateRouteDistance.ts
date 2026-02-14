@@ -20,12 +20,14 @@ Deno.serve(async (req) => {
     let numberOfTasks = 0;
 
     if (object_ids && Array.isArray(object_ids) && object_ids.length > 0) {
-      // Direct object IDs provided (for form preview)
+      // Direct object IDs provided (for form preview or testing)
       numberOfTasks = object_ids.length;
+      const seenIds = new Set();
       object_ids.forEach(objId => {
         const obj = allObjects.find(o => o.id === objId);
-        if (obj && obj.latitude && obj.longitude) {
+        if (obj && obj.latitude && obj.longitude && !seenIds.has(obj.id)) {
           uniqueObjects.push(obj);
+          seenIds.add(obj.id);
         }
       });
     } else if (route_id) {
