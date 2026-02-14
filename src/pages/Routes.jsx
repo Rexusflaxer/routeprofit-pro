@@ -2,7 +2,17 @@ import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Plus, Route as RouteIcon, Trash2, Pencil } from "lucide-react";
+import { Plus, Route as RouteIcon } from "lucide-react";
+
+const WEEKDAY_LABELS = {
+  1: "Maandag",
+  2: "Dinsdag",
+  3: "Woensdag",
+  4: "Donderdag",
+  5: "Vrijdag",
+  6: "Zaterdag",
+  7: "Zondag",
+};
 import { AnimatePresence, motion } from "framer-motion";
 import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
@@ -43,6 +53,19 @@ export default function Routes() {
   });
 
   const handleSave = (data) => {
+    // Valideer: 1 route per dag per map
+    const selectedDay = data.weekdays?.[0];
+    const existingRoute = routes.find(r => 
+      r.folder_id === data.folder_id && 
+      r.weekdays?.includes(selectedDay) &&
+      (!editing || r.id !== editing.id)
+    );
+    
+    if (existingRoute) {
+      alert(`Er bestaat al een route op ${WEEKDAY_LABELS[selectedDay]} in deze map.`);
+      return;
+    }
+    
     if (editing) updateMutation.mutate({ id: editing.id, data });
     else createMutation.mutate(data);
   };
@@ -73,11 +96,26 @@ export default function Routes() {
       {tasks && tasks.length > 0 && <UnassignedTasks tasks={tasks} routes={routes} objects={objects} />}
 
       <div className="border border-slate-200 rounded-xl bg-white p-6 min-h-[400px]">
-        {routes.length > 0 ? (
-          <RouteFolderView routes={routes} folders={folders} vehicles={vehicles} costSettings={cs} onEdit={(route) => { setEditing(route); setShowForm(true); }} onDelete={(id) => deleteMutation.mutate(id)} />
+        {folders.length > 0 ? (
+          <RouteFolderView 
+            routes={routes} 
+            folders={folders} 
+            vehicles={vehicles} 
+            costSettings={cs} 
+            onEdit={(route) => { setEditing(route); setShowForm(true); }} 
+            onDelete={(id) => deleteMutation.mutate(id)}
+            onAddRoute={(folderId, weekday) => {
+              setEditing({
+                folder_id: folderId,
+                weekdays: [weekday],
+                name: WEEKDAY_LABELS[weekday]
+              });
+              setShowForm(true);
+            }}
+          />
         ) : !showForm && (
           <div className="flex items-center justify-center h-[350px]">
-            <EmptyState icon={RouteIcon} title="Geen routes" description="Maak uw eerste surveillanceroute aan." actionLabel="Route aanmaken" onAction={() => setShowForm(true)} />
+            <EmptyState icon={RouteIcon} title="Geen routes" description="Maak eerst een uitschuifmap aan." />
           </div>
         )}
       </div>

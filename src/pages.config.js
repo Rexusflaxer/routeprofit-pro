@@ -51,10 +51,10 @@ import CostSettings from './pages/CostSettings';
 import Dashboard from './pages/Dashboard';
 import Objects from './pages/Objects';
 import Personnel from './pages/Personnel';
-import Routes from './pages/Routes';
-import Vehicles from './pages/Vehicles';
 import RouteDetails from './pages/RouteDetails';
+import Routes from './pages/Routes';
 import Settings from './pages/Settings';
+import Vehicles from './pages/Vehicles';
 import __Layout from './Layout.jsx';
 
 
@@ -63,10 +63,10 @@ export const PAGES = {
     "Dashboard": Dashboard,
     "Objects": Objects,
     "Personnel": Personnel,
-    "Routes": Routes,
-    "Vehicles": Vehicles,
     "RouteDetails": RouteDetails,
+    "Routes": Routes,
     "Settings": Settings,
+    "Vehicles": Vehicles,
 }
 
 export const pagesConfig = {

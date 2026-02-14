@@ -57,8 +57,7 @@ export default function RouteBuilder({ route, vehicles, folders, onSave, onCance
 
   const selectWeekday = (day) => {
     const newWeekdays = [day];
-    const folder = folders?.find(f => f.id === form.folder_id);
-    const autoName = folder ? `${folder.name} - ${WEEKDAY_LABELS[day]}` : form.name;
+    const autoName = WEEKDAY_LABELS[day];
     
     setForm(prev => ({
       ...prev,
@@ -68,9 +67,8 @@ export default function RouteBuilder({ route, vehicles, folders, onSave, onCance
   };
 
   const handleFolderChange = (folderId) => {
-    const folder = folders?.find(f => f.id === folderId);
     const day = form.weekdays?.[0];
-    const autoName = folder && day ? `${folder.name} - ${WEEKDAY_LABELS[day]}` : form.name;
+    const autoName = day ? WEEKDAY_LABELS[day] : form.name;
     
     setForm(prev => ({
       ...prev,
