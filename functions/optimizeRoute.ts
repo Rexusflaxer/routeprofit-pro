@@ -51,7 +51,8 @@ Deno.serve(async (req) => {
           longitude: obj.longitude,
           duration_minutes: task.duration_minutes || 0,
           time_window_start: task.time_window_start || route.time_window_start || '00:00',
-          time_window_end: task.time_window_end || route.time_window_end || '23:59'
+          time_window_end: task.time_window_end || route.time_window_end || '23:59',
+          task_type: task.task_type
         });
       }
     });
