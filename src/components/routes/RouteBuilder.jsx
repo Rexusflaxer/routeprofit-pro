@@ -188,23 +188,27 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
 
   useEffect(() => {
     const fetchRouteMetrics = async () => {
-      if (!form.assigned_tasks || form.assigned_tasks.length < 2) {
+      if (!form.assigned_tasks || form.assigned_tasks.length === 0) {
         setGoogleMapsMetrics({ totalDistanceKm: 0, avgTravelMinutes: 0, loading: false });
         return;
       }
 
       setGoogleMapsMetrics(prev => ({ ...prev, loading: true }));
-      
+
       try {
         // Haal object IDs van taken
         const objectIds = selectedTasks.map(t => t.object_id).filter(Boolean);
-        
-        if (objectIds.length < 2) {
+
+        if (objectIds.length === 0) {
           setGoogleMapsMetrics({ avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
           return;
         }
 
-        const response = await base44.functions.invoke('calculateRouteDistance', { object_ids: objectIds });
+        const response = await base44.functions.invoke('calculateRouteDistance', { 
+          object_ids: objectIds,
+          start_location_id: form.start_location_id,
+          end_location_id: form.end_location_id
+        });
 
         if (response.data && response.data.avg_travel_minutes !== undefined) {
           setGoogleMapsMetrics({
@@ -223,7 +227,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
     };
 
     fetchRouteMetrics();
-  }, [selectedTasks]);
+  }, [selectedTasks, form.start_location_id, form.end_location_id]);
 
   // Bereken route metrics
   const { avgTravelMinutes, totalServiceMinutes, totalRouteMinutes, totalRevenuePerVisit, totalVisitsPerMonth } = useMemo(() => {
