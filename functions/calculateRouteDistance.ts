@@ -9,7 +9,8 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { route_id, object_ids, start_location_id, end_location_id } = await req.json();
+    let payload = await req.json();
+    let { route_id, object_ids, start_location_id, end_location_id } = payload;
 
     // Get all objects and offices
     const allObjects = await base44.entities.SurveillanceObject.list();
@@ -33,6 +34,15 @@ Deno.serve(async (req) => {
       if (!route) {
         return Response.json({ error: 'Route not found' }, { status: 404 });
       }
+      
+      // CRITICAL: Get start and end locations from route if not provided
+      if (!start_location_id && route.start_location_id) {
+        start_location_id = route.start_location_id;
+      }
+      if (!end_location_id && route.end_location_id) {
+        end_location_id = route.end_location_id;
+      }
+      
       const allTasks = await base44.entities.Task.list();
       const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
       const routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
