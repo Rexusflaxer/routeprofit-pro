@@ -1,10 +1,13 @@
-import React, { useMemo } from "react";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import React, { useMemo, useState } from "react";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import { Checkbox } from "@/components/ui/checkbox";
 import { Clock, Euro, MapPin, Plus } from "lucide-react";
 
 export default function AddTaskDialog({ open, onOpenChange, route, tasks, objects, routes, onAddTask }) {
+  const [selectedTaskIds, setSelectedTaskIds] = useState([]);
+
   const availableTasks = useMemo(() => {
     if (!route || !route.time_window_start || !route.time_window_end || !route.weekdays || route.weekdays.length === 0) {
       return [];
@@ -73,14 +76,37 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
     }
   };
 
+  const handleOpenChange = (isOpen) => {
+    if (!isOpen) {
+      setSelectedTaskIds([]);
+    }
+    onOpenChange(isOpen);
+  };
+
+  const toggleTask = (taskId) => {
+    setSelectedTaskIds(prev => 
+      prev.includes(taskId) 
+        ? prev.filter(id => id !== taskId)
+        : [...prev, taskId]
+    );
+  };
+
+  const handleAddSelected = () => {
+    if (selectedTaskIds.length > 0) {
+      onAddTask(selectedTaskIds);
+      setSelectedTaskIds([]);
+      onOpenChange(false);
+    }
+  };
+
   return (
-    <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+    <Dialog open={open} onOpenChange={handleOpenChange}>
+      <DialogContent className="max-w-2xl max-h-[80vh] flex flex-col">
         <DialogHeader>
-          <DialogTitle>Taak toevoegen</DialogTitle>
+          <DialogTitle>Taken toevoegen</DialogTitle>
         </DialogHeader>
         
-        <div className="space-y-3 mt-4">
+        <div className="space-y-3 mt-4 overflow-y-auto flex-1">
           {availableTasks.length === 0 ? (
             <div className="text-center py-8">
               <p className="text-sm text-slate-500">
@@ -91,8 +117,18 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
             availableTasks.map(task => (
               <div 
                 key={task.id} 
-                className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200 hover:bg-slate-100 transition-colors"
+                className={`flex items-start gap-3 p-4 rounded-lg border-2 transition-colors cursor-pointer ${
+                  selectedTaskIds.includes(task.id)
+                    ? 'bg-blue-50 border-blue-500'
+                    : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
+                }`}
+                onClick={() => toggleTask(task.id)}
               >
+                <Checkbox 
+                  checked={selectedTaskIds.includes(task.id)}
+                  onCheckedChange={() => toggleTask(task.id)}
+                  className="mt-1"
+                />
                 <MapPin className="w-5 h-5 text-slate-500 mt-0.5 flex-shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-900">{getObjectName(task)}</p>
@@ -116,20 +152,28 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
                     )}
                   </div>
                 </div>
-                <Button
-                  size="sm"
-                  className="bg-slate-900 hover:bg-slate-800 flex-shrink-0"
-                  onClick={() => {
-                    onAddTask(task.id);
-                    onOpenChange(false);
-                  }}
-                >
-                  <Plus className="w-4 h-4 mr-1" /> Toevoegen
-                </Button>
               </div>
             ))
           )}
         </div>
+
+        {availableTasks.length > 0 && (
+          <DialogFooter className="mt-4">
+            <Button variant="outline" onClick={() => handleOpenChange(false)}>
+              Annuleren
+            </Button>
+            <Button 
+              onClick={handleAddSelected}
+              disabled={selectedTaskIds.length === 0}
+              className="bg-slate-900 hover:bg-slate-800"
+            >
+              <Plus className="w-4 h-4 mr-1" />
+              {selectedTaskIds.length > 0 
+                ? `${selectedTaskIds.length} ${selectedTaskIds.length === 1 ? 'taak' : 'taken'} toevoegen`
+                : 'Selecteer taken'}
+            </Button>
+          </DialogFooter>
+        )}
       </DialogContent>
     </Dialog>
   );

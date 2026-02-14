@@ -73,10 +73,35 @@ export default function RouteDetails() {
   });
 
   const addTaskMutation = useMutation({
-    mutationFn: ({ routeId, taskId }) => {
+    mutationFn: async ({ routeId, taskIds }) => {
       const selectedDay = route?.weekdays?.[0];
-      const updatedTasks = [...(route?.assigned_tasks || []), { task_id: taskId, days: selectedDay ? [selectedDay] : [] }];
-      return base44.entities.Route.update(routeId, { assigned_tasks: updatedTasks });
+      const newTasks = taskIds.map(taskId => ({ 
+        task_id: taskId, 
+        days: selectedDay ? [selectedDay] : [] 
+      }));
+      const updatedTasks = [...(route?.assigned_tasks || []), ...newTasks];
+      
+      // Update route met nieuwe taken
+      await base44.entities.Route.update(routeId, { assigned_tasks: updatedTasks });
+      
+      // Bereken statistieken
+      const allTaskIds = updatedTasks.map(at => at.task_id);
+      const response = await base44.functions.invoke('calculateRouteDistance', {
+        route_id: routeId,
+        object_ids: allTaskIds
+      });
+      
+      // Bereken totale taaktijd
+      const routeTasksData = tasks.filter(t => allTaskIds.includes(t.id));
+      const totalServiceMinutes = routeTasksData.reduce((sum, t) => sum + (t.duration_minutes || 0), 0);
+      
+      // Update route met statistieken
+      return base44.entities.Route.update(routeId, {
+        assigned_tasks: updatedTasks,
+        total_service_minutes: totalServiceMinutes,
+        avg_travel_minutes: response.data?.avg_travel_minutes || 0,
+        total_distance_km: response.data?.total_distance_km || 0
+      });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["routes"] });
@@ -462,7 +487,10 @@ export default function RouteDetails() {
         tasks={tasks}
         objects={objects}
         routes={routes}
-        onAddTask={(taskId) => addTaskMutation.mutate({ routeId: route.id, taskId })}
+        onAddTask={(taskIds) => {
+          const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
+          addTaskMutation.mutate({ routeId: route.id, taskIds: ids });
+        }}
       />
     </div>
   );
