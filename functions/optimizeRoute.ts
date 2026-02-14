@@ -92,7 +92,9 @@ Deno.serve(async (req) => {
         duration_minutes: 0,
         time_window_start: route.time_window_start || '00:00',
         time_window_end: route.time_window_end || '23:59',
-        is_start: true
+        is_start: true,
+        arrival_time: formatMinutesToTime(currentTime),
+        departure_time: formatMinutesToTime(currentTime)
       });
     }
 
