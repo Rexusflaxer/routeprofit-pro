@@ -65,16 +65,25 @@ Deno.serve(async (req) => {
     let totalDistanceKm = 0;
     let pairCount = 0;
 
+    console.error(`Starting pair calculation for ${uniqueObjects.length} objects`);
+    console.error(`Objects:`, uniqueObjects.map(o => ({ id: o.id, name: o.name, lat: o.latitude, lng: o.longitude })));
+
     // Generate all unique pairs
     for (let i = 0; i < uniqueObjects.length; i++) {
       for (let j = i + 1; j < uniqueObjects.length; j++) {
         const obj1 = uniqueObjects[i];
         const obj2 = uniqueObjects[j];
         
+        console.error(`Calculating pair ${i}-${j}: ${obj1.name} to ${obj2.name}`);
+        
         const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${obj1.latitude},${obj1.longitude}&destination=${obj2.latitude},${obj2.longitude}&key=${googleMapsApiKey}`;
+        
+        console.error(`Fetching: ${url.substring(0, 100)}...`);
         
         const response = await fetch(url);
         const data = await response.json();
+
+        console.error(`Response status: ${data.status}`);
 
         if (data.status === 'OK' && data.routes && data.routes.length > 0) {
           const route = data.routes[0];
@@ -84,11 +93,17 @@ Deno.serve(async (req) => {
             routeDuration += leg.duration.value; // in seconds
           });
 
-          totalTravelMinutes += Math.round(routeDuration / 60);
+          const minutes = Math.round(routeDuration / 60);
+          console.error(`Duration: ${minutes} minutes`);
+          totalTravelMinutes += minutes;
           pairCount++;
+        } else {
+          console.error(`Failed: ${data.status}, error: ${data.error_message || 'none'}`);
         }
       }
     }
+
+    console.error(`Final: ${pairCount} pairs calculated, total ${totalTravelMinutes} minutes`);
 
     // Calculate average travel time per pair
     const avgTravelMinutes = pairCount > 0 ? Math.round(totalTravelMinutes / pairCount) : 0;
