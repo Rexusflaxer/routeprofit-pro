@@ -101,7 +101,9 @@ Deno.serve(async (req) => {
         const obj1 = uniqueObjects[i];
         const obj2 = uniqueObjects[j];
         
-        console.error(`Calculating pair ${i}-${j}: ${obj1.name} to ${obj2.name}`);
+        const name1 = obj1.name || obj1._label || 'Unknown';
+        const name2 = obj2.name || obj2._label || 'Unknown';
+        console.error(`Calculating pair ${i}-${j}: ${name1} to ${name2}`);
 
         // Check if coordinates are identical (same physical location)
         if (obj1.latitude === obj2.latitude && obj1.longitude === obj2.longitude) {
