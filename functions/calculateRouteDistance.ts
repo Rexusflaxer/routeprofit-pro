@@ -100,9 +100,12 @@ Deno.serve(async (req) => {
         const obj2 = uniqueObjects[j];
         
         console.error(`Calculating pair ${i}-${j}: ${obj1.name} to ${obj2.name}`);
-        
+
+        // Note: Our objects store coordinates as lat/lng in fields named latitude/longitude
         // Google Maps API expects: latitude,longitude format
-        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${obj1.latitude},${obj1.longitude}&destination=${obj2.latitude},${obj2.longitude}&key=${googleMapsApiKey}`;
+        const origin = `${obj1.latitude},${obj1.longitude}`;
+        const destination = `${obj2.latitude},${obj2.longitude}`;
+        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&key=${googleMapsApiKey}`;
         
         console.error(`Fetching: ${url.substring(0, 100)}...`);
         
