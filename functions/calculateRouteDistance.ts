@@ -132,8 +132,8 @@ Deno.serve(async (req) => {
 
     console.error(`Final: ${pairCount} pairs calculated, total ${totalTravelMinutes} minutes`);
 
-    // Calculate average travel time per pair
-    const avgTravelMinutes = pairCount > 0 ? Math.round(totalTravelMinutes / pairCount) : 0;
+    // Calculate average travel time per object (total travel time divided by number of objects)
+    const avgTravelMinutes = uniqueObjects.length > 0 ? Math.round(totalTravelMinutes / uniqueObjects.length) : 0;
 
     return Response.json({
       avg_travel_minutes: avgTravelMinutes,
