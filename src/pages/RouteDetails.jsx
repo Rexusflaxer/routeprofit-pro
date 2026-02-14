@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Route as RouteIcon, Clock, MapPin, Calendar, Euro, Edit, Trash2, Navigation, Loader2, Plus, X } from "lucide-react";
+import { ArrowLeft, Route as RouteIcon, Clock, MapPin, Calendar, Euro, Edit, Trash2, Navigation, Loader2, Plus, X, RefreshCw } from "lucide-react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
 import RouteBuilder from "../components/routes/RouteBuilder";
@@ -23,6 +23,7 @@ export default function RouteDetails() {
   const [loadingOptimization, setLoadingOptimization] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
   const [showAddTaskDialog, setShowAddTaskDialog] = useState(false);
+  const [isRecalculating, setIsRecalculating] = useState(false);
   const queryClient = useQueryClient();
 
   const urlParams = new URLSearchParams(window.location.search);
@@ -109,6 +110,43 @@ export default function RouteDetails() {
       }
     },
   });
+
+  const recalculateRoute = async () => {
+    if (!route || routeTasks.length === 0) return;
+    
+    setIsRecalculating(true);
+    try {
+      // Bereken totale taaktijd
+      const totalServiceMinutes = routeTasks.reduce((sum, t) => sum + (t.duration_minutes || 0), 0);
+      
+      // Update route met taaktijd
+      await base44.entities.Route.update(route.id, { 
+        total_service_minutes: totalServiceMinutes
+      });
+      
+      // Bereken reistijd statistieken
+      const distanceResponse = await base44.functions.invoke('calculateRouteDistance', {
+        route_id: route.id
+      });
+      
+      // Update route met reistijd statistieken
+      await base44.entities.Route.update(route.id, {
+        avg_travel_minutes: distanceResponse.data?.avg_travel_minutes || 0,
+        total_distance_km: distanceResponse.data?.total_distance_km || 0
+      });
+
+      // Bereken route optimalisatie
+      const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: route.id });
+      setOptimizedRoute(optimizationResponse.data);
+
+      queryClient.invalidateQueries({ queryKey: ["routes"] });
+      queryClient.invalidateQueries({ queryKey: ["route", routeId] });
+    } catch (error) {
+      console.error('Fout bij herberekenen:', error);
+    } finally {
+      setIsRecalculating(false);
+    }
+  };
 
   const addTaskMutation = useMutation({
     mutationFn: async ({ routeId, taskIds }) => {
@@ -232,6 +270,18 @@ export default function RouteDetails() {
           </div>
         </div>
         <div className="flex gap-2">
+          <Button 
+            variant="outline" 
+            onClick={recalculateRoute}
+            disabled={isRecalculating || routeTasks.length === 0}
+          >
+            {isRecalculating ? (
+              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
+            ) : (
+              <RefreshCw className="w-4 h-4 mr-2" />
+            )}
+            Herbereken
+          </Button>
           <Button variant="outline" onClick={() => setEditing(true)}>
             <Edit className="w-4 h-4 mr-2" /> Bewerken
           </Button>
@@ -292,7 +342,7 @@ export default function RouteDetails() {
                 <CardTitle className="text-sm font-medium text-slate-500">Totale taaktijd</CardTitle>
               </CardHeader>
               <CardContent>
-                {(addTaskMutation.isPending || removeTaskMutation.isPending) ? (
+                {(addTaskMutation.isPending || removeTaskMutation.isPending || isRecalculating) ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
                     <span className="text-sm text-slate-500">Berekenen...</span>
@@ -307,7 +357,7 @@ export default function RouteDetails() {
                 <CardTitle className="text-sm font-medium text-slate-500">Gem. reistijd per object</CardTitle>
               </CardHeader>
               <CardContent>
-                {(addTaskMutation.isPending || removeTaskMutation.isPending) ? (
+                {(addTaskMutation.isPending || removeTaskMutation.isPending || isRecalculating) ? (
                   <div className="flex items-center gap-2">
                     <Loader2 className="w-5 h-5 animate-spin text-slate-400" />
                     <span className="text-sm text-slate-500">Berekenen...</span>
