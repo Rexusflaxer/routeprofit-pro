@@ -87,10 +87,17 @@ Deno.serve(async (req) => {
     let totalDistanceKm = 0;
     let pairCount = 0;
 
-    console.error(`Starting pair calculation for ${conceptualStops.length} stops`);
-    console.error(`Stops:`, conceptualStops.map(o => ({ id: o.id, name: o.name || o._label, lat: o.latitude, lng: o.longitude, _conceptual_id: o._conceptual_id })));
+    // Log all conceptual stops including start/end
+    console.error(`Starting pair calculation for ${conceptualStops.length} conceptual stops`);
+    console.error(`All conceptual stops:`, conceptualStops.map(o => ({ 
+      id: o.id, 
+      name: o.name || o._label, 
+      lat: o.latitude, 
+      lng: o.longitude, 
+      _conceptual_id: o._conceptual_id 
+    })));
 
-    // Generate all unique pairs
+    // Generate all unique pairs from ALL conceptual stops (including start/end)
     for (let i = 0; i < conceptualStops.length; i++) {
       for (let j = i + 1; j < conceptualStops.length; j++) {
         const obj1 = conceptualStops[i];
