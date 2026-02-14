@@ -17,36 +17,18 @@ Deno.serve(async (req) => {
     const allLocations = [...allObjects, ...allOffices];
 
     let numberOfTasks = 0;
-    const conceptualStops = [];
-    
-    // Add start location if provided (always as first conceptual stop)
-    if (start_location_id) {
-      const startLoc = allLocations.find(loc => loc.id === start_location_id);
-      if (startLoc && startLoc.latitude && startLoc.longitude) {
-        conceptualStops.push({ ...startLoc, _conceptual_id: 'start_1', _label: 'Start locatie 1' });
-      }
-    }
-    
-    // Add end location if provided (always as second conceptual stop, even if same ID)
-    if (end_location_id) {
-      const endLoc = allLocations.find(loc => loc.id === end_location_id);
-      if (endLoc && endLoc.latitude && endLoc.longitude) {
-        conceptualStops.push({ ...endLoc, _conceptual_id: 'start_2', _label: 'Start locatie 2' });
-      }
-    }
+    let taskObjects = [];
 
-    // Add task objects
+    // Get task objects
     if (object_ids && Array.isArray(object_ids) && object_ids.length > 0) {
-      // Direct object IDs provided (for form preview or testing)
       numberOfTasks = object_ids.length;
       object_ids.forEach(objId => {
         const obj = allObjects.find(o => o.id === objId);
         if (obj && obj.latitude && obj.longitude) {
-          conceptualStops.push(obj);
+          taskObjects.push(obj);
         }
       });
     } else if (route_id) {
-      // Fetch route by ID
       const route = await base44.entities.Route.get(route_id);
       if (!route) {
         return Response.json({ error: 'Route not found' }, { status: 404 });
@@ -55,25 +37,46 @@ Deno.serve(async (req) => {
       const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
       const routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
       
-      // Count total number of tasks
       numberOfTasks = routeTasks.length;
       
       routeTasks.forEach(task => {
         const obj = allObjects.find(o => o.id === task.object_id);
         if (obj && obj.latitude && obj.longitude) {
-          conceptualStops.push(obj);
+          taskObjects.push(obj);
         }
       });
     } else {
       return Response.json({ error: 'route_id or object_ids is required' }, { status: 400 });
     }
 
-    if (conceptualStops.length < 2) {
+    // Build array of ALL conceptual stops (start, end, and all task objects)
+    const allConceptualStops = [];
+    
+    // Add start location
+    if (start_location_id) {
+      const startLoc = allLocations.find(loc => loc.id === start_location_id);
+      if (startLoc && startLoc.latitude && startLoc.longitude) {
+        allConceptualStops.push({ ...startLoc, _conceptual_id: 'start', _label: 'Startlocatie' });
+      }
+    }
+    
+    // Add end location (even if same as start)
+    if (end_location_id) {
+      const endLoc = allLocations.find(loc => loc.id === end_location_id);
+      if (endLoc && endLoc.latitude && endLoc.longitude) {
+        allConceptualStops.push({ ...endLoc, _conceptual_id: 'end', _label: 'Eindlocatie' });
+      }
+    }
+    
+    // Add all task objects
+    allConceptualStops.push(...taskObjects);
+
+    if (allConceptualStops.length < 2) {
       return Response.json({
         total_distance_km: 0,
         avg_travel_minutes: 0,
         number_of_pairs: 0,
-        debug: `Only ${conceptualStops.length} stops`
+        debug: `Only ${allConceptualStops.length} stops`
       });
     }
 
@@ -82,32 +85,31 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Google Maps API key not configured' }, { status: 500 });
     }
 
-    // Calculate travel time for all unique pairs of stops
+    // Calculate travel time for ALL pairs between ALL conceptual stops
     let totalTravelMinutes = 0;
     let totalDistanceKm = 0;
     let pairCount = 0;
 
-    // Log all conceptual stops including start/end
-    console.error(`Starting pair calculation for ${conceptualStops.length} conceptual stops`);
-    console.error(`All conceptual stops:`, conceptualStops.map(o => ({ 
+    console.error(`Starting pair calculation for ${allConceptualStops.length} conceptual stops (${numberOfTasks} tasks + ${start_location_id ? 1 : 0} start + ${end_location_id ? 1 : 0} end)`);
+    console.error(`All stops:`, allConceptualStops.map(o => ({ 
       id: o.id, 
       name: o.name || o._label, 
       lat: o.latitude, 
       lng: o.longitude, 
-      _conceptual_id: o._conceptual_id 
+      conceptual_id: o._conceptual_id 
     })));
 
-    // Generate all unique pairs from ALL conceptual stops (including start/end)
-    for (let i = 0; i < conceptualStops.length; i++) {
-      for (let j = i + 1; j < conceptualStops.length; j++) {
-        const obj1 = conceptualStops[i];
-        const obj2 = conceptualStops[j];
+    // Calculate ALL unique pairs
+    for (let i = 0; i < allConceptualStops.length; i++) {
+      for (let j = i + 1; j < allConceptualStops.length; j++) {
+        const obj1 = allConceptualStops[i];
+        const obj2 = allConceptualStops[j];
         
         const name1 = obj1.name || obj1._label || 'Unknown';
         const name2 = obj2.name || obj2._label || 'Unknown';
         console.error(`Calculating pair ${i}-${j}: ${name1} to ${name2}`);
 
-        // Check if coordinates are identical (same physical location)
+        // Check if coordinates are identical
         if (obj1.latitude === obj2.latitude && obj1.longitude === obj2.longitude) {
           console.error(`Same coordinates - 0 minutes travel time`);
           totalTravelMinutes += 0;
@@ -115,9 +117,7 @@ Deno.serve(async (req) => {
           continue;
         }
 
-        // CRITICAL: The database stores lat/lng swapped (longitude in latitude field, latitude in longitude field)
-        // Google Maps API expects: latitude,longitude (e.g., 52.xxx,6.xxx for Netherlands)
-        // So we need to swap them: use longitude field as latitude, and latitude field as longitude
+        // Database stores lat/lng swapped - swap them for Google Maps API
         const origin = `${obj1.longitude},${obj1.latitude}`;
         const destination = `${obj2.longitude},${obj2.latitude}`;
         const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&key=${googleMapsApiKey}`;
@@ -134,7 +134,7 @@ Deno.serve(async (req) => {
           let routeDuration = 0;
 
           (route.legs || []).forEach(leg => {
-            routeDuration += leg.duration.value; // in seconds
+            routeDuration += leg.duration.value;
           });
 
           const minutes = Math.round(routeDuration / 60);
@@ -149,9 +149,7 @@ Deno.serve(async (req) => {
 
     console.error(`Final: ${pairCount} pairs calculated, total ${totalTravelMinutes} minutes`);
 
-    // Calculate average travel time per conceptual stop:
-    // Total travel time divided by number of conceptual stops (tasks + start + end)
-    // Even if start and end are the same location, they count as separate stops
+    // Average per conceptual stop: total / number of conceptual stops
     const numberOfConceptualStops = numberOfTasks + (start_location_id ? 1 : 0) + (end_location_id ? 1 : 0);
     const avgTravelMinutes = numberOfConceptualStops > 0 ? Math.round(totalTravelMinutes / numberOfConceptualStops) : 0;
 
