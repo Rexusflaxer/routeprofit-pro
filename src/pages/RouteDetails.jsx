@@ -9,6 +9,7 @@ import { ArrowLeft, Route as RouteIcon, Clock, MapPin, Calendar, Euro, Edit, Tra
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
 import RouteBuilder from "../components/routes/RouteBuilder";
+import AddTaskDialog from "../components/routes/AddTaskDialog";
 import { AnimatePresence, motion } from "framer-motion";
 
 const WEEKDAY_LABELS = {
@@ -21,6 +22,7 @@ export default function RouteDetails() {
   const [optimizedRoute, setOptimizedRoute] = useState(null);
   const [loadingOptimization, setLoadingOptimization] = useState(false);
   const [activeTab, setActiveTab] = useState("overview");
+  const [showAddTaskDialog, setShowAddTaskDialog] = useState(false);
   const queryClient = useQueryClient();
 
   const urlParams = new URLSearchParams(window.location.search);
@@ -62,6 +64,18 @@ export default function RouteDetails() {
   const removeTaskMutation = useMutation({
     mutationFn: ({ routeId, taskId }) => {
       const updatedTasks = (route?.assigned_tasks || []).filter(at => at.task_id !== taskId);
+      return base44.entities.Route.update(routeId, { assigned_tasks: updatedTasks });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["routes"] });
+      queryClient.invalidateQueries({ queryKey: ["route", routeId] });
+    },
+  });
+
+  const addTaskMutation = useMutation({
+    mutationFn: ({ routeId, taskId }) => {
+      const selectedDay = route?.weekdays?.[0];
+      const updatedTasks = [...(route?.assigned_tasks || []), { task_id: taskId, days: selectedDay ? [selectedDay] : [] }];
       return base44.entities.Route.update(routeId, { assigned_tasks: updatedTasks });
     },
     onSuccess: () => {
@@ -312,7 +326,7 @@ export default function RouteDetails() {
                 <CardHeader>
                   <div className="flex items-center justify-between">
                     <CardTitle className="text-lg">Taken op route</CardTitle>
-                    <Button size="sm" onClick={() => setEditing(true)}>
+                    <Button size="sm" onClick={() => setShowAddTaskDialog(true)}>
                       <Plus className="w-4 h-4 mr-1" /> Taak toevoegen
                     </Button>
                   </div>
@@ -359,7 +373,7 @@ export default function RouteDetails() {
                     {routeTasks.length === 0 && (
                       <div className="text-center py-8">
                         <p className="text-sm text-slate-500 mb-3">Geen taken toegewezen aan deze route</p>
-                        <Button size="sm" onClick={() => setEditing(true)}>
+                        <Button size="sm" onClick={() => setShowAddTaskDialog(true)}>
                           <Plus className="w-4 h-4 mr-1" /> Taak toevoegen
                         </Button>
                       </div>
@@ -440,6 +454,16 @@ export default function RouteDetails() {
           </Tabs>
         </>
       )}
+
+      <AddTaskDialog
+        open={showAddTaskDialog}
+        onOpenChange={setShowAddTaskDialog}
+        route={route}
+        tasks={tasks}
+        objects={objects}
+        routes={routes}
+        onAddTask={(taskId) => addTaskMutation.mutate({ routeId: route.id, taskId })}
+      />
     </div>
   );
 }
