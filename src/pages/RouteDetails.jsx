@@ -270,18 +270,6 @@ export default function RouteDetails() {
           </div>
         </div>
         <div className="flex gap-2">
-          <Button 
-            variant="outline" 
-            onClick={recalculateRoute}
-            disabled={isRecalculating || routeTasks.length === 0}
-          >
-            {isRecalculating ? (
-              <Loader2 className="w-4 h-4 mr-2 animate-spin" />
-            ) : (
-              <RefreshCw className="w-4 h-4 mr-2" />
-            )}
-            Herbereken
-          </Button>
           <Button variant="outline" onClick={() => setEditing(true)}>
             <Edit className="w-4 h-4 mr-2" /> Bewerken
           </Button>
