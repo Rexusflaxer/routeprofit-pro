@@ -55,19 +55,19 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'route_id or object_ids is required' }, { status: 400 });
     }
 
-    // Add start location at the beginning if provided
+    // Add start location at the beginning if provided (always as separate conceptual stop)
     if (start_location_id) {
       const startLoc = allLocations.find(loc => loc.id === start_location_id);
       if (startLoc && startLoc.latitude && startLoc.longitude) {
-        uniqueObjects.unshift(startLoc);
+        uniqueObjects.unshift({ ...startLoc, _conceptual_id: 'start' });
       }
     }
     
-    // Add end location at the end if provided (only if different from start)
-    if (end_location_id && end_location_id !== start_location_id) {
+    // Add end location at the end if provided (always as separate conceptual stop, even if same ID)
+    if (end_location_id) {
       const endLoc = allLocations.find(loc => loc.id === end_location_id);
       if (endLoc && endLoc.latitude && endLoc.longitude) {
-        uniqueObjects.push(endLoc);
+        uniqueObjects.push({ ...endLoc, _conceptual_id: 'end' });
       }
     }
 
