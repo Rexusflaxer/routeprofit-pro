@@ -103,7 +103,6 @@ export default function RouteFolderView({ routes, folders, vehicles, onEdit, onD
                             className="flex flex-col p-3 bg-slate-50 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors group min-h-[100px]"
                           >
                             <div className="flex-1">
-                              <p className="text-xs font-medium text-slate-900 mb-2">{dayRoute.name}</p>
                               <div className="space-y-1">
                                 <span className="text-xs text-slate-500 flex items-center gap-1">
                                   <MapPin className="w-3 h-3" />
