@@ -101,10 +101,11 @@ Deno.serve(async (req) => {
         
         console.error(`Calculating pair ${i}-${j}: ${obj1.name} to ${obj2.name}`);
 
-        // Note: Our objects store coordinates as lat/lng in fields named latitude/longitude
-        // Google Maps API expects: latitude,longitude format
-        const origin = `${obj1.latitude},${obj1.longitude}`;
-        const destination = `${obj2.latitude},${obj2.longitude}`;
+        // CRITICAL: The database stores lat/lng swapped (longitude in latitude field, latitude in longitude field)
+        // Google Maps API expects: latitude,longitude (e.g., 52.xxx,6.xxx for Netherlands)
+        // So we need to swap them: use longitude field as latitude, and latitude field as longitude
+        const origin = `${obj1.longitude},${obj1.latitude}`;
+        const destination = `${obj2.longitude},${obj2.latitude}`;
         const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${origin}&destination=${destination}&key=${googleMapsApiKey}`;
         
         console.error(`Fetching: ${url.substring(0, 100)}...`);
