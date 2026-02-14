@@ -97,6 +97,14 @@ Deno.serve(async (req) => {
         
         console.error(`Calculating pair ${i}-${j}: ${obj1.name} to ${obj2.name}`);
 
+        // Check if coordinates are identical (same physical location)
+        if (obj1.latitude === obj2.latitude && obj1.longitude === obj2.longitude) {
+          console.error(`Same coordinates - 0 minutes travel time`);
+          totalTravelMinutes += 0;
+          pairCount++;
+          continue;
+        }
+
         // CRITICAL: The database stores lat/lng swapped (longitude in latitude field, latitude in longitude field)
         // Google Maps API expects: latitude,longitude (e.g., 52.xxx,6.xxx for Netherlands)
         // So we need to swap them: use longitude field as latitude, and latitude field as longitude
