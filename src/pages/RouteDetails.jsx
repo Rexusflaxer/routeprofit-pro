@@ -4,7 +4,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { ArrowLeft, Route as RouteIcon, Clock, MapPin, Calendar, Euro, Edit, Trash2, Navigation, Loader2 } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ArrowLeft, Route as RouteIcon, Clock, MapPin, Calendar, Euro, Edit, Trash2, Navigation, Loader2, Plus, X } from "lucide-react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
 import RouteBuilder from "../components/routes/RouteBuilder";
@@ -19,6 +20,7 @@ export default function RouteDetails() {
   const [editing, setEditing] = useState(false);
   const [optimizedRoute, setOptimizedRoute] = useState(null);
   const [loadingOptimization, setLoadingOptimization] = useState(false);
+  const [activeTab, setActiveTab] = useState("overview");
   const queryClient = useQueryClient();
 
   const urlParams = new URLSearchParams(window.location.search);
@@ -53,6 +55,17 @@ export default function RouteDetails() {
     mutationFn: (id) => base44.entities.Route.delete(id),
     onSuccess: () => {
       window.location.href = createPageUrl("Routes");
+    },
+  });
+
+  const removeTaskMutation = useMutation({
+    mutationFn: ({ routeId, taskId }) => {
+      const updatedTasks = (route.assigned_tasks || []).filter(at => at.task_id !== taskId);
+      return base44.entities.Route.update(routeId, { assigned_tasks: updatedTasks });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["routes"] });
+      queryClient.invalidateQueries({ queryKey: ["route", routeId] });
     },
   });
 
@@ -166,8 +179,17 @@ export default function RouteDetails() {
 
       {!editing && (
         <>
-          {/* Overzicht kaarten */}
-          <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          {/* Tabs */}
+          <Tabs value={activeTab} onValueChange={setActiveTab}>
+            <TabsList className="grid w-full grid-cols-3">
+              <TabsTrigger value="overview">Overzicht</TabsTrigger>
+              <TabsTrigger value="optimization">Routeoptimalisatie</TabsTrigger>
+              <TabsTrigger value="tasks">Taken op Route</TabsTrigger>
+            </TabsList>
+
+            <TabsContent value="overview" className="space-y-6 mt-6">
+              {/* Overzicht kaarten */}
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
             <Card>
               <CardHeader className="pb-2">
                 <CardTitle className="text-sm font-medium text-slate-500">Taken</CardTitle>
@@ -194,22 +216,98 @@ export default function RouteDetails() {
             </Card>
           </div>
 
-          {/* Omzet */}
-          <Card className="border-2 border-green-200 bg-green-50">
-            <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Euro className="w-5 h-5 text-green-600" />
-                Opbrengst per route
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-3xl font-bold text-green-700">€{totalRevenue.toFixed(2)}</p>
-              <p className="text-sm text-slate-600 mt-1">Per gereden route</p>
-            </CardContent>
-          </Card>
+              {/* Omzet */}
+              <Card className="border-2 border-green-200 bg-green-50">
+                <CardHeader>
+                  <CardTitle className="flex items-center gap-2">
+                    <Euro className="w-5 h-5 text-green-600" />
+                    Opbrengst per route
+                  </CardTitle>
+                </CardHeader>
+                <CardContent>
+                  <p className="text-3xl font-bold text-green-700">€{totalRevenue.toFixed(2)}</p>
+                  <p className="text-sm text-slate-600 mt-1">Per gereden route</p>
+                </CardContent>
+              </Card>
 
-          {/* Routeoptimalisatie */}
-          <Card>
+              {/* Route informatie */}
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Route planning</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    <div className="flex items-center gap-2">
+                      <Calendar className="w-4 h-4 text-slate-500" />
+                      <span className="text-sm">
+                        {route.weekdays?.map(d => WEEKDAY_LABELS[d]).join(", ") || "Geen dagen"}
+                      </span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-slate-500" />
+                      <span className="text-sm">
+                        {route.time_window_start} - {route.time_window_end}
+                      </span>
+                    </div>
+                    {vehicle && (
+                      <div className="flex items-center gap-2">
+                        <RouteIcon className="w-4 h-4 text-slate-500" />
+                        <span className="text-sm">
+                          {vehicle.license_plate} - {vehicle.brand} {vehicle.model}
+                        </span>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Locaties</CardTitle>
+                  </CardHeader>
+                  <CardContent className="space-y-3">
+                    {route.start_location_id && (
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-green-500" />
+                        <div>
+                          <p className="text-xs text-slate-500">Start</p>
+                          <span className="text-sm font-medium">
+                            {objects.find(o => o.id === route.start_location_id)?.name || "Onbekend"}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {route.end_location_id && (
+                      <div className="flex items-center gap-2">
+                        <MapPin className="w-4 h-4 text-red-500" />
+                        <div>
+                          <p className="text-xs text-slate-500">Eind</p>
+                          <span className="text-sm font-medium">
+                            {objects.find(o => o.id === route.end_location_id)?.name || "Onbekend"}
+                          </span>
+                        </div>
+                      </div>
+                    )}
+                    {!route.start_location_id && !route.end_location_id && (
+                      <p className="text-sm text-slate-500">Geen start-/eindlocaties ingesteld</p>
+                    )}
+                  </CardContent>
+                </Card>
+              </div>
+
+              {route.notes && (
+                <Card>
+                  <CardHeader>
+                    <CardTitle className="text-lg">Opmerkingen</CardTitle>
+                  </CardHeader>
+                  <CardContent>
+                    <p className="text-sm text-slate-600 whitespace-pre-wrap">{route.notes}</p>
+                  </CardContent>
+                </Card>
+              )}
+            </TabsContent>
+
+            <TabsContent value="optimization" className="space-y-6 mt-6">
+              <Card>
             <CardHeader>
               <CardTitle className="flex items-center gap-2">
                 <Navigation className="w-5 h-5 text-blue-600" />
@@ -271,79 +369,72 @@ export default function RouteDetails() {
               ) : (
                 <p className="text-sm text-slate-500 text-center py-4">Geen routeoptimalisatie beschikbaar</p>
               )}
-            </CardContent>
-          </Card>
+                </CardContent>
+              </Card>
+            </TabsContent>
 
-          {/* Route informatie */}
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Route planning</CardTitle>
-              </CardHeader>
-              <CardContent className="space-y-3">
-                <div className="flex items-center gap-2">
-                  <Calendar className="w-4 h-4 text-slate-500" />
-                  <span className="text-sm">
-                    {route.weekdays?.map(d => WEEKDAY_LABELS[d]).join(", ") || "Geen dagen"}
-                  </span>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Clock className="w-4 h-4 text-slate-500" />
-                  <span className="text-sm">
-                    {route.time_window_start} - {route.time_window_end}
-                  </span>
-                </div>
-                {vehicle && (
-                  <div className="flex items-center gap-2">
-                    <RouteIcon className="w-4 h-4 text-slate-500" />
-                    <span className="text-sm">
-                      {vehicle.license_plate} - {vehicle.brand} {vehicle.model}
-                    </span>
+            <TabsContent value="tasks" className="space-y-6 mt-6">
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">Taken op route</CardTitle>
+                    <Button size="sm" onClick={() => setEditing(true)}>
+                      <Plus className="w-4 h-4 mr-1" /> Taak toevoegen
+                    </Button>
                   </div>
-                )}
-              </CardContent>
-            </Card>
-
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Taken op route</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <div className="space-y-2">
-                  {routeTasks.map(task => {
-                    const obj = objects.find(o => o.id === task.object_id);
-                    return (
-                      <div key={task.id} className="flex items-start gap-2 p-2 bg-slate-50 rounded-lg">
-                        <MapPin className="w-4 h-4 text-slate-500 mt-0.5" />
-                        <div className="flex-1 min-w-0">
-                          <p className="text-sm font-medium">{obj?.name || "Onbekend"}</p>
-                          <div className="flex items-center gap-2 text-xs text-slate-500">
-                            <span>{task.task_type}</span>
-                            <span>•</span>
-                            <span>{task.duration_minutes} min</span>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {routeTasks.map(task => {
+                      const obj = objects.find(o => o.id === task.object_id);
+                      return (
+                        <div key={task.id} className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
+                          <MapPin className="w-5 h-5 text-slate-500 mt-0.5" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-slate-900">{obj?.name || "Onbekend"}</p>
+                            <p className="text-xs text-slate-500 mb-2">{obj?.address}</p>
+                            <div className="flex flex-wrap gap-2">
+                              <Badge variant="secondary" className="text-xs">
+                                {task.task_type}
+                              </Badge>
+                              <Badge variant="outline" className="text-xs">
+                                <Clock className="w-3 h-3 mr-1" />
+                                {task.duration_minutes} min
+                              </Badge>
+                              <Badge variant="outline" className="text-xs">
+                                <Euro className="w-3 h-3 mr-1" />
+                                €{task.pricing_type === 'per_minuut' ? task.price_amount : (task.price_amount / task.duration_minutes).toFixed(2)}/min
+                              </Badge>
+                            </div>
                           </div>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => {
+                              if (confirm("Weet je zeker dat je deze taak wilt verwijderen uit de route?")) {
+                                removeTaskMutation.mutate({ routeId: route.id, taskId: task.id });
+                              }
+                            }}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
                         </div>
+                      );
+                    })}
+                    {routeTasks.length === 0 && (
+                      <div className="text-center py-8">
+                        <p className="text-sm text-slate-500 mb-3">Geen taken toegewezen aan deze route</p>
+                        <Button size="sm" onClick={() => setEditing(true)}>
+                          <Plus className="w-4 h-4 mr-1" /> Taak toevoegen
+                        </Button>
                       </div>
-                    );
-                  })}
-                  {routeTasks.length === 0 && (
-                    <p className="text-sm text-slate-500 text-center py-4">Geen taken toegewezen</p>
-                  )}
-                </div>
-              </CardContent>
-            </Card>
-          </div>
-
-          {route.notes && (
-            <Card>
-              <CardHeader>
-                <CardTitle className="text-lg">Opmerkingen</CardTitle>
-              </CardHeader>
-              <CardContent>
-                <p className="text-sm text-slate-600 whitespace-pre-wrap">{route.notes}</p>
-              </CardContent>
-            </Card>
-          )}
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
+            </TabsContent>
+          </Tabs>
         </>
       )}
     </div>

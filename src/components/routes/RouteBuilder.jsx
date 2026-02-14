@@ -36,6 +36,8 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
     name: "",
     folder_id: "",
     assigned_tasks: [],
+    start_location_id: "",
+    end_location_id: "",
     vehicle_id: "",
     time_window_start: "",
     time_window_end: "",
@@ -318,6 +320,35 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
                   {vehicles.filter(v => v.is_active).map(v => (
                     <SelectItem key={v.id} value={v.id}>
                       {v.license_plate} - {v.brand} {v.model}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Startlocatie</Label>
+              <Select value={form.start_location_id} onValueChange={(v) => handleChange("start_location_id", v)}>
+                <SelectTrigger><SelectValue placeholder="Selecteer startlocatie" /></SelectTrigger>
+                <SelectContent>
+                  {objects.map(obj => (
+                    <SelectItem key={obj.id} value={obj.id}>
+                      {obj.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Eindlocatie</Label>
+              <Select value={form.end_location_id} onValueChange={(v) => handleChange("end_location_id", v)}>
+                <SelectTrigger><SelectValue placeholder="Selecteer eindlocatie" /></SelectTrigger>
+                <SelectContent>
+                  {objects.map(obj => (
+                    <SelectItem key={obj.id} value={obj.id}>
+                      {obj.name}
                     </SelectItem>
                   ))}
                 </SelectContent>

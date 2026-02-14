@@ -30,6 +30,10 @@ Deno.serve(async (req) => {
     const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
     const routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
 
+    // Get start and end locations
+    const startLocation = route.start_location_id ? allObjects.find(o => o.id === route.start_location_id) : null;
+    const endLocation = route.end_location_id ? allObjects.find(o => o.id === route.end_location_id) : null;
+
     // Get objects with coordinates
     const taskObjects = [];
     routeTasks.forEach(task => {
@@ -67,17 +71,27 @@ Deno.serve(async (req) => {
     const visited = new Set();
     const optimizedOrder = [];
     
-    // Start met eerste object (of object met vroegste tijdvenster)
-    let currentTask = taskObjects.reduce((earliest, task) => 
+    // Start locatie
+    let currentLocation = startLocation || taskObjects.reduce((earliest, task) => 
       task.time_window_start < earliest.time_window_start ? task : earliest
     );
     
-    optimizedOrder.push(currentTask);
-    visited.add(currentTask.task_id);
-    
     let totalTravelTime = 0;
-    let currentTime = parseTimeToMinutes(currentTask.time_window_start);
-    currentTime += currentTask.duration_minutes;
+    let currentTime = parseTimeToMinutes(route.time_window_start || '00:00');
+    
+    // Als startlocatie niet een taak is, voeg startpunt toe voor visuele weergave
+    if (startLocation && !taskObjects.some(t => t.object_id === startLocation.id)) {
+      optimizedOrder.push({
+        name: `START: ${startLocation.name}`,
+        address: startLocation.address,
+        latitude: startLocation.latitude,
+        longitude: startLocation.longitude,
+        duration_minutes: 0,
+        time_window_start: route.time_window_start || '00:00',
+        time_window_end: route.time_window_end || '23:59',
+        is_start: true
+      });
+    }
 
     // Vind dichtstbijzijnde volgende objecten
     while (visited.size < taskObjects.length) {
@@ -93,7 +107,7 @@ Deno.serve(async (req) => {
         const taskEndMinutes = parseTimeToMinutes(task.time_window_end);
 
         // Google Maps API call voor reistijd
-        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${currentTask.longitude},${currentTask.latitude}&destination=${task.longitude},${task.latitude}&key=${googleMapsApiKey}`;
+        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${currentLocation.longitude},${currentLocation.latitude}&destination=${task.longitude},${task.latitude}&key=${googleMapsApiKey}`;
         
         const response = await fetch(url);
         const data = await response.json();
@@ -139,10 +153,37 @@ Deno.serve(async (req) => {
       const taskStartMinutes = parseTimeToMinutes(nearestTask.time_window_start);
       currentTime = Math.max(arrivalTime, taskStartMinutes) + nearestTask.duration_minutes;
       
-      currentTask = nearestTask;
+      currentLocation = nearestTask;
     }
 
-    const totalServiceTime = optimizedOrder.reduce((sum, t) => sum + t.duration_minutes, 0);
+    // Voeg eindlocatie toe als die anders is
+    if (endLocation && currentLocation.object_id !== endLocation.id) {
+      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${currentLocation.longitude},${currentLocation.latitude}&destination=${endLocation.longitude},${endLocation.latitude}&key=${googleMapsApiKey}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      
+      if (data.status === 'OK' && data.routes && data.routes.length > 0) {
+        let routeDuration = 0;
+        (data.routes[0].legs || []).forEach(leg => {
+          routeDuration += leg.duration.value;
+        });
+        const travelMinutes = Math.round(routeDuration / 60);
+        totalTravelTime += travelMinutes;
+        
+        optimizedOrder.push({
+          name: `EIND: ${endLocation.name}`,
+          address: endLocation.address,
+          latitude: endLocation.latitude,
+          longitude: endLocation.longitude,
+          duration_minutes: 0,
+          time_window_start: route.time_window_start || '00:00',
+          time_window_end: route.time_window_end || '23:59',
+          is_end: true
+        });
+      }
+    }
+
+    const totalServiceTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + t.duration_minutes, 0);
     const totalRouteTime = totalServiceTime + totalTravelTime;
 
     return Response.json({
