@@ -17,9 +17,11 @@ Deno.serve(async (req) => {
     const allLocations = [...allObjects, ...allOffices];
 
     let uniqueObjects = [];
+    let numberOfTasks = 0;
 
     if (object_ids && Array.isArray(object_ids) && object_ids.length > 0) {
       // Direct object IDs provided (for form preview)
+      numberOfTasks = object_ids.length;
       object_ids.forEach(objId => {
         const obj = allObjects.find(o => o.id === objId);
         if (obj && obj.latitude && obj.longitude) {
@@ -35,6 +37,9 @@ Deno.serve(async (req) => {
       const allTasks = await base44.entities.Task.list();
       const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
       const routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
+      
+      // Count total number of tasks
+      numberOfTasks = routeTasks.length;
       
       const seenIds = new Set();
       routeTasks.forEach(task => {
@@ -132,13 +137,18 @@ Deno.serve(async (req) => {
 
     console.error(`Final: ${pairCount} pairs calculated, total ${totalTravelMinutes} minutes`);
 
-    // Calculate average travel time per object (total travel time divided by number of objects)
-    const avgTravelMinutes = uniqueObjects.length > 0 ? Math.round(totalTravelMinutes / uniqueObjects.length) : 0;
+    // Count total stops: tasks + start location (1) + end location (1)
+    const totalStops = numberOfTasks + 1 + (end_location_id ? 1 : 0);
+    
+    // Calculate average travel time per task (total travel time divided by total stops)
+    const avgTravelMinutes = totalStops > 0 ? Math.round(totalTravelMinutes / totalStops) : 0;
 
     return Response.json({
       avg_travel_minutes: avgTravelMinutes,
       total_travel_minutes_all_pairs: totalTravelMinutes,
-      number_of_objects: uniqueObjects.length,
+      number_of_tasks: numberOfTasks,
+      total_stops: totalStops,
+      number_of_unique_locations: uniqueObjects.length,
       number_of_pairs: pairCount
     });
 
