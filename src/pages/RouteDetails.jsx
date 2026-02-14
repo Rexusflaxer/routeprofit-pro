@@ -181,10 +181,9 @@ export default function RouteDetails() {
         <>
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-3">
+            <TabsList className="grid w-full grid-cols-2">
               <TabsTrigger value="overview">Overzicht</TabsTrigger>
               <TabsTrigger value="optimization">Routeoptimalisatie</TabsTrigger>
-              <TabsTrigger value="tasks">Taken op Route</TabsTrigger>
             </TabsList>
 
             <TabsContent value="overview" className="space-y-6 mt-6">
@@ -304,6 +303,67 @@ export default function RouteDetails() {
                   </CardContent>
                 </Card>
               )}
+
+              {/* Taken op route */}
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
+                    <CardTitle className="text-lg">Taken op route</CardTitle>
+                    <Button size="sm" onClick={() => setEditing(true)}>
+                      <Plus className="w-4 h-4 mr-1" /> Taak toevoegen
+                    </Button>
+                  </div>
+                </CardHeader>
+                <CardContent>
+                  <div className="space-y-3">
+                    {routeTasks.map(task => {
+                      const obj = objects.find(o => o.id === task.object_id);
+                      return (
+                        <div key={task.id} className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
+                          <MapPin className="w-5 h-5 text-slate-500 mt-0.5" />
+                          <div className="flex-1 min-w-0">
+                            <p className="text-sm font-semibold text-slate-900">{obj?.name || "Onbekend"}</p>
+                            <p className="text-xs text-slate-500 mb-2">{obj?.address}</p>
+                            <div className="flex flex-wrap gap-2">
+                              <Badge variant="secondary" className="text-xs">
+                                {task.task_type}
+                              </Badge>
+                              <Badge variant="outline" className="text-xs">
+                                <Clock className="w-3 h-3 mr-1" />
+                                {task.duration_minutes} min
+                              </Badge>
+                              <Badge variant="outline" className="text-xs">
+                                <Euro className="w-3 h-3 mr-1" />
+                                €{task.pricing_type === 'per_minuut' ? task.price_amount : (task.price_amount / task.duration_minutes).toFixed(2)}/min
+                              </Badge>
+                            </div>
+                          </div>
+                          <Button
+                            size="icon"
+                            variant="ghost"
+                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
+                            onClick={() => {
+                              if (confirm("Weet je zeker dat je deze taak wilt verwijderen uit de route?")) {
+                                removeTaskMutation.mutate({ routeId: route.id, taskId: task.id });
+                              }
+                            }}
+                          >
+                            <X className="w-4 h-4" />
+                          </Button>
+                        </div>
+                      );
+                    })}
+                    {routeTasks.length === 0 && (
+                      <div className="text-center py-8">
+                        <p className="text-sm text-slate-500 mb-3">Geen taken toegewezen aan deze route</p>
+                        <Button size="sm" onClick={() => setEditing(true)}>
+                          <Plus className="w-4 h-4 mr-1" /> Taak toevoegen
+                        </Button>
+                      </div>
+                    )}
+                  </div>
+                </CardContent>
+              </Card>
             </TabsContent>
 
             <TabsContent value="optimization" className="space-y-6 mt-6">
@@ -373,67 +433,7 @@ export default function RouteDetails() {
               </Card>
             </TabsContent>
 
-            <TabsContent value="tasks" className="space-y-6 mt-6">
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <CardTitle className="text-lg">Taken op route</CardTitle>
-                    <Button size="sm" onClick={() => setEditing(true)}>
-                      <Plus className="w-4 h-4 mr-1" /> Taak toevoegen
-                    </Button>
-                  </div>
-                </CardHeader>
-                <CardContent>
-                  <div className="space-y-3">
-                    {routeTasks.map(task => {
-                      const obj = objects.find(o => o.id === task.object_id);
-                      return (
-                        <div key={task.id} className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
-                          <MapPin className="w-5 h-5 text-slate-500 mt-0.5" />
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-semibold text-slate-900">{obj?.name || "Onbekend"}</p>
-                            <p className="text-xs text-slate-500 mb-2">{obj?.address}</p>
-                            <div className="flex flex-wrap gap-2">
-                              <Badge variant="secondary" className="text-xs">
-                                {task.task_type}
-                              </Badge>
-                              <Badge variant="outline" className="text-xs">
-                                <Clock className="w-3 h-3 mr-1" />
-                                {task.duration_minutes} min
-                              </Badge>
-                              <Badge variant="outline" className="text-xs">
-                                <Euro className="w-3 h-3 mr-1" />
-                                €{task.pricing_type === 'per_minuut' ? task.price_amount : (task.price_amount / task.duration_minutes).toFixed(2)}/min
-                              </Badge>
-                            </div>
-                          </div>
-                          <Button
-                            size="icon"
-                            variant="ghost"
-                            className="text-red-600 hover:text-red-700 hover:bg-red-50"
-                            onClick={() => {
-                              if (confirm("Weet je zeker dat je deze taak wilt verwijderen uit de route?")) {
-                                removeTaskMutation.mutate({ routeId: route.id, taskId: task.id });
-                              }
-                            }}
-                          >
-                            <X className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      );
-                    })}
-                    {routeTasks.length === 0 && (
-                      <div className="text-center py-8">
-                        <p className="text-sm text-slate-500 mb-3">Geen taken toegewezen aan deze route</p>
-                        <Button size="sm" onClick={() => setEditing(true)}>
-                          <Plus className="w-4 h-4 mr-1" /> Taak toevoegen
-                        </Button>
-                      </div>
-                    )}
-                  </div>
-                </CardContent>
-              </Card>
-            </TabsContent>
+
           </Tabs>
         </>
       )}
