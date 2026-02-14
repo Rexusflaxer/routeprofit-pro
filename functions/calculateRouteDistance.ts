@@ -22,12 +22,10 @@ Deno.serve(async (req) => {
     if (object_ids && Array.isArray(object_ids) && object_ids.length > 0) {
       // Direct object IDs provided (for form preview or testing)
       numberOfTasks = object_ids.length;
-      const seenIds = new Set();
       object_ids.forEach(objId => {
         const obj = allObjects.find(o => o.id === objId);
-        if (obj && obj.latitude && obj.longitude && !seenIds.has(obj.id)) {
+        if (obj && obj.latitude && obj.longitude) {
           uniqueObjects.push(obj);
-          seenIds.add(obj.id);
         }
       });
     } else if (route_id) {
@@ -43,12 +41,10 @@ Deno.serve(async (req) => {
       // Count total number of tasks
       numberOfTasks = routeTasks.length;
       
-      const seenIds = new Set();
       routeTasks.forEach(task => {
         const obj = allObjects.find(o => o.id === task.object_id);
-        if (obj && obj.latitude && obj.longitude && !seenIds.has(obj.id)) {
+        if (obj && obj.latitude && obj.longitude) {
           uniqueObjects.push(obj);
-          seenIds.add(obj.id);
         }
       });
     } else {
