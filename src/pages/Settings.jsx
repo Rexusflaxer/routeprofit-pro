@@ -1,13 +1,11 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Building2, MapPin, Plus, Edit, Trash2, Save, X } from "lucide-react";
-import { Checkbox } from "@/components/ui/checkbox";
 
 export default function Settings() {
   const [editingSettings, setEditingSettings] = useState(false);
@@ -69,26 +67,57 @@ export default function Settings() {
     address: "",
     latitude: null,
     longitude: null,
-    is_default_start: false,
-    is_default_end: false,
-    notes: "",
   });
 
-  const handleSearchAddress = async (address) => {
-    if (!address) return;
-    try {
-      const response = await base44.functions.invoke("searchAddress", { address });
-      if (response.data?.latitude && response.data?.longitude) {
-        setOfficeForm(prev => ({
-          ...prev,
-          latitude: response.data.latitude,
-          longitude: response.data.longitude,
-        }));
-      }
-    } catch (error) {
-      console.error("Fout bij zoeken adres:", error);
+  const [addressSuggestions, setAddressSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [loadingAddress, setLoadingAddress] = useState(false);
+  const addressTimeoutRef = useRef(null);
+
+  const handleAddressChange = (value) => {
+    setOfficeForm(prev => ({ ...prev, address: value }));
+    
+    if (addressTimeoutRef.current) {
+      clearTimeout(addressTimeoutRef.current);
+    }
+
+    if (value.length >= 3) {
+      addressTimeoutRef.current = setTimeout(async () => {
+        setLoadingAddress(true);
+        try {
+          const { data } = await base44.functions.invoke('searchAddress', { query: value });
+          setAddressSuggestions(data.suggestions || []);
+          setShowSuggestions(true);
+        } catch (error) {
+          console.error('Error fetching address suggestions:', error);
+        } finally {
+          setLoadingAddress(false);
+        }
+      }, 300);
+    } else {
+      setAddressSuggestions([]);
+      setShowSuggestions(false);
     }
   };
+
+  const selectAddress = (suggestion) => {
+    setOfficeForm(prev => ({
+      ...prev,
+      address: suggestion.address,
+      latitude: suggestion.latitude,
+      longitude: suggestion.longitude,
+    }));
+    setShowSuggestions(false);
+    setAddressSuggestions([]);
+  };
+
+  useEffect(() => {
+    return () => {
+      if (addressTimeoutRef.current) {
+        clearTimeout(addressTimeoutRef.current);
+      }
+    };
+  }, []);
 
   return (
     <div className="space-y-6">
@@ -201,7 +230,7 @@ export default function Settings() {
               Kantoren
             </CardTitle>
             <Button size="sm" onClick={() => {
-              setOfficeForm({ name: "", address: "", latitude: null, longitude: null, is_default_start: false, is_default_end: false, notes: "" });
+              setOfficeForm({ name: "", address: "", latitude: null, longitude: null });
               setEditingOffice(null);
               setShowOfficeForm(true);
             }}>
@@ -214,44 +243,39 @@ export default function Settings() {
             <Card className="mb-4 border-2 border-slate-200">
               <CardContent className="pt-6">
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Naam kantoor *</Label>
-                      <Input value={officeForm.name} onChange={(e) => setOfficeForm({ ...officeForm, name: e.target.value })} placeholder="Bijv. Hoofdkantoor" />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Adres *</Label>
-                      <Input 
-                        value={officeForm.address} 
-                        onChange={(e) => setOfficeForm({ ...officeForm, address: e.target.value })}
-                        onBlur={(e) => handleSearchAddress(e.target.value)}
-                        placeholder="Straat 123, 1234AB Plaats"
-                      />
-                    </div>
-                  </div>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-2">
-                      <Label>Latitude</Label>
-                      <Input type="number" step="0.000001" value={officeForm.latitude || ""} onChange={(e) => setOfficeForm({ ...officeForm, latitude: parseFloat(e.target.value) })} />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Longitude</Label>
-                      <Input type="number" step="0.000001" value={officeForm.longitude || ""} onChange={(e) => setOfficeForm({ ...officeForm, longitude: parseFloat(e.target.value) })} />
-                    </div>
-                  </div>
-                  <div className="flex gap-4">
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <Checkbox checked={officeForm.is_default_start} onCheckedChange={(checked) => setOfficeForm({ ...officeForm, is_default_start: checked })} />
-                      <span className="text-sm">Standaard startlocatie</span>
-                    </label>
-                    <label className="flex items-center gap-2 cursor-pointer">
-                      <Checkbox checked={officeForm.is_default_end} onCheckedChange={(checked) => setOfficeForm({ ...officeForm, is_default_end: checked })} />
-                      <span className="text-sm">Standaard eindlocatie</span>
-                    </label>
-                  </div>
                   <div className="space-y-2">
-                    <Label>Opmerkingen</Label>
-                    <Textarea value={officeForm.notes || ""} onChange={(e) => setOfficeForm({ ...officeForm, notes: e.target.value })} rows={2} />
+                    <Label>Naam kantoor *</Label>
+                    <Input value={officeForm.name} onChange={(e) => setOfficeForm({ ...officeForm, name: e.target.value })} placeholder="Bijv. Hoofdkantoor" required />
+                  </div>
+                  <div className="space-y-2 relative">
+                    <Label>Adres *</Label>
+                    <Input 
+                      value={officeForm.address} 
+                      onChange={(e) => handleAddressChange(e.target.value)}
+                      placeholder="Bijv. Stationsplein 1, Amsterdam"
+                      required
+                      autoComplete="off"
+                    />
+                    {loadingAddress && (
+                      <div className="absolute right-3 top-9 text-slate-400">
+                        <div className="animate-spin h-4 w-4 border-2 border-slate-300 border-t-slate-600 rounded-full" />
+                      </div>
+                    )}
+                    {showSuggestions && addressSuggestions.length > 0 && (
+                      <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-60 overflow-y-auto">
+                        {addressSuggestions.map((suggestion, idx) => (
+                          <button
+                            key={idx}
+                            type="button"
+                            onClick={() => selectAddress(suggestion)}
+                            className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex items-start gap-2 border-b border-slate-100 last:border-0"
+                          >
+                            <MapPin className="w-4 h-4 text-slate-400 mt-0.5 flex-shrink-0" />
+                            <span className="text-slate-700">{suggestion.address}</span>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                   <div className="flex justify-end gap-2">
                     <Button variant="outline" onClick={() => { setShowOfficeForm(false); setEditingOffice(null); }}>
@@ -273,15 +297,6 @@ export default function Settings() {
                 <div className="flex-1 min-w-0">
                   <p className="text-sm font-semibold text-slate-900">{office.name}</p>
                   <p className="text-xs text-slate-500">{office.address}</p>
-                  {office.notes && <p className="text-xs text-slate-400 mt-1">{office.notes}</p>}
-                  <div className="flex gap-2 mt-2">
-                    {office.is_default_start && (
-                      <span className="text-xs px-2 py-0.5 bg-green-100 text-green-700 rounded">Standaard start</span>
-                    )}
-                    {office.is_default_end && (
-                      <span className="text-xs px-2 py-0.5 bg-blue-100 text-blue-700 rounded">Standaard eind</span>
-                    )}
-                  </div>
                 </div>
                 <div className="flex gap-1">
                   <Button size="icon" variant="ghost" onClick={() => {
