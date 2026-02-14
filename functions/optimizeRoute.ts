@@ -188,6 +188,8 @@ Deno.serve(async (req) => {
         const travelMinutes = Math.round(routeDuration / 60);
         totalTravelTime += travelMinutes;
         
+        const arrivalTimeAtEnd = currentTime + travelMinutes;
+        
         optimizedOrder.push({
           name: `EIND: ${endLocation.name}`,
           address: endLocation.address,
@@ -196,7 +198,9 @@ Deno.serve(async (req) => {
           duration_minutes: 0,
           time_window_start: route.time_window_start || '00:00',
           time_window_end: route.time_window_end || '23:59',
-          is_end: true
+          is_end: true,
+          travel_time_minutes: travelMinutes,
+          arrival_time: formatMinutesToTime(arrivalTimeAtEnd)
         });
       }
     }
