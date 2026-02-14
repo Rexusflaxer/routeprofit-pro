@@ -150,13 +150,26 @@ Deno.serve(async (req) => {
         break;
       }
 
-      optimizedOrder.push(nearestTask);
+      // Bereken aankomst en vertrektijd voor deze taak
+      const arrivalTime = currentTime + travelTime;
+      const taskStartMinutes = parseTimeToMinutes(nearestTask.time_window_start);
+      const actualStartTime = Math.max(arrivalTime, taskStartMinutes);
+      const departureTime = actualStartTime + nearestTask.duration_minutes;
+
+      // Voeg taak toe met extra info
+      const taskWithInfo = {
+        ...nearestTask,
+        travel_time_minutes: travelTime,
+        arrival_time: formatMinutesToTime(arrivalTime),
+        actual_start_time: formatMinutesToTime(actualStartTime),
+        departure_time: formatMinutesToTime(departureTime)
+      };
+
+      optimizedOrder.push(taskWithInfo);
       visited.add(nearestTask.task_id);
       
       totalTravelTime += travelTime;
-      const arrivalTime = currentTime + travelTime;
-      const taskStartMinutes = parseTimeToMinutes(nearestTask.time_window_start);
-      currentTime = Math.max(arrivalTime, taskStartMinutes) + nearestTask.duration_minutes;
+      currentTime = departureTime;
       
       currentLocation = nearestTask;
     }
