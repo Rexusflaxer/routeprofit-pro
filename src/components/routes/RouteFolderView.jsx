@@ -3,7 +3,8 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { ChevronRight, ChevronDown, Folder, Pencil, Trash2, MapPin, Clock } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import RouteDetailDialog from "./RouteDetailDialog";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "../../utils";
 
 const COLORS = {
   slate: "bg-slate-500",
@@ -17,8 +18,6 @@ const COLORS = {
 
 export default function RouteFolderView({ routes, folders, vehicles, onEdit, onDelete }) {
   const [expandedFolders, setExpandedFolders] = useState(new Set());
-  const [selectedRoute, setSelectedRoute] = useState(null);
-  const [detailDialogOpen, setDetailDialogOpen] = useState(false);
 
   const groupedRoutes = useMemo(() => {
     const grouped = {};
@@ -89,10 +88,10 @@ export default function RouteFolderView({ routes, folders, vehicles, onEdit, onD
               <CardContent className="pt-0 pb-4 px-4">
                 <div className="space-y-2 ml-8">
                   {data.routes.map(route => (
-                    <div 
+                    <Link 
                       key={route.id} 
+                      to={createPageUrl(`RouteDetails?id=${route.id}`)}
                       className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors group"
-                      onClick={() => { setSelectedRoute(route); setDetailDialogOpen(true); }}
                     >
                       <MapPin className="w-4 h-4 text-slate-400 flex-shrink-0" />
                       <div className="flex-1 min-w-0">
@@ -118,7 +117,7 @@ export default function RouteFolderView({ routes, folders, vehicles, onEdit, onD
                           variant="outline" 
                           size="icon" 
                           className="h-7 w-7" 
-                          onClick={(e) => { e.stopPropagation(); onEdit(route); }}
+                          onClick={(e) => { e.stopPropagation(); e.preventDefault(); onEdit(route); }}
                         >
                           <Pencil className="w-3 h-3" />
                         </Button>
@@ -126,12 +125,12 @@ export default function RouteFolderView({ routes, folders, vehicles, onEdit, onD
                           variant="outline" 
                           size="icon" 
                           className="h-7 w-7 text-red-500 hover:text-red-700" 
-                          onClick={(e) => { e.stopPropagation(); onDelete(route.id); }}
+                          onClick={(e) => { e.stopPropagation(); e.preventDefault(); onDelete(route.id); }}
                         >
                           <Trash2 className="w-3 h-3" />
                         </Button>
                       </div>
-                    </div>
+                    </Link>
                   ))}
                 </div>
               </CardContent>
@@ -140,16 +139,6 @@ export default function RouteFolderView({ routes, folders, vehicles, onEdit, onD
         );
       })}
       </div>
-      
-      {selectedRoute && (
-        <RouteDetailDialog 
-          route={selectedRoute} 
-          open={detailDialogOpen} 
-          onOpenChange={setDetailDialogOpen}
-          onEdit={onEdit}
-          vehicles={vehicles}
-        />
-      )}
     </>
   );
 }
