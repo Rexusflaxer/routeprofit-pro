@@ -11,6 +11,7 @@ const NAV_ITEMS = [
   { name: "Voertuigen", icon: Settings, page: "Vehicles" },
   { name: "Routes", icon: Route, page: "Routes" },
   { name: "Kosten", icon: Settings, page: "CostSettings" },
+  { name: "Instellingen", icon: Settings, page: "Settings" },
 ];
 
 export default function Layout({ children, currentPageName }) {

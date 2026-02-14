@@ -26,13 +26,16 @@ Deno.serve(async (req) => {
     // Get tasks and objects
     const allTasks = await base44.entities.Task.list();
     const allObjects = await base44.entities.SurveillanceObject.list();
+    const allOffices = await base44.entities.Office.list();
     
     const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
     const routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
 
-    // Get start and end locations
-    const startLocation = route.start_location_id ? allObjects.find(o => o.id === route.start_location_id) : null;
-    const endLocation = route.end_location_id ? allObjects.find(o => o.id === route.end_location_id) : null;
+    // Get start and end locations (kan object of kantoor zijn)
+    const startLocation = route.start_location_id ? 
+      (allObjects.find(o => o.id === route.start_location_id) || allOffices.find(o => o.id === route.start_location_id)) : null;
+    const endLocation = route.end_location_id ? 
+      (allObjects.find(o => o.id === route.end_location_id) || allOffices.find(o => o.id === route.end_location_id)) : null;
 
     // Get objects with coordinates
     const taskObjects = [];

@@ -54,6 +54,7 @@ import Personnel from './pages/Personnel';
 import Routes from './pages/Routes';
 import Vehicles from './pages/Vehicles';
 import RouteDetails from './pages/RouteDetails';
+import Settings from './pages/Settings';
 import __Layout from './Layout.jsx';
 
 
@@ -65,6 +66,7 @@ export const PAGES = {
     "Routes": Routes,
     "Vehicles": Vehicles,
     "RouteDetails": RouteDetails,
+    "Settings": Settings,
 }
 
 export const pagesConfig = {

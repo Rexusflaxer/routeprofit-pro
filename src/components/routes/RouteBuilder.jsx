@@ -55,6 +55,11 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
     queryFn: () => base44.entities.SurveillanceObject.list(),
   });
 
+  const { data: offices = [] } = useQuery({
+    queryKey: ['offices'],
+    queryFn: () => base44.entities.Office.list(),
+  });
+
   const handleChange = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
 
   const toggleTask = (taskId) => {
@@ -333,6 +338,17 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
               <Select value={form.start_location_id} onValueChange={(v) => handleChange("start_location_id", v)}>
                 <SelectTrigger><SelectValue placeholder="Selecteer startlocatie" /></SelectTrigger>
                 <SelectContent>
+                  {offices.length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-slate-500">Kantoren</div>
+                      {offices.map(office => (
+                        <SelectItem key={`office-${office.id}`} value={office.id}>
+                          🏢 {office.name}
+                        </SelectItem>
+                      ))}
+                      <div className="px-2 py-1.5 text-xs font-semibold text-slate-500">Objecten</div>
+                    </>
+                  )}
                   {objects.map(obj => (
                     <SelectItem key={obj.id} value={obj.id}>
                       {obj.name}
@@ -346,6 +362,17 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
               <Select value={form.end_location_id} onValueChange={(v) => handleChange("end_location_id", v)}>
                 <SelectTrigger><SelectValue placeholder="Selecteer eindlocatie" /></SelectTrigger>
                 <SelectContent>
+                  {offices.length > 0 && (
+                    <>
+                      <div className="px-2 py-1.5 text-xs font-semibold text-slate-500">Kantoren</div>
+                      {offices.map(office => (
+                        <SelectItem key={`office-${office.id}`} value={office.id}>
+                          🏢 {office.name}
+                        </SelectItem>
+                      ))}
+                      <div className="px-2 py-1.5 text-xs font-semibold text-slate-500">Objecten</div>
+                    </>
+                  )}
                   {objects.map(obj => (
                     <SelectItem key={obj.id} value={obj.id}>
                       {obj.name}

@@ -37,6 +37,7 @@ export default function RouteDetails() {
 
   const { data: tasks = [] } = useQuery({ queryKey: ["all-tasks"], queryFn: () => base44.entities.Task.list() });
   const { data: objects = [] } = useQuery({ queryKey: ["objects"], queryFn: () => base44.entities.SurveillanceObject.list() });
+  const { data: offices = [] } = useQuery({ queryKey: ["offices"], queryFn: () => base44.entities.Office.list() });
   const { data: vehicles = [] } = useQuery({ queryKey: ["vehicles"], queryFn: () => base44.entities.Vehicle.list() });
   const { data: folders = [] } = useQuery({ queryKey: ["folders"], queryFn: () => base44.entities.RouteFolder.list() });
   const { data: routes = [] } = useQuery({ queryKey: ["routes"], queryFn: () => base44.entities.Route.list() });
@@ -270,7 +271,8 @@ export default function RouteDetails() {
                         <div>
                           <p className="text-xs text-slate-500">Start</p>
                           <span className="text-sm font-medium">
-                            {objects.find(o => o.id === route.start_location_id)?.name || "Onbekend"}
+                            {objects.find(o => o.id === route.start_location_id)?.name || 
+                             offices.find(o => o.id === route.start_location_id)?.name || "Onbekend"}
                           </span>
                         </div>
                       </div>
@@ -281,7 +283,8 @@ export default function RouteDetails() {
                         <div>
                           <p className="text-xs text-slate-500">Eind</p>
                           <span className="text-sm font-medium">
-                            {objects.find(o => o.id === route.end_location_id)?.name || "Onbekend"}
+                            {objects.find(o => o.id === route.end_location_id)?.name || 
+                             offices.find(o => o.id === route.end_location_id)?.name || "Onbekend"}
                           </span>
                         </div>
                       </div>
