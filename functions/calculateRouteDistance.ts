@@ -50,9 +50,12 @@ Deno.serve(async (req) => {
       return Response.json({
         total_distance_km: 0,
         avg_travel_minutes: 0,
-        number_of_pairs: 0
+        number_of_pairs: 0,
+        debug: `Only ${uniqueObjects.length} objects`
       });
     }
+
+    console.error(`DEBUG: Found ${uniqueObjects.length} objects, will calculate ${(uniqueObjects.length * (uniqueObjects.length - 1)) / 2} pairs`);
 
     const googleMapsApiKey = Deno.env.get('GOOGLE_MAPS_API_KEY');
     if (!googleMapsApiKey) {
