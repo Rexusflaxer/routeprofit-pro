@@ -87,7 +87,7 @@ Deno.serve(async (req) => {
     let pairCount = 0;
 
     console.error(`Starting pair calculation for ${uniqueObjects.length} objects`);
-    console.error(`Objects:`, uniqueObjects.map(o => ({ id: o.id, name: o.name, lat: o.latitude, lng: o.longitude })));
+    console.error(`Objects:`, uniqueObjects.map(o => ({ id: o.id, name: o.name, lat: o.latitude, lng: o.longitude, _conceptual_id: o._conceptual_id })));
 
     // Generate all unique pairs
     for (let i = 0; i < uniqueObjects.length; i++) {
