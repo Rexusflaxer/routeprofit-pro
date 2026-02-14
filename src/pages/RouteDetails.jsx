@@ -81,26 +81,26 @@ export default function RouteDetails() {
       }));
       const updatedTasks = [...(route?.assigned_tasks || []), ...newTasks];
       
-      // Update route met nieuwe taken
-      await base44.entities.Route.update(routeId, { assigned_tasks: updatedTasks });
-      
-      // Bereken statistieken
-      const allTaskIds = updatedTasks.map(at => at.task_id);
-      const response = await base44.functions.invoke('calculateRouteDistance', {
-        route_id: routeId,
-        object_ids: allTaskIds
-      });
-      
       // Bereken totale taaktijd
+      const allTaskIds = updatedTasks.map(at => at.task_id);
       const routeTasksData = tasks.filter(t => allTaskIds.includes(t.id));
       const totalServiceMinutes = routeTasksData.reduce((sum, t) => sum + (t.duration_minutes || 0), 0);
       
-      // Update route met statistieken
-      await base44.entities.Route.update(routeId, {
+      // Update route met nieuwe taken en taaktijd eerst
+      await base44.entities.Route.update(routeId, { 
         assigned_tasks: updatedTasks,
-        total_service_minutes: totalServiceMinutes,
-        avg_travel_minutes: response.data?.avg_travel_minutes || 0,
-        total_distance_km: response.data?.total_distance_km || 0
+        total_service_minutes: totalServiceMinutes
+      });
+      
+      // Bereken reistijd statistieken
+      const distanceResponse = await base44.functions.invoke('calculateRouteDistance', {
+        route_id: routeId
+      });
+      
+      // Update route met reistijd statistieken
+      await base44.entities.Route.update(routeId, {
+        avg_travel_minutes: distanceResponse.data?.avg_travel_minutes || 0,
+        total_distance_km: distanceResponse.data?.total_distance_km || 0
       });
 
       // Bereken route optimalisatie
