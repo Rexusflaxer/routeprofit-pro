@@ -543,19 +543,63 @@ export default function RouteDetails() {
 
                   <div>
                     <p className="text-sm font-semibold text-slate-700 mb-3">Optimale volgorde:</p>
-                    <div className="space-y-2">
+                    <div className="space-y-3">
                       {optimizedRoute.optimized_order?.map((item, index) => (
-                        <div key={item.task_id} className="flex items-center gap-3 p-3 bg-slate-50 rounded-lg">
-                          <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold">
-                            {index + 1}
-                          </div>
-                          <div className="flex-1 min-w-0">
-                            <p className="text-sm font-medium text-slate-900">{item.name}</p>
-                            <p className="text-xs text-slate-500">{item.address}</p>
-                          </div>
-                          <div className="text-right">
-                            <p className="text-xs text-slate-600">{item.time_window_start} - {item.time_window_end}</p>
-                            <p className="text-xs font-medium text-slate-700">{item.duration_minutes} min</p>
+                        <div key={item.task_id || index}>
+                          {index > 0 && optimizedRoute.optimized_order[index - 1].travel_time_minutes && (
+                            <div className="flex items-center justify-center py-2">
+                              <div className="flex items-center gap-2 px-3 py-1 bg-blue-100 rounded-full">
+                                <Navigation className="w-3 h-3 text-blue-600" />
+                                <span className="text-xs font-medium text-blue-700">
+                                  Reistijd: {optimizedRoute.optimized_order[index - 1].travel_time_minutes} min
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
+                          <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border-l-4 border-blue-600">
+                            <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold">
+                              {index + 1}
+                            </div>
+                            <div className="flex-1 min-w-0">
+                              <p className="text-sm font-semibold text-slate-900">{item.name}</p>
+                              <p className="text-xs text-slate-500 mb-2">{item.address}</p>
+
+                              {item.task_type && (
+                                <Badge variant="outline" className="text-xs mb-2">
+                                  {item.task_type}
+                                </Badge>
+                              )}
+
+                              <div className="grid grid-cols-2 gap-2 mt-2">
+                                {item.arrival_time && (
+                                  <div className="text-xs">
+                                    <span className="text-slate-500">Aankomst:</span>
+                                    <span className="ml-1 font-medium text-slate-900">{item.arrival_time}</span>
+                                  </div>
+                                )}
+                                {!item.is_start && !item.is_end && (
+                                  <>
+                                    <div className="text-xs">
+                                      <span className="text-slate-500">Tijdsvenster:</span>
+                                      <span className="ml-1 font-medium text-slate-900">
+                                        {item.time_window_start} - {item.time_window_end}
+                                      </span>
+                                    </div>
+                                    <div className="text-xs">
+                                      <span className="text-slate-500">Taakduur:</span>
+                                      <span className="ml-1 font-medium text-slate-900">{item.duration_minutes} min</span>
+                                    </div>
+                                    {item.departure_time && (
+                                      <div className="text-xs">
+                                        <span className="text-slate-500">Vertrek:</span>
+                                        <span className="ml-1 font-medium text-slate-900">{item.departure_time}</span>
+                                      </div>
+                                    )}
+                                  </>
+                                )}
+                              </div>
+                            </div>
                           </div>
                         </div>
                       ))}
