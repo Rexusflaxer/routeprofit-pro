@@ -135,16 +135,17 @@ Deno.serve(async (req) => {
 
     console.error(`Final: ${pairCount} pairs calculated, total ${totalTravelMinutes} minutes`);
 
-    // Calculate average travel time per object:
-    // Total travel time from all pairs divided by number of locations (objects)
-    // This gives the average travel burden per object in the route
-    const avgTravelMinutes = uniqueObjects.length > 0 ? Math.round(totalTravelMinutes / uniqueObjects.length) : 0;
+    // Calculate average travel time per conceptual stop:
+    // Total travel time divided by number of conceptual stops (tasks + start + end)
+    // Even if start and end are the same location, they count as separate stops
+    const numberOfConceptualStops = numberOfTasks + (start_location_id ? 1 : 0) + (end_location_id ? 1 : 0);
+    const avgTravelMinutes = numberOfConceptualStops > 0 ? Math.round(totalTravelMinutes / numberOfConceptualStops) : 0;
 
     return Response.json({
       avg_travel_minutes: avgTravelMinutes,
       total_travel_minutes_all_pairs: totalTravelMinutes,
       number_of_tasks: numberOfTasks,
-      number_of_conceptual_locations: uniqueObjects.length,
+      number_of_conceptual_stops: numberOfConceptualStops,
       number_of_pairs: pairCount
     });
 
