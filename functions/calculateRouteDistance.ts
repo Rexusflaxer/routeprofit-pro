@@ -53,27 +53,21 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'route_id or object_ids is required' }, { status: 400 });
     }
 
-    // Add start location at the beginning if provided
+    // Add start location at the beginning if provided (always add, even if duplicate)
     if (start_location_id) {
       const startLoc = allLocations.find(loc => loc.id === start_location_id);
       if (startLoc && startLoc.latitude && startLoc.longitude) {
-        // Check if this location is not already in the list
-        const alreadyExists = uniqueObjects.some(obj => obj.id === startLoc.id);
-        if (!alreadyExists) {
-          uniqueObjects.unshift(startLoc);
-        }
+        // Always add start location as a separate conceptual stop
+        uniqueObjects.unshift({ ...startLoc, _conceptual_id: 'start' });
       }
     }
     
-    // Add end location at the end if provided
+    // Add end location at the end if provided (always add, even if duplicate)
     if (end_location_id) {
       const endLoc = allLocations.find(loc => loc.id === end_location_id);
       if (endLoc && endLoc.latitude && endLoc.longitude) {
-        // Check if this location is not already in the list (including if it's the same as start)
-        const alreadyExists = uniqueObjects.some(obj => obj.id === endLoc.id);
-        if (!alreadyExists) {
-          uniqueObjects.push(endLoc);
-        }
+        // Always add end location as a separate conceptual stop
+        uniqueObjects.push({ ...endLoc, _conceptual_id: 'end' });
       }
     }
 
@@ -137,18 +131,15 @@ Deno.serve(async (req) => {
 
     console.error(`Final: ${pairCount} pairs calculated, total ${totalTravelMinutes} minutes`);
 
-    // Count total stops: tasks + start location (1) + end location (1)
-    const totalStops = numberOfTasks + 1 + (end_location_id ? 1 : 0);
-    
-    // Calculate average travel time per task (total travel time divided by total stops)
-    const avgTravelMinutes = totalStops > 0 ? Math.round(totalTravelMinutes / totalStops) : 0;
+    // Calculate average travel time: total travel time divided by number of conceptual locations
+    // This includes start + end + unique task objects (even if start/end are physically the same location)
+    const avgTravelMinutes = uniqueObjects.length > 0 ? Math.round(totalTravelMinutes / uniqueObjects.length) : 0;
 
     return Response.json({
       avg_travel_minutes: avgTravelMinutes,
       total_travel_minutes_all_pairs: totalTravelMinutes,
       number_of_tasks: numberOfTasks,
-      total_stops: totalStops,
-      number_of_unique_locations: uniqueObjects.length,
+      number_of_conceptual_locations: uniqueObjects.length,
       number_of_pairs: pairCount
     });
 
