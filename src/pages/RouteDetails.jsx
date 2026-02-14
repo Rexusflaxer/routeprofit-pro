@@ -90,16 +90,13 @@ export default function RouteDetails() {
   const vehicle = vehicles.find(v => v.id === route.vehicle_id);
   const routeTasks = tasks.filter(t => (route.assigned_tasks || []).some(at => at.task_id === t.id));
 
-  // Bereken omzet
-  const weeksPerMonth = 52 / 12;
+  // Bereken omzet per route
   let totalRevenue = 0;
   routeTasks.forEach(t => {
-    const assignment = route.assigned_tasks?.find(at => at.task_id === t.id);
-    const visitsPerTask = (assignment?.days?.length || 0) * weeksPerMonth;
     const pricePerVisit = t.pricing_type === 'per_minuut' 
       ? (t.price_amount || 0) * (t.duration_minutes || 0)
       : (t.price_amount || 0);
-    totalRevenue += pricePerVisit * visitsPerTask;
+    totalRevenue += pricePerVisit;
   });
 
   const totalServiceMinutes = route.total_service_minutes || 0;
@@ -207,7 +204,7 @@ export default function RouteDetails() {
             </CardHeader>
             <CardContent>
               <p className="text-3xl font-bold text-green-700">€{totalRevenue.toFixed(2)}</p>
-              <p className="text-sm text-slate-600 mt-1">Per maand (4x per week)</p>
+              <p className="text-sm text-slate-600 mt-1">Per gereden route</p>
             </CardContent>
           </Card>
 
