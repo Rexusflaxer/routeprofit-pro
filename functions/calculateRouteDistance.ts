@@ -102,7 +102,7 @@ Deno.serve(async (req) => {
         console.error(`Calculating pair ${i}-${j}: ${obj1.name} to ${obj2.name}`);
         
         // Google Maps API expects: latitude,longitude format
-        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${obj1.longitude},${obj1.latitude}&destination=${obj2.longitude},${obj2.latitude}&key=${googleMapsApiKey}`;
+        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${obj1.latitude},${obj1.longitude}&destination=${obj2.latitude},${obj2.longitude}&key=${googleMapsApiKey}`;
         
         console.error(`Fetching: ${url.substring(0, 100)}...`);
         
@@ -131,9 +131,9 @@ Deno.serve(async (req) => {
 
     console.error(`Final: ${pairCount} pairs calculated, total ${totalTravelMinutes} minutes`);
 
-    // Calculate average travel time: total travel time divided by number of conceptual locations
-    // This includes start + end + unique task objects (even if start/end are physically the same location)
-    const avgTravelMinutes = uniqueObjects.length > 0 ? Math.round(totalTravelMinutes / uniqueObjects.length) : 0;
+    // Calculate average travel time per object:
+    // Total travel time divided by number of pairs (connections between locations)
+    const avgTravelMinutes = pairCount > 0 ? Math.round(totalTravelMinutes / pairCount) : 0;
 
     return Response.json({
       avg_travel_minutes: avgTravelMinutes,
