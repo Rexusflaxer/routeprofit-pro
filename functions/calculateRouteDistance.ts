@@ -76,7 +76,8 @@ Deno.serve(async (req) => {
         
         console.error(`Calculating pair ${i}-${j}: ${obj1.name} to ${obj2.name}`);
         
-        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${obj1.latitude},${obj1.longitude}&destination=${obj2.latitude},${obj2.longitude}&key=${googleMapsApiKey}`;
+        // Google Maps API expects: latitude,longitude format
+        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${obj1.longitude},${obj1.latitude}&destination=${obj2.longitude},${obj2.latitude}&key=${googleMapsApiKey}`;
         
         console.error(`Fetching: ${url.substring(0, 100)}...`);
         
