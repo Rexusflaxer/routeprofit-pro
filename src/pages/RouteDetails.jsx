@@ -60,7 +60,7 @@ export default function RouteDetails() {
 
   const removeTaskMutation = useMutation({
     mutationFn: ({ routeId, taskId }) => {
-      const updatedTasks = (route.assigned_tasks || []).filter(at => at.task_id !== taskId);
+      const updatedTasks = (route?.assigned_tasks || []).filter(at => at.task_id !== taskId);
       return base44.entities.Route.update(routeId, { assigned_tasks: updatedTasks });
     },
     onSuccess: () => {
@@ -68,6 +68,41 @@ export default function RouteDetails() {
       queryClient.invalidateQueries({ queryKey: ["route", routeId] });
     },
   });
+
+  const folder = folders.find(f => f.id === route?.folder_id);
+  const vehicle = vehicles.find(v => v.id === route?.vehicle_id);
+  const routeTasks = tasks.filter(t => (route?.assigned_tasks || []).some(at => at.task_id === t.id));
+
+  // Bereken omzet per route
+  let totalRevenue = 0;
+  routeTasks.forEach(t => {
+    const pricePerVisit = t.pricing_type === 'per_minuut' 
+      ? (t.price_amount || 0) * (t.duration_minutes || 0)
+      : (t.price_amount || 0);
+    totalRevenue += pricePerVisit;
+  });
+
+  const totalServiceMinutes = route?.total_service_minutes || 0;
+  const avgTravelMinutes = route?.avg_travel_minutes || 0;
+
+  // Fetch route optimization
+  useEffect(() => {
+    const fetchOptimization = async () => {
+      if (!route || routeTasks.length < 2) return;
+      
+      setLoadingOptimization(true);
+      try {
+        const response = await base44.functions.invoke('optimizeRoute', { route_id: route.id });
+        setOptimizedRoute(response.data);
+      } catch (error) {
+        console.error('Fout bij route optimalisatie:', error);
+      } finally {
+        setLoadingOptimization(false);
+      }
+    };
+
+    fetchOptimization();
+  }, [route, routeTasks.length]);
 
   if (!routeId) {
     return (
@@ -98,41 +133,6 @@ export default function RouteDetails() {
       </div>
     );
   }
-
-  const folder = folders.find(f => f.id === route.folder_id);
-  const vehicle = vehicles.find(v => v.id === route.vehicle_id);
-  const routeTasks = tasks.filter(t => (route.assigned_tasks || []).some(at => at.task_id === t.id));
-
-  // Bereken omzet per route
-  let totalRevenue = 0;
-  routeTasks.forEach(t => {
-    const pricePerVisit = t.pricing_type === 'per_minuut' 
-      ? (t.price_amount || 0) * (t.duration_minutes || 0)
-      : (t.price_amount || 0);
-    totalRevenue += pricePerVisit;
-  });
-
-  const totalServiceMinutes = route.total_service_minutes || 0;
-  const avgTravelMinutes = route.avg_travel_minutes || 0;
-
-  // Fetch route optimization
-  useEffect(() => {
-    const fetchOptimization = async () => {
-      if (!route || routeTasks.length < 2) return;
-      
-      setLoadingOptimization(true);
-      try {
-        const response = await base44.functions.invoke('optimizeRoute', { route_id: route.id });
-        setOptimizedRoute(response.data);
-      } catch (error) {
-        console.error('Fout bij route optimalisatie:', error);
-      } finally {
-        setLoadingOptimization(false);
-      }
-    };
-
-    fetchOptimization();
-  }, [route, routeTasks.length]);
 
   return (
     <div className="space-y-6">
