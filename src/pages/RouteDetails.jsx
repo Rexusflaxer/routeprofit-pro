@@ -235,7 +235,7 @@ export default function RouteDetails() {
                 <CardHeader>
                   <CardTitle className="flex items-center gap-2">
                     <Euro className="w-5 h-5 text-green-600" />
-                    Opbrengst per route
+                    Inkomsten in deze route
                   </CardTitle>
                 </CardHeader>
                 <CardContent>
