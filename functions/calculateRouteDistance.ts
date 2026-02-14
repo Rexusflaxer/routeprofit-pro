@@ -55,8 +55,6 @@ Deno.serve(async (req) => {
       });
     }
 
-    console.error(`DEBUG: Found ${uniqueObjects.length} objects, will calculate ${(uniqueObjects.length * (uniqueObjects.length - 1)) / 2} pairs`);
-
     const googleMapsApiKey = Deno.env.get('GOOGLE_MAPS_API_KEY');
     if (!googleMapsApiKey) {
       return Response.json({ error: 'Google Maps API key not configured' }, { status: 500 });
@@ -75,31 +73,19 @@ Deno.serve(async (req) => {
         
         const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${obj1.latitude},${obj1.longitude}&destination=${obj2.latitude},${obj2.longitude}&key=${googleMapsApiKey}`;
         
-        try {
-          const response = await fetch(url);
-          const data = await response.json();
+        const response = await fetch(url);
+        const data = await response.json();
 
-          if (data.status === 'OK' && data.routes && data.routes.length > 0) {
-            const route = data.routes[0];
-            let routeDistance = 0;
-            let routeDuration = 0;
+        if (data.status === 'OK' && data.routes && data.routes.length > 0) {
+          const route = data.routes[0];
+          let routeDuration = 0;
 
-            (route.legs || []).forEach(leg => {
-              routeDistance += leg.distance.value; // in meters
-              routeDuration += leg.duration.value; // in seconds
-            });
+          (route.legs || []).forEach(leg => {
+            routeDuration += leg.duration.value; // in seconds
+          });
 
-            totalDistanceKm += routeDistance / 1000;
-            totalTravelMinutes += Math.round(routeDuration / 60);
-            pairCount++;
-          } else {
-            console.error(`Google Maps error for pair ${i}-${j}: ${data.status}`);
-            if (data.error_message) {
-              console.error(`  Message: ${data.error_message}`);
-            }
-          }
-        } catch (err) {
-          console.error(`Fetch error for pair ${i}-${j}:`, err.message);
+          totalTravelMinutes += Math.round(routeDuration / 60);
+          pairCount++;
         }
       }
     }
@@ -108,7 +94,6 @@ Deno.serve(async (req) => {
     const avgTravelMinutes = pairCount > 0 ? Math.round(totalTravelMinutes / pairCount) : 0;
 
     return Response.json({
-      total_distance_km: Math.round(totalDistanceKm * 10) / 10,
       avg_travel_minutes: avgTravelMinutes,
       total_travel_minutes_all_pairs: totalTravelMinutes,
       number_of_objects: uniqueObjects.length,

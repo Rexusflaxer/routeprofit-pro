@@ -177,7 +177,7 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
   };
 
   // Fetch Google Maps route metrics
-  const [googleMapsMetrics, setGoogleMapsMetrics] = useState({ totalDistanceKm: 0, avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
+  const [googleMapsMetrics, setGoogleMapsMetrics] = useState({ avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
 
   useEffect(() => {
     const fetchRouteMetrics = async () => {
@@ -193,34 +193,33 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
         const objectIds = selectedTasks.map(t => t.object_id).filter(Boolean);
         
         if (objectIds.length < 2) {
-          setGoogleMapsMetrics({ totalDistanceKm: 0, avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
+          setGoogleMapsMetrics({ avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
           return;
         }
 
         const response = await base44.functions.invoke('calculateRouteDistance', { object_ids: objectIds });
-        
+
         if (response.data && response.data.avg_travel_minutes !== undefined) {
           setGoogleMapsMetrics({
-            totalDistanceKm: response.data.total_distance_km || 0,
             avgTravelMinutes: response.data.avg_travel_minutes || 0,
             totalTravelMinutes: response.data.total_travel_minutes_all_pairs || 0,
             loading: false
           });
         } else {
           console.error('Invalid response data:', response.data);
-          setGoogleMapsMetrics({ totalDistanceKm: 0, avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
+          setGoogleMapsMetrics({ avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
         }
-      } catch (error) {
+        } catch (error) {
         console.error('Fout bij ophalen routemetreken:', error);
-        setGoogleMapsMetrics({ totalDistanceKm: 0, avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
-      }
+        setGoogleMapsMetrics({ avgTravelMinutes: 0, totalTravelMinutes: 0, loading: false });
+        }
     };
 
     fetchRouteMetrics();
   }, [selectedTasks]);
 
   // Bereken route metrics
-  const { totalDistanceKm, avgTravelMinutes, totalServiceMinutes, totalRouteMinutes, totalRevenuePerVisit, totalVisitsPerMonth } = useMemo(() => {
+  const { avgTravelMinutes, totalServiceMinutes, totalRouteMinutes, totalRevenuePerVisit, totalVisitsPerMonth } = useMemo(() => {
     const serviceMin = selectedTasks.reduce((s, t) => s + (t.duration_minutes || 0), 0);
     const avgTravelMin = googleMapsMetrics.avgTravelMinutes || 0;
     const totalTravelMin = googleMapsMetrics.totalTravelMinutes || 0;
@@ -244,7 +243,6 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
       const visitsPerMonth = Math.round(uniqueDays.size * weeksPerMonth * 10) / 10;
 
       return { 
-      totalDistanceKm: googleMapsMetrics.totalDistanceKm, 
       avgTravelMinutes: avgTravelMin,
       totalServiceMinutes: serviceMin,
       totalRouteMinutes: routeMin,
@@ -270,7 +268,6 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
       ...form,
       total_service_minutes: totalServiceMinutes,
       avg_travel_minutes: avgTravelMinutes,
-      total_distance_km: totalDistanceKm,
       total_route_minutes: totalRouteMinutes,
       total_revenue: totalRevenuePerVisit * totalVisitsPerMonth,
     });
@@ -438,9 +435,6 @@ export default function RouteBuilder({ route, vehicles, routes, folders, onSave,
               
               {selectedTasks.length > 1 && (
                 <div className="space-y-1 pt-2">
-                  <p className="text-xs text-slate-500">
-                    Totale afstand: <span className="font-semibold text-slate-700">{totalDistanceKm} km</span> (automatisch berekend)
-                  </p>
                   <p className="text-xs text-slate-500">
                     Gem. reistijd tussen objecten: <span className="font-semibold text-slate-700">{avgTravelMinutes} min</span> (automatisch berekend via Google Maps)
                   </p>
