@@ -52,7 +52,11 @@ Deno.serve(async (req) => {
     if (start_location_id) {
       const startLoc = allLocations.find(loc => loc.id === start_location_id);
       if (startLoc && startLoc.latitude && startLoc.longitude) {
-        uniqueObjects.unshift(startLoc);
+        // Check if this location is not already in the list
+        const alreadyExists = uniqueObjects.some(obj => obj.id === startLoc.id);
+        if (!alreadyExists) {
+          uniqueObjects.unshift(startLoc);
+        }
       }
     }
     
@@ -60,7 +64,11 @@ Deno.serve(async (req) => {
     if (end_location_id) {
       const endLoc = allLocations.find(loc => loc.id === end_location_id);
       if (endLoc && endLoc.latitude && endLoc.longitude) {
-        uniqueObjects.push(endLoc);
+        // Check if this location is not already in the list (including if it's the same as start)
+        const alreadyExists = uniqueObjects.some(obj => obj.id === endLoc.id);
+        if (!alreadyExists) {
+          uniqueObjects.push(endLoc);
+        }
       }
     }
 
