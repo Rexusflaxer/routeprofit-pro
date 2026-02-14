@@ -96,16 +96,21 @@ export default function RouteDetails() {
       const totalServiceMinutes = routeTasksData.reduce((sum, t) => sum + (t.duration_minutes || 0), 0);
       
       // Update route met statistieken
-      return base44.entities.Route.update(routeId, {
+      await base44.entities.Route.update(routeId, {
         assigned_tasks: updatedTasks,
         total_service_minutes: totalServiceMinutes,
         avg_travel_minutes: response.data?.avg_travel_minutes || 0,
         total_distance_km: response.data?.total_distance_km || 0
       });
+
+      // Bereken route optimalisatie
+      const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: routeId });
+      return optimizationResponse.data;
     },
-    onSuccess: () => {
+    onSuccess: (optimizedData) => {
       queryClient.invalidateQueries({ queryKey: ["routes"] });
       queryClient.invalidateQueries({ queryKey: ["route", routeId] });
+      setOptimizedRoute(optimizedData);
     },
   });
 
