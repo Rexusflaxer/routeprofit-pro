@@ -546,12 +546,12 @@ export default function RouteDetails() {
                     <div className="space-y-3">
                       {optimizedRoute.optimized_order?.map((item, index) => (
                         <div key={item.task_id || index}>
-                          {index > 0 && optimizedRoute.optimized_order[index - 1].travel_time_minutes && (
+                          {index > 0 && item.travel_time_minutes && (
                             <div className="flex items-center justify-center py-2">
                               <div className="flex items-center gap-2 px-3 py-1 bg-blue-100 rounded-full">
                                 <Navigation className="w-3 h-3 text-blue-600" />
                                 <span className="text-xs font-medium text-blue-700">
-                                  Reistijd: {optimizedRoute.optimized_order[index - 1].travel_time_minutes} min
+                                  Reistijd: {item.travel_time_minutes} min
                                 </span>
                               </div>
                             </div>
