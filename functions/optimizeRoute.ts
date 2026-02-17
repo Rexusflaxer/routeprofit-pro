@@ -159,10 +159,13 @@ Deno.serve(async (req) => {
       const waitingTime = actualStartTime - arrivalTime;
       const departureTime = actualStartTime + nearestTask.duration_minutes;
 
+      const segmentDistanceKm = nearestTask._distance_km || 0;
+
       // Voeg taak toe met extra info
       const taskWithInfo = {
         ...nearestTask,
         travel_time_minutes: travelTime,
+        distance_km: segmentDistanceKm,
         arrival_time: formatMinutesToTime(arrivalTime),
         actual_start_time: formatMinutesToTime(actualStartTime),
         departure_time: formatMinutesToTime(departureTime),
@@ -173,6 +176,7 @@ Deno.serve(async (req) => {
       visited.add(nearestTask.task_id);
       
       totalTravelTime += travelTime;
+      totalDistanceKm += segmentDistanceKm;
       currentTime = departureTime;
       
       currentLocation = nearestTask;
