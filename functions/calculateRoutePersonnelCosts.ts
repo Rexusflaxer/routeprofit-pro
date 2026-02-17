@@ -191,6 +191,7 @@ Deno.serve(async (req) => {
 
     const allPersonnel = await base44.entities.Personnel.list();
     const surveillants = allPersonnel.filter(p => p.function_type === 'surveillant' && p.is_active !== false);
+    const binnendienst = allPersonnel.filter(p => p.function_type === 'binnendienst' && p.is_active !== false);
 
     if (surveillants.length === 0) {
       return Response.json({ error: 'Geen actieve surveillanten gevonden' }, { status: 404 });
