@@ -528,24 +528,30 @@ export default function RouteDetails() {
                 </div>
               ) : optimizedRoute ? (
                 <div className="space-y-4">
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 p-4 bg-blue-50 rounded-lg">
-                    <div>
-                      <p className="text-xs text-slate-600 mb-1">Totale geoptimaliseerde routetijd</p>
-                      <p className="text-xl font-bold text-blue-700">{optimizedRoute.total_route_time} min</p>
+                  <div className={`grid grid-cols-2 ${optimizedRoute.alarm_standby ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-4 p-4 bg-blue-50 rounded-lg`}>
+                      <div>
+                        <p className="text-xs text-slate-600 mb-1">Totale diensttijd</p>
+                        <p className="text-xl font-bold text-blue-700">{optimizedRoute.actual_shift_minutes ?? optimizedRoute.total_route_time} min</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-600 mb-1">Reistijd</p>
+                        <p className="text-xl font-bold">{optimizedRoute.total_travel_time} min</p>
+                      </div>
+                      <div>
+                        <p className="text-xs text-slate-600 mb-1">Taaktijd</p>
+                        <p className="text-xl font-bold">{optimizedRoute.total_service_time} min</p>
+                      </div>
+                      {optimizedRoute.alarm_standby && (
+                        <div>
+                          <p className="text-xs text-amber-700 mb-1">🚨 Alarmdienst</p>
+                          <p className="text-xl font-bold text-amber-700">{optimizedRoute.total_alarm_standby_time} min</p>
+                        </div>
+                      )}
+                      <div>
+                        <p className="text-xs text-slate-600 mb-1">Totale afstand</p>
+                        <p className="text-xl font-bold">{optimizedRoute.total_distance_km} km</p>
+                      </div>
                     </div>
-                    <div>
-                      <p className="text-xs text-slate-600 mb-1">Geoptimaliseerde reistijd</p>
-                      <p className="text-xl font-bold">{optimizedRoute.total_travel_time} min</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-600 mb-1">Totale afstand</p>
-                      <p className="text-xl font-bold">{optimizedRoute.total_distance_km} km</p>
-                    </div>
-                    <div>
-                      <p className="text-xs text-slate-600 mb-1">Taaktijd</p>
-                      <p className="text-xl font-bold">{optimizedRoute.total_service_time} min</p>
-                    </div>
-                  </div>
 
                   <div>
                     <p className="text-sm font-semibold text-slate-700 mb-3">Optimale volgorde:</p>
