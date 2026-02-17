@@ -231,6 +231,9 @@ Deno.serve(async (req) => {
     return Response.json({
       shift_date: shiftDate, weekday: targetWeekday,
       start_time: startTime, end_time: endTime,
+      planned_end_time: plannedEndTime,
+      alarm_standby: !!route.alarm_standby,
+      actual_shift_note: actualShiftNote,
       total_surveillants: count,
       most_expensive: mostExpensive, cheapest, average,
       all_personnel: results
