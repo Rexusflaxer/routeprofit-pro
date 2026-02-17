@@ -532,7 +532,7 @@ export default function RouteDetails() {
                       <p className="text-xl font-bold text-blue-700">{optimizedRoute.total_route_time} min</p>
                     </div>
                     <div>
-                      <p className="text-xs text-slate-600 mb-1">Reistijd</p>
+                      <p className="text-xs text-slate-600 mb-1">Geoptimaliseerde reistijd</p>
                       <p className="text-xl font-bold">{optimizedRoute.total_travel_time} min</p>
                     </div>
                     <div>
