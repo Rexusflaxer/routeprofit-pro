@@ -45,6 +45,8 @@ function getNextDateForWeekday(routeWeekday) {
 }
 
 function r2(n) { return Math.round(n * 100) / 100; }
+function timeToMinutes(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
+function minutesToTime(m) { const h = Math.floor(m / 60); const min = m % 60; return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`; }
 
 function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
   const startDate = new Date(`${date}T${startTime}:00`);
