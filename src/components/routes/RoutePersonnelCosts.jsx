@@ -157,43 +157,43 @@ export default function RoutePersonnelCosts({ route }) {
     }
   };
 
+  // Automatisch laden bij mount of dag-wijziging
+  useEffect(() => {
+    if (route?.id && activeWeekday) {
+      calculate(activeWeekday);
+    }
+  }, [route?.id, activeWeekday]);
+
   return (
     <div className="space-y-6">
-      {/* Dag selectie + berekenen knop */}
-      <Card>
-        <CardContent className="pt-5">
-          <div className="flex flex-wrap items-center gap-3">
-            <span className="text-sm font-medium text-slate-700">Bereken loonkosten voor:</span>
-            <div className="flex flex-wrap gap-2">
-              {(route.weekdays || []).map(day => (
-                <Button
-                  key={day}
-                  size="sm"
-                  variant={activeWeekday === day ? "default" : "outline"}
-                  onClick={() => { setSelectedWeekday(day); setData(null); }}
-                  className={activeWeekday === day ? "bg-slate-900" : ""}
-                >
-                  {WEEKDAY_LABELS[day]}
-                </Button>
-              ))}
+      {/* Dag selectie */}
+      {(route.weekdays || []).length > 1 && (
+        <Card>
+          <CardContent className="pt-5 pb-4">
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm font-medium text-slate-700">Loonkosten voor:</span>
+              <div className="flex flex-wrap gap-2">
+                {(route.weekdays || []).map(day => (
+                  <Button
+                    key={day}
+                    size="sm"
+                    variant={activeWeekday === day ? "default" : "outline"}
+                    onClick={() => setSelectedWeekday(day)}
+                    className={activeWeekday === day ? "bg-slate-900" : ""}
+                  >
+                    {WEEKDAY_LABELS[day]}
+                  </Button>
+                ))}
+              </div>
             </div>
-            <Button
-              size="sm"
-              onClick={() => calculate(activeWeekday)}
-              disabled={loading || !activeWeekday}
-              className="bg-blue-600 hover:bg-blue-700 ml-auto"
-            >
-              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Users className="w-4 h-4 mr-1" />}
-              Bereken
-            </Button>
-          </div>
-          {data && (
-            <p className="text-xs text-slate-400 mt-2">
-              Berekend voor {WEEKDAY_LABELS[data.weekday]} · dienst {data.start_time}–{data.end_time} · {data.total_surveillants} surveillanten meegenomen
-            </p>
-          )}
-        </CardContent>
-      </Card>
+            {data && (
+              <p className="text-xs text-slate-400 mt-2">
+                Dienst {data.start_time}–{data.end_time} · {data.total_surveillants} surveillanten meegenomen
+              </p>
+            )}
+          </CardContent>
+        </Card>
+      )}
 
       {error && (
         <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
