@@ -237,13 +237,6 @@ export default function RoutePersonnelCosts({ route }) {
         </div>
       )}
 
-      {loading && (
-        <div className="flex items-center justify-center py-12">
-          <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
-          <span className="ml-2 text-sm text-slate-500">Loonkosten berekenen...</span>
-        </div>
-      )}
-
       {data && !loading && data.alarm_standby && (
         <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
           <span>🚨</span>
