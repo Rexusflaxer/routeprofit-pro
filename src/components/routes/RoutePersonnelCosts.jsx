@@ -304,12 +304,7 @@ export default function RoutePersonnelCosts({ route }) {
           <span><strong>Alarmdienst actief:</strong> de volledige tijd van {data.start_time} tot {data.end_time} wordt als diensttijd meegerekend in de kosten.</span>
         </div>
       )}
-      {data && !loading && !data.alarm_standby && data.actual_shift_note && (
-        <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
-          <span>ℹ️</span>
-          <span>{data.actual_shift_note}</span>
-        </div>
-      )}
+
 
       {data && !loading && data.vehicle_costs && (
         <VehicleCostCard data={data.vehicle_costs} />
