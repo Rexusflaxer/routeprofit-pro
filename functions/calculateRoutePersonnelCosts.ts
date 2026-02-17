@@ -146,7 +146,7 @@ Deno.serve(async (req) => {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { route_id, weekday } = await req.json();
+    const { route_id, weekday, force_recalculate } = await req.json();
     if (!route_id) return Response.json({ error: 'route_id is required' }, { status: 400 });
 
     const routes = await base44.entities.Route.list();
