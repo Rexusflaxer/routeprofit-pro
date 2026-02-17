@@ -154,6 +154,12 @@ Deno.serve(async (req) => {
     if (!route) return Response.json({ error: 'Route not found' }, { status: 404 });
 
     const targetWeekday = weekday || route.weekdays?.[0] || 1;
+    const cacheKey = String(targetWeekday);
+
+    // Return cached result if available and not force-recalculating
+    if (!force_recalculate && route.cached_personnel_costs?.[cacheKey]) {
+      return Response.json(route.cached_personnel_costs[cacheKey]);
+    }
     const shiftDate = getNextDateForWeekday(targetWeekday);
     const startTime = route.time_window_start || '08:00';
     const plannedEndTime = route.time_window_end || '17:00';
