@@ -250,9 +250,13 @@ export default function RoutePersonnelCosts({ route }) {
   };
 
   // Automatisch laden bij mount of dag-wijziging
+  // Als er geen vehicle_costs in de cache zitten, herbereken automatisch
   useEffect(() => {
     if (route?.id && activeWeekday) {
-      calculate(activeWeekday);
+      const cacheKey = String(activeWeekday);
+      const cached = route?.cached_personnel_costs?.[cacheKey];
+      const forceRecalc = cached && cached.vehicle_costs === undefined && route.vehicle_id;
+      calculate(activeWeekday, !!forceRecalc);
     }
   }, [route?.id, activeWeekday]);
 
