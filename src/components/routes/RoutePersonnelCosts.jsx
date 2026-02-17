@@ -197,21 +197,15 @@ function VehicleCostCard({ data }) {
             />
 
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-3 mb-1">Variabele kosten (per dienst)</p>
-            {data.km_per_service > 0 ? (
-              <>
-                <CostDetailRow
-                  label={`Brandstof (${data.km_per_service} km × €${data.fuel_cost_per_km?.toFixed(3)}/km)`}
-                  value={data.fuel_cost_per_service}
-                />
-                {data.maintenance_cost_per_service > 0 && (
-                  <CostDetailRow label="Onderhoud" value={data.maintenance_cost_per_service} />
-                )}
-                {data.tire_cost_per_service > 0 && (
-                  <CostDetailRow label="Banden" value={data.tire_cost_per_service} />
-                )}
-              </>
-            ) : (
-              <p className="text-xs text-slate-400 italic">Geen ritafstand bekend – variabele kosten zijn €0,00</p>
+            <CostDetailRow
+              label={`Brandstof (${data.km_per_service} km × €${data.fuel_cost_per_km?.toFixed(3)}/km)`}
+              value={data.fuel_cost_per_service}
+            />
+            {data.maintenance_cost_per_service > 0 && (
+              <CostDetailRow label="Onderhoud" value={data.maintenance_cost_per_service} />
+            )}
+            {data.tire_cost_per_service > 0 && (
+              <CostDetailRow label="Banden" value={data.tire_cost_per_service} />
             )}
 
             <div className="pt-2 border-t border-slate-200 mt-2">
