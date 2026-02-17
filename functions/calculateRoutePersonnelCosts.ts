@@ -234,7 +234,7 @@ Deno.serve(async (req) => {
       count
     };
 
-    return Response.json({
+    const resultPayload = {
       shift_date: shiftDate, weekday: targetWeekday,
       start_time: startTime, end_time: endTime,
       planned_end_time: plannedEndTime,
@@ -243,7 +243,17 @@ Deno.serve(async (req) => {
       total_surveillants: count,
       most_expensive: mostExpensive, cheapest, average,
       all_personnel: results
+    };
+
+    // Sla gecachte resultaten op in de route
+    const existingCache = route.cached_personnel_costs || {};
+    existingCache[cacheKey] = resultPayload;
+    await base44.entities.Route.update(route_id, {
+      cached_personnel_costs: existingCache,
+      personnel_costs_calculated_at: new Date().toISOString()
     });
+
+    return Response.json(resultPayload);
 
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
