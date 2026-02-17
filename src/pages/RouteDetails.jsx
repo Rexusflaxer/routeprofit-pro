@@ -243,11 +243,12 @@ export default function RouteDetails() {
         const optData = response.data;
         setOptimizedRoute(optData);
 
-        // Sla werkelijke dienstduur op zodat loonkostenberekening de juiste tijd gebruikt
-        if (optData?.actual_shift_minutes !== undefined) {
-          await base44.entities.Route.update(route.id, {
-            total_route_minutes: optData.actual_shift_minutes
-          });
+        // Sla werkelijke dienstduur en afstand op
+        const updateData = {};
+        if (optData?.actual_shift_minutes !== undefined) updateData.total_route_minutes = optData.actual_shift_minutes;
+        if (optData?.total_distance_km !== undefined) updateData.total_distance_km = optData.total_distance_km;
+        if (Object.keys(updateData).length > 0) {
+          await base44.entities.Route.update(route.id, updateData);
           queryClient.invalidateQueries({ queryKey: ["route", routeId] });
         }
       } catch (error) {
