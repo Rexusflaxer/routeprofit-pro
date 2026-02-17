@@ -223,7 +223,16 @@ export default function RouteDetails() {
       setLoadingOptimization(true);
       try {
         const response = await base44.functions.invoke('optimizeRoute', { route_id: route.id });
-        setOptimizedRoute(response.data);
+        const optData = response.data;
+        setOptimizedRoute(optData);
+
+        // Sla werkelijke dienstduur op zodat loonkostenberekening de juiste tijd gebruikt
+        if (optData?.actual_shift_minutes !== undefined) {
+          await base44.entities.Route.update(route.id, {
+            total_route_minutes: optData.actual_shift_minutes
+          });
+          queryClient.invalidateQueries({ queryKey: ["route", routeId] });
+        }
       } catch (error) {
         console.error('Fout bij route optimalisatie:', error);
       } finally {
@@ -232,7 +241,7 @@ export default function RouteDetails() {
     };
 
     fetchOptimization();
-  }, [route, routeTasks.length]);
+  }, [route?.id, routeTasks.length]);
 
   if (!routeId) {
     return (
