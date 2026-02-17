@@ -280,16 +280,7 @@ export default function RoutePersonnelCosts({ route }) {
                 </div>
               </div>
             ) : <div />}
-            <Button
-              size="sm"
-              variant="outline"
-              onClick={() => calculate(activeWeekday, true)}
-              disabled={loading}
-              className="text-slate-500 gap-1.5"
-            >
-              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
-              Herberekenen
-            </Button>
+
           </div>
           {data && (
             <div className="space-y-1">
