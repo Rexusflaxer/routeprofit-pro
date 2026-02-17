@@ -316,42 +316,87 @@ export default function RoutePersonnelCosts({ route }) {
       )}
 
 
-      {data && !loading && data.vehicle_costs && (
-        <VehicleCostCard data={data.vehicle_costs} />
-      )}
-
       {data && !loading && (
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <PersonnelCostCard
-            title="Duurste surveillant"
-            icon={TrendingUp}
-            iconColor="text-red-600"
-            bgColor="bg-red-50"
-            borderColor="border-red-200"
-            badge="Hoogste kosten"
-            badgeColor="bg-red-100 text-red-800"
-            data={data.most_expensive}
-          />
-          <PersonnelCostCard
-            title="Gemiddelde loonkosten"
-            icon={BarChart2}
-            iconColor="text-blue-600"
-            bgColor="bg-blue-50"
-            borderColor="border-blue-200"
-            badge={`${data.average.count} surveillanten`}
-            badgeColor="bg-blue-100 text-blue-800"
-            data={data.average}
-          />
-          <PersonnelCostCard
-            title="Goedkoopste surveillant"
-            icon={TrendingDown}
-            iconColor="text-green-600"
-            bgColor="bg-green-50"
-            borderColor="border-green-200"
-            badge="Laagste kosten"
-            badgeColor="bg-green-100 text-green-800"
-            data={data.cheapest}
-          />
+        <div className="space-y-6">
+          {/* ── Personeelskosten ── */}
+          <div>
+            <div className="flex items-center gap-2 mb-4">
+              <Users className="w-5 h-5 text-slate-600" />
+              <h2 className="text-base font-bold text-slate-800 uppercase tracking-wide">Personeelskosten</h2>
+            </div>
+
+            {/* Operationeel */}
+            <div className="mb-2">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 pl-1 border-l-2 border-blue-400">Operationeel – Surveillanten</p>
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <PersonnelCostCard
+                  title="Duurste surveillant"
+                  icon={TrendingUp}
+                  iconColor="text-red-600"
+                  bgColor="bg-red-50"
+                  borderColor="border-red-200"
+                  badge="Hoogste kosten"
+                  badgeColor="bg-red-100 text-red-800"
+                  data={data.most_expensive}
+                />
+                <PersonnelCostCard
+                  title="Gemiddelde loonkosten"
+                  icon={BarChart2}
+                  iconColor="text-blue-600"
+                  bgColor="bg-blue-50"
+                  borderColor="border-blue-200"
+                  badge={`${data.average.count} surveillanten`}
+                  badgeColor="bg-blue-100 text-blue-800"
+                  data={data.average}
+                />
+                <PersonnelCostCard
+                  title="Goedkoopste surveillant"
+                  icon={TrendingDown}
+                  iconColor="text-green-600"
+                  bgColor="bg-green-50"
+                  borderColor="border-green-200"
+                  badge="Laagste kosten"
+                  badgeColor="bg-green-100 text-green-800"
+                  data={data.cheapest}
+                />
+              </div>
+            </div>
+
+            {/* Binnendienst */}
+            <div className="mt-6">
+              <p className="text-xs font-semibold text-slate-500 uppercase tracking-wider mb-3 pl-1 border-l-2 border-purple-400">Binnendienst – Vaste kosten</p>
+              {data.binnendienst && data.binnendienst.length > 0 ? (
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  {data.binnendienst.map((p, i) => (
+                    <PersonnelCostCard
+                      key={p.personnel_id || i}
+                      title={p.name}
+                      icon={Users}
+                      iconColor="text-purple-600"
+                      bgColor="bg-purple-50"
+                      borderColor="border-purple-200"
+                      badge="Binnendienst"
+                      badgeColor="bg-purple-100 text-purple-800"
+                      data={p}
+                    />
+                  ))}
+                </div>
+              ) : (
+                <p className="text-sm text-slate-400 italic pl-1">Geen actieve binnendienst medewerkers gevonden.</p>
+              )}
+            </div>
+          </div>
+
+          {/* ── Voertuigkosten ── */}
+          {data.vehicle_costs && (
+            <div>
+              <div className="flex items-center gap-2 mb-4">
+                <Car className="w-5 h-5 text-slate-600" />
+                <h2 className="text-base font-bold text-slate-800 uppercase tracking-wide">Voertuigkosten</h2>
+              </div>
+              <VehicleCostCard data={data.vehicle_costs} />
+            </div>
+          )}
         </div>
       )}
     </div>
