@@ -1,0 +1,248 @@
+import React, { useState } from "react";
+import { base44 } from "@/api/base44Client";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import { Users, ChevronDown, ChevronUp, TrendingUp, TrendingDown, BarChart2, Loader2, AlertCircle } from "lucide-react";
+
+const WEEKDAY_LABELS = {
+  1: "Maandag", 2: "Dinsdag", 3: "Woensdag", 4: "Donderdag",
+  5: "Vrijdag", 6: "Zaterdag", 7: "Zondag"
+};
+
+function CostDetailRow({ label, value, highlight }) {
+  return (
+    <div className={`flex justify-between items-center text-sm py-1 ${highlight ? "font-semibold" : ""}`}>
+      <span className="text-slate-600">{label}</span>
+      <span className={highlight ? "text-slate-900" : "text-slate-700"}>€{value?.toFixed(2) ?? "0.00"}</span>
+    </div>
+  );
+}
+
+function PersonnelCostCard({ title, icon: Icon, iconColor, bgColor, borderColor, data, badge, badgeColor }) {
+  const [expanded, setExpanded] = useState(false);
+
+  if (!data) return null;
+
+  const isZzp = data.employee_type === 'zzp';
+  const isAverage = data.count !== undefined;
+
+  const contractLabel = data.employee_type === 'zzp' ? 'ZZP' : 'Loondienst';
+  const caoLabel = data.cao === 'cao_particuliere_beveiliging' && !isZzp
+    ? `CAO schaal ${data.cao_scale ?? '-'}, periode ${data.cao_period ?? '0'}`
+    : null;
+
+  return (
+    <Card className={`border-2 ${borderColor}`}>
+      <CardHeader className={`${bgColor} rounded-t-lg pb-3`}>
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Icon className={`w-5 h-5 ${iconColor}`} />
+            {title}
+          </CardTitle>
+          {badge && (
+            <Badge className={badgeColor}>{badge}</Badge>
+          )}
+        </div>
+        {!isAverage && (
+          <div className="mt-1 space-y-0.5">
+            <p className="text-sm font-semibold text-slate-900">{data.name}</p>
+            <p className="text-xs text-slate-500">
+              {contractLabel}{caoLabel ? ` · ${caoLabel}` : ''}
+              {data.employee_type === 'zzp' ? ` · €${data.base_hourly_rate?.toFixed(2)}/u excl. BTW` : ` · €${data.base_hourly_rate?.toFixed(2)}/u basis`}
+            </p>
+          </div>
+        )}
+        {isAverage && (
+          <p className="text-xs text-slate-500 mt-1">{data.count} actieve surveillanten</p>
+        )}
+      </CardHeader>
+      <CardContent className="pt-4">
+        <div className="flex justify-between items-center mb-3">
+          <div>
+            <p className="text-xs text-slate-500">Totale loonkosten voor deze route</p>
+            <p className="text-2xl font-bold text-slate-900">€{data.total_cost_employer?.toFixed(2)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-slate-500">Kosten per uur</p>
+            <p className="text-lg font-semibold text-slate-700">€{data.cost_per_hour?.toFixed(2)}</p>
+          </div>
+        </div>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full text-xs text-slate-500 hover:text-slate-700"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? <ChevronUp className="w-4 h-4 mr-1" /> : <ChevronDown className="w-4 h-4 mr-1" />}
+          {expanded ? "Verberg berekening" : "Toon berekening & details"}
+        </Button>
+
+        {expanded && (
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Opbouw loonkosten</p>
+
+            <CostDetailRow label={`Basissalaris (${data.total_hours?.toFixed(2)}u × €${data.base_hourly_rate?.toFixed(2)})`} value={data.base_salary} />
+
+            {data.surcharges_total > 0 && (
+              <>
+                {data.surcharge_details?.map((s, i) => (
+                  <CostDetailRow key={i} label={s.label} value={s.amount} />
+                ))}
+                <CostDetailRow label="Totaal toeslagen" value={data.surcharges_total} highlight />
+              </>
+            )}
+
+            <div className="pt-1 border-t border-slate-100">
+              <CostDetailRow label="Bruto loon" value={data.total_gross} highlight />
+            </div>
+
+            {!isZzp && data.employer_costs && (
+              <>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-3 mb-1">Werkgeverslasten</p>
+                {data.employer_costs.pension_premium > 0 && <CostDetailRow label="Pensioenpremie werkgever" value={data.employer_costs.pension_premium} />}
+                {data.employer_costs.premium_awf > 0 && <CostDetailRow label="AWF premie" value={data.employer_costs.premium_awf} />}
+                {data.employer_costs.premium_ww > 0 && <CostDetailRow label="WW premie" value={data.employer_costs.premium_ww} />}
+                {data.employer_costs.premium_wia > 0 && <CostDetailRow label="WIA premie" value={data.employer_costs.premium_wia} />}
+                {data.employer_costs.premium_wga > 0 && <CostDetailRow label="WGA premie" value={data.employer_costs.premium_wga} />}
+                <CostDetailRow label="Totaal werkgeverslasten" value={data.employer_costs_total} highlight />
+              </>
+            )}
+
+            {isZzp && data.employer_costs?.vat_21 > 0 && (
+              <CostDetailRow label="BTW 21%" value={data.employer_costs.vat_21} />
+            )}
+
+            {!isZzp && data.accruals_total > 0 && (
+              <>
+                <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-3 mb-1">Reserveringen</p>
+                {data.accruals?.vacation_allowance > 0 && <CostDetailRow label="Vakantiegeld (8%)" value={data.accruals.vacation_allowance} />}
+                {data.accruals?.year_end_bonus > 0 && <CostDetailRow label="Eindejaarsuitkering" value={data.accruals.year_end_bonus} />}
+                <CostDetailRow label="Totaal reserveringen" value={data.accruals_total} highlight />
+              </>
+            )}
+
+            <div className="pt-2 border-t border-slate-200 mt-2">
+              <CostDetailRow label="Totale kosten werkgever" value={data.total_cost_employer} highlight />
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+export default function RoutePersonnelCosts({ route }) {
+  const [data, setData] = useState(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
+  const [selectedWeekday, setSelectedWeekday] = useState(null);
+
+  const activeWeekday = selectedWeekday || route?.weekdays?.[0];
+
+  const calculate = async (weekday) => {
+    setLoading(true);
+    setError(null);
+    try {
+      const response = await base44.functions.invoke('calculateRoutePersonnelCosts', {
+        route_id: route.id,
+        weekday: weekday || activeWeekday
+      });
+      setData(response.data);
+    } catch (err) {
+      setError("Kon loonkosten niet berekenen. Controleer of er actieve surveillanten zijn.");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  return (
+    <div className="space-y-6">
+      {/* Dag selectie + berekenen knop */}
+      <Card>
+        <CardContent className="pt-5">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm font-medium text-slate-700">Bereken loonkosten voor:</span>
+            <div className="flex flex-wrap gap-2">
+              {(route.weekdays || []).map(day => (
+                <Button
+                  key={day}
+                  size="sm"
+                  variant={activeWeekday === day ? "default" : "outline"}
+                  onClick={() => { setSelectedWeekday(day); setData(null); }}
+                  className={activeWeekday === day ? "bg-slate-900" : ""}
+                >
+                  {WEEKDAY_LABELS[day]}
+                </Button>
+              ))}
+            </div>
+            <Button
+              size="sm"
+              onClick={() => calculate(activeWeekday)}
+              disabled={loading || !activeWeekday}
+              className="bg-blue-600 hover:bg-blue-700 ml-auto"
+            >
+              {loading ? <Loader2 className="w-4 h-4 animate-spin mr-1" /> : <Users className="w-4 h-4 mr-1" />}
+              Bereken
+            </Button>
+          </div>
+          {data && (
+            <p className="text-xs text-slate-400 mt-2">
+              Berekend voor {WEEKDAY_LABELS[data.weekday]} · dienst {data.start_time}–{data.end_time} · {data.total_surveillants} surveillanten meegenomen
+            </p>
+          )}
+        </CardContent>
+      </Card>
+
+      {error && (
+        <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
+          <AlertCircle className="w-4 h-4 flex-shrink-0" />
+          {error}
+        </div>
+      )}
+
+      {loading && (
+        <div className="flex items-center justify-center py-12">
+          <Loader2 className="w-6 h-6 animate-spin text-slate-400" />
+          <span className="ml-2 text-sm text-slate-500">Loonkosten berekenen...</span>
+        </div>
+      )}
+
+      {data && !loading && (
+        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+          <PersonnelCostCard
+            title="Duurste surveillant"
+            icon={TrendingUp}
+            iconColor="text-red-600"
+            bgColor="bg-red-50"
+            borderColor="border-red-200"
+            badge="Hoogste kosten"
+            badgeColor="bg-red-100 text-red-800"
+            data={data.most_expensive}
+          />
+          <PersonnelCostCard
+            title="Gemiddelde loonkosten"
+            icon={BarChart2}
+            iconColor="text-blue-600"
+            bgColor="bg-blue-50"
+            borderColor="border-blue-200"
+            badge={`${data.average.count} surveillanten`}
+            badgeColor="bg-blue-100 text-blue-800"
+            data={data.average}
+          />
+          <PersonnelCostCard
+            title="Goedkoopste surveillant"
+            icon={TrendingDown}
+            iconColor="text-green-600"
+            bgColor="bg-green-50"
+            borderColor="border-green-200"
+            badge="Laagste kosten"
+            badgeColor="bg-green-100 text-green-800"
+            data={data.cheapest}
+          />
+        </div>
+      )}
+    </div>
+  );
+}
