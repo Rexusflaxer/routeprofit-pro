@@ -216,6 +216,19 @@ export default function RoutePersonnelCosts({ route }) {
         </div>
       )}
 
+      {data && !loading && data.alarm_standby && (
+        <div className="flex items-center gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
+          <span>🚨</span>
+          <span><strong>Alarmdienst actief:</strong> de volledige tijd van {data.start_time} tot {data.end_time} wordt als diensttijd meegerekend in de kosten.</span>
+        </div>
+      )}
+      {data && !loading && !data.alarm_standby && data.actual_shift_note && (
+        <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+          <span>ℹ️</span>
+          <span>{data.actual_shift_note}</span>
+        </div>
+      )}
+
       {data && !loading && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <PersonnelCostCard
