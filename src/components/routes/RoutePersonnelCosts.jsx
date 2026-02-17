@@ -141,6 +141,89 @@ function PersonnelCostCard({ title, icon: Icon, iconColor, bgColor, borderColor,
   );
 }
 
+function VehicleCostCard({ data }) {
+  const [expanded, setExpanded] = useState(false);
+  if (!data) return null;
+
+  const acqLabels = { aankoop: 'Aankoop', lease: 'Lease', private_lease: 'Private lease', banklening: 'Banklening' };
+
+  return (
+    <Card className="border-2 border-slate-200">
+      <CardHeader className="bg-slate-50 rounded-t-lg pb-3">
+        <div className="flex items-center justify-between">
+          <CardTitle className="flex items-center gap-2 text-base">
+            <Car className="w-5 h-5 text-slate-600" />
+            Voertuigkosten
+          </CardTitle>
+          <Badge className="bg-slate-100 text-slate-800">{acqLabels[data.acquisition_type] || data.acquisition_type}</Badge>
+        </div>
+        <p className="text-sm font-semibold text-slate-900 mt-1">{data.vehicle_label}</p>
+        <p className="text-xs text-slate-500">
+          {data.km_per_service} km per dienst · {data.routes_with_vehicle} route{data.routes_with_vehicle !== 1 ? 's' : ''} · {data.total_services_per_week}x/week · {data.total_services_per_year} diensten/jaar
+        </p>
+      </CardHeader>
+      <CardContent className="pt-4">
+        <div className="flex justify-between items-center mb-3">
+          <div>
+            <p className="text-xs text-slate-500">Voertuigkosten per dienst</p>
+            <p className="text-2xl font-bold text-slate-900">€{data.total_per_service?.toFixed(2)}</p>
+          </div>
+          <div className="text-right">
+            <p className="text-xs text-slate-500">Afschrijving/jaar</p>
+            <p className="text-lg font-semibold text-slate-700">€{data.depreciation_per_year?.toFixed(2)}</p>
+          </div>
+        </div>
+
+        <Button
+          variant="ghost"
+          size="sm"
+          className="w-full text-xs text-slate-500 hover:text-slate-700"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? <ChevronUp className="w-4 h-4 mr-1" /> : <ChevronDown className="w-4 h-4 mr-1" />}
+          {expanded ? "Verberg berekening" : "Toon berekening & details"}
+        </Button>
+
+        {expanded && (
+          <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Vaste kosten (per dienst)</p>
+            <CostDetailRow
+              label={`${data.depreciation_label} ÷ ${data.total_services_per_year} diensten/jaar`}
+              value={data.depreciation_per_service}
+            />
+            <CostDetailRow
+              label={`Verzekering (€${data.insurance_per_year?.toFixed(2)}/jaar ÷ ${data.total_services_per_year} diensten)`}
+              value={data.insurance_per_service}
+            />
+
+            <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-3 mb-1">Variabele kosten (per dienst)</p>
+            {data.km_per_service > 0 ? (
+              <>
+                <CostDetailRow
+                  label={`Brandstof (${data.km_per_service} km × €${data.fuel_cost_per_km?.toFixed(3)}/km)`}
+                  value={data.fuel_cost_per_service}
+                />
+                {data.maintenance_cost_per_service > 0 && (
+                  <CostDetailRow label="Onderhoud" value={data.maintenance_cost_per_service} />
+                )}
+                {data.tire_cost_per_service > 0 && (
+                  <CostDetailRow label="Banden" value={data.tire_cost_per_service} />
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-slate-400 italic">Geen ritafstand bekend – variabele kosten zijn €0,00</p>
+            )}
+
+            <div className="pt-2 border-t border-slate-200 mt-2">
+              <CostDetailRow label="Totaal voertuigkosten per dienst" value={data.total_per_service} highlight />
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function RoutePersonnelCosts({ route }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
