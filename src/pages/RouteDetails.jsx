@@ -557,6 +557,17 @@ export default function RouteDetails() {
                             </div>
                           )}
 
+                          {item.waiting_time > 0 && (
+                            <div className="flex items-center justify-center py-2">
+                              <div className="flex items-center gap-2 px-3 py-1 bg-green-100 rounded-full">
+                                <Clock className="w-3 h-3 text-green-600" />
+                                <span className="text-xs font-medium text-green-700">
+                                  Vrije tijd: {item.waiting_time} min ({item.arrival_time} - {item.actual_start_time})
+                                </span>
+                              </div>
+                            </div>
+                          )}
+
                           <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border-l-4 border-blue-600">
                             <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold">
                               {index + 1}

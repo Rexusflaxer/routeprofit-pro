@@ -155,6 +155,7 @@ Deno.serve(async (req) => {
       const arrivalTime = currentTime + travelTime;
       const taskStartMinutes = parseTimeToMinutes(nearestTask.time_window_start);
       const actualStartTime = Math.max(arrivalTime, taskStartMinutes);
+      const waitingTime = actualStartTime - arrivalTime;
       const departureTime = actualStartTime + nearestTask.duration_minutes;
 
       // Voeg taak toe met extra info
@@ -163,7 +164,8 @@ Deno.serve(async (req) => {
         travel_time_minutes: travelTime,
         arrival_time: formatMinutesToTime(arrivalTime),
         actual_start_time: formatMinutesToTime(actualStartTime),
-        departure_time: formatMinutesToTime(departureTime)
+        departure_time: formatMinutesToTime(departureTime),
+        waiting_time: waitingTime
       };
 
       optimizedOrder.push(taskWithInfo);
