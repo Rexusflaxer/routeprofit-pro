@@ -225,6 +225,7 @@ Deno.serve(async (req) => {
     return Response.json({
       optimized_order: optimizedOrder,
       total_travel_time: totalTravelTime,
+      total_distance_km: Math.round(totalDistanceKm * 10) / 10,
       total_service_time: totalServiceTime,
       total_waiting_time: totalWaitingTime,
       total_route_time: totalRouteTime,
