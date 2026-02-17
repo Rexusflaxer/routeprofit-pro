@@ -149,13 +149,14 @@ export default function RoutePersonnelCosts({ route }) {
 
   const activeWeekday = selectedWeekday || route?.weekdays?.[0];
 
-  const calculate = async (weekday) => {
+  const calculate = async (weekday, force = false) => {
     setLoading(true);
     setError(null);
     try {
       const response = await base44.functions.invoke('calculateRoutePersonnelCosts', {
         route_id: route.id,
-        weekday: weekday || activeWeekday
+        weekday: weekday || activeWeekday,
+        force_recalculate: force
       });
       setData(response.data);
     } catch (err) {
