@@ -285,22 +285,6 @@ export default function RoutePersonnelCosts({ route }) {
               Herberekenen
             </Button>
           </div>
-          {data && (
-            <div className="space-y-1">
-              <p className="text-xs text-slate-500">
-                <span className="font-medium">{WEEKDAY_LABELS[activeWeekday]}</span>
-                {" · "}Dienst <span className="font-medium">{data.start_time}–{data.end_time}</span>
-                {data.alarm_standby
-                  ? <span className="ml-1 text-amber-600 font-medium">· 🚨 Alarmdienst t/m {data.planned_end_time}</span>
-                  : <span className="ml-1 text-slate-400">(gepland t/m {data.planned_end_time})</span>
-                }
-                <span className="ml-1 text-slate-400">· {data.total_surveillants} surveillanten</span>
-              </p>
-              {data.actual_shift_note && (
-                <p className="text-xs text-blue-600">ℹ️ {data.actual_shift_note}</p>
-              )}
-            </div>
-          )}
           {!data && !loading && !error && (
             <p className="text-xs text-slate-400">Berekening wordt geladen...</p>
           )}
