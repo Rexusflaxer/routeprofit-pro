@@ -13,6 +13,14 @@ import AddTaskDialog from "../components/routes/AddTaskDialog";
 import RoutePersonnelCosts from "../components/routes/RoutePersonnelCosts";
 import { AnimatePresence, motion } from "framer-motion";
 
+function formatMinutes(minutes) {
+  if (!minutes && minutes !== 0) return "–";
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m > 0 ? `${h}u ${m}min` : `${h}u`;
+}
+
 const WEEKDAY_LABELS = {
   1: "Maandag", 2: "Dinsdag", 3: "Woensdag", 4: "Donderdag", 
   5: "Vrijdag", 6: "Zaterdag", 7: "Zondag"
