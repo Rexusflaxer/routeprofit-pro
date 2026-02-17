@@ -623,6 +623,23 @@ export default function RouteDetails() {
                     </div>
                   </div>
 
+                  {/* Vroeg/laat indicatoren */}
+                  {optimizedRoute.finished_early && (
+                    <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-blue-600 flex-shrink-0" />
+                      <p className="text-sm text-blue-800">
+                        <strong>Route eerder klaar:</strong> de route eindigt {optimizedRoute.early_by_minutes} minuten eerder dan het geplande tijdsvenster. De dienst stopt direct na de route.
+                      </p>
+                    </div>
+                  )}
+                  {optimizedRoute.finished_late && (
+                    <div className="p-3 bg-red-50 border border-red-200 rounded-lg flex items-center gap-2">
+                      <Clock className="w-4 h-4 text-red-600 flex-shrink-0" />
+                      <p className="text-sm text-red-800">
+                        <strong>Route loopt uit:</strong> de route eindigt {optimizedRoute.late_by_minutes} minuten na het geplande tijdsvenster.
+                      </p>
+                    </div>
+                  )}
                   {optimizedRoute.tasks_skipped > 0 && (
                     <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
                       <p className="text-sm text-amber-800">
