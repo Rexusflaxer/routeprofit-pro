@@ -638,8 +638,11 @@ export default function RouteDetails() {
               </Card>
             </TabsContent>
 
+            <TabsContent value="costs" className="space-y-6 mt-6">
+              <RoutePersonnelCosts route={route} />
+            </TabsContent>
 
-          </Tabs>
+            </Tabs>
         </>
       )}
 
