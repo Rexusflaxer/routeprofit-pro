@@ -197,15 +197,21 @@ function VehicleCostCard({ data }) {
             />
 
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-3 mb-1">Variabele kosten (per dienst)</p>
-            <CostDetailRow
-              label={`Brandstof (${data.km_per_service} km × €${data.fuel_cost_per_km?.toFixed(3)}/km)`}
-              value={data.fuel_cost_per_service}
-            />
-            {data.maintenance_cost_per_service > 0 && (
-              <CostDetailRow label="Onderhoud" value={data.maintenance_cost_per_service} />
-            )}
-            {data.tire_cost_per_service > 0 && (
-              <CostDetailRow label="Banden" value={data.tire_cost_per_service} />
+            {data.km_per_service > 0 ? (
+              <>
+                <CostDetailRow
+                  label={`Brandstof (${data.km_per_service} km × €${data.fuel_cost_per_km?.toFixed(3)}/km)`}
+                  value={data.fuel_cost_per_service}
+                />
+                {data.maintenance_cost_per_service > 0 && (
+                  <CostDetailRow label="Onderhoud" value={data.maintenance_cost_per_service} />
+                )}
+                {data.tire_cost_per_service > 0 && (
+                  <CostDetailRow label="Banden" value={data.tire_cost_per_service} />
+                )}
+              </>
+            ) : (
+              <p className="text-xs text-slate-400 italic">Geen ritafstand bekend – variabele kosten zijn €0,00</p>
             )}
 
             <div className="pt-2 border-t border-slate-200 mt-2">
@@ -274,8 +280,33 @@ export default function RoutePersonnelCosts({ route }) {
                 </div>
               </div>
             ) : <div />}
-
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => calculate(activeWeekday, true)}
+              disabled={loading}
+              className="text-slate-500 gap-1.5"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Herberekenen
+            </Button>
           </div>
+          {data && (
+            <div className="space-y-1">
+              <p className="text-xs text-slate-500">
+                <span className="font-medium">{WEEKDAY_LABELS[activeWeekday]}</span>
+                {" · "}Dienst <span className="font-medium">{data.start_time}–{data.end_time}</span>
+                {data.alarm_standby
+                  ? <span className="ml-1 text-amber-600 font-medium">· 🚨 Alarmdienst t/m {data.planned_end_time}</span>
+                  : <span className="ml-1 text-slate-400">(gepland t/m {data.planned_end_time})</span>
+                }
+                <span className="ml-1 text-slate-400">· {data.total_surveillants} surveillanten</span>
+              </p>
+              {data.actual_shift_note && (
+                <p className="text-xs text-blue-600">ℹ️ {data.actual_shift_note}</p>
+              )}
+            </div>
+          )}
           {!data && !loading && !error && (
             <p className="text-xs text-slate-400">Berekening wordt geladen...</p>
           )}
@@ -295,7 +326,12 @@ export default function RoutePersonnelCosts({ route }) {
           <span><strong>Alarmdienst actief:</strong> de volledige tijd van {data.start_time} tot {data.end_time} wordt als diensttijd meegerekend in de kosten.</span>
         </div>
       )}
-
+      {data && !loading && !data.alarm_standby && data.actual_shift_note && (
+        <div className="flex items-center gap-2 p-3 bg-blue-50 border border-blue-200 rounded-lg text-sm text-blue-800">
+          <span>ℹ️</span>
+          <span>{data.actual_shift_note}</span>
+        </div>
+      )}
 
       {data && !loading && data.vehicle_costs && (
         <VehicleCostCard data={data.vehicle_costs} />
