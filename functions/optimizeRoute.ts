@@ -190,11 +190,15 @@ Deno.serve(async (req) => {
       
       if (data.status === 'OK' && data.routes && data.routes.length > 0) {
         let routeDuration = 0;
+        let routeDistance = 0;
         (data.routes[0].legs || []).forEach(leg => {
           routeDuration += leg.duration.value;
+          routeDistance += leg.distance.value;
         });
         const travelMinutes = Math.round(routeDuration / 60);
+        const distanceKm = Math.round(routeDistance / 100) / 10;
         totalTravelTime += travelMinutes;
+        totalDistanceKm += distanceKm;
         
         const arrivalTimeAtEnd = currentTime + travelMinutes;
         
@@ -208,6 +212,7 @@ Deno.serve(async (req) => {
           time_window_end: route.time_window_end || '23:59',
           is_end: true,
           travel_time_minutes: travelMinutes,
+          distance_km: distanceKm,
           arrival_time: formatMinutesToTime(arrivalTimeAtEnd)
         });
       }
