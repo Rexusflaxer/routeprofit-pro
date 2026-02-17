@@ -178,24 +178,36 @@ export default function RoutePersonnelCosts({ route }) {
       {/* Dag selectie + dienst info */}
       <Card>
         <CardContent className="pt-5 pb-4">
-          {(route.weekdays || []).length > 1 && (
-            <div className="flex flex-wrap items-center gap-3 mb-3">
-              <span className="text-sm font-medium text-slate-700">Loonkosten voor:</span>
-              <div className="flex flex-wrap gap-2">
-                {(route.weekdays || []).map(day => (
-                  <Button
-                    key={day}
-                    size="sm"
-                    variant={activeWeekday === day ? "default" : "outline"}
-                    onClick={() => setSelectedWeekday(day)}
-                    className={activeWeekday === day ? "bg-slate-900" : ""}
-                  >
-                    {WEEKDAY_LABELS[day]}
-                  </Button>
-                ))}
+          <div className="flex flex-wrap items-center justify-between gap-3 mb-3">
+            {(route.weekdays || []).length > 1 ? (
+              <div className="flex flex-wrap items-center gap-3">
+                <span className="text-sm font-medium text-slate-700">Loonkosten voor:</span>
+                <div className="flex flex-wrap gap-2">
+                  {(route.weekdays || []).map(day => (
+                    <Button
+                      key={day}
+                      size="sm"
+                      variant={activeWeekday === day ? "default" : "outline"}
+                      onClick={() => setSelectedWeekday(day)}
+                      className={activeWeekday === day ? "bg-slate-900" : ""}
+                    >
+                      {WEEKDAY_LABELS[day]}
+                    </Button>
+                  ))}
+                </div>
               </div>
-            </div>
-          )}
+            ) : <div />}
+            <Button
+              size="sm"
+              variant="outline"
+              onClick={() => calculate(activeWeekday, true)}
+              disabled={loading}
+              className="text-slate-500 gap-1.5"
+            >
+              <RefreshCw className={`w-3.5 h-3.5 ${loading ? 'animate-spin' : ''}`} />
+              Herberekenen
+            </Button>
+          </div>
           {data && (
             <div className="space-y-1">
               <p className="text-xs text-slate-500">
