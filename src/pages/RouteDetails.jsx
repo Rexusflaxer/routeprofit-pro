@@ -306,7 +306,7 @@ export default function RouteDetails() {
             <TabsList className="grid w-full grid-cols-3">
                 <TabsTrigger value="overview">Overzicht</TabsTrigger>
                 <TabsTrigger value="optimization">Routeoptimalisatie</TabsTrigger>
-                <TabsTrigger value="costs">Personeelskosten</TabsTrigger>
+                <TabsTrigger value="costs">Kosten</TabsTrigger>
               </TabsList>
 
             <TabsContent value="overview" className="space-y-6 mt-6">
