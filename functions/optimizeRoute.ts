@@ -81,6 +81,7 @@ Deno.serve(async (req) => {
     );
     
     let totalTravelTime = 0;
+    let totalDistanceKm = 0;
     let currentTime = parseTimeToMinutes(route.time_window_start || '00:00');
     
     // Als startlocatie niet een taak is, voeg startpunt toe voor visuele weergave
