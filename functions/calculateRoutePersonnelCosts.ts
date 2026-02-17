@@ -154,7 +154,32 @@ Deno.serve(async (req) => {
     const targetWeekday = weekday || route.weekdays?.[0] || 1;
     const shiftDate = getNextDateForWeekday(targetWeekday);
     const startTime = route.time_window_start || '08:00';
-    const endTime = route.time_window_end || '17:00';
+    const plannedEndTime = route.time_window_end || '17:00';
+
+    // Als alarmdienst aan staat loopt de dienst altijd door tot time_window_end.
+    // Anders: bereken de werkelijke routeduur via optimizeRoute-logica (via opgeslagen total_route_time).
+    // We benaderen de werkelijke eindtijd op basis van de opgeslagen total_route_minutes of
+    // de optimalisatieberekening. Voor kostenberekening gebruiken we de werkelijke diensttijd.
+    let endTime = plannedEndTime;
+    let actualShiftNote = null;
+
+    if (!route.alarm_standby) {
+      // Dienst eindigt op basis van werkelijke routetijd
+      const routeStartMinutes = timeToMinutes(startTime);
+      // Gebruik opgeslagen total_route_minutes als beschikbaar, anders planned window
+      const routeDuration = route.total_route_minutes || 
+        (timeToMinutes(plannedEndTime) - routeStartMinutes);
+      const actualEndMinutes = routeStartMinutes + routeDuration;
+      const plannedEndMinutes = timeToMinutes(plannedEndTime);
+      
+      if (actualEndMinutes < plannedEndMinutes) {
+        endTime = minutesToTime(actualEndMinutes);
+        actualShiftNote = `Route eindigt ${plannedEndMinutes - actualEndMinutes} min eerder dan gepland (${endTime} i.p.v. ${plannedEndTime})`;
+      } else if (actualEndMinutes > plannedEndMinutes) {
+        endTime = minutesToTime(actualEndMinutes);
+        actualShiftNote = `Route loopt ${actualEndMinutes - plannedEndMinutes} min uit (${endTime} i.p.v. ${plannedEndTime})`;
+      }
+    }
 
     const allPersonnel = await base44.entities.Personnel.list();
     const surveillants = allPersonnel.filter(p => p.function_type === 'surveillant' && p.is_active !== false);
