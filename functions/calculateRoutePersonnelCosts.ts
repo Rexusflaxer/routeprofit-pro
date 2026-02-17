@@ -234,6 +234,107 @@ Deno.serve(async (req) => {
       count
     };
 
+    // --- Voertuigkosten berekening ---
+    let vehicleCosts = null;
+    if (route.vehicle_id) {
+      const vehicles = await base44.entities.Vehicle.list();
+      const vehicle = vehicles.find(v => v.id === route.vehicle_id);
+
+      if (vehicle) {
+        // Aantal routes dat dit voertuig gebruikt
+        const routesWithVehicle = routes.filter(r => r.vehicle_id === route.vehicle_id);
+
+        // Aantal diensten per week voor dit voertuig (som over alle routes van hun weekdays.length)
+        const totalServicesPerWeek = routesWithVehicle.reduce((sum, r) => sum + (r.weekdays?.length || 1), 0);
+        const totalServicesPerYear = totalServicesPerWeek * 52;
+
+        // Afschrijving/kapitaalkosten per jaar
+        let depreciationPerYear = 0;
+        let depreciationLabel = '';
+        if (vehicle.acquisition_type === 'lease' || vehicle.acquisition_type === 'private_lease') {
+          depreciationPerYear = (vehicle.monthly_lease_cost || 0) * 12;
+          depreciationLabel = `Leasekosten (€${(vehicle.monthly_lease_cost || 0).toFixed(2)}/mnd × 12)`;
+        } else if (vehicle.acquisition_type === 'banklening') {
+          depreciationPerYear = (vehicle.monthly_loan_payment || 0) * 12;
+          depreciationLabel = `Aflossing banklening (€${(vehicle.monthly_loan_payment || 0).toFixed(2)}/mnd × 12)`;
+        } else {
+          // aankoop: afschrijving = (aankoopprijs - restwaarde) / jaren
+          const purchase = vehicle.purchase_price || 0;
+          const residual = vehicle.residual_value || 0;
+          const years = vehicle.depreciation_years || 5;
+          depreciationPerYear = (purchase - residual) / years;
+          depreciationLabel = `Afschrijving ((€${purchase.toFixed(2)} - €${residual.toFixed(2)}) / ${years} jaar)`;
+        }
+
+        // Variabele kosten per km
+        const kmPerService = route.total_distance_km || 0;
+        const fuelCostPerService = kmPerService * (vehicle.fuel_cost_per_km || 0);
+
+        // Onderhoud per dienst
+        let maintenanceCostPerService = 0;
+        let maintenanceCostPerYear = 0;
+        if (vehicle.maintenance_type === 'per_km') {
+          maintenanceCostPerService = kmPerService * (vehicle.maintenance_cost || 0);
+          maintenanceCostPerYear = maintenanceCostPerService * totalServicesPerYear;
+        } else if (vehicle.maintenance_type === 'per_year') {
+          maintenanceCostPerYear = vehicle.maintenance_cost || 0;
+          maintenanceCostPerService = totalServicesPerYear > 0 ? maintenanceCostPerYear / totalServicesPerYear : 0;
+        } else if (vehicle.maintenance_type === 'per_month') {
+          maintenanceCostPerYear = (vehicle.maintenance_cost || 0) * 12;
+          maintenanceCostPerService = totalServicesPerYear > 0 ? maintenanceCostPerYear / totalServicesPerYear : 0;
+        } else if (vehicle.maintenance_type === 'per_quarter') {
+          maintenanceCostPerYear = (vehicle.maintenance_cost || 0) * 4;
+          maintenanceCostPerService = totalServicesPerYear > 0 ? maintenanceCostPerYear / totalServicesPerYear : 0;
+        }
+
+        // Banden per dienst
+        let tireCostPerService = 0;
+        let tireCostPerYear = 0;
+        if (vehicle.tire_type === 'per_km') {
+          tireCostPerService = kmPerService * (vehicle.tire_cost || 0);
+          tireCostPerYear = tireCostPerService * totalServicesPerYear;
+        } else if (vehicle.tire_type === 'per_year') {
+          tireCostPerYear = vehicle.tire_cost || 0;
+          tireCostPerService = totalServicesPerYear > 0 ? tireCostPerYear / totalServicesPerYear : 0;
+        } else if (vehicle.tire_type === 'per_month') {
+          tireCostPerYear = (vehicle.tire_cost || 0) * 12;
+          tireCostPerService = totalServicesPerYear > 0 ? tireCostPerYear / totalServicesPerYear : 0;
+        } else if (vehicle.tire_type === 'per_quarter') {
+          tireCostPerYear = (vehicle.tire_cost || 0) * 4;
+          tireCostPerService = totalServicesPerYear > 0 ? tireCostPerYear / totalServicesPerYear : 0;
+        }
+
+        // Verzekering per dienst
+        const insurancePerYear = (vehicle.insurance_per_month || 0) * 12;
+        const insuranceCostPerService = totalServicesPerYear > 0 ? insurancePerYear / totalServicesPerYear : 0;
+
+        // Afschrijving per dienst (gedeeld door alle routes + diensten per jaar)
+        const depreciationPerService = totalServicesPerYear > 0 ? depreciationPerYear / totalServicesPerYear : 0;
+
+        const totalPerService = r2(depreciationPerService + fuelCostPerService + maintenanceCostPerService + tireCostPerService + insuranceCostPerService);
+
+        vehicleCosts = {
+          vehicle_id: vehicle.id,
+          vehicle_label: `${vehicle.brand || ''} ${vehicle.model || ''} (${vehicle.license_plate})`.trim(),
+          acquisition_type: vehicle.acquisition_type,
+          km_per_service: r2(kmPerService),
+          total_services_per_week: totalServicesPerWeek,
+          total_services_per_year: totalServicesPerYear,
+          routes_with_vehicle: routesWithVehicle.length,
+          depreciation_per_year: r2(depreciationPerYear),
+          depreciation_label: depreciationLabel,
+          depreciation_per_service: r2(depreciationPerService),
+          fuel_cost_per_service: r2(fuelCostPerService),
+          fuel_cost_per_km: vehicle.fuel_cost_per_km || 0,
+          maintenance_cost_per_service: r2(maintenanceCostPerService),
+          tire_cost_per_service: r2(tireCostPerService),
+          insurance_per_year: r2(insurancePerYear),
+          insurance_per_service: r2(insuranceCostPerService),
+          total_per_service: totalPerService
+        };
+      }
+    }
+
     const resultPayload = {
       shift_date: shiftDate, weekday: targetWeekday,
       start_time: startTime, end_time: endTime,
@@ -242,7 +343,8 @@ Deno.serve(async (req) => {
       actual_shift_note: actualShiftNote,
       total_surveillants: count,
       most_expensive: mostExpensive, cheapest, average,
-      all_personnel: results
+      all_personnel: results,
+      vehicle_costs: vehicleCosts
     };
 
     // Sla gecachte resultaten op in de route
