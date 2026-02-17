@@ -303,10 +303,11 @@ export default function RouteDetails() {
         <>
           {/* Tabs */}
           <Tabs value={activeTab} onValueChange={setActiveTab}>
-            <TabsList className="grid w-full grid-cols-2">
-              <TabsTrigger value="overview">Overzicht</TabsTrigger>
-              <TabsTrigger value="optimization">Routeoptimalisatie</TabsTrigger>
-            </TabsList>
+            <TabsList className="grid w-full grid-cols-3">
+                <TabsTrigger value="overview">Overzicht</TabsTrigger>
+                <TabsTrigger value="optimization">Routeoptimalisatie</TabsTrigger>
+                <TabsTrigger value="costs">Personeelskosten</TabsTrigger>
+              </TabsList>
 
             <TabsContent value="overview" className="space-y-6 mt-6">
               {/* Overzicht kaarten */}
