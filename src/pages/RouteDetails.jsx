@@ -555,7 +555,7 @@ export default function RouteDetails() {
                               <div className="flex items-center gap-2 px-3 py-1 bg-blue-100 rounded-full">
                                 <Navigation className="w-3 h-3 text-blue-600" />
                                 <span className="text-xs font-medium text-blue-700">
-                                  Reistijd: {item.travel_time_minutes} min
+                                  Reistijd: {item.travel_time_minutes} min{item.distance_km ? ` · ${item.distance_km} km` : ''}
                                 </span>
                               </div>
                             </div>
