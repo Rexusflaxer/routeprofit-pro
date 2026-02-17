@@ -182,74 +182,26 @@ Deno.serve(async (req) => {
       currentLocation = nearestTask;
     }
 
-    // Voeg eindlocatie toe als die anders is
-    if (endLocation && currentLocation.object_id !== endLocation.id) {
-      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${currentLocation.longitude},${currentLocation.latitude}&destination=${endLocation.longitude},${endLocation.latitude}&key=${googleMapsApiKey}`;
-      const response = await fetch(url);
-      const data = await response.json();
-      
-      if (data.status === 'OK' && data.routes && data.routes.length > 0) {
-        let routeDuration = 0;
-        let routeDistance = 0;
-        (data.routes[0].legs || []).forEach(leg => {
-          routeDuration += leg.duration.value;
-          routeDistance += leg.distance.value;
-        });
-        const travelMinutes = Math.round(routeDuration / 60);
-        const distanceKm = Math.round(routeDistance / 100) / 10;
-        totalTravelTime += travelMinutes;
-        totalDistanceKm += distanceKm;
-        
-        const arrivalTimeAtEnd = currentTime + travelMinutes;
-        
-        optimizedOrder.push({
-          name: `EIND: ${endLocation.name}`,
-          address: endLocation.address,
-          latitude: endLocation.latitude,
-          longitude: endLocation.longitude,
-          duration_minutes: 0,
-          time_window_start: route.time_window_start || '00:00',
-          time_window_end: route.time_window_end || '23:59',
-          is_end: true,
-          travel_time_minutes: travelMinutes,
-          distance_km: distanceKm,
-          arrival_time: formatMinutesToTime(arrivalTimeAtEnd)
-        });
-      }
-    }
-
     const totalServiceTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + t.duration_minutes, 0);
     const totalWaitingTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + (t.waiting_time || 0), 0);
 
     const routeEndMinutes = parseTimeToMinutes(route.time_window_end || '23:59');
     const alarmStandby = !!route.alarm_standby;
 
-    // Determine actual shift end time
     let actualShiftEndMinutes;
     let alarmAfterRoute = 0;
-    let alarmBetweenStops = 0; // already counted in totalWaitingTime when alarm_standby
+    let alarmBetweenStops = 0;
 
     if (alarmStandby) {
-      // Shift always runs until time_window_end
       actualShiftEndMinutes = routeEndMinutes;
-      // Extra alarm time after route finished
       alarmAfterRoute = Math.max(0, routeEndMinutes - currentTime);
-      alarmBetweenStops = totalWaitingTime; // waiting = alarm time between stops
+      alarmBetweenStops = totalWaitingTime;
     } else {
-      // Shift ends when route finishes (currentTime = departure of last stop or end location arrival)
       actualShiftEndMinutes = currentTime;
-      alarmAfterRoute = 0;
-      alarmBetweenStops = 0;
     }
 
-    const plannedWindowMinutes = routeEndMinutes - parseTimeToMinutes(route.time_window_start || '00:00');
-    const actualShiftMinutes = actualShiftEndMinutes - parseTimeToMinutes(route.time_window_start || '00:00');
-    const finishedEarly = !alarmStandby && currentTime < routeEndMinutes;
-    const finishedLate = currentTime > routeEndMinutes;
-
-    const totalRouteTime = totalServiceTime + totalTravelTime + (alarmStandby ? totalWaitingTime : 0) + alarmAfterRoute;
-
-    // Add alarm standby block at the end if applicable
+    // Volgorde: laatste taak → alarmdienst (indien van toepassing) → eindstop
+    // Alarmdienst blok invoegen VOOR de eindstop
     if (alarmStandby && alarmAfterRoute > 0) {
       optimizedOrder.push({
         is_alarm_standby: true,
@@ -259,6 +211,63 @@ Deno.serve(async (req) => {
         departure_time: formatMinutesToTime(routeEndMinutes),
       });
     }
+
+    // Voeg eindlocatie toe als die anders is (na alarmdienst, zonder reistijd als alarmdienst actief)
+    if (endLocation && currentLocation.object_id !== endLocation.id) {
+      if (alarmStandby) {
+        // Bij alarmdienst: eindstop wordt bereikt aan het einde van de alarmdienst, geen extra reistijd
+        optimizedOrder.push({
+          name: `EIND: ${endLocation.name}`,
+          address: endLocation.address,
+          latitude: endLocation.latitude,
+          longitude: endLocation.longitude,
+          duration_minutes: 0,
+          is_end: true,
+          travel_time_minutes: 0,
+          distance_km: 0,
+          arrival_time: formatMinutesToTime(routeEndMinutes)
+        });
+      } else {
+        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${currentLocation.longitude},${currentLocation.latitude}&destination=${endLocation.longitude},${endLocation.latitude}&key=${googleMapsApiKey}`;
+        const response = await fetch(url);
+        const data = await response.json();
+        
+        if (data.status === 'OK' && data.routes && data.routes.length > 0) {
+          let routeDuration = 0;
+          let routeDistance = 0;
+          (data.routes[0].legs || []).forEach(leg => {
+            routeDuration += leg.duration.value;
+            routeDistance += leg.distance.value;
+          });
+          const travelMinutes = Math.round(routeDuration / 60);
+          const distanceKm = Math.round(routeDistance / 100) / 10;
+          totalTravelTime += travelMinutes;
+          totalDistanceKm += distanceKm;
+          
+          const arrivalTimeAtEnd = currentTime + travelMinutes;
+          actualShiftEndMinutes = arrivalTimeAtEnd;
+
+          optimizedOrder.push({
+            name: `EIND: ${endLocation.name}`,
+            address: endLocation.address,
+            latitude: endLocation.latitude,
+            longitude: endLocation.longitude,
+            duration_minutes: 0,
+            is_end: true,
+            travel_time_minutes: travelMinutes,
+            distance_km: distanceKm,
+            arrival_time: formatMinutesToTime(arrivalTimeAtEnd)
+          });
+        }
+      }
+    }
+
+    const plannedWindowMinutes = routeEndMinutes - parseTimeToMinutes(route.time_window_start || '00:00');
+    const actualShiftMinutes = actualShiftEndMinutes - parseTimeToMinutes(route.time_window_start || '00:00');
+    const finishedEarly = !alarmStandby && currentTime < routeEndMinutes;
+    const finishedLate = currentTime > routeEndMinutes;
+
+    const totalRouteTime = totalServiceTime + totalTravelTime + (alarmStandby ? totalWaitingTime : 0) + alarmAfterRoute;
 
     return Response.json({
       optimized_order: optimizedOrder,
