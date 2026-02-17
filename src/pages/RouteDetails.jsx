@@ -387,7 +387,7 @@ export default function RouteDetails() {
                     <span className="text-sm text-slate-500">Berekenen...</span>
                   </div>
                 ) : (
-                  <p className="text-2xl font-bold">{avgTravelMinutes} min</p>
+                  <p className="text-2xl font-bold">{formatMinutes(avgTravelMinutes)}</p>
                 )}
               </CardContent>
             </Card>
