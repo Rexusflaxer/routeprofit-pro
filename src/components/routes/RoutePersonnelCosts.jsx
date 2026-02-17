@@ -166,11 +166,11 @@ export default function RoutePersonnelCosts({ route }) {
 
   return (
     <div className="space-y-6">
-      {/* Dag selectie */}
-      {(route.weekdays || []).length > 1 && (
-        <Card>
-          <CardContent className="pt-5 pb-4">
-            <div className="flex flex-wrap items-center gap-3">
+      {/* Dag selectie + dienst info */}
+      <Card>
+        <CardContent className="pt-5 pb-4">
+          {(route.weekdays || []).length > 1 && (
+            <div className="flex flex-wrap items-center gap-3 mb-3">
               <span className="text-sm font-medium text-slate-700">Loonkosten voor:</span>
               <div className="flex flex-wrap gap-2">
                 {(route.weekdays || []).map(day => (
@@ -186,21 +186,28 @@ export default function RoutePersonnelCosts({ route }) {
                 ))}
               </div>
             </div>
-            {data && (
-              <div className="mt-2 space-y-1">
-                <p className="text-xs text-slate-400">
-                  Dienst {data.start_time}–{data.end_time}
-                  {data.alarm_standby && <span className="ml-1 text-amber-600 font-medium">· 🚨 Alarmdienst t/m {data.planned_end_time}</span>}
-                  <span className="ml-1">· {data.total_surveillants} surveillanten</span>
-                </p>
-                {data.actual_shift_note && (
-                  <p className="text-xs text-blue-600">{data.actual_shift_note}</p>
-                )}
-              </div>
-            )}
-          </CardContent>
-        </Card>
-      )}
+          )}
+          {data && (
+            <div className="space-y-1">
+              <p className="text-xs text-slate-500">
+                <span className="font-medium">{WEEKDAY_LABELS[activeWeekday]}</span>
+                {" · "}Dienst <span className="font-medium">{data.start_time}–{data.end_time}</span>
+                {data.alarm_standby
+                  ? <span className="ml-1 text-amber-600 font-medium">· 🚨 Alarmdienst t/m {data.planned_end_time}</span>
+                  : <span className="ml-1 text-slate-400">(gepland t/m {data.planned_end_time})</span>
+                }
+                <span className="ml-1 text-slate-400">· {data.total_surveillants} surveillanten</span>
+              </p>
+              {data.actual_shift_note && (
+                <p className="text-xs text-blue-600">ℹ️ {data.actual_shift_note}</p>
+              )}
+            </div>
+          )}
+          {!data && !loading && !error && (
+            <p className="text-xs text-slate-400">Berekening wordt geladen...</p>
+          )}
+        </CardContent>
+      </Card>
 
       {error && (
         <div className="flex items-center gap-2 p-4 bg-red-50 border border-red-200 rounded-lg text-sm text-red-700">
