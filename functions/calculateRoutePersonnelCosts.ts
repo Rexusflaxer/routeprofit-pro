@@ -336,6 +336,17 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Binnendienst kosten berekenen (vaste kosten, per dienst op basis van wekelijkse diensten)
+    const binnendienstResults = binnendienst.map(p => {
+      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig);
+      return {
+        personnel_id: p.id, name: p.name,
+        employee_type: p.employee_type, contract_type: p.contract_type,
+        cao: p.cao, cao_scale: p.cao_scale, cao_period: p.cao_period,
+        ...cost
+      };
+    });
+
     const resultPayload = {
       shift_date: shiftDate, weekday: targetWeekday,
       start_time: startTime, end_time: endTime,
@@ -345,6 +356,7 @@ Deno.serve(async (req) => {
       total_surveillants: count,
       most_expensive: mostExpensive, cheapest, average,
       all_personnel: results,
+      binnendienst: binnendienstResults,
       vehicle_costs: vehicleCosts
     };
 
