@@ -333,6 +333,10 @@ export default function RoutePersonnelCosts({ route }) {
         </div>
       )}
 
+      {data && !loading && data.vehicle_costs && (
+        <VehicleCostCard data={data.vehicle_costs} />
+      )}
+
       {data && !loading && (
         <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
           <PersonnelCostCard
