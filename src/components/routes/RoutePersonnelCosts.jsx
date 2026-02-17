@@ -10,6 +10,14 @@ const WEEKDAY_LABELS = {
   5: "Vrijdag", 6: "Zaterdag", 7: "Zondag"
 };
 
+function formatMinutes(minutes) {
+  if (!minutes && minutes !== 0) return "–";
+  if (minutes < 60) return `${minutes} min`;
+  const h = Math.floor(minutes / 60);
+  const m = minutes % 60;
+  return m > 0 ? `${h}u ${m}min` : `${h}u`;
+}
+
 function CostDetailRow({ label, value, highlight }) {
   return (
     <div className={`flex justify-between items-center text-sm py-1 ${highlight ? "font-semibold" : ""}`}>
