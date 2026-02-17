@@ -220,7 +220,45 @@ Deno.serve(async (req) => {
 
     const totalServiceTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + t.duration_minutes, 0);
     const totalWaitingTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + (t.waiting_time || 0), 0);
-    const totalRouteTime = totalServiceTime + totalTravelTime + totalWaitingTime;
+
+    const routeEndMinutes = parseTimeToMinutes(route.time_window_end || '23:59');
+    const alarmStandby = !!route.alarm_standby;
+
+    // Determine actual shift end time
+    let actualShiftEndMinutes;
+    let alarmAfterRoute = 0;
+    let alarmBetweenStops = 0; // already counted in totalWaitingTime when alarm_standby
+
+    if (alarmStandby) {
+      // Shift always runs until time_window_end
+      actualShiftEndMinutes = routeEndMinutes;
+      // Extra alarm time after route finished
+      alarmAfterRoute = Math.max(0, routeEndMinutes - currentTime);
+      alarmBetweenStops = totalWaitingTime; // waiting = alarm time between stops
+    } else {
+      // Shift ends when route finishes (currentTime = departure of last stop or end location arrival)
+      actualShiftEndMinutes = currentTime;
+      alarmAfterRoute = 0;
+      alarmBetweenStops = 0;
+    }
+
+    const plannedWindowMinutes = routeEndMinutes - parseTimeToMinutes(route.time_window_start || '00:00');
+    const actualShiftMinutes = actualShiftEndMinutes - parseTimeToMinutes(route.time_window_start || '00:00');
+    const finishedEarly = !alarmStandby && currentTime < routeEndMinutes;
+    const finishedLate = currentTime > routeEndMinutes;
+
+    const totalRouteTime = totalServiceTime + totalTravelTime + (alarmStandby ? totalWaitingTime : 0) + alarmAfterRoute;
+
+    // Add alarm standby block at the end if applicable
+    if (alarmStandby && alarmAfterRoute > 0) {
+      optimizedOrder.push({
+        is_alarm_standby: true,
+        name: 'Alarmdienst',
+        duration_minutes: alarmAfterRoute,
+        arrival_time: formatMinutesToTime(currentTime),
+        departure_time: formatMinutesToTime(routeEndMinutes),
+      });
+    }
 
     return Response.json({
       optimized_order: optimizedOrder,
@@ -228,7 +266,15 @@ Deno.serve(async (req) => {
       total_distance_km: Math.round(totalDistanceKm * 10) / 10,
       total_service_time: totalServiceTime,
       total_waiting_time: totalWaitingTime,
+      total_alarm_standby_time: alarmAfterRoute + (alarmStandby ? alarmBetweenStops : 0),
       total_route_time: totalRouteTime,
+      actual_shift_minutes: actualShiftMinutes,
+      planned_window_minutes: plannedWindowMinutes,
+      finished_early: finishedEarly,
+      finished_late: finishedLate,
+      early_by_minutes: finishedEarly ? routeEndMinutes - currentTime : 0,
+      late_by_minutes: finishedLate ? currentTime - routeEndMinutes : 0,
+      alarm_standby: alarmStandby,
       tasks_optimized: visited.size,
       tasks_skipped: taskObjects.length - visited.size
     });
