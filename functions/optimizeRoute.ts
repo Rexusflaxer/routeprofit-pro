@@ -120,28 +120,28 @@ Deno.serve(async (req) => {
         const data = await response.json();
 
         if (data.status === 'OK' && data.routes && data.routes.length > 0) {
-          const route = data.routes[0];
+          const routeData = data.routes[0];
           let routeDuration = 0;
+          let routeDistance = 0;
 
-          (route.legs || []).forEach(leg => {
+          (routeData.legs || []).forEach(leg => {
             routeDuration += leg.duration.value; // in seconds
+            routeDistance += leg.distance.value; // in meters
           });
 
           const travelMinutes = Math.round(routeDuration / 60);
+          const distanceKm = Math.round(routeDistance / 100) / 10;
           const arrivalTime = currentTime + travelMinutes;
 
           // Check of we op tijd kunnen aankomen
           if (arrivalTime <= taskEndMinutes) {
-            // Start tijd is de latere van: aankomsttijd of begin tijdvenster
-            const startTime = Math.max(arrivalTime, taskStartMinutes);
-            
-            // Score gebaseerd op reistijd (lagere is beter)
             const score = travelMinutes;
 
             if (score < shortestTime) {
               shortestTime = score;
               nearestTask = task;
               travelTime = travelMinutes;
+              nearestTask = { ...task, _distance_km: distanceKm };
             }
           }
         }
