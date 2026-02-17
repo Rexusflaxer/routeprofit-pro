@@ -209,12 +209,14 @@ Deno.serve(async (req) => {
     }
 
     const totalServiceTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + t.duration_minutes, 0);
-    const totalRouteTime = totalServiceTime + totalTravelTime;
+    const totalWaitingTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + (t.waiting_time || 0), 0);
+    const totalRouteTime = totalServiceTime + totalTravelTime + totalWaitingTime;
 
     return Response.json({
       optimized_order: optimizedOrder,
       total_travel_time: totalTravelTime,
       total_service_time: totalServiceTime,
+      total_waiting_time: totalWaitingTime,
       total_route_time: totalRouteTime,
       tasks_optimized: visited.size,
       tasks_skipped: taskObjects.length - visited.size
