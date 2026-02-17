@@ -10,6 +10,7 @@ import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
 import RouteBuilder from "../components/routes/RouteBuilder";
 import AddTaskDialog from "../components/routes/AddTaskDialog";
+import RoutePersonnelCosts from "../components/routes/RoutePersonnelCosts";
 import { AnimatePresence, motion } from "framer-motion";
 
 const WEEKDAY_LABELS = {
