@@ -187,9 +187,16 @@ export default function RoutePersonnelCosts({ route }) {
               </div>
             </div>
             {data && (
-              <p className="text-xs text-slate-400 mt-2">
-                Dienst {data.start_time}–{data.end_time} · {data.total_surveillants} surveillanten meegenomen
-              </p>
+              <div className="mt-2 space-y-1">
+                <p className="text-xs text-slate-400">
+                  Dienst {data.start_time}–{data.end_time}
+                  {data.alarm_standby && <span className="ml-1 text-amber-600 font-medium">· 🚨 Alarmdienst t/m {data.planned_end_time}</span>}
+                  <span className="ml-1">· {data.total_surveillants} surveillanten</span>
+                </p>
+                {data.actual_shift_note && (
+                  <p className="text-xs text-blue-600">{data.actual_shift_note}</p>
+                )}
+              </div>
             )}
           </CardContent>
         </Card>
