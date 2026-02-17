@@ -91,12 +91,17 @@ export default function RouteDetails() {
 
         // Bereken route optimalisatie
         const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: routeId });
-        return optimizationResponse.data;
+        const optData = optimizationResponse.data;
+        if (optData?.actual_shift_minutes !== undefined) {
+          await base44.entities.Route.update(routeId, { total_route_minutes: optData.actual_shift_minutes });
+        }
+        return optData;
       } else {
         // Geen taken meer, reset statistieken
         await base44.entities.Route.update(routeId, {
           avg_travel_minutes: 0,
-          total_distance_km: 0
+          total_distance_km: 0,
+          total_route_minutes: 0
         });
         return null;
       }
