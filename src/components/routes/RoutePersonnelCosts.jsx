@@ -3,7 +3,7 @@ import { base44 } from "@/api/base44Client";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Users, ChevronDown, ChevronUp, TrendingUp, TrendingDown, BarChart2, Loader2, AlertCircle, RefreshCw } from "lucide-react";
+import { Users, ChevronDown, ChevronUp, TrendingUp, TrendingDown, BarChart2, Loader2, AlertCircle, RefreshCw, Car } from "lucide-react";
 
 const WEEKDAY_LABELS = {
   1: "Maandag", 2: "Dinsdag", 3: "Woensdag", 4: "Donderdag",
