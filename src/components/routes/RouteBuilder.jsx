@@ -233,6 +233,26 @@ export default function RouteBuilder({ route, vehicles, folders, onSave, onCance
             </p>
           </div>
 
+          {/* Alarmdienst optie */}
+          <div className="flex items-start gap-3 p-4 rounded-lg border border-amber-200 bg-amber-50">
+            <Checkbox
+              id="alarm_standby"
+              checked={!!form.alarm_standby}
+              onCheckedChange={(v) => handleChange("alarm_standby", !!v)}
+              className="mt-0.5"
+            />
+            <div>
+              <label htmlFor="alarm_standby" className="text-sm font-semibold text-amber-900 cursor-pointer">
+                Alarmdienst in overige tijd
+              </label>
+              <p className="text-xs text-amber-700 mt-0.5">
+                Vrije tijd tussen stops én resterende tijd na de route worden meegeteld als alarmdienst. 
+                De dienst loopt door tot het einde van het tijdsvenster ({form.time_window_end || "–"}). 
+                Dit wordt meegenomen in de kostenbepaling.
+              </p>
+            </div>
+          </div>
+
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Opmerkingen</Label>
             <Textarea value={form.notes} onChange={(e) => handleChange("notes", e.target.value)} rows={2} />
