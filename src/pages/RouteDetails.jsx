@@ -528,7 +528,7 @@ export default function RouteDetails() {
                 <div className="space-y-4">
                   <div className="grid grid-cols-3 gap-4 p-4 bg-blue-50 rounded-lg">
                     <div>
-                      <p className="text-xs text-slate-600 mb-1">Totale routetijd</p>
+                      <p className="text-xs text-slate-600 mb-1">Totale geoptimaliseerde routetijd</p>
                       <p className="text-xl font-bold text-blue-700">{optimizedRoute.total_route_time} min</p>
                     </div>
                     <div>
