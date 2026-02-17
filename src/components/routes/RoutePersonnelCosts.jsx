@@ -302,9 +302,6 @@ export default function RoutePersonnelCosts({ route }) {
                 }
                 <span className="ml-1 text-slate-400">· {data.total_surveillants} surveillanten</span>
               </p>
-              {data.actual_shift_note && (
-                <p className="text-xs text-blue-600">ℹ️ {data.actual_shift_note}</p>
-              )}
             </div>
           )}
           {!data && !loading && !error && (
