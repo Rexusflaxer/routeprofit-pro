@@ -232,6 +232,18 @@ export default function RoutePersonnelCosts({ route }) {
 
   const activeWeekday = selectedWeekday || route?.weekdays?.[0];
 
+  // Cache-sleutel op basis van relevante route-eigenschappen die herberekening vereisen
+  const cacheKey = route ? [
+    route.total_distance_km,
+    route.total_route_minutes,
+    route.vehicle_id,
+    route.time_window_start,
+    route.time_window_end,
+    route.alarm_standby,
+    (route.assigned_tasks || []).length,
+    route.personnel_costs_calculated_at,
+  ].join('|') : null;
+
   const calculate = async (weekday, force = false) => {
     setLoading(true);
     setError(null);
@@ -249,12 +261,23 @@ export default function RoutePersonnelCosts({ route }) {
     }
   };
 
-  // Altijd herberekenen zodat actuele km-stand en voertuigkosten worden gebruikt
+  // Herbereken alleen als de cache-sleutel verandert (route/voertuig/personeel wijziging)
+  // of als er nog geen data is voor deze weekdag
   useEffect(() => {
-    if (route?.id && activeWeekday) {
+    if (!route?.id || !activeWeekday) return;
+
+    const cached = route?.cached_personnel_costs?.[activeWeekday];
+    if (cached && data) {
+      // Data is al geladen voor deze weekdag; herbereken alleen als iets relevants veranderd
+      calculate(activeWeekday, true);
+    } else if (cached) {
+      // Gebruik gecachte data, geen herberekening nodig
+      calculate(activeWeekday, false);
+    } else {
+      // Geen cache beschikbaar, bereken vers
       calculate(activeWeekday, true);
     }
-  }, [route?.id, activeWeekday]);
+  }, [route?.id, activeWeekday, cacheKey]);
 
   return (
     <div className="space-y-6">
