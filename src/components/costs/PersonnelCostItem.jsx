@@ -9,7 +9,7 @@ import { PERIOD_OPTIONS, FUNCTION_GROUPS, toMonthlyAmount } from "./CostHelpers"
 const ASSIGN_MODE_LABELS = { group: "Functiegroep", specific: "Specifieke medewerkers" };
 
 export default function PersonnelCostItem({ item, onChange, onDelete, personnelCounts = {}, allPersonnel = [] }) {
-  const [expanded, setExpanded] = useState(false);
+  const [expanded, setExpanded] = useState(item.readonly || false);
 
   const period = item.period || "per_year";
   const costPerPerson = item.cost_per_person || 0;
