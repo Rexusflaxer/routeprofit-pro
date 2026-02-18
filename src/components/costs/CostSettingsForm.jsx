@@ -145,15 +145,27 @@ export default function CostSettingsForm({ settings, onSave }) {
     chauffeur: 0,
   };
 
-  const [form, setForm] = useState(() => ({
-    label: "Standaard",
-    housing_costs: [],
-    software_costs: [],
-    custom_cost_sections: [],
-    personnel_cost_sections: [],
-    admin_salary_per_month: 0,
-    ...settings,
-  }));
+  const DEFAULT_PERSONNEL_SECTION = {
+    id: "default-personnel",
+    section_name: "Personeelsgebonden kosten",
+    items: [],
+  };
+
+  const [form, setForm] = useState(() => {
+    const base = {
+      label: "Standaard",
+      housing_costs: [],
+      software_costs: [],
+      custom_cost_sections: [],
+      personnel_cost_sections: [DEFAULT_PERSONNEL_SECTION],
+      ...settings,
+    };
+    // Zorg altijd voor minimaal 1 personeelssectie
+    if (!base.personnel_cost_sections || base.personnel_cost_sections.length === 0) {
+      base.personnel_cost_sections = [DEFAULT_PERSONNEL_SECTION];
+    }
+    return base;
+  });
 
   // Sync offices -> housing_costs
   useEffect(() => {
@@ -193,7 +205,7 @@ export default function CostSettingsForm({ settings, onSave }) {
         : fg.reduce((a, g) => a + (personnelCounts[g] || 0), 0);
       return ss + toMonthlyAmount((it.cost_per_person || 0) * count, it.period || "per_year");
     }, 0), 0);
-  const grandTotal = housingTotal + softwareTotal + adminTotal + customSectionsTotal + personnelSectionsTotal;
+  const grandTotal = housingTotal + softwareTotal + customSectionsTotal + personnelSectionsTotal;
 
   const addCustomSection = () => setForm(prev => ({
     ...prev,
