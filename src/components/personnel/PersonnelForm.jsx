@@ -240,6 +240,95 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
             </div>
           )}
 
+          {/* Auto van de zaak */}
+          <div className="space-y-4 pt-4 border-t">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold text-slate-700 uppercase tracking-wider flex items-center gap-2">
+                <Car className="w-4 h-4" /> Auto van de zaak
+              </h3>
+              <Switch
+                checked={!!form.company_car_license_plate || !!form._showCarSection}
+                onCheckedChange={(v) => {
+                  if (!v) {
+                    setForm(prev => ({
+                      ...prev,
+                      _showCarSection: false,
+                      company_car_license_plate: "",
+                      company_car_brand: "",
+                      company_car_model: "",
+                      company_car_year: "",
+                      company_car_fiscal_value: "",
+                      company_car_bijtelling_percentage: 16,
+                      company_car_fuel_type: "",
+                      company_car_monthly_lease_cost: "",
+                    }));
+                  } else {
+                    handleChange("_showCarSection", true);
+                  }
+                }}
+              />
+            </div>
+
+            {(form.company_car_license_plate || form._showCarSection) && (
+              <div className="bg-blue-50 rounded-xl p-4 space-y-4 border border-blue-100">
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Kenteken</Label>
+                    <Input value={form.company_car_license_plate || ""} onChange={(e) => handleChange("company_car_license_plate", e.target.value)} placeholder="AB-123-C" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Merk</Label>
+                    <Input value={form.company_car_brand || ""} onChange={(e) => handleChange("company_car_brand", e.target.value)} placeholder="bijv. Volkswagen" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Model</Label>
+                    <Input value={form.company_car_model || ""} onChange={(e) => handleChange("company_car_model", e.target.value)} placeholder="bijv. Golf" />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-600">Bouwjaar</Label>
+                    <Input type="number" value={form.company_car_year || ""} onChange={(e) => handleChange("company_car_year", parseInt(e.target.value) || "")} placeholder="2022" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-600">Brandstof</Label>
+                    <Select value={form.company_car_fuel_type || ""} onValueChange={(v) => handleChange("company_car_fuel_type", v)}>
+                      <SelectTrigger><SelectValue placeholder="Kies..." /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="benzine">Benzine</SelectItem>
+                        <SelectItem value="diesel">Diesel</SelectItem>
+                        <SelectItem value="elektrisch">Elektrisch</SelectItem>
+                        <SelectItem value="hybride">Hybride</SelectItem>
+                        <SelectItem value="lpg">LPG</SelectItem>
+                      </SelectContent>
+                    </Select>
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-600">Cataloguswaarde (€)</Label>
+                    <Input type="number" step="100" value={form.company_car_fiscal_value || ""} onChange={(e) => handleChange("company_car_fiscal_value", parseFloat(e.target.value) || "")} placeholder="48990" />
+                  </div>
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-600">Bijtelling (%)</Label>
+                    <Input type="number" step="0.5" value={form.company_car_bijtelling_percentage ?? 16} onChange={(e) => handleChange("company_car_bijtelling_percentage", parseFloat(e.target.value) || 16)} />
+                  </div>
+                </div>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                  <div className="space-y-2">
+                    <Label className="text-xs text-slate-600">Maandelijkse leasekosten (€)</Label>
+                    <Input type="number" step="0.01" value={form.company_car_monthly_lease_cost || ""} onChange={(e) => handleChange("company_car_monthly_lease_cost", parseFloat(e.target.value) || "")} placeholder="bijv. 690,60" />
+                  </div>
+                  <div className="space-y-2 col-span-1 flex items-end">
+                    {form.company_car_fiscal_value && form.company_car_bijtelling_percentage ? (
+                      <p className="text-xs text-blue-700 bg-blue-100 rounded-lg px-3 py-2">
+                        Fiscale bijtelling: <strong>€{((form.company_car_fiscal_value * form.company_car_bijtelling_percentage / 100) / 12).toFixed(2)}/mnd</strong>
+                      </p>
+                    ) : null}
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
           <div className="flex items-center gap-3 pt-4 border-t">
             <Switch checked={form.is_active} onCheckedChange={(v) => handleChange("is_active", v)} />
             <Label>Actief</Label>
