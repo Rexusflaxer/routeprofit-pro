@@ -59,24 +59,45 @@ function FlexCostList({ items = [], onChange, addLabel = "Toevoegen", placeholde
   );
 }
 
+const PERSONNEL_QUICK_ADD = [
+  "Bedrijfskleding", "PBM (persoonlijke beschermingsmiddelen)", "Opleidingen & certificeringen",
+  "Telefoon / abonnement", "Gereedschap", "EHBO-kosten", "Keuringskosten",
+];
+
 // --- PersonnelCostSection: sectie met personeelsgebonden kosten ---
 function PersonnelCostSection({ section, onChange, onDelete, personnelCounts, allPersonnel }) {
   const [open, setOpen] = useState(true);
+  const isFixed = section.id === "default-personnel";
   const items = section.items || [];
   const secTotal = items.reduce((s, it) => {
-    const fg = it.function_groups || ["all"];
-    const count = fg.includes("all")
-      ? Object.values(personnelCounts).reduce((a, b) => a + b, 0)
-      : fg.reduce((a, g) => a + (personnelCounts[g] || 0), 0);
+    const mode = it.assign_mode || "group";
+    let count;
+    if (mode === "specific") {
+      count = (it.specific_person_ids || []).length;
+    } else {
+      const fg = it.function_groups || ["all"];
+      count = fg.includes("all")
+        ? Object.values(personnelCounts).reduce((a, b) => a + b, 0)
+        : fg.reduce((a, g) => a + (personnelCounts[g] || 0), 0);
+    }
     return s + toMonthlyAmount((it.cost_per_person || 0) * count, it.period || "per_year");
   }, 0);
 
-  const addItem = () => onChange({
+  const addItem = (name = "") => onChange({
     ...section,
-    items: [...items, { id: uid(), name: "", cost_per_person: 0, period: "per_year", assign_mode: "group", function_groups: ["all"], specific_person_ids: [], notes: "", supplier: "" }]
+    items: [...items, { id: uid(), name, cost_per_person: 0, period: "per_year", assign_mode: "group", function_groups: ["all"], specific_person_ids: [], notes: "", supplier: "" }]
   });
   const updateItem = (idx, val) => onChange({ ...section, items: items.map((it, i) => i === idx ? val : it) });
-  const removeItem = (idx) => onChange({ ...section, items: items.filter((_, i) => i !== idx) });
+  const removeItem = (idx) => {
+    if (items[idx]?.readonly) return;
+    onChange({ ...section, items: items.filter((_, i) => i !== idx) });
+  };
+
+  // Quick-add opties: verberg al toegevoegde namen
+  const usedNames = items.map(it => it.name);
+  const quickAddOptions = isFixed
+    ? PERSONNEL_QUICK_ADD.filter(n => !usedNames.includes(n))
+    : [];
 
   return (
     <Card className="border-0 shadow-sm border-l-4 border-l-blue-400">
@@ -84,22 +105,28 @@ function PersonnelCostSection({ section, onChange, onDelete, personnelCounts, al
         <div className="flex items-center justify-between gap-3">
           <div className="flex items-center gap-2 flex-1 cursor-pointer" onClick={() => setOpen(v => !v)}>
             <Users className="w-4 h-4 text-blue-500 flex-shrink-0" />
-            <Input
-              value={section.section_name || ""}
-              onChange={e => onChange({ ...section, section_name: e.target.value })}
-              onClick={e => e.stopPropagation()}
-              className="font-semibold text-sm border-0 shadow-none p-0 h-auto focus-visible:ring-0 bg-transparent"
-              placeholder="Sectienaam personeelskosten..."
-            />
+            {isFixed ? (
+              <span className="font-semibold text-sm text-slate-800">{section.section_name}</span>
+            ) : (
+              <Input
+                value={section.section_name || ""}
+                onChange={e => onChange({ ...section, section_name: e.target.value })}
+                onClick={e => e.stopPropagation()}
+                className="font-semibold text-sm border-0 shadow-none p-0 h-auto focus-visible:ring-0 bg-transparent"
+                placeholder="Sectienaam personeelskosten..."
+              />
+            )}
           </div>
           <div className="flex items-center gap-2">
             <span className="text-sm font-semibold text-slate-700">€{secTotal.toFixed(2)}/mnd</span>
             <Button type="button" size="icon" variant="ghost" className="h-8 w-8 text-slate-400" onClick={() => setOpen(v => !v)}>
               {open ? <ChevronUp className="w-4 h-4" /> : <ChevronDown className="w-4 h-4" />}
             </Button>
-            <Button type="button" size="icon" variant="ghost" className="text-red-400 hover:text-red-600 h-8 w-8" onClick={onDelete}>
-              <Trash2 className="w-4 h-4" />
-            </Button>
+            {!isFixed && (
+              <Button type="button" size="icon" variant="ghost" className="text-red-400 hover:text-red-600 h-8 w-8" onClick={onDelete}>
+                <Trash2 className="w-4 h-4" />
+              </Button>
+            )}
           </div>
         </div>
       </CardHeader>
@@ -125,9 +152,27 @@ function PersonnelCostSection({ section, onChange, onDelete, personnelCounts, al
               allPersonnel={allPersonnel}
             />
           ))}
-          <Button type="button" variant="ghost" size="sm" className="text-slate-500 hover:text-slate-800 text-xs" onClick={addItem}>
-            <Plus className="w-3.5 h-3.5 mr-1" /> Kostenpost toevoegen
-          </Button>
+          {/* Vaste sectie: snelknoppen + vrij toevoegen */}
+          {isFixed ? (
+            <div className="flex flex-wrap gap-2 pt-1">
+              {quickAddOptions.map(name => (
+                <button key={name} type="button"
+                  className="text-xs px-2 py-1 rounded-lg border border-dashed border-blue-200 text-blue-400 hover:border-blue-500 hover:text-blue-600 transition-colors"
+                  onClick={() => addItem(name)}>
+                  + {name}
+                </button>
+              ))}
+              <button type="button"
+                className="text-xs px-2 py-1 rounded-lg border border-dashed border-slate-300 text-slate-400 hover:border-slate-500 hover:text-slate-600 transition-colors"
+                onClick={() => addItem("")}>
+                + Overig toevoegen
+              </button>
+            </div>
+          ) : (
+            <Button type="button" variant="ghost" size="sm" className="text-slate-500 hover:text-slate-800 text-xs" onClick={() => addItem("")}>
+              <Plus className="w-3.5 h-3.5 mr-1" /> Kostenpost toevoegen
+            </Button>
+          )}
         </CardContent>
       )}
     </Card>
