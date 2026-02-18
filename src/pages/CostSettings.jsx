@@ -42,8 +42,8 @@ export default function CostSettings() {
   return (
     <div className="space-y-6">
       <PageHeader
-        title="Kosteninstellingen"
-        subtitle="Voertuig-, kantoor- en vaste kosten beheren"
+        title="Overige kosten"
+        subtitle="Beheer huisvesting, software en overige bedrijfskosten"
       />
       <CostSettingsForm settings={settings[0]} onSave={handleSave} />
     </div>
