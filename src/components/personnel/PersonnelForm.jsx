@@ -556,7 +556,7 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
           </div>
 
           <div className="flex items-center gap-3 pt-4 border-t">
-            <Switch checked={form.is_active} onCheckedChange={(v) => handleChange("is_active", v)} />
+            <Switch checked={form.is_active !== false} onCheckedChange={(v) => handleChange("is_active", v)} />
             <Label>Actief</Label>
           </div>
 
