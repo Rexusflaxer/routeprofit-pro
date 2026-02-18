@@ -150,7 +150,7 @@ export default function CostSettingsForm({ settings, onSave }) {
     id: "default-personnel",
     section_name: "Personeelsgebonden kosten",
     items: [
-      { id: "default-kleding", name: "Bedrijfskleding", cost_per_person: 0, period: "per_year", assign_mode: "group", function_groups: ["all"], specific_person_ids: [], notes: "", supplier: "" },
+      { id: "default-kleding", name: "Bedrijfskleding", cost_per_person: 0, period: "per_year", assign_mode: "group", function_groups: ["all"], specific_person_ids: [], notes: "", supplier: "", readonly: true },
     ],
   };
 
