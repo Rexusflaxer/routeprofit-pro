@@ -715,6 +715,7 @@ export default function RouteDetails() {
             </TabsContent>
 
             <TabsContent value="costs" className="space-y-6 mt-6">
+              <RouteOverheadSummary route={route} allRoutes={routes} costSettings={costSettings[0]} />
               <RoutePersonnelCosts route={route} />
             </TabsContent>
 
