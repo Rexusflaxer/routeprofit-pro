@@ -139,7 +139,7 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
     const depreciation = isAankoop && form.company_car_purchase_price && form.company_car_depreciation_years
       ? ((form.company_car_purchase_price - (form.company_car_residual_value || 0)) / form.company_car_depreciation_years) / 12
       : 0;
-    const fuel = (form.company_car_fuel_cost_per_km || 0) * km;
+    const fuel = (form.company_car_fuel_for_company ?? true) ? (form.company_car_fuel_cost_per_km || 0) * km : 0;
     const maintenanceMnd = form.company_car_maintenance_for_company
       ? toMonthly(form.company_car_maintenance_cost, form.company_car_maintenance_type, form.company_car_maintenance_interval_km, km)
       : 0;
