@@ -31,7 +31,7 @@ const WEEKDAY_LABELS = {
   7: "Zondag",
 };
 
-export default function RouteBuilder({ route, vehicles, folders, onSave, onCancel }) {
+export default function RouteBuilder({ route, vehicles, folders, routes = [], onSave, onCancel }) {
   const [form, setForm] = useState(route || {
     name: "",
     folder_id: "",
@@ -42,6 +42,8 @@ export default function RouteBuilder({ route, vehicles, folders, onSave, onCance
     time_window_end: "",
     weekdays: [],
     notes: "",
+    overhead_cost_ids: [],
+    binnendienst_personnel_ids: [],
   });
 
   const { data: objects = [] } = useQuery({
