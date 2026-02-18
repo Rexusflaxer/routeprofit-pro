@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Save, X, Route } from "lucide-react";
+import RouteOverheadSelector from "./RouteOverheadSelector";
 
 const WEEKDAYS = [
   { value: 1, label: "Maandag" },
