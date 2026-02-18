@@ -325,7 +325,7 @@ export default function RouteDetails() {
             <RouteBuilder 
               route={route} 
               vehicles={vehicles} 
-              routes={routes} 
+              routes={routes}
               folders={folders} 
               onSave={(data) => updateMutation.mutate({ id: route.id, data })} 
               onCancel={() => setEditing(false)} 
