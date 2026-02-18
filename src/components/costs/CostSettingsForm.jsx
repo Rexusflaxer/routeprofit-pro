@@ -293,6 +293,9 @@ export default function CostSettingsForm({ settings, onSave }) {
         />
       </SectionWrapper>
 
+      {/* Auto's van de zaak (personeel) */}
+      <CompanyCarSection personnel={personnel} />
+
       {/* Personeelsgebonden kostensecties */}
       {(form.personnel_cost_sections || []).map((section, idx) => (
         <PersonnelCostSection
