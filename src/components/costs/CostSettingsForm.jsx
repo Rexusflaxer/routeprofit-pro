@@ -298,6 +298,7 @@ export default function CostSettingsForm({ settings, onSave }) {
           onChange={updated => updatePersonnelSection(idx, updated)}
           onDelete={() => deletePersonnelSection(idx)}
           personnelCounts={personnelCounts}
+          allPersonnel={personnel}
         />
       ))}
 
