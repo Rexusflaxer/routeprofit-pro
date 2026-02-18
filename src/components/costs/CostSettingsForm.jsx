@@ -278,17 +278,6 @@ export default function CostSettingsForm({ settings, onSave }) {
         )}
       </SectionWrapper>
 
-      {/* Overig personeel */}
-      <SectionWrapper icon={Users} title="Overig personeel" total={adminTotal}>
-        <div className="space-y-1.5 max-w-sm">
-          <Label className="text-xs text-slate-500">Totale salariskosten overig personeel (€/mnd)</Label>
-          <Input type="number" min="0" value={form.admin_salary_per_month || ""}
-            onChange={e => setForm(prev => ({ ...prev, admin_salary_per_month: parseFloat(e.target.value) || 0 }))}
-            placeholder="bijv. 4500" />
-          <p className="text-[10px] text-slate-400">Inclusief werkgeverslasten — voor management, administratie, planning, etc.</p>
-        </div>
-      </SectionWrapper>
-
       {/* Software */}
       <SectionWrapper icon={Monitor} title="Softwarekosten" total={softwareTotal}>
         <FlexCostList
@@ -371,9 +360,6 @@ export default function CostSettingsForm({ settings, onSave }) {
           <div className="space-y-1.5 mb-4">
             {housingTotal > 0 && (
               <div className="flex justify-between text-sm text-slate-300"><span>Huisvesting</span><span>€{housingTotal.toFixed(2)}</span></div>
-            )}
-            {adminTotal > 0 && (
-              <div className="flex justify-between text-sm text-slate-300"><span>Overig personeel</span><span>€{adminTotal.toFixed(2)}</span></div>
             )}
             {softwareTotal > 0 && (
               <div className="flex justify-between text-sm text-slate-300"><span>Software</span><span>€{softwareTotal.toFixed(2)}</span></div>
