@@ -432,76 +432,92 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
                 {/* 3. Variabele kosten */}
                 <div className="p-4 space-y-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">Variabele kosten</p>
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-slate-600">{form.company_car_fuel_type === "elektrisch" ? "Elektriciteit" : "Brandstof"} per km (€)</Label>
-                      <Input type="number" step="0.001" value={form.company_car_fuel_cost_per_km || ""} onChange={(e) => handleChange("company_car_fuel_cost_per_km", parseFloat(e.target.value) || "")} placeholder="bijv. 0,12" />
-                      <p className="text-[10px] text-slate-400">Benzine ~€0,14 · Diesel ~€0,10 · Elektrisch ~€0,04</p>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-slate-600">Geschatte km per maand</Label>
-                      <Input type="number" step="50" value={form.company_car_km_per_month || ""} onChange={(e) => handleChange("company_car_km_per_month", parseInt(e.target.value) || "")} placeholder="bijv. 1500" />
-                    </div>
+
+                  {/* Geschatte km per maand - altijd tonen */}
+                  <div className="space-y-1">
+                    <Label className="text-xs text-slate-600">Geschatte km per maand</Label>
+                    <Input type="number" step="50" value={form.company_car_km_per_month || ""} onChange={(e) => handleChange("company_car_km_per_month", parseInt(e.target.value) || "")} placeholder="bijv. 1500" />
+                  </div>
+
+                  {/* Brandstof */}
+                  <div className="bg-white rounded-lg p-3 space-y-2 border border-blue-100">
+                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">{form.company_car_fuel_type === "elektrisch" ? "Elektriciteit" : "Brandstof"}</Label>
+                    <CostOwnerToggle value={form.company_car_fuel_for_company ?? true} onChange={(v) => handleChange("company_car_fuel_for_company", v)} />
+                    {(form.company_car_fuel_for_company ?? true) && (
+                      <div className="space-y-1 mt-2">
+                        <Label className="text-xs text-slate-600">Kosten per km (€)</Label>
+                        <Input type="number" step="0.001" value={form.company_car_fuel_cost_per_km || ""} onChange={(e) => handleChange("company_car_fuel_cost_per_km", parseFloat(e.target.value) || "")} placeholder="bijv. 0.12" />
+                        <p className="text-[10px] text-slate-400">Benzine ~€0,14 · Diesel ~€0,10 · Elektrisch ~€0,04</p>
+                      </div>
+                    )}
                   </div>
 
                   {/* Onderhoud */}
                   <div className="bg-white rounded-lg p-3 space-y-2 border border-blue-100">
                     <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Onderhoud</Label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <Label className="text-xs text-slate-600">Berekeningswijze</Label>
-                        <Select value={form.company_car_maintenance_type || "per_km"} onValueChange={(v) => handleChange("company_car_maintenance_type", v)}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {MAINTENANCE_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-slate-600">
-                          Kosten (€{form.company_car_maintenance_type === "per_km" ? "" : form.company_car_maintenance_type === "per_month" ? "/mnd" : form.company_car_maintenance_type === "per_quarter" ? "/kwartaal" : "/jaar"})
-                        </Label>
-                        <Input type="number" step="0.01" value={form.company_car_maintenance_cost || ""} onChange={(e) => handleChange("company_car_maintenance_cost", parseFloat(e.target.value) || "")} placeholder="0" />
-                      </div>
-                    </div>
-                    {form.company_car_maintenance_type === "per_km" && (
-                      <div className="space-y-1">
-                        <Label className="text-xs text-slate-600">Onderhoud elke X kilometer</Label>
-                        <Input type="number" value={form.company_car_maintenance_interval_km || ""} onChange={(e) => handleChange("company_car_maintenance_interval_km", Number(e.target.value))} placeholder="bijv. 10000" />
-                        <p className="text-xs text-slate-500">Kosten per km: €{form.company_car_maintenance_interval_km > 0 ? ((form.company_car_maintenance_cost || 0) / form.company_car_maintenance_interval_km).toFixed(4) : "0.0000"}</p>
+                    <CostOwnerToggle value={form.company_car_maintenance_for_company ?? true} onChange={(v) => handleChange("company_car_maintenance_for_company", v)} />
+                    {(form.company_car_maintenance_for_company ?? true) && (
+                      <div className="space-y-3 mt-2">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-xs text-slate-600">Berekeningswijze</Label>
+                            <Select value={form.company_car_maintenance_type || "per_km"} onValueChange={(v) => handleChange("company_car_maintenance_type", v)}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {MAINTENANCE_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-slate-600">
+                              Kosten (€{form.company_car_maintenance_type === "per_km" ? "" : form.company_car_maintenance_type === "per_month" ? "/mnd" : form.company_car_maintenance_type === "per_quarter" ? "/kwartaal" : "/jaar"})
+                            </Label>
+                            <Input type="number" step="0.01" value={form.company_car_maintenance_cost || ""} onChange={(e) => handleChange("company_car_maintenance_cost", parseFloat(e.target.value) || "")} placeholder="0" />
+                          </div>
+                        </div>
+                        {form.company_car_maintenance_type === "per_km" && (
+                          <div className="space-y-1">
+                            <Label className="text-xs text-slate-600">Onderhoud elke X kilometer</Label>
+                            <Input type="number" value={form.company_car_maintenance_interval_km || ""} onChange={(e) => handleChange("company_car_maintenance_interval_km", Number(e.target.value))} placeholder="bijv. 10000" />
+                            <p className="text-xs text-slate-500">Kosten per km: €{form.company_car_maintenance_interval_km > 0 ? ((form.company_car_maintenance_cost || 0) / form.company_car_maintenance_interval_km).toFixed(4) : "0.0000"}</p>
+                          </div>
+                        )}
                       </div>
                     )}
-                    <CostOwnerToggle label="Onderhoud" value={form.company_car_maintenance_for_company ?? true} onChange={(v) => handleChange("company_car_maintenance_for_company", v)} />
                   </div>
 
                   {/* Banden */}
                   <div className="bg-white rounded-lg p-3 space-y-2 border border-blue-100">
                     <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Banden</Label>
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                      <div className="space-y-1">
-                        <Label className="text-xs text-slate-600">Berekeningswijze</Label>
-                        <Select value={form.company_car_tire_type || "per_year"} onValueChange={(v) => handleChange("company_car_tire_type", v)}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {MAINTENANCE_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label className="text-xs text-slate-600">
-                          Kosten (€{form.company_car_tire_type === "per_km" ? "" : form.company_car_tire_type === "per_month" ? "/mnd" : form.company_car_tire_type === "per_quarter" ? "/kwartaal" : "/jaar"})
-                        </Label>
-                        <Input type="number" step="0.01" value={form.company_car_tire_cost || ""} onChange={(e) => handleChange("company_car_tire_cost", parseFloat(e.target.value) || "")} placeholder="0" />
-                      </div>
-                    </div>
-                    {form.company_car_tire_type === "per_km" && (
-                      <div className="space-y-1">
-                        <Label className="text-xs text-slate-600">Banden vervangen elke X kilometer</Label>
-                        <Input type="number" value={form.company_car_tire_interval_km || ""} onChange={(e) => handleChange("company_car_tire_interval_km", Number(e.target.value))} placeholder="bijv. 50000" />
-                        <p className="text-xs text-slate-500">Kosten per km: €{form.company_car_tire_interval_km > 0 ? ((form.company_car_tire_cost || 0) / form.company_car_tire_interval_km).toFixed(4) : "0.0000"}</p>
+                    <CostOwnerToggle value={form.company_car_tire_for_company ?? true} onChange={(v) => handleChange("company_car_tire_for_company", v)} />
+                    {(form.company_car_tire_for_company ?? true) && (
+                      <div className="space-y-3 mt-2">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                          <div className="space-y-1">
+                            <Label className="text-xs text-slate-600">Berekeningswijze</Label>
+                            <Select value={form.company_car_tire_type || "per_year"} onValueChange={(v) => handleChange("company_car_tire_type", v)}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                {MAINTENANCE_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label className="text-xs text-slate-600">
+                              Kosten (€{form.company_car_tire_type === "per_km" ? "" : form.company_car_tire_type === "per_month" ? "/mnd" : form.company_car_tire_type === "per_quarter" ? "/kwartaal" : "/jaar"})
+                            </Label>
+                            <Input type="number" step="0.01" value={form.company_car_tire_cost || ""} onChange={(e) => handleChange("company_car_tire_cost", parseFloat(e.target.value) || "")} placeholder="0" />
+                          </div>
+                        </div>
+                        {form.company_car_tire_type === "per_km" && (
+                          <div className="space-y-1">
+                            <Label className="text-xs text-slate-600">Banden vervangen elke X kilometer</Label>
+                            <Input type="number" value={form.company_car_tire_interval_km || ""} onChange={(e) => handleChange("company_car_tire_interval_km", Number(e.target.value))} placeholder="bijv. 50000" />
+                            <p className="text-xs text-slate-500">Kosten per km: €{form.company_car_tire_interval_km > 0 ? ((form.company_car_tire_cost || 0) / form.company_car_tire_interval_km).toFixed(4) : "0.0000"}</p>
+                          </div>
+                        )}
                       </div>
                     )}
-                    <CostOwnerToggle label="Banden" value={form.company_car_tire_for_company ?? true} onChange={(v) => handleChange("company_car_tire_for_company", v)} />
                   </div>
                 </div>
 
