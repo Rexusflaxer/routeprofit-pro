@@ -256,6 +256,11 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
             </div>
           </div>
 
+          {/* Overhead & binnendienst */}
+          <div className="border-t border-slate-100 pt-4">
+            <RouteOverheadSelector form={form} onChange={setForm} allRoutes={routes} />
+          </div>
+
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Opmerkingen</Label>
             <Textarea value={form.notes} onChange={(e) => handleChange("notes", e.target.value)} rows={2} />
