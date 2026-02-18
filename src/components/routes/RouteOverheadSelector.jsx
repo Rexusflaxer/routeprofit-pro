@@ -79,22 +79,6 @@ function flattenCostItems(settings) {
     });
   });
 
-  // --- Fallback: oude flat structuur ---
-  if (items.length === 0) {
-    if ((settings.office_costs_per_month || 0) > 0) {
-      items.push({ id: "legacy-office", label: "Kantoorkosten", monthlyAmount: settings.office_costs_per_month, category: "Huisvesting", icon: Building2, iconColor: "text-slate-500" });
-    }
-    if ((settings.admin_salary_per_month || 0) > 0) {
-      items.push({ id: "legacy-admin", label: "Administratief personeel", monthlyAmount: settings.admin_salary_per_month, category: "Personeel", icon: Users, iconColor: "text-blue-500" });
-    }
-    if ((settings.other_fixed_costs_per_month || 0) > 0) {
-      items.push({ id: "legacy-other", label: "Overige vaste kosten", monthlyAmount: settings.other_fixed_costs_per_month, category: "Overig", icon: Layers, iconColor: "text-amber-500" });
-    }
-    if ((settings.insurance_per_month || 0) > 0) {
-      items.push({ id: "legacy-insurance", label: "Verzekering", monthlyAmount: settings.insurance_per_month, category: "Overig", icon: Layers, iconColor: "text-amber-500" });
-    }
-  }
-
   return items;
 }
 
