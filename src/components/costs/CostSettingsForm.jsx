@@ -149,7 +149,9 @@ export default function CostSettingsForm({ settings, onSave }) {
   const DEFAULT_PERSONNEL_SECTION = {
     id: "default-personnel",
     section_name: "Personeelsgebonden kosten",
-    items: [],
+    items: [
+      { id: "default-kleding", name: "Bedrijfskleding", cost_per_person: 0, period: "per_year", assign_mode: "group", function_groups: ["all"], specific_person_ids: [], notes: "", supplier: "" },
+    ],
   };
 
   const [form, setForm] = useState(() => {
