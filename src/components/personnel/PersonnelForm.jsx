@@ -524,26 +524,28 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
                 {/* 4. Verzekering */}
                 <div className="p-4 space-y-4">
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-600">Verzekering</p>
-                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                    <div className="space-y-1">
-                      <Label className="text-xs text-slate-600">Type</Label>
-                      <Select value={form.company_car_insurance_type || "wa"} onValueChange={(v) => handleChange("company_car_insurance_type", v)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {INSURANCE_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-slate-600">Per maand (€)</Label>
-                      <Input type="number" step="0.01" value={form.company_car_insurance_per_month || ""} onChange={(e) => handleChange("company_car_insurance_per_month", parseFloat(e.target.value) || "")} placeholder="0" />
-                    </div>
-                    <div className="space-y-1">
-                      <Label className="text-xs text-slate-600">Eigen risico (€)</Label>
-                      <Input type="number" step="0.01" value={form.company_car_insurance_deductible || ""} onChange={(e) => handleChange("company_car_insurance_deductible", parseFloat(e.target.value) || "")} placeholder="0" />
-                    </div>
-                  </div>
                   <CostOwnerToggle value={form.company_car_insurance_for_company ?? true} onChange={(v) => handleChange("company_car_insurance_for_company", v)} />
+                  {(form.company_car_insurance_for_company ?? true) && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4 mt-2">
+                      <div className="space-y-1">
+                        <Label className="text-xs text-slate-600">Type</Label>
+                        <Select value={form.company_car_insurance_type || "wa"} onValueChange={(v) => handleChange("company_car_insurance_type", v)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {INSURANCE_TYPES.map(t => <SelectItem key={t.value} value={t.value}>{t.label}</SelectItem>)}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-slate-600">Per maand (€)</Label>
+                        <Input type="number" step="0.01" value={form.company_car_insurance_per_month || ""} onChange={(e) => handleChange("company_car_insurance_per_month", parseFloat(e.target.value) || "")} placeholder="0" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label className="text-xs text-slate-600">Eigen risico (€)</Label>
+                        <Input type="number" step="0.01" value={form.company_car_insurance_deductible || ""} onChange={(e) => handleChange("company_car_insurance_deductible", parseFloat(e.target.value) || "")} placeholder="0" />
+                      </div>
+                    </div>
+                  )}
                 </div>
 
                 {/* 5. Totaaloverzicht */}
