@@ -59,7 +59,7 @@ function FlexCostList({ items = [], onChange, addLabel = "Toevoegen", placeholde
 }
 
 // --- PersonnelCostSection: sectie met personeelsgebonden kosten ---
-function PersonnelCostSection({ section, onChange, onDelete, personnelCounts }) {
+function PersonnelCostSection({ section, onChange, onDelete, personnelCounts, allPersonnel }) {
   const [open, setOpen] = useState(true);
   const items = section.items || [];
   const secTotal = items.reduce((s, it) => {
