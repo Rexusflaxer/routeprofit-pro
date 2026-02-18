@@ -290,6 +290,11 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
 
             {(form.company_car_license_plate || form._showCarSection) && (
               <div className="bg-blue-50 rounded-xl p-4 space-y-5 border border-blue-100">
+                {/* PLACEHOLDER - will be replaced below */}
+              </div>
+            )}
+          </div>
+          {/* REMOVE THIS BLOCK */}
                 {/* Basisgegevens */}
                 <div>
                   <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Voertuiggegevens</p>
