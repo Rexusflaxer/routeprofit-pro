@@ -11,7 +11,7 @@ function flattenCostItems(settings) {
   if (!settings) return [];
   const items = [];
 
-  // Huisvestingskosten
+  // Huisvestingskosten (nieuwe structuur)
   (settings.housing_costs || []).forEach(h => {
     const total = (h.rent_per_month || 0) + (h.utilities_per_month || 0) + (h.cleaning_per_month || 0) + (h.other_per_month || 0);
     if (total > 0) {
@@ -26,7 +26,7 @@ function flattenCostItems(settings) {
     }
   });
 
-  // Softwarekosten
+  // Softwarekosten (nieuwe structuur)
   (settings.software_costs || []).forEach(s => {
     const monthly = toMonthlyAmount(s.amount || 0, s.period || "per_month");
     if (monthly > 0) {
@@ -41,10 +41,9 @@ function flattenCostItems(settings) {
     }
   });
 
-  // Personeelsgebonden kostensecties
+  // Personeelsgebonden kostensecties (nieuwe structuur)
   (settings.personnel_cost_sections || []).forEach(sec => {
     (sec.items || []).forEach(it => {
-      // Alleen meenemen als er een bedrag is
       if ((it.cost_per_person || 0) > 0) {
         const monthly = toMonthlyAmount(it.cost_per_person || 0, it.period || "per_year");
         items.push({
@@ -62,7 +61,7 @@ function flattenCostItems(settings) {
     });
   });
 
-  // Vrije secties
+  // Vrije secties (nieuwe structuur)
   (settings.custom_cost_sections || []).forEach(sec => {
     (sec.items || []).forEach(it => {
       const monthly = toMonthlyAmount(it.amount || 0, it.period || "per_month");
@@ -79,6 +78,22 @@ function flattenCostItems(settings) {
       }
     });
   });
+
+  // --- Fallback: oude flat structuur ---
+  if (items.length === 0) {
+    if ((settings.office_costs_per_month || 0) > 0) {
+      items.push({ id: "legacy-office", label: "Kantoorkosten", monthlyAmount: settings.office_costs_per_month, category: "Huisvesting", icon: Building2, iconColor: "text-slate-500" });
+    }
+    if ((settings.admin_salary_per_month || 0) > 0) {
+      items.push({ id: "legacy-admin", label: "Administratief personeel", monthlyAmount: settings.admin_salary_per_month, category: "Personeel", icon: Users, iconColor: "text-blue-500" });
+    }
+    if ((settings.other_fixed_costs_per_month || 0) > 0) {
+      items.push({ id: "legacy-other", label: "Overige vaste kosten", monthlyAmount: settings.other_fixed_costs_per_month, category: "Overig", icon: Layers, iconColor: "text-amber-500" });
+    }
+    if ((settings.insurance_per_month || 0) > 0) {
+      items.push({ id: "legacy-insurance", label: "Verzekering", monthlyAmount: settings.insurance_per_month, category: "Overig", icon: Layers, iconColor: "text-amber-500" });
+    }
+  }
 
   return items;
 }
