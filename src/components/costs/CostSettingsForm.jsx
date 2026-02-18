@@ -72,7 +72,7 @@ function PersonnelCostSection({ section, onChange, onDelete, personnelCounts, al
 
   const addItem = () => onChange({
     ...section,
-    items: [...items, { id: uid(), name: "", cost_per_person: 0, period: "per_year", function_groups: ["all"], notes: "", supplier: "" }]
+    items: [...items, { id: uid(), name: "", cost_per_person: 0, period: "per_year", assign_mode: "group", function_groups: ["all"], specific_person_ids: [], notes: "", supplier: "" }]
   });
   const updateItem = (idx, val) => onChange({ ...section, items: items.map((it, i) => i === idx ? val : it) });
   const removeItem = (idx) => onChange({ ...section, items: items.filter((_, i) => i !== idx) });
