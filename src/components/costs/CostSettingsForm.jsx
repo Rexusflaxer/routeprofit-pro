@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Save, Building2, Monitor, Plus, Trash2, Calculator, Layers,
-  Users, Shirt, BookOpen, Heart, Wrench, ShieldCheck, ChevronDown, ChevronUp
+  Users, Shirt, BookOpen, Heart, Wrench, ShieldCheck, ChevronDown, ChevronUp, Car
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
@@ -14,6 +14,7 @@ import { uid, toMonthlyAmount, PERIOD_OPTIONS, FUNCTION_GROUPS } from "./CostHel
 import SectionWrapper from "./SectionWrapper";
 import FlexCostItem from "./FlexCostItem";
 import PersonnelCostItem from "./PersonnelCostItem";
+import CompanyCarSection from "./CompanyCarSection";
 
 // --- FlexCostList: lijst van FlexCostItems ---
 function FlexCostList({ items = [], onChange, addLabel = "Toevoegen", placeholder = "Omschrijving", quickAdd = [] }) {
