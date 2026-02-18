@@ -142,6 +142,60 @@ export default function VehiclesPage() {
         )
       )}
 
+      {/* Sectie: Auto's van de zaak (gekoppeld aan personeel) */}
+      {personnelWithCar.length > 0 && (
+        <div className="mt-10">
+          <div className="flex items-center gap-2 mb-4">
+            <Users className="w-5 h-5 text-purple-600" />
+            <h2 className="text-base font-bold text-slate-800">Auto's van de zaak – Personeel</h2>
+            <Badge className="bg-purple-100 text-purple-800">{personnelWithCar.length}</Badge>
+          </div>
+          <p className="text-xs text-slate-500 mb-4">Deze voertuigen zijn gekoppeld aan een medewerker. Beheer ze via de <a href="/Personnel" className="text-blue-600 underline">personeelspagina</a>.</p>
+          <div className="bg-white rounded-xl border border-purple-200 overflow-hidden">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-purple-50 border-b border-purple-100">
+                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Medewerker</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Kenteken</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Voertuig</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Bijtelling</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Leasekosten/mnd</th>
+                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Fiscale bijtelling/mnd</th>
+                </tr>
+              </thead>
+              <tbody>
+                {personnelWithCar.map(p => {
+                  const bijtellingMnd = p.company_car_fiscal_value && p.company_car_bijtelling_percentage
+                    ? (p.company_car_fiscal_value * p.company_car_bijtelling_percentage / 100) / 12
+                    : null;
+                  return (
+                    <tr key={p.id} className="border-b border-slate-100 hover:bg-purple-50/30">
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-900">{p.name}</div>
+                        <div className="text-xs text-slate-500">{p.function_type}</div>
+                      </td>
+                      <td className="px-4 py-3 font-mono font-semibold text-slate-900">{p.company_car_license_plate}</td>
+                      <td className="px-4 py-3">
+                        <div className="font-medium text-slate-900">{p.company_car_brand} {p.company_car_model}</div>
+                        <div className="flex items-center gap-2 mt-0.5">
+                          {p.company_car_year && <span className="text-xs text-slate-500">{p.company_car_year}</span>}
+                          {p.company_car_fuel_type && (
+                            <Badge variant="secondary" className="text-xs bg-slate-100 text-slate-600">{p.company_car_fuel_type}</Badge>
+                          )}
+                        </div>
+                      </td>
+                      <td className="px-4 py-3">{p.company_car_bijtelling_percentage ?? 16}%</td>
+                      <td className="px-4 py-3">{p.company_car_monthly_lease_cost ? `€${p.company_car_monthly_lease_cost.toFixed(2)}` : '–'}</td>
+                      <td className="px-4 py-3">{bijtellingMnd ? `€${bijtellingMnd.toFixed(2)}` : '–'}</td>
+                    </tr>
+                  );
+                })}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      )}
+
       <SellVehicleDialog 
         vehicle={sellVehicle} 
         open={!!sellVehicle} 
