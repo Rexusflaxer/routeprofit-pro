@@ -543,7 +543,7 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
                       <Input type="number" step="0.01" value={form.company_car_insurance_deductible || ""} onChange={(e) => handleChange("company_car_insurance_deductible", parseFloat(e.target.value) || "")} placeholder="0" />
                     </div>
                   </div>
-                  <CostOwnerToggle label="Verzekering" value={form.company_car_insurance_for_company ?? true} onChange={(v) => handleChange("company_car_insurance_for_company", v)} />
+                  <CostOwnerToggle value={form.company_car_insurance_for_company ?? true} onChange={(v) => handleChange("company_car_insurance_for_company", v)} />
                 </div>
 
                 {/* 5. Totaaloverzicht */}
