@@ -5,7 +5,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Switch } from "@/components/ui/switch";
-import { X, Save } from "lucide-react";
+import { X, Save, Car } from "lucide-react";
 
 const CONTRACT_TYPES = [
   { value: "fulltime", label: "Fulltime" },
