@@ -270,61 +270,175 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
             </div>
 
             {(form.company_car_license_plate || form._showCarSection) && (
-              <div className="bg-blue-50 rounded-xl p-4 space-y-4 border border-blue-100">
-                <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Kenteken</Label>
-                    <Input value={form.company_car_license_plate || ""} onChange={(e) => handleChange("company_car_license_plate", e.target.value)} placeholder="AB-123-C" />
+              <div className="bg-blue-50 rounded-xl p-4 space-y-5 border border-blue-100">
+                {/* Basisgegevens */}
+                <div>
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Voertuiggegevens</p>
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Kenteken</Label>
+                      <Input value={form.company_car_license_plate || ""} onChange={(e) => handleChange("company_car_license_plate", e.target.value)} placeholder="AB-123-C" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Merk</Label>
+                      <Input value={form.company_car_brand || ""} onChange={(e) => handleChange("company_car_brand", e.target.value)} placeholder="bijv. Volkswagen" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Model</Label>
+                      <Input value={form.company_car_model || ""} onChange={(e) => handleChange("company_car_model", e.target.value)} placeholder="bijv. Golf" />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Merk</Label>
-                    <Input value={form.company_car_brand || ""} onChange={(e) => handleChange("company_car_brand", e.target.value)} placeholder="bijv. Volkswagen" />
+                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mt-3">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Bouwjaar</Label>
+                      <Input type="number" value={form.company_car_year || ""} onChange={(e) => handleChange("company_car_year", parseInt(e.target.value) || "")} placeholder="2022" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Brandstof</Label>
+                      <Select value={form.company_car_fuel_type || ""} onValueChange={(v) => handleChange("company_car_fuel_type", v)}>
+                        <SelectTrigger><SelectValue placeholder="Kies..." /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="benzine">Benzine</SelectItem>
+                          <SelectItem value="diesel">Diesel</SelectItem>
+                          <SelectItem value="elektrisch">Elektrisch</SelectItem>
+                          <SelectItem value="hybride">Hybride</SelectItem>
+                          <SelectItem value="lpg">LPG</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Cataloguswaarde (€)</Label>
+                      <Input type="number" step="100" value={form.company_car_fiscal_value || ""} onChange={(e) => handleChange("company_car_fiscal_value", parseFloat(e.target.value) || "")} placeholder="48990" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Bijtelling (%)</Label>
+                      <Input type="number" step="0.5" value={form.company_car_bijtelling_percentage ?? 16} onChange={(e) => handleChange("company_car_bijtelling_percentage", parseFloat(e.target.value) || 16)} />
+                    </div>
                   </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Model</Label>
-                    <Input value={form.company_car_model || ""} onChange={(e) => handleChange("company_car_model", e.target.value)} placeholder="bijv. Golf" />
-                  </div>
+                  {form.company_car_fiscal_value && form.company_car_bijtelling_percentage ? (
+                    <p className="text-xs text-blue-700 bg-blue-100 rounded-lg px-3 py-2 mt-2 inline-block">
+                      Fiscale bijtelling: <strong>€{((form.company_car_fiscal_value * form.company_car_bijtelling_percentage / 100) / 12).toFixed(2)}/mnd</strong> (wordt opgeteld bij loonkosten medewerker)
+                    </p>
+                  ) : null}
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-4 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-600">Bouwjaar</Label>
-                    <Input type="number" value={form.company_car_year || ""} onChange={(e) => handleChange("company_car_year", parseInt(e.target.value) || "")} placeholder="2022" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-600">Brandstof</Label>
-                    <Select value={form.company_car_fuel_type || ""} onValueChange={(v) => handleChange("company_car_fuel_type", v)}>
-                      <SelectTrigger><SelectValue placeholder="Kies..." /></SelectTrigger>
+
+                {/* Aanschaftype */}
+                <div className="border-t border-blue-200 pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Aanschaf &amp; vaste maandkosten</p>
+                  <div className="space-y-2 mb-3">
+                    <Label className="text-xs text-slate-600">Aanschaftype</Label>
+                    <Select value={form.company_car_acquisition_type || "lease"} onValueChange={(v) => handleChange("company_car_acquisition_type", v)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
-                        <SelectItem value="benzine">Benzine</SelectItem>
-                        <SelectItem value="diesel">Diesel</SelectItem>
-                        <SelectItem value="elektrisch">Elektrisch</SelectItem>
-                        <SelectItem value="hybride">Hybride</SelectItem>
-                        <SelectItem value="lpg">LPG</SelectItem>
+                        <SelectItem value="lease">Operationele lease</SelectItem>
+                        <SelectItem value="private_lease">Private lease</SelectItem>
+                        <SelectItem value="aankoop">Eigen aankoop</SelectItem>
                       </SelectContent>
                     </Select>
                   </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-600">Cataloguswaarde (€)</Label>
-                    <Input type="number" step="100" value={form.company_car_fiscal_value || ""} onChange={(e) => handleChange("company_car_fiscal_value", parseFloat(e.target.value) || "")} placeholder="48990" />
-                  </div>
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-600">Bijtelling (%)</Label>
-                    <Input type="number" step="0.5" value={form.company_car_bijtelling_percentage ?? 16} onChange={(e) => handleChange("company_car_bijtelling_percentage", parseFloat(e.target.value) || 16)} />
+
+                  {(form.company_car_acquisition_type === "lease" || form.company_car_acquisition_type === "private_lease" || !form.company_car_acquisition_type) && (
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-xs text-slate-600">Maandelijkse leasekosten (€)</Label>
+                        <Input type="number" step="0.01" value={form.company_car_monthly_lease_cost || ""} onChange={(e) => handleChange("company_car_monthly_lease_cost", parseFloat(e.target.value) || "")} placeholder="bijv. 690,60" />
+                        <p className="text-[10px] text-slate-400">Het all-in maandbedrag van de leasemaatschappij</p>
+                      </div>
+                    </div>
+                  )}
+
+                  {form.company_car_acquisition_type === "aankoop" && (
+                    <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                      <div className="space-y-2">
+                        <Label className="text-xs text-slate-600">Aankoopprijs (€)</Label>
+                        <Input type="number" step="100" value={form.company_car_purchase_price || ""} onChange={(e) => handleChange("company_car_purchase_price", parseFloat(e.target.value) || "")} placeholder="35000" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs text-slate-600">Restwaarde na afschrijving (€)</Label>
+                        <Input type="number" step="100" value={form.company_car_residual_value || ""} onChange={(e) => handleChange("company_car_residual_value", parseFloat(e.target.value) || "")} placeholder="10000" />
+                      </div>
+                      <div className="space-y-2">
+                        <Label className="text-xs text-slate-600">Afschrijving (jaren)</Label>
+                        <Input type="number" min="1" max="15" value={form.company_car_depreciation_years ?? 5} onChange={(e) => handleChange("company_car_depreciation_years", parseInt(e.target.value) || 5)} />
+                      </div>
+                      {form.company_car_purchase_price && form.company_car_depreciation_years ? (
+                        <p className="text-xs text-blue-700 bg-blue-100 rounded-lg px-3 py-2 col-span-3 inline-block">
+                          Afschrijving: <strong>€{(((form.company_car_purchase_price - (form.company_car_residual_value || 0)) / form.company_car_depreciation_years) / 12).toFixed(2)}/mnd</strong>
+                        </p>
+                      ) : null}
+                    </div>
+                  )}
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mt-3">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Verzekering per maand (€)</Label>
+                      <Input type="number" step="0.01" value={form.company_car_insurance_per_month || ""} onChange={(e) => handleChange("company_car_insurance_per_month", parseFloat(e.target.value) || "")} placeholder="bijv. 85,00" />
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Onderhoud per maand (€)</Label>
+                      <Input type="number" step="0.01" value={form.company_car_maintenance_cost_per_month || ""} onChange={(e) => handleChange("company_car_maintenance_cost_per_month", parseFloat(e.target.value) || "")} placeholder="bijv. 50,00" />
+                      <p className="text-[10px] text-slate-400">Gemiddeld (APK, service, reparaties)</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Bandenkosten per jaar (€)</Label>
+                      <Input type="number" step="0.01" value={form.company_car_tire_cost_per_year || ""} onChange={(e) => handleChange("company_car_tire_cost_per_year", parseFloat(e.target.value) || "")} placeholder="bijv. 600,00" />
+                    </div>
                   </div>
                 </div>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  <div className="space-y-2">
-                    <Label className="text-xs text-slate-600">Maandelijkse leasekosten (€)</Label>
-                    <Input type="number" step="0.01" value={form.company_car_monthly_lease_cost || ""} onChange={(e) => handleChange("company_car_monthly_lease_cost", parseFloat(e.target.value) || "")} placeholder="bijv. 690,60" />
+
+                {/* Variabele kosten */}
+                <div className="border-t border-blue-200 pt-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-3">Variabele kosten (brandstof/km)</p>
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Brandstofkosten per km (€)</Label>
+                      <Input type="number" step="0.001" value={form.company_car_fuel_cost_per_km || ""} onChange={(e) => handleChange("company_car_fuel_cost_per_km", parseFloat(e.target.value) || "")} placeholder="bijv. 0,12" />
+                      <p className="text-[10px] text-slate-400">Benzine ~€0,14/km · Diesel ~€0,10/km · Elektrisch ~€0,04/km</p>
+                    </div>
+                    <div className="space-y-2">
+                      <Label className="text-xs text-slate-600">Geschatte km per maand</Label>
+                      <Input type="number" step="50" value={form.company_car_km_per_month || ""} onChange={(e) => handleChange("company_car_km_per_month", parseInt(e.target.value) || "")} placeholder="bijv. 1500" />
+                    </div>
                   </div>
-                  <div className="space-y-2 col-span-1 flex items-end">
-                    {form.company_car_fiscal_value && form.company_car_bijtelling_percentage ? (
-                      <p className="text-xs text-blue-700 bg-blue-100 rounded-lg px-3 py-2">
-                        Fiscale bijtelling: <strong>€{((form.company_car_fiscal_value * form.company_car_bijtelling_percentage / 100) / 12).toFixed(2)}/mnd</strong>
-                      </p>
-                    ) : null}
-                  </div>
+                  {form.company_car_fuel_cost_per_km && form.company_car_km_per_month ? (
+                    <p className="text-xs text-blue-700 bg-blue-100 rounded-lg px-3 py-2 mt-2 inline-block">
+                      Brandstofkosten: <strong>€{(form.company_car_fuel_cost_per_km * form.company_car_km_per_month).toFixed(2)}/mnd</strong>
+                    </p>
+                  ) : null}
                 </div>
+
+                {/* Totaaloverzicht */}
+                {(() => {
+                  const lease = form.company_car_monthly_lease_cost || 0;
+                  const insurance = form.company_car_insurance_per_month || 0;
+                  const maintenance = form.company_car_maintenance_cost_per_month || 0;
+                  const tires = (form.company_car_tire_cost_per_year || 0) / 12;
+                  const fuel = (form.company_car_fuel_cost_per_km || 0) * (form.company_car_km_per_month || 0);
+                  const depreciation = form.company_car_acquisition_type === "aankoop" && form.company_car_purchase_price && form.company_car_depreciation_years
+                    ? ((form.company_car_purchase_price - (form.company_car_residual_value || 0)) / form.company_car_depreciation_years) / 12
+                    : 0;
+                  const total = lease + insurance + maintenance + tires + fuel + depreciation;
+                  if (total === 0) return null;
+                  return (
+                    <div className="border-t border-blue-200 pt-4">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Totale autokosten per maand</p>
+                      <div className="bg-white rounded-lg p-3 space-y-1 text-xs">
+                        {lease > 0 && <div className="flex justify-between text-slate-600"><span>Lease</span><span>€{lease.toFixed(2)}</span></div>}
+                        {depreciation > 0 && <div className="flex justify-between text-slate-600"><span>Afschrijving</span><span>€{depreciation.toFixed(2)}</span></div>}
+                        {insurance > 0 && <div className="flex justify-between text-slate-600"><span>Verzekering</span><span>€{insurance.toFixed(2)}</span></div>}
+                        {maintenance > 0 && <div className="flex justify-between text-slate-600"><span>Onderhoud</span><span>€{maintenance.toFixed(2)}</span></div>}
+                        {tires > 0 && <div className="flex justify-between text-slate-600"><span>Banden (gem./mnd)</span><span>€{tires.toFixed(2)}</span></div>}
+                        {fuel > 0 && <div className="flex justify-between text-slate-600"><span>Brandstof</span><span>€{fuel.toFixed(2)}</span></div>}
+                        <div className="flex justify-between font-bold text-slate-900 border-t pt-1 mt-1">
+                          <span>Totaal/mnd</span><span>€{total.toFixed(2)}</span>
+                        </div>
+                        <div className="flex justify-between text-slate-500 text-[10px]">
+                          <span>Per dag (÷ 22 werkdagen)</span><span>€{(total / 22).toFixed(2)}</span>
+                        </div>
+                      </div>
+                    </div>
+                  );
+                })()}
               </div>
             )}
           </div>
