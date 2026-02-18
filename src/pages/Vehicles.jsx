@@ -25,6 +25,13 @@ export default function VehiclesPage() {
     queryFn: () => base44.entities.Vehicle.list(),
   });
 
+  const { data: personnel = [] } = useQuery({
+    queryKey: ["personnel"],
+    queryFn: () => base44.entities.Personnel.list(),
+  });
+
+  const personnelWithCar = personnel.filter(p => p.company_car_license_plate);
+
   const createMutation = useMutation({
     mutationFn: (data) => base44.entities.Vehicle.create(data),
     onSuccess: () => {
