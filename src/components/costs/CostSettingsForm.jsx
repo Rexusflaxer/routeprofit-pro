@@ -121,6 +121,7 @@ function PersonnelCostSection({ section, onChange, onDelete, personnelCounts, al
               onChange={val => updateItem(idx, val)}
               onDelete={() => removeItem(idx)}
               personnelCounts={personnelCounts}
+              allPersonnel={allPersonnel}
             />
           ))}
           <Button type="button" variant="ghost" size="sm" className="text-slate-500 hover:text-slate-800 text-xs" onClick={addItem}>
