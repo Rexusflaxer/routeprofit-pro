@@ -25,6 +25,9 @@ const VALID_PERIODS_PER_SCALE = {
 };
 
 export default function PersonnelForm({ person, onSave, onCancel }) {
+  const getDefaultCao = (functionType) =>
+    functionType === "binnendienst" ? "eigen_tarief" : "cao_particuliere_beveiliging";
+
   const [form, setForm] = useState(person || {
     name: "",
     function_type: "surveillant",
@@ -35,6 +38,14 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
     cao_period: 0,
     is_active: true,
   });
+
+  const handleFunctionTypeChange = (v) => {
+    setForm(prev => ({
+      ...prev,
+      function_type: v,
+      cao: prev.employee_type === "loondienst" ? getDefaultCao(v) : prev.cao,
+    }));
+  };
 
   const handleChange = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
 
