@@ -405,10 +405,7 @@ export default function CostSettingsForm({ settings, onSave }) {
               <p className="text-xs text-slate-400">Totaal/jaar</p>
               <p className="text-2xl font-bold">€{(grandTotal * 12).toFixed(0)}</p>
             </div>
-            <div>
-              <p className="text-xs text-slate-400">Per werkdag (÷22)</p>
-              <p className="text-2xl font-bold">€{(grandTotal / 22).toFixed(2)}</p>
-            </div>
+
           </div>
           <div className="mt-3 pt-3 border-t border-slate-700 grid grid-cols-2 gap-4 text-xs text-slate-400">
             <div>Surveillanten: <span className="text-white font-semibold">{personnelCounts.surveillant}</span></div>
