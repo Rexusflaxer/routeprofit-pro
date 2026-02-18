@@ -88,7 +88,7 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
               </div>
               <div className="space-y-2">
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Functie</Label>
-                <Select value={form.function_type} onValueChange={(v) => handleChange("function_type", v)}>
+                <Select value={form.function_type} onValueChange={handleFunctionTypeChange}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="surveillant">Surveillant</SelectItem>
