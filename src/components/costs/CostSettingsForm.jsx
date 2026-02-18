@@ -407,10 +407,7 @@ export default function CostSettingsForm({ settings, onSave }) {
             </div>
 
           </div>
-          <div className="mt-3 pt-3 border-t border-slate-700 grid grid-cols-2 gap-4 text-xs text-slate-400">
-            <div>Surveillanten: <span className="text-white font-semibold">{personnelCounts.surveillant}</span></div>
-            <div>Binnendienst: <span className="text-white font-semibold">{personnelCounts.binnendienst}</span></div>
-          </div>
+
         </CardContent>
       </Card>
 
