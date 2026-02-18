@@ -54,12 +54,16 @@ export default function PersonnelCostItem({ item, onChange, onDelete, personnelC
       {/* Hoofdrij */}
       <div className="p-3 grid grid-cols-12 gap-2 items-center">
         <div className="col-span-3">
-          <Input
-            value={item.name || ""}
-            onChange={e => onChange({ ...item, name: e.target.value })}
-            placeholder="bijv. Bedrijfskleding"
-            className="text-sm font-medium"
-          />
+          {item.readonly ? (
+            <p className="text-sm font-medium text-slate-700 px-1">{item.name}</p>
+          ) : (
+            <Input
+              value={item.name || ""}
+              onChange={e => onChange({ ...item, name: e.target.value })}
+              placeholder="bijv. Bedrijfskleding"
+              className="text-sm font-medium"
+            />
+          )}
         </div>
         <div className="col-span-2">
           <div className="relative">
