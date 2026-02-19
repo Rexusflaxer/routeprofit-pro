@@ -233,11 +233,7 @@ export default function CostSettingsForm({ settings, onSave }) {
     });
   }, [offices]);
 
-  const handleSubmit = (e) => { 
-    e.preventDefault(); 
-    e.stopPropagation();
-    onSave(form); 
-  };
+  const handleSave = () => { onSave(form); };
 
   const updateHousing = (idx, field, value) => {
     setForm(prev => ({ ...prev, housing_costs: prev.housing_costs.map((h, i) => i === idx ? { ...h, [field]: value } : h) }));
