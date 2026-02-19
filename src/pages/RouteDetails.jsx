@@ -206,7 +206,10 @@ export default function RouteDetails() {
       const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: routeId });
       const optData = optimizationResponse.data;
       if (optData?.actual_shift_minutes !== undefined) {
-        await base44.entities.Route.update(routeId, { total_route_minutes: optData.actual_shift_minutes });
+        await base44.entities.Route.update(routeId, { 
+          total_route_minutes: optData.actual_shift_minutes,
+          personnel_costs_calculated_at: null  // forceer herberekening loonkosten
+        });
       }
       return optData;
     },
