@@ -289,7 +289,7 @@ export default function CostSettingsForm({ settings, onSave }) {
   };
 
   return (
-    <form onSubmit={handleSubmit} className="space-y-5" noValidate>
+    <div className="space-y-5">
 
       {/* Huisvestingskosten */}
       <SectionWrapper icon={Building2} title="Huisvestingskosten" total={housingTotal}>
