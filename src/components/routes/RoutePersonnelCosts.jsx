@@ -261,22 +261,10 @@ export default function RoutePersonnelCosts({ route }) {
     }
   };
 
-  // Herbereken alleen als de cache-sleutel verandert (route/voertuig/personeel wijziging)
-  // of als er nog geen data is voor deze weekdag
+  // Herbereken altijd als de cache-sleutel verandert (route/voertuig/taken wijziging)
   useEffect(() => {
     if (!route?.id || !activeWeekday) return;
-
-    const cached = route?.cached_personnel_costs?.[activeWeekday];
-    if (cached && data) {
-      // Data is al geladen voor deze weekdag; herbereken alleen als iets relevants veranderd
-      calculate(activeWeekday, true);
-    } else if (cached) {
-      // Gebruik gecachte data, geen herberekening nodig
-      calculate(activeWeekday, false);
-    } else {
-      // Geen cache beschikbaar, bereken vers
-      calculate(activeWeekday, true);
-    }
+    calculate(activeWeekday, true);
   }, [route?.id, activeWeekday, cacheKey]);
 
   return (
