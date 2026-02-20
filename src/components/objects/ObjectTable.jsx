@@ -71,11 +71,11 @@ export default function ObjectTable({ objects, onEdit, onDelete }) {
                         {directTaskCount} {directTaskCount === 1 ? 'eigen taak' : 'eigen taken'}
                       </Badge>
                     )}
-                    {collectiefTasks.map(t => (
-                      <Badge key={t.id} variant="secondary" className="bg-blue-50 text-blue-700 border border-blue-200 text-xs w-fit">
-                        {t.task_type}
+                    {collectiefTasks.length > 0 && (
+                      <Badge variant="secondary" className="bg-blue-50 text-blue-700 border border-blue-200 text-xs w-fit">
+                        {collectiefTasks.length} {collectiefTasks.length === 1 ? "collectief taak" : "collectief taken"}
                       </Badge>
-                    ))}
+                    )}
                   </div>
                 </TableCell>
                 <TableCell className="text-right">
