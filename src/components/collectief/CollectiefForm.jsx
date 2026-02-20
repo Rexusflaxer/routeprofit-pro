@@ -7,7 +7,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Check, Loader2, ArrowLeft, Building, MapPin, X } from "lucide-react";
+import { Check, Loader2, ArrowLeft, Building, MapPin, X, Search } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 
 const TYPE_OPTIONS = [
