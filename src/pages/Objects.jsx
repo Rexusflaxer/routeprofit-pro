@@ -35,6 +35,18 @@ export default function Objects() {
   });
 
   const handleSave = (data) => {
+    // Controleer op dubbele objectcode
+    if (data.object_code && data.object_code.trim() !== "") {
+      const duplicate = objects.find(
+        obj => obj.object_code?.trim().toLowerCase() === data.object_code.trim().toLowerCase()
+          && obj.id !== editing?.id
+      );
+      if (duplicate) {
+        alert(`Objectcode "${data.object_code}" is al in gebruik bij object "${duplicate.name}". Kies een unieke objectcode.`);
+        return;
+      }
+    }
+
     if (editing) {
       updateMutation.mutate({ id: editing.id, data });
     } else {
