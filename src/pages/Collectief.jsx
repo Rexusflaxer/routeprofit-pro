@@ -96,6 +96,7 @@ function CollectiefCard({ collectief, customers, objects, allCollectieven, onEdi
 export default function CollectiefPage() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [selectedCollectief, setSelectedCollectief] = useState(null);
   const queryClient = useQueryClient();
 
   const { data: collectieven = [], isLoading } = useQuery({
