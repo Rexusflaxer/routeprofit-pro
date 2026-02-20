@@ -226,7 +226,10 @@ export default function CollectiefForm({ collectief, customers, objects, collect
                 />
               </div>
               <div className="border border-slate-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
-                {objects.map((obj, i) => {
+                {objects.filter(obj => {
+                  const q = objectSearch.toLowerCase();
+                  return !q || obj.name?.toLowerCase().includes(q) || obj.object_code?.toLowerCase().includes(q) || obj.address?.toLowerCase().includes(q);
+                }).map((obj, i) => {
                   const isTaken = takenObjectIds.has(obj.id);
                   const takenBy = isTaken
                     ? collectieven.find(c => c.id !== collectief?.id && (c.object_ids || []).includes(obj.id))
