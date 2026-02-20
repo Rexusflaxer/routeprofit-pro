@@ -22,7 +22,7 @@ const TYPE_COLORS = {
   bedrijfsverzamelgebouw: "bg-blue-100 text-blue-700",
 };
 
-function CollectiefCard({ collectief, customers, objects, allCollectieven, onEdit, onDelete }) {
+function CollectiefCard({ collectief, customers, objects, allCollectieven, onEdit, onDelete, onSelect, selected }) {
   const customer = customers.find(c => c.id === collectief.customer_id);
   const linkedObjects = objects.filter(o => (collectief.object_ids || []).includes(o.id));
   const childCollectieven = allCollectieven.filter(c => c.parent_collectief_id === collectief.id);
