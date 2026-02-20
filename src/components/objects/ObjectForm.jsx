@@ -3,7 +3,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { X, Save, MapPin } from "lucide-react";
 import { base44 } from "@/api/base44Client";
@@ -89,11 +89,8 @@ export default function ObjectForm({ object, onSave, onCancel }) {
 
   return (
     <div className="space-y-6">
-      <Card className="border-0 shadow-lg">
-        <CardHeader className="pb-4">
-          <CardTitle className="text-lg">{object ? "Object bewerken" : "Nieuw object"}</CardTitle>
-        </CardHeader>
-        <CardContent>
+      <div className="bg-slate-50 rounded-lg p-6">
+        <h3 className="text-lg font-semibold text-slate-900 mb-4">{object ? "Object bewerken" : "Nieuw object"}</h3>
           <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Klant *</Label>
@@ -167,8 +164,7 @@ export default function ObjectForm({ object, onSave, onCancel }) {
               <Button type="submit" className="bg-slate-900 hover:bg-slate-800"><Save className="w-4 h-4 mr-1" /> Opslaan</Button>
             </div>
           </form>
-        </CardContent>
-      </Card>
+      </div>
 
       {object && object.id && <TaskList objectId={object.id} />}
     </div>
