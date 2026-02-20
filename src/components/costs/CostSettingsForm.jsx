@@ -200,7 +200,11 @@ export default function CostSettingsForm({ settings, onSave, isSaving }) {
     ],
   };
 
-  const [form, setForm] = useState(() => {
+  const [form, setForm] = useState(null);
+
+  // Sync form state wanneer settings geladen zijn
+  useEffect(() => {
+    if (!settings) return;
     const base = {
       label: "Standaard",
       housing_costs: [],
@@ -209,12 +213,11 @@ export default function CostSettingsForm({ settings, onSave, isSaving }) {
       personnel_cost_sections: [DEFAULT_PERSONNEL_SECTION],
       ...settings,
     };
-    // Zorg altijd voor minimaal 1 personeelssectie
     if (!base.personnel_cost_sections || base.personnel_cost_sections.length === 0) {
       base.personnel_cost_sections = [DEFAULT_PERSONNEL_SECTION];
     }
-    return base;
-  });
+    setForm(base);
+  }, [settings?.id]);
 
   // Sync offices -> housing_costs
   useEffect(() => {
