@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
-import { MapPin, Route } from "lucide-react";
+import { MapPin, Route, Users } from "lucide-react";
 
 const TILES = [
   {
@@ -17,6 +17,13 @@ const TILES = [
     icon: Route,
     color: "from-slate-700 to-slate-900",
     page: "Routes",
+  },
+  {
+    label: "Klanten",
+    description: "Beheer particulieren en bedrijven",
+    icon: Users,
+    color: "from-amber-500 to-amber-700",
+    page: "Customers",
   },
 ];
 
