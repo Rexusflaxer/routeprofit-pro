@@ -63,6 +63,7 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
   };
 
   const getPricePerMinute = (task) => {
+    if (task.is_free) return 0;
     if (task.pricing_type === 'per_minuut') {
       return task.price_amount || 0;
     } else {
