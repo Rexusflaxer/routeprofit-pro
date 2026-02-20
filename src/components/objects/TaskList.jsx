@@ -148,7 +148,7 @@ export default function TaskList({ objectId }) {
         ) : tasks.length === 0 ? null : (
           <div className="space-y-3">
             {tasks.map((task) => (
-              <div key={task.id} className="border border-amber-200 bg-amber-50 rounded-lg p-4 hover:border-amber-300 transition-colors">
+              <div key={task.id} className="border border-slate-200 rounded-lg p-4 hover:border-slate-300 transition-colors">
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
