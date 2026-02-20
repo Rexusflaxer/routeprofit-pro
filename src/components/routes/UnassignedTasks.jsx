@@ -118,7 +118,7 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
                     </span>
                     {task.is_free ? (
                       <Badge className="bg-green-50 text-green-700 border border-green-200 text-xs">
-                        Gratis service
+                        Service
                       </Badge>
                     ) : (
                       <span className="flex items-center gap-1">
