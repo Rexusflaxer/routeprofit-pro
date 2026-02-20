@@ -168,6 +168,13 @@ export default function CollectiefPage() {
           onCancel={() => { setShowForm(false); setEditing(null); }}
           saving={isPending}
         />
+        {editing && (
+          <CollectiefTaskList
+            collectief={editing}
+            objects={objects}
+            allCollectieven={collectieven}
+          />
+        )}
       </div>
     );
   }
