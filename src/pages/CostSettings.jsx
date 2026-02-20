@@ -7,6 +7,7 @@ import { Loader2, CheckCircle2 } from "lucide-react";
 
 export default function CostSettings() {
   const queryClient = useQueryClient();
+  const [saved, setSaved] = useState(false);
 
   const { data: settings = [], isLoading } = useQuery({
     queryKey: ["costSettings"],
