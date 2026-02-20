@@ -72,7 +72,7 @@ function CollectiefCard({ collectief, customers, objects, allCollectieven, onEdi
                 </div>
               )}
             </div>
-          </div>
+          </button>
           <div className="flex gap-1 flex-shrink-0">
             <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-700" onClick={() => onEdit(collectief)}>
               <Pencil className="w-4 h-4" />
