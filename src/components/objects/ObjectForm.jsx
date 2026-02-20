@@ -83,9 +83,15 @@ export default function ObjectForm({ object, onSave, onCancel }) {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-5">
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Naam</Label>
-              <Input value={form.name} onChange={(e) => handleChange("name", e.target.value)} placeholder="Bijv. Kantoor ABC" required />
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Objectcode</Label>
+                <Input value={form.object_code || ""} onChange={(e) => handleChange("object_code", e.target.value)} placeholder="Bijv. OBJ-001" />
+              </div>
+              <div className="space-y-2 md:col-span-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Naam</Label>
+                <Input value={form.name} onChange={(e) => handleChange("name", e.target.value)} placeholder="Bijv. Kantoor ABC" required />
+              </div>
             </div>
 
             <div className="space-y-2 relative">
