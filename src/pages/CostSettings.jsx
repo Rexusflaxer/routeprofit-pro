@@ -21,7 +21,9 @@ export default function CostSettings() {
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => base44.entities.CostSettings.update(id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["costSettings"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["costSettings"] });
+    },
   });
 
   const handleSave = (data) => {
