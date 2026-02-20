@@ -1,7 +1,7 @@
 import React, { useMemo } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Clock, Euro } from "lucide-react";
+import { AlertCircle, Clock, Euro, Package } from "lucide-react";
 
 const WEEKDAYS = [
   { value: 1, label: "Ma" },
