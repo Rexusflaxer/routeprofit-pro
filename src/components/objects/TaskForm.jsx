@@ -32,6 +32,7 @@ export default function TaskForm({ task, onSave, onCancel }) {
     weekdays: [],
     pricing_type: "per_taak",
     price_amount: 0,
+    is_free: false,
   });
 
   const handleChange = (field, value) => {

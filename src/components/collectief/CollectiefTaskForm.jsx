@@ -36,6 +36,7 @@ export default function CollectiefTaskForm({ task, collectief, objects, allColle
     weekdays: task?.weekdays || [],
     pricing_type: task?.pricing_type || "per_taak",
     price_amount: task?.price_amount || 0,
+    is_free: task?.is_free || false,
     selected_object_ids: task?.selected_object_ids ?? directObjects.map(o => o.id),
     selected_sub_collectief_ids: task?.selected_sub_collectief_ids ?? subCollectieven.map(c => c.id),
   });
