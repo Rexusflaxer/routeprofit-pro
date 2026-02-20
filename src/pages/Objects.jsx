@@ -69,6 +69,12 @@ export default function Objects() {
     setShowTasks(true);
   };
 
+  const filteredObjects = objects.filter(obj =>
+    obj.object_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    obj.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
+    obj.address?.toLowerCase().includes(searchTerm.toLowerCase())
+  );
+
   return (
     <div className="space-y-6">
       <PageHeader
