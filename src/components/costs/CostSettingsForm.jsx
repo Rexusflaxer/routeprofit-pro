@@ -6,7 +6,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   Save, Building2, Monitor, Plus, Trash2, Calculator, Layers,
-  Users, Shirt, BookOpen, Heart, Wrench, ShieldCheck, ChevronDown, ChevronUp, Car
+  Users, Shirt, BookOpen, Heart, Wrench, ShieldCheck, ChevronDown, ChevronUp, Car, Loader2
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
