@@ -1,12 +1,13 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "./utils";
-import { LayoutDashboard, Users, Settings, Shield, Menu, X, CarFront } from "lucide-react";
+import { LayoutDashboard, Users, Settings, Shield, Menu, X, CarFront, UserRound } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const NAV_ITEMS = [
   { name: "Dashboard", icon: LayoutDashboard, page: "Dashboard" },
   { name: "Mobiele Surveillance", icon: CarFront, page: "MobileSurveillance" },
+  { name: "Klanten", icon: UserRound, page: "Customers" },
   { name: "Personeel", icon: Users, page: "Personnel" },
   { name: "Voertuigen", icon: Settings, page: "Vehicles" },
   { name: "Overig", icon: Settings, page: "CostSettings" },
