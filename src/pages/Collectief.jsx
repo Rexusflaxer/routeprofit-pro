@@ -28,10 +28,10 @@ function CollectiefCard({ collectief, customers, objects, allCollectieven, onEdi
   const childCollectieven = allCollectieven.filter(c => c.parent_collectief_id === collectief.id);
 
   return (
-    <Card className="border-0 shadow-sm hover:shadow-md transition-shadow">
+    <Card className={`border-0 shadow-sm hover:shadow-md transition-shadow ${selected ? "ring-2 ring-slate-800" : ""}`}>
       <CardContent className="p-5">
         <div className="flex items-start justify-between gap-3">
-          <div className="flex items-start gap-3 flex-1 min-w-0">
+          <button className="flex items-start gap-3 flex-1 min-w-0 text-left" onClick={() => onSelect(collectief)}>
             <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
               <Building className="w-5 h-5 text-slate-600" />
             </div>
