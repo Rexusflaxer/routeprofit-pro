@@ -128,6 +128,18 @@ export default function CollectiefForm({ collectief, customers, objects, collect
             </div>
           </div>
 
+          {/* Objectcode (alleen voor bedrijfsverzamelgebouw) */}
+          {form.collectief_type === "bedrijfsverzamelgebouw" && (
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Objectcode</Label>
+              <Input
+                value={form.object_code}
+                onChange={(e) => handleChange("object_code", e.target.value)}
+                placeholder="Bijv. OBJ-001"
+              />
+            </div>
+          )}
+
           {/* Naam & klant */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
