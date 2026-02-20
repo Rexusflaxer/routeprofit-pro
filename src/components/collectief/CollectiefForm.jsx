@@ -145,13 +145,35 @@ export default function CollectiefForm({ collectief, customers, objects, collect
 
           {/* Adres & parent collectief */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="space-y-2">
+            <div className="space-y-2" ref={addressWrapperRef}>
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Adres / Locatie</Label>
-              <Input
-                value={form.address}
-                onChange={(e) => handleChange("address", e.target.value)}
-                placeholder="Bijv. Industrieweg 1, Enschede"
-              />
+              <div className="relative">
+                <Input
+                  value={form.address}
+                  onChange={(e) => handleAddressChange(e.target.value)}
+                  onFocus={() => addressSuggestions.length > 0 && setShowSuggestions(true)}
+                  placeholder="Bijv. Industrieweg 1, Enschede"
+                  autoComplete="off"
+                />
+                {addressLoading && (
+                  <Loader2 className="absolute right-3 top-2.5 w-4 h-4 animate-spin text-slate-400" />
+                )}
+                {showSuggestions && addressSuggestions.length > 0 && (
+                  <div className="absolute z-50 top-full left-0 right-0 mt-1 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+                    {addressSuggestions.map((s, i) => (
+                      <button
+                        key={i}
+                        type="button"
+                        className="w-full text-left flex items-center gap-2 px-3 py-2.5 hover:bg-slate-50 text-sm border-b border-slate-100 last:border-0"
+                        onMouseDown={() => selectAddress(s)}
+                      >
+                        <MapPin className="w-3.5 h-3.5 text-slate-400 flex-shrink-0" />
+                        <span className="truncate">{s.address}</span>
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
             </div>
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Valt onder collectief (optioneel)</Label>
