@@ -3,12 +3,11 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { X, Save, MapPin } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import TaskList from "./TaskList";
+import CustomerSelect from "../ui-custom/CustomerSelect";
 
 export default function ObjectForm({ object, onSave, onCancel }) {
   const [form, setForm] = useState(object || {
@@ -92,22 +91,11 @@ export default function ObjectForm({ object, onSave, onCancel }) {
     <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Klant *</Label>
-              <Select value={form.customer_id} onValueChange={(v) => handleChange("customer_id", v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecteer een klant" />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.length === 0 ? (
-                    <div className="px-2 py-3 text-xs text-slate-500 text-center">Geen klanten gevonden. Voeg eerst een klant toe.</div>
-                  ) : (
-                    customers.map(c => (
-                      <SelectItem key={c.id} value={c.id}>
-                        {c.name} ({c.customer_type})
-                      </SelectItem>
-                    ))
-                  )}
-                </SelectContent>
-              </Select>
+              {customers.length === 0 ? (
+                <div className="px-3 py-2 text-xs text-slate-500 bg-slate-50 rounded-lg">Geen klanten gevonden. Voeg eerst een klant toe.</div>
+              ) : (
+                <CustomerSelect customers={customers} value={form.customer_id} onValueChange={(v) => handleChange("customer_id", v)} placeholder="Selecteer een klant" />
+              )}
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
