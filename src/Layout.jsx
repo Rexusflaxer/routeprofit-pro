@@ -7,7 +7,6 @@ import { Button } from "@/components/ui/button";
 const NAV_ITEMS = [
   { name: "Dashboard", icon: LayoutDashboard, page: "Dashboard" },
   { name: "Mobiele Surveillance", icon: CarFront, page: "MobileSurveillance" },
-  { name: "Klanten", icon: UserRound, page: "Customers" },
   { name: "Personeel", icon: Users, page: "Personnel" },
   { name: "Voertuigen", icon: Settings, page: "Vehicles" },
   { name: "Overig", icon: Settings, page: "CostSettings" },
