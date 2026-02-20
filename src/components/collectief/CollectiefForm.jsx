@@ -46,6 +46,8 @@ export default function CollectiefForm({ collectief, customers, objects, collect
     onSave(data);
   };
 
+  const [objectSearch, setObjectSearch] = useState("");
+
   // Exclude self from parent options
   const parentOptions = collectieven.filter(c => c.id !== collectief?.id);
 
