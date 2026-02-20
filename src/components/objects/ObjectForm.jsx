@@ -80,6 +80,10 @@ export default function ObjectForm({ object, onSave, onCancel }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!form.customer_id) {
+      alert("Selecteer een klant voor dit object");
+      return;
+    }
     onSave(form);
   };
 
