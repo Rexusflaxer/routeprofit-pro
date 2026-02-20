@@ -116,10 +116,16 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
                       <Clock className="w-3 h-3" />
                       {task.duration_minutes} min
                     </span>
-                    <span className="flex items-center gap-1">
-                      <Euro className="w-3 h-3" />
-                      €{getPricePerMinute(task).toFixed(2)}/min
-                    </span>
+                    {task.is_free ? (
+                      <Badge className="bg-green-50 text-green-700 border border-green-200 text-xs">
+                        Gratis service
+                      </Badge>
+                    ) : (
+                      <span className="flex items-center gap-1">
+                        <Euro className="w-3 h-3" />
+                        €{getPricePerMinute(task).toFixed(2)}/min
+                      </span>
+                    )}
                     {task.time_window_start && task.time_window_end && (
                       <span>{task.time_window_start} - {task.time_window_end}</span>
                     )}
