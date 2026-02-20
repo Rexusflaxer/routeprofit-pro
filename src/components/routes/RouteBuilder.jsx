@@ -78,10 +78,18 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
     const newWeekdays = [day];
     const autoName = WEEKDAY_LABELS[day];
     
+    // Reset voertuig als het op de nieuwe dag al bezet is
+    const busyVehicleIds = routes
+      .filter(r => r.id !== route?.id)
+      .filter(r => (r.weekdays || []).includes(day))
+      .map(r => r.vehicle_id)
+      .filter(Boolean);
+
     setForm(prev => ({
       ...prev,
       weekdays: newWeekdays,
-      name: autoName
+      name: autoName,
+      vehicle_id: busyVehicleIds.includes(prev.vehicle_id) ? "" : prev.vehicle_id,
     }));
   };
 
