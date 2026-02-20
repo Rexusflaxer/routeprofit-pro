@@ -36,6 +36,12 @@ function flattenCostItems(settings) {
   return items;
 }
 
+// Hoeveel diensten per maand heeft een route (op basis van weekdays)
+function servicesPerMonth(route) {
+  const daysPerWeek = (route?.weekdays || []).length || 1;
+  return daysPerWeek * 4.33; // gemiddeld 4.33 weken per maand
+}
+
 export default function RouteOverheadSummary({ route, allRoutes = [], costSettings }) {
   const selectedIds = route?.overhead_cost_ids || [];
   const allItems = useMemo(() => flattenCostItems(costSettings), [costSettings]);
@@ -43,12 +49,23 @@ export default function RouteOverheadSummary({ route, allRoutes = [], costSettin
 
   if (selectedItems.length === 0) return null;
 
+  const thisRouteDaysPerWeek = (route?.weekdays || []).length || 1;
+  const thisRouteServicesPerMonth = thisRouteDaysPerWeek * 4.33;
+
   const rows = selectedItems.map(item => {
-    const sharedWithCount = allRoutes.filter(r => (r.overhead_cost_ids || []).includes(item.id)).length || 1;
-    const amountForThisRoute = item.monthlyAmount / sharedWithCount;
-    return { ...item, sharedWithCount, amountForThisRoute };
+    // Tel het totale aantal "gewogen" diensten over alle routes die deze post aangevinkt hebben
+    const routesWithItem = allRoutes.filter(r => (r.overhead_cost_ids || []).includes(item.id));
+    const totalServicesPerMonth = routesWithItem.reduce((sum, r) => sum + servicesPerMonth(r), 0) || thisRouteServicesPerMonth;
+
+    // Aandeel van deze route = (diensten deze route / totale diensten) * maandelijkse kosten
+    const amountForThisRoute = (thisRouteServicesPerMonth / totalServicesPerMonth) * item.monthlyAmount;
+    const amountPerService = amountForThisRoute / thisRouteServicesPerMonth;
+    const sharedRouteCount = routesWithItem.length || 1;
+
+    return { ...item, sharedRouteCount, totalServicesPerMonth, amountForThisRoute, amountPerService, thisRouteServicesPerMonth };
   });
 
+  const totalPerService = rows.reduce((s, r) => s + r.amountPerService, 0);
   const totalMonthly = rows.reduce((s, r) => s + r.amountForThisRoute, 0);
 
   return (
@@ -64,19 +81,24 @@ export default function RouteOverheadSummary({ route, allRoutes = [], costSettin
           <div key={row.id} className="flex items-center justify-between py-1.5 border-b border-slate-50 last:border-0">
             <div>
               <p className="text-sm text-slate-800">{row.label}</p>
-              <p className="text-xs text-slate-400">{row.category}{row.sharedWithCount > 1 ? ` · gedeeld over ${row.sharedWithCount} routes` : ""}</p>
+              <p className="text-xs text-slate-400">
+                {row.category}
+                {row.sharedRouteCount > 1 ? ` · gedeeld over ${row.sharedRouteCount} routes` : ""}
+                {` · ${row.thisRouteServicesPerMonth.toFixed(1)} diensten/mnd`}
+              </p>
             </div>
             <div className="text-right">
-              <p className="text-sm font-semibold text-slate-700">€{row.amountForThisRoute.toFixed(2)}/mnd</p>
-              {row.sharedWithCount > 1 && (
-                <p className="text-xs text-slate-400">van €{row.monthlyAmount.toFixed(2)} totaal</p>
-              )}
+              <p className="text-sm font-semibold text-slate-700">€{row.amountPerService.toFixed(2)}/dienst</p>
+              <p className="text-xs text-slate-400">€{row.amountForThisRoute.toFixed(2)}/mnd</p>
             </div>
           </div>
         ))}
-        <div className="flex justify-between pt-2 border-t border-slate-200">
-          <p className="text-sm font-semibold text-slate-700">Totaal overhead deze route</p>
-          <p className="text-sm font-bold text-slate-900">€{totalMonthly.toFixed(2)}/mnd</p>
+        <div className="flex justify-between items-end pt-2 border-t border-slate-200">
+          <div>
+            <p className="text-sm font-semibold text-slate-700">Totaal overhead deze route</p>
+            <p className="text-xs text-slate-400">€{totalMonthly.toFixed(2)}/mnd</p>
+          </div>
+          <p className="text-sm font-bold text-slate-900">€{totalPerService.toFixed(2)}/dienst</p>
         </div>
       </CardContent>
     </Card>
