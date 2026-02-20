@@ -235,7 +235,8 @@ export default function CostSettingsForm({ settings, onSave, isSaving }) {
     });
   }, [offices]);
 
-  if (!form) return null;
+  // Toon altijd het formulier (ook zonder bestaande settings)
+  if (form === null) return null;
 
   const handleSave = () => { onSave(form); };
 
