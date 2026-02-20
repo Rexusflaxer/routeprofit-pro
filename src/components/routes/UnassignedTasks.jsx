@@ -13,7 +13,7 @@ const WEEKDAYS = [
   { value: 7, label: "Zo" },
 ];
 
-export default function UnassignedTasks({ tasks, routes, objects }) {
+export default function UnassignedTasks({ tasks, routes, objects, collectiefs }) {
   const unassignedTasks = useMemo(() => {
     // Verzamel welke taken op welke dagen al zijn toegewezen
     const taskDayUsage = {};
