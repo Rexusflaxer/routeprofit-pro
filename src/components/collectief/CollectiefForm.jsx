@@ -214,6 +214,17 @@ export default function CollectiefForm({ collectief, customers, objects, collect
             {objects.length === 0 ? (
               <p className="text-sm text-slate-400 italic">Geen objecten beschikbaar. Voeg eerst objecten toe.</p>
             ) : (
+              <div className="space-y-2">
+              <div className="relative">
+                <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+                <input
+                  type="text"
+                  value={objectSearch}
+                  onChange={e => setObjectSearch(e.target.value)}
+                  placeholder="Zoek op naam, code of adres..."
+                  className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-400"
+                />
+              </div>
               <div className="border border-slate-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
                 {objects.map((obj, i) => {
                   const isTaken = takenObjectIds.has(obj.id);
