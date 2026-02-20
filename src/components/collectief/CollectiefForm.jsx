@@ -47,6 +47,7 @@ export default function CollectiefForm({ collectief, customers, objects, collect
   };
 
   const [objectSearch, setObjectSearch] = useState("");
+  const [customerSearch, setCustomerSearch] = useState("");
 
   // Exclude self from parent options
   const parentOptions = collectieven.filter(c => c.id !== collectief?.id);
@@ -139,16 +140,28 @@ export default function CollectiefForm({ collectief, customers, objects, collect
             </div>
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Beheerder (klant) *</Label>
-              <Select value={form.customer_id} onValueChange={(v) => handleChange("customer_id", v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecteer klant..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+              <div className="space-y-2">
+                <Input
+                  placeholder="Zoek klant..."
+                  value={customerSearch}
+                  onChange={(e) => setCustomerSearch(e.target.value)}
+                />
+                <div className="border border-slate-200 rounded-lg max-h-40 overflow-y-auto">
+                  {customers.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase())).map((c, i) => (
+                    <button
+                      key={c.id}
+                      type="button"
+                      onClick={() => { handleChange("customer_id", c.id); setCustomerSearch(""); }}
+                      className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors ${i > 0 ? "border-t border-slate-100" : ""} ${form.customer_id === c.id ? "bg-slate-100" : ""}`}
+                    >
+                      <span className="font-medium text-slate-900">{c.name}</span>
+                    </button>
                   ))}
-                </SelectContent>
-              </Select>
+                </div>
+                {form.customer_id && (
+                  <div className="text-sm text-slate-600">Geselecteerd: <span className="font-medium">{customers.find(c => c.id === form.customer_id)?.name}</span></div>
+                )}
+              </div>
             </div>
           </div>
 
