@@ -94,7 +94,7 @@ export default function Routes() {
         )}
       </AnimatePresence>
 
-      {tasks && tasks.length > 0 && <UnassignedTasks tasks={tasks} routes={routes} objects={objects} />}
+      {tasks && tasks.length > 0 && <UnassignedTasks tasks={tasks} routes={routes} objects={objects} collectiefs={collectiefs} />}
 
       <div className="border border-slate-200 rounded-xl bg-white p-6 min-h-[400px]">
         {folders.length > 0 ? (
