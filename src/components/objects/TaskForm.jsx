@@ -120,38 +120,50 @@ export default function TaskForm({ task, onSave, onCancel }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Prijstype</Label>
-            <Select value={form.pricing_type} onValueChange={(v) => handleChange("pricing_type", v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent>
-                <SelectItem value="per_taak">Per taak</SelectItem>
-                <SelectItem value="per_minuut">Per minuut</SelectItem>
-              </SelectContent>
-            </Select>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">
-              Prijs (€)
-            </Label>
-            <Input 
-              type="number" 
-              step="0.01" 
-              min="0" 
-              value={form.price_amount} 
-              onChange={(e) => handleChange("price_amount", parseFloat(e.target.value) || 0)} 
-              required 
+        <div className="space-y-3">
+          <label className="flex items-center gap-3 cursor-pointer bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+            <Checkbox
+              checked={!!form.is_free}
+              onCheckedChange={(v) => handleChange("is_free", v)}
             />
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Prijs per minuut</Label>
-            <div className="h-10 flex items-center px-3 bg-slate-100 rounded-md text-sm font-medium text-slate-900">
-              €{pricePerMinute.toFixed(2)}/min
+            <div>
+              <p className="text-sm font-medium text-green-800">Gratis service</p>
+              <p className="text-xs text-green-600 mt-0.5">Deze taak wordt niet in rekening gebracht bij de klant</p>
             </div>
-          </div>
+          </label>
+
+          {!form.is_free && (
+            <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Prijstype</Label>
+                <Select value={form.pricing_type} onValueChange={(v) => handleChange("pricing_type", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="per_taak">Per taak</SelectItem>
+                    <SelectItem value="per_minuut">Per minuut</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Prijs (€)</Label>
+                <Input
+                  type="number"
+                  step="0.01"
+                  min="0"
+                  value={form.price_amount}
+                  onChange={(e) => handleChange("price_amount", parseFloat(e.target.value) || 0)}
+                />
+              </div>
+
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Prijs per minuut</Label>
+                <div className="h-10 flex items-center px-3 bg-slate-100 rounded-md text-sm font-medium text-slate-900">
+                  €{pricePerMinute.toFixed(2)}/min
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="flex justify-end gap-3 pt-2">
