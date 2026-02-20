@@ -150,9 +150,15 @@ export default function TaskList({ objectId }) {
                       <Badge variant="secondary" className="text-xs font-medium bg-slate-100 text-slate-800">
                         {task.task_type}
                       </Badge>
-                      <Badge variant="outline" className="text-xs">
-                        €{getPricePerMinute(task).toFixed(2)}/min
-                      </Badge>
+                      {task.is_free ? (
+                        <Badge className="text-xs bg-green-50 text-green-700 border border-green-200">
+                          <Gift className="w-3 h-3 mr-1" /> Gratis service
+                        </Badge>
+                      ) : (
+                        <Badge variant="outline" className="text-xs">
+                          €{getPricePerMinute(task).toFixed(2)}/min
+                        </Badge>
+                      )}
                     </div>
                     
                     <div className="grid grid-cols-2 gap-x-4 gap-y-2 text-xs text-slate-600">
@@ -161,14 +167,16 @@ export default function TaskList({ objectId }) {
                         <span>{task.duration_minutes} min</span>
                       </div>
                       
-                      <div className="flex items-center gap-1.5">
-                        <Euro className="w-3.5 h-3.5 text-slate-400" />
-                        <span>
-                          {task.pricing_type === 'per_taak' 
-                            ? `€${(task.price_amount || 0).toFixed(2)} per taak` 
-                            : `€${(task.price_amount || 0).toFixed(2)} per min`}
-                        </span>
-                      </div>
+                      {!task.is_free && (
+                        <div className="flex items-center gap-1.5">
+                          <Euro className="w-3.5 h-3.5 text-slate-400" />
+                          <span>
+                            {task.pricing_type === 'per_taak'
+                              ? `€${(task.price_amount || 0).toFixed(2)} per taak`
+                              : `€${(task.price_amount || 0).toFixed(2)} per min`}
+                          </span>
+                        </div>
+                      )}
 
                       {task.time_window_start && task.time_window_end && (
                         <div className="flex items-center gap-1.5 col-span-2">
