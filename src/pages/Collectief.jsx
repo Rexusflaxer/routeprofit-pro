@@ -27,11 +27,22 @@ function CollectiefCard({ collectief, customers, objects, allCollectieven, onEdi
   const linkedObjects = objects.filter(o => (collectief.object_ids || []).includes(o.id));
   const childCollectieven = allCollectieven.filter(c => c.parent_collectief_id === collectief.id);
 
+  const handleDelete = () => {
+    if (childCollectieven.length > 0) {
+      alert(`Dit collectief bevat nog ${childCollectieven.length} sub-collectief(en). Verwijder deze eerst.`);
+      return;
+    }
+    if (confirm(`Collectief "${collectief.name}" verwijderen?`)) onDelete(collectief.id);
+  };
+
   return (
     <Card className={`border-0 shadow-sm hover:shadow-md transition-shadow ${selected ? "ring-2 ring-slate-800" : ""}`}>
       <CardContent className="p-5">
-        <div className="flex items-start justify-between gap-3">
-          <button className="flex items-start gap-3 flex-1 min-w-0 text-left" onClick={() => onSelect(collectief)}>
+        <div className="flex items-start gap-3">
+          <div
+            className="flex items-start gap-3 flex-1 min-w-0 cursor-pointer"
+            onClick={() => onSelect(collectief)}
+          >
             <div className="w-9 h-9 rounded-lg bg-slate-100 flex items-center justify-center flex-shrink-0">
               <Building className="w-5 h-5 text-slate-600" />
             </div>
@@ -72,18 +83,12 @@ function CollectiefCard({ collectief, customers, objects, allCollectieven, onEdi
                 </div>
               )}
             </div>
-          </button>
+          </div>
           <div className="flex gap-1 flex-shrink-0">
             <Button variant="ghost" size="icon" className="h-8 w-8 text-slate-400 hover:text-slate-700" onClick={() => onEdit(collectief)}>
               <Pencil className="w-4 h-4" />
             </Button>
-            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600" onClick={() => {
-              if (childCollectieven.length > 0) {
-                alert(`Dit collectief bevat nog ${childCollectieven.length} sub-collectief(en). Verwijder deze eerst.`);
-                return;
-              }
-              if (confirm(`Collectief "${collectief.name}" verwijderen?`)) onDelete(collectief.id);
-            }}>
+            <Button variant="ghost" size="icon" className="h-8 w-8 text-red-400 hover:text-red-600" onClick={handleDelete}>
               <Trash2 className="w-4 h-4" />
             </Button>
           </div>
