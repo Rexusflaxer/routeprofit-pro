@@ -180,7 +180,7 @@ function PersonnelCostSection({ section, onChange, onDelete, personnelCounts, al
 }
 
 // --- Hoofd component ---
-export default function CostSettingsForm({ settings, onSave }) {
+export default function CostSettingsForm({ settings, onSave, isSaving }) {
   const { data: offices = [] } = useQuery({ queryKey: ["offices"], queryFn: () => base44.entities.Office.list() });
   const { data: personnel = [] } = useQuery({ queryKey: ["personnel"], queryFn: () => base44.entities.Personnel.list() });
 
