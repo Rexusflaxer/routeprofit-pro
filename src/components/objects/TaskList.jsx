@@ -127,6 +127,11 @@ export default function TaskList({ objectId }) {
                   <span className="text-xs text-blue-700 font-medium">{getCollectiefName(task.collectief_id)}</span>
                   <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-xs">{task.task_type}</Badge>
                   <span className="text-xs text-slate-500">{task.duration_minutes} min</span>
+                  {task.is_free ? (
+                    <Badge className="text-xs bg-green-50 text-green-700 border border-green-200">
+                      <Gift className="w-3 h-3 mr-1" /> Gratis
+                    </Badge>
+                  ) : null}
                   {task.time_window_start && task.time_window_end && (
                     <span className="text-xs text-slate-500">{task.time_window_start} - {task.time_window_end}</span>
                   )}
