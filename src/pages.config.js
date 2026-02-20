@@ -49,26 +49,28 @@
  */
 import CostSettings from './pages/CostSettings';
 import Dashboard from './pages/Dashboard';
+import MobileSurveillance from './pages/MobileSurveillance';
 import Objects from './pages/Objects';
 import Personnel from './pages/Personnel';
 import RouteDetails from './pages/RouteDetails';
 import Routes from './pages/Routes';
 import Settings from './pages/Settings';
 import Vehicles from './pages/Vehicles';
-import MobileSurveillance from './pages/MobileSurveillance';
+import Customers from './pages/Customers';
 import __Layout from './Layout.jsx';
 
 
 export const PAGES = {
     "CostSettings": CostSettings,
     "Dashboard": Dashboard,
+    "MobileSurveillance": MobileSurveillance,
     "Objects": Objects,
     "Personnel": Personnel,
     "RouteDetails": RouteDetails,
     "Routes": Routes,
     "Settings": Settings,
     "Vehicles": Vehicles,
-    "MobileSurveillance": MobileSurveillance,
+    "Customers": Customers,
 }
 
 export const pagesConfig = {
