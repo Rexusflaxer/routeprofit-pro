@@ -49,6 +49,42 @@ export default function CollectiefForm({ collectief, customers, objects, collect
   // Exclude self from parent options
   const parentOptions = collectieven.filter(c => c.id !== collectief?.id);
 
+  // Address autocomplete
+  const [addressSuggestions, setAddressSuggestions] = useState([]);
+  const [addressLoading, setAddressLoading] = useState(false);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const addressDebounceRef = useRef(null);
+  const addressWrapperRef = useRef(null);
+
+  const handleAddressChange = (value) => {
+    handleChange("address", value);
+    clearTimeout(addressDebounceRef.current);
+    if (value.length < 3) { setAddressSuggestions([]); setShowSuggestions(false); return; }
+    addressDebounceRef.current = setTimeout(async () => {
+      setAddressLoading(true);
+      const res = await base44.functions.invoke("searchAddress", { query: value });
+      setAddressSuggestions(res.data?.suggestions || []);
+      setShowSuggestions(true);
+      setAddressLoading(false);
+    }, 400);
+  };
+
+  const selectAddress = (suggestion) => {
+    handleChange("address", suggestion.address);
+    setShowSuggestions(false);
+    setAddressSuggestions([]);
+  };
+
+  useEffect(() => {
+    const handleClick = (e) => {
+      if (addressWrapperRef.current && !addressWrapperRef.current.contains(e.target)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClick);
+    return () => document.removeEventListener("mousedown", handleClick);
+  }, []);
+
   return (
     <Card className="border-0 shadow-lg">
       <CardContent className="p-6 sm:p-8">
