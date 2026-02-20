@@ -202,7 +202,7 @@ export default function CostSettingsForm({ settings, onSave, isSaving }) {
 
   const [form, setForm] = useState(null);
 
-  // Sync form state wanneer settings geladen zijn (ook als er nog geen settings zijn)
+  // Initialiseer form zodra settings + offices geladen zijn
   useEffect(() => {
     const base = {
       label: "Standaard",
@@ -215,28 +215,22 @@ export default function CostSettingsForm({ settings, onSave, isSaving }) {
     if (!base.personnel_cost_sections || base.personnel_cost_sections.length === 0) {
       base.personnel_cost_sections = [DEFAULT_PERSONNEL_SECTION];
     }
-    setForm(base);
-  }, [settings?.id]);
-
-  // Sync offices -> housing_costs
-  useEffect(() => {
-    if (offices.length === 0) return;
-    setForm(prev => {
-      if (!prev) return prev;
-      const existingIds = (prev.housing_costs || []).map(h => h.office_id);
+    // Sync offices in housing_costs
+    if (offices.length > 0) {
+      const existingIds = (base.housing_costs || []).map(h => h.office_id);
       const newEntries = offices.filter(o => !existingIds.includes(o.id)).map(o => ({
         office_id: o.id, office_name: o.name,
         rent_per_month: 0, utilities_per_month: 0, cleaning_per_month: 0, other_per_month: 0,
       }));
-      const updated = (prev.housing_costs || []).map(h => {
+      const updated = (base.housing_costs || []).map(h => {
         const office = offices.find(o => o.id === h.office_id);
         return office ? { ...h, office_name: office.name } : h;
       });
-      return { ...prev, housing_costs: [...updated, ...newEntries] };
-    });
-  }, [offices]);
+      base.housing_costs = [...updated, ...newEntries];
+    }
+    setForm(base);
+  }, [settings?.id, offices.length]);
 
-  // Toon altijd het formulier (ook zonder bestaande settings)
   if (form === null) return null;
 
   const handleSave = () => { onSave(form); };
