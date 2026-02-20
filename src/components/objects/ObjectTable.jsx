@@ -35,6 +35,7 @@ export default function ObjectTable({ objects, onEdit, onDelete }) {
       <Table>
         <TableHeader>
           <TableRow className="bg-slate-50/80">
+            <TableHead className="font-semibold text-xs uppercase tracking-wider text-slate-500">Code</TableHead>
             <TableHead className="font-semibold text-xs uppercase tracking-wider text-slate-500">Object</TableHead>
             <TableHead className="font-semibold text-xs uppercase tracking-wider text-slate-500">Adres</TableHead>
             <TableHead className="font-semibold text-xs uppercase tracking-wider text-slate-500">Collectief / Taken</TableHead>
