@@ -97,16 +97,40 @@ export default function Objects() {
       </Dialog>
 
       <Dialog open={showTasks} onOpenChange={setShowTasks}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Taken voor {taskObject?.name}</DialogTitle>
-          </DialogHeader>
-          {taskObject && <TaskList objectId={taskObject.id} />}
-        </DialogContent>
-      </Dialog>
+         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+           <DialogHeader>
+             <DialogTitle>Taken voor {taskObject?.name}</DialogTitle>
+           </DialogHeader>
+           {taskObject && <TaskList objectId={taskObject.id} />}
+         </DialogContent>
+       </Dialog>
 
-      {objects.length > 0 ? (
-        <ObjectTable objects={objects} onEdit={handleEdit} onDelete={(id) => deleteMutation.mutate(id)} />
+       {objects.length > 0 && (
+         <div className="space-y-4">
+           <div className="relative">
+             <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
+             <Input
+               placeholder="Zoek op objectcode, naam of adres..."
+               value={searchTerm}
+               onChange={(e) => setSearchTerm(e.target.value)}
+               className="pl-9 pr-9"
+             />
+             {searchTerm && (
+               <button
+                 onClick={() => setSearchTerm("")}
+                 className="absolute right-3 top-2.5 text-slate-400 hover:text-slate-600"
+               >
+                 <X className="h-4 w-4" />
+               </button>
+             )}
+           </div>
+           <ObjectTable objects={filteredObjects} onEdit={handleEdit} onDelete={(id) => deleteMutation.mutate(id)} />
+         </div>
+       )}
+
+       {objects.length > 0 && filteredObjects.length === 0 && (
+         <EmptyState icon={MapPin} title="Geen resultaten" description={`Geen objecten gevonden met "${searchTerm}".`} />
+       )}
       ) : !showForm && (
         <EmptyState icon={MapPin} title="Geen objecten" description="Voeg uw eerste bewakingsobject toe om te beginnen." actionLabel="Object toevoegen" onAction={() => setShowForm(true)} />
       )}
