@@ -150,17 +150,28 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
               </Select>
             </div>
             <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Voertuig</Label>
-              <Select value={form.vehicle_id} onValueChange={(v) => handleChange("vehicle_id", v)}>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Voertuig *</Label>
+              <Select value={form.vehicle_id} onValueChange={(v) => handleChange("vehicle_id", v)} required>
                 <SelectTrigger><SelectValue placeholder="Selecteer voertuig" /></SelectTrigger>
                 <SelectContent>
-                  {vehicles.filter(v => v.is_active).map(v => (
-                    <SelectItem key={v.id} value={v.id}>
-                      {v.license_plate} - {v.brand} {v.model}
-                    </SelectItem>
-                  ))}
+                  {availableVehicles.length === 0 ? (
+                    <div className="px-2 py-3 text-xs text-slate-500 text-center">
+                      {form.weekdays?.length > 0
+                        ? "Geen beschikbare voertuigen op deze dag"
+                        : "Selecteer eerst een dag"}
+                    </div>
+                  ) : (
+                    availableVehicles.map(v => (
+                      <SelectItem key={v.id} value={v.id}>
+                        {v.license_plate} - {v.brand} {v.model}
+                      </SelectItem>
+                    ))
+                  )}
                 </SelectContent>
               </Select>
+              {form.weekdays?.length > 0 && availableVehicles.length === 0 && (
+                <p className="text-xs text-red-500">Alle voertuigen zijn al bezet op deze dag</p>
+              )}
             </div>
           </div>
 
