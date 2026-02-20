@@ -111,7 +111,7 @@ export default function CollectiefTaskList({ collectief, objects, allCollectieve
                         </Badge>
                         {task.is_free ? (
                           <Badge className="text-xs bg-green-50 text-green-700 border border-green-200">
-                            <Gift className="w-3 h-3 mr-1" /> Gratis service
+                            Service
                           </Badge>
                         ) : (
                           <Badge variant="outline" className="text-xs">
