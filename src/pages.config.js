@@ -47,7 +47,9 @@
  *
  * The mainPage value must match a key in the PAGES object exactly.
  */
+import Collectief from './pages/Collectief';
 import CostSettings from './pages/CostSettings';
+import Customers from './pages/Customers';
 import Dashboard from './pages/Dashboard';
 import MobileSurveillance from './pages/MobileSurveillance';
 import Objects from './pages/Objects';
@@ -56,13 +58,13 @@ import RouteDetails from './pages/RouteDetails';
 import Routes from './pages/Routes';
 import Settings from './pages/Settings';
 import Vehicles from './pages/Vehicles';
-import Customers from './pages/Customers';
-import Collectief from './pages/Collectief';
 import __Layout from './Layout.jsx';
 
 
 export const PAGES = {
+    "Collectief": Collectief,
     "CostSettings": CostSettings,
+    "Customers": Customers,
     "Dashboard": Dashboard,
     "MobileSurveillance": MobileSurveillance,
     "Objects": Objects,
@@ -71,8 +73,6 @@ export const PAGES = {
     "Routes": Routes,
     "Settings": Settings,
     "Vehicles": Vehicles,
-    "Customers": Customers,
-    "Collectief": Collectief,
 }
 
 export const pagesConfig = {

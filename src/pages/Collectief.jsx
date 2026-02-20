@@ -8,6 +8,7 @@ import { Plus, Pencil, Trash2, Building, MapPin, ChevronRight, ArrowLeft, Layers
 import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
 import CollectiefForm from "../components/collectief/CollectiefForm";
+import CollectiefTaskList from "../components/collectief/CollectiefTaskList";
 
 const TYPE_LABELS = {
   regio_groep: "Regio / Groep",
