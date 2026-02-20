@@ -53,6 +53,15 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
     return obj ? obj.name : "Onbekend object";
   };
 
+  const getCollectifName = (task) => {
+    const collectief = collectiefs?.find(c => c.id === task.collectief_id);
+    return collectief ? collectief.name : null;
+  };
+
+  const isCollectifTask = (task) => {
+    return task.collectief_id && !task.object_id;
+  };
+
   const getPricePerMinute = (task) => {
     if (task.pricing_type === 'per_minuut') {
       return task.price_amount || 0;
