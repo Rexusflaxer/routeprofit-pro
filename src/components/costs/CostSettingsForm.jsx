@@ -222,6 +222,7 @@ export default function CostSettingsForm({ settings, onSave, isSaving }) {
   useEffect(() => {
     if (offices.length === 0) return;
     setForm(prev => {
+      if (!prev) return prev;
       const existingIds = (prev.housing_costs || []).map(h => h.office_id);
       const newEntries = offices.filter(o => !existingIds.includes(o.id)).map(o => ({
         office_id: o.id, office_name: o.name,
