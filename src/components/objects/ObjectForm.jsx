@@ -13,9 +13,15 @@ import TaskList from "./TaskList";
 export default function ObjectForm({ object, onSave, onCancel }) {
   const [form, setForm] = useState(object || {
     object_code: "",
+    customer_id: "",
     name: "",
     address: "",
     notes: "",
+  });
+
+  const { data: customers = [] } = useQuery({
+    queryKey: ["customers"],
+    queryFn: () => base44.entities.Customer.list(),
   });
 
   const [addressSuggestions, setAddressSuggestions] = useState([]);
