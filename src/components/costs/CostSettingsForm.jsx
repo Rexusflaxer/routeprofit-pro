@@ -461,8 +461,9 @@ export default function CostSettingsForm({ settings, onSave, isSaving }) {
       </Card>
 
       <div className="flex justify-end">
-        <Button onClick={handleSave} className="bg-slate-900 hover:bg-slate-800">
-          <Save className="w-4 h-4 mr-1" /> Opslaan
+        <Button onClick={handleSave} disabled={isSaving} className="bg-slate-900 hover:bg-slate-800">
+          {isSaving ? <Loader2 className="w-4 h-4 mr-1 animate-spin" /> : <Save className="w-4 h-4 mr-1" />}
+          {isSaving ? "Opslaan..." : "Opslaan"}
         </Button>
       </div>
     </div>
