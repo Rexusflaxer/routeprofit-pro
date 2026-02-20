@@ -202,16 +202,15 @@ export default function CostSettingsForm({ settings, onSave, isSaving }) {
 
   const [form, setForm] = useState(null);
 
-  // Sync form state wanneer settings geladen zijn
+  // Sync form state wanneer settings geladen zijn (ook als er nog geen settings zijn)
   useEffect(() => {
-    if (!settings) return;
     const base = {
       label: "Standaard",
       housing_costs: [],
       software_costs: [],
       custom_cost_sections: [],
       personnel_cost_sections: [DEFAULT_PERSONNEL_SECTION],
-      ...settings,
+      ...(settings || {}),
     };
     if (!base.personnel_cost_sections || base.personnel_cost_sections.length === 0) {
       base.personnel_cost_sections = [DEFAULT_PERSONNEL_SECTION];
