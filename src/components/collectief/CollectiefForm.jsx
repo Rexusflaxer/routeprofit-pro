@@ -19,6 +19,7 @@ const TYPE_OPTIONS = [
 
 export default function CollectiefForm({ collectief, customers, objects, collectieven, onSave, onCancel, saving }) {
   const [form, setForm] = useState({
+    object_code: collectief?.object_code || "",
     name: collectief?.name || "",
     collectief_type: collectief?.collectief_type || "bedrijventerrein",
     customer_id: collectief?.customer_id || "",
