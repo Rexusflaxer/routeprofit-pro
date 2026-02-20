@@ -49,8 +49,12 @@ export default function ObjectTable({ objects, onEdit, onDelete }) {
             const collectiefTasks = getCollectiefTasks(obj.id);
             return (
               <TableRow key={obj.id} className="hover:bg-slate-50/50 transition-colors">
+                <TableCell>
+                  {obj.object_code
+                    ? <span className="text-xs font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{obj.object_code}</span>
+                    : <span className="text-slate-300 text-xs">—</span>}
+                </TableCell>
                 <TableCell className="font-medium text-slate-900">
-                  {obj.object_code && <span className="text-slate-400 text-xs mr-1">[{obj.object_code}]</span>}
                   {obj.name}
                 </TableCell>
                 <TableCell>
