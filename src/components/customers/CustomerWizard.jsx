@@ -149,6 +149,82 @@ function StepKvK({ onSelect, onSkip, onBack }) {
   );
 }
 
+// Adres autocomplete component
+function AddressAutocomplete({ value, onChange }) {
+  const [suggestions, setSuggestions] = useState([]);
+  const [showSuggestions, setShowSuggestions] = useState(false);
+  const [loadingAddr, setLoadingAddr] = useState(false);
+  const addrDebounce = useRef(null);
+  const wrapperRef = useRef(null);
+
+  useEffect(() => {
+    const handleClickOutside = (e) => {
+      if (wrapperRef.current && !wrapperRef.current.contains(e.target)) {
+        setShowSuggestions(false);
+      }
+    };
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
+
+  const handleInput = (val) => {
+    onChange(val);
+    if (addrDebounce.current) clearTimeout(addrDebounce.current);
+    if (!val || val.length < 3) { setSuggestions([]); setShowSuggestions(false); return; }
+    addrDebounce.current = setTimeout(async () => {
+      setLoadingAddr(true);
+      try {
+        const res = await base44.functions.invoke("searchAddress", { query: val });
+        const sugs = res.data?.suggestions || [];
+        setSuggestions(sugs);
+        setShowSuggestions(sugs.length > 0);
+      } catch (_) {
+        setSuggestions([]);
+      } finally {
+        setLoadingAddr(false);
+      }
+    }, 350);
+  };
+
+  const handleSelect = (sug) => {
+    onChange(sug.address);
+    setSuggestions([]);
+    setShowSuggestions(false);
+  };
+
+  return (
+    <div className="relative" ref={wrapperRef}>
+      <div className="relative">
+        <Input
+          value={value}
+          onChange={(e) => handleInput(e.target.value)}
+          placeholder="Begin met typen: straat, postcode of stad..."
+          onFocus={() => suggestions.length > 0 && setShowSuggestions(true)}
+        />
+        {loadingAddr && (
+          <div className="absolute right-3 top-1/2 -translate-y-1/2">
+            <Loader2 className="w-4 h-4 animate-spin text-slate-400" />
+          </div>
+        )}
+      </div>
+      {showSuggestions && (
+        <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-xl shadow-lg overflow-hidden">
+          {suggestions.map((sug, i) => (
+            <button
+              key={i}
+              type="button"
+              onMouseDown={() => handleSelect(sug)}
+              className="w-full text-left px-4 py-2.5 text-sm hover:bg-slate-50 border-b border-slate-100 last:border-0 transition-colors"
+            >
+              {sug.address}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // Step 2: Gegevens invullen
 function StepDetails({ customerType, prefilled, onSave, onBack, saving }) {
   const [form, setForm] = useState({
@@ -218,7 +294,10 @@ function StepDetails({ customerType, prefilled, onSave, onBack, saving }) {
         <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
           <div className="space-y-2">
             <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Adres</Label>
-            <Input value={form.address} onChange={(e) => handleChange("address", e.target.value)} placeholder="Straat 1, 1234 AB Stad" />
+            <AddressAutocomplete
+              value={form.address}
+              onChange={(val) => handleChange("address", val)}
+            />
           </div>
           {customerType === "bedrijf" && (
             <div className="space-y-2">
