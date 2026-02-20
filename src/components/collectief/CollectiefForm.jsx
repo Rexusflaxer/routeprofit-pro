@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Check, Loader2, ArrowLeft, Building, MapPin, X, Search } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import CustomerSelect from "./CustomerSelect";
 
 const TYPE_OPTIONS = [
   { value: "regio_groep", label: "Regio / Groep", description: "Een geografische regio of logische groepering van objecten" },
@@ -139,16 +140,7 @@ export default function CollectiefForm({ collectief, customers, objects, collect
             </div>
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Beheerder (klant) *</Label>
-              <Select value={form.customer_id} onValueChange={(v) => handleChange("customer_id", v)}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Selecteer klant..." />
-                </SelectTrigger>
-                <SelectContent>
-                  {customers.map(c => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+              <CustomerSelect customers={customers} value={form.customer_id} onValueChange={(v) => handleChange("customer_id", v)} placeholder="Selecteer klant..." />
             </div>
           </div>
 
