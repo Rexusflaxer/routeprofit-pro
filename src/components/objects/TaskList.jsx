@@ -117,11 +117,30 @@ export default function TaskList({ objectId }) {
           />
         )}
 
-        {tasks.length === 0 ? (
+        {collectiefTasks.length > 0 && (
+          <div className="space-y-2 mb-4">
+            <p className="text-xs font-semibold uppercase tracking-wider text-slate-400">Via collectief</p>
+            {collectiefTasks.map(task => (
+              <div key={task.id} className="border border-blue-200 bg-blue-50 rounded-lg p-3">
+                <div className="flex items-center gap-2 flex-wrap">
+                  <Layers className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
+                  <span className="text-xs text-blue-700 font-medium">{getCollectiefName(task.collectief_id)}</span>
+                  <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-xs">{task.task_type}</Badge>
+                  <span className="text-xs text-slate-500">{task.duration_minutes} min</span>
+                  {task.time_window_start && task.time_window_end && (
+                    <span className="text-xs text-slate-500">{task.time_window_start} - {task.time_window_end}</span>
+                  )}
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+
+        {tasks.length === 0 && collectiefTasks.length === 0 ? (
           <div className="text-center py-8 text-slate-500 text-sm">
             Geen taken toegevoegd. Klik op "Taak toevoegen" om te beginnen.
           </div>
-        ) : (
+        ) : tasks.length === 0 ? null : (
           <div className="space-y-3">
             {tasks.map((task) => (
               <div key={task.id} className="border border-slate-200 rounded-lg p-4 hover:border-slate-300 transition-colors">
