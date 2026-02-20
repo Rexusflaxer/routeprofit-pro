@@ -55,6 +55,7 @@ import RouteDetails from './pages/RouteDetails';
 import Routes from './pages/Routes';
 import Settings from './pages/Settings';
 import Vehicles from './pages/Vehicles';
+import MobileSurveillance from './pages/MobileSurveillance';
 import __Layout from './Layout.jsx';
 
 
@@ -67,6 +68,7 @@ export const PAGES = {
     "Routes": Routes,
     "Settings": Settings,
     "Vehicles": Vehicles,
+    "MobileSurveillance": MobileSurveillance,
 }
 
 export const pagesConfig = {
