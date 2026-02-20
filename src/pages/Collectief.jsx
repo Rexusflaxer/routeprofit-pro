@@ -198,7 +198,16 @@ export default function CollectiefPage() {
                     allCollectieven={collectieven}
                     onEdit={handleEdit}
                     onDelete={(id) => deleteMutation.mutate(id)}
+                    onSelect={handleSelect}
+                    selected={selectedCollectief?.id === c.id}
                   />
+                  {selectedCollectief?.id === c.id && (
+                    <CollectiefTaskList
+                      collectief={c}
+                      objects={objects}
+                      allCollectieven={collectieven}
+                    />
+                  )}
                   {/* Sub-collectieven */}
                   {nested.filter(n => n.parent_collectief_id === c.id).map(sub => (
                     <div key={sub.id} className="ml-6 mt-2 flex gap-2">
@@ -214,7 +223,16 @@ export default function CollectiefPage() {
                           allCollectieven={collectieven}
                           onEdit={handleEdit}
                           onDelete={(id) => deleteMutation.mutate(id)}
+                          onSelect={handleSelect}
+                          selected={selectedCollectief?.id === sub.id}
                         />
+                        {selectedCollectief?.id === sub.id && (
+                          <CollectiefTaskList
+                            collectief={sub}
+                            objects={objects}
+                            allCollectieven={collectieven}
+                          />
+                        )}
                       </div>
                     </div>
                   ))}
