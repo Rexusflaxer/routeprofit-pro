@@ -72,7 +72,7 @@ export default function ObjectTable({ objects, onEdit, onDelete }) {
                       </div>
                     )}
                     {directTaskCount > 0 && (
-                      <Badge variant="secondary" className="bg-slate-100 text-slate-800 text-xs w-fit">
+                      <Badge variant="secondary" className="bg-amber-50 text-amber-700 border border-amber-200 text-xs w-fit">
                         {directTaskCount} {directTaskCount === 1 ? 'eigen taak' : 'eigen taken'}
                       </Badge>
                     )}
