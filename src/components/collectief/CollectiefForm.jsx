@@ -258,6 +258,7 @@ export default function CollectiefForm({ collectief, customers, objects, collect
                   );
                 })}
               </div>
+              </div>
             )}
           </div>
 
