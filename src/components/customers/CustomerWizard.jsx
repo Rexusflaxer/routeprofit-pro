@@ -56,47 +56,64 @@ function StepKvK({ onSelect, onSkip, onBack }) {
   const [loading, setLoading] = useState(false);
   const [searched, setSearched] = useState(false);
   const [error, setError] = useState("");
+  const debounceRef = useRef(null);
 
-  const handleSearch = async () => {
-    if (!query.trim()) return;
-    setLoading(true);
-    setError("");
-    setSearched(false);
-    try {
-      const res = await base44.functions.invoke("searchKvK", { query: query.trim() });
-      setResults(res.data.results || []);
-      setSearched(true);
-    } catch (e) {
-      setError("Zoeken mislukt. Probeer het opnieuw.");
-    } finally {
-      setLoading(false);
+  useEffect(() => {
+    if (debounceRef.current) clearTimeout(debounceRef.current);
+    if (!query.trim() || query.trim().length < 2) {
+      setResults([]);
+      setSearched(false);
+      setError("");
+      return;
     }
-  };
+    debounceRef.current = setTimeout(async () => {
+      setLoading(true);
+      setError("");
+      setSearched(false);
+      try {
+        const res = await base44.functions.invoke("searchKvK", { query: query.trim() });
+        if (res.data?.error) {
+          setError("Zoeken mislukt: " + res.data.error);
+          setResults([]);
+        } else {
+          setResults(res.data?.results || []);
+          setSearched(true);
+        }
+      } catch (e) {
+        setError("Zoeken mislukt. Probeer het opnieuw.");
+        setResults([]);
+      } finally {
+        setLoading(false);
+      }
+    }, 400);
+
+    return () => clearTimeout(debounceRef.current);
+  }, [query]);
 
   return (
     <div className="space-y-6">
       <div>
         <h2 className="text-xl font-bold text-slate-900">Bedrijf zoeken in KvK</h2>
-        <p className="text-slate-500 text-sm mt-1">Zoek op bedrijfsnaam, KVK-nummer of adres</p>
+        <p className="text-slate-500 text-sm mt-1">Zoek op bedrijfsnaam of KVK-nummer</p>
       </div>
 
-      <div className="flex gap-2">
+      <div className="relative">
         <Input
           value={query}
           onChange={(e) => setQuery(e.target.value)}
-          onKeyDown={(e) => e.key === "Enter" && handleSearch()}
-          placeholder="Bedrijfsnaam, KVK-nummer of adres..."
-          className="flex-1"
+          placeholder="Typ een bedrijfsnaam of KVK-nummer..."
+          className="pr-10"
+          autoFocus
         />
-        <Button onClick={handleSearch} disabled={loading || !query.trim()} className="bg-slate-900 hover:bg-slate-800">
-          {loading ? <Loader2 className="w-4 h-4 animate-spin" /> : <Search className="w-4 h-4" />}
-        </Button>
+        <div className="absolute right-3 top-1/2 -translate-y-1/2">
+          {loading ? <Loader2 className="w-4 h-4 animate-spin text-slate-400" /> : <Search className="w-4 h-4 text-slate-300" />}
+        </div>
       </div>
 
       {error && <p className="text-red-500 text-sm">{error}</p>}
 
-      {searched && results.length === 0 && (
-        <p className="text-slate-500 text-sm text-center py-4">Geen resultaten gevonden. Probeer een andere zoekterm of sla het handelsregister over.</p>
+      {searched && results.length === 0 && !loading && (
+        <p className="text-slate-500 text-sm text-center py-4">Geen resultaten gevonden. Probeer een andere zoekterm of voer handmatig in.</p>
       )}
 
       {results.length > 0 && (
