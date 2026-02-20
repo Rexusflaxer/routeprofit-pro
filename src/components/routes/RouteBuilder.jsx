@@ -46,6 +46,22 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
     binnendienst_personnel_ids: [],
   });
 
+  // Filter beschikbare voertuigen: sluit voertuigen uit die al bezet zijn op dezelfde dag
+  const availableVehicles = useMemo(() => {
+    if (!form.weekdays || form.weekdays.length === 0) {
+      return vehicles.filter(v => v.is_active);
+    }
+    
+    const selectedDay = form.weekdays[0];
+    const busyVehicleIds = routes
+      .filter(r => r.id !== route?.id) // Excludeer huidige route bij bewerken
+      .filter(r => (r.weekdays || []).includes(selectedDay))
+      .map(r => r.vehicle_id)
+      .filter(Boolean);
+
+    return vehicles.filter(v => v.is_active && !busyVehicleIds.includes(v.id));
+  }, [vehicles, routes, form.weekdays, route?.id]);
+
   const { data: objects = [] } = useQuery({
     queryKey: ['objects'],
     queryFn: () => base44.entities.SurveillanceObject.list(),
