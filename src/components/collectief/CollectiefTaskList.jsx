@@ -109,9 +109,15 @@ export default function CollectiefTaskList({ collectief, objects, allCollectieve
                         <Badge variant="secondary" className="text-xs font-medium bg-slate-100 text-slate-800">
                           {task.task_type}
                         </Badge>
-                        <Badge variant="outline" className="text-xs">
-                          €{getPricePerMinute(task).toFixed(2)}/min
-                        </Badge>
+                        {task.is_free ? (
+                          <Badge className="text-xs bg-green-50 text-green-700 border border-green-200">
+                            <Gift className="w-3 h-3 mr-1" /> Gratis service
+                          </Badge>
+                        ) : (
+                          <Badge variant="outline" className="text-xs">
+                            €{getPricePerMinute(task).toFixed(2)}/min
+                          </Badge>
+                        )}
                         {task.allow_split && (
                           <Badge className="text-xs bg-amber-50 text-amber-700 border border-amber-200">
                             <Scissors className="w-3 h-3 mr-1" /> Splits toegestaan
@@ -147,14 +153,16 @@ export default function CollectiefTaskList({ collectief, objects, allCollectieve
                           </div>
                         )}
 
-                        <div className="flex items-center gap-1.5">
-                          <Euro className="w-3.5 h-3.5 text-slate-400" />
-                          <span>
-                            {task.pricing_type === "per_taak"
-                              ? `€${(task.price_amount || 0).toFixed(2)} per taak`
-                              : `€${(task.price_amount || 0).toFixed(2)} per min`}
-                          </span>
-                        </div>
+                        {!task.is_free && (
+                          <div className="flex items-center gap-1.5">
+                            <Euro className="w-3.5 h-3.5 text-slate-400" />
+                            <span>
+                              {task.pricing_type === "per_taak"
+                                ? `€${(task.price_amount || 0).toFixed(2)} per taak`
+                                : `€${(task.price_amount || 0).toFixed(2)} per min`}
+                            </span>
+                          </div>
+                        )}
 
                         {task.weekdays?.length > 0 && (
                           <div className="flex items-center gap-1.5 col-span-2">
