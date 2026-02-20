@@ -92,11 +92,24 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 mb-1 flex-wrap">
-                    <span className="text-sm font-medium text-slate-900">{getObjectName(task)}</span>
-                    <Badge variant="secondary" className="text-xs bg-slate-200 text-slate-700">
-                      {task.task_type}
-                    </Badge>
-                  </div>
+                     {isCollectifTask(task) ? (
+                       <>
+                         <div className="flex items-center gap-1.5">
+                           <Package className="w-4 h-4 text-blue-600" />
+                           <span className="text-sm font-medium text-slate-900">{getCollectifName(task)}</span>
+                         </div>
+                         <Badge className="text-xs bg-blue-100 text-blue-800">
+                           <Package className="w-3 h-3 mr-1" />
+                           Collectief
+                         </Badge>
+                       </>
+                     ) : (
+                       <span className="text-sm font-medium text-slate-900">{getObjectName(task)}</span>
+                     )}
+                     <Badge variant="secondary" className="text-xs bg-slate-200 text-slate-700">
+                       {task.task_type}
+                     </Badge>
+                   </div>
                   <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-slate-500 mb-2">
                     <span className="flex items-center gap-1">
                       <Clock className="w-3 h-3" />
