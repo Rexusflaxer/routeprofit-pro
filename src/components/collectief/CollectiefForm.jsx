@@ -213,24 +213,34 @@ export default function CollectiefForm({ collectief, customers, objects, collect
               <p className="text-sm text-slate-400 italic">Geen objecten beschikbaar. Voeg eerst objecten toe.</p>
             ) : (
               <div className="border border-slate-200 rounded-xl overflow-hidden max-h-56 overflow-y-auto">
-                {objects.map((obj, i) => (
-                  <label
-                    key={obj.id}
-                    className={`flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors ${i > 0 ? "border-t border-slate-100" : ""}`}
-                  >
-                    <Checkbox
-                      checked={form.object_ids.includes(obj.id)}
-                      onCheckedChange={() => toggleObject(obj.id)}
-                    />
-                    <div className="flex-1 min-w-0">
-                      <p className="text-sm font-medium text-slate-900">
-                        {obj.object_code ? <span className="text-slate-400 mr-1">[{obj.object_code}]</span> : null}
-                        {obj.name}
-                      </p>
-                      {obj.address && <p className="text-xs text-slate-400 truncate">{obj.address}</p>}
-                    </div>
-                  </label>
-                ))}
+                {objects.map((obj, i) => {
+                  const isTaken = takenObjectIds.has(obj.id);
+                  const takenBy = isTaken
+                    ? collectieven.find(c => c.id !== collectief?.id && (c.object_ids || []).includes(obj.id))
+                    : null;
+                  return (
+                    <label
+                      key={obj.id}
+                      className={`flex items-center gap-3 px-4 py-3 transition-colors ${i > 0 ? "border-t border-slate-100" : ""} ${isTaken ? "opacity-50 cursor-not-allowed bg-slate-50" : "cursor-pointer hover:bg-slate-50"}`}
+                    >
+                      <Checkbox
+                        checked={form.object_ids.includes(obj.id)}
+                        onCheckedChange={() => !isTaken && toggleObject(obj.id)}
+                        disabled={isTaken}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium text-slate-900">
+                          {obj.object_code ? <span className="text-slate-400 mr-1">[{obj.object_code}]</span> : null}
+                          {obj.name}
+                        </p>
+                        {isTaken
+                          ? <p className="text-xs text-amber-600">Al in gebruik: {takenBy?.name}</p>
+                          : obj.address && <p className="text-xs text-slate-400 truncate">{obj.address}</p>
+                        }
+                      </div>
+                    </label>
+                  );
+                })}
               </div>
             )}
           </div>
