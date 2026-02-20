@@ -49,6 +49,13 @@ export default function CollectiefForm({ collectief, customers, objects, collect
   // Exclude self from parent options
   const parentOptions = collectieven.filter(c => c.id !== collectief?.id);
 
+  // Object IDs die al in een ander collectief zitten (niet het huidige)
+  const takenObjectIds = new Set(
+    collectieven
+      .filter(c => c.id !== collectief?.id)
+      .flatMap(c => c.object_ids || [])
+  );
+
   // Address autocomplete
   const [addressSuggestions, setAddressSuggestions] = useState([]);
   const [addressLoading, setAddressLoading] = useState(false);
