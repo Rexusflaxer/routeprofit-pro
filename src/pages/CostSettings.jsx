@@ -51,7 +51,13 @@ export default function CostSettings() {
         title="Overige kosten"
         subtitle="Beheer huisvesting, software en overige bedrijfskosten"
       />
-      <CostSettingsForm settings={settings[0]} onSave={handleSave} />
+      {saved && (
+        <div className="flex items-center gap-2 px-4 py-3 bg-green-50 border border-green-200 rounded-lg text-sm text-green-700">
+          <CheckCircle2 className="w-4 h-4 flex-shrink-0" />
+          Instellingen opgeslagen!
+        </div>
+      )}
+      <CostSettingsForm settings={settings[0]} onSave={handleSave} isSaving={createMutation.isPending || updateMutation.isPending} />
     </div>
   );
 }
