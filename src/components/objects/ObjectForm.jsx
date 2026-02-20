@@ -10,6 +10,7 @@ import TaskList from "./TaskList";
 
 export default function ObjectForm({ object, onSave, onCancel }) {
   const [form, setForm] = useState(object || {
+    object_code: "",
     name: "",
     address: "",
     notes: "",
