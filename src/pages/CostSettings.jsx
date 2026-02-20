@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "../components/ui-custom/PageHeader";
@@ -16,26 +16,27 @@ export default function CostSettings() {
 
   const createMutation = useMutation({
     mutationFn: (data) => base44.entities.CostSettings.create(data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["costSettings"] }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["costSettings"] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    },
   });
 
   const updateMutation = useMutation({
     mutationFn: ({ id, data }) => base44.entities.CostSettings.update(id, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["costSettings"] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
     },
   });
 
   const handleSave = (data) => {
-    const onSuccess = () => {
-      queryClient.invalidateQueries({ queryKey: ["costSettings"] });
-      setSaved(true);
-      setTimeout(() => setSaved(false), 2500);
-    };
     if (settings.length > 0) {
-      updateMutation.mutate({ id: settings[0].id, data }, { onSuccess });
+      updateMutation.mutate({ id: settings[0].id, data });
     } else {
-      createMutation.mutate(data, { onSuccess });
+      createMutation.mutate(data);
     }
   };
 
@@ -59,7 +60,11 @@ export default function CostSettings() {
           Instellingen opgeslagen!
         </div>
       )}
-      <CostSettingsForm settings={settings[0]} onSave={handleSave} isSaving={createMutation.isPending || updateMutation.isPending} />
+      <CostSettingsForm
+        settings={settings[0]}
+        onSave={handleSave}
+        isSaving={createMutation.isPending || updateMutation.isPending}
+      />
     </div>
   );
 }
