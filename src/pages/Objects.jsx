@@ -3,7 +3,7 @@ import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Plus, MapPin } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
 import ObjectForm from "../components/objects/ObjectForm";
@@ -71,13 +71,14 @@ export default function Objects() {
         }
       />
 
-      <AnimatePresence>
-        {showForm && (
-          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
-            <ObjectForm object={editing} onSave={handleSave} onCancel={() => { setShowForm(false); setEditing(null); }} />
-          </motion.div>
-        )}
-      </AnimatePresence>
+      <Dialog open={showForm} onOpenChange={setShowForm}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>{editing ? "Object bewerken" : "Nieuw object"}</DialogTitle>
+          </DialogHeader>
+          <ObjectForm object={editing} onSave={handleSave} onCancel={() => { setShowForm(false); setEditing(null); }} />
+        </DialogContent>
+      </Dialog>
 
       {objects.length > 0 ? (
         <ObjectTable objects={objects} onEdit={handleEdit} onDelete={(id) => deleteMutation.mutate(id)} />
