@@ -236,6 +236,8 @@ export default function CostSettingsForm({ settings, onSave, isSaving }) {
     });
   }, [offices]);
 
+  if (!form) return null;
+
   const handleSave = () => { onSave(form); };
 
   const updateHousing = (idx, field, value) => {
