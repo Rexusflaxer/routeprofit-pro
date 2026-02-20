@@ -5,6 +5,13 @@ import { MapPin, Route, Users } from "lucide-react";
 
 const TILES = [
   {
+    label: "Klanten",
+    description: "Beheer particulieren en bedrijven",
+    icon: Users,
+    color: "from-amber-500 to-amber-700",
+    page: "Customers",
+  },
+  {
     label: "Objecten",
     description: "Bekijk en beheer alle surveillanceobjecten",
     icon: MapPin,
@@ -17,13 +24,6 @@ const TILES = [
     icon: Route,
     color: "from-slate-700 to-slate-900",
     page: "Routes",
-  },
-  {
-    label: "Klanten",
-    description: "Beheer particulieren en bedrijven",
-    icon: Users,
-    color: "from-amber-500 to-amber-700",
-    page: "Customers",
   },
 ];
 
