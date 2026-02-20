@@ -1,11 +1,13 @@
+
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "./utils";
-import { LayoutDashboard, MapPin, Users, Route, Settings, Shield, Menu, X } from "lucide-react";
+import { LayoutDashboard, MapPin, Users, Route, Settings, Shield, Menu, X, Smartphone } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const NAV_ITEMS = [
   { name: "Dashboard", icon: LayoutDashboard, page: "Dashboard" },
+  { name: "Mobiele Surveillance", icon: Smartphone, page: "MobileSurveillance" },
   { name: "Objecten", icon: MapPin, page: "Objects" },
   { name: "Personeel", icon: Users, page: "Personnel" },
   { name: "Voertuigen", icon: Settings, page: "Vehicles" },
