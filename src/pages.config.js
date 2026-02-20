@@ -57,6 +57,7 @@ import Routes from './pages/Routes';
 import Settings from './pages/Settings';
 import Vehicles from './pages/Vehicles';
 import Customers from './pages/Customers';
+import Collectief from './pages/Collectief';
 import __Layout from './Layout.jsx';
 
 
@@ -71,6 +72,7 @@ export const PAGES = {
     "Settings": Settings,
     "Vehicles": Vehicles,
     "Customers": Customers,
+    "Collectief": Collectief,
 }
 
 export const pagesConfig = {
