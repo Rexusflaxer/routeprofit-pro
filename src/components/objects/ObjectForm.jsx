@@ -8,6 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { X, Save, MapPin } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
+import TaskList from "./TaskList";
 
 export default function ObjectForm({ object, onSave, onCancel }) {
   const [form, setForm] = useState(object || {
@@ -87,6 +88,7 @@ export default function ObjectForm({ object, onSave, onCancel }) {
   };
 
   return (
+    <div className="space-y-6">
     <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Klant *</Label>
@@ -160,5 +162,8 @@ export default function ObjectForm({ object, onSave, onCancel }) {
               <Button type="submit" className="bg-slate-900 hover:bg-slate-800"><Save className="w-4 h-4 mr-1" /> Opslaan</Button>
             </div>
     </form>
+
+    {object && object.id && <TaskList objectId={object.id} />}
+  </div>
   );
 }
