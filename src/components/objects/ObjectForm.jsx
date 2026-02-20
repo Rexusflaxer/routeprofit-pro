@@ -8,7 +8,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { X, Save, MapPin } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
-import TaskList from "./TaskList";
 
 export default function ObjectForm({ object, onSave, onCancel }) {
   const [form, setForm] = useState(object || {
@@ -88,10 +87,7 @@ export default function ObjectForm({ object, onSave, onCancel }) {
   };
 
   return (
-    <div className="space-y-6">
-      <div className="bg-slate-50 rounded-lg p-6">
-        <h3 className="text-lg font-semibold text-slate-900 mb-4">{object ? "Object bewerken" : "Nieuw object"}</h3>
-          <form onSubmit={handleSubmit} className="space-y-5">
+    <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Klant *</Label>
               <Select value={form.customer_id} onValueChange={(v) => handleChange("customer_id", v)}>
@@ -163,10 +159,6 @@ export default function ObjectForm({ object, onSave, onCancel }) {
               <Button type="button" variant="outline" onClick={onCancel}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
               <Button type="submit" className="bg-slate-900 hover:bg-slate-800"><Save className="w-4 h-4 mr-1" /> Opslaan</Button>
             </div>
-          </form>
-      </div>
-
-      {object && object.id && <TaskList objectId={object.id} />}
-    </div>
+    </form>
   );
 }
