@@ -34,6 +34,9 @@ export default function RouteAnalysisCard({ route, vehicles, costSettings }) {
 
     // Revenue - bereken per taak op basis van toegewezen dagen
     const monthlyRevenue = routeTasks.reduce((total, task) => {
+      // Skip gratis taken
+      if (task.is_free) return total;
+      
       const assignment = (route.assigned_tasks || []).find(at => at.task_id === task.id);
       const taskDays = assignment?.days?.length || 0;
       const visitsPerMonth = taskDays * 4;
