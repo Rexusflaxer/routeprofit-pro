@@ -27,7 +27,6 @@ export default function ObjectForm({ object, onSave, onCancel }) {
   const [addressSuggestions, setAddressSuggestions] = useState([]);
   const [showSuggestions, setShowSuggestions] = useState(false);
   const [loadingAddress, setLoadingAddress] = useState(false);
-  const [customerSearch, setCustomerSearch] = useState("");
   const addressTimeoutRef = useRef(null);
 
   const handleChange = (field, value) => {
@@ -93,33 +92,22 @@ export default function ObjectForm({ object, onSave, onCancel }) {
     <form onSubmit={handleSubmit} className="space-y-5">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Klant *</Label>
-              {customers.length === 0 ? (
-                <div className="px-3 py-2 text-sm text-slate-500 border border-slate-200 rounded-lg">Geen klanten gevonden. Voeg eerst een klant toe.</div>
-              ) : (
-                <div className="space-y-2">
-                  <Input
-                    placeholder="Zoek klant..."
-                    value={customerSearch}
-                    onChange={(e) => setCustomerSearch(e.target.value)}
-                  />
-                  <div className="border border-slate-200 rounded-lg max-h-40 overflow-y-auto">
-                    {customers.filter(c => c.name.toLowerCase().includes(customerSearch.toLowerCase())).map((c, i) => (
-                      <button
-                        key={c.id}
-                        type="button"
-                        onClick={() => { handleChange("customer_id", c.id); setCustomerSearch(""); }}
-                        className={`w-full text-left px-3 py-2 text-sm hover:bg-slate-50 transition-colors ${i > 0 ? "border-t border-slate-100" : ""} ${form.customer_id === c.id ? "bg-slate-100" : ""}`}
-                      >
-                        <span className="font-medium text-slate-900">{c.name}</span>
-                        <span className="text-slate-400 ml-2">({c.customer_type})</span>
-                      </button>
-                    ))}
-                  </div>
-                  {form.customer_id && (
-                    <div className="text-sm text-slate-600">Geselecteerd: <span className="font-medium">{customers.find(c => c.id === form.customer_id)?.name}</span></div>
+              <Select value={form.customer_id} onValueChange={(v) => handleChange("customer_id", v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecteer een klant" />
+                </SelectTrigger>
+                <SelectContent>
+                  {customers.length === 0 ? (
+                    <div className="px-2 py-3 text-xs text-slate-500 text-center">Geen klanten gevonden. Voeg eerst een klant toe.</div>
+                  ) : (
+                    customers.map(c => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} ({c.customer_type})
+                      </SelectItem>
+                    ))
                   )}
-                </div>
-              )}
+                </SelectContent>
+              </Select>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
