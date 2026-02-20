@@ -25,10 +25,15 @@ export default function CostSettings() {
   });
 
   const handleSave = (data) => {
+    const onSuccess = () => {
+      queryClient.invalidateQueries({ queryKey: ["costSettings"] });
+      setSaved(true);
+      setTimeout(() => setSaved(false), 2500);
+    };
     if (settings.length > 0) {
-      updateMutation.mutate({ id: settings[0].id, data });
+      updateMutation.mutate({ id: settings[0].id, data }, { onSuccess });
     } else {
-      createMutation.mutate(data);
+      createMutation.mutate(data, { onSuccess });
     }
   };
 
