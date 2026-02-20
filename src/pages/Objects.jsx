@@ -8,10 +8,13 @@ import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
 import ObjectForm from "../components/objects/ObjectForm";
 import ObjectTable from "../components/objects/ObjectTable";
+import TaskList from "../components/objects/TaskList";
 
 export default function Objects() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [showTasks, setShowTasks] = useState(false);
+  const [taskObject, setTaskObject] = useState(null);
   const queryClient = useQueryClient();
 
   const { data: objects = [], isLoading } = useQuery({
@@ -59,6 +62,11 @@ export default function Objects() {
     setShowForm(true);
   };
 
+  const handleViewTasks = (obj) => {
+    setTaskObject(obj);
+    setShowTasks(true);
+  };
+
   return (
     <div className="space-y-6">
       <PageHeader
@@ -77,6 +85,15 @@ export default function Objects() {
             <DialogTitle>{editing ? "Object bewerken" : "Nieuw object"}</DialogTitle>
           </DialogHeader>
           <ObjectForm object={editing} onSave={handleSave} onCancel={() => { setShowForm(false); setEditing(null); }} />
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={showTasks} onOpenChange={setShowTasks}>
+        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Taken voor {taskObject?.name}</DialogTitle>
+          </DialogHeader>
+          {taskObject && <TaskList objectId={taskObject.id} />}
         </DialogContent>
       </Dialog>
 
