@@ -116,6 +116,11 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
       alert("Selecteer een dag voor deze route");
       return;
     }
+
+    if (!form.vehicle_id) {
+      alert("Selecteer een voertuig");
+      return;
+    }
     
     onSave(form);
   };
