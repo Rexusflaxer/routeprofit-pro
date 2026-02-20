@@ -95,6 +95,26 @@ export default function ObjectForm({ object, onSave, onCancel }) {
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="space-y-5">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Klant *</Label>
+              <Select value={form.customer_id} onValueChange={(v) => handleChange("customer_id", v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecteer een klant" />
+                </SelectTrigger>
+                <SelectContent>
+                  {customers.length === 0 ? (
+                    <div className="px-2 py-3 text-xs text-slate-500 text-center">Geen klanten gevonden. Voeg eerst een klant toe.</div>
+                  ) : (
+                    customers.map(c => (
+                      <SelectItem key={c.id} value={c.id}>
+                        {c.name} ({c.customer_type})
+                      </SelectItem>
+                    ))
+                  )}
+                </SelectContent>
+              </Select>
+            </div>
+
             <div className="grid grid-cols-1 md:grid-cols-3 gap-5">
               <div className="space-y-2">
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Objectcode</Label>
