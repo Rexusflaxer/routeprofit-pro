@@ -19,6 +19,25 @@ export default function TaskList({ objectId }) {
     queryFn: () => base44.entities.Task.filter({ object_id: objectId }),
   });
 
+  const { data: allCollectieven = [] } = useQuery({
+    queryKey: ['collectieven'],
+    queryFn: () => base44.entities.Collectief.list(),
+  });
+
+  const { data: allCollectiefTasks = [] } = useQuery({
+    queryKey: ['all-tasks'],
+    queryFn: () => base44.entities.Task.list(),
+  });
+
+  // Find collectief tasks where this object is in selected_object_ids
+  const collectiefTasks = allCollectiefTasks.filter(
+    t => t.collectief_id && (t.selected_object_ids || []).includes(objectId)
+  );
+
+  const getCollectiefName = (collectiefId) => {
+    return allCollectieven.find(c => c.id === collectiefId)?.name || "Collectief";
+  };
+
   const createMutation = useMutation({
     mutationFn: (data) => base44.entities.Task.create(data),
     onSuccess: () => {
