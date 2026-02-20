@@ -16,6 +16,7 @@ export default function Objects() {
   const [editing, setEditing] = useState(null);
   const [showTasks, setShowTasks] = useState(false);
   const [taskObject, setTaskObject] = useState(null);
+  const [searchTerm, setSearchTerm] = useState("");
   const queryClient = useQueryClient();
 
   const { data: objects = [], isLoading } = useQuery({
