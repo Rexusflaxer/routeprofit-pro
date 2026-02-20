@@ -142,6 +142,10 @@ export default function CollectiefPage() {
     setShowForm(true);
   };
 
+  const handleSelect = (c) => {
+    setSelectedCollectief(prev => prev?.id === c.id ? null : c);
+  };
+
   const isPending = createMutation.isPending || updateMutation.isPending;
 
   if (showForm) {
