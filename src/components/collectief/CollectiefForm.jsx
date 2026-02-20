@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { Check, Loader2, ArrowLeft, Building, MapPin, X, Search } from "lucide-react";
 import { base44 } from "@/api/base44Client";
-import CustomerSelect from "./CustomerSelect";
+import CustomerSelect from "../ui-custom/CustomerSelect";
 
 const TYPE_OPTIONS = [
   { value: "regio_groep", label: "Regio / Groep", description: "Een geografische regio of logische groepering van objecten" },
