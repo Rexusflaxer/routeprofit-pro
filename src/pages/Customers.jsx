@@ -123,11 +123,27 @@ export default function Customers() {
         }
       />
 
+      {!isLoading && customers.length > 0 && (
+        <div className="relative">
+          <Search className="absolute left-3 top-2.5 w-4 h-4 text-slate-400" />
+          <input
+            type="text"
+            value={searchTerm}
+            onChange={e => setSearchTerm(e.target.value)}
+            placeholder="Zoek op naam, e-mail, telefoon of KVK..."
+            className="w-full pl-9 pr-3 py-2 text-sm border border-slate-200 rounded-lg focus:outline-none focus:ring-1 focus:ring-slate-400 bg-white"
+          />
+        </div>
+      )}
+
       {isLoading ? (
         <div className="text-center text-slate-400 py-10">Laden...</div>
       ) : customers.length > 0 ? (
         <div className="grid grid-cols-1 gap-3">
-          {customers.map(customer => (
+          {customers.filter(c => {
+            const q = searchTerm.toLowerCase();
+            return !q || c.name?.toLowerCase().includes(q) || c.email?.toLowerCase().includes(q) || c.phone?.toLowerCase().includes(q) || c.kvk_number?.toLowerCase().includes(q) || c.contact_person?.toLowerCase().includes(q);
+          }).map(customer => (
             <CustomerCard
               key={customer.id}
               customer={customer}
