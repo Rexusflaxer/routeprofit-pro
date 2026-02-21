@@ -4,7 +4,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Pencil, Trash2, Users, Building2, User, MapPin, ArrowLeft } from "lucide-react";
+import { Plus, Pencil, Trash2, Users, Building2, User, MapPin, ArrowLeft, Search } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
