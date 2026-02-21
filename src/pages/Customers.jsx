@@ -71,6 +71,7 @@ function CustomerCard({ customer, objects, onEdit, onDelete }) {
 
 export default function Customers() {
   const [showWizard, setShowWizard] = useState(false);
+  const [searchTerm, setSearchTerm] = useState("");
   const queryClient = useQueryClient();
 
   const { data: customers = [], isLoading } = useQuery({
