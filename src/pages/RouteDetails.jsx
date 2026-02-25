@@ -740,6 +740,7 @@ export default function RouteDetails() {
         route={route}
         tasks={tasks}
         objects={objects}
+        collectiefs={collectiefs}
         routes={routes}
         onAddTask={(taskIds) => {
           const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
