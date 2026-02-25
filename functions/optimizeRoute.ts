@@ -124,7 +124,6 @@ Deno.serve(async (req) => {
     const currentHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
 
     // Gebruik cache als hash overeenkomt en force_recalculate niet is ingesteld
-    const { force_recalculate } = await req.json().catch(() => ({}));
     if (!force_recalculate && route.cached_optimization && route.optimization_hash === currentHash) {
       return Response.json(route.cached_optimization);
     }
