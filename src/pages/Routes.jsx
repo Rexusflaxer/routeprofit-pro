@@ -54,21 +54,11 @@ export default function Routes() {
   });
 
   const handleSave = (data) => {
-    // Valideer: 1 route per dag per map
-    const selectedDay = data.weekdays?.[0];
-    const existingRoute = routes.find(r => 
-      r.folder_id === data.folder_id && 
-      r.weekdays?.includes(selectedDay) &&
-      (!editing || r.id !== editing.id)
-    );
-    
-    if (existingRoute) {
-      alert(`Er bestaat al een route op ${WEEKDAY_LABELS[selectedDay]} in deze map.`);
-      return;
+    if (editing?.id) {
+      updateMutation.mutate({ id: editing.id, data });
+    } else {
+      createMutation.mutate(data);
     }
-    
-    if (editing) updateMutation.mutate({ id: editing.id, data });
-    else createMutation.mutate(data);
   };
 
   return (
