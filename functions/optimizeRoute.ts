@@ -56,8 +56,8 @@ Deno.serve(async (req) => {
               object_id: obj.id,
               name: obj.name,
               address: obj.address,
-              latitude: obj.latitude,
-              longitude: obj.longitude,
+              latitude: obj.latitude,  // breedtegraad ~52
+              longitude: obj.longitude, // lengtegraad ~6
               duration_minutes: durationPerObject,
               time_window_start: task.time_window_start || route.time_window_start || '00:00',
               time_window_end: task.time_window_end || route.time_window_end || '23:59',
