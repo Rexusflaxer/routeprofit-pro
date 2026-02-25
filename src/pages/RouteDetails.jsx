@@ -241,34 +241,13 @@ export default function RouteDetails() {
   const totalServiceMinutes = route?.total_service_minutes || 0;
   const avgTravelMinutes = route?.avg_travel_minutes || 0;
 
-  // Fetch route optimization
+  // Laad gecachte optimalisatie bij het openen van de pagina
   useEffect(() => {
-    const fetchOptimization = async () => {
-      if (!route || routeTasks.length < 2) return;
-      
-      setLoadingOptimization(true);
-      try {
-        const response = await base44.functions.invoke('optimizeRoute', { route_id: route.id });
-        const optData = response.data;
-        setOptimizedRoute(optData);
-
-        // Sla werkelijke dienstduur en afstand op
-        const updateData = {};
-        if (optData?.actual_shift_minutes !== undefined) updateData.total_route_minutes = optData.actual_shift_minutes;
-        if (optData?.total_distance_km !== undefined) updateData.total_distance_km = optData.total_distance_km;
-        if (Object.keys(updateData).length > 0) {
-          await base44.entities.Route.update(route.id, updateData);
-          queryClient.invalidateQueries({ queryKey: ["route", routeId] });
-        }
-      } catch (error) {
-        console.error('Fout bij route optimalisatie:', error);
-      } finally {
-        setLoadingOptimization(false);
-      }
-    };
-
-    fetchOptimization();
-  }, [route?.id, routeTasks.length]);
+    if (!route) return;
+    if (route.cached_optimization) {
+      setOptimizedRoute(route.cached_optimization);
+    }
+  }, [route?.id]);
 
   if (!routeId) {
     return (
