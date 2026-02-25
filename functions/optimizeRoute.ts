@@ -157,10 +157,14 @@ Deno.serve(async (req) => {
 
         // Check of we binnen tijdsvenster kunnen komen
         const taskStartMinutes = parseTimeToMinutes(task.time_window_start);
-        const taskEndMinutes = parseTimeToMinutes(task.time_window_end);
+        let taskEndMinutes = parseTimeToMinutes(task.time_window_end);
+        // Tijdvenster eindigt na middernacht (bijv. 00:00 = volgende dag)
+        if (taskEndMinutes <= parseTimeToMinutes(route.time_window_start || '00:00')) {
+          taskEndMinutes += 24 * 60;
+        }
 
         // Google Maps API call voor reistijd
-        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${currentLocation.longitude},${currentLocation.latitude}&destination=${task.longitude},${task.latitude}&key=${googleMapsApiKey}`;
+        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${currentLocation.latitude},${currentLocation.longitude}&destination=${task.latitude},${task.longitude}&key=${googleMapsApiKey}`;
         
         const response = await fetch(url);
         const data = await response.json();
