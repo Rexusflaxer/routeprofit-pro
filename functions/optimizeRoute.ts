@@ -62,15 +62,16 @@ Deno.serve(async (req) => {
         const totalObjects = task.selected_object_ids.length;
         const durationPerObject = Math.round((task.duration_minutes || 0) / totalObjects);
         task.selected_object_ids.forEach((objId, idx) => {
-          const obj = allObjects.find(o => o.id === objId);
+          const rawObj = allObjects.find(o => o.id === objId);
+          const obj = rawObj ? fixCoords(rawObj) : null;
           if (obj && obj.latitude && obj.longitude) {
             taskObjects.push({
               task_id: `${task.id}_${idx}`,
               object_id: obj.id,
               name: obj.name,
               address: obj.address,
-              latitude: obj.latitude,  // breedtegraad ~52
-              longitude: obj.longitude, // lengtegraad ~6
+              latitude: obj.latitude,
+              longitude: obj.longitude,
               duration_minutes: durationPerObject,
               time_window_start: task.time_window_start || route.time_window_start || '00:00',
               time_window_end: task.time_window_end || route.time_window_end || '23:59',
