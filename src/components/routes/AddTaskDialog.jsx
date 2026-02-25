@@ -5,7 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Clock, Euro, MapPin, Plus } from "lucide-react";
 
-export default function AddTaskDialog({ open, onOpenChange, route, tasks, objects, routes, onAddTask }) {
+export default function AddTaskDialog({ open, onOpenChange, route, tasks, objects, collectiefs = [], routes, onAddTask }) {
   const [selectedTaskIds, setSelectedTaskIds] = useState([]);
 
   const availableTasks = useMemo(() => {
