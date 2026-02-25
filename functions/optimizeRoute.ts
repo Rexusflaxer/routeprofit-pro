@@ -31,11 +31,24 @@ Deno.serve(async (req) => {
     const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
     const routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
 
+    // Normalize coordinates: in de database zijn lat/lng omgedraaid (latitude bevat ~6 = lengtegraad, longitude bevat ~52 = breedtegraad)
+    // We corrigeren dit hier door te wisselen wanneer longitude > latitude (wat betekent dat ze omgedraaid zijn opgeslagen)
+    const fixCoords = (obj) => {
+      if (!obj) return obj;
+      let lat = obj.latitude;
+      let lng = obj.longitude;
+      // Als latitude kleiner is dan longitude, zijn ze waarschijnlijk omgedraaid (NL: lat ~52, lng ~4-7)
+      if (lat !== undefined && lng !== undefined && lat < lng) {
+        return { ...obj, latitude: lng, longitude: lat };
+      }
+      return obj;
+    };
+
     // Get start and end locations (kan object of kantoor zijn)
     const startLocation = route.start_location_id ? 
-      (allObjects.find(o => o.id === route.start_location_id) || allOffices.find(o => o.id === route.start_location_id)) : null;
+      fixCoords(allObjects.find(o => o.id === route.start_location_id) || allOffices.find(o => o.id === route.start_location_id)) : null;
     const endLocation = route.end_location_id ? 
-      (allObjects.find(o => o.id === route.end_location_id) || allOffices.find(o => o.id === route.end_location_id)) : null;
+      fixCoords(allObjects.find(o => o.id === route.end_location_id) || allOffices.find(o => o.id === route.end_location_id)) : null;
 
     // Get collectiefs for collectief-tasks
     const allCollectiefs = await base44.entities.Collectief.list();
