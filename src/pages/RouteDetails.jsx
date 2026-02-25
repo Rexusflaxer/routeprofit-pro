@@ -155,17 +155,10 @@ export default function RouteDetails() {
         total_distance_km: distanceResponse.data?.total_distance_km || 0
       });
 
-      // Bereken route optimalisatie
-      const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: route.id });
+      // Bereken route optimalisatie (forceer herberekening)
+      const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: route.id, force_recalculate: true });
       const optData = optimizationResponse.data;
       setOptimizedRoute(optData);
-
-      // Sla werkelijke dienstduur op zodat loonkostenberekening de juiste tijd gebruikt
-      if (optData?.actual_shift_minutes !== undefined) {
-        await base44.entities.Route.update(route.id, {
-          total_route_minutes: optData.actual_shift_minutes
-        });
-      }
 
       queryClient.invalidateQueries({ queryKey: ["routes"] });
       queryClient.invalidateQueries({ queryKey: ["route", routeId] });
