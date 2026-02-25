@@ -121,6 +121,16 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
       alert("Selecteer een voertuig");
       return;
     }
+
+    if (!form.time_window_start) {
+      alert("Vul een begintijd in");
+      return;
+    }
+
+    if (!form.time_window_end) {
+      alert("Vul een eindtijd in");
+      return;
+    }
     
     onSave(form);
   };
