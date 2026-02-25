@@ -37,23 +37,51 @@ Deno.serve(async (req) => {
     const endLocation = route.end_location_id ? 
       (allObjects.find(o => o.id === route.end_location_id) || allOffices.find(o => o.id === route.end_location_id)) : null;
 
+    // Get collectiefs for collectief-tasks
+    const allCollectiefs = await base44.entities.Collectief.list();
+
     // Get objects with coordinates
+    // For collectief-tasks: treat each selected object as a separate stop
     const taskObjects = [];
     routeTasks.forEach(task => {
-      const obj = allObjects.find(o => o.id === task.object_id);
-      if (obj && obj.latitude && obj.longitude) {
-        taskObjects.push({
-          task_id: task.id,
-          object_id: obj.id,
-          name: obj.name,
-          address: obj.address,
-          latitude: obj.latitude,
-          longitude: obj.longitude,
-          duration_minutes: task.duration_minutes || 0,
-          time_window_start: task.time_window_start || route.time_window_start || '00:00',
-          time_window_end: task.time_window_end || route.time_window_end || '23:59',
-          task_type: task.task_type
+      if (task.collectief_id && task.selected_object_ids && task.selected_object_ids.length > 0) {
+        // Collectief-taak: voeg elk geselecteerd object toe als aparte stop
+        const totalObjects = task.selected_object_ids.length;
+        const durationPerObject = Math.round((task.duration_minutes || 0) / totalObjects);
+        task.selected_object_ids.forEach((objId, idx) => {
+          const obj = allObjects.find(o => o.id === objId);
+          if (obj && obj.latitude && obj.longitude) {
+            taskObjects.push({
+              task_id: `${task.id}_${idx}`,
+              object_id: obj.id,
+              name: obj.name,
+              address: obj.address,
+              latitude: obj.latitude,
+              longitude: obj.longitude,
+              duration_minutes: durationPerObject,
+              time_window_start: task.time_window_start || route.time_window_start || '00:00',
+              time_window_end: task.time_window_end || route.time_window_end || '23:59',
+              task_type: task.task_type
+            });
+          }
         });
+      } else {
+        // Gewone taak: koppel aan enkel object
+        const obj = allObjects.find(o => o.id === task.object_id);
+        if (obj && obj.latitude && obj.longitude) {
+          taskObjects.push({
+            task_id: task.id,
+            object_id: obj.id,
+            name: obj.name,
+            address: obj.address,
+            latitude: obj.latitude,
+            longitude: obj.longitude,
+            duration_minutes: task.duration_minutes || 0,
+            time_window_start: task.time_window_start || route.time_window_start || '00:00',
+            time_window_end: task.time_window_end || route.time_window_end || '23:59',
+            task_type: task.task_type
+          });
+        }
       }
     });
 
