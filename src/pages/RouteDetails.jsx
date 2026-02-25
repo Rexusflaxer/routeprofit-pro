@@ -507,7 +507,9 @@ export default function RouteDetails() {
                 <CardContent>
                   <div className="space-y-3">
                     {routeTasks.map(task => {
-                      const obj = objects.find(o => o.id === task.object_id);
+                      const obj = task.collectief_id
+                        ? collectiefs.find(c => c.id === task.collectief_id)
+                        : objects.find(o => o.id === task.object_id);
                       return (
                         <div key={task.id} className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
                           <MapPin className="w-5 h-5 text-slate-500 mt-0.5" />
