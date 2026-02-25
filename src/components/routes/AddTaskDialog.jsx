@@ -59,11 +59,19 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
   }, [tasks, route, routes]);
 
   const getObjectName = (task) => {
+    if (task.collectief_id) {
+      const col = collectiefs.find(c => c.id === task.collectief_id);
+      return col ? col.name : "Onbekend collectief";
+    }
     const obj = objects.find(o => o.id === task.object_id);
     return obj ? obj.name : "Onbekend object";
   };
 
   const getObjectAddress = (task) => {
+    if (task.collectief_id) {
+      const col = collectiefs.find(c => c.id === task.collectief_id);
+      return col?.address || "";
+    }
     const obj = objects.find(o => o.id === task.object_id);
     return obj ? obj.address : "";
   };
