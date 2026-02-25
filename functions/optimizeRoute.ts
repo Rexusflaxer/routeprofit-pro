@@ -109,6 +109,25 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Bereken hash van relevante route-data om te detecteren of herberekening nodig is
+    const hashInput = JSON.stringify({
+      assigned_tasks: route.assigned_tasks,
+      start_location_id: route.start_location_id,
+      end_location_id: route.end_location_id,
+      time_window_start: route.time_window_start,
+      time_window_end: route.time_window_end,
+      alarm_standby: route.alarm_standby,
+      task_ids: taskObjects.map(t => t.task_id + ':' + t.duration_minutes + ':' + t.time_window_start + ':' + t.time_window_end)
+    });
+    const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput));
+    const currentHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
+
+    // Gebruik cache als hash overeenkomt en force_recalculate niet is ingesteld
+    const { force_recalculate } = await req.json().catch(() => ({}));
+    if (!force_recalculate && route.cached_optimization && route.optimization_hash === currentHash) {
+      return Response.json(route.cached_optimization);
+    }
+
     const googleMapsApiKey = Deno.env.get('GOOGLE_MAPS_API_KEY');
     if (!googleMapsApiKey) {
       return Response.json({ error: 'Google Maps API key not configured' }, { status: 500 });
