@@ -316,7 +316,7 @@ Deno.serve(async (req) => {
 
     const totalRouteTime = totalServiceTime + totalTravelTime + (alarmStandby ? totalWaitingTime : 0) + alarmAfterRoute;
 
-    return Response.json({
+    const result = {
       optimized_order: optimizedOrder,
       total_travel_time: totalTravelTime,
       total_distance_km: Math.round(totalDistanceKm * 10) / 10,
@@ -333,7 +333,20 @@ Deno.serve(async (req) => {
       alarm_standby: alarmStandby,
       tasks_optimized: visited.size,
       tasks_skipped: taskObjects.length - visited.size
-    });
+    };
+
+    // Sla resultaat op in de route (cache)
+    const updateData = {
+      cached_optimization: result,
+      optimization_calculated_at: new Date().toISOString(),
+      optimization_hash: currentHash,
+      total_route_minutes: actualShiftMinutes,
+      total_distance_km: Math.round(totalDistanceKm * 10) / 10,
+      avg_travel_minutes: taskObjects.length > 0 ? Math.round(totalTravelTime / Math.max(taskObjects.length - 1, 1)) : 0
+    };
+    await base44.asServiceRole.entities.Route.update(route_id, updateData);
+
+    return Response.json(result);
 
   } catch (error) {
     console.error('Error:', error);
