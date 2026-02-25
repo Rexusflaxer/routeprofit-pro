@@ -81,7 +81,8 @@ Deno.serve(async (req) => {
         });
       } else {
         // Gewone taak: koppel aan enkel object
-        const obj = allObjects.find(o => o.id === task.object_id);
+        const rawObj = allObjects.find(o => o.id === task.object_id);
+        const obj = rawObj ? fixCoords(rawObj) : null;
         if (obj && obj.latitude && obj.longitude) {
           taskObjects.push({
             task_id: task.id,
