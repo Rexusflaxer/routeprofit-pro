@@ -53,6 +53,10 @@ export default function RouteDetailDialog({ route, open, onOpenChange, onEdit, v
   const getObjectName = (taskId) => {
     const task = allTasks.find(t => t.id === taskId);
     if (!task) return "Onbekend";
+    if (task.collectief_id) {
+      const col = collectiefs.find(c => c.id === task.collectief_id);
+      return col ? col.name : "Onbekend collectief";
+    }
     const obj = objects.find(o => o.id === task.object_id);
     return obj ? obj.name : "Onbekend object";
   };
