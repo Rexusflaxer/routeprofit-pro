@@ -99,23 +99,18 @@ export default function RouteDetails() {
           total_distance_km: distanceResponse.data?.total_distance_km || 0
         });
 
-        // Bereken route optimalisatie
-        const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: routeId });
-        const optData = optimizationResponse.data;
-        if (optData?.actual_shift_minutes !== undefined) {
-          await base44.entities.Route.update(routeId, { 
-            total_route_minutes: optData.actual_shift_minutes,
-            personnel_costs_calculated_at: null  // forceer herberekening loonkosten
-          });
-        }
-        return optData;
+        // Bereken route optimalisatie (forceer herberekening)
+        const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: routeId, force_recalculate: true });
+        return optimizationResponse.data;
       } else {
         // Geen taken meer, reset statistieken
         await base44.entities.Route.update(routeId, {
           avg_travel_minutes: 0,
           total_distance_km: 0,
           total_route_minutes: 0,
-          personnel_costs_calculated_at: null
+          personnel_costs_calculated_at: null,
+          cached_optimization: null,
+          optimization_hash: null
         });
         return null;
       }
