@@ -27,6 +27,11 @@ export default function RouteDetailDialog({ route, open, onOpenChange, onEdit, v
     queryFn: () => base44.entities.SurveillanceObject.list(),
   });
 
+  const { data: collectiefs = [] } = useQuery({
+    queryKey: ['collectiefs'],
+    queryFn: () => base44.entities.Collectief.list(),
+  });
+
   const routeDetails = useMemo(() => {
     if (!route) return null;
 
