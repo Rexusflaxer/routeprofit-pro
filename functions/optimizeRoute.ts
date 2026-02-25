@@ -85,12 +85,15 @@ Deno.serve(async (req) => {
       }
     });
 
+    console.log(`[DEBUG] Total taskObjects found: ${taskObjects.length}, routeTasks: ${routeTasks.length}`);
+    routeTasks.forEach(t => console.log(`[DEBUG] Task ${t.id}: collectief_id=${t.collectief_id}, object_id=${t.object_id}, selected_object_ids=${JSON.stringify(t.selected_object_ids)}`));
+
     if (taskObjects.length < 2) {
       return Response.json({
         optimized_order: taskObjects,
         total_travel_time: 0,
         total_route_time: taskObjects.reduce((sum, t) => sum + t.duration_minutes, 0),
-        message: 'Te weinig objecten voor optimalisatie'
+        message: `Te weinig objecten voor optimalisatie (${taskObjects.length} gevonden)`
       });
     }
 
