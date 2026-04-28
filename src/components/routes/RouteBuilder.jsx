@@ -131,7 +131,7 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
       alert("Vul een eindtijd in");
       return;
     }
-    
+
     onSave(form);
   };
 
@@ -254,11 +254,10 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
                 type="time" 
                 value={form.time_window_end || ""} 
                 onChange={(e) => handleChange("time_window_end", e.target.value)} 
-                min={form.time_window_start || undefined}
                 required 
               />
               {form.time_window_start && form.time_window_end && form.time_window_end <= form.time_window_start && (
-                <p className="text-xs text-red-600">Eindtijd moet na starttijd liggen</p>
+                <p className="text-xs text-blue-600">⏱ Eindtijd ligt na middernacht (volgende dag)</p>
               )}
             </div>
           </div>

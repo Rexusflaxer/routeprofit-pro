@@ -105,7 +105,7 @@ export default function Objects() {
          </DialogContent>
        </Dialog>
 
-       {objects.length > 0 && (
+       {objects.length > 0 ? (
          <div className="space-y-4">
            <div className="relative">
              <Search className="absolute left-3 top-2.5 h-4 w-4 text-slate-400" />
@@ -124,16 +124,15 @@ export default function Objects() {
                </button>
              )}
            </div>
-           <ObjectTable objects={filteredObjects} onEdit={handleEdit} onDelete={(id) => deleteMutation.mutate(id)} />
+           {filteredObjects.length === 0 ? (
+             <EmptyState icon={MapPin} title="Geen resultaten" description={`Geen objecten gevonden met "${searchTerm}".`} />
+           ) : (
+             <ObjectTable objects={filteredObjects} onEdit={handleEdit} onDelete={(id) => deleteMutation.mutate(id)} />
+           )}
          </div>
+       ) : !showForm && (
+         <EmptyState icon={MapPin} title="Geen objecten" description="Voeg uw eerste bewakingsobject toe om te beginnen." actionLabel="Object toevoegen" onAction={() => setShowForm(true)} />
        )}
-
-       {objects.length > 0 && filteredObjects.length === 0 && (
-         <EmptyState icon={MapPin} title="Geen resultaten" description={`Geen objecten gevonden met "${searchTerm}".`} />
-       )}
-      ) : !showForm && (
-        <EmptyState icon={MapPin} title="Geen objecten" description="Voeg uw eerste bewakingsobject toe om te beginnen." actionLabel="Object toevoegen" onAction={() => setShowForm(true)} />
-      )}
     </div>
   );
 }
