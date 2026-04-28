@@ -25,7 +25,7 @@ export default function TaskList({ objectId }) {
   });
 
   const { data: allCollectiefTasks = [] } = useQuery({
-    queryKey: ['all-tasks'],
+    queryKey: ['all-tasks-list'],
     queryFn: () => base44.entities.Task.list(),
   });
 
