@@ -14,17 +14,22 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
     }
 
     const selectedDay = route.weekdays[0];
-    const routeStart = route.time_window_start;
-    const routeEnd = route.time_window_end;
-    
+    const nextDay = selectedDay === 7 ? 1 : selectedDay + 1;
+
+    const toMinutes = (t) => { const [h, m] = t.split(':').map(Number); return h * 60 + m; };
+
+    const routeStartMin = toMinutes(route.time_window_start);
+    let routeEndMin = toMinutes(route.time_window_end);
+    const routeCrossesMiddnight = routeEndMin <= routeStartMin;
+    if (routeCrossesMiddnight) routeEndMin += 24 * 60;
+
     // Verzamel alle al toegewezen taken
     const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
 
     // Vind taken die al in andere routes zitten op dezelfde dag
     const taskDayUsage = {};
     routes.forEach(r => {
-      if (r.id === route.id) return; // Skip huidige route
-      
+      if (r.id === route.id) return;
       (r.assigned_tasks || []).forEach(at => {
         if (!taskDayUsage[at.task_id]) taskDayUsage[at.task_id] = [];
         (at.days || []).forEach(day => {
@@ -40,20 +45,36 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
       // Check of taak al in deze route zit
       if (assignedTaskIds.includes(task.id)) return false;
 
-      // Check of taak binnen tijdsvenster past
-      const taskStart = task.time_window_start || "00:00";
-      const taskEnd = task.time_window_end || "23:59";
-      const fitsInWindow = taskStart >= routeStart && taskEnd <= routeEnd;
+      // Check of taak op de juiste dag(en) is
+      const taskWeekdays = task.weekdays || [];
+      const onSelectedDay = taskWeekdays.includes(selectedDay);
+      const onNextDay = routeCrossesMiddnight && taskWeekdays.includes(nextDay);
+      if (!onSelectedDay && !onNextDay) return false;
+
+      // Check of taak al gebruikt is in andere route op die dag
+      const usedDays = taskDayUsage[task.id] || [];
+      const dayToCheck = onNextDay && !onSelectedDay ? nextDay : selectedDay;
+      if (usedDays.includes(dayToCheck)) return false;
+
+      // Check of taak qua tijdvenster binnen de route past (middernacht-bewust)
+      const taskStartStr = task.time_window_start || "00:00";
+      const taskEndStr = task.time_window_end || "23:59";
+      let taskStartMin = toMinutes(taskStartStr);
+      let taskEndMin = toMinutes(taskEndStr);
+
+      // Als de taak op de volgende dag valt, schuif de tijden 24u op
+      if (onNextDay && !onSelectedDay) {
+        taskStartMin += 24 * 60;
+        taskEndMin += 24 * 60;
+      } else if (taskEndMin <= taskStartMin) {
+        // Taak zelf overschrijdt middernacht
+        taskEndMin += 24 * 60;
+      }
+
+      // Taak moet overlappen met het routetijdvenster
+      const fitsInWindow = taskStartMin < routeEndMin && taskEndMin > routeStartMin;
       if (!fitsInWindow) return false;
 
-      // Check of taak op deze dag mag
-      const taskWeekdays = task.weekdays || [];
-      if (!taskWeekdays.includes(selectedDay)) return false;
-      
-      // Check of deze dag al gebruikt is in andere route
-      const usedDays = taskDayUsage[task.id] || [];
-      if (usedDays.includes(selectedDay)) return false;
-      
       return true;
     });
   }, [tasks, route, routes]);
