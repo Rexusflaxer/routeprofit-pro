@@ -174,8 +174,8 @@ Deno.serve(async (req) => {
         // Check of we binnen tijdsvenster kunnen komen
         const taskStartMinutes = parseTimeToMinutes(task.time_window_start);
         let taskEndMinutes = parseTimeToMinutes(task.time_window_end);
-        // Tijdvenster eindigt na middernacht (bijv. 00:00 = volgende dag)
-        if (taskEndMinutes <= parseTimeToMinutes(route.time_window_start || '00:00')) {
+        // Tijdvenster eindigt na middernacht: eindtijd <= begintijd betekent volgende dag
+        if (taskEndMinutes <= taskStartMinutes) {
           taskEndMinutes += 24 * 60;
         }
 
@@ -220,7 +220,11 @@ Deno.serve(async (req) => {
 
       // Bereken aankomst en vertrektijd voor deze taak
       const arrivalTime = currentTime + travelTime;
-      const taskStartMinutes = parseTimeToMinutes(nearestTask.time_window_start);
+      let taskStartMinutes = parseTimeToMinutes(nearestTask.time_window_start);
+      // Als de taak begint na middernacht en we al voorbij middernacht zijn, corrigeer
+      if (taskStartMinutes < parseTimeToMinutes(route.time_window_start || '00:00') && arrivalTime > 24 * 60) {
+        taskStartMinutes += 24 * 60;
+      }
       const actualStartTime = Math.max(arrivalTime, taskStartMinutes);
       const waitingTime = actualStartTime - arrivalTime;
       const departureTime = actualStartTime + nearestTask.duration_minutes;
@@ -251,7 +255,12 @@ Deno.serve(async (req) => {
     const totalServiceTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + t.duration_minutes, 0);
     const totalWaitingTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + (t.waiting_time || 0), 0);
 
-    const routeEndMinutes = parseTimeToMinutes(route.time_window_end || '23:59');
+    let routeEndMinutes = parseTimeToMinutes(route.time_window_end || '23:59');
+    const routeStartMinutes = parseTimeToMinutes(route.time_window_start || '00:00');
+    // Route eindigt na middernacht
+    if (routeEndMinutes <= routeStartMinutes) {
+      routeEndMinutes += 24 * 60;
+    }
     const alarmStandby = !!route.alarm_standby;
 
     let actualShiftEndMinutes;
@@ -328,8 +337,8 @@ Deno.serve(async (req) => {
       }
     }
 
-    const plannedWindowMinutes = routeEndMinutes - parseTimeToMinutes(route.time_window_start || '00:00');
-    const actualShiftMinutes = actualShiftEndMinutes - parseTimeToMinutes(route.time_window_start || '00:00');
+    const plannedWindowMinutes = routeEndMinutes - routeStartMinutes;
+    const actualShiftMinutes = actualShiftEndMinutes - routeStartMinutes;
     const finishedEarly = !alarmStandby && currentTime < routeEndMinutes;
     const finishedLate = currentTime > routeEndMinutes;
 
@@ -379,7 +388,8 @@ function parseTimeToMinutes(timeString) {
 }
 
 function formatMinutesToTime(minutes) {
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
+  const totalMins = minutes % (24 * 60); // Wrap naar 0-1439
+  const hours = Math.floor(totalMins / 60);
+  const mins = totalMins % 60;
   return `${String(hours).padStart(2, '0')}:${String(mins).padStart(2, '0')}`;
 }

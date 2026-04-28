@@ -102,6 +102,9 @@ export default function TaskForm({ task, onSave, onCancel }) {
               value={form.time_window_end} 
               onChange={(e) => handleChange("time_window_end", e.target.value)} 
             />
+            {form.time_window_start && form.time_window_end && form.time_window_end <= form.time_window_start && (
+              <p className="text-xs text-blue-600">⏱ Eindtijd ligt na middernacht (volgende dag)</p>
+            )}
           </div>
         </div>
 
