@@ -391,12 +391,30 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Brede zoekstap: probeer een betere totale volgorde te vinden die méér taken bevat.
-    // Dit is nodig wanneer twee gemiste taken alleen samen passen als eerdere stops worden herschikt.
+    // Brede zoekstap: kies eerst de volgorde met de meeste taken en daarna de laagste reistijd/afstand.
+    // Dit voorkomt dat ruime flexibele taken pas later apart worden gereden terwijl ze in bestaande wachttijd passen.
     const buildOrderFromSequence = async (sequence) => {
       const simulation = await simulateSequence(sequence);
       if (!simulation) return null;
       return simulation;
+    };
+
+    const isBetterState = (candidate, current) => {
+      if (!current) return true;
+      if (candidate.sequence.length !== current.sequence.length) return candidate.sequence.length > current.sequence.length;
+      if ((candidate.urgencyScore || 0) !== (current.urgencyScore || 0)) return (candidate.urgencyScore || 0) > (current.urgencyScore || 0);
+      if (candidate.totalTravelTime !== current.totalTravelTime) return candidate.totalTravelTime < current.totalTravelTime;
+      if (candidate.totalDistanceKm !== current.totalDistanceKm) return candidate.totalDistanceKm < current.totalDistanceKm;
+      return candidate.currentTime < current.currentTime;
+    };
+
+    const isBetterSimulation = (candidate, currentSequenceLength, currentTravelTime, currentDistanceKm, currentEndTime) => {
+      if (candidate.order.filter(item => !item.is_start && !item.is_end && !item.is_alarm_standby).length !== currentSequenceLength) {
+        return candidate.order.filter(item => !item.is_start && !item.is_end && !item.is_alarm_standby).length > currentSequenceLength;
+      }
+      if (candidate.totalTravelTime !== currentTravelTime) return candidate.totalTravelTime < currentTravelTime;
+      if (candidate.totalDistanceKm !== currentDistanceKm) return candidate.totalDistanceKm < currentDistanceKm;
+      return candidate.currentTime < currentEndTime;
     };
 
     const findBestSequence = async () => {
@@ -427,21 +445,20 @@ Deno.serve(async (req) => {
         for (const state of states) {
           const key = getStateKey(state);
           const existing = grouped.get(key);
-          if (!existing ||
-              state.sequence.length > existing.sequence.length ||
-              (state.sequence.length === existing.sequence.length && state.urgencyScore > existing.urgencyScore) ||
-              (state.sequence.length === existing.sequence.length && state.urgencyScore === existing.urgencyScore && state.currentTime < existing.currentTime)) {
+          if (isBetterState(state, existing)) {
             grouped.set(key, state);
           }
         }
         return Array.from(grouped.values()).sort((a, b) => {
           const countDiff = b.sequence.length - a.sequence.length;
           if (countDiff !== 0) return countDiff;
-          const urgencyDiff = b.urgencyScore - a.urgencyScore;
+          const urgencyDiff = (b.urgencyScore || 0) - (a.urgencyScore || 0);
           if (urgencyDiff !== 0) return urgencyDiff;
-          const timeDiff = a.currentTime - b.currentTime;
-          if (timeDiff !== 0) return timeDiff;
-          return a.totalTravelTime - b.totalTravelTime;
+          const travelDiff = a.totalTravelTime - b.totalTravelTime;
+          if (travelDiff !== 0) return travelDiff;
+          const distanceDiff = a.totalDistanceKm - b.totalDistanceKm;
+          if (distanceDiff !== 0) return distanceDiff;
+          return a.currentTime - b.currentTime;
         }).slice(0, beamWidth);
       };
 
@@ -479,15 +496,12 @@ Deno.serve(async (req) => {
               currentLocation: task,
               totalTravelTime: state.totalTravelTime + travel.travelMinutes,
               totalDistanceKm: state.totalDistanceKm + travel.distanceKm,
-              urgencyScore: state.urgencyScore + urgentTaskBonus
+              urgencyScore: (state.urgencyScore || 0) + urgentTaskBonus
             });
             expanded = true;
           }
 
-          if (!expanded && (
-            state.sequence.length > bestState.sequence.length ||
-            (state.sequence.length === bestState.sequence.length && state.urgencyScore > bestState.urgencyScore)
-          )) {
+          if (!expanded && isBetterState(state, bestState)) {
             bestState = state;
           }
         }
@@ -495,9 +509,7 @@ Deno.serve(async (req) => {
         if (nextBeam.length === 0) break;
 
         beam = keepDiverseBestStates(nextBeam);
-        if (beam[0].sequence.length > bestState.sequence.length ||
-            (beam[0].sequence.length === bestState.sequence.length && beam[0].urgencyScore > bestState.urgencyScore) ||
-            (beam[0].sequence.length === bestState.sequence.length && beam[0].urgencyScore === bestState.urgencyScore && beam[0].totalTravelTime < bestState.totalTravelTime)) {
+        if (isBetterState(beam[0], bestState)) {
           bestState = beam[0];
         }
       }
@@ -506,18 +518,146 @@ Deno.serve(async (req) => {
     };
 
     const bestSequenceState = await findBestSequence();
-    if (bestSequenceState.sequence.length > sequenceTasks.length) {
-      const bestSimulation = await buildOrderFromSequence(bestSequenceState.sequence);
-      if (bestSimulation) {
-        sequenceTasks = bestSequenceState.sequence;
-        optimizedOrder.length = 0;
-        optimizedOrder.push(...bestSimulation.order);
-        totalTravelTime = bestSimulation.totalTravelTime;
-        totalDistanceKm = bestSimulation.totalDistanceKm;
-        currentTime = bestSimulation.currentTime;
-        currentLocation = bestSimulation.currentLocation;
-        visited.clear();
-        sequenceTasks.forEach(task => visited.add(task.task_id));
+    const bestSimulation = await buildOrderFromSequence(bestSequenceState.sequence);
+    if (bestSimulation && isBetterSimulation(bestSimulation, sequenceTasks.length, totalTravelTime, totalDistanceKm, currentTime)) {
+      sequenceTasks = bestSequenceState.sequence;
+      optimizedOrder.length = 0;
+      optimizedOrder.push(...bestSimulation.order);
+      totalTravelTime = bestSimulation.totalTravelTime;
+      totalDistanceKm = bestSimulation.totalDistanceKm;
+      currentTime = bestSimulation.currentTime;
+      currentLocation = bestSimulation.currentLocation;
+      visited.clear();
+      sequenceTasks.forEach(task => visited.add(task.task_id));
+    }
+
+    const applySimulation = (simulation, sequence) => {
+      sequenceTasks = sequence;
+      optimizedOrder.length = 0;
+      optimizedOrder.push(...simulation.order);
+      totalTravelTime = simulation.totalTravelTime;
+      totalDistanceKm = simulation.totalDistanceKm;
+      currentTime = simulation.currentTime;
+      currentLocation = simulation.currentLocation;
+      visited.clear();
+      sequenceTasks.forEach(task => visited.add(task.task_id));
+    };
+
+    const getSimulationTaskCount = (simulation) => simulation.order.filter(item => !item.is_start && !item.is_end && !item.is_alarm_standby).length;
+
+    const isAcceptedImprovement = (simulation) => {
+      if (!simulation || getSimulationTaskCount(simulation) !== sequenceTasks.length) return false;
+      if (simulation.totalTravelTime < totalTravelTime) return true;
+      if (simulation.totalTravelTime === totalTravelTime && simulation.totalDistanceKm < totalDistanceKm) return true;
+      return false;
+    };
+
+    // Wachttijd-invulstap: als er lang gewacht wordt bij/voor een stop, probeer ruime taken daarin te plaatsen.
+    let idleImproved = true;
+    while (idleImproved) {
+      idleImproved = false;
+      const currentSimulation = await simulateSequence(sequenceTasks);
+      if (!currentSimulation) break;
+      const plannedStops = currentSimulation.order.filter(item => !item.is_start && !item.is_end && !item.is_alarm_standby);
+
+      for (let stopIndex = 0; stopIndex < plannedStops.length; stopIndex++) {
+        const stop = plannedStops[stopIndex];
+        if ((stop.waiting_time || 0) < 10) continue;
+
+        const sequenceStopIndex = sequenceTasks.findIndex(task => task.task_id === stop.task_id);
+        if (sequenceStopIndex <= 0) continue;
+
+        const previousTask = sequenceTasks[sequenceStopIndex - 1];
+        const waitStartMinutes = parseTimeToMinutes(stop.arrival_time) + (parseTimeToMinutes(stop.arrival_time) < routeStartMinutes ? 24 * 60 : 0);
+        const waitEndMinutes = parseTimeToMinutes(stop.actual_start_time) + (parseTimeToMinutes(stop.actual_start_time) < routeStartMinutes ? 24 * 60 : 0);
+
+        let bestIdleSimulation = null;
+        let bestIdleSequence = null;
+
+        for (let taskIndex = 0; taskIndex < sequenceTasks.length; taskIndex++) {
+          if (taskIndex === sequenceStopIndex || taskIndex === sequenceStopIndex - 1) continue;
+          const candidateTask = sequenceTasks[taskIndex];
+          const { taskStart, taskEnd } = normalizeTaskWindow(candidateTask);
+          const canFitInWaitByWindow = Math.max(waitStartMinutes, taskStart) + candidateTask.duration_minutes <= Math.min(waitEndMinutes, taskEnd);
+          if (!canFitInWaitByWindow) continue;
+
+          const travelToCandidate = await getTravelTime(
+            previousTask.latitude, previousTask.longitude,
+            candidateTask.latitude, candidateTask.longitude,
+            `${previousTask.task_id}->idle-${candidateTask.task_id}`
+          );
+          const travelBackToWaitStop = await getTravelTime(
+            candidateTask.latitude, candidateTask.longitude,
+            stop.latitude, stop.longitude,
+            `idle-${candidateTask.task_id}->${stop.task_id}`
+          );
+          if (!travelToCandidate || !travelBackToWaitStop) continue;
+
+          const candidateStart = Math.max(waitStartMinutes + travelToCandidate.travelMinutes, taskStart);
+          const candidateDeparture = candidateStart + candidateTask.duration_minutes;
+          const returnsBeforeWaitEnds = candidateDeparture + travelBackToWaitStop.travelMinutes <= waitEndMinutes;
+          if (!returnsBeforeWaitEnds) continue;
+
+          const withoutTask = sequenceTasks.filter((_, index) => index !== taskIndex);
+          const adjustedInsertIndex = taskIndex < sequenceStopIndex ? sequenceStopIndex - 1 : sequenceStopIndex;
+          const candidateSequence = [
+            ...withoutTask.slice(0, adjustedInsertIndex),
+            candidateTask,
+            ...withoutTask.slice(adjustedInsertIndex)
+          ];
+          const candidateSimulation = await simulateSequence(candidateSequence);
+          if (!isAcceptedImprovement(candidateSimulation)) continue;
+
+          if (!bestIdleSimulation ||
+              candidateSimulation.totalTravelTime < bestIdleSimulation.totalTravelTime ||
+              (candidateSimulation.totalTravelTime === bestIdleSimulation.totalTravelTime && candidateSimulation.totalDistanceKm < bestIdleSimulation.totalDistanceKm)) {
+            bestIdleSimulation = candidateSimulation;
+            bestIdleSequence = candidateSequence;
+          }
+        }
+
+        if (bestIdleSimulation) {
+          applySimulation(bestIdleSimulation, bestIdleSequence);
+          idleImproved = true;
+          break;
+        }
+      }
+    }
+
+    // Lokale verbeterstap: verplaats één taak naar een andere positie als alle taken behouden blijven
+    // en de totale reistijd/afstand daalt. Dit benut bestaande wachttijd beter zonder taken te verliezen.
+    let localImproved = true;
+    while (localImproved) {
+      localImproved = false;
+      let bestLocalSimulation = null;
+      let bestLocalSequence = null;
+
+      for (let fromIndex = 0; fromIndex < sequenceTasks.length; fromIndex++) {
+        const taskToMove = sequenceTasks[fromIndex];
+        const withoutTask = sequenceTasks.filter((_, index) => index !== fromIndex);
+
+        for (let toIndex = 0; toIndex <= withoutTask.length; toIndex++) {
+          if (toIndex === fromIndex) continue;
+          const candidateSequence = [
+            ...withoutTask.slice(0, toIndex),
+            taskToMove,
+            ...withoutTask.slice(toIndex)
+          ];
+          const candidateSimulation = await simulateSequence(candidateSequence);
+          if (!isAcceptedImprovement(candidateSimulation)) continue;
+
+          if (!bestLocalSimulation ||
+              candidateSimulation.totalTravelTime < bestLocalSimulation.totalTravelTime ||
+              (candidateSimulation.totalTravelTime === bestLocalSimulation.totalTravelTime && candidateSimulation.totalDistanceKm < bestLocalSimulation.totalDistanceKm)) {
+            bestLocalSimulation = candidateSimulation;
+            bestLocalSequence = candidateSequence;
+          }
+        }
+      }
+
+      if (bestLocalSimulation) {
+        applySimulation(bestLocalSimulation, bestLocalSequence);
+        localImproved = true;
       }
     }
 
