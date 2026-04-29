@@ -146,7 +146,10 @@ Deno.serve(async (req) => {
     
     let totalTravelTime = 0;
     let totalDistanceKm = 0;
-    let currentTime = parseTimeToMinutes(route.time_window_start || '00:00');
+    const routeStartMinutes = parseTimeToMinutes(route.time_window_start || '00:00');
+    let routeEndMinutes = parseTimeToMinutes(route.time_window_end || '23:59');
+    if (routeEndMinutes <= routeStartMinutes) routeEndMinutes += 24 * 60;
+    let currentTime = routeStartMinutes;
     
     // Als startlocatie niet een taak is, voeg startpunt toe voor visuele weergave
     if (startLocation && !taskObjects.some(t => t.object_id === startLocation.id)) {
@@ -164,21 +167,23 @@ Deno.serve(async (req) => {
       });
     }
 
-    // Helper: normaliseer taaktijdvenster t.o.v. currentTime (middernacht-bewust)
-    const normalizeTaskWindow = (task, refTime) => {
-      let taskStart = parseTimeToMinutes(task.time_window_start);
-      let taskEnd = parseTimeToMinutes(task.time_window_end);
-      // Tijdvenster over middernacht
-      if (taskEnd <= taskStart) taskEnd += 24 * 60;
-      // Als refTime voorbij middernacht is, schuif venster mee indien dat logisch is
-      if (refTime >= 24 * 60) {
-        const offset = Math.floor(refTime / (24 * 60)) * 24 * 60;
-        if (taskStart + offset <= refTime + 24 * 60) {
-          taskStart += offset;
-          taskEnd += offset;
-        }
-      }
-      return { taskStart, taskEnd };
+    // Helper: plaats elk taaktijdvenster op de juiste kalenderdag binnen het routevenster.
+    // Voor een route 18:00-08:00 betekent 04:00-08:00 dus volgende ochtend, niet dezelfde ochtend.
+    const normalizeTaskWindow = (task) => {
+      const baseStart = parseTimeToMinutes(task.time_window_start);
+      let baseEnd = parseTimeToMinutes(task.time_window_end);
+      if (baseEnd <= baseStart) baseEnd += 24 * 60;
+
+      const candidates = [-24 * 60, 0, 24 * 60].map(offset => ({
+        taskStart: baseStart + offset,
+        taskEnd: baseEnd + offset
+      }));
+
+      const overlapping = candidates
+        .filter(window => window.taskStart < routeEndMinutes && window.taskEnd > routeStartMinutes)
+        .sort((a, b) => a.taskStart - b.taskStart);
+
+      return overlapping[0] || { taskStart: baseStart, taskEnd: baseEnd };
     };
 
     // Cache voor reistijden: slaat (origin_task_id, dest_task_id) -> { travelMinutes, distanceKm } op
@@ -213,14 +218,14 @@ Deno.serve(async (req) => {
     // De loop stopt alleen als GEEN ENKELE resterende taak meer bereikbaar is vóór het einde van haar tijdvenster.
     while (visited.size < taskObjects.length) {
       let bestTask = null;
-      let bestScore = Infinity; // score = reistijd (we willen kortste reistijd, wachttijd telt niet mee in score)
+      let bestScore = Infinity; // score = deadline eerst, daarna reistijd
       let bestTravelTime = 0;
       let bestDistanceKm = 0;
 
       for (const task of taskObjects) {
         if (visited.has(task.task_id)) continue;
 
-        const { taskStart, taskEnd } = normalizeTaskWindow(task, currentTime);
+        const { taskStart, taskEnd } = normalizeTaskWindow(task);
 
         // Bereken reistijd
         const fromId = currentLocation.task_id || currentLocation.id || 'start';
@@ -239,8 +244,12 @@ Deno.serve(async (req) => {
         // (ook al zijn we vroeg en moeten we wachten)
         if (arrivalTime > taskEnd) continue; // te laat — sla over
 
-        // Score = reistijd (kortste reistijd wint; wachttijd wordt geaccepteerd)
-        const score = travelMinutes;
+        const waitingTime = Math.max(0, taskStart - arrivalTime);
+        const canFinishBeforeWindowEnds = Math.max(arrivalTime, taskStart) + task.duration_minutes <= taskEnd;
+        if (!canFinishBeforeWindowEnds) continue;
+
+        // Urgente taken met vroege eindtijd krijgen prioriteit, daarna kortste reistijd/wachttijd.
+        const score = (taskEnd * 10000) + (waitingTime * 10) + travelMinutes;
         if (score < bestScore) {
           bestScore = score;
           bestTask = { ...task, _distance_km: distanceKm };
@@ -254,7 +263,7 @@ Deno.serve(async (req) => {
       }
 
       // Bereken aankomst en vertrektijd voor de gekozen taak
-      const { taskStart: chosenStart } = normalizeTaskWindow(bestTask, currentTime);
+      const { taskStart: chosenStart } = normalizeTaskWindow(bestTask);
       const arrivalTime = currentTime + bestTravelTime;
       const actualStartTime = Math.max(arrivalTime, chosenStart);
       const waitingTime = actualStartTime - arrivalTime;
@@ -283,16 +292,10 @@ Deno.serve(async (req) => {
     for (const task of taskObjects) {
       if (visited.has(task.task_id)) continue;
 
-      let taskStartMin = parseTimeToMinutes(task.time_window_start);
-      let taskEndMin = parseTimeToMinutes(task.time_window_end);
-      if (taskEndMin <= taskStartMin) taskEndMin += 24 * 60;
-
-      const routeStartMin = parseTimeToMinutes(route.time_window_start || '00:00');
-      let routeEndMin = parseTimeToMinutes(route.time_window_end || '23:59');
-      if (routeEndMin <= routeStartMin) routeEndMin += 24 * 60;
+      const { taskStart: taskStartMin, taskEnd: taskEndMin } = normalizeTaskWindow(task);
 
       // Controleer of het tijdvenster van de taak überhaupt overlapt met de route
-      const windowsOverlap = taskStartMin < routeEndMin && taskEndMin > routeStartMin;
+      const windowsOverlap = taskStartMin < routeEndMinutes && taskEndMin > routeStartMinutes;
       if (!windowsOverlap) {
         skippedTasksList.push({
           name: task.name,
@@ -311,12 +314,6 @@ Deno.serve(async (req) => {
     const totalServiceTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + t.duration_minutes, 0);
     const totalWaitingTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + (t.waiting_time || 0), 0);
 
-    let routeEndMinutes = parseTimeToMinutes(route.time_window_end || '23:59');
-    const routeStartMinutes = parseTimeToMinutes(route.time_window_start || '00:00');
-    // Route eindigt na middernacht
-    if (routeEndMinutes <= routeStartMinutes) {
-      routeEndMinutes += 24 * 60;
-    }
     const alarmStandby = !!route.alarm_standby;
 
     let actualShiftEndMinutes;
