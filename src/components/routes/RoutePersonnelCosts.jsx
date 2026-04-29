@@ -127,6 +127,7 @@ function PersonnelCostCard({ title, icon: Icon, iconColor, bgColor, borderColor,
                 <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mt-3 mb-1">Reserveringen</p>
                 {data.accruals?.vacation_allowance > 0 && <CostDetailRow label="Vakantiegeld (8%)" value={data.accruals.vacation_allowance} />}
                 {data.accruals?.year_end_bonus > 0 && <CostDetailRow label="Eindejaarsuitkering" value={data.accruals.year_end_bonus} />}
+                {data.accruals?.ort_vacation_reservation > 0 && <CostDetailRow label="ORT verlof reservering" value={data.accruals.ort_vacation_reservation} />}
                 <CostDetailRow label="Totaal reserveringen" value={data.accruals_total} highlight />
               </>
             )}

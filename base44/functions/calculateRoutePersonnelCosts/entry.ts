@@ -130,7 +130,10 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
 
   const vacationAllowance = totalGross * ((caoConfig.vacation_allowance || 8) / 100);
   const yearEndBonus = totalGross * ((caoConfig.year_end_bonus || 2.01) / 100);
-  const accrualsTotal = vacationAllowance + yearEndBonus;
+  const avgOrtPerHour = totalHours > 0 ? surchargesTotal / totalHours : 0;
+  const estimatedAnnualVacationHours = 200;
+  const ortVacationReservation = (estimatedAnnualVacationHours / 13) * avgOrtPerHour;
+  const accrualsTotal = vacationAllowance + yearEndBonus + ortVacationReservation;
 
   const totalCostEmployer = totalGross + employerCostsTotal + accrualsTotal;
 
@@ -144,7 +147,11 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
       premium_ww: r2(premiumWW), premium_wia: r2(premiumWIA), premium_wga: r2(premiumWGA)
     },
     accruals_total: r2(accrualsTotal),
-    accruals: { vacation_allowance: r2(vacationAllowance), year_end_bonus: r2(yearEndBonus) },
+    accruals: {
+      vacation_allowance: r2(vacationAllowance),
+      year_end_bonus: r2(yearEndBonus),
+      ort_vacation_reservation: r2(ortVacationReservation)
+    },
     total_cost_employer: r2(totalCostEmployer),
     cost_per_hour: r2(totalHours > 0 ? totalCostEmployer / totalHours : 0)
   };
