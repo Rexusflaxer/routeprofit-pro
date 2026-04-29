@@ -12,6 +12,7 @@ import RouteBuilder from "../components/routes/RouteBuilder";
 import AddTaskDialog from "../components/routes/AddTaskDialog";
 import RoutePersonnelCosts from "../components/routes/RoutePersonnelCosts";
 import RouteOverheadSummary from "../components/routes/RouteOverheadSummary";
+import RouteExportPdf from "../components/routes/RouteExportPdf";
 import { AnimatePresence, motion } from "framer-motion";
 
 function formatMinutes(minutes) {
@@ -526,18 +527,21 @@ export default function RouteDetails() {
                   <Navigation className="w-5 h-5 text-blue-600" />
                   Routeoptimalisatie
                 </CardTitle>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={recalculateRoute}
-                  disabled={isRecalculating || routeTasks.length === 0}
-                >
-                  {isRecalculating ? (
-                    <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Berekenen...</>
-                  ) : (
-                    <><RefreshCw className="w-4 h-4 mr-1" /> Herberekenen</>
-                  )}
-                </Button>
+                <div className="flex gap-2">
+                  <RouteExportPdf route={route} optimizedRoute={optimizedRoute} />
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={recalculateRoute}
+                    disabled={isRecalculating || routeTasks.length === 0}
+                  >
+                    {isRecalculating ? (
+                      <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Berekenen...</>
+                    ) : (
+                      <><RefreshCw className="w-4 h-4 mr-1" /> Herberekenen</>
+                    )}
+                  </Button>
+                </div>
               </div>
             </CardHeader>
             <CardContent>
