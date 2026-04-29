@@ -6,13 +6,24 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Calculator, Plus, X } from "lucide-react";
 
+function getTodayDate() {
+  const today = new Date();
+  today.setMinutes(today.getMinutes() - today.getTimezoneOffset());
+  return today.toISOString().split("T")[0];
+}
+
+function formatNumber(value) {
+  return Number.isFinite(value) ? value.toFixed(2) : "0.00";
+}
+
 export default function CostCalculator({ personnel }) {
-  const [schedule, setSchedule] = useState([{ date: "", start_time: "08:00", end_time: "17:00" }]);
+  const [schedule, setSchedule] = useState([{ date: getTodayDate(), start_time: "08:00", end_time: "17:00" }]);
   const [result, setResult] = useState(null);
   const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
   const addShift = () => {
-    setSchedule([...schedule, { date: "", start_time: "08:00", end_time: "17:00" }]);
+    setSchedule([...schedule, { date: getTodayDate(), start_time: "08:00", end_time: "17:00" }]);
   };
 
   const removeShift = (idx) => {
@@ -26,14 +37,27 @@ export default function CostCalculator({ personnel }) {
   };
 
   const calculate = async () => {
+    const hasIncompleteShift = schedule.some(shift => !shift.date || !shift.start_time || !shift.end_time);
+    if (hasIncompleteShift) {
+      setResult(null);
+      setError("Vul bij elke dienst een datum, starttijd en eindtijd in.");
+      return;
+    }
+
     setLoading(true);
+    setError(null);
     try {
       const { data } = await base44.functions.invoke('calculatePersonnelCosts', {
         personnel_id: personnel.id,
         work_schedule: schedule
       });
+      if (data?.error || !Number.isFinite(data?.total_hours)) {
+        throw new Error(data?.error || "Ongeldige berekening");
+      }
       setResult(data);
     } catch (error) {
+      setResult(null);
+      setError("Kon de kosten niet berekenen. Controleer de ingevulde dienstgegevens.");
       console.error('Fout bij berekenen:', error);
     } finally {
       setLoading(false);
@@ -82,11 +106,17 @@ export default function CostCalculator({ personnel }) {
           </Button>
         </div>
 
+        {error && (
+          <div className="rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-700">
+            {error}
+          </div>
+        )}
+
         {result && (
           <div className="mt-6 p-4 bg-slate-50 rounded-lg space-y-3">
             <div className="flex justify-between items-center">
               <span className="text-sm font-semibold text-slate-700">Totaal uren</span>
-              <span className="text-sm font-bold text-slate-900">{result.total_hours.toFixed(2)}u</span>
+              <span className="text-sm font-bold text-slate-900">{formatNumber(result.total_hours)}u</span>
             </div>
             
             {result.employee_type === 'loondienst' && (

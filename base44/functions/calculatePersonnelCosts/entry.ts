@@ -1,4 +1,4 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.6';
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
 
 // CAO Particuliere Beveiliging - Toeslagberekening
 // Artikel 40: Toeslag bijzondere uren
@@ -222,8 +222,16 @@ Deno.serve(async (req) => {
     for (const shift of work_schedule) {
       const { date, start_time, end_time } = shift;
       
+      if (!date || !start_time || !end_time) {
+        return Response.json({ error: 'Elke dienst moet een datum, starttijd en eindtijd hebben' }, { status: 400 });
+      }
+
       let startDate = new Date(`${date}T${start_time}:00`);
       let endDate = new Date(`${date}T${end_time}:00`);
+
+      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+        return Response.json({ error: 'Ongeldige datum of tijd ingevuld' }, { status: 400 });
+      }
       
       // Bereken uren - corrigeer voor overnight shifts
       let hoursWorked = (endDate - startDate) / (1000 * 60 * 60);
