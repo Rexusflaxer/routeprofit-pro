@@ -521,10 +521,24 @@ export default function RouteDetails() {
             <TabsContent value="optimization" className="space-y-6 mt-6">
               <Card>
             <CardHeader>
-              <CardTitle className="flex items-center gap-2">
-                <Navigation className="w-5 h-5 text-blue-600" />
-                Routeoptimalisatie
-              </CardTitle>
+              <div className="flex items-center justify-between">
+                <CardTitle className="flex items-center gap-2">
+                  <Navigation className="w-5 h-5 text-blue-600" />
+                  Routeoptimalisatie
+                </CardTitle>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={recalculateRoute}
+                  disabled={isRecalculating || routeTasks.length === 0}
+                >
+                  {isRecalculating ? (
+                    <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Berekenen...</>
+                  ) : (
+                    <><RefreshCw className="w-4 h-4 mr-1" /> Herberekenen</>
+                  )}
+                </Button>
+              </div>
             </CardHeader>
             <CardContent>
               {loadingOptimization ? (
