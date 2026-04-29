@@ -671,10 +671,23 @@ export default function RouteDetails() {
                     </div>
                   )}
                   {optimizedRoute.tasks_skipped > 0 && (
-                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg">
-                      <p className="text-sm text-amber-800">
-                        <strong>Let op:</strong> {optimizedRoute.tasks_skipped} {optimizedRoute.tasks_skipped === 1 ? 'taak' : 'taken'} niet opgenomen vanwege tijdsbeperkingen.
+                    <div className="p-3 bg-amber-50 border border-amber-200 rounded-lg space-y-2">
+                      <p className="text-sm text-amber-800 font-semibold">
+                        ⚠️ {optimizedRoute.tasks_skipped} {optimizedRoute.tasks_skipped === 1 ? 'taak' : 'taken'} niet opgenomen vanwege tijdsbeperkingen:
                       </p>
+                      {(optimizedRoute.skipped_tasks || []).map((skipped, i) => (
+                        <div key={i} className="ml-2 pl-2 border-l-2 border-amber-300">
+                          <p className="text-xs font-semibold text-amber-900">{skipped.name}</p>
+                          <p className="text-xs text-amber-700">Tijdvenster: {skipped.time_window}</p>
+                          {skipped.earliest_arrival && (
+                            <p className="text-xs text-amber-700">Vroegste aankomst: {skipped.earliest_arrival} (venster sluit: {skipped.task_end})</p>
+                          )}
+                          {skipped.current_time && !skipped.earliest_arrival && (
+                            <p className="text-xs text-amber-700">Huidige tijd op moment van check: {skipped.current_time}</p>
+                          )}
+                          <p className="text-xs text-amber-600 italic">{skipped.reason}</p>
+                        </div>
+                      ))}
                     </div>
                   )}
                 </div>

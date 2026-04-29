@@ -136,6 +136,7 @@ Deno.serve(async (req) => {
     // Greedy nearest neighbor algoritme
     const visited = new Set();
     const optimizedOrder = [];
+    const skippedReasons = {}; // task_id -> reden waarom overgeslagen
     
     // Start locatie
     let currentLocation = startLocation || taskObjects.reduce((earliest, task) => 
@@ -221,12 +222,38 @@ Deno.serve(async (req) => {
               travelTime = travelMinutes;
               nearestTask = { ...task, _distance_km: distanceKm };
             }
+          } else {
+            // Taak kan niet bereikt worden binnen tijdvenster vanuit huidige positie
+            skippedReasons[task.task_id] = {
+              name: task.name,
+              time_window: `${task.time_window_start} - ${task.time_window_end}`,
+              current_time: formatMinutesToTime(currentTime),
+              earliest_arrival: formatMinutesToTime(arrivalTime),
+              task_end: formatMinutesToTime(taskEndMinutes),
+              reason: `Aankomst ${formatMinutesToTime(arrivalTime)} is na einde tijdvenster ${task.time_window_end}`
+            };
           }
+        } else {
+          skippedReasons[task.task_id] = {
+            name: task.name,
+            time_window: `${task.time_window_start} - ${task.time_window_end}`,
+            reason: 'Geen route gevonden via Google Maps'
+          };
         }
       }
 
       if (!nearestTask) {
-        // Geen geschikt volgend object gevonden binnen tijdsvenster
+        // Geen geschikt volgend object gevonden binnen tijdsvenster - markeer resterende taken
+        for (const task of taskObjects) {
+          if (!visited.has(task.task_id) && !skippedReasons[task.task_id]) {
+            skippedReasons[task.task_id] = {
+              name: task.name,
+              time_window: `${task.time_window_start} - ${task.time_window_end}`,
+              current_time: formatMinutesToTime(currentTime),
+              reason: `Geen enkel volgend object bereikbaar binnen tijdvenster vanaf tijdstip ${formatMinutesToTime(currentTime)}`
+            };
+          }
+        }
         break;
       }
 
@@ -378,7 +405,8 @@ Deno.serve(async (req) => {
       late_by_minutes: finishedLate ? currentTime - routeEndMinutes : 0,
       alarm_standby: alarmStandby,
       tasks_optimized: visited.size,
-      tasks_skipped: taskObjects.length - visited.size
+      tasks_skipped: taskObjects.length - visited.size,
+      skipped_tasks: Object.values(skippedReasons)
     };
 
     // Sla resultaat op in de route (cache)
