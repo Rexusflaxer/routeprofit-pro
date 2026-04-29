@@ -123,8 +123,9 @@ Deno.serve(async (req) => {
     const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput));
     const currentHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
 
-    // Gebruik cache als hash overeenkomt en force_recalculate niet is ingesteld
-    if (!force_recalculate && route.cached_optimization && route.optimization_hash === currentHash) {
+    // Gebruik cache alleen als deze actueel én compleet is; oude caches zonder waarschuwingdetails worden opnieuw berekend.
+    const cachedOptimizationIsComplete = route.cached_optimization?.tasks_skipped === 0 || Array.isArray(route.cached_optimization?.skipped_tasks);
+    if (!force_recalculate && route.cached_optimization && route.optimization_hash === currentHash && cachedOptimizationIsComplete) {
       return Response.json(route.cached_optimization);
     }
 
