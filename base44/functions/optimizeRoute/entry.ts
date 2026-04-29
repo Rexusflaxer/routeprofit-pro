@@ -136,7 +136,8 @@ Deno.serve(async (req) => {
     // Greedy nearest neighbor algoritme
     const visited = new Set();
     const optimizedOrder = [];
-    const skippedReasons = {}; // task_id -> reden waarom overgeslagen
+    // skippedReasons wordt pas gevuld NA de volledige optimalisatie-loop
+    // zodat taken die in een vroege iteratie "te laat" lijken maar later toch worden opgenomen, niet foutief worden gemarkeerd
     
     // Start locatie
     let currentLocation = startLocation || taskObjects.reduce((earliest, task) => 
@@ -222,38 +223,11 @@ Deno.serve(async (req) => {
               travelTime = travelMinutes;
               nearestTask = { ...task, _distance_km: distanceKm };
             }
-          } else {
-            // Taak kan niet bereikt worden binnen tijdvenster vanuit huidige positie
-            skippedReasons[task.task_id] = {
-              name: task.name,
-              time_window: `${task.time_window_start} - ${task.time_window_end}`,
-              current_time: formatMinutesToTime(currentTime),
-              earliest_arrival: formatMinutesToTime(arrivalTime),
-              task_end: formatMinutesToTime(taskEndMinutes),
-              reason: `Aankomst ${formatMinutesToTime(arrivalTime)} is na einde tijdvenster ${task.time_window_end}`
-            };
           }
-        } else {
-          skippedReasons[task.task_id] = {
-            name: task.name,
-            time_window: `${task.time_window_start} - ${task.time_window_end}`,
-            reason: 'Geen route gevonden via Google Maps'
-          };
         }
       }
 
       if (!nearestTask) {
-        // Geen geschikt volgend object gevonden binnen tijdsvenster - markeer resterende taken
-        for (const task of taskObjects) {
-          if (!visited.has(task.task_id) && !skippedReasons[task.task_id]) {
-            skippedReasons[task.task_id] = {
-              name: task.name,
-              time_window: `${task.time_window_start} - ${task.time_window_end}`,
-              current_time: formatMinutesToTime(currentTime),
-              reason: `Geen enkel volgend object bereikbaar binnen tijdvenster vanaf tijdstip ${formatMinutesToTime(currentTime)}`
-            };
-          }
-        }
         break;
       }
 
@@ -295,6 +269,37 @@ Deno.serve(async (req) => {
       currentTime = departureTime;
       
       currentLocation = nearestTask;
+    }
+
+    // Bepaal welke taken daadwerkelijk zijn overgeslagen (niet bezocht)
+    // en waarom: controleer elk overgeslagen object op tijdvensterproblemen
+    const skippedTasksList = [];
+    for (const task of taskObjects) {
+      if (visited.has(task.task_id)) continue;
+
+      let taskStartMin = parseTimeToMinutes(task.time_window_start);
+      let taskEndMin = parseTimeToMinutes(task.time_window_end);
+      if (taskEndMin <= taskStartMin) taskEndMin += 24 * 60;
+
+      const routeStartMin = parseTimeToMinutes(route.time_window_start || '00:00');
+      let routeEndMin = parseTimeToMinutes(route.time_window_end || '23:59');
+      if (routeEndMin <= routeStartMin) routeEndMin += 24 * 60;
+
+      // Controleer of het tijdvenster van de taak überhaupt overlapt met de route
+      const windowsOverlap = taskStartMin < routeEndMin && taskEndMin > routeStartMin;
+      if (!windowsOverlap) {
+        skippedTasksList.push({
+          name: task.name,
+          time_window: `${task.time_window_start} - ${task.time_window_end}`,
+          reason: `Tijdvenster van taak overlapt niet met routevenster (${route.time_window_start} - ${route.time_window_end})`
+        });
+      } else {
+        skippedTasksList.push({
+          name: task.name,
+          time_window: `${task.time_window_start} - ${task.time_window_end}`,
+          reason: `Kon niet worden ingepland: bereikbaar in tijdvenster maar conflicteert met volgorde/tijden van andere taken`
+        });
+      }
     }
 
     const totalServiceTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + t.duration_minutes, 0);
@@ -406,7 +411,7 @@ Deno.serve(async (req) => {
       alarm_standby: alarmStandby,
       tasks_optimized: visited.size,
       tasks_skipped: taskObjects.length - visited.size,
-      skipped_tasks: Object.values(skippedReasons)
+      skipped_tasks: skippedTasksList
     };
 
     // Sla resultaat op in de route (cache)
