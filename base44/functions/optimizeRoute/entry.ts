@@ -541,19 +541,21 @@ Deno.serve(async (req) => {
       }
 
       const bestCandidate = candidates.sort((a, b) => a.finish - b.finish)[0];
-      const suggestedEnd = bestCandidate ? formatMinutesToTime(bestCandidate.finish) : null;
+      const suggestedEndMinutes = bestCandidate?.finish;
+      const suggestedEnd = suggestedEndMinutes ? formatMinutesToTime(suggestedEndMinutes) : null;
       const conflictText = conflicts.length > 0
         ? `Botst met ${conflicts.map(conflict => `${conflict.name} (${conflict.planned_time})`).join(', ')}.`
         : `Er is geen vrij blok groot genoeg binnen dit tijdvenster, inclusief reistijd.`;
+      const needsLongerWindow = suggestedEndMinutes && suggestedEndMinutes > taskEndMin;
 
       return {
         name: task.name,
         time_window: `${task.time_window_start} - ${task.time_window_end}`,
-        reason: `Deze taak duurt ${task.duration_minutes} minuten en past met reistijd niet volledig binnen ${task.time_window_start} - ${task.time_window_end}. ${conflictText}`,
+        reason: `Deze taak duurt ${task.duration_minutes} minuten, maar er is binnen ${task.time_window_start} - ${task.time_window_end} geen aaneengesloten vrij blok beschikbaar door de huidige routevolgorde en reistijden. ${conflictText}`,
         conflicts,
-        advice: suggestedEnd
-          ? `Maak ruimte door het tijdvenster van deze taak te verlengen tot minimaal ${suggestedEnd}, of verruim/verplaats één van de conflicterende taken naar een later of eerder moment.`
-          : `Verruim het tijdvenster, verkort de taakduur of zet deze taak op een aparte route.`
+        advice: needsLongerWindow
+          ? `Maak ruimte door het tijdvenster van deze taak te verlengen tot minimaal ${suggestedEnd}, of verplaats één van de conflicterende taken naar een later of eerder moment.`
+          : `Het tijdvenster zelf is ruim genoeg, maar het blok is bezet. Verplaats één of meer conflicterende taken buiten ${task.time_window_start} - ${task.time_window_end}, verkort de taakduur, of zet deze taak op een aparte route.`
       };
     };
 
