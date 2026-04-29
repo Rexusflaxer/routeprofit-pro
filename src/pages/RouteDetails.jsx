@@ -700,6 +700,19 @@ export default function RouteDetails() {
                             <p className="text-xs text-amber-700">Huidige tijd op moment van check: {skipped.current_time}</p>
                           )}
                           <p className="text-xs text-amber-600 italic">{skipped.reason}</p>
+                          {skipped.conflicts?.length > 0 && (
+                            <div className="mt-1 space-y-0.5">
+                              <p className="text-xs font-semibold text-amber-800">Conflicten:</p>
+                              {skipped.conflicts.map((conflict, conflictIndex) => (
+                                <p key={conflictIndex} className="text-xs text-amber-700">
+                                  • {conflict.name}: gepland {conflict.planned_time}{conflict.time_window ? ` · venster ${conflict.time_window}` : ''}
+                                </p>
+                              ))}
+                            </div>
+                          )}
+                          {skipped.advice && (
+                            <p className="text-xs text-amber-800 mt-1"><strong>Advies:</strong> {skipped.advice}</p>
+                          )}
                         </div>
                       ))}
                     </div>

@@ -487,6 +487,76 @@ Deno.serve(async (req) => {
       }
     }
 
+    const toAbsoluteRouteMinutes = (timeString) => {
+      let minutes = parseTimeToMinutes(timeString);
+      if (minutes < routeStartMinutes) minutes += 24 * 60;
+      return minutes;
+    };
+
+    const realPlannedStops = optimizedOrder
+      .filter(item => !item.is_start && !item.is_end && !item.is_alarm_standby)
+      .map(item => {
+        const start = toAbsoluteRouteMinutes(item.actual_start_time || item.arrival_time);
+        let end = toAbsoluteRouteMinutes(item.departure_time || item.actual_start_time || item.arrival_time);
+        if (end < start) end += 24 * 60;
+        return { ...item, _start: start, _end: end };
+      });
+
+    const getSkippedTaskExplanation = async (task, taskStartMin, taskEndMin, windowsOverlap) => {
+      if (!windowsOverlap) {
+        return {
+          name: task.name,
+          time_window: `${task.time_window_start} - ${task.time_window_end}`,
+          reason: `Het tijdvenster van deze taak valt buiten de route (${route.time_window_start} - ${route.time_window_end}).`,
+          advice: `Verplaats het tijdvenster naar binnen de route of maak hiervoor een aparte route.`
+        };
+      }
+
+      const conflicts = realPlannedStops
+        .filter(stop => stop._start < taskEndMin && stop._end > taskStartMin)
+        .map(stop => ({
+          name: stop.name,
+          planned_time: `${formatMinutesToTime(stop._start)} - ${formatMinutesToTime(stop._end)}`,
+          time_window: stop.time_window_start && stop.time_window_end ? `${stop.time_window_start} - ${stop.time_window_end}` : undefined
+        }));
+
+      const candidates = [];
+      const possiblePreviousStops = [
+        { name: startLocation?.name || 'Start route', latitude: currentLocation?.latitude || startLocation?.latitude, longitude: currentLocation?.longitude || startLocation?.longitude, _end: routeStartMinutes, task_id: 'route_start' },
+        ...realPlannedStops.filter(stop => stop._end <= taskEndMin)
+      ].filter(stop => stop.latitude && stop.longitude);
+
+      for (const previousStop of possiblePreviousStops) {
+        const travel = await getTravelTime(
+          previousStop.latitude, previousStop.longitude,
+          task.latitude, task.longitude,
+          `${previousStop.task_id || previousStop.name}->skipped-${task.task_id}`
+        );
+        if (!travel) continue;
+
+        const arrival = previousStop._end + travel.travelMinutes;
+        const start = Math.max(arrival, taskStartMin);
+        const finish = start + task.duration_minutes;
+        candidates.push({ previousStop, arrival, start, finish, travelMinutes: travel.travelMinutes });
+      }
+
+      const bestCandidate = candidates.sort((a, b) => a.finish - b.finish)[0];
+      const suggestedEnd = bestCandidate ? formatMinutesToTime(bestCandidate.finish) : null;
+      const conflictText = conflicts.length > 0
+        ? `Botst met ${conflicts.map(conflict => `${conflict.name} (${conflict.planned_time})`).join(', ')}.`
+        : `Er is geen vrij blok groot genoeg binnen dit tijdvenster, inclusief reistijd.`;
+
+      return {
+        name: task.name,
+        time_window: `${task.time_window_start} - ${task.time_window_end}`,
+        reason: `Deze taak duurt ${task.duration_minutes} minuten en past met reistijd niet volledig binnen ${task.time_window_start} - ${task.time_window_end}. ${conflictText}`,
+        conflicts,
+        advice: suggestedEnd
+          ? `Maak ruimte door het tijdvenster van deze taak te verlengen tot minimaal ${suggestedEnd}, of verruim/verplaats één van de conflicterende taken naar een later of eerder moment.`
+          : `Verruim het tijdvenster, verkort de taakduur of zet deze taak op een aparte route.`
+      };
+    };
+
     // Bepaal welke taken daadwerkelijk zijn overgeslagen (niet bezocht)
     // en waarom: controleer elk overgeslagen object op tijdvensterproblemen
     const skippedTasksList = [];
@@ -494,22 +564,8 @@ Deno.serve(async (req) => {
       if (visited.has(task.task_id)) continue;
 
       const { taskStart: taskStartMin, taskEnd: taskEndMin } = normalizeTaskWindow(task);
-
-      // Controleer of het tijdvenster van de taak überhaupt overlapt met de route
       const windowsOverlap = taskStartMin < routeEndMinutes && taskEndMin > routeStartMinutes;
-      if (!windowsOverlap) {
-        skippedTasksList.push({
-          name: task.name,
-          time_window: `${task.time_window_start} - ${task.time_window_end}`,
-          reason: `Tijdvenster van taak overlapt niet met routevenster (${route.time_window_start} - ${route.time_window_end})`
-        });
-      } else {
-        skippedTasksList.push({
-          name: task.name,
-          time_window: `${task.time_window_start} - ${task.time_window_end}`,
-          reason: `Kon niet worden ingepland: bereikbaar in tijdvenster maar conflicteert met volgorde/tijden van andere taken`
-        });
-      }
+      skippedTasksList.push(await getSkippedTaskExplanation(task, taskStartMin, taskEndMin, windowsOverlap));
     }
 
     const totalServiceTime = optimizedOrder.filter(t => !t.is_start && !t.is_end).reduce((sum, t) => sum + t.duration_minutes, 0);
