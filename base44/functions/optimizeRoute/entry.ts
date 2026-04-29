@@ -172,11 +172,23 @@ Deno.serve(async (req) => {
         if (visited.has(task.task_id)) continue;
 
         // Check of we binnen tijdsvenster kunnen komen
-        const taskStartMinutes = parseTimeToMinutes(task.time_window_start);
+        let taskStartMinutes = parseTimeToMinutes(task.time_window_start);
         let taskEndMinutes = parseTimeToMinutes(task.time_window_end);
+
         // Tijdvenster eindigt na middernacht: eindtijd <= begintijd betekent volgende dag
         if (taskEndMinutes <= taskStartMinutes) {
           taskEndMinutes += 24 * 60;
+        }
+
+        // Als currentTime al voorbij middernacht is (>= 1440), schuif taaktijden op
+        // zodat taken die vroeg beginnen (bijv. 00:00-06:00) correct worden vergeleken
+        if (currentTime >= 24 * 60) {
+          const offset = Math.floor(currentTime / (24 * 60)) * 24 * 60;
+          // Schuif op als de taak nog niet opgeschoven is (taskStartMinutes < currentTime)
+          if (taskStartMinutes + offset <= currentTime + 4 * 60) {
+            taskStartMinutes += offset;
+            taskEndMinutes += offset;
+          }
         }
 
         // Google Maps API call voor reistijd
@@ -199,7 +211,7 @@ Deno.serve(async (req) => {
           const distanceKm = Math.round(routeDistance / 100) / 10;
           const arrivalTime = currentTime + travelMinutes;
 
-          // Check of we op tijd kunnen aankomen
+          // Check of we op tijd kunnen aankomen (voor het einde van het tijdvenster)
           if (arrivalTime <= taskEndMinutes) {
             const score = travelMinutes;
 
@@ -221,9 +233,15 @@ Deno.serve(async (req) => {
       // Bereken aankomst en vertrektijd voor deze taak
       const arrivalTime = currentTime + travelTime;
       let taskStartMinutes = parseTimeToMinutes(nearestTask.time_window_start);
-      // Als de taak begint na middernacht en we al voorbij middernacht zijn, corrigeer
-      if (taskStartMinutes < parseTimeToMinutes(route.time_window_start || '00:00') && arrivalTime > 24 * 60) {
-        taskStartMinutes += 24 * 60;
+      let taskEndMinutesCheck = parseTimeToMinutes(nearestTask.time_window_end);
+      if (taskEndMinutesCheck <= taskStartMinutes) taskEndMinutesCheck += 24 * 60;
+
+      // Als currentTime voorbij middernacht is, schuif taakstart op indien nodig
+      if (arrivalTime >= 24 * 60) {
+        const offset = Math.floor(arrivalTime / (24 * 60)) * 24 * 60;
+        if (taskStartMinutes + offset <= arrivalTime + 4 * 60) {
+          taskStartMinutes += offset;
+        }
       }
       const actualStartTime = Math.max(arrivalTime, taskStartMinutes);
       const waitingTime = actualStartTime - arrivalTime;
