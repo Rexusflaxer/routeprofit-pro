@@ -164,111 +164,117 @@ Deno.serve(async (req) => {
       });
     }
 
+    // Helper: normaliseer taaktijdvenster t.o.v. currentTime (middernacht-bewust)
+    const normalizeTaskWindow = (task, refTime) => {
+      let taskStart = parseTimeToMinutes(task.time_window_start);
+      let taskEnd = parseTimeToMinutes(task.time_window_end);
+      // Tijdvenster over middernacht
+      if (taskEnd <= taskStart) taskEnd += 24 * 60;
+      // Als refTime voorbij middernacht is, schuif venster mee indien dat logisch is
+      if (refTime >= 24 * 60) {
+        const offset = Math.floor(refTime / (24 * 60)) * 24 * 60;
+        if (taskStart + offset <= refTime + 24 * 60) {
+          taskStart += offset;
+          taskEnd += offset;
+        }
+      }
+      return { taskStart, taskEnd };
+    };
+
+    // Cache voor reistijden: slaat (origin_task_id, dest_task_id) -> { travelMinutes, distanceKm } op
+    // om dubbele Google Maps calls te voorkomen
+    const travelCache = new Map();
+    const getTravelTime = async (fromLat, fromLng, toLat, toLng, cacheKey) => {
+      if (travelCache.has(cacheKey)) return travelCache.get(cacheKey);
+      const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${fromLat},${fromLng}&destination=${toLat},${toLng}&key=${googleMapsApiKey}`;
+      const response = await fetch(url);
+      const data = await response.json();
+      if (data.status === 'OK' && data.routes && data.routes.length > 0) {
+        let routeDuration = 0;
+        let routeDistance = 0;
+        (data.routes[0].legs || []).forEach(leg => {
+          routeDuration += leg.duration.value;
+          routeDistance += leg.distance.value;
+        });
+        const result = {
+          travelMinutes: Math.round(routeDuration / 60),
+          distanceKm: Math.round(routeDistance / 100) / 10
+        };
+        travelCache.set(cacheKey, result);
+        return result;
+      }
+      return null;
+    };
+
     // Vind dichtstbijzijnde volgende objecten
+    // Score = reistijd + wachttijd (totale tijd tot we de taak starten)
+    // Taken waarbij we te laat aankomen (na einde tijdvenster) worden overgeslagen.
+    // Taken die wachttijd vereisen (aankomst vóór vensteropening) zijn WEL toegestaan.
+    // De loop stopt alleen als GEEN ENKELE resterende taak meer bereikbaar is vóór het einde van haar tijdvenster.
     while (visited.size < taskObjects.length) {
-      let nearestTask = null;
-      let shortestTime = Infinity;
-      let travelTime = 0;
+      let bestTask = null;
+      let bestScore = Infinity; // score = reistijd (we willen kortste reistijd, wachttijd telt niet mee in score)
+      let bestTravelTime = 0;
+      let bestDistanceKm = 0;
 
       for (const task of taskObjects) {
         if (visited.has(task.task_id)) continue;
 
-        // Check of we binnen tijdsvenster kunnen komen
-        let taskStartMinutes = parseTimeToMinutes(task.time_window_start);
-        let taskEndMinutes = parseTimeToMinutes(task.time_window_end);
+        const { taskStart, taskEnd } = normalizeTaskWindow(task, currentTime);
 
-        // Tijdvenster eindigt na middernacht: eindtijd <= begintijd betekent volgende dag
-        if (taskEndMinutes <= taskStartMinutes) {
-          taskEndMinutes += 24 * 60;
-        }
+        // Bereken reistijd
+        const fromId = currentLocation.task_id || currentLocation.id || 'start';
+        const cacheKey = `${fromId}->${task.task_id}`;
+        const travel = await getTravelTime(
+          currentLocation.latitude, currentLocation.longitude,
+          task.latitude, task.longitude,
+          cacheKey
+        );
+        if (!travel) continue;
 
-        // Als currentTime al voorbij middernacht is (>= 1440), schuif taaktijden op
-        // zodat taken die vroeg beginnen (bijv. 00:00-06:00) correct worden vergeleken
-        if (currentTime >= 24 * 60) {
-          const offset = Math.floor(currentTime / (24 * 60)) * 24 * 60;
-          // Schuif op als de taak nog niet opgeschoven is (taskStartMinutes < currentTime)
-          if (taskStartMinutes + offset <= currentTime + 4 * 60) {
-            taskStartMinutes += offset;
-            taskEndMinutes += offset;
-          }
-        }
+        const { travelMinutes, distanceKm } = travel;
+        const arrivalTime = currentTime + travelMinutes;
 
-        // Google Maps API call voor reistijd
-        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${currentLocation.latitude},${currentLocation.longitude}&destination=${task.latitude},${task.longitude}&key=${googleMapsApiKey}`;
-        
-        const response = await fetch(url);
-        const data = await response.json();
+        // We kunnen deze taak uitvoeren als we aankomen VÓÓR het einde van het tijdvenster
+        // (ook al zijn we vroeg en moeten we wachten)
+        if (arrivalTime > taskEnd) continue; // te laat — sla over
 
-        if (data.status === 'OK' && data.routes && data.routes.length > 0) {
-          const routeData = data.routes[0];
-          let routeDuration = 0;
-          let routeDistance = 0;
-
-          (routeData.legs || []).forEach(leg => {
-            routeDuration += leg.duration.value; // in seconds
-            routeDistance += leg.distance.value; // in meters
-          });
-
-          const travelMinutes = Math.round(routeDuration / 60);
-          const distanceKm = Math.round(routeDistance / 100) / 10;
-          const arrivalTime = currentTime + travelMinutes;
-
-          // Check of we op tijd kunnen aankomen (voor het einde van het tijdvenster)
-          if (arrivalTime <= taskEndMinutes) {
-            const score = travelMinutes;
-
-            if (score < shortestTime) {
-              shortestTime = score;
-              nearestTask = task;
-              travelTime = travelMinutes;
-              nearestTask = { ...task, _distance_km: distanceKm };
-            }
-          }
+        // Score = reistijd (kortste reistijd wint; wachttijd wordt geaccepteerd)
+        const score = travelMinutes;
+        if (score < bestScore) {
+          bestScore = score;
+          bestTask = { ...task, _distance_km: distanceKm };
+          bestTravelTime = travelMinutes;
+          bestDistanceKm = distanceKm;
         }
       }
 
-      if (!nearestTask) {
-        break;
+      if (!bestTask) {
+        break; // Geen enkele taak meer bereikbaar
       }
 
-      // Bereken aankomst en vertrektijd voor deze taak
-      const arrivalTime = currentTime + travelTime;
-      let taskStartMinutes = parseTimeToMinutes(nearestTask.time_window_start);
-      let taskEndMinutesCheck = parseTimeToMinutes(nearestTask.time_window_end);
-      if (taskEndMinutesCheck <= taskStartMinutes) taskEndMinutesCheck += 24 * 60;
-
-      // Als currentTime voorbij middernacht is, schuif taakstart op indien nodig
-      if (arrivalTime >= 24 * 60) {
-        const offset = Math.floor(arrivalTime / (24 * 60)) * 24 * 60;
-        if (taskStartMinutes + offset <= arrivalTime + 4 * 60) {
-          taskStartMinutes += offset;
-        }
-      }
-      const actualStartTime = Math.max(arrivalTime, taskStartMinutes);
+      // Bereken aankomst en vertrektijd voor de gekozen taak
+      const { taskStart: chosenStart } = normalizeTaskWindow(bestTask, currentTime);
+      const arrivalTime = currentTime + bestTravelTime;
+      const actualStartTime = Math.max(arrivalTime, chosenStart);
       const waitingTime = actualStartTime - arrivalTime;
-      const departureTime = actualStartTime + nearestTask.duration_minutes;
+      const departureTime = actualStartTime + bestTask.duration_minutes;
 
-      const segmentDistanceKm = nearestTask._distance_km || 0;
-
-      // Voeg taak toe met extra info
-      const taskWithInfo = {
-        ...nearestTask,
-        travel_time_minutes: travelTime,
-        distance_km: segmentDistanceKm,
+      optimizedOrder.push({
+        ...bestTask,
+        travel_time_minutes: bestTravelTime,
+        distance_km: bestDistanceKm,
         arrival_time: formatMinutesToTime(arrivalTime),
         actual_start_time: formatMinutesToTime(actualStartTime),
         departure_time: formatMinutesToTime(departureTime),
         waiting_time: waitingTime
-      };
+      });
 
-      optimizedOrder.push(taskWithInfo);
-      visited.add(nearestTask.task_id);
-      
-      totalTravelTime += travelTime;
-      totalDistanceKm += segmentDistanceKm;
+      visited.add(bestTask.task_id);
+      totalTravelTime += bestTravelTime;
+      totalDistanceKm += bestDistanceKm;
       currentTime = departureTime;
-      
-      currentLocation = nearestTask;
+      currentLocation = bestTask;
     }
 
     // Bepaal welke taken daadwerkelijk zijn overgeslagen (niet bezocht)
@@ -353,25 +359,17 @@ Deno.serve(async (req) => {
           arrival_time: formatMinutesToTime(routeEndMinutes)
         });
       } else {
-        const url = `https://maps.googleapis.com/maps/api/directions/json?origin=${currentLocation.longitude},${currentLocation.latitude}&destination=${endLocation.longitude},${endLocation.latitude}&key=${googleMapsApiKey}`;
-        const response = await fetch(url);
-        const data = await response.json();
-        
-        if (data.status === 'OK' && data.routes && data.routes.length > 0) {
-          let routeDuration = 0;
-          let routeDistance = 0;
-          (data.routes[0].legs || []).forEach(leg => {
-            routeDuration += leg.duration.value;
-            routeDistance += leg.distance.value;
-          });
-          const travelMinutes = Math.round(routeDuration / 60);
-          const distanceKm = Math.round(routeDistance / 100) / 10;
+        const endTravel = await getTravelTime(
+          currentLocation.latitude, currentLocation.longitude,
+          endLocation.latitude, endLocation.longitude,
+          `end->${endLocation.id}`
+        );
+        if (endTravel) {
+          const { travelMinutes, distanceKm } = endTravel;
           totalTravelTime += travelMinutes;
           totalDistanceKm += distanceKm;
-          
           const arrivalTimeAtEnd = currentTime + travelMinutes;
           actualShiftEndMinutes = arrivalTimeAtEnd;
-
           optimizedOrder.push({
             name: `EIND: ${endLocation.name}`,
             address: endLocation.address,
