@@ -286,6 +286,110 @@ Deno.serve(async (req) => {
       currentLocation = bestTask;
     }
 
+    // Reparatiestap: probeer overgeslagen taken alsnog in te voegen op elke mogelijke positie.
+    // Dit voorkomt dat een vroege greedy-keuze later onnodig taken blokkeert.
+    const simulateSequence = async (sequence) => {
+      const simulatedOrder = [];
+      let simCurrentTime = routeStartMinutes;
+      let simTotalTravelTime = 0;
+      let simTotalDistanceKm = 0;
+      let simCurrentLocation = startLocation || sequence[0];
+
+      if (startLocation) {
+        simulatedOrder.push({
+          name: `START: ${startLocation.name}`,
+          address: startLocation.address,
+          latitude: startLocation.latitude,
+          longitude: startLocation.longitude,
+          duration_minutes: 0,
+          time_window_start: route.time_window_start || '00:00',
+          time_window_end: route.time_window_end || '23:59',
+          is_start: true,
+          arrival_time: formatMinutesToTime(simCurrentTime),
+          departure_time: formatMinutesToTime(simCurrentTime)
+        });
+      }
+
+      for (const task of sequence) {
+        if (!simCurrentLocation) simCurrentLocation = task;
+        const fromId = simCurrentLocation.task_id || simCurrentLocation.id || 'start';
+        const travel = await getTravelTime(
+          simCurrentLocation.latitude, simCurrentLocation.longitude,
+          task.latitude, task.longitude,
+          `${fromId}->${task.task_id}`
+        );
+        if (!travel) return null;
+
+        const { taskStart, taskEnd } = normalizeTaskWindow(task);
+        const arrivalTime = simCurrentTime + travel.travelMinutes;
+        const actualStartTime = Math.max(arrivalTime, taskStart);
+        const departureTime = actualStartTime + task.duration_minutes;
+
+        if (arrivalTime > taskEnd || departureTime > taskEnd) return null;
+
+        simulatedOrder.push({
+          ...task,
+          travel_time_minutes: travel.travelMinutes,
+          distance_km: travel.distanceKm,
+          arrival_time: formatMinutesToTime(arrivalTime),
+          actual_start_time: formatMinutesToTime(actualStartTime),
+          departure_time: formatMinutesToTime(departureTime),
+          waiting_time: actualStartTime - arrivalTime
+        });
+
+        simTotalTravelTime += travel.travelMinutes;
+        simTotalDistanceKm += travel.distanceKm;
+        simCurrentTime = departureTime;
+        simCurrentLocation = task;
+      }
+
+      return {
+        order: simulatedOrder,
+        currentTime: simCurrentTime,
+        currentLocation: simCurrentLocation,
+        totalTravelTime: simTotalTravelTime,
+        totalDistanceKm: simTotalDistanceKm
+      };
+    };
+
+    let sequenceTasks = optimizedOrder.filter(item => !item.is_start && !item.is_end && !item.is_alarm_standby);
+    let repairImproved = true;
+    while (repairImproved) {
+      repairImproved = false;
+      const remainingTasks = taskObjects.filter(task => !visited.has(task.task_id));
+
+      let bestRepair = null;
+      for (const task of remainingTasks) {
+        for (let index = 0; index <= sequenceTasks.length; index++) {
+          const candidateSequence = [
+            ...sequenceTasks.slice(0, index),
+            task,
+            ...sequenceTasks.slice(index)
+          ];
+          const simulation = await simulateSequence(candidateSequence);
+          if (!simulation) continue;
+
+          const addedTravel = simulation.totalTravelTime - totalTravelTime;
+          const score = (simulation.currentTime * 1000) + addedTravel;
+          if (!bestRepair || score < bestRepair.score) {
+            bestRepair = { task, simulation, candidateSequence, score };
+          }
+        }
+      }
+
+      if (bestRepair) {
+        sequenceTasks = bestRepair.candidateSequence;
+        optimizedOrder.length = 0;
+        optimizedOrder.push(...bestRepair.simulation.order);
+        totalTravelTime = bestRepair.simulation.totalTravelTime;
+        totalDistanceKm = bestRepair.simulation.totalDistanceKm;
+        currentTime = bestRepair.simulation.currentTime;
+        currentLocation = bestRepair.simulation.currentLocation;
+        visited.add(bestRepair.task.task_id);
+        repairImproved = true;
+      }
+    }
+
     // Bepaal welke taken daadwerkelijk zijn overgeslagen (niet bezocht)
     // en waarom: controleer elk overgeslagen object op tijdvensterproblemen
     const skippedTasksList = [];
