@@ -1,4 +1,4 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.6';
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
 
 const HOLIDAYS_2025 = ['2025-01-01', '2025-04-20', '2025-04-21', '2025-04-27', '2025-05-29', '2025-06-08', '2025-06-09', '2025-12-25', '2025-12-26'];
 const HOLIDAYS_2026 = ['2026-01-01', '2026-04-05', '2026-04-06', '2026-04-27', '2026-05-14', '2026-05-24', '2026-05-25', '2026-12-25', '2026-12-26'];
@@ -46,7 +46,17 @@ function getNextDateForWeekday(routeWeekday) {
 
 function r2(n) { return Math.round(n * 100) / 100; }
 function timeToMinutes(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
-function minutesToTime(m) { const h = Math.floor(m / 60); const min = m % 60; return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`; }
+function minutesToTime(m) {
+  const total = ((m % (24 * 60)) + (24 * 60)) % (24 * 60);
+  const h = Math.floor(total / 60);
+  const min = total % 60;
+  return `${String(h).padStart(2,'0')}:${String(min).padStart(2,'0')}`;
+}
+function getAbsoluteEndMinutes(startMinutes, endTime) {
+  let endMinutes = timeToMinutes(endTime);
+  if (endMinutes <= startMinutes) endMinutes += 24 * 60;
+  return endMinutes;
+}
 
 function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
   const startDate = new Date(`${date}T${startTime}:00`);
@@ -172,13 +182,12 @@ Deno.serve(async (req) => {
     let actualShiftNote = null;
 
     if (!route.alarm_standby) {
-      // Dienst eindigt op basis van werkelijke routetijd
+      // Dienst eindigt op basis van werkelijke routeduur, met correcte ondersteuning voor routes na middernacht
       const routeStartMinutes = timeToMinutes(startTime);
-      // Gebruik opgeslagen total_route_minutes als beschikbaar, anders planned window
-      const routeDuration = route.total_route_minutes || 
-        (timeToMinutes(plannedEndTime) - routeStartMinutes);
+      const plannedEndMinutes = getAbsoluteEndMinutes(routeStartMinutes, plannedEndTime);
+      const plannedWindowMinutes = plannedEndMinutes - routeStartMinutes;
+      const routeDuration = route.total_route_minutes || plannedWindowMinutes;
       const actualEndMinutes = routeStartMinutes + routeDuration;
-      const plannedEndMinutes = timeToMinutes(plannedEndTime);
       
       if (actualEndMinutes < plannedEndMinutes) {
         endTime = minutesToTime(actualEndMinutes);
