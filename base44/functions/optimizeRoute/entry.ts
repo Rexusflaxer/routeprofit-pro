@@ -400,16 +400,50 @@ Deno.serve(async (req) => {
     };
 
     const findBestSequence = async () => {
-      const beamWidth = 700;
+      const beamWidth = 2500;
+      const taskDeadlineById = new Map(taskObjects.map(task => [task.task_id, normalizeTaskWindow(task).taskEnd]));
       let beam = [{
         sequence: [],
         visitedIds: new Set(),
         currentTime: routeStartMinutes,
         currentLocation: startLocation || taskObjects[0],
         totalTravelTime: 0,
-        totalDistanceKm: 0
+        totalDistanceKm: 0,
+        urgencyScore: 0
       }];
       let bestState = beam[0];
+
+      const getStateKey = (state) => {
+        const remainingUrgentTasks = taskObjects
+          .filter(task => !state.visitedIds.has(task.task_id) && taskDeadlineById.get(task.task_id) <= state.currentTime + 90)
+          .map(task => task.task_id)
+          .sort()
+          .join('|');
+        return `${state.currentLocation.task_id || state.currentLocation.id || 'start'}::${Math.floor(state.currentTime / 10)}::${remainingUrgentTasks}`;
+      };
+
+      const keepDiverseBestStates = (states) => {
+        const grouped = new Map();
+        for (const state of states) {
+          const key = getStateKey(state);
+          const existing = grouped.get(key);
+          if (!existing ||
+              state.sequence.length > existing.sequence.length ||
+              (state.sequence.length === existing.sequence.length && state.urgencyScore > existing.urgencyScore) ||
+              (state.sequence.length === existing.sequence.length && state.urgencyScore === existing.urgencyScore && state.currentTime < existing.currentTime)) {
+            grouped.set(key, state);
+          }
+        }
+        return Array.from(grouped.values()).sort((a, b) => {
+          const countDiff = b.sequence.length - a.sequence.length;
+          if (countDiff !== 0) return countDiff;
+          const urgencyDiff = b.urgencyScore - a.urgencyScore;
+          if (urgencyDiff !== 0) return urgencyDiff;
+          const timeDiff = a.currentTime - b.currentTime;
+          if (timeDiff !== 0) return timeDiff;
+          return a.totalTravelTime - b.totalTravelTime;
+        }).slice(0, beamWidth);
+      };
 
       for (let depth = 0; depth < taskObjects.length; depth++) {
         const nextBeam = [];
@@ -436,35 +470,34 @@ Deno.serve(async (req) => {
 
             const nextVisitedIds = new Set(state.visitedIds);
             nextVisitedIds.add(task.task_id);
+            const deadlineSlack = Math.max(0, taskEnd - departureTime);
+            const urgentTaskBonus = Math.max(0, 240 - deadlineSlack);
             nextBeam.push({
               sequence: [...state.sequence, task],
               visitedIds: nextVisitedIds,
               currentTime: departureTime,
               currentLocation: task,
               totalTravelTime: state.totalTravelTime + travel.travelMinutes,
-              totalDistanceKm: state.totalDistanceKm + travel.distanceKm
+              totalDistanceKm: state.totalDistanceKm + travel.distanceKm,
+              urgencyScore: state.urgencyScore + urgentTaskBonus
             });
             expanded = true;
           }
 
-          if (!expanded && state.sequence.length > bestState.sequence.length) {
+          if (!expanded && (
+            state.sequence.length > bestState.sequence.length ||
+            (state.sequence.length === bestState.sequence.length && state.urgencyScore > bestState.urgencyScore)
+          )) {
             bestState = state;
           }
         }
 
         if (nextBeam.length === 0) break;
 
-        nextBeam.sort((a, b) => {
-          const countDiff = b.sequence.length - a.sequence.length;
-          if (countDiff !== 0) return countDiff;
-          const timeDiff = a.currentTime - b.currentTime;
-          if (timeDiff !== 0) return timeDiff;
-          return a.totalTravelTime - b.totalTravelTime;
-        });
-
-        beam = nextBeam.slice(0, beamWidth);
+        beam = keepDiverseBestStates(nextBeam);
         if (beam[0].sequence.length > bestState.sequence.length ||
-            (beam[0].sequence.length === bestState.sequence.length && beam[0].totalTravelTime < bestState.totalTravelTime)) {
+            (beam[0].sequence.length === bestState.sequence.length && beam[0].urgencyScore > bestState.urgencyScore) ||
+            (beam[0].sequence.length === bestState.sequence.length && beam[0].urgencyScore === bestState.urgencyScore && beam[0].totalTravelTime < bestState.totalTravelTime)) {
           bestState = beam[0];
         }
       }
