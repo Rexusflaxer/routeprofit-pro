@@ -390,6 +390,103 @@ Deno.serve(async (req) => {
       }
     }
 
+    // Brede zoekstap: probeer een betere totale volgorde te vinden die méér taken bevat.
+    // Dit is nodig wanneer twee gemiste taken alleen samen passen als eerdere stops worden herschikt.
+    const buildOrderFromSequence = async (sequence) => {
+      const simulation = await simulateSequence(sequence);
+      if (!simulation) return null;
+      return simulation;
+    };
+
+    const findBestSequence = async () => {
+      const beamWidth = 700;
+      let beam = [{
+        sequence: [],
+        visitedIds: new Set(),
+        currentTime: routeStartMinutes,
+        currentLocation: startLocation || taskObjects[0],
+        totalTravelTime: 0,
+        totalDistanceKm: 0
+      }];
+      let bestState = beam[0];
+
+      for (let depth = 0; depth < taskObjects.length; depth++) {
+        const nextBeam = [];
+
+        for (const state of beam) {
+          let expanded = false;
+
+          for (const task of taskObjects) {
+            if (state.visitedIds.has(task.task_id)) continue;
+
+            const travel = await getTravelTime(
+              state.currentLocation.latitude, state.currentLocation.longitude,
+              task.latitude, task.longitude,
+              `${state.currentLocation.task_id || state.currentLocation.id || 'start'}->${task.task_id}`
+            );
+            if (!travel) continue;
+
+            const { taskStart, taskEnd } = normalizeTaskWindow(task);
+            const arrivalTime = state.currentTime + travel.travelMinutes;
+            const actualStartTime = Math.max(arrivalTime, taskStart);
+            const departureTime = actualStartTime + task.duration_minutes;
+
+            if (arrivalTime > taskEnd || departureTime > taskEnd) continue;
+
+            const nextVisitedIds = new Set(state.visitedIds);
+            nextVisitedIds.add(task.task_id);
+            nextBeam.push({
+              sequence: [...state.sequence, task],
+              visitedIds: nextVisitedIds,
+              currentTime: departureTime,
+              currentLocation: task,
+              totalTravelTime: state.totalTravelTime + travel.travelMinutes,
+              totalDistanceKm: state.totalDistanceKm + travel.distanceKm
+            });
+            expanded = true;
+          }
+
+          if (!expanded && state.sequence.length > bestState.sequence.length) {
+            bestState = state;
+          }
+        }
+
+        if (nextBeam.length === 0) break;
+
+        nextBeam.sort((a, b) => {
+          const countDiff = b.sequence.length - a.sequence.length;
+          if (countDiff !== 0) return countDiff;
+          const timeDiff = a.currentTime - b.currentTime;
+          if (timeDiff !== 0) return timeDiff;
+          return a.totalTravelTime - b.totalTravelTime;
+        });
+
+        beam = nextBeam.slice(0, beamWidth);
+        if (beam[0].sequence.length > bestState.sequence.length ||
+            (beam[0].sequence.length === bestState.sequence.length && beam[0].totalTravelTime < bestState.totalTravelTime)) {
+          bestState = beam[0];
+        }
+      }
+
+      return bestState;
+    };
+
+    const bestSequenceState = await findBestSequence();
+    if (bestSequenceState.sequence.length > sequenceTasks.length) {
+      const bestSimulation = await buildOrderFromSequence(bestSequenceState.sequence);
+      if (bestSimulation) {
+        sequenceTasks = bestSequenceState.sequence;
+        optimizedOrder.length = 0;
+        optimizedOrder.push(...bestSimulation.order);
+        totalTravelTime = bestSimulation.totalTravelTime;
+        totalDistanceKm = bestSimulation.totalDistanceKm;
+        currentTime = bestSimulation.currentTime;
+        currentLocation = bestSimulation.currentLocation;
+        visited.clear();
+        sequenceTasks.forEach(task => visited.add(task.task_id));
+      }
+    }
+
     // Bepaal welke taken daadwerkelijk zijn overgeslagen (niet bezocht)
     // en waarom: controleer elk overgeslagen object op tijdvensterproblemen
     const skippedTasksList = [];
