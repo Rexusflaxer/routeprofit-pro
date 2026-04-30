@@ -51,9 +51,10 @@ function deriveRouteName(route, tasks, objects, collectiefs) {
   }
 
   if (cities.length === 0) return route.name || 'Lege route';
-  // Sorteer alfabetisch, toon max 3 steden
-  const sorted = cities.sort((a, b) => a.localeCompare(b));
-  const label = sorted.slice(0, 3).join(' – ');
+  if (cities.length === 1) return `Regio ${cities[0]}`;
+  // Sorteer alfabetisch — eerste en laatste geven de "buitenste" plaatsen
+  const sorted = cities.sort((a, b) => a.localeCompare(b, 'nl'));
+  const label = `${sorted[0]} – ${sorted[sorted.length - 1]}`;
   return `Regio ${label}`;
 }
 
