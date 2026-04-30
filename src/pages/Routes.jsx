@@ -23,6 +23,7 @@ const WEEKDAYS = [
 export default function Routes() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [activeDay, setActiveDay] = useState(1);
   const queryClient = useQueryClient();
 
   const { data: routes = [] } = useQuery({ queryKey: ["routes"], queryFn: () => base44.entities.Route.list() });
@@ -77,23 +78,50 @@ export default function Routes() {
 
       {tasks.length > 0 && <UnassignedTasks tasks={tasks} routes={routes} objects={objects} collectiefs={collectiefs} />}
 
-      <div className="space-y-4">
-        {WEEKDAYS.map(day => {
-          const dayRoutes = routes.filter(r => r.weekdays?.includes(day.value));
+      <div>
+        {/* Dag-tabs horizontaal */}
+        <div className="flex gap-1 border-b border-slate-200 mb-5 overflow-x-auto">
+          {WEEKDAYS.map(day => {
+            const count = routes.filter(r => r.weekdays?.includes(day.value)).length;
+            const isActive = activeDay === day.value;
+            return (
+              <button
+                key={day.value}
+                onClick={() => setActiveDay(day.value)}
+                className={`flex items-center gap-1.5 px-4 py-2.5 text-sm font-medium whitespace-nowrap border-b-2 transition-colors ${
+                  isActive
+                    ? "border-slate-900 text-slate-900"
+                    : "border-transparent text-slate-500 hover:text-slate-700 hover:border-slate-300"
+                }`}
+              >
+                {day.label}
+                {count > 0 && (
+                  <span className={`text-xs rounded-full px-1.5 py-0.5 font-semibold ${isActive ? "bg-slate-900 text-white" : "bg-slate-100 text-slate-500"}`}>
+                    {count}
+                  </span>
+                )}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Routes voor de actieve dag */}
+        {(() => {
+          const dayRoutes = routes.filter(r => r.weekdays?.includes(activeDay));
+          const dayLabel = WEEKDAYS.find(d => d.value === activeDay)?.label;
           return (
-            <div key={day.value}>
-              <div className="flex items-center gap-3 mb-2">
-                <h2 className="text-sm font-semibold text-slate-700">{day.label}</h2>
-                <div className="flex-1 h-px bg-slate-200" />
+            <div>
+              <div className="flex items-center justify-between mb-3">
+                <h2 className="text-sm font-semibold text-slate-700">{dayLabel}</h2>
                 <button
-                  onClick={() => { setEditing({ weekdays: [day.value], name: day.label }); setShowForm(true); }}
+                  onClick={() => { setEditing({ weekdays: [activeDay], name: dayLabel }); setShowForm(true); }}
                   className="text-xs text-slate-400 hover:text-slate-700 flex items-center gap-1 transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" /> Route toevoegen
                 </button>
               </div>
               {dayRoutes.length === 0 ? (
-                <p className="text-xs text-slate-400 italic pl-1">Geen routes gepland</p>
+                <p className="text-xs text-slate-400 italic">Geen routes gepland voor {dayLabel}</p>
               ) : (
                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-3">
                   {dayRoutes.map(route => (
@@ -129,7 +157,7 @@ export default function Routes() {
               )}
             </div>
           );
-        })}
+        })()}
       </div>
     </div>
   );
