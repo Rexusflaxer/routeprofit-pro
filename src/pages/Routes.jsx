@@ -21,6 +21,8 @@ import RouteAnalysisCard from "../components/routes/RouteAnalysisCard";
 import UnassignedTasks from "../components/routes/UnassignedTasks";
 import RouteFolderView from "../components/routes/RouteFolderView";
 import FolderManagementBar from "../components/routes/FolderManagementBar";
+import AutoRoutePlanner from "../components/routes/AutoRoutePlanner";
+import TaskAdjustmentPanel from "../components/routes/TaskAdjustmentPanel";
 
 export default function Routes() {
   const [showForm, setShowForm] = useState(false);
@@ -53,6 +55,13 @@ export default function Routes() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["routes"] }),
   });
 
+  const refreshPlanningData = () => {
+    queryClient.invalidateQueries({ queryKey: ["routes"] });
+    queryClient.invalidateQueries({ queryKey: ["folders"] });
+    queryClient.invalidateQueries({ queryKey: ["all-tasks"] });
+    queryClient.invalidateQueries({ queryKey: ["task-adjustments"] });
+  };
+
   const handleSave = (data) => {
     if (editing?.id) {
       updateMutation.mutate({ id: editing.id, data });
@@ -83,6 +92,10 @@ export default function Routes() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <AutoRoutePlanner onPlanned={refreshPlanningData} />
+
+      <TaskAdjustmentPanel tasks={tasks} objects={objects} collectiefs={collectiefs} onChanged={refreshPlanningData} />
 
       {tasks && tasks.length > 0 && <UnassignedTasks tasks={tasks} routes={routes} objects={objects} collectiefs={collectiefs} />}
 

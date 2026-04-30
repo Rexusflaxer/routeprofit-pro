@@ -1,0 +1,49 @@
+{
+  "name": "TaskAdjustment",
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "ID van de taak die tijdelijk wordt aangepast"
+    },
+    "mode": {
+      "type": "string",
+      "enum": [
+        "one_time"
+      ],
+      "default": "one_time",
+      "description": "Type aanpassing"
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Datum waarop deze eenmalige aanpassing geldt"
+    },
+    "time_window_start": {
+      "type": "string",
+      "description": "Aangepaste starttijd (HH:MM)"
+    },
+    "time_window_end": {
+      "type": "string",
+      "description": "Aangepaste eindtijd (HH:MM)"
+    },
+    "duration_minutes": {
+      "type": "number",
+      "description": "Aangepaste duur in minuten"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Toelichting, bijvoorbeeld waarom de taak is aangepast"
+    },
+    "is_active": {
+      "type": "boolean",
+      "description": "Is deze aanpassing actief?",
+      "default": true
+    }
+  },
+  "required": [
+    "task_id",
+    "mode",
+    "date"
+  ]
+}
