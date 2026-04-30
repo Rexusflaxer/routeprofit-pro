@@ -53,6 +53,18 @@ export default function Routes() {
   const handleSave = (data) => {
     if (editing?.id) {
       updateMutation.mutate({ id: editing.id, data });
+    } else if (data.weekdays?.length > 1) {
+      // Maak voor elke geselecteerde dag een aparte route aan
+      const dayLabels = { 1:"Maandag",2:"Dinsdag",3:"Woensdag",4:"Donderdag",5:"Vrijdag",6:"Zaterdag",7:"Zondag" };
+      Promise.all(
+        data.weekdays.map(day =>
+          base44.entities.Route.create({ ...data, weekdays: [day], name: dayLabels[day] })
+        )
+      ).then(() => {
+        queryClient.invalidateQueries({ queryKey: ["routes"] });
+        setShowForm(false);
+        setEditing(null);
+      });
     } else {
       createMutation.mutate(data);
     }

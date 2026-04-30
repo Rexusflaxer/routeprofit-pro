@@ -46,6 +46,13 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
     binnendienst_personnel_ids: [],
   });
 
+  // Auto-set folder_id to first available folder when folders load
+  useEffect(() => {
+    if (!form.folder_id && folders?.length > 0) {
+      setForm(prev => ({ ...prev, folder_id: folders[0].id }));
+    }
+  }, [folders]);
+
   // Filter beschikbare voertuigen: sluit voertuigen uit die al bezet zijn op dezelfde dag
   const availableVehicles = useMemo(() => {
     if (!form.weekdays || form.weekdays.length === 0) {
@@ -74,43 +81,20 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
 
   const handleChange = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
 
-  const selectWeekday = (day) => {
-    const newWeekdays = [day];
-    const autoName = WEEKDAY_LABELS[day];
-    
-    // Reset voertuig als het op de nieuwe dag al bezet is
-    const busyVehicleIds = routes
-      .filter(r => r.id !== route?.id)
-      .filter(r => (r.weekdays || []).includes(day))
-      .map(r => r.vehicle_id)
-      .filter(Boolean);
-
-    setForm(prev => ({
-      ...prev,
-      weekdays: newWeekdays,
-      name: autoName,
-      vehicle_id: busyVehicleIds.includes(prev.vehicle_id) ? "" : prev.vehicle_id,
-    }));
-  };
-
-  const handleFolderChange = (folderId) => {
-    const day = form.weekdays?.[0];
-    const autoName = day ? WEEKDAY_LABELS[day] : form.name;
-    
-    setForm(prev => ({
-      ...prev,
-      folder_id: folderId,
-      name: autoName
-    }));
+  const toggleWeekday = (day) => {
+    setForm(prev => {
+      const current = prev.weekdays || [];
+      const newWeekdays = current.includes(day)
+        ? current.filter(d => d !== day)
+        : [...current, day].sort((a, b) => a - b);
+      // Auto-name based on first selected day if no custom name yet
+      const autoName = newWeekdays.length === 1 ? WEEKDAY_LABELS[newWeekdays[0]] : prev.name;
+      return { ...prev, weekdays: newWeekdays, name: autoName };
+    });
   };
 
   const handleSubmit = (e) => {
     e.preventDefault();
-    
-    if (!form.folder_id) {
-      alert("Selecteer een uitschuifmap");
-      return;
-    }
     
     if (!form.weekdays || form.weekdays.length === 0) {
       alert("Selecteer een dag voor deze route");
@@ -145,20 +129,35 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
       </CardHeader>
       <CardContent>
         <form onSubmit={handleSubmit} className="space-y-6">
-          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Uitschuifmap *</Label>
-              <Select value={form.folder_id} onValueChange={handleFolderChange} required>
-                <SelectTrigger><SelectValue placeholder="Selecteer map" /></SelectTrigger>
-                <SelectContent>
-                  {(folders || []).map(f => (
-                    <SelectItem key={f.id} value={f.id}>
-                      {f.name}
-                    </SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+
+          {/* Dagen — bovenaan */}
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Dag(en) van de week *</Label>
+            <div className="flex flex-wrap gap-2">
+              {WEEKDAYS.map(day => {
+                const selected = (form.weekdays || []).includes(day.value);
+                return (
+                  <button
+                    key={day.value}
+                    type="button"
+                    onClick={() => toggleWeekday(day.value)}
+                    className={`px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors ${
+                      selected
+                        ? "bg-slate-900 text-white border-slate-900"
+                        : "bg-white text-slate-600 border-slate-200 hover:border-slate-400"
+                    }`}
+                  >
+                    {day.label}
+                  </button>
+                );
+              })}
             </div>
+            {form.weekdays?.length > 1 && (
+              <p className="text-xs text-blue-600">De route wordt aangemaakt voor {form.weekdays.length} dagen tegelijk.</p>
+            )}
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Voertuig *</Label>
               <Select value={form.vehicle_id} onValueChange={(v) => handleChange("vehicle_id", v)} required>
@@ -260,29 +259,6 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
                 <p className="text-xs text-blue-600">⏱ Eindtijd ligt na middernacht (volgende dag)</p>
               )}
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Dag van de week *</Label>
-            <Select 
-              value={form.weekdays?.[0]?.toString() || ""} 
-              onValueChange={(v) => selectWeekday(parseInt(v))}
-              required
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecteer een dag" />
-              </SelectTrigger>
-              <SelectContent>
-                {WEEKDAYS.map(day => (
-                  <SelectItem key={day.value} value={day.value.toString()}>
-                    {day.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-            <p className="text-xs text-slate-500">
-              Kies de dag waarop deze route gereden wordt (4 keer per maand)
-            </p>
           </div>
 
           {/* Alarmdienst optie */}
