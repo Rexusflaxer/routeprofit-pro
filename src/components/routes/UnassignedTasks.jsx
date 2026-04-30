@@ -1,7 +1,7 @@
-import React, { useMemo } from "react";
+import React, { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Clock, Euro, Package } from "lucide-react";
+import { AlertCircle, Clock, Euro, Package, ChevronDown, ChevronUp } from "lucide-react";
 
 const WEEKDAYS = [
   { value: 1, label: "Ma" },
@@ -14,6 +14,7 @@ const WEEKDAYS = [
 ];
 
 export default function UnassignedTasks({ tasks, routes, objects, collectiefs }) {
+  const [open, setOpen] = useState(false);
   const unassignedTasks = useMemo(() => {
     // Verzamel welke taken op welke dagen al zijn toegewezen
     const taskDayUsage = {};
@@ -77,17 +78,19 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
 
   return (
     <Card className="border-amber-200 bg-amber-50/50">
-      <CardHeader className="pb-4">
-        <div className="flex items-center gap-2">
-          <AlertCircle className="w-5 h-5 text-amber-600" />
-          <CardTitle className="text-lg">Nog niet toegewezen taken</CardTitle>
+      <CardHeader className="pb-3 cursor-pointer select-none" onClick={() => setOpen(o => !o)}>
+        <div className="flex items-center justify-between">
+          <div className="flex items-center gap-2">
+            <AlertCircle className="w-5 h-5 text-amber-600" />
+            <CardTitle className="text-base">Nog niet toegewezen taken</CardTitle>
+            <Badge className="bg-amber-100 text-amber-800 border-0">{unassignedTasks.length}</Badge>
+          </div>
+          {open ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
         </div>
-        <p className="text-sm text-slate-600 mt-1">
-          {unassignedTasks.length} {unassignedTasks.length === 1 ? 'taak heeft' : 'taken hebben'} nog beschikbare dagen
-        </p>
       </CardHeader>
+      {open && (
       <CardContent>
-        <div className="space-y-2">
+        <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
           {unassignedTasks.map(task => (
             <div key={task.id} className="bg-white rounded-lg p-3 border border-slate-200">
               <div className="flex items-start gap-3">
@@ -162,6 +165,7 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
           ))}
         </div>
       </CardContent>
+      )}
     </Card>
   );
 }

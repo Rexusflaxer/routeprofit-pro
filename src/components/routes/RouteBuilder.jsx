@@ -87,9 +87,7 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
       const newWeekdays = current.includes(day)
         ? current.filter(d => d !== day)
         : [...current, day].sort((a, b) => a - b);
-      // Auto-name based on first selected day if no custom name yet
-      const autoName = newWeekdays.length === 1 ? WEEKDAY_LABELS[newWeekdays[0]] : prev.name;
-      return { ...prev, weekdays: newWeekdays, name: autoName };
+      return { ...prev, weekdays: newWeekdays };
     });
   };
 
@@ -155,6 +153,16 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
             {form.weekdays?.length > 1 && (
               <p className="text-xs text-blue-600">De route wordt aangemaakt voor {form.weekdays.length} dagen tegelijk.</p>
             )}
+          </div>
+
+          <div className="space-y-2">
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Naam route</Label>
+            <Input
+              value={form.name || ""}
+              onChange={(e) => handleChange("name", e.target.value)}
+              placeholder="bijv. Regio Kampen – Zwolle"
+            />
+            <p className="text-xs text-slate-400">Laat leeg voor "Lege route"</p>
           </div>
 
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">

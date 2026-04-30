@@ -51,14 +51,13 @@ export default function Routes() {
   });
 
   const handleSave = (data) => {
+    const routeName = data.name?.trim() || "Lege route";
     if (editing?.id) {
-      updateMutation.mutate({ id: editing.id, data });
+      updateMutation.mutate({ id: editing.id, data: { ...data, name: routeName } });
     } else if (data.weekdays?.length > 1) {
-      // Maak voor elke geselecteerde dag een aparte route aan
-      const dayLabels = { 1:"Maandag",2:"Dinsdag",3:"Woensdag",4:"Donderdag",5:"Vrijdag",6:"Zaterdag",7:"Zondag" };
       Promise.all(
         data.weekdays.map(day =>
-          base44.entities.Route.create({ ...data, weekdays: [day], name: dayLabels[day] })
+          base44.entities.Route.create({ ...data, weekdays: [day], name: routeName })
         )
       ).then(() => {
         queryClient.invalidateQueries({ queryKey: ["routes"] });
@@ -66,7 +65,7 @@ export default function Routes() {
         setEditing(null);
       });
     } else {
-      createMutation.mutate(data);
+      createMutation.mutate({ ...data, name: routeName });
     }
   };
 
@@ -139,10 +138,9 @@ export default function Routes() {
           const dayLabel = WEEKDAYS.find(d => d.value === activeDay)?.label;
           return (
             <div>
-              <div className="flex items-center justify-between mb-3">
-                <h2 className="text-sm font-semibold text-slate-700">{dayLabel}</h2>
+              <div className="flex items-center justify-end mb-3">
                 <button
-                  onClick={() => { setEditing({ weekdays: [activeDay], name: dayLabel }); setShowForm(true); }}
+                  onClick={() => { setEditing({ weekdays: [activeDay] }); setShowForm(true); }}
                   className="text-xs text-slate-400 hover:text-slate-700 flex items-center gap-1 transition-colors"
                 >
                   <Plus className="w-3.5 h-3.5" /> Route toevoegen
