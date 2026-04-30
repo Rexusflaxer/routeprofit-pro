@@ -1,0 +1,58 @@
+{
+  "name": "TaskPlanningException",
+  "type": "object",
+  "properties": {
+    "task_id": {
+      "type": "string",
+      "description": "ID van de taak waarvoor een afwijking geldt"
+    },
+    "scope": {
+      "type": "string",
+      "enum": [
+        "one_time",
+        "permanent"
+      ],
+      "default": "one_time",
+      "description": "Eenmalige of blijvende aanpassing"
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Datum voor een eenmalige aanpassing"
+    },
+    "weekday": {
+      "type": "number",
+      "description": "Weekdag voor blijvende aanpassing: 1=Maandag, 7=Zondag"
+    },
+    "time_window_start": {
+      "type": "string",
+      "description": "Aangepaste starttijd (HH:MM)"
+    },
+    "time_window_end": {
+      "type": "string",
+      "description": "Aangepaste eindtijd (HH:MM)"
+    },
+    "duration_minutes": {
+      "type": "number",
+      "description": "Aangepaste taakduur in minuten"
+    },
+    "is_cancelled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Taak vervalt voor deze uitzondering"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Toelichting"
+    },
+    "is_active": {
+      "type": "boolean",
+      "default": true,
+      "description": "Is deze aanpassing actief?"
+    }
+  },
+  "required": [
+    "task_id",
+    "scope"
+  ]
+}

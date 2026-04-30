@@ -21,6 +21,8 @@ import RouteAnalysisCard from "../components/routes/RouteAnalysisCard";
 import UnassignedTasks from "../components/routes/UnassignedTasks";
 import RouteFolderView from "../components/routes/RouteFolderView";
 import FolderManagementBar from "../components/routes/FolderManagementBar";
+import AutoRoutePlannerPanel from "../components/routes/AutoRoutePlannerPanel";
+import TaskPlanningExceptionPanel from "../components/routes/TaskPlanningExceptionPanel";
 
 export default function Routes() {
   const [showForm, setShowForm] = useState(false);
@@ -83,6 +85,10 @@ export default function Routes() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <AutoRoutePlannerPanel onPlanned={() => queryClient.invalidateQueries({ queryKey: ["routes"] })} />
+
+      {tasks && tasks.length > 0 && <TaskPlanningExceptionPanel tasks={tasks} />}
 
       {tasks && tasks.length > 0 && <UnassignedTasks tasks={tasks} routes={routes} objects={objects} collectiefs={collectiefs} />}
 

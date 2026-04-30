@@ -90,49 +90,55 @@ export default function RouteFolderView({ routes, folders, vehicles, onEdit, onD
               <CardContent className="pt-0 pb-4 px-4">
                 <div className="grid grid-cols-7 gap-2 ml-8">
                   {WEEKDAYS.map(day => {
-                    const dayRoute = data.routes.find(r => r.weekdays?.includes(day.value));
+                    const dayRoutes = data.routes.filter(r => r.weekdays?.includes(day.value));
                     
                     return (
                       <div key={day.value} className="flex flex-col">
                         <div className="text-xs font-semibold text-slate-500 mb-2 text-center">
                           {day.label}
                         </div>
-                        {dayRoute ? (
-                          <Link 
-                            to={createPageUrl(`RouteDetails?id=${dayRoute.id}`)}
-                            className="flex flex-col p-3 bg-slate-50 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors group min-h-[100px]"
-                          >
-                            <div className="flex-1">
-                              <div className="space-y-1">
-                                <span className="text-xs text-slate-500 flex items-center gap-1">
-                                  <MapPin className="w-3 h-3" />
-                                  {dayRoute.assigned_tasks?.length || 0}
-                                </span>
-                                <span className="text-xs text-slate-500 flex items-center gap-1">
-                                  <Clock className="w-3 h-3" />
-                                  {dayRoute.time_window_start?.slice(0,5)}
-                                </span>
-                              </div>
-                            </div>
-                            <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 mt-2 justify-end">
-                              <Button 
-                                variant="outline" 
-                                size="icon" 
-                                className="h-6 w-6" 
-                                onClick={(e) => { e.stopPropagation(); e.preventDefault(); onEdit(dayRoute); }}
+                        {dayRoutes.length > 0 ? (
+                          <div className="space-y-2">
+                            {dayRoutes.map(dayRoute => (
+                              <Link 
+                                key={dayRoute.id}
+                                to={createPageUrl(`RouteDetails?id=${dayRoute.id}`)}
+                                className="flex flex-col p-3 bg-slate-50 rounded-lg hover:bg-slate-100 cursor-pointer transition-colors group min-h-[100px]"
                               >
-                                <Pencil className="w-3 h-3" />
-                              </Button>
-                              <Button 
-                                variant="outline" 
-                                size="icon" 
-                                className="h-6 w-6 text-red-500 hover:text-red-700" 
-                                onClick={(e) => { e.stopPropagation(); e.preventDefault(); onDelete(dayRoute.id); }}
-                              >
-                                <Trash2 className="w-3 h-3" />
-                              </Button>
-                            </div>
-                          </Link>
+                                <div className="flex-1">
+                                  <div className="space-y-1">
+                                    <span className="text-xs font-semibold text-slate-700 truncate">{dayRoute.name}</span>
+                                    <span className="text-xs text-slate-500 flex items-center gap-1">
+                                      <MapPin className="w-3 h-3" />
+                                      {dayRoute.assigned_tasks?.length || 0}
+                                    </span>
+                                    <span className="text-xs text-slate-500 flex items-center gap-1">
+                                      <Clock className="w-3 h-3" />
+                                      {dayRoute.time_window_start?.slice(0,5)}-{dayRoute.time_window_end?.slice(0,5)}
+                                    </span>
+                                  </div>
+                                </div>
+                                <div className="opacity-0 group-hover:opacity-100 transition-opacity flex gap-1 mt-2 justify-end">
+                                  <Button 
+                                    variant="outline" 
+                                    size="icon" 
+                                    className="h-6 w-6" 
+                                    onClick={(e) => { e.stopPropagation(); e.preventDefault(); onEdit(dayRoute); }}
+                                  >
+                                    <Pencil className="w-3 h-3" />
+                                  </Button>
+                                  <Button 
+                                    variant="outline" 
+                                    size="icon" 
+                                    className="h-6 w-6 text-red-500 hover:text-red-700" 
+                                    onClick={(e) => { e.stopPropagation(); e.preventDefault(); onDelete(dayRoute.id); }}
+                                  >
+                                    <Trash2 className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </Link>
+                            ))}
+                          </div>
                         ) : (
                           <button
                             onClick={() => onAddRoute(data.folder.id, day.value)}
