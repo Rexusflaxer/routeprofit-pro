@@ -2,7 +2,7 @@ import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Plus, Route as RouteIcon } from "lucide-react";
+import { Plus, Route as RouteIcon, Zap, ChevronDown, ChevronRight } from "lucide-react";
 
 const WEEKDAY_LABELS = {
   1: "Maandag",
@@ -21,10 +21,12 @@ import RouteAnalysisCard from "../components/routes/RouteAnalysisCard";
 import UnassignedTasks from "../components/routes/UnassignedTasks";
 import RouteFolderView from "../components/routes/RouteFolderView";
 import FolderManagementBar from "../components/routes/FolderManagementBar";
+import FleetOptimizerPanel from "../components/routes/FleetOptimizerPanel";
 
 export default function Routes() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
+  const [showOptimizer, setShowOptimizer] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: routes = [] } = useQuery({ queryKey: ["routes"], queryFn: () => base44.entities.Route.list() });
@@ -68,6 +70,15 @@ export default function Routes() {
         subtitle="Bouw routes en analyseer winstgevendheid"
         actions={
           <div className="flex gap-2">
+            <Button
+              variant="outline"
+              onClick={() => setShowOptimizer(!showOptimizer)}
+              className="border-amber-300 text-amber-700 hover:bg-amber-50"
+            >
+              <Zap className="w-4 h-4 mr-1" />
+              Auto-optimizer
+              {showOptimizer ? <ChevronDown className="w-3.5 h-3.5 ml-1" /> : <ChevronRight className="w-3.5 h-3.5 ml-1" />}
+            </Button>
             <FolderManagementBar folders={folders} />
             <Button onClick={() => { setEditing(null); setShowForm(true); }} className="bg-slate-900 hover:bg-slate-800">
               <Plus className="w-4 h-4 mr-1" /> Nieuwe route
@@ -75,6 +86,19 @@ export default function Routes() {
           </div>
         }
       />
+
+      <AnimatePresence>
+        {showOptimizer && (
+          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <FleetOptimizerPanel
+              folders={folders}
+              vehicles={vehicles}
+              routes={routes}
+              tasks={tasks}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence>
         {showForm && (
