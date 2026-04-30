@@ -522,55 +522,66 @@ Deno.serve(async (req) => {
       vehicles_available: vehicles.length,
     };
 
-    // ── 12. OPSLAAN ALS CONCEPTROUTES ─────────────────────────────
-    const savedRouteIds = [];
-    if (folder_id) {
-      // Verwijder eerst bestaande conceptroutes voor deze dag in de map
-      const existingConceptRoutes = allRoutes.filter(r =>
-        r.folder_id === folder_id &&
-        r.weekdays?.includes(weekday) &&
-        r.notes?.includes('AUTO-OPTIMIZER')
-      );
-      for (const r of existingConceptRoutes) {
-        await base44.asServiceRole.entities.Route.delete(r.id);
-      }
+    // ── 12. OPSLAAN ALS CONCEPTROUTES (altijd) ────────────────────
+    // Verwijder bestaande auto-optimizer routes voor deze weekdag
+    const existingAutoRoutes = allRoutes.filter(r =>
+      r.weekdays?.includes(weekday) &&
+      r.notes?.includes('AUTO-OPTIMIZER')
+    );
+    for (const r of existingAutoRoutes) {
+      await base44.asServiceRole.entities.Route.delete(r.id);
+    }
 
-      for (const route of generatedRoutes) {
-        const vehicle = allVehicles.find(v => v.id === route.vehicleId);
-        const newRoute = await base44.asServiceRole.entities.Route.create({
-          name: `${route.vehicleName} — ${formatTime(slot?.routeStart || parseTime(horizon_start || '00:00'))}`,
-          folder_id,
-          vehicle_id: route.vehicleId,
-          weekdays: [weekday],
-          time_window_start: route.plannedStartTime,
-          time_window_end: route.plannedEndTime,
-          total_route_minutes: route.totalDurationMinutes,
+    // Gebruik opgegeven folder_id of fallback naar de eerste beschikbare map
+    const saveFolderId = folder_id || allFolders[0]?.id || null;
+
+    // Sla elke gegenereerde route op
+    const savedRouteIds = [];
+    for (const route of generatedRoutes) {
+      const optimizedOrder = route.stops.map((s) => ({
+        task_id: s.taskId,
+        name: s.name,
+        address: s.address,
+        travel_time_minutes: s.travelMinutes,
+        distance_km: s.distanceKm,
+        waiting_time: s.waitMinutes,
+        arrival_time: s.arrivalTime,
+        actual_start_time: s.startTime,
+        departure_time: s.departureTime,
+        duration_minutes: s.durationMinutes,
+        time_window_start: s.windowStart,
+        time_window_end: s.windowEnd,
+        within_window: s.withinWindow,
+      }));
+
+      const newRoute = await base44.asServiceRole.entities.Route.create({
+        name: `${route.vehicleName} (Auto)`,
+        folder_id: saveFolderId,
+        vehicle_id: route.vehicleId,
+        weekdays: [weekday],
+        time_window_start: route.plannedStartTime,
+        time_window_end: route.plannedEndTime,
+        total_route_minutes: route.totalDurationMinutes,
+        total_distance_km: route.totalDistanceKm,
+        total_service_minutes: route.totalServiceMinutes,
+        notes: `AUTO-OPTIMIZER | planning_date: ${planning_date} | ${route.taskCount} taken`,
+        cached_optimization: {
+          optimized_order: optimizedOrder,
+          total_travel_time: route.totalTravelMinutes,
           total_distance_km: route.totalDistanceKm,
-          notes: `AUTO-OPTIMIZER | planning_date: ${planning_date} | ${route.taskCount} taken | Est. kosten: €${route.estimatedCost}`,
-          cached_optimization: {
-            optimized_order: route.stops.map((s, idx) => ({
-              ...s,
-              task_id: s.taskId,
-              travel_time_minutes: s.travelMinutes,
-              distance_km: s.distanceKm,
-              waiting_time: s.waitMinutes,
-              arrival_time: s.arrivalTime,
-              actual_start_time: s.startTime,
-              departure_time: s.departureTime,
-            })),
-            total_travel_time: route.totalTravelMinutes,
-            total_distance_km: route.totalDistanceKm,
-            total_service_time: route.totalServiceMinutes,
-            total_waiting_time: route.totalWaitMinutes,
-            total_route_time: route.totalDurationMinutes,
-            tasks_optimized: route.taskCount,
-            tasks_skipped: 0,
-            skipped_tasks: []
-          },
-          optimization_calculated_at: new Date().toISOString(),
-        });
-        savedRouteIds.push(newRoute.id);
-      }
+          total_service_time: route.totalServiceMinutes,
+          total_waiting_time: route.totalWaitMinutes,
+          total_route_time: route.totalDurationMinutes,
+          actual_shift_minutes: route.totalDurationMinutes,
+          tasks_optimized: route.taskCount,
+          tasks_skipped: 0,
+          skipped_tasks: [],
+          alarm_standby: false,
+        },
+        optimization_calculated_at: new Date().toISOString(),
+      });
+      savedRouteIds.push(newRoute.id);
+      route.savedRouteId = newRoute.id;
     }
 
     return Response.json({

@@ -3,9 +3,11 @@ import { base44 } from "@/api/base44Client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
+import { Link } from "react-router-dom";
+import { createPageUrl } from "../../utils";
 import {
   RefreshCw, ChevronDown, ChevronRight, Clock, MapPin,
-  AlertTriangle, CheckCircle, XCircle, Car, Loader2, Info
+  AlertTriangle, CheckCircle, XCircle, Car, Loader2, Info, ExternalLink
 } from "lucide-react";
 
 const WEEKDAYS = [
@@ -104,26 +106,45 @@ function RouteStopList({ stops }) {
 function RouteCard({ route, index }) {
   const [expanded, setExpanded] = useState(false);
 
+  const header = (
+    <div className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors">
+      <div className="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center flex-shrink-0">
+        <Car className="w-3.5 h-3.5 text-amber-400" />
+      </div>
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-semibold text-slate-900 truncate">{route.vehicleName}</p>
+        <p className="text-xs text-slate-500">{route.plannedStartTime} – {route.plannedEndTime}</p>
+      </div>
+      <div className="flex items-center gap-1.5 flex-shrink-0">
+        <Badge className="bg-blue-50 text-blue-700 text-xs border-0">{route.taskCount} taken</Badge>
+        <Badge className="bg-slate-100 text-slate-600 text-xs border-0">{route.totalDistanceKm} km</Badge>
+        {!route.feasible && <Badge className="bg-red-50 text-red-600 text-xs border-0">Conflict</Badge>}
+        {route.hasEstimatedTravelTimes && <Badge className="bg-amber-50 text-amber-600 text-xs border-0">~geschat</Badge>}
+      </div>
+    </div>
+  );
+
   return (
     <div className="border border-slate-200 rounded-xl overflow-hidden bg-white">
-      <div
-        className="flex items-center gap-3 px-4 py-3 cursor-pointer hover:bg-slate-50 transition-colors"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <div className="w-7 h-7 rounded-lg bg-slate-800 flex items-center justify-center flex-shrink-0">
-          <Car className="w-3.5 h-3.5 text-amber-400" />
+      <div className="flex items-stretch">
+        <div className="flex-1" onClick={() => setExpanded(!expanded)}>
+          {header}
         </div>
-        <div className="flex-1 min-w-0">
-          <p className="text-sm font-semibold text-slate-900 truncate">{route.vehicleName}</p>
-          <p className="text-xs text-slate-500">{route.plannedStartTime} – {route.plannedEndTime}</p>
-        </div>
-        <div className="flex items-center gap-1.5 flex-shrink-0">
-          <Badge className="bg-blue-50 text-blue-700 text-xs border-0">{route.taskCount} taken</Badge>
-          <Badge className="bg-slate-100 text-slate-600 text-xs border-0">{route.totalDistanceKm} km</Badge>
-          {!route.feasible && <Badge className="bg-red-50 text-red-600 text-xs border-0">Conflict</Badge>}
-          {route.hasEstimatedTravelTimes && <Badge className="bg-amber-50 text-amber-600 text-xs border-0">~geschat</Badge>}
-          {expanded ? <ChevronDown className="w-4 h-4 text-slate-400 ml-1" /> : <ChevronRight className="w-4 h-4 text-slate-400 ml-1" />}
-        </div>
+        {route.savedRouteId && (
+          <Link
+            to={createPageUrl(`RouteDetails?id=${route.savedRouteId}`)}
+            className="flex items-center px-3 border-l border-slate-100 text-slate-400 hover:text-slate-700 hover:bg-slate-50 transition-colors"
+            title="Bekijk volledige routedetails"
+          >
+            <ExternalLink className="w-4 h-4" />
+          </Link>
+        )}
+        <button
+          className="flex items-center px-3 border-l border-slate-100 text-slate-400 hover:bg-slate-50 transition-colors"
+          onClick={() => setExpanded(!expanded)}
+        >
+          {expanded ? <ChevronDown className="w-4 h-4" /> : <ChevronRight className="w-4 h-4" />}
+        </button>
       </div>
 
       {expanded && (
@@ -141,6 +162,15 @@ function RouteCard({ route, index }) {
               </div>
             ))}
           </div>
+          {route.savedRouteId && (
+            <Link
+              to={createPageUrl(`RouteDetails?id=${route.savedRouteId}`)}
+              className="mt-3 flex items-center justify-center gap-2 w-full py-2 bg-slate-900 hover:bg-slate-700 text-white text-xs font-semibold rounded-lg transition-colors"
+            >
+              <ExternalLink className="w-3.5 h-3.5" />
+              Bekijk route (optimalisatie + kosten)
+            </Link>
+          )}
           <RouteStopList stops={route.stops} />
         </div>
       )}
@@ -196,8 +226,8 @@ export default function WeekPlanningView({ tasks, vehicles }) {
         weekday,
         horizon_start: horizon.start,
         horizon_end: horizon.end,
-        vehicle_ids: null, // alle actieve voertuigen
-        folder_id: null,   // niet opslaan, alleen weergeven
+        vehicle_ids: null,
+        save_routes: true, // sla altijd op zodat RouteDetails werkt
       });
 
       if (data.error) throw new Error(data.error);
