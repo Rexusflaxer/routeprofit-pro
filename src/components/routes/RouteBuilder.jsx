@@ -8,7 +8,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Save, X, Route } from "lucide-react";
+import { Save, X, Route, AlertTriangle } from "lucide-react";
 import RouteOverheadSelector from "./RouteOverheadSelector";
 
 const WEEKDAYS = [
@@ -53,21 +53,42 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
     }
   }, [folders]);
 
-  // Filter beschikbare voertuigen: sluit voertuigen uit die al bezet zijn op dezelfde dag
-  const availableVehicles = useMemo(() => {
-    if (!form.weekdays || form.weekdays.length === 0) {
-      return vehicles.filter(v => v.is_active);
-    }
-    
-    const selectedDay = form.weekdays[0];
-    const busyVehicleIds = routes
-      .filter(r => r.id !== route?.id) // Excludeer huidige route bij bewerken
-      .filter(r => (r.weekdays || []).includes(selectedDay))
-      .map(r => r.vehicle_id)
-      .filter(Boolean);
+  const activeVehicles = useMemo(() => vehicles.filter(v => v.is_active), [vehicles]);
 
-    return vehicles.filter(v => v.is_active && !busyVehicleIds.includes(v.id));
-  }, [vehicles, routes, form.weekdays, route?.id]);
+  // Controleer of het geselecteerde voertuig een tijdoverlap heeft met bestaande routes
+  const vehicleTimeConflicts = useMemo(() => {
+    if (!form.vehicle_id || !form.time_window_start || !form.time_window_end || !form.weekdays?.length) return [];
+
+    const parseMin = (t) => {
+      if (!t) return null;
+      const [h, m] = t.split(':').map(Number);
+      return h * 60 + m;
+    };
+
+    const newStart = parseMin(form.time_window_start);
+    let newEnd = parseMin(form.time_window_end);
+    if (newEnd === null || newStart === null) return [];
+    if (newEnd <= newStart) newEnd += 1440; // over middernacht
+
+    const conflicts = [];
+    for (const day of form.weekdays) {
+      const conflicting = routes
+        .filter(r => r.id !== route?.id)
+        .filter(r => r.vehicle_id === form.vehicle_id)
+        .filter(r => (r.weekdays || []).includes(day))
+        .filter(r => r.time_window_start && r.time_window_end)
+        .filter(r => {
+          const rStart = parseMin(r.time_window_start);
+          let rEnd = parseMin(r.time_window_end);
+          if (rEnd <= rStart) rEnd += 1440;
+          return newStart < rEnd && rEnd > newStart && newEnd > rStart;
+        });
+      if (conflicting.length > 0) {
+        conflicts.push({ day, routes: conflicting });
+      }
+    }
+    return conflicts;
+  }, [form.vehicle_id, form.time_window_start, form.time_window_end, form.weekdays, routes, route?.id]);
 
   const { data: objects = [] } = useQuery({
     queryKey: ['objects'],
@@ -101,6 +122,11 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
 
     if (!form.vehicle_id) {
       alert("Selecteer een voertuig");
+      return;
+    }
+
+    if (vehicleTimeConflicts.length > 0) {
+      alert("Dit voertuig heeft een tijdoverlap met een bestaande route op de geselecteerde dag(en). Pas de tijden aan.");
       return;
     }
 
@@ -159,16 +185,14 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Voertuig *</Label>
               <Select value={form.vehicle_id} onValueChange={(v) => handleChange("vehicle_id", v)} required>
-                <SelectTrigger><SelectValue placeholder="Selecteer voertuig" /></SelectTrigger>
+                <SelectTrigger className={vehicleTimeConflicts.length > 0 ? "border-amber-400" : ""}>
+                  <SelectValue placeholder="Selecteer voertuig" />
+                </SelectTrigger>
                 <SelectContent>
-                  {availableVehicles.length === 0 ? (
-                    <div className="px-2 py-3 text-xs text-slate-500 text-center">
-                      {form.weekdays?.length > 0
-                        ? "Geen beschikbare voertuigen op deze dag"
-                        : "Selecteer eerst een dag"}
-                    </div>
+                  {activeVehicles.length === 0 ? (
+                    <div className="px-2 py-3 text-xs text-slate-500 text-center">Geen actieve voertuigen</div>
                   ) : (
-                    availableVehicles.map(v => (
+                    activeVehicles.map(v => (
                       <SelectItem key={v.id} value={v.id}>
                         {v.license_plate} - {v.brand} {v.model}
                       </SelectItem>
@@ -176,8 +200,20 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
                   )}
                 </SelectContent>
               </Select>
-              {form.weekdays?.length > 0 && availableVehicles.length === 0 && (
-                <p className="text-xs text-red-500">Alle voertuigen zijn al bezet op deze dag</p>
+              {vehicleTimeConflicts.length > 0 && (
+                <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg">
+                  <AlertTriangle className="w-4 h-4 text-amber-600 flex-shrink-0 mt-0.5" />
+                  <div className="text-xs text-amber-800">
+                    <p className="font-semibold mb-1">Tijdoverlap met bestaande route(s):</p>
+                    {vehicleTimeConflicts.map(({ day, routes: cr }) => (
+                      <p key={day}>
+                        <span className="font-medium">{WEEKDAY_LABELS[day]}:</span>{" "}
+                        {cr.map(r => `${r.time_window_start}–${r.time_window_end}`).join(', ')}
+                      </p>
+                    ))}
+                    <p className="mt-1 text-amber-700">Pas de tijden aan zodat ze niet overlappen.</p>
+                  </div>
+                </div>
               )}
             </div>
           </div>
