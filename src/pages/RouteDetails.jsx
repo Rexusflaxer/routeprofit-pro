@@ -100,9 +100,7 @@ export default function RouteDetails() {
           total_distance_km: distanceResponse.data?.total_distance_km || 0
         });
 
-        // Bereken route optimalisatie (forceer herberekening)
-        const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: routeId, force_recalculate: true });
-        return optimizationResponse.data;
+        return null;
       } else {
         // Geen taken meer, reset statistieken
         await base44.entities.Route.update(routeId, {
@@ -151,10 +149,7 @@ export default function RouteDetails() {
         total_distance_km: distanceResponse.data?.total_distance_km || 0
       });
 
-      // Bereken route optimalisatie (forceer herberekening)
-      const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: route.id, force_recalculate: true });
-      const optData = optimizationResponse.data;
-      setOptimizedRoute(optData);
+      setOptimizedRoute(null);
 
       queryClient.invalidateQueries({ queryKey: ["routes"] });
       queryClient.invalidateQueries({ queryKey: ["route", routeId] });
@@ -196,9 +191,7 @@ export default function RouteDetails() {
         total_distance_km: distanceResponse.data?.total_distance_km || 0
       });
 
-      // Bereken route optimalisatie (forceer herberekening)
-      const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: routeId, force_recalculate: true });
-      return optimizationResponse.data;
+      return null;
     },
     onSuccess: (optimizedData) => {
       queryClient.invalidateQueries({ queryKey: ["routes"] });
@@ -529,18 +522,11 @@ export default function RouteDetails() {
                 </CardTitle>
                 <div className="flex gap-2">
                   <RouteExportPdf route={route} optimizedRoute={optimizedRoute} />
-                  <Button
-                    size="sm"
-                    variant="outline"
-                    onClick={recalculateRoute}
-                    disabled={isRecalculating || routeTasks.length === 0}
-                  >
-                    {isRecalculating ? (
-                      <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Berekenen...</>
-                    ) : (
-                      <><RefreshCw className="w-4 h-4 mr-1" /> Herberekenen</>
-                    )}
-                  </Button>
+                  <Link to={createPageUrl("Routes")}>
+                    <Button size="sm" variant="outline">
+                      Centrale routeplanning openen
+                    </Button>
+                  </Link>
                 </div>
               </div>
             </CardHeader>

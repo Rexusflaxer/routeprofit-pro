@@ -21,6 +21,8 @@ import RouteAnalysisCard from "../components/routes/RouteAnalysisCard";
 import UnassignedTasks from "../components/routes/UnassignedTasks";
 import RouteFolderView from "../components/routes/RouteFolderView";
 import FolderManagementBar from "../components/routes/FolderManagementBar";
+import RouteAutoPlanner from "../components/routes/RouteAutoPlanner";
+import TaskAdjustmentPanel from "../components/routes/TaskAdjustmentPanel";
 
 export default function Routes() {
   const [showForm, setShowForm] = useState(false);
@@ -65,7 +67,7 @@ export default function Routes() {
     <div className="space-y-6">
       <PageHeader
         title="Routes"
-        subtitle="Bouw routes en analyseer winstgevendheid"
+        subtitle="Automatisch optimale avond- en nachtroutes berekenen, aanmaken en bijsturen"
         actions={
           <div className="flex gap-2">
             <FolderManagementBar folders={folders} />
@@ -83,6 +85,13 @@ export default function Routes() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      <RouteAutoPlanner onFinished={() => {
+        queryClient.invalidateQueries({ queryKey: ["routes"] });
+        queryClient.invalidateQueries({ queryKey: ["folders"] });
+      }} />
+
+      <TaskAdjustmentPanel tasks={tasks} objects={objects} collectiefs={collectiefs} />
 
       {tasks && tasks.length > 0 && <UnassignedTasks tasks={tasks} routes={routes} objects={objects} collectiefs={collectiefs} />}
 
