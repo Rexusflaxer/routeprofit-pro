@@ -1,0 +1,174 @@
+{
+  "name": "Vehicle",
+  "type": "object",
+  "properties": {
+    "license_plate": {
+      "type": "string",
+      "description": "Kenteken"
+    },
+    "name": {
+      "type": "string",
+      "description": "Naam van het voertuig"
+    },
+    "brand": {
+      "type": "string",
+      "description": "Merk"
+    },
+    "model": {
+      "type": "string",
+      "description": "Model"
+    },
+    "year": {
+      "type": "number",
+      "description": "Bouwjaar"
+    },
+    "startDepotLocationId": {
+      "type": "string",
+      "description": "Startdepot locatie-ID"
+    },
+    "eindDepotLocationId": {
+      "type": "string",
+      "description": "Einddepot locatie-ID"
+    },
+    "kostenPerKm": {
+      "type": "number",
+      "description": "Voertuigkosten per kilometer"
+    },
+    "kostenPerMinuutVoertuig": {
+      "type": "number",
+      "description": "Voertuigkosten per minuut"
+    },
+    "vasteKostenPerRoute": {
+      "type": "number",
+      "description": "Vaste voertuigkosten per route"
+    },
+    "toegestaneTaaktypes": {
+      "type": "array",
+      "description": "Optionele taaktypes die dit voertuig mag uitvoeren",
+      "items": {
+        "type": "string"
+      }
+    },
+    "fuel_type": {
+      "type": "string",
+      "enum": [
+        "benzine",
+        "diesel",
+        "elektrisch",
+        "hybride",
+        "lpg"
+      ],
+      "description": "Brandstoftype"
+    },
+    "acquisition_type": {
+      "type": "string",
+      "enum": [
+        "aankoop",
+        "lease",
+        "private_lease",
+        "banklening"
+      ],
+      "description": "Type aanschaf"
+    },
+    "purchase_price": {
+      "type": "number",
+      "description": "Aankoopprijs (alleen bij aankoop/banklening)"
+    },
+    "residual_value": {
+      "type": "number",
+      "description": "Geschatte restwaarde (alleen bij aankoop/banklening)"
+    },
+    "depreciation_years": {
+      "type": "number",
+      "description": "Afschrijvingsperiode in jaren (alleen bij aankoop/banklening)"
+    },
+    "actual_residual_value": {
+      "type": "number",
+      "description": "Daadwerkelijke restwaarde bij verkoop/vervanging"
+    },
+    "disposal_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Datum uit gebruik genomen/verkocht"
+    },
+    "final_mileage": {
+      "type": "number",
+      "description": "Eind-kilometerstand bij verkoop/vervanging"
+    },
+    "monthly_lease_cost": {
+      "type": "number",
+      "description": "Maandelijkse leasekosten (alleen bij lease/private lease)"
+    },
+    "monthly_loan_payment": {
+      "type": "number",
+      "description": "Maandelijkse aflossing (alleen bij banklening)"
+    },
+    "fuel_cost_per_km": {
+      "type": "number",
+      "description": "Brandstof/elektriciteitskosten per km"
+    },
+    "maintenance_type": {
+      "type": "string",
+      "enum": [
+        "per_km",
+        "per_year",
+        "per_month",
+        "per_quarter"
+      ],
+      "description": "Type onderhoudsberekening",
+      "default": "per_km"
+    },
+    "maintenance_cost": {
+      "type": "number",
+      "description": "Onderhoudskosten"
+    },
+    "maintenance_interval_km": {
+      "type": "number",
+      "description": "Onderhoud elke X km (alleen bij per_km)"
+    },
+    "tire_type": {
+      "type": "string",
+      "enum": [
+        "per_km",
+        "per_year",
+        "per_month",
+        "per_quarter"
+      ],
+      "description": "Type bandenkostenberekening",
+      "default": "per_year"
+    },
+    "tire_cost": {
+      "type": "number",
+      "description": "Bandenkosten"
+    },
+    "tire_interval_km": {
+      "type": "number",
+      "description": "Banden elke X km (alleen bij per_km)"
+    },
+    "insurance_type": {
+      "type": "string",
+      "enum": [
+        "wa",
+        "wa_beperkt_casco",
+        "all_risk"
+      ],
+      "description": "Type verzekering"
+    },
+    "insurance_per_month": {
+      "type": "number",
+      "description": "Verzekering per maand"
+    },
+    "insurance_deductible": {
+      "type": "number",
+      "description": "Eigen risico verzekering"
+    },
+    "is_active": {
+      "type": "boolean",
+      "description": "Is het voertuig actief?",
+      "default": true
+    }
+  },
+  "required": [
+    "license_plate"
+  ]
+}
