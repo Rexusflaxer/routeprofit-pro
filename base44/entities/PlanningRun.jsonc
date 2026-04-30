@@ -1,0 +1,94 @@
+{
+  "name": "PlanningRun",
+  "type": "object",
+  "properties": {
+    "planning_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Planningsdatum"
+    },
+    "horizon_start": {
+      "type": "string",
+      "description": "Begin planningshorizon HH:MM"
+    },
+    "horizon_end": {
+      "type": "string",
+      "description": "Einde planningshorizon HH:MM"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "bezig",
+        "concept",
+        "geoptimaliseerd",
+        "goedgekeurd",
+        "vergrendeld"
+      ],
+      "default": "bezig"
+    },
+    "vehicle_ids": {
+      "type": "array",
+      "description": "Gebruikte voertuigen",
+      "items": {
+        "type": "string"
+      }
+    },
+    "task_ids": {
+      "type": "array",
+      "description": "Ingeplande taak-IDs",
+      "items": {
+        "type": "string"
+      }
+    },
+    "route_runs": {
+      "type": "array",
+      "description": "Gegenereerde routes",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "unassigned_tasks": {
+      "type": "array",
+      "description": "Niet ingeplande taken met reden",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "total_cost": {
+      "type": "number"
+    },
+    "total_distance_km": {
+      "type": "number"
+    },
+    "total_travel_minutes": {
+      "type": "number"
+    },
+    "total_task_minutes": {
+      "type": "number"
+    },
+    "total_routes": {
+      "type": "number"
+    },
+    "tasks_planned": {
+      "type": "number"
+    },
+    "tasks_unplanned": {
+      "type": "number"
+    },
+    "optimizer_version": {
+      "type": "string"
+    },
+    "settings_used": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "notes": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "planning_date"
+  ]
+}

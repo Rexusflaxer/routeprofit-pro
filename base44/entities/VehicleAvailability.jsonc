@@ -1,0 +1,58 @@
+{
+  "name": "VehicleAvailability",
+  "type": "object",
+  "properties": {
+    "vehicle_id": {
+      "type": "string",
+      "description": "ID van het voertuig"
+    },
+    "name": {
+      "type": "string",
+      "description": "Naam van dit beschikbaarheidsblok"
+    },
+    "weekdays": {
+      "type": "array",
+      "description": "Beschikbare weekdagen: 1=Ma, 7=Zo",
+      "items": {
+        "type": "number"
+      }
+    },
+    "start_time": {
+      "type": "string",
+      "description": "Starttijd HH:MM"
+    },
+    "end_time": {
+      "type": "string",
+      "description": "Eindtijd HH:MM (mag na middernacht zijn)"
+    },
+    "start_depot_id": {
+      "type": "string",
+      "description": "Start depot locatie ID (object of office)"
+    },
+    "end_depot_id": {
+      "type": "string",
+      "description": "Eind depot locatie ID"
+    },
+    "cost_per_km": {
+      "type": "number",
+      "description": "Kosten per km voor dit blok"
+    },
+    "cost_per_minute": {
+      "type": "number",
+      "description": "Kosten per minuut rijden"
+    },
+    "fixed_cost_per_shift": {
+      "type": "number",
+      "description": "Vaste kosten per dienst"
+    },
+    "is_active": {
+      "type": "boolean",
+      "default": true
+    }
+  },
+  "required": [
+    "vehicle_id",
+    "start_time",
+    "end_time"
+  ]
+}

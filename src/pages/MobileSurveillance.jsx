@@ -1,9 +1,16 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
-import { MapPin, Route, Users, Layers } from "lucide-react";
+import { MapPin, Route, Users, Layers, Zap } from "lucide-react";
 
 const TILES = [
+  {
+    label: "Automatische Planning",
+    description: "Fleet optimizer — routes automatisch genereren",
+    icon: Zap,
+    color: "from-violet-600 to-violet-800",
+    page: "FleetPlanning",
+  },
   {
     label: "Klanten",
     description: "Beheer particulieren en bedrijven",
