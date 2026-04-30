@@ -1,0 +1,202 @@
+{
+  "name": "Route",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Naam van de route"
+    },
+    "folder_id": {
+      "type": "string",
+      "description": "ID van de uitschuifmap"
+    },
+    "assigned_tasks": {
+      "type": "array",
+      "description": "Taken met hun toegewezen dagen",
+      "items": {
+        "type": "object",
+        "properties": {
+          "task_id": {
+            "type": "string",
+            "description": "ID van de taak"
+          },
+          "days": {
+            "type": "array",
+            "description": "Dagen waarop deze taak voor deze route wordt uitgevoerd",
+            "items": {
+              "type": "number"
+            }
+          }
+        },
+        "required": [
+          "task_id",
+          "days"
+        ]
+      }
+    },
+    "start_location_id": {
+      "type": "string",
+      "description": "ID van het startobject/depot"
+    },
+    "end_location_id": {
+      "type": "string",
+      "description": "ID van het eindobject/depot"
+    },
+    "vehicle_id": {
+      "type": "string",
+      "description": "ID van het toegewezen voertuig"
+    },
+    "time_window_start": {
+      "type": "string",
+      "description": "Vroegste aanvangstijd route (HH:MM)"
+    },
+    "time_window_end": {
+      "type": "string",
+      "description": "Uiterste eindtijd route (HH:MM)"
+    },
+    "weekdays": {
+      "type": "array",
+      "description": "Dagen van de week waarop deze route actief is: 1=Maandag, 7=Zondag",
+      "items": {
+        "type": "number"
+      }
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "automatic",
+        "suggested"
+      ],
+      "default": "manual",
+      "description": "Herkomst van de route"
+    },
+    "lockedStartTime": {
+      "type": "boolean",
+      "default": true,
+      "description": "Starttijd is vastgezet"
+    },
+    "lockedEndTime": {
+      "type": "boolean",
+      "default": true,
+      "description": "Eindtijd is vastgezet"
+    },
+    "allowExtensionBefore": {
+      "type": "boolean",
+      "default": false,
+      "description": "Optimizer mag eerder starten als advies voorstellen"
+    },
+    "allowExtensionAfter": {
+      "type": "boolean",
+      "default": true,
+      "description": "Optimizer mag later eindigen als advies voorstellen"
+    },
+    "maxExtensionBeforeMinutes": {
+      "type": "number",
+      "default": 30,
+      "description": "Maximale voorgestelde vervroeging in minuten"
+    },
+    "maxExtensionAfterMinutes": {
+      "type": "number",
+      "default": 60,
+      "description": "Maximale voorgestelde verlenging in minuten"
+    },
+    "regionHint": {
+      "type": "string",
+      "description": "Optionele regiohint voor routevulling"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "concept",
+        "gevuld",
+        "geoptimaliseerd",
+        "goedgekeurd",
+        "vergrendeld"
+      ],
+      "default": "concept",
+      "description": "Route status"
+    },
+    "alarm_standby": {
+      "type": "boolean",
+      "description": "Vrije tijd tussen stops en na de route wordt alarmdienst. Dienst loopt door tot time_window_end.",
+      "default": false
+    },
+    "overhead_cost_ids": {
+      "type": "array",
+      "description": "IDs van aangevinkte overhead-kostenposten",
+      "items": {
+        "type": "string"
+      }
+    },
+    "binnendienst_personnel_ids": {
+      "type": "array",
+      "description": "IDs van binnendienst-medewerkers die aan deze route zijn gekoppeld",
+      "items": {
+        "type": "string"
+      }
+    },
+    "total_service_minutes": {
+      "type": "number",
+      "description": "Berekende totale diensttijd in minuten"
+    },
+    "avg_travel_minutes": {
+      "type": "number",
+      "description": "Automatisch berekende gemiddelde reistijd tussen objecten in minuten"
+    },
+    "total_distance_km": {
+      "type": "number",
+      "description": "Geschatte totale afstand in km"
+    },
+    "total_route_minutes": {
+      "type": "number",
+      "description": "Totale routetijd (dienst + reistijd) in minuten"
+    },
+    "total_revenue": {
+      "type": "number",
+      "description": "Berekende totale omzet per maand"
+    },
+    "total_costs": {
+      "type": "number",
+      "description": "Berekende totale kosten per maand"
+    },
+    "profit": {
+      "type": "number",
+      "description": "Berekende winst per maand"
+    },
+    "break_even_price_per_minute": {
+      "type": "number",
+      "description": "Break-even prijs per minuut"
+    },
+    "cached_personnel_costs": {
+      "type": "object",
+      "description": "Gecachte loonkostenberekening per weekdag",
+      "additionalProperties": true
+    },
+    "personnel_costs_calculated_at": {
+      "type": "string",
+      "description": "Tijdstip waarop loonkosten voor het laatst zijn berekend (ISO string)"
+    },
+    "cached_optimization": {
+      "type": "object",
+      "description": "Gecachte routeoptimalisatie resultaten",
+      "additionalProperties": true
+    },
+    "optimization_calculated_at": {
+      "type": "string",
+      "description": "Tijdstip waarop optimalisatie voor het laatst is berekend (ISO string)"
+    },
+    "optimization_hash": {
+      "type": "string",
+      "description": "Hash van route+taken om te detecteren of herberekening nodig is"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Opmerkingen"
+    }
+  },
+  "required": [
+    "name",
+    "folder_id"
+  ]
+}

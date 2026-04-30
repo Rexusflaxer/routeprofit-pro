@@ -10,6 +10,14 @@ const DEFAULT_SETTINGS = {
   costPerKm: 0.35,
   fixedCostPerRoute: 8,
   waitingCostFactor: 0.35,
+  minimumPaidMinutesPerRoute: 180,
+  minimumOperationalRouteMinutes: 120,
+  microRoutePenalty: 500,
+  routeFragmentationPenalty: 250,
+  existingManualRoutePreferenceBonus: 1000,
+  minSavingsRequiredForNewRoute: 180,
+  depotTravelRequired: true,
+  extensionCostMultiplier: 1.2,
 };
 
 function parseTime(timeStr) {
@@ -533,6 +541,279 @@ function buildOutputRoute(route, index) {
   };
 }
 
+function getLocationById(id, objects, offices) {
+  if (!id) return null;
+  return fixCoords(offices.find(o => o.id === id) || objects.find(o => o.id === id));
+}
+
+function overlaps(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && bStart < aEnd;
+}
+
+async function scheduleSequenceInManualWindow(sequence, routeState, apiKey, travelCache, settings) {
+  const horizon = routeState.horizon;
+  const depotStart = routeState.startDepot;
+  const depotEnd = routeState.endDepot || routeState.startDepot;
+  let currentTime = horizon.start_minute;
+  let currentLocation = depotStart;
+  const planned = [];
+  let totalTravel = 0;
+  let totalDistance = 0;
+  let totalWait = 0;
+  let hasEstimatedTravel = false;
+
+  for (const task of sequence) {
+    const window = normalizeWindowToHorizon(task.time_window_start, task.time_window_end, horizon.start_minute, horizon.end_minute);
+    const travel = await getTravelTime(currentLocation, task, apiKey, travelCache);
+    hasEstimatedTravel = hasEstimatedTravel || travel.estimated;
+    const arrival = currentTime + travel.travelMinutes;
+    const start = Math.max(arrival, window.start);
+    const departure = start + (task.duration_minutes || 0);
+
+    if (settings.finishWithinTimeWindow && departure > window.end) return null;
+    if (!settings.finishWithinTimeWindow && start > window.end) return null;
+    if (departure > horizon.end_minute) return null;
+
+    const wait = Math.max(0, start - arrival);
+    planned.push({
+      ...task,
+      _windowStart: window.start,
+      _windowEnd: window.end,
+      _travelTime: travel.travelMinutes,
+      _distanceKm: travel.distanceKm,
+      _arrivalTime: arrival,
+      _actualStart: start,
+      _departureTime: departure,
+      _waitTime: wait,
+      _estimated: travel.estimated,
+    });
+    totalTravel += travel.travelMinutes;
+    totalDistance += travel.distanceKm;
+    totalWait += wait;
+    currentTime = departure;
+    currentLocation = task;
+  }
+
+  if (sequence.length > 0) {
+    const returnTravel = await getTravelTime(currentLocation, depotEnd, apiKey, travelCache);
+    hasEstimatedTravel = hasEstimatedTravel || returnTravel.estimated;
+    if (currentTime + returnTravel.travelMinutes > horizon.end_minute) return null;
+    totalTravel += returnTravel.travelMinutes;
+    totalDistance += returnTravel.distanceKm;
+  }
+
+  const totalService = planned.reduce((sum, task) => sum + (task.duration_minutes || 0), 0);
+  const routeMinutes = horizon.end_minute - horizon.start_minute;
+  if (sequence.length > 0 && totalTravel === 0 && totalDistance === 0 && !planned.every(task => task.latitude === depotStart?.latitude && task.longitude === depotStart?.longitude)) return null;
+  if (routeMinutes < totalTravel + totalService) return null;
+
+  return {
+    tasks: planned,
+    route_start_minute: horizon.start_minute,
+    route_end_minute: horizon.end_minute,
+    time_window_start: formatTime(horizon.start_minute),
+    time_window_end: formatTime(horizon.end_minute),
+    stats: {
+      total_tasks: planned.length,
+      total_service_minutes: Math.round(totalService),
+      total_travel_minutes: Math.round(totalTravel),
+      total_distance_km: r2(totalDistance),
+      total_wait_minutes: Math.round(totalWait),
+      total_route_minutes: Math.round(routeMinutes),
+      has_estimated_travel: hasEstimatedTravel,
+    },
+  };
+}
+
+function buildManualRouteStates(manualRoutes, vehicles, objects, offices) {
+  return manualRoutes.map((route, index) => {
+    const start = parseTime(route.time_window_start) ?? 0;
+    let end = parseTime(route.time_window_end) ?? 1439;
+    if (end <= start) end += 1440;
+    const vehicle = vehicles.find(v => v.id === route.vehicle_id) || vehicles[index % vehicles.length];
+    const startDepot = getLocationById(route.start_location_id || vehicle?.startDepotLocationId, objects, offices) || fixCoords(offices[0]);
+    const endDepot = getLocationById(route.end_location_id || vehicle?.eindDepotLocationId, objects, offices) || startDepot;
+    return {
+      id: route.id,
+      source_route: route,
+      name: route.name,
+      vehicle,
+      startDepot,
+      endDepot,
+      depot: startDepot,
+      horizon: {
+        id: `manual_${route.id}`,
+        label: 'handmatige route',
+        start_minute: start,
+        end_minute: end,
+        start_time: formatTime(start),
+        end_time: formatTime(end),
+        explanation: 'Bestaande handmatige route wordt als primaire capaciteit gebruikt.',
+      },
+      tasks: [],
+      lockedStartTime: route.lockedStartTime !== false,
+      lockedEndTime: route.lockedEndTime !== false,
+      allowExtensionBefore: route.allowExtensionBefore === true,
+      allowExtensionAfter: route.allowExtensionAfter !== false,
+      maxExtensionBeforeMinutes: route.maxExtensionBeforeMinutes || 30,
+      maxExtensionAfterMinutes: route.maxExtensionAfterMinutes || 60,
+    };
+  });
+}
+
+function hasVehicleOverlap(routes) {
+  for (let i = 0; i < routes.length; i++) {
+    for (let j = i + 1; j < routes.length; j++) {
+      if (routes[i].vehicle?.id && routes[i].vehicle.id === routes[j].vehicle?.id && overlaps(routes[i].route_start_minute, routes[i].route_end_minute, routes[j].route_start_minute, routes[j].route_end_minute)) return true;
+    }
+  }
+  return false;
+}
+
+async function fillExistingManualRoutesOptimizer(taskInstances, manualRoutes, vehicles, objects, offices, apiKey, travelCache, weekday, settings) {
+  let routeStates = buildManualRouteStates(manualRoutes, vehicles, objects, offices);
+  const missingCoordTasks = taskInstances.filter(t => t.missing_coords).map(t => ({
+    ...t,
+    primaryReason: 'missing_coordinates',
+    skip_reason: 'Ontbrekende coördinaten. Invoeging is niet geprobeerd omdat reistijd niet betrouwbaar kan worden berekend.',
+    advice: 'Voeg coördinaten toe bij het object.',
+  }));
+  const plannableTasks = taskInstances.filter(t => !t.missing_coords);
+  const debug = {
+    mode: 'fillExistingManualRoutesOptimizer',
+    manual_routes_used: routeStates.map(r => ({ name: r.name, start: r.horizon.start_time, end: r.horizon.end_time, vehicle: r.vehicle?.license_plate || r.vehicle?.name })),
+    task_insertion_attempts: [],
+    planned_routes: [],
+    unassigned_tasks: [],
+  };
+
+  const sortedTasks = [...plannableTasks].sort((a, b) => {
+    const aw = collectTaskWindows([a])[0];
+    const bw = collectTaskWindows([b])[0];
+    return (aw.end - aw.start) - (bw.end - bw.start) || aw.end - bw.end;
+  });
+
+  const unassigned = [...missingCoordTasks];
+
+  for (const task of sortedTasks) {
+    let best = null;
+    const attempts = [];
+
+    for (const route of routeStates) {
+      let routeBest = null;
+      for (let pos = 0; pos <= route.tasks.length; pos++) {
+        const sequence = [...route.tasks.slice(0, pos), task, ...route.tasks.slice(pos)];
+        const scheduled = await scheduleSequenceInManualWindow(sequence, route, apiKey, travelCache, settings);
+        if (!scheduled) {
+          attempts.push({ route: route.name, position: pos, feasible: false, reason: 'tijdvenster, depotrit of route-eindtijd past niet' });
+          continue;
+        }
+        const previousCost = route.stats ? calculateRouteCost(route, settings) : 0;
+        const candidate = { ...route, ...scheduled, tasks: scheduled.tasks };
+        const extraCost = calculateRouteCost(candidate, settings) - previousCost - settings.existingManualRoutePreferenceBonus;
+        const extraTravel = scheduled.stats.total_travel_minutes - (route.stats?.total_travel_minutes || 0);
+        const extraDistance = scheduled.stats.total_distance_km - (route.stats?.total_distance_km || 0);
+        const extraWait = scheduled.stats.total_wait_minutes - (route.stats?.total_wait_minutes || 0);
+        const attempt = { route: route.name, position: pos, feasible: true, extraTravel, extraDistance: r2(extraDistance), extraWait, extraCost: r2(extraCost) };
+        attempts.push(attempt);
+        if (!routeBest || extraCost < routeBest.extraCost) routeBest = { ...attempt, candidate, extraCost };
+        if (!best || extraCost < best.extraCost) best = { routeId: route.id, candidate, extraCost, attempt };
+      }
+      if (routeBest) attempts.push({ route: route.name, bestPosition: routeBest.position, chosenCandidateCost: r2(routeBest.extraCost) });
+    }
+
+    debug.task_insertion_attempts.push({ task: task.name, attempts, chosen_route: best?.candidate?.name || null });
+
+    if (best) {
+      routeStates = routeStates.map(route => route.id === best.routeId ? best.candidate : route);
+    } else {
+      unassigned.push({
+        ...task,
+        primaryReason: 'no_feasible_time_window',
+        skip_reason: 'Invoeging is geprobeerd in alle bestaande handmatige routes en op alle posities, maar paste niet binnen route- en taakvensters inclusief depotritten.',
+        advice: 'Bekijk scenario’s voor route verlengen, eerder starten of nieuwe route voorstellen.',
+      });
+    }
+  }
+
+  const outputRoutes = routeStates.map((route, index) => {
+    const withCost = { ...route, route_cost: calculateRouteCost(route.stats ? route : { ...route, stats: { total_route_minutes: route.horizon.end_minute - route.horizon.start_minute, total_distance_km: 0, total_wait_minutes: 0 } }, settings) };
+    return buildOutputRoute({ ...withCost, horizon_id: route.horizon.id, validation: validateRouteRun(withCost, vehicles.length) }, index);
+  });
+
+  const scenarios = await generateManualRoutePlanningAdvice(unassigned, routeStates, vehicles, apiKey, travelCache, settings);
+  const totals = {
+    total_travel_minutes: outputRoutes.reduce((s, r) => s + r.stats.total_travel_minutes, 0),
+    total_service_minutes: outputRoutes.reduce((s, r) => s + r.stats.total_service_minutes, 0),
+    total_wait_minutes: outputRoutes.reduce((s, r) => s + r.stats.total_wait_minutes, 0),
+    total_distance_km: r2(outputRoutes.reduce((s, r) => s + r.stats.total_distance_km, 0)),
+    total_cost: r2(outputRoutes.reduce((s, r) => s + (r.route_cost || 0), 0)),
+  };
+
+  debug.planned_routes = outputRoutes.map(r => ({ route: r.id, vehicle: r.vehicle?.license_plate, start: r.time_window_start, end: r.time_window_end, tasks: r.tasks.length, valid: r.validation?.valid, errors: r.validation?.errors || [] }));
+  debug.unassigned_tasks = unassigned.map(t => ({ task: t.name, primaryReason: t.primaryReason, best_failed_insertion: t.skip_reason, cheapest_solution: scenarios.lowest_cost?.description || null }));
+
+  return {
+    planning_mode: 'manual_route_fill',
+    manual_routes_used: true,
+    horizons: routeStates.map(r => r.horizon),
+    routes: outputRoutes,
+    skipped_tasks: unassigned,
+    advice: generateAdvice(unassigned, vehicles, outputRoutes, outputRoutes.some(r => r.stats.has_estimated_travel)),
+    scenarios,
+    totals,
+    vehicle_count: vehicles.length,
+    max_concurrent_routes: maxConcurrentRoutes(outputRoutes),
+    total_tasks_input: taskInstances.length,
+    total_tasks_planned: outputRoutes.reduce((s, r) => s + r.tasks.length, 0),
+    total_tasks_skipped: unassigned.length,
+    total_routes_created: 0,
+    has_estimated_travel: outputRoutes.some(r => r.stats.has_estimated_travel),
+    debug_report: debug,
+  };
+}
+
+async function generateManualRoutePlanningAdvice(unassignedTasks, existingRoutes, vehicles, apiKey, travelCache, settings) {
+  const extension = [];
+  const earlierStart = [];
+  const newRoute = [];
+
+  for (const task of unassignedTasks.filter(t => !t.missing_coords)) {
+    for (const route of existingRoutes) {
+      if (route.allowExtensionAfter) {
+        const extended = { ...route, horizon: { ...route.horizon, end_minute: route.horizon.end_minute + Math.min(route.maxExtensionAfterMinutes || 60, 60), end_time: formatTime(route.horizon.end_minute + Math.min(route.maxExtensionAfterMinutes || 60, 60)) } };
+        const scheduled = await scheduleSequenceInManualWindow([...route.tasks, task], extended, apiKey, travelCache, settings);
+        if (scheduled) extension.push({ route_id: route.id, route_name: route.name, extend_minutes: extended.horizon.end_minute - route.horizon.end_minute, tasks: [task.name], extra_cost: r2(calculateRouteCost({ ...extended, ...scheduled }, settings) - calculateRouteCost(route, settings)), extra_km: scheduled.stats.total_distance_km - (route.stats?.total_distance_km || 0), description: `Verleng ${route.name} met ${extended.horizon.end_minute - route.horizon.end_minute} minuten om ${task.name} te plaatsen.` });
+      }
+      const earlier = { ...route, horizon: { ...route.horizon, start_minute: route.horizon.start_minute - Math.min(route.maxExtensionBeforeMinutes || 30, 30), start_time: formatTime(route.horizon.start_minute - Math.min(route.maxExtensionBeforeMinutes || 30, 30)) } };
+      const scheduledEarlier = await scheduleSequenceInManualWindow([task, ...route.tasks], earlier, apiKey, travelCache, settings);
+      if (scheduledEarlier) earlierStart.push({ route_id: route.id, route_name: route.name, earlier_minutes: route.horizon.start_minute - earlier.horizon.start_minute, tasks: [task.name], extra_cost: r2(calculateRouteCost({ ...earlier, ...scheduledEarlier }, settings) - calculateRouteCost(route, settings)), description: `Start ${route.name} ${route.horizon.start_minute - earlier.horizon.start_minute} minuten eerder om ${task.name} te plaatsen.` });
+    }
+
+    if (extension.length === 0 && earlierStart.length === 0) {
+      const routeWindow = normalizeWindowToHorizon(task.time_window_start, task.time_window_end, 0, 2880);
+      newRoute.push({
+        warning: 'Deze voorgestelde route bevat slechts 1 taak. Controleer of verlengen van een bestaande route logischer is.',
+        proposed_start_time: formatTime(routeWindow.start - 30),
+        proposed_end_time: formatTime(routeWindow.start + Math.max(settings.minimumOperationalRouteMinutes, task.duration_minutes + 60)),
+        vehicle: vehicles[0]?.license_plate || vehicles[0]?.name,
+        region: task.address,
+        tasks: [task.name],
+        cost_note: 'Inclusief vaste routekosten, minimum betaalde minuten en depotritten.',
+        reason: 'Geen bestaande route of beperkte verlenging kon deze taak haalbaar opnemen.',
+      });
+    }
+  }
+
+  return {
+    exact_existing_routes: { label: 'Scenario A: bestaande routes exact houden', description: 'Handmatige start- en eindtijden blijven ongewijzigd.', unassigned_count: unassignedTasks.length },
+    extend_routes: { label: 'Scenario B: routes licht verlengen', suggestions: extension },
+    start_earlier: { label: 'Scenario C: routes eerder starten', suggestions: earlierStart },
+    propose_new_route: { label: 'Scenario D: nieuwe route voorstellen', suggestions: newRoute },
+    lowest_cost: { label: 'Scenario E: laagste totale kosten', description: extension.length ? 'Routeverlenging lijkt goedkoper dan een nieuwe route.' : newRoute.length ? 'Nieuwe route is alleen als voorstel opgenomen omdat bestaande routes niet voldoende waren.' : 'Bestaande routes exact houden is voldoende.' },
+  };
+}
+
 async function runGlobalFleetOptimizer(taskInstances, vehicles, offices, apiKey, travelCache, weekday, settings) {
   const depot = fixCoords(offices[0]);
   const missingCoordTasks = taskInstances.filter(t => t.missing_coords).map(t => ({
@@ -685,7 +966,18 @@ Deno.serve(async (req) => {
 
     const { instances, nonRelevant } = prepareTaskInstances(tasks, objects, collectiefs, weekday);
     const travelCache = new Map();
-    const result = await runGlobalFleetOptimizer(instances, activeVehicles, offices, apiKey, travelCache, weekday, settings);
+    const manualRoutes = (await base44.entities.Route.list()).filter(route =>
+      (route.weekdays || []).includes(weekday) &&
+      (route.source || 'manual') === 'manual' &&
+      route.status !== 'vergrendeld' &&
+      route.time_window_start &&
+      route.time_window_end
+    );
+
+    const result = manualRoutes.length > 0
+      ? await fillExistingManualRoutesOptimizer(instances, manualRoutes, activeVehicles, objects, offices, apiKey, travelCache, weekday, settings)
+      : await runGlobalFleetOptimizer(instances, activeVehicles, offices, apiKey, travelCache, weekday, settings);
+
     result.non_relevant_tasks = nonRelevant;
     result.total_tasks_not_relevant = nonRelevant.length;
 
@@ -693,7 +985,34 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Deze planning bevat geschatte reistijden. Controleer Google Maps/adressen voordat je definitief opslaat.', result }, { status: 409 });
     }
 
-    if (saveRoutes && result.routes.length > 0) {
+    if (saveRoutes && result.planning_mode === 'manual_route_fill') {
+      for (const route of result.routes) {
+        if (route.validation && !route.validation.valid) continue;
+        await base44.asServiceRole.entities.Route.update(route.id, {
+          assigned_tasks: route.tasks.map(task => ({ task_id: task.task_id, days: [weekday] })),
+          total_service_minutes: route.stats.total_service_minutes,
+          total_distance_km: route.stats.total_distance_km,
+          total_route_minutes: route.stats.total_route_minutes,
+          status: 'geoptimaliseerd',
+          cached_optimization: {
+            optimized_order: route.tasks,
+            total_travel_time: route.stats.total_travel_minutes,
+            total_distance_km: route.stats.total_distance_km,
+            total_service_time: route.stats.total_service_minutes,
+            total_waiting_time: route.stats.total_wait_minutes,
+            total_route_time: route.stats.total_route_minutes,
+            route_cost: route.route_cost,
+            validation: route.validation,
+            source: 'manual_route_fill',
+            tasks_optimized: route.tasks.length,
+            tasks_skipped: 0,
+            skipped_tasks: [],
+          },
+          optimization_calculated_at: new Date().toISOString(),
+          optimization_hash: JSON.stringify({ taskIds: route.tasks.map(t => t.task_id), vehicleId: route.vehicle?.id, routeId: route.id, mode: result.planning_mode }),
+        });
+      }
+    } else if (saveRoutes && result.routes.length > 0) {
       let folderId = folders[0]?.id;
       if (!folderId) {
         const newFolder = await base44.asServiceRole.entities.RouteFolder.create({ name: 'Automatisch gegenereerd', color: 'blue' });

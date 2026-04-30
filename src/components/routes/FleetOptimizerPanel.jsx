@@ -123,10 +123,19 @@ export default function FleetOptimizerPanel({ activeDay, onRoutesCreated, onClos
 
         {result && !loading && (
           <div className="space-y-4">
+            {result.manual_routes_used && (
+              <div className="bg-white border border-green-100 rounded-xl p-4">
+                <div className="flex items-center gap-2 text-sm font-semibold text-green-900">
+                  <CheckCircle className="w-4 h-4" /> Handmatige routes als primaire capaciteit gebruikt
+                </div>
+                <p className="text-xs text-green-700 mt-1">De optimizer heeft bestaande routes eerst gevuld. Nieuwe routes worden alleen als scenario voorgesteld.</p>
+              </div>
+            )}
+
             {result.horizons?.length > 0 && (
               <div className="bg-white border border-blue-100 rounded-xl p-4 space-y-3">
                 <div className="flex items-center gap-2 text-sm font-semibold text-blue-900">
-                  <Clock className="w-4 h-4" /> Automatisch bepaalde horizon
+                  <Clock className="w-4 h-4" /> {result.manual_routes_used ? 'Gebruikte handmatige routevensters' : 'Automatisch bepaalde horizon'}
                 </div>
                 {result.horizons.map((horizon) => (
                   <div key={horizon.id} className="rounded-lg bg-blue-50/60 border border-blue-100 p-3">
@@ -220,6 +229,33 @@ export default function FleetOptimizerPanel({ activeDay, onRoutesCreated, onClos
                     )}
                   </div>
                 ))}
+              </div>
+            )}
+
+            {result.scenarios && (
+              <div className="space-y-2">
+                <p className="text-xs font-semibold uppercase tracking-wider text-slate-500">Scenario’s</p>
+                <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                  {Object.entries(result.scenarios).map(([key, scenario]) => (
+                    <div key={key} className="bg-white border border-slate-200 rounded-xl p-3">
+                      <p className="text-sm font-semibold text-slate-900">{scenario.label}</p>
+                      {scenario.description && <p className="text-xs text-slate-500 mt-1">{scenario.description}</p>}
+                      {typeof scenario.unassigned_count === 'number' && <p className="text-xs text-amber-700 mt-1">Niet ingepland: {scenario.unassigned_count}</p>}
+                      {scenario.suggestions?.length > 0 ? (
+                        <div className="mt-2 space-y-1">
+                          {scenario.suggestions.slice(0, 3).map((suggestion, i) => (
+                            <div key={i} className="text-xs text-slate-600 bg-slate-50 rounded-lg p-2">
+                              {suggestion.description || suggestion.reason || suggestion.warning}
+                              {suggestion.extra_cost !== undefined && <span className="block text-slate-500">Extra kosten: €{Number(suggestion.extra_cost).toFixed(2)}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        <p className="text-xs text-slate-400 mt-2">Geen voorstel nodig.</p>
+                      )}
+                    </div>
+                  ))}
+                </div>
               </div>
             )}
 
