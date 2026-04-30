@@ -100,7 +100,9 @@ export default function RouteDetails() {
           total_distance_km: distanceResponse.data?.total_distance_km || 0
         });
 
-        return null;
+        // Bereken route optimalisatie (forceer herberekening)
+        const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: routeId, force_recalculate: true });
+        return optimizationResponse.data;
       } else {
         // Geen taken meer, reset statistieken
         await base44.entities.Route.update(routeId, {
@@ -149,7 +151,10 @@ export default function RouteDetails() {
         total_distance_km: distanceResponse.data?.total_distance_km || 0
       });
 
-      setOptimizedRoute(null);
+      // Bereken route optimalisatie (forceer herberekening)
+      const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: route.id, force_recalculate: true });
+      const optData = optimizationResponse.data;
+      setOptimizedRoute(optData);
 
       queryClient.invalidateQueries({ queryKey: ["routes"] });
       queryClient.invalidateQueries({ queryKey: ["route", routeId] });
@@ -191,7 +196,9 @@ export default function RouteDetails() {
         total_distance_km: distanceResponse.data?.total_distance_km || 0
       });
 
-      return null;
+      // Bereken route optimalisatie (forceer herberekening)
+      const optimizationResponse = await base44.functions.invoke('optimizeRoute', { route_id: routeId, force_recalculate: true });
+      return optimizationResponse.data;
     },
     onSuccess: (optimizedData) => {
       queryClient.invalidateQueries({ queryKey: ["routes"] });
@@ -522,11 +529,18 @@ export default function RouteDetails() {
                 </CardTitle>
                 <div className="flex gap-2">
                   <RouteExportPdf route={route} optimizedRoute={optimizedRoute} />
-                  <Link to={createPageUrl("Routes")}>
-                    <Button size="sm" variant="outline">
-                      Centrale routeplanning openen
-                    </Button>
-                  </Link>
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={recalculateRoute}
+                    disabled={isRecalculating || routeTasks.length === 0}
+                  >
+                    {isRecalculating ? (
+                      <><Loader2 className="w-4 h-4 mr-1 animate-spin" /> Berekenen...</>
+                    ) : (
+                      <><RefreshCw className="w-4 h-4 mr-1" /> Herberekenen</>
+                    )}
+                  </Button>
                 </div>
               </div>
             </CardHeader>
