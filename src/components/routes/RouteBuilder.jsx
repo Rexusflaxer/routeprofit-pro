@@ -155,16 +155,6 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
             )}
           </div>
 
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Naam route</Label>
-            <Input
-              value={form.name || ""}
-              onChange={(e) => handleChange("name", e.target.value)}
-              placeholder="bijv. Regio Kampen – Zwolle"
-            />
-            <p className="text-xs text-slate-400">Laat leeg voor "Lege route"</p>
-          </div>
-
           <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
             <div className="space-y-2">
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Voertuig *</Label>

@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -10,6 +10,52 @@ import PageHeader from "../components/ui-custom/PageHeader";
 import RouteBuilder from "../components/routes/RouteBuilder";
 import UnassignedTasks from "../components/routes/UnassignedTasks";
 import FleetOptimizerPanel from "../components/routes/FleetOptimizerPanel";
+
+// Extraheer de plaatsnaam uit een adres (laatste deel voor postcode/land)
+function extractCity(address) {
+  if (!address) return null;
+  // Adres is bijv. "Straatnaam 1, 8261 AB Kampen" of "Straatnaam 1, Kampen"
+  const parts = address.split(',');
+  for (let i = parts.length - 1; i >= 0; i--) {
+    const part = parts[i].trim();
+    // Verwijder postcodes (bijv. "8261 AB") en landnamen
+    const cleaned = part.replace(/\b\d{4}\s?[A-Z]{2}\b/g, '').replace(/\bNederland\b/gi, '').trim();
+    // Pak alleen het stadsdeel (laatste woord of twee woorden)
+    const words = cleaned.split(/\s+/).filter(Boolean);
+    if (words.length > 0) {
+      // Pak maximaal 2 woorden als stadsnaam
+      return words.slice(-2).join(' ');
+    }
+  }
+  return null;
+}
+
+function deriveRouteName(route, tasks, objects, collectiefs) {
+  const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
+  if (assignedTaskIds.length === 0) return route.name || 'Lege route';
+
+  const cities = [];
+  for (const taskId of assignedTaskIds) {
+    const task = tasks.find(t => t.id === taskId);
+    if (!task) continue;
+    let address = null;
+    if (task.object_id) {
+      const obj = objects.find(o => o.id === task.object_id);
+      address = obj?.address;
+    } else if (task.collectief_id) {
+      const col = collectiefs?.find(c => c.id === task.collectief_id);
+      address = col?.address;
+    }
+    const city = extractCity(address);
+    if (city && !cities.includes(city)) cities.push(city);
+  }
+
+  if (cities.length === 0) return route.name || 'Lege route';
+  // Sorteer alfabetisch, toon max 3 steden
+  const sorted = cities.sort((a, b) => a.localeCompare(b));
+  const label = sorted.slice(0, 3).join(' – ');
+  return `Regio ${label}`;
+}
 
 const WEEKDAYS = [
   { value: 1, label: "Maandag" },
@@ -154,7 +200,7 @@ export default function Routes() {
                     <div key={route.id} className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md transition-shadow group">
                       <div className="flex items-start justify-between gap-2">
                         <Link to={createPageUrl(`RouteDetails?id=${route.id}`)} className="flex-1 min-w-0">
-                          <p className="text-sm font-semibold text-slate-900 truncate">{route.name}</p>
+                          <p className="text-sm font-semibold text-slate-900 truncate">{deriveRouteName(route, tasks, objects, collectiefs)}</p>
                           <div className="flex items-center gap-3 mt-1.5 text-xs text-slate-500">
                             {route.time_window_start && (
                               <span className="flex items-center gap-1">
