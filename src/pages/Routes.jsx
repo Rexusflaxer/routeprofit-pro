@@ -2,13 +2,14 @@ import React, { useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Plus, Pencil, Trash2, MapPin, Clock } from "lucide-react";
+import { Plus, Pencil, Trash2, MapPin, Clock, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
 import { AnimatePresence, motion } from "framer-motion";
 import PageHeader from "../components/ui-custom/PageHeader";
 import RouteBuilder from "../components/routes/RouteBuilder";
 import UnassignedTasks from "../components/routes/UnassignedTasks";
+import FleetOptimizerPanel from "../components/routes/FleetOptimizerPanel";
 
 const WEEKDAYS = [
   { value: 1, label: "Maandag" },
@@ -24,6 +25,7 @@ export default function Routes() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
   const [activeDay, setActiveDay] = useState(1);
+  const [showOptimizer, setShowOptimizer] = useState(false);
   const queryClient = useQueryClient();
 
   const { data: routes = [] } = useQuery({ queryKey: ["routes"], queryFn: () => base44.entities.Route.list() });
@@ -62,13 +64,27 @@ export default function Routes() {
         title="Routes"
         subtitle="Bouw routes en analyseer winstgevendheid"
         actions={
-          <Button onClick={() => { setEditing(null); setShowForm(true); }} className="bg-slate-900 hover:bg-slate-800">
-            <Plus className="w-4 h-4 mr-1" /> Nieuwe route
-          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" onClick={() => { setShowOptimizer(!showOptimizer); setShowForm(false); }} className="border-blue-300 text-blue-700 hover:bg-blue-50">
+              <Zap className="w-4 h-4 mr-1" /> Auto-plannen
+            </Button>
+            <Button onClick={() => { setEditing(null); setShowForm(true); setShowOptimizer(false); }} className="bg-slate-900 hover:bg-slate-800">
+              <Plus className="w-4 h-4 mr-1" /> Handmatig
+            </Button>
+          </div>
         }
       />
 
       <AnimatePresence>
+        {showOptimizer && (
+          <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
+            <FleetOptimizerPanel
+              activeDay={activeDay}
+              onRoutesCreated={() => queryClient.invalidateQueries({ queryKey: ["routes"] })}
+              onClose={() => setShowOptimizer(false)}
+            />
+          </motion.div>
+        )}
         {showForm && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
             <RouteBuilder route={editing} vehicles={vehicles} routes={routes} folders={folders} onSave={handleSave} onCancel={() => { setShowForm(false); setEditing(null); }} />
