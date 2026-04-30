@@ -12,6 +12,7 @@ const TASK_TYPES = [
   "Externe Controleronde",
   "Externe Sluitronde",
   "Brand- en Sluitronde",
+  "Openingsronde",
 ];
 
 const WEEKDAYS = [
