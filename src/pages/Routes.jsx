@@ -92,7 +92,6 @@ export default function Routes() {
         {showOptimizer && (
           <motion.div initial={{ opacity: 0, y: -10 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -10 }}>
             <FleetOptimizerPanel
-              activeDay={activeDay}
               onRoutesCreated={() => queryClient.invalidateQueries({ queryKey: ["routes"] })}
               onClose={() => setShowOptimizer(false)}
             />

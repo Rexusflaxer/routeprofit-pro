@@ -943,117 +943,142 @@ Deno.serve(async (req) => {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json();
-    const weekday = body.weekday;
+    // Ondersteuning voor zowel weekdays (array) als weekday (enkel getal, legacy)
+    const weekdays = body.weekdays ?? (body.weekday ? [body.weekday] : [1,2,3,4,5,6,7]);
     const saveRoutes = !!body.save_routes;
     const settings = { ...DEFAULT_SETTINGS, ...(body.settings || {}) };
 
-    if (!weekday) return Response.json({ error: 'weekday is verplicht (1=maandag, 7=zondag)' }, { status: 400 });
     const apiKey = Deno.env.get('GOOGLE_MAPS_API_KEY');
     if (!apiKey) return Response.json({ error: 'Google Maps API key niet geconfigureerd' }, { status: 500 });
 
-    const [tasks, objects, collectiefs, vehicles, offices, folders] = await Promise.all([
+    const [tasks, objects, collectiefs, vehicles, offices, folders, allRoutes] = await Promise.all([
       base44.entities.Task.list(),
       base44.entities.SurveillanceObject.list(),
       base44.entities.Collectief.list(),
       base44.entities.Vehicle.list(),
       base44.entities.Office.list(),
       base44.entities.RouteFolder.list(),
+      base44.entities.Route.list(),
     ]);
 
     const activeVehicles = vehicles.filter(v => v.is_active !== false);
     if (activeVehicles.length === 0) return Response.json({ error: 'Geen actieve voertuigen gevonden. Voeg voertuigen toe.' }, { status: 400 });
     if (offices.length === 0) return Response.json({ error: 'Geen depot/kantoor gevonden. Voeg eerst een kantoor toe bij instellingen.' }, { status: 400 });
 
-    const { instances, nonRelevant } = prepareTaskInstances(tasks, objects, collectiefs, weekday);
     const travelCache = new Map();
-    const manualRoutes = (await base44.entities.Route.list()).filter(route =>
-      (route.weekdays || []).includes(weekday) &&
-      (route.source || 'manual') === 'manual' &&
-      route.status !== 'vergrendeld' &&
-      route.time_window_start &&
-      route.time_window_end
-    );
+    const weekdayLabels = { 1: 'Maandag', 2: 'Dinsdag', 3: 'Woensdag', 4: 'Donderdag', 5: 'Vrijdag', 6: 'Zaterdag', 7: 'Zondag' };
 
-    const result = manualRoutes.length > 0
-      ? await fillExistingManualRoutesOptimizer(instances, manualRoutes, activeVehicles, objects, offices, apiKey, travelCache, weekday, settings)
-      : await runGlobalFleetOptimizer(instances, activeVehicles, offices, apiKey, travelCache, weekday, settings);
+    // Verwerk elke dag afzonderlijk en combineer resultaten
+    const allDayResults = [];
+    for (const weekday of weekdays) {
+      const { instances, nonRelevant } = prepareTaskInstances(tasks, objects, collectiefs, weekday);
+      const manualRoutes = allRoutes.filter(route =>
+        (route.weekdays || []).includes(weekday) &&
+        (route.source || 'manual') === 'manual' &&
+        route.status !== 'vergrendeld' &&
+        route.time_window_start &&
+        route.time_window_end
+      );
 
-    result.non_relevant_tasks = nonRelevant;
-    result.total_tasks_not_relevant = nonRelevant.length;
+      const dayResult = manualRoutes.length > 0
+        ? await fillExistingManualRoutesOptimizer(instances, manualRoutes, activeVehicles, objects, offices, apiKey, travelCache, weekday, settings)
+        : await runGlobalFleetOptimizer(instances, activeVehicles, offices, apiKey, travelCache, weekday, settings);
+
+      dayResult.non_relevant_tasks = nonRelevant;
+      dayResult.total_tasks_not_relevant = nonRelevant.length;
+      dayResult.weekday = weekday;
+      allDayResults.push(dayResult);
+    }
+
+    // Combineer resultaten van alle dagen
+    const combinedRoutes = allDayResults.flatMap(r => r.routes || []);
+    const combinedSkipped = allDayResults.flatMap(r => r.skipped_tasks || []);
+    const combinedNonRelevant = allDayResults.flatMap(r => r.non_relevant_tasks || []);
+    const combinedAdvice = allDayResults.flatMap(r => r.advice || []);
+    const combinedHorizons = allDayResults.flatMap(r => r.horizons || []);
+    const hasEstimatedTravel = allDayResults.some(r => r.has_estimated_travel);
+
+    const combinedTotals = {
+      total_travel_minutes: allDayResults.reduce((s, r) => s + (r.totals?.total_travel_minutes || 0), 0),
+      total_service_minutes: allDayResults.reduce((s, r) => s + (r.totals?.total_service_minutes || 0), 0),
+      total_wait_minutes: allDayResults.reduce((s, r) => s + (r.totals?.total_wait_minutes || 0), 0),
+      total_distance_km: r2(allDayResults.reduce((s, r) => s + (r.totals?.total_distance_km || 0), 0)),
+      total_cost: r2(allDayResults.reduce((s, r) => s + (r.totals?.total_cost || 0), 0)),
+    };
+
+    const result = {
+      planning_mode: allDayResults[0]?.planning_mode || 'automatic_day_night',
+      manual_routes_used: allDayResults.some(r => r.manual_routes_used),
+      routes: combinedRoutes,
+      skipped_tasks: combinedSkipped,
+      non_relevant_tasks: combinedNonRelevant,
+      advice: combinedAdvice,
+      horizons: combinedHorizons,
+      totals: combinedTotals,
+      vehicle_count: activeVehicles.length,
+      max_concurrent_routes: maxConcurrentRoutes(combinedRoutes),
+      total_tasks_input: allDayResults.reduce((s, r) => s + (r.total_tasks_input || 0), 0),
+      total_tasks_planned: allDayResults.reduce((s, r) => s + (r.total_tasks_planned || 0), 0),
+      total_tasks_skipped: combinedSkipped.length,
+      total_tasks_not_relevant: combinedNonRelevant.length,
+      total_routes_created: combinedRoutes.length,
+      has_estimated_travel: hasEstimatedTravel,
+      weekdays,
+      per_day: allDayResults.map(r => ({ weekday: r.weekday, label: weekdayLabels[r.weekday], routes: r.routes?.length || 0, planned: r.total_tasks_planned || 0, skipped: r.total_tasks_skipped || 0 })),
+    };
 
     if (saveRoutes && result.has_estimated_travel) {
       return Response.json({ error: 'Deze planning bevat geschatte reistijden. Controleer Google Maps/adressen voordat je definitief opslaat.', result }, { status: 409 });
     }
 
-    if (saveRoutes && result.planning_mode === 'manual_route_fill') {
-      for (const route of result.routes) {
-        if (route.validation && !route.validation.valid) continue;
-        await base44.asServiceRole.entities.Route.update(route.id, {
-          assigned_tasks: route.tasks.map(task => ({ task_id: task.task_id, days: [weekday] })),
-          total_service_minutes: route.stats.total_service_minutes,
-          total_distance_km: route.stats.total_distance_km,
-          total_route_minutes: route.stats.total_route_minutes,
-          status: 'geoptimaliseerd',
-          cached_optimization: {
-            optimized_order: route.tasks,
-            total_travel_time: route.stats.total_travel_minutes,
-            total_distance_km: route.stats.total_distance_km,
-            total_service_time: route.stats.total_service_minutes,
-            total_waiting_time: route.stats.total_wait_minutes,
-            total_route_time: route.stats.total_route_minutes,
-            route_cost: route.route_cost,
-            validation: route.validation,
-            source: 'manual_route_fill',
-            tasks_optimized: route.tasks.length,
-            tasks_skipped: 0,
-            skipped_tasks: [],
-          },
-          optimization_calculated_at: new Date().toISOString(),
-          optimization_hash: JSON.stringify({ taskIds: route.tasks.map(t => t.task_id), vehicleId: route.vehicle?.id, routeId: route.id, mode: result.planning_mode }),
-        });
-      }
-    } else if (saveRoutes && result.routes.length > 0) {
+    if (saveRoutes) {
       let folderId = folders[0]?.id;
       if (!folderId) {
         const newFolder = await base44.asServiceRole.entities.RouteFolder.create({ name: 'Automatisch gegenereerd', color: 'blue' });
         folderId = newFolder.id;
       }
-      const weekdayLabels = { 1: 'Maandag', 2: 'Dinsdag', 3: 'Woensdag', 4: 'Donderdag', 5: 'Vrijdag', 6: 'Zaterdag', 7: 'Zondag' };
-      for (let i = 0; i < result.routes.length; i++) {
-        const route = result.routes[i];
-        if (route.validation && !route.validation.valid) continue;
-        await base44.asServiceRole.entities.Route.create({
-          name: `${weekdayLabels[weekday]} - Auto route ${i + 1}${route.vehicle ? ` (${route.vehicle.license_plate || route.vehicle.name})` : ''}`,
-          folder_id: folderId,
-          vehicle_id: route.vehicle?.id || null,
-          time_window_start: route.time_window_start,
-          time_window_end: route.time_window_end,
-          weekdays: [weekday],
-          assigned_tasks: route.tasks.map(task => ({ task_id: task.task_id, days: [weekday] })),
-          total_service_minutes: route.stats.total_service_minutes,
-          total_distance_km: route.stats.total_distance_km,
-          total_route_minutes: route.stats.total_route_minutes,
-          cached_optimization: {
-            optimized_order: route.tasks,
-            total_travel_time: route.stats.total_travel_minutes,
-            total_distance_km: route.stats.total_distance_km,
-            total_service_time: route.stats.total_service_minutes,
-            total_waiting_time: route.stats.total_wait_minutes,
-            total_route_time: route.stats.total_route_minutes,
-            route_cost: route.route_cost,
-            validation: route.validation,
-            automatic_horizon: result.horizons.find(h => h.id === route.horizon_id),
-            tasks_optimized: route.tasks.length,
-            tasks_skipped: 0,
-            skipped_tasks: [],
-          },
-          optimization_calculated_at: new Date().toISOString(),
-          optimization_hash: JSON.stringify({ taskIds: route.tasks.map(t => t.task_id), vehicleId: route.vehicle?.id, horizonId: route.horizon_id, mode: result.planning_mode }),
-        });
+
+      for (const dayResult of allDayResults) {
+        const weekday = dayResult.weekday;
+        if (dayResult.planning_mode === 'manual_route_fill') {
+          for (const route of dayResult.routes) {
+            if (route.validation && !route.validation.valid) continue;
+            await base44.asServiceRole.entities.Route.update(route.id, {
+              assigned_tasks: route.tasks.map(task => ({ task_id: task.task_id, days: [weekday] })),
+              total_service_minutes: route.stats.total_service_minutes,
+              total_distance_km: route.stats.total_distance_km,
+              total_route_minutes: route.stats.total_route_minutes,
+              status: 'geoptimaliseerd',
+              cached_optimization: { optimized_order: route.tasks, route_cost: route.route_cost, validation: route.validation, source: 'manual_route_fill', tasks_optimized: route.tasks.length },
+              optimization_calculated_at: new Date().toISOString(),
+              optimization_hash: JSON.stringify({ taskIds: route.tasks.map(t => t.task_id), vehicleId: route.vehicle?.id, routeId: route.id }),
+            });
+          }
+        } else {
+          for (let i = 0; i < dayResult.routes.length; i++) {
+            const route = dayResult.routes[i];
+            if (route.validation && !route.validation.valid) continue;
+            await base44.asServiceRole.entities.Route.create({
+              name: `${weekdayLabels[weekday]} - Auto route ${i + 1}${route.vehicle ? ` (${route.vehicle.license_plate || route.vehicle.name})` : ''}`,
+              folder_id: folderId,
+              vehicle_id: route.vehicle?.id || null,
+              time_window_start: route.time_window_start,
+              time_window_end: route.time_window_end,
+              weekdays: [weekday],
+              assigned_tasks: route.tasks.map(task => ({ task_id: task.task_id, days: [weekday] })),
+              total_service_minutes: route.stats.total_service_minutes,
+              total_distance_km: route.stats.total_distance_km,
+              total_route_minutes: route.stats.total_route_minutes,
+              cached_optimization: { optimized_order: route.tasks, route_cost: route.route_cost, validation: route.validation, tasks_optimized: route.tasks.length },
+              optimization_calculated_at: new Date().toISOString(),
+              optimization_hash: JSON.stringify({ taskIds: route.tasks.map(t => t.task_id), vehicleId: route.vehicle?.id, horizonId: route.horizon_id }),
+            });
+          }
+        }
       }
     }
 
-    return Response.json({ ...result, weekday, generated_at: new Date().toISOString(), saved: saveRoutes });
+    return Response.json({ ...result, generated_at: new Date().toISOString(), saved: saveRoutes });
   } catch (error) {
     console.error('Fleet optimizer error:', error);
     return Response.json({ error: error.message }, { status: 500 });

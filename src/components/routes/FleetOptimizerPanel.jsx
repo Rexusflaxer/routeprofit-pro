@@ -22,7 +22,9 @@ function Metric({ label, value, tone = "slate" }) {
   );
 }
 
-export default function FleetOptimizerPanel({ activeDay, onRoutesCreated, onClose }) {
+const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
+
+export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
   const [error, setError] = useState(null);
@@ -36,7 +38,7 @@ export default function FleetOptimizerPanel({ activeDay, onRoutesCreated, onClos
     setResult(null);
     try {
       const res = await base44.functions.invoke('globalFleetOptimizer', {
-        weekday: activeDay,
+        weekdays: ALL_WEEKDAYS,
         save_routes: false,
       });
       setResult(res.data);
@@ -53,7 +55,7 @@ export default function FleetOptimizerPanel({ activeDay, onRoutesCreated, onClos
     setError(null);
     try {
       await base44.functions.invoke('globalFleetOptimizer', {
-        weekday: activeDay,
+        weekdays: ALL_WEEKDAYS,
         save_routes: true,
       });
       onRoutesCreated?.();
@@ -74,7 +76,7 @@ export default function FleetOptimizerPanel({ activeDay, onRoutesCreated, onClos
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base flex items-center gap-2 text-blue-900">
             <Zap className="w-5 h-5 text-blue-600" />
-            Automatische Vlootoptimalisatie — {WEEKDAY_LABELS[activeDay]}
+            Automatische Vlootoptimalisatie — Alle dagen
           </CardTitle>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
             <X className="w-4 h-4" />
