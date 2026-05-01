@@ -214,15 +214,8 @@ function buildPlanningVehicles(manualRoutes, activeVehicles, objects, offices) {
   });
 }
 
-function buildTaskTimeWindows(date, start, end, globalStart, globalEnd) {
-  const candidates = [
-    { start, end },
-    { start: start + 1440, end: end + 1440 },
-  ];
-
-  return candidates
-    .filter(window => window.end >= globalStart && window.start <= globalEnd)
-    .map(window => ({ startTime: isoForMinute(date, window.start), endTime: isoForMinute(date, window.end) }));
+function buildTaskTimeWindows(date, start, end) {
+  return [{ startTime: isoForMinute(date, start), endTime: isoForMinute(date, end) }];
 }
 
 function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) {
