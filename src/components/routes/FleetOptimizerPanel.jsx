@@ -58,8 +58,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
     setSaving(true);
     setError(null);
     try {
-      const functionName = result?.google_route_optimization ? 'googleRouteOptimization' : 'globalFleetOptimizer';
-      await base44.functions.invoke(functionName, {
+      await base44.functions.invoke('globalFleetOptimizer', {
         weekdays: planningDays,
         save_routes: true,
       });

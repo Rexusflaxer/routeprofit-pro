@@ -218,8 +218,8 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
         totalDistanceMeters += Number(transition.travelDistanceMeters || 0);
       }
 
-      const tasks = (route.visits || []).filter(visit => Number.isInteger(visit.shipmentIndex) && taskInstances[visit.shipmentIndex]?.task_id).map((visit, index) => {
-        const task = taskInstances[visit.shipmentIndex];
+      const tasks = route.visits.map((visit, index) => {
+        const task = taskInstances[visit.shipmentIndex] || {};
         plannedShipmentIndexes.add(visit.shipmentIndex);
         const transition = route.transitions?.[index] || {};
         const travelMinutes = Math.round(secondsFromDuration(transition.travelDuration || transition.totalDuration) / 60);
@@ -257,7 +257,6 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
       return {
         id: `google_route_${weekday}_${routeIndex + 1}`,
         candidate_id: `google_route_${weekday}_${routeIndex + 1}`,
-        weekday,
         vehicle,
         time_window_start: startTime,
         time_window_end: endTime,
@@ -330,12 +329,11 @@ Deno.serve(async (req) => {
     const serviceAccount = JSON.parse(serviceAccountJson);
     const accessToken = await getAccessToken(serviceAccount);
 
-    const [tasks, objects, vehicles, offices, folders] = await Promise.all([
+    const [tasks, objects, vehicles, offices] = await Promise.all([
       base44.entities.Task.list(),
       base44.entities.SurveillanceObject.list(),
       base44.entities.Vehicle.list(),
       base44.entities.Office.list(),
-      base44.entities.RouteFolder.list(),
     ]);
 
     const activeVehicles = vehicles.filter(v => v.is_active !== false);
@@ -375,41 +373,6 @@ Deno.serve(async (req) => {
       total_cost: r2(perDay.reduce((s, d) => s + (d.totals?.total_cost || 0), 0)),
     };
 
-    if (body.save_routes) {
-      let folderId = folders[0]?.id;
-      if (!folderId) {
-        const newFolder = await base44.asServiceRole.entities.RouteFolder.create({ name: 'Google optimalisatie', color: 'green' });
-        folderId = newFolder.id;
-      }
-
-      const weekdayLabels = { 1: 'Maandag', 2: 'Dinsdag', 3: 'Woensdag', 4: 'Donderdag', 5: 'Vrijdag', 6: 'Zaterdag', 7: 'Zondag' };
-      for (let i = 0; i < routes.length; i++) {
-        const route = routes[i];
-        const weekday = route.weekday || weekdays[0];
-        await base44.asServiceRole.entities.Route.create({
-          name: `${weekdayLabels[weekday] || 'Dag'} - Google route ${i + 1}${route.vehicle ? ` (${route.vehicle.license_plate || route.vehicle.name})` : ''}`,
-          folder_id: folderId,
-          vehicle_id: route.vehicle?.id || null,
-          time_window_start: route.time_window_start,
-          time_window_end: route.time_window_end,
-          weekdays: [weekday],
-          assigned_tasks: route.tasks.filter(task => task.task_id).map((task, index) => ({
-            task_id: task.task_id,
-            days: [weekday],
-            sequence_index: index,
-            locked_sequence: true,
-            planned_arrival_time: task.arrival_time,
-            planned_start_time: task.actual_start_time,
-            planned_departure_time: task.departure_time
-          })),
-          total_service_minutes: route.stats.total_service_minutes,
-          total_distance_km: route.stats.total_distance_km,
-          total_route_minutes: route.stats.total_route_minutes,
-          status: 'geoptimaliseerd',
-        });
-      }
-    }
-
     return Response.json({
       planning_mode: 'google_route_optimization',
       google_route_optimization: true,
@@ -430,7 +393,7 @@ Deno.serve(async (req) => {
       has_estimated_travel: false,
       weekdays,
       generated_at: new Date().toISOString(),
-      saved: !!body.save_routes,
+      saved: false,
     });
   } catch (error) {
     console.error('Google Route Optimization error:', error);
