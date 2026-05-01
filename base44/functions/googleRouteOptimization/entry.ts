@@ -151,9 +151,49 @@ function prepareTaskInstances(tasks, objects, weekday) {
   return { instances, nonRelevant, skipped };
 }
 
+function getLocationById(id, objects, offices) {
+  if (!id) return null;
+  return fixCoords(objects.find(o => o.id === id) || offices.find(o => o.id === id));
+}
+
+function buildPlanningVehicles(manualRoutes, activeVehicles, objects, offices) {
+  if (!manualRoutes.length) {
+    const depot = fixCoords(offices[0]);
+    return activeVehicles.map((vehicle, index) => ({
+      ...vehicle,
+      _planningLabel: vehicle.license_plate || vehicle.name || `Voertuig ${index + 1}`,
+      _startDepot: getLocationById(vehicle.startDepotLocationId, objects, offices) || depot,
+      _endDepot: getLocationById(vehicle.eindDepotLocationId, objects, offices) || getLocationById(vehicle.startDepotLocationId, objects, offices) || depot,
+      _windowStart: 0,
+      _windowEnd: 1439,
+      _manualRouteId: null,
+      _manualRouteName: null,
+    }));
+  }
+
+  return manualRoutes.map((route, index) => {
+    const vehicle = activeVehicles.find(v => v.id === route.vehicle_id) || activeVehicles[index % activeVehicles.length];
+    const depot = fixCoords(offices[0]);
+    const start = parseTime(route.time_window_start) ?? 0;
+    let end = parseTime(route.time_window_end) ?? 1439;
+    if (end <= start) end += 1440;
+    const startDepot = getLocationById(route.start_location_id || vehicle?.startDepotLocationId, objects, offices) || depot;
+    const endDepot = getLocationById(route.end_location_id || vehicle?.eindDepotLocationId, objects, offices) || startDepot;
+    return {
+      ...vehicle,
+      _planningLabel: route.name || vehicle?.license_plate || vehicle?.name || `Route ${index + 1}`,
+      _startDepot: startDepot,
+      _endDepot: endDepot,
+      _windowStart: start,
+      _windowEnd: end,
+      _manualRouteId: route.id,
+      _manualRouteName: route.name,
+    };
+  });
+}
+
 function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) {
   const date = dateForWeekday(weekday);
-  const depot = fixCoords(offices[0]);
   const shipments = taskInstances.map((task, index) => {
     const start = parseTime(task.time_window_start) ?? 0;
     let end = parseTime(task.time_window_end) ?? 1439;
@@ -169,28 +209,18 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
     };
   });
 
-  const allStarts = taskInstances.map(t => parseTime(t.time_window_start) ?? 0);
-  const allEnds = taskInstances.map(t => {
-    const start = parseTime(t.time_window_start) ?? 0;
-    let end = parseTime(t.time_window_end) ?? 1439;
-    return end <= start ? end + 1440 : end;
-  });
-  const globalStart = Math.max(0, Math.min(...allStarts, 0) - 120);
-  const globalEnd = Math.min(2880, Math.max(...allEnds, 1439) + 120);
+  const globalStart = Math.min(...vehicles.map(v => v._windowStart ?? 0));
+  const globalEnd = Math.max(...vehicles.map(v => v._windowEnd ?? 1439));
 
-  const googleVehicles = vehicles.map((vehicle, index) => {
-    const startDepot = fixCoords(objects.find(o => o.id === vehicle.startDepotLocationId)) || depot;
-    const endDepot = fixCoords(objects.find(o => o.id === vehicle.eindDepotLocationId)) || startDepot || depot;
-    return {
-      label: vehicle.license_plate || vehicle.name || `Voertuig ${index + 1}`,
-      startLocation: { latitude: startDepot.latitude, longitude: startDepot.longitude },
-      endLocation: { latitude: endDepot.latitude, longitude: endDepot.longitude },
-      startTimeWindows: [{ startTime: isoForMinute(date, globalStart), endTime: isoForMinute(date, globalEnd) }],
-      endTimeWindows: [{ startTime: isoForMinute(date, globalStart), endTime: isoForMinute(date, globalEnd) }],
-      costPerKilometer: Number(vehicle.kostenPerKm ?? vehicle.fuel_cost_per_km ?? 0.35),
-      costPerHour: Number(vehicle.kostenPerMinuutVoertuig ?? 0.12) * 60,
-    };
-  });
+  const googleVehicles = vehicles.map((vehicle, index) => ({
+    label: vehicle._planningLabel || vehicle.license_plate || vehicle.name || `Voertuig ${index + 1}`,
+    startLocation: { latitude: vehicle._startDepot.latitude, longitude: vehicle._startDepot.longitude },
+    endLocation: { latitude: vehicle._endDepot.latitude, longitude: vehicle._endDepot.longitude },
+    startTimeWindows: [{ startTime: isoForMinute(date, vehicle._windowStart ?? globalStart), endTime: isoForMinute(date, vehicle._windowEnd ?? globalEnd) }],
+    endTimeWindows: [{ startTime: isoForMinute(date, vehicle._windowStart ?? globalStart), endTime: isoForMinute(date, vehicle._windowEnd ?? globalEnd) }],
+    costPerKilometer: Number(vehicle.kostenPerKm ?? vehicle.fuel_cost_per_km ?? 0.35),
+    costPerHour: Number(vehicle.kostenPerMinuutVoertuig ?? 0.12) * 60,
+  }));
 
   return {
     model: {
@@ -255,8 +285,10 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
       const routeMinutes = Math.max(serviceMinutes + travelMinutes + waitMinutes, 0);
 
       return {
-        id: `google_route_${weekday}_${routeIndex + 1}`,
-        candidate_id: `google_route_${weekday}_${routeIndex + 1}`,
+        id: vehicle._manualRouteId || `google_route_${weekday}_${routeIndex + 1}`,
+        candidate_id: vehicle._manualRouteId || `google_route_${weekday}_${routeIndex + 1}`,
+        manual_route_id: vehicle._manualRouteId || null,
+        manual_route_name: vehicle._manualRouteName || null,
         vehicle,
         time_window_start: startTime,
         time_window_end: endTime,
@@ -296,7 +328,7 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
   return {
     planning_mode: 'google_route_optimization',
     google_route_optimization: true,
-    manual_routes_used: false,
+    manual_routes_used: routes.some(route => route.manual_route_id),
     routes,
     skipped_tasks: allSkipped,
     non_relevant_tasks: nonRelevant,
@@ -330,12 +362,13 @@ Deno.serve(async (req) => {
     const serviceAccount = JSON.parse(serviceAccountJson);
     const accessToken = await getAccessToken(serviceAccount);
 
-    const [tasks, objects, vehicles, offices, folders] = await Promise.all([
+    const [tasks, objects, vehicles, offices, folders, allRoutes] = await Promise.all([
       base44.entities.Task.list(),
       base44.entities.SurveillanceObject.list(),
       base44.entities.Vehicle.list(),
       base44.entities.Office.list(),
       base44.entities.RouteFolder.list(),
+      base44.entities.Route.list(),
     ]);
 
     const activeVehicles = vehicles.filter(v => v.is_active !== false);
@@ -345,12 +378,20 @@ Deno.serve(async (req) => {
     const perDay = [];
     for (const weekday of weekdays) {
       const { instances, nonRelevant, skipped } = prepareTaskInstances(tasks, objects, weekday);
+      const manualRoutes = allRoutes.filter(route =>
+        (route.weekdays || []).includes(weekday) &&
+        (route.source || 'manual') === 'manual' &&
+        route.status !== 'vergrendeld' &&
+        route.time_window_start &&
+        route.time_window_end
+      );
+      const planningVehicles = buildPlanningVehicles(manualRoutes, activeVehicles, objects, offices);
       if (instances.length === 0) {
-        perDay.push(mapGoogleResult({ routes: [], skippedShipments: [] }, instances, activeVehicles, skipped, nonRelevant, weekday));
+        perDay.push(mapGoogleResult({ routes: [], skippedShipments: [] }, instances, planningVehicles, skipped, nonRelevant, weekday));
         continue;
       }
 
-      const googleRequest = buildGoogleRequest(instances, activeVehicles, offices, objects, weekday);
+      const googleRequest = buildGoogleRequest(instances, planningVehicles, offices, objects, weekday);
       const response = await fetch(`https://routeoptimization.googleapis.com/v1/projects/${projectId}:optimizeTours`, {
         method: 'POST',
         headers: {
@@ -361,7 +402,7 @@ Deno.serve(async (req) => {
       });
       const apiResult = await response.json();
       if (!response.ok) throw new Error(apiResult.error?.message || 'Google Route Optimization API gaf een fout terug.');
-      perDay.push(mapGoogleResult(apiResult, instances, activeVehicles, skipped, nonRelevant, weekday));
+      perDay.push(mapGoogleResult(apiResult, instances, planningVehicles, skipped, nonRelevant, weekday));
     }
 
     const routes = perDay.flatMap(day => day.routes || []);
@@ -384,17 +425,15 @@ Deno.serve(async (req) => {
 
       const weekdayLabels = { 1: 'Maandag', 2: 'Dinsdag', 3: 'Woensdag', 4: 'Donderdag', 5: 'Vrijdag', 6: 'Zaterdag', 7: 'Zondag' };
       for (const weekday of weekdays) {
-        const dayRoutes = routes.filter(route => route.id?.startsWith(`google_route_${weekday}_`));
+        const dayRoutes = routes.filter(route => route.manual_route_id || route.id?.startsWith(`google_route_${weekday}_`));
         for (let i = 0; i < dayRoutes.length; i++) {
           const route = dayRoutes[i];
-          await base44.asServiceRole.entities.Route.create({
-            name: `${weekdayLabels[weekday]} - Google route ${i + 1}${route.vehicle ? ` (${route.vehicle.license_plate || route.vehicle.name})` : ''}`,
+          const routeData = {
             folder_id: folderId,
             vehicle_id: route.vehicle?.id || null,
             time_window_start: route.time_window_start,
             time_window_end: route.time_window_end,
             weekdays: [weekday],
-            source: 'automatic',
             assigned_tasks: route.tasks.map((task, index) => ({
               task_id: task.task_id,
               days: [weekday],
@@ -410,7 +449,17 @@ Deno.serve(async (req) => {
             status: 'geoptimaliseerd',
             cached_optimization: route,
             optimization_calculated_at: new Date().toISOString(),
-          });
+          };
+
+          if (route.manual_route_id) {
+            await base44.asServiceRole.entities.Route.update(route.manual_route_id, routeData);
+          } else {
+            await base44.asServiceRole.entities.Route.create({
+              ...routeData,
+              name: `${weekdayLabels[weekday]} - Google route ${i + 1}${route.vehicle ? ` (${route.vehicle.license_plate || route.vehicle.name})` : ''}`,
+              source: 'automatic',
+            });
+          }
         }
       }
     }
@@ -418,7 +467,7 @@ Deno.serve(async (req) => {
     return Response.json({
       planning_mode: 'google_route_optimization',
       google_route_optimization: true,
-      manual_routes_used: false,
+      manual_routes_used: routes.some(route => route.manual_route_id),
       routes,
       skipped_tasks: skippedTasks,
       non_relevant_tasks: nonRelevantTasks,
