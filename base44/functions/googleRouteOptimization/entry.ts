@@ -192,8 +192,28 @@ function buildPlanningVehicles(manualRoutes, activeVehicles, objects, offices) {
   });
 }
 
+function buildTaskTimeWindows(date, start, end, globalStart, globalEnd) {
+  const candidates = [
+    { start, end },
+    { start: start + 1440, end: end + 1440 },
+  ];
+
+  return candidates
+    .filter(window => window.end >= globalStart && window.start <= globalEnd)
+    .map(window => ({ startTime: isoForMinute(date, window.start), endTime: isoForMinute(date, window.end) }));
+}
+
 function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) {
   const date = dateForWeekday(weekday);
+  const shipmentStarts = taskInstances.map(task => parseTime(task.time_window_start) ?? 0);
+  const shipmentEnds = taskInstances.map(task => {
+    const start = parseTime(task.time_window_start) ?? 0;
+    let end = parseTime(task.time_window_end) ?? 1439;
+    return end <= start ? end + 1440 : end;
+  });
+  const globalStart = Math.min(...vehicles.map(v => v._windowStart ?? 0), ...shipmentStarts);
+  const globalEnd = Math.max(...vehicles.map(v => v._windowEnd ?? 1439), ...shipmentEnds, ...shipmentEnds.map(end => end + 1440));
+
   const shipments = taskInstances.map((task, index) => {
     const start = parseTime(task.time_window_start) ?? 0;
     let end = parseTime(task.time_window_end) ?? 1439;
@@ -204,19 +224,10 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
       deliveries: [{
         arrivalLocation: { latitude: task.latitude, longitude: task.longitude },
         duration: `${Math.max(1, task.duration_minutes || 1) * 60}s`,
-        timeWindows: [{ startTime: isoForMinute(date, start), endTime: isoForMinute(date, end) }],
+        timeWindows: buildTaskTimeWindows(date, start, end, globalStart, globalEnd),
       }],
     };
   });
-
-  const shipmentStarts = taskInstances.map(task => parseTime(task.time_window_start) ?? 0);
-  const shipmentEnds = taskInstances.map(task => {
-    const start = parseTime(task.time_window_start) ?? 0;
-    let end = parseTime(task.time_window_end) ?? 1439;
-    return end <= start ? end + 1440 : end;
-  });
-  const globalStart = Math.min(...vehicles.map(v => v._windowStart ?? 0), ...shipmentStarts);
-  const globalEnd = Math.max(...vehicles.map(v => v._windowEnd ?? 1439), ...shipmentEnds);
 
   const googleVehicles = vehicles.map((vehicle, index) => ({
     label: vehicle._planningLabel || vehicle.license_plate || vehicle.name || `Voertuig ${index + 1}`,
@@ -437,8 +448,6 @@ Deno.serve(async (req) => {
           const routeData = {
             folder_id: folderId,
             vehicle_id: route.vehicle?.id || null,
-            time_window_start: route.time_window_start,
-            time_window_end: route.time_window_end,
             weekdays: [weekday],
             assigned_tasks: route.tasks.map((task, index) => ({
               task_id: task.task_id,
@@ -463,6 +472,8 @@ Deno.serve(async (req) => {
             await base44.asServiceRole.entities.Route.create({
               ...routeData,
               name: `${weekdayLabels[weekday]} - Google route ${i + 1}${route.vehicle ? ` (${route.vehicle.license_plate || route.vehicle.name})` : ''}`,
+              time_window_start: route.time_window_start,
+              time_window_end: route.time_window_end,
               source: 'automatic',
             });
           }
