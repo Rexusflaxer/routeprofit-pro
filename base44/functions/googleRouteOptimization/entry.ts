@@ -506,7 +506,8 @@ Deno.serve(async (req) => {
     if (offices.length === 0) return Response.json({ error: 'Geen depot/kantoor gevonden.' }, { status: 400 });
 
     const perDay = [];
-    for (const weekday of weekdays) {
+    if (!plannedResult) {
+      for (const weekday of weekdays) {
       const { instances, nonRelevant, skipped } = prepareTaskInstances(tasks, objects, weekday);
       const manualRoutes = allRoutes.filter(route =>
         (route.weekdays || []).includes(weekday) &&
@@ -533,6 +534,7 @@ Deno.serve(async (req) => {
       const apiResult = await response.json();
       if (!response.ok) throw new Error(apiResult.error?.message || 'Google Route Optimization API gaf een fout terug.');
       perDay.push(mapGoogleResult(apiResult, instances, planningVehicles, skipped, nonRelevant, weekday));
+      }
     }
 
     const routes = plannedResult?.routes || perDay.flatMap(day => day.routes || []);
