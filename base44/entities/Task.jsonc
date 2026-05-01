@@ -43,6 +43,10 @@
       "type": "string",
       "description": "Uiterste aankomsttijd voor taken zoals Sluitbegeleiding of optionele Openingsronde (HH:MM)"
     },
+    "latest_departure_time": {
+      "type": "string",
+      "description": "Laatste vertrektijd voor taken met een minimale aankomsttijd (HH:MM)"
+    },
     "extra_time_windows": {
       "type": "array",
       "description": "Extra tijdvensters waarbinnen de taak (deels) uitgevoerd mag worden",

@@ -35,6 +35,7 @@ export default function CollectiefTaskForm({ task, collectief, objects, allColle
     time_window_end: task?.time_window_end || "",
     use_arrival_deadline: task?.use_arrival_deadline || false,
     arrival_deadline_time: task?.arrival_deadline_time || "",
+    latest_departure_time: task?.latest_departure_time || "",
     extra_time_windows: task?.extra_time_windows || [],
     allow_split: task?.allow_split || false,
     weekdays: task?.weekdays || [],
@@ -202,16 +203,27 @@ export default function CollectiefTaskForm({ task, collectief, objects, allColle
           )}
 
           {usesArrivalDeadline ? (
-            <div className="space-y-2">
-              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Aankomst vóór</Label>
-              <Input
-                type="time"
-                value={form.arrival_deadline_time || ""}
-                onChange={(e) => handleChange("arrival_deadline_time", e.target.value)}
-                required
-              />
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Aankomst vóór</Label>
+                <Input
+                  type="time"
+                  value={form.arrival_deadline_time || ""}
+                  onChange={(e) => handleChange("arrival_deadline_time", e.target.value)}
+                  required
+                />
+              </div>
+              <div className="space-y-2">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Laatste vertrek</Label>
+                <Input
+                  type="time"
+                  value={form.latest_departure_time || ""}
+                  onChange={(e) => handleChange("latest_departure_time", e.target.value)}
+                  required
+                />
+              </div>
               {form.task_type === "Sluitbegeleiding" && (
-                <p className="text-xs text-slate-500">Sluitbegeleiding gebruikt geen tijdsvenster; alleen een uiterste aankomsttijd.</p>
+                <p className="text-xs text-slate-500 md:col-span-2">Sluitbegeleiding gebruikt geen tijdsvenster; alleen aankomst vóór en laatste vertrek.</p>
               )}
             </div>
           ) : (

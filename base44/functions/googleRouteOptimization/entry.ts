@@ -97,13 +97,24 @@ function isoForMinute(date, minute) {
   return value.toISOString();
 }
 
+function formatMinute(minute) {
+  const wrapped = ((Math.round(minute) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(wrapped / 60)).padStart(2, '0')}:${String(wrapped % 60).padStart(2, '0')}`;
+}
+
 function getTaskTiming(task) {
   const useArrivalDeadline = task.task_type === 'Sluitbegeleiding' || (task.task_type === 'Openingsronde' && task.use_arrival_deadline && task.arrival_deadline_time);
+  const arrivalDeadline = parseTime(task.arrival_deadline_time) ?? 1439;
+  const latestDeparture = parseTime(task.latest_departure_time);
+  const deadlineEnd = latestDeparture !== null
+    ? Math.min(arrivalDeadline, Math.max(0, latestDeparture - (task.duration_minutes || 0)))
+    : arrivalDeadline;
   return {
     time_window_start: useArrivalDeadline ? '00:00' : (task.time_window_start || '00:00'),
-    time_window_end: useArrivalDeadline ? (task.arrival_deadline_time || '23:59') : (task.time_window_end || '23:59'),
+    time_window_end: useArrivalDeadline ? formatMinute(deadlineEnd) : (task.time_window_end || '23:59'),
     use_arrival_deadline: useArrivalDeadline,
     arrival_deadline_time: task.arrival_deadline_time || '',
+    latest_departure_time: task.latest_departure_time || '',
   };
 }
 
@@ -127,6 +138,7 @@ function prepareTaskInstances(tasks, objects, weekday) {
       time_window_end: timing.time_window_end,
       use_arrival_deadline: timing.use_arrival_deadline,
       arrival_deadline_time: timing.arrival_deadline_time,
+      latest_departure_time: timing.latest_departure_time,
       task_type: task.task_type,
       price_amount: task.is_free ? 0 : (task.price_amount || 0),
       pricing_type: task.pricing_type,
