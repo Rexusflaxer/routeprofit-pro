@@ -34,13 +34,14 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   const [showDebug, setShowDebug] = useState(false);
   const [planningDays, setPlanningDays] = useState(ALL_WEEKDAYS);
 
-  const runOptimizer = async (days = ALL_WEEKDAYS) => {
+  const runOptimizer = async (days = ALL_WEEKDAYS, engine = 'custom') => {
     setPlanningDays(days);
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const res = await base44.functions.invoke('globalFleetOptimizer', {
+      const functionName = engine === 'google' ? 'googleRouteOptimization' : 'globalFleetOptimizer';
+      const res = await base44.functions.invoke(functionName, {
         weekdays: days,
         save_routes: false,
       });
@@ -99,6 +100,10 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
           <Button onClick={() => runOptimizer(MONDAY_ONLY)} disabled={loading} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50">
             <Zap className="w-4 h-4 mr-1.5" />
             Alleen maandag
+          </Button>
+          <Button onClick={() => runOptimizer(ALL_WEEKDAYS, 'google')} disabled={loading} variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
+            <Zap className="w-4 h-4 mr-1.5" />
+            Google optimalisatie
           </Button>
           {result?.routes?.length > 0 && (
             <Button onClick={saveRoutes} disabled={saving || result.has_estimated_travel} variant="outline" className="border-green-300 text-green-700 hover:bg-green-50">
