@@ -31,6 +31,8 @@ export default function TaskForm({ task, onSave, onCancel }) {
     duration_minutes: 15,
     time_window_start: "",
     time_window_end: "",
+    repeat_count: 1,
+    min_minutes_between_visits: 0,
     use_arrival_deadline: false,
     arrival_deadline_time: "",
     weekdays: [],
@@ -59,6 +61,8 @@ export default function TaskForm({ task, onSave, onCancel }) {
     onSave({
       ...form,
       use_arrival_deadline: usesArrivalDeadline,
+      repeat_count: usesArrivalDeadline ? 1 : Math.max(1, Number(form.repeat_count || 1)),
+      min_minutes_between_visits: usesArrivalDeadline ? 0 : Math.max(0, Number(form.min_minutes_between_visits || 0)),
       time_window_start: usesArrivalDeadline ? "" : form.time_window_start,
       time_window_end: usesArrivalDeadline ? "" : form.time_window_end,
     });
@@ -142,6 +146,31 @@ export default function TaskForm({ task, onSave, onCancel }) {
                 <p className="text-xs text-blue-600">⏱ Eindtijd ligt na middernacht (volgende dag)</p>
               )}
             </div>
+          </div>
+        )}
+
+        {!usesArrivalDeadline && (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4 bg-white border border-slate-200 rounded-lg p-3">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Aantal uitvoeringen binnen dit venster</Label>
+              <Input
+                type="number"
+                min="1"
+                value={form.repeat_count || 1}
+                onChange={(e) => handleChange("repeat_count", Number(e.target.value) || 1)}
+              />
+            </div>
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Min. tijd ertussen (min)</Label>
+              <Input
+                type="number"
+                min="0"
+                value={form.min_minutes_between_visits || 0}
+                onChange={(e) => handleChange("min_minutes_between_visits", Number(e.target.value) || 0)}
+                disabled={Number(form.repeat_count || 1) <= 1}
+              />
+            </div>
+            <p className="md:col-span-2 text-xs text-slate-500">Voor bijvoorbeeld 2 nachtrondes kies je één ruim tijdvenster, aantal 2 en een minimale tussentijd.</p>
           </div>
         )}
 

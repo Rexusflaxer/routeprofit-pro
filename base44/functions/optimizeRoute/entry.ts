@@ -69,6 +69,27 @@ Deno.serve(async (req) => {
       };
     };
 
+    const buildRepeatWindows = (task, timing) => {
+      const repeatCount = Math.max(1, Math.floor(Number(task.repeat_count || 1)));
+      if (repeatCount === 1 || timing.use_arrival_deadline) return [{ start: timing.time_window_start, end: timing.time_window_end, index: 1 }];
+
+      const duration = Math.max(1, Number(task.duration_minutes || 1));
+      const minGap = Math.max(0, Number(task.min_minutes_between_visits || 0));
+      const start = parseTimeToMinutes(timing.time_window_start || '00:00');
+      let end = parseTimeToMinutes(timing.time_window_end || '23:59');
+      if (end <= start) end += 24 * 60;
+
+      const usable = end - start - (minGap * (repeatCount - 1));
+      if (usable < duration * repeatCount) return [{ start: timing.time_window_start, end: timing.time_window_end, index: 1 }];
+
+      const slotSize = usable / repeatCount;
+      return Array.from({ length: repeatCount }, (_, index) => {
+        const slotStart = start + index * (slotSize + minGap);
+        const slotEnd = index === repeatCount - 1 ? end : slotStart + slotSize;
+        return { start: formatMinutesToTime(slotStart), end: formatMinutesToTime(slotEnd), index: index + 1 };
+      });
+    };
+
     // Get start and end locations (kan object of kantoor zijn)
     const startLocation = route.start_location_id ? 
       fixCoords(allObjects.find(o => o.id === route.start_location_id) || allOffices.find(o => o.id === route.start_location_id)) : null;
@@ -92,25 +113,31 @@ Deno.serve(async (req) => {
           if (obj && obj.latitude && obj.longitude) {
             const assignedMeta = assignedTaskMetaById.get(task.id) || {};
             const timing = getTaskTiming(task);
-            taskObjects.push({
-              task_id: `${task.id}_${idx}`,
-              parent_task_id: task.id,
-              object_id: obj.id,
-              name: obj.name,
-              address: obj.address,
-              latitude: obj.latitude,
-              longitude: obj.longitude,
-              duration_minutes: durationPerObject,
-              time_window_start: timing.time_window_start,
-              time_window_end: timing.time_window_end,
-              use_arrival_deadline: timing.use_arrival_deadline,
-              arrival_deadline_time: timing.arrival_deadline_time,
-              task_type: task.task_type,
-              sequence_index: assignedMeta.sequence_index ?? idx,
-              locked_sequence: !!assignedMeta.locked_sequence,
-              planned_arrival_time: assignedMeta.planned_arrival_time,
-              planned_start_time: assignedMeta.planned_start_time,
-              planned_departure_time: assignedMeta.planned_departure_time
+            const repeatWindows = buildRepeatWindows(task, timing);
+            repeatWindows.forEach((repeatWindow) => {
+              taskObjects.push({
+                task_id: `${task.id}_${idx}${repeatWindows.length > 1 ? `_r${repeatWindow.index}` : ''}`,
+                parent_task_id: task.id,
+                object_id: obj.id,
+                name: repeatWindows.length > 1 ? `${obj.name} (${repeatWindow.index}/${repeatWindows.length})` : obj.name,
+                address: obj.address,
+                latitude: obj.latitude,
+                longitude: obj.longitude,
+                duration_minutes: durationPerObject,
+                time_window_start: repeatWindow.start,
+                time_window_end: repeatWindow.end,
+                use_arrival_deadline: timing.use_arrival_deadline,
+                arrival_deadline_time: timing.arrival_deadline_time,
+                task_type: task.task_type,
+                repeat_index: repeatWindow.index,
+                repeat_count: repeatWindows.length,
+                min_minutes_between_visits: task.min_minutes_between_visits || 0,
+                sequence_index: assignedMeta.sequence_index ?? idx,
+                locked_sequence: !!assignedMeta.locked_sequence,
+                planned_arrival_time: assignedMeta.planned_arrival_time,
+                planned_start_time: assignedMeta.planned_start_time,
+                planned_departure_time: assignedMeta.planned_departure_time
+              });
             });
           }
         });
@@ -121,25 +148,31 @@ Deno.serve(async (req) => {
         if (obj && obj.latitude && obj.longitude) {
         const assignedMeta = assignedTaskMetaById.get(task.id) || {};
         const timing = getTaskTiming(task);
-        taskObjects.push({
-          task_id: task.id,
-          object_id: obj.id,
-          name: obj.name,
-          address: obj.address,
-          latitude: obj.latitude,
-          longitude: obj.longitude,
-          duration_minutes: task.duration_minutes || 0,
-          time_window_start: timing.time_window_start,
-          time_window_end: timing.time_window_end,
-          use_arrival_deadline: timing.use_arrival_deadline,
-          arrival_deadline_time: timing.arrival_deadline_time,
-          latest_departure_time: timing.latest_departure_time,
-          task_type: task.task_type,
-          sequence_index: assignedMeta.sequence_index,
-          locked_sequence: !!assignedMeta.locked_sequence,
-          planned_arrival_time: assignedMeta.planned_arrival_time,
-          planned_start_time: assignedMeta.planned_start_time,
-          planned_departure_time: assignedMeta.planned_departure_time
+        const repeatWindows = buildRepeatWindows(task, timing);
+        repeatWindows.forEach((repeatWindow) => {
+          taskObjects.push({
+            task_id: `${task.id}${repeatWindows.length > 1 ? `_r${repeatWindow.index}` : ''}`,
+            object_id: obj.id,
+            name: repeatWindows.length > 1 ? `${obj.name} (${repeatWindow.index}/${repeatWindows.length})` : obj.name,
+            address: obj.address,
+            latitude: obj.latitude,
+            longitude: obj.longitude,
+            duration_minutes: task.duration_minutes || 0,
+            time_window_start: repeatWindow.start,
+            time_window_end: repeatWindow.end,
+            use_arrival_deadline: timing.use_arrival_deadline,
+            arrival_deadline_time: timing.arrival_deadline_time,
+            latest_departure_time: timing.latest_departure_time,
+            task_type: task.task_type,
+            repeat_index: repeatWindow.index,
+            repeat_count: repeatWindows.length,
+            min_minutes_between_visits: task.min_minutes_between_visits || 0,
+            sequence_index: assignedMeta.sequence_index,
+            locked_sequence: !!assignedMeta.locked_sequence,
+            planned_arrival_time: assignedMeta.planned_arrival_time,
+            planned_start_time: assignedMeta.planned_start_time,
+            planned_departure_time: assignedMeta.planned_departure_time
+          });
         });
         }
       }

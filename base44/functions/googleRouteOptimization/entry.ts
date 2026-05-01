@@ -111,8 +111,36 @@ function getTaskTiming(task) {
     time_window_end: useArrivalDeadline ? formatMinute(departureDeadline) : (task.time_window_end || '23:59'),
     use_arrival_deadline: useArrivalDeadline,
     arrival_deadline_time: task.arrival_deadline_time || '',
-
   };
+}
+
+function buildRepeatWindows(task, timing) {
+  const repeatCount = Math.max(1, Math.floor(Number(task.repeat_count || 1)));
+  if (repeatCount === 1 || timing.use_arrival_deadline) return [{ start: timing.time_window_start, end: timing.time_window_end, index: 1 }];
+
+  const duration = Math.max(1, Number(task.duration_minutes || 1));
+  const minGap = Math.max(0, Number(task.min_minutes_between_visits || 0));
+  const start = parseTime(timing.time_window_start) ?? 0;
+  let end = parseTime(timing.time_window_end) ?? 1439;
+  if (end <= start) end += 1440;
+
+  const usable = end - start - (minGap * (repeatCount - 1));
+  if (usable < duration * repeatCount) return [{ start: timing.time_window_start, end: timing.time_window_end, index: 1 }];
+
+  const slotSize = usable / repeatCount;
+  return Array.from({ length: repeatCount }, (_, index) => {
+    const slotStart = start + index * (slotSize + minGap);
+    const slotEnd = index === repeatCount - 1 ? end : slotStart + slotSize;
+    return { start: formatMinute(slotStart), end: formatMinute(slotEnd), index: index + 1 };
+  });
+}
+
+function explainSkippedTask(task, code = '') {
+  const repeatText = task.repeat_count > 1 ? ` Dit is uitvoering ${task.repeat_index || 1} van ${task.repeat_count}; herhaalde uitvoeringen moeten minimaal ${task.min_minutes_between_visits || 0} minuten uit elkaar blijven.` : '';
+  if (task.primaryReason === 'missing_coordinates') return { reason: 'De gekoppelde locatie heeft geen bruikbare coördinaten.', advice: 'Vul de coördinaten of het adres van dit object aan.' };
+  if (task.primaryReason === 'missing_object') return { reason: 'Deze taak heeft geen gekoppeld object.', advice: 'Koppel de taak aan een object of collectief.' };
+  if (code === 'CANNOT_BE_PERFORMED_WITHIN_VEHICLE_TIME_WINDOWS') return { reason: `De taak past niet binnen de beschikbare route- of voertuigvensters, inclusief reistijd en bestaande taken.${repeatText}`, advice: 'Vergroot het routevenster, voeg voertuigcapaciteit toe, verruim het taakvenster of verlaag de minimale tussentijd bij herhaalde taken.' };
+  return { reason: `Google kon deze taak niet combineren met de gekozen routes, tijdvensters en reistijden.${repeatText}`, advice: 'Controleer of het taakvenster binnen een route valt en of er voldoende ruimte is inclusief reistijd.' };
 }
 
 function prepareTaskInstances(tasks, objects, weekday) {
@@ -128,11 +156,10 @@ function prepareTaskInstances(tasks, objects, weekday) {
     }
 
     const timing = getTaskTiming(task);
+    const repeatWindows = buildRepeatWindows(task, timing);
     const base = {
       task_id: task.id,
       duration_minutes: task.duration_minutes || 15,
-      time_window_start: timing.time_window_start,
-      time_window_end: timing.time_window_end,
       use_arrival_deadline: timing.use_arrival_deadline,
       arrival_deadline_time: timing.arrival_deadline_time,
       latest_departure_time: timing.latest_departure_time,
@@ -140,23 +167,34 @@ function prepareTaskInstances(tasks, objects, weekday) {
       price_amount: task.is_free ? 0 : (task.price_amount || 0),
       pricing_type: task.pricing_type,
       weekdays: days,
+      repeat_count: repeatWindows.length,
+      min_minutes_between_visits: task.min_minutes_between_visits || 0,
     };
 
     const addInstance = (objectId, idSuffix = '') => {
       const obj = fixCoords(objects.find(o => o.id === objectId));
-      if (!obj?.latitude || !obj?.longitude) {
-        skipped.push({ ...base, id: `${task.id}${idSuffix}`, task_id: task.id, name: obj?.name || task.task_type || 'Onbekend object', primaryReason: 'missing_coordinates', skip_reason: 'Ontbrekende coördinaten bij het object.' });
-        return;
+      for (const repeatWindow of repeatWindows) {
+        const repeatSuffix = repeatWindows.length > 1 ? `_r${repeatWindow.index}` : '';
+        const instanceBase = {
+          ...base,
+          time_window_start: repeatWindow.start,
+          time_window_end: repeatWindow.end,
+          repeat_index: repeatWindow.index,
+        };
+        if (!obj?.latitude || !obj?.longitude) {
+          skipped.push({ ...instanceBase, id: `${task.id}${idSuffix}${repeatSuffix}`, task_id: task.id, name: obj?.name || task.task_type || 'Onbekend object', primaryReason: 'missing_coordinates', skip_reason: 'Ontbrekende coördinaten bij het object.' });
+          return;
+        }
+        instances.push({
+          ...instanceBase,
+          id: `${task.id}${idSuffix}${repeatSuffix}`,
+          object_id: objectId,
+          name: repeatWindows.length > 1 ? `${obj.name || task.task_type || 'Taak'} (${repeatWindow.index}/${repeatWindows.length})` : (obj.name || task.task_type || 'Taak'),
+          address: obj.address || '',
+          latitude: obj.latitude,
+          longitude: obj.longitude,
+        });
       }
-      instances.push({
-        ...base,
-        id: `${task.id}${idSuffix}`,
-        object_id: objectId,
-        name: obj.name || task.task_type || 'Taak',
-        address: obj.address || '',
-        latitude: obj.latitude,
-        longitude: obj.longitude,
-      });
     };
 
     if (task.collectief_id && task.selected_object_ids?.length > 0) {
@@ -310,6 +348,9 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
           time_window_start: task.time_window_start,
           time_window_end: task.time_window_end,
           task_type: task.task_type,
+          repeat_index: task.repeat_index,
+          repeat_count: task.repeat_count,
+          min_minutes_between_visits: task.min_minutes_between_visits,
           arrival_time: startTime,
           actual_start_time: startTime,
           departure_time: `${String(Math.floor((departureMinute % 1440) / 60)).padStart(2, '0')}:${String(departureMinute % 60).padStart(2, '0')}`,
@@ -324,6 +365,25 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
 
       const startTime = formatTimeFromIso(route.vehicleStartTime || route.routeStartTime || tasks[0]?.actual_start_time);
       const endTime = formatTimeFromIso(route.vehicleEndTime || route.routeEndTime || tasks[tasks.length - 1]?.departure_time);
+      const optimizedOrder = [
+        ...(vehicle._startDepot ? [{
+          name: `START: ${vehicle._startDepot.name || 'Startlocatie'}`,
+          address: vehicle._startDepot.address || '',
+          duration_minutes: 0,
+          is_start: true,
+          arrival_time: startTime,
+          departure_time: startTime,
+        }] : []),
+        ...tasks,
+        ...(vehicle._endDepot ? [{
+          name: `EIND: ${vehicle._endDepot.name || 'Eindlocatie'}`,
+          address: vehicle._endDepot.address || '',
+          duration_minutes: 0,
+          is_end: true,
+          arrival_time: endTime,
+          departure_time: endTime,
+        }] : []),
+      ];
       const serviceMinutes = tasks.reduce((sum, task) => sum + (task.duration_minutes || 0), 0);
       const travelMinutes = Math.round(totalTravelSeconds / 60);
       const waitMinutes = Math.round(totalWaitSeconds / 60);
@@ -340,7 +400,7 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
         route_cost: r2(Number(route.routeCosts?.modelCost || route.metrics?.costs?.modelCost || 0)),
         validation: { valid: true, errors: [] },
         tasks,
-        optimized_order: tasks,
+        optimized_order: optimizedOrder,
         total_route_time: routeMinutes,
         total_travel_time: travelMinutes,
         total_service_time: serviceMinutes,
@@ -360,12 +420,17 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
 
   const googleSkipped = (apiResult.skippedShipments || []).map(item => {
     const task = taskInstances[item.index] || {};
-    return { ...task, primaryReason: 'google_skipped', skip_reason: item.reasons?.[0]?.code || 'Niet ingepland door Google Route Optimization.' };
+    const code = item.reasons?.[0]?.code || '';
+    const details = explainSkippedTask({ ...task, primaryReason: 'google_skipped' }, code);
+    return { ...task, primaryReason: 'Niet ingepland', skip_reason: details.reason, google_code: code, advice: details.advice };
   });
 
   const notVisited = taskInstances
     .filter(task => !plannedShipmentIndexes.has(task._shipmentIndex) && !googleSkipped.some(s => s._shipmentIndex === task._shipmentIndex))
-    .map(task => ({ ...task, primaryReason: 'not_planned', skip_reason: 'Niet teruggevonden in de Google planning.' }));
+    .map(task => {
+      const details = explainSkippedTask({ ...task, primaryReason: 'not_planned' });
+      return { ...task, primaryReason: 'Niet ingepland', skip_reason: details.reason, advice: details.advice };
+    });
 
   const allSkipped = [...skipped, ...googleSkipped, ...notVisited];
   const totals = {

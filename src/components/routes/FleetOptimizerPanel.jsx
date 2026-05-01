@@ -307,8 +307,8 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
                       <div className="flex-1 min-w-0">
                         <p className="text-sm font-medium text-slate-800">{task.name}</p>
                         <p className="text-xs text-slate-500">{task.time_window_start} – {task.time_window_end} · {task.duration_minutes} min</p>
-                        <p className="text-xs text-amber-700 mt-0.5">{task.primaryReason}: {task.skip_reason}</p>
-                        {task.advice && <p className="text-xs text-slate-500 mt-0.5">Advies: {task.advice}</p>}
+                        <p className="text-xs text-amber-700 mt-0.5"><strong>Uitleg:</strong> {task.skip_reason}</p>
+                        {task.advice && <p className="text-xs text-slate-500 mt-0.5"><strong>Advies:</strong> {task.advice}</p>}
                       </div>
                     </div>
                   ))}
