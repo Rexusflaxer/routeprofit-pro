@@ -18,7 +18,8 @@
         "Externe Sluitronde",
         "Brand- en Sluitronde",
         "Openingsronde",
-        "Sluitbegeleiding"
+        "Sluitbegeleiding",
+        "Grote collectief"
       ],
       "description": "Type taak"
     },
@@ -76,6 +77,11 @@
       "type": "boolean",
       "description": "Taak mag in meerdere delen worden uitgevoerd binnen het tijdvenster",
       "default": false
+    },
+    "split_part_count": {
+      "type": "number",
+      "description": "Aantal delen waarin een splitsbare taak mag worden ingepland",
+      "default": 1
     },
     "weekdays": {
       "type": "array",

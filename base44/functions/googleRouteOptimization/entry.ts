@@ -177,6 +177,10 @@ function buildTargetedAdvice(task, vehicles) {
     return `Er is maar weinig overlap met ${tightRoute.label}. Verruim het taakvenster of maak deze route minimaal 15 minuten langer.${repeatText}`;
   }
 
+  if (task.allow_split) {
+    return `Deze taak mag in delen worden gepland. Vergroot eventueel het tijdvenster of verhoog het aantal delen als Google nog geen passende combinatie vindt.`;
+  }
+
   if (task.repeat_count > 1) {
     return `Verruim het taakvenster of verlaag de minimale tussentijd tussen de herhalingen; de herhalingen gebruiken nu hetzelfde volledige venster maar moeten wel ${task.min_minutes_between_visits || 0} minuten uit elkaar blijven.`;
   }
@@ -219,31 +223,43 @@ function prepareTaskInstances(tasks, objects, weekday) {
       weekdays: days,
       repeat_count: repeatWindows.length,
       min_minutes_between_visits: task.min_minutes_between_visits || 0,
+      allow_split: !!task.allow_split,
+      split_part_count: task.allow_split ? Math.max(2, Math.floor(Number(task.split_part_count || 2))) : 1,
     };
 
     const addInstance = (objectId, idSuffix = '') => {
       const obj = fixCoords(objects.find(o => o.id === objectId));
       for (const repeatWindow of repeatWindows) {
         const repeatSuffix = repeatWindows.length > 1 ? `_r${repeatWindow.index}` : '';
-        const instanceBase = {
-          ...base,
-          time_window_start: repeatWindow.start,
-          time_window_end: repeatWindow.end,
-          repeat_index: repeatWindow.index,
-        };
-        if (!obj?.latitude || !obj?.longitude) {
-          skipped.push({ ...instanceBase, id: `${task.id}${idSuffix}${repeatSuffix}`, task_id: task.id, name: obj?.name || task.task_type || 'Onbekend object', primaryReason: 'missing_coordinates', skip_reason: 'Ontbrekende coördinaten bij het object.' });
-          return;
+        const splitCount = base.allow_split ? base.split_part_count : 1;
+        const splitDuration = Math.max(1, Math.ceil((task.duration_minutes || 15) / splitCount));
+        for (let splitIndex = 1; splitIndex <= splitCount; splitIndex++) {
+          const splitSuffix = splitCount > 1 ? `_p${splitIndex}` : '';
+          const instanceBase = {
+            ...base,
+            duration_minutes: splitCount > 1 ? splitDuration : base.duration_minutes,
+            time_window_start: repeatWindow.start,
+            time_window_end: repeatWindow.end,
+            repeat_index: repeatWindow.index,
+            split_index: splitIndex,
+            split_part_count: splitCount,
+          };
+          if (!obj?.latitude || !obj?.longitude) {
+            skipped.push({ ...instanceBase, id: `${task.id}${idSuffix}${repeatSuffix}${splitSuffix}`, task_id: task.id, name: obj?.name || task.task_type || 'Onbekend object', primaryReason: 'missing_coordinates', skip_reason: 'Ontbrekende coördinaten bij het object.' });
+            return;
+          }
+          instances.push({
+            ...instanceBase,
+            id: `${task.id}${idSuffix}${repeatSuffix}${splitSuffix}`,
+            object_id: objectId,
+            name: splitCount > 1
+              ? `${obj.name || task.task_type || 'Taak'} (deel ${splitIndex}/${splitCount})`
+              : (repeatWindows.length > 1 ? `${obj.name || task.task_type || 'Taak'} (${repeatWindow.index}/${repeatWindows.length})` : (obj.name || task.task_type || 'Taak')),
+            address: obj.address || '',
+            latitude: obj.latitude,
+            longitude: obj.longitude,
+          });
         }
-        instances.push({
-          ...instanceBase,
-          id: `${task.id}${idSuffix}${repeatSuffix}`,
-          object_id: objectId,
-          name: repeatWindows.length > 1 ? `${obj.name || task.task_type || 'Taak'} (${repeatWindow.index}/${repeatWindows.length})` : (obj.name || task.task_type || 'Taak'),
-          address: obj.address || '',
-          latitude: obj.latitude,
-          longitude: obj.longitude,
-        });
       }
     };
 
@@ -424,6 +440,9 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
           repeat_index: task.repeat_index,
           repeat_count: task.repeat_count,
           min_minutes_between_visits: task.min_minutes_between_visits,
+          allow_split: task.allow_split,
+          split_index: task.split_index,
+          split_part_count: task.split_part_count,
           arrival_time: startTime,
           actual_start_time: startTime,
           departure_time: `${String(Math.floor((departureMinute % 1440) / 60)).padStart(2, '0')}:${String(departureMinute % 60).padStart(2, '0')}`,

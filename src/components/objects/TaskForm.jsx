@@ -12,7 +12,8 @@ const TASK_TYPES = [
   "Externe Sluitronde",
   "Brand- en Sluitronde",
   "Openingsronde",
-  "Sluitbegeleiding"
+  "Sluitbegeleiding",
+  "Grote collectief"
 ];
 
 const WEEKDAYS = [
@@ -35,6 +36,8 @@ export default function TaskForm({ task, onSave, onCancel }) {
     min_minutes_between_visits: 0,
     use_arrival_deadline: false,
     arrival_deadline_time: "",
+    allow_split: false,
+    split_part_count: 2,
     weekdays: [],
     pricing_type: "per_taak",
     price_amount: 0,
@@ -65,6 +68,8 @@ export default function TaskForm({ task, onSave, onCancel }) {
       min_minutes_between_visits: usesArrivalDeadline ? 0 : Math.max(0, Number(form.min_minutes_between_visits || 0)),
       time_window_start: usesArrivalDeadline ? "" : form.time_window_start,
       time_window_end: usesArrivalDeadline ? "" : form.time_window_end,
+      allow_split: usesArrivalDeadline ? false : form.allow_split,
+      split_part_count: usesArrivalDeadline || !form.allow_split ? 1 : Math.max(2, Number(form.split_part_count || 2)),
     });
   };
 
@@ -171,6 +176,28 @@ export default function TaskForm({ task, onSave, onCancel }) {
               />
             </div>
             <p className="md:col-span-2 text-xs text-slate-500">Voor bijvoorbeeld 2 nachtrondes kies je één ruim tijdvenster, aantal 2 en een minimale tussentijd.</p>
+          </div>
+        )}
+
+        {!usesArrivalDeadline && (
+          <div className="space-y-3 bg-white border border-slate-200 rounded-lg px-4 py-3">
+            <div className="flex items-start gap-3">
+              <Checkbox
+                checked={!!form.allow_split}
+                onCheckedChange={(v) => handleChange("allow_split", v)}
+                className="mt-0.5"
+              />
+              <div>
+                <p className="text-sm font-medium text-slate-800">Taak mag in meerdere delen worden uitgevoerd</p>
+                <p className="text-xs text-slate-500 mt-0.5">Google mag deze taak als losse deelbezoeken binnen hetzelfde tijdvenster plannen.</p>
+              </div>
+            </div>
+            {form.allow_split && (
+              <div className="max-w-xs space-y-1.5 pl-7">
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Aantal delen</Label>
+                <Input type="number" min="2" value={form.split_part_count || 2} onChange={(e) => handleChange("split_part_count", Number(e.target.value) || 2)} />
+              </div>
+            )}
           </div>
         )}
 
