@@ -265,8 +265,11 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
         totalDistanceMeters += Number(transition.travelDistanceMeters || 0);
       }
 
-      const tasks = route.visits.map((visit, index) => {
-        const task = taskInstances[visit.shipmentIndex] || {};
+      const tasks = (route.visits || [])
+        .map((visit, index) => ({ visit, index }))
+        .filter(({ visit }) => Number.isInteger(visit.shipmentIndex) && taskInstances[visit.shipmentIndex]?.task_id)
+        .map(({ visit, index }) => {
+        const task = taskInstances[visit.shipmentIndex];
         plannedShipmentIndexes.add(visit.shipmentIndex);
         const transition = route.transitions?.[index] || {};
         const travelMinutes = Math.round(secondsFromDuration(transition.travelDuration || transition.totalDuration) / 60);
@@ -449,15 +452,17 @@ Deno.serve(async (req) => {
             folder_id: folderId,
             vehicle_id: route.vehicle?.id || null,
             weekdays: [weekday],
-            assigned_tasks: route.tasks.map((task, index) => ({
-              task_id: task.task_id,
-              days: [weekday],
-              sequence_index: index,
-              locked_sequence: true,
-              planned_arrival_time: task.arrival_time,
-              planned_start_time: task.actual_start_time,
-              planned_departure_time: task.departure_time,
-            })),
+            assigned_tasks: route.tasks
+              .filter(task => task.task_id)
+              .map((task, index) => ({
+                task_id: task.task_id,
+                days: [weekday],
+                sequence_index: index,
+                locked_sequence: true,
+                planned_arrival_time: task.arrival_time,
+                planned_start_time: task.actual_start_time,
+                planned_departure_time: task.departure_time,
+              })),
             total_service_minutes: route.stats.total_service_minutes,
             total_distance_km: route.stats.total_distance_km,
             total_route_minutes: route.stats.total_route_minutes,
