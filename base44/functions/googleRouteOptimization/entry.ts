@@ -254,7 +254,10 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
   const routes = (apiResult.routes || [])
     .filter(route => route.visits?.length > 0)
     .map((route, routeIndex) => {
-      const vehicle = vehicles[route.vehicleIndex] || {};
+      const vehicleIndex = Number.isInteger(route.vehicleIndex)
+        ? route.vehicleIndex
+        : vehicles.findIndex(vehicle => vehicle._planningLabel === route.vehicleLabel || vehicle._planningLabel === route.label);
+      const vehicle = vehicles[vehicleIndex] || {};
       let totalTravelSeconds = 0;
       let totalWaitSeconds = 0;
       let totalDistanceMeters = 0;
