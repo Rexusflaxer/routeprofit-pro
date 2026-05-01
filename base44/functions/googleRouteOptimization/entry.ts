@@ -148,12 +148,61 @@ function buildRepeatWindows(task, timing) {
   });
 }
 
-function explainSkippedTask(task, code = '') {
+function buildTargetedAdvice(task, vehicles) {
+  const repeatText = task.repeat_count > 1
+    ? ` Omdat deze taak ${task.repeat_count} keer moet worden uitgevoerd, kun je ook de minimale tussentijd verlagen of het totale taakvenster verruimen.`
+    : '';
+  const taskStart = parseTime(task.time_window_start) ?? 0;
+  let taskEnd = parseTime(task.time_window_end) ?? 1439;
+  if (taskEnd <= taskStart) taskEnd += 1440;
+
+  const windows = vehicles.map(vehicle => ({
+    label: vehicle._planningLabel || vehicle.license_plate || vehicle.name || 'route',
+    start: vehicle._windowStart ?? 0,
+    end: vehicle._windowEnd ?? 1439,
+  }));
+
+  const overlapping = windows.filter(window => window.end > taskStart && window.start < taskEnd);
+  if (!overlapping.length) {
+    const nearestBefore = windows
+      .filter(window => window.start > taskStart)
+      .sort((a, b) => a.start - b.start)[0];
+    const nearestAfter = windows
+      .filter(window => window.end < taskEnd)
+      .sort((a, b) => b.end - a.end)[0];
+
+    if (nearestBefore) {
+      const minutes = Math.ceil((nearestBefore.start - taskStart) / 5) * 5;
+      return `Laat ${nearestBefore.label} ongeveer ${minutes} minuten eerder beginnen, of verruim het taakvenster naar later.${repeatText}`;
+    }
+    if (nearestAfter) {
+      const minutes = Math.ceil((taskEnd - nearestAfter.end) / 5) * 5;
+      return `Laat ${nearestAfter.label} ongeveer ${minutes} minuten later eindigen, of verruim het taakvenster naar eerder.${repeatText}`;
+    }
+  }
+
+  const tightRoute = overlapping
+    .map(window => ({ ...window, overlap: Math.min(window.end, taskEnd) - Math.max(window.start, taskStart) }))
+    .sort((a, b) => b.overlap - a.overlap)[0];
+
+  if (tightRoute && tightRoute.overlap < (Number(task.duration_minutes || 0) + 20)) {
+    return `Er is maar weinig overlap met ${tightRoute.label}. Verruim het taakvenster of maak deze route minimaal 15 minuten langer.${repeatText}`;
+  }
+
+  if (task.repeat_count > 1) {
+    return `Verruim het taakvenster of verlaag de minimale tussentijd tussen de herhalingen; de huidige herhaalregels maken de planning krap.`;
+  }
+
+  return `Maak het taakvenster ruimer of verleng een route die dit tijdblok raakt met ongeveer 15 minuten.`;
+}
+
+function explainSkippedTask(task, code = '', vehicles = []) {
   const repeatText = task.repeat_count > 1 ? ` Dit is uitvoering ${task.repeat_index || 1} van ${task.repeat_count}; herhaalde uitvoeringen moeten minimaal ${task.min_minutes_between_visits || 0} minuten uit elkaar blijven.` : '';
   if (task.primaryReason === 'missing_coordinates') return { reason: 'De gekoppelde locatie heeft geen bruikbare coördinaten.', advice: 'Vul de coördinaten of het adres van dit object aan.' };
   if (task.primaryReason === 'missing_object') return { reason: 'Deze taak heeft geen gekoppeld object.', advice: 'Koppel de taak aan een object of collectief.' };
-  if (code === 'CANNOT_BE_PERFORMED_WITHIN_VEHICLE_TIME_WINDOWS') return { reason: `De taak past niet binnen de beschikbare route- of voertuigvensters, inclusief reistijd en bestaande taken.${repeatText}`, advice: 'Vergroot het routevenster, voeg voertuigcapaciteit toe, verruim het taakvenster of verlaag de minimale tussentijd bij herhaalde taken.' };
-  return { reason: `Google kon deze taak niet combineren met de gekozen routes, tijdvensters en reistijden.${repeatText}`, advice: 'Controleer of het taakvenster binnen een route valt en of er voldoende ruimte is inclusief reistijd.' };
+  const advice = buildTargetedAdvice(task, vehicles);
+  if (code === 'CANNOT_BE_PERFORMED_WITHIN_VEHICLE_TIME_WINDOWS') return { reason: `De taak past niet binnen de beschikbare route- of voertuigvensters, inclusief reistijd en bestaande taken.${repeatText}`, advice };
+  return { reason: `Google kon deze taak niet combineren met de gekozen routes, tijdvensters en reistijden.${repeatText}`, advice };
 }
 
 function prepareTaskInstances(tasks, objects, weekday) {
@@ -434,14 +483,14 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
   const googleSkipped = (apiResult.skippedShipments || []).map(item => {
     const task = taskInstances[item.index] || {};
     const code = item.reasons?.[0]?.code || '';
-    const details = explainSkippedTask({ ...task, primaryReason: 'google_skipped' }, code);
+    const details = explainSkippedTask({ ...task, primaryReason: 'google_skipped' }, code, vehicles);
     return { ...task, primaryReason: 'Niet ingepland', skip_reason: details.reason, google_code: code, advice: details.advice };
   });
 
   const notVisited = taskInstances
     .filter(task => !plannedShipmentIndexes.has(task._shipmentIndex) && !googleSkipped.some(s => s._shipmentIndex === task._shipmentIndex))
     .map(task => {
-      const details = explainSkippedTask({ ...task, primaryReason: 'not_planned' });
+      const details = explainSkippedTask({ ...task, primaryReason: 'not_planned' }, '', vehicles);
       return { ...task, primaryReason: 'Niet ingepland', skip_reason: details.reason, advice: details.advice };
     });
 
