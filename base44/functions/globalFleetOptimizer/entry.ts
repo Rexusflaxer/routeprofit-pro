@@ -18,6 +18,11 @@ const DEFAULT_SETTINGS = {
   minSavingsRequiredForNewRoute: 180,
   depotTravelRequired: true,
   extensionCostMultiplier: 1.2,
+  areaJumpPenalty: 45,
+  areaSpreadPenalty: 75,
+  outOfDominantAreaPenalty: 35,
+  areaRevisitPenalty: 100,
+  duplicateAreaDeploymentPenalty: 300,
 };
 
 function parseTime(timeStr) {
@@ -217,6 +222,47 @@ function distanceClusterKey(task) {
   return `${Math.round(task.latitude * 100) / 100}_${Math.round(task.longitude * 100) / 100}`;
 }
 
+function getTaskAreaKey(task) {
+  const text = `${task.name || ''} ${task.address || ''}`.toLowerCase();
+  const knownAreas = ['kampen', 'zwolle', 'hattem', 'heerde', 'wapenveld', 'wezep', 'ijsselmuiden'];
+  const matched = knownAreas.find(area => text.includes(area));
+  if (matched) return matched;
+  if (Number.isFinite(Number(task.latitude)) && Number.isFinite(Number(task.longitude))) return distanceClusterKey(task);
+  return 'onbekend';
+}
+
+function calculateRouteAreaPenalty(route, settings) {
+  const keys = (route.tasks || []).map(getTaskAreaKey).filter(Boolean);
+  if (keys.length <= 1) return 0;
+
+  const counts = keys.reduce((acc, key) => ({ ...acc, [key]: (acc[key] || 0) + 1 }), {});
+  const dominantCount = Math.max(...Object.values(counts));
+  const uniqueCount = Object.keys(counts).length;
+  const jumps = keys.slice(1).reduce((sum, key, index) => sum + (key !== keys[index] ? 1 : 0), 0);
+  const revisits = keys.reduce((sum, key, index) => sum + (index > 1 && key === keys[index - 2] && key !== keys[index - 1] ? 1 : 0), 0);
+
+  return r2(
+    jumps * settings.areaJumpPenalty +
+    Math.max(0, uniqueCount - 1) * settings.areaSpreadPenalty +
+    Math.max(0, keys.length - dominantCount) * settings.outOfDominantAreaPenalty +
+    revisits * settings.areaRevisitPenalty
+  );
+}
+
+function calculateFleetAreaPenalty(routes, settings) {
+  let penalty = 0;
+  for (let i = 0; i < routes.length; i++) {
+    for (let j = i + 1; j < routes.length; j++) {
+      if (!overlaps(routes[i].route_start_minute, routes[i].route_end_minute, routes[j].route_start_minute, routes[j].route_end_minute)) continue;
+      const leftAreas = new Set((routes[i].tasks || []).map(getTaskAreaKey));
+      const rightAreas = new Set((routes[j].tasks || []).map(getTaskAreaKey));
+      const sharedAreas = [...leftAreas].filter(area => area !== 'onbekend' && rightAreas.has(area));
+      penalty += sharedAreas.length * settings.duplicateAreaDeploymentPenalty;
+    }
+  }
+  return r2(penalty);
+}
+
 function prepareTaskInstances(tasks, objects, collectiefs, weekday) {
   const instances = [];
   const nonRelevant = [];
@@ -376,7 +422,8 @@ function calculateRouteCost(route, settings) {
     route.stats.total_route_minutes * perVehicleMinute +
     route.stats.total_distance_km * perKm +
     fixed +
-    route.stats.total_wait_minutes * settings.waitingCostFactor
+    route.stats.total_wait_minutes * settings.waitingCostFactor +
+    calculateRouteAreaPenalty(route, settings)
   );
 }
 
@@ -457,9 +504,9 @@ async function optimizeHorizonTasks(tasks, horizon, vehicles, depot, apiKey, tra
         const candidateRoutes = routes.map(r => r.id === route.id ? { ...r, ...scheduled, id: r.id, depot, horizon_id: horizon.id } : r);
         const assignment = assignVehicles(candidateRoutes, vehicles);
         if (!assignment.feasible) continue;
-        const oldCost = calculateRouteCost(route, settings);
+        const oldCost = calculateRouteCost(route, settings) + calculateFleetAreaPenalty(routes, settings);
         const newRoute = assignment.routes.find(r => r.id === route.id);
-        const score = calculateRouteCost(newRoute, settings) - oldCost;
+        const score = calculateRouteCost(newRoute, settings) + calculateFleetAreaPenalty(assignment.routes, settings) - oldCost;
         if (!best || score < best.score) best = { type: 'insert', routeId: route.id, route: newRoute, routes: assignment.routes, score, pos };
       }
     }
@@ -470,7 +517,7 @@ async function optimizeHorizonTasks(tasks, horizon, vehicles, depot, apiKey, tra
       const assignment = assignVehicles([...routes, newRoute], vehicles);
       if (assignment.feasible) {
         const assignedNewRoute = assignment.routes.find(r => r.id === newRoute.id);
-        const score = calculateRouteCost(assignedNewRoute, settings) + 12;
+        const score = calculateRouteCost(assignedNewRoute, settings) + calculateFleetAreaPenalty(assignment.routes, settings) + 12;
         if (!best || score < best.score) best = { type: 'new_route', route: assignedNewRoute, routes: assignment.routes, score, pos: 0 };
       }
     }
@@ -678,7 +725,8 @@ function calculateManualRouteVariableScore(route, settings) {
   return r2(
     route.stats.total_travel_minutes * perVehicleMinute +
     route.stats.total_distance_km * perKm +
-    route.stats.total_wait_minutes * settings.waitingCostFactor
+    route.stats.total_wait_minutes * settings.waitingCostFactor +
+    calculateRouteAreaPenalty(route, settings)
   );
 }
 
@@ -707,10 +755,11 @@ async function improveManualRouteAssignments(routeStates, apiKey, travelCache, s
             const scheduledTo = await scheduleSequenceInManualWindow(toSequence, toRoute, apiKey, travelCache, settings);
             if (!scheduledFrom || !scheduledTo) continue;
 
-            const currentScore = calculateManualRouteVariableScore(fromRoute, settings) + calculateManualRouteVariableScore(toRoute, settings);
+            const currentScore = routeStates.reduce((sum, route) => sum + calculateManualRouteVariableScore(route, settings), 0) + calculateFleetAreaPenalty(routeStates, settings);
             const candidateFrom = { ...fromRoute, ...scheduledFrom, tasks: scheduledFrom.tasks };
             const candidateTo = { ...toRoute, ...scheduledTo, tasks: scheduledTo.tasks };
-            const candidateScore = calculateManualRouteVariableScore(candidateFrom, settings) + calculateManualRouteVariableScore(candidateTo, settings);
+            const candidateRoutes = routeStates.map((route, index) => index === fromIndex ? candidateFrom : index === toIndex ? candidateTo : route);
+            const candidateScore = candidateRoutes.reduce((sum, route) => sum + calculateManualRouteVariableScore(route, settings), 0) + calculateFleetAreaPenalty(candidateRoutes, settings);
 
             if (candidateScore + 0.5 < currentScore) {
               routeStates[fromIndex] = candidateFrom;
@@ -776,9 +825,10 @@ async function fillExistingManualRoutesOptimizer(taskInstances, manualRoutes, ve
           attempts.push({ route: route.name, position: pos, feasible: false, reason: 'tijdvenster, depotrit of route-eindtijd past niet' });
           continue;
         }
-        const previousCost = calculateManualRouteVariableScore(route, settings);
+        const previousCost = routeStates.reduce((sum, currentRoute) => sum + calculateManualRouteVariableScore(currentRoute, settings), 0) + calculateFleetAreaPenalty(routeStates, settings);
         const candidate = { ...route, ...scheduled, tasks: scheduled.tasks };
-        const extraCost = calculateManualRouteVariableScore(candidate, settings) - previousCost;
+        const candidateRoutes = routeStates.map(currentRoute => currentRoute.id === route.id ? candidate : currentRoute);
+        const extraCost = candidateRoutes.reduce((sum, currentRoute) => sum + calculateManualRouteVariableScore(currentRoute, settings), 0) + calculateFleetAreaPenalty(candidateRoutes, settings) - previousCost;
         const extraTravel = scheduled.stats.total_travel_minutes - (route.stats?.total_travel_minutes || 0);
         const extraDistance = scheduled.stats.total_distance_km - (route.stats?.total_distance_km || 0);
         const extraWait = scheduled.stats.total_wait_minutes - (route.stats?.total_wait_minutes || 0);
