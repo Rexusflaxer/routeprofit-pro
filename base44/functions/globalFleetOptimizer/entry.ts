@@ -1169,16 +1169,14 @@ Deno.serve(async (req) => {
               total_distance_km: route.stats.total_distance_km,
               total_route_minutes: route.stats.total_route_minutes,
               status: 'geoptimaliseerd',
-              cached_optimization: { optimized_order: route.tasks, route_cost: route.route_cost, validation: route.validation, source: 'manual_route_fill', tasks_optimized: route.tasks.length },
-              optimization_calculated_at: new Date().toISOString(),
-              optimization_hash: JSON.stringify({ taskIds: route.tasks.map(t => t.task_id), vehicleId: route.vehicle?.id, routeId: route.id }),
             });
+            await base44.functions.invoke('optimizeRoute', { route_id: route.id, force_recalculate: true });
           }
         } else {
           for (let i = 0; i < dayResult.routes.length; i++) {
             const route = dayResult.routes[i];
             if (route.validation && !route.validation.valid) continue;
-            await base44.asServiceRole.entities.Route.create({
+            const createdRoute = await base44.asServiceRole.entities.Route.create({
               name: `${weekdayLabels[weekday]} - Auto route ${i + 1}${route.vehicle ? ` (${route.vehicle.license_plate || route.vehicle.name})` : ''}`,
               folder_id: folderId,
               vehicle_id: route.vehicle?.id || null,
@@ -1189,10 +1187,9 @@ Deno.serve(async (req) => {
               total_service_minutes: route.stats.total_service_minutes,
               total_distance_km: route.stats.total_distance_km,
               total_route_minutes: route.stats.total_route_minutes,
-              cached_optimization: { optimized_order: route.tasks, route_cost: route.route_cost, validation: route.validation, tasks_optimized: route.tasks.length },
-              optimization_calculated_at: new Date().toISOString(),
-              optimization_hash: JSON.stringify({ taskIds: route.tasks.map(t => t.task_id), vehicleId: route.vehicle?.id, horizonId: route.horizon_id }),
+              status: 'geoptimaliseerd',
             });
+            await base44.functions.invoke('optimizeRoute', { route_id: createdRoute.id, force_recalculate: true });
           }
         }
       }
