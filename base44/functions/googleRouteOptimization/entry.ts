@@ -209,8 +209,14 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
     };
   });
 
-  const globalStart = Math.min(...vehicles.map(v => v._windowStart ?? 0));
-  const globalEnd = Math.max(...vehicles.map(v => v._windowEnd ?? 1439));
+  const shipmentStarts = taskInstances.map(task => parseTime(task.time_window_start) ?? 0);
+  const shipmentEnds = taskInstances.map(task => {
+    const start = parseTime(task.time_window_start) ?? 0;
+    let end = parseTime(task.time_window_end) ?? 1439;
+    return end <= start ? end + 1440 : end;
+  });
+  const globalStart = Math.min(...vehicles.map(v => v._windowStart ?? 0), ...shipmentStarts);
+  const globalEnd = Math.max(...vehicles.map(v => v._windowEnd ?? 1439), ...shipmentEnds);
 
   const googleVehicles = vehicles.map((vehicle, index) => ({
     label: vehicle._planningLabel || vehicle.license_plate || vehicle.name || `Voertuig ${index + 1}`,
