@@ -21,6 +21,12 @@ export default function ObjectTable({ objects, onEdit, onDelete }) {
     return allTasks.filter(t => t.object_id === objectId).length;
   };
 
+  const getExecutionCount = (objectId) => {
+    return allTasks
+      .filter(t => t.object_id === objectId)
+      .reduce((sum, task) => sum + Math.max(1, Number(task.repeat_count || 1)), 0);
+  };
+
   // Direct object tasks + collectief tasks where this object is selected
   const getCollectiefTasks = (objectId) => {
     return allTasks.filter(t => t.collectief_id && (t.selected_object_ids || []).includes(objectId));
@@ -46,6 +52,7 @@ export default function ObjectTable({ objects, onEdit, onDelete }) {
           {objects.map((obj) => {
             const collectief = getCollectief(obj.id);
             const directTaskCount = getTaskCount(obj.id);
+            const directExecutionCount = getExecutionCount(obj.id);
             const collectiefTasks = getCollectiefTasks(obj.id);
             return (
               <TableRow key={obj.id} className="hover:bg-slate-50/50 transition-colors">
@@ -74,6 +81,11 @@ export default function ObjectTable({ objects, onEdit, onDelete }) {
                     {directTaskCount > 0 && (
                       <Badge variant="secondary" className="bg-amber-50 text-amber-700 border border-amber-200 text-xs w-fit">
                         {directTaskCount} {directTaskCount === 1 ? 'eigen taak' : 'eigen taken'}
+                      </Badge>
+                    )}
+                    {directExecutionCount > directTaskCount && (
+                      <Badge variant="secondary" className="bg-orange-50 text-orange-700 border border-orange-200 text-xs w-fit">
+                        {directExecutionCount} uitvoeringen totaal
                       </Badge>
                     )}
                     {collectiefTasks.length > 0 && (

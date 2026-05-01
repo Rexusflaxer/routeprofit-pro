@@ -126,6 +126,11 @@ export default function TaskList({ objectId }) {
                   <Layers className="w-3.5 h-3.5 text-blue-500 flex-shrink-0" />
                   <span className="text-xs text-blue-700 font-medium">{getCollectiefName(task.collectief_id)}</span>
                   <Badge variant="secondary" className="bg-blue-100 text-blue-800 text-xs">{task.task_type}</Badge>
+                  {Number(task.repeat_count || 1) > 1 && (
+                    <Badge className="text-xs bg-amber-50 text-amber-700 border border-amber-200">
+                      {task.repeat_count}x binnen venster
+                    </Badge>
+                  )}
                   <span className="text-xs text-slate-500">{task.duration_minutes} min</span>
                   {task.is_free ? (
                     <Badge className="text-xs bg-green-50 text-green-700 border border-green-200">
@@ -157,6 +162,11 @@ export default function TaskList({ objectId }) {
                       <Badge variant="secondary" className="text-xs font-medium bg-slate-100 text-slate-800">
                         {task.task_type}
                       </Badge>
+                      {Number(task.repeat_count || 1) > 1 && (
+                        <Badge className="text-xs bg-amber-50 text-amber-700 border border-amber-200">
+                          {task.repeat_count}x binnen venster
+                        </Badge>
+                      )}
                       {task.is_free ? (
                         <Badge className="text-xs bg-green-50 text-green-700 border border-green-200">
                           Service
