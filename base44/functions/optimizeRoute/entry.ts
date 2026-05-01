@@ -63,10 +63,9 @@ Deno.serve(async (req) => {
       }
       return {
         time_window_start: task.arrival_deadline_time || '00:00',
-        time_window_end: task.latest_departure_time || task.arrival_deadline_time || '23:59',
+        time_window_end: formatMinutesToTime((parseTimeToMinutes(task.arrival_deadline_time || '00:00') + (task.duration_minutes || 0))),
         use_arrival_deadline: true,
         arrival_deadline_time: task.arrival_deadline_time || '',
-        latest_departure_time: task.latest_departure_time || '',
       };
     };
 
@@ -106,7 +105,6 @@ Deno.serve(async (req) => {
               time_window_end: timing.time_window_end,
               use_arrival_deadline: timing.use_arrival_deadline,
               arrival_deadline_time: timing.arrival_deadline_time,
-              latest_departure_time: timing.latest_departure_time,
               task_type: task.task_type,
               sequence_index: assignedMeta.sequence_index ?? idx,
               locked_sequence: !!assignedMeta.locked_sequence,

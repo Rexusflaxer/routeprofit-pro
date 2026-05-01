@@ -105,14 +105,13 @@ function formatMinute(minute) {
 function getTaskTiming(task) {
   const useArrivalDeadline = task.task_type === 'Sluitbegeleiding' || (task.task_type === 'Openingsronde' && task.use_arrival_deadline && task.arrival_deadline_time);
   const arrivalDeadline = parseTime(task.arrival_deadline_time) ?? 1439;
-  const latestDeparture = parseTime(task.latest_departure_time);
-  const departureDeadline = latestDeparture ?? arrivalDeadline;
+  const departureDeadline = arrivalDeadline + (task.duration_minutes || 0);
   return {
     time_window_start: useArrivalDeadline ? formatMinute(arrivalDeadline) : (task.time_window_start || '00:00'),
     time_window_end: useArrivalDeadline ? formatMinute(departureDeadline) : (task.time_window_end || '23:59'),
     use_arrival_deadline: useArrivalDeadline,
     arrival_deadline_time: task.arrival_deadline_time || '',
-    latest_departure_time: task.latest_departure_time || '',
+
   };
 }
 
