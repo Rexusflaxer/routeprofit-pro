@@ -318,6 +318,12 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
         route_cost: r2(Number(route.routeCosts?.modelCost || route.metrics?.costs?.modelCost || 0)),
         validation: { valid: true, errors: [] },
         tasks,
+        optimized_order: tasks,
+        total_route_time: routeMinutes,
+        total_travel_time: travelMinutes,
+        total_service_time: serviceMinutes,
+        total_distance_km: r2(totalDistanceMeters / 1000),
+        tasks_skipped: 0,
         stats: {
           total_tasks: tasks.length,
           total_service_minutes: serviceMinutes,
