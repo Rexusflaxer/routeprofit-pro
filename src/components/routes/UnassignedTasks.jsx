@@ -27,33 +27,39 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
   };
 
   const unassignedTasks = useMemo(() => {
-    // Verzamel welke taken op welke dagen al zijn toegewezen
+    // Verzamel hoeveel uitvoeringen per taak per dag al zijn toegewezen
     const taskDayUsage = {};
     
     routes.forEach(route => {
       (route.assigned_tasks || []).forEach(at => {
         if (!taskDayUsage[at.task_id]) {
-          taskDayUsage[at.task_id] = [];
+          taskDayUsage[at.task_id] = {};
         }
         (at.days || []).forEach(day => {
-          if (!taskDayUsage[at.task_id].includes(day)) {
-            taskDayUsage[at.task_id].push(day);
-          }
+          taskDayUsage[at.task_id][day] = (taskDayUsage[at.task_id][day] || 0) + 1;
         });
       });
     });
 
-    // Filter taken die nog niet volledig zijn toegewezen
+    // Filter taken die nog niet volledig zijn toegewezen, inclusief herhalingen
     return tasks
       .map(task => {
         const taskWeekdays = task.weekdays || [];
-        const usedDays = taskDayUsage[task.id] || [];
-        const availableDays = taskWeekdays.filter(d => !usedDays.includes(d));
+        const requiredPerDay = Math.max(1, Number(task.repeat_count || 1));
+        const assignedByDay = taskDayUsage[task.id] || {};
+        const missingByDay = Object.fromEntries(
+          taskWeekdays.map(day => [day, Math.max(0, requiredPerDay - (assignedByDay[day] || 0))])
+        );
+        const availableDays = taskWeekdays.filter(day => missingByDay[day] > 0);
+        const usedDays = taskWeekdays.filter(day => (assignedByDay[day] || 0) > 0);
         
         return {
           ...task,
           availableDays,
           usedDays,
+          assignedByDay,
+          missingByDay,
+          requiredPerDay,
           isFullyAssigned: availableDays.length === 0 && taskWeekdays.length > 0
         };
       })
@@ -228,7 +234,7 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
                         <div className="flex gap-1">
                           {task.availableDays.map(d => (
                             <Badge key={d} className="text-[10px] bg-amber-100 text-amber-800 px-1.5 py-0">
-                              {WEEKDAYS.find(w => w.value === d)?.label}
+                              {WEEKDAYS.find(w => w.value === d)?.label}{task.missingByDay?.[d] > 1 ? ` (${task.missingByDay[d]}x)` : ''}
                             </Badge>
                           ))}
                         </div>
@@ -240,7 +246,7 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
                         <div className="flex gap-1">
                           {task.usedDays.map(d => (
                             <Badge key={d} className="text-[10px] bg-green-100 text-green-800 px-1.5 py-0">
-                              {WEEKDAYS.find(w => w.value === d)?.label}
+                              {WEEKDAYS.find(w => w.value === d)?.label}{task.requiredPerDay > 1 ? ` (${task.assignedByDay?.[d] || 0}/${task.requiredPerDay})` : ''}
                             </Badge>
                           ))}
                         </div>
