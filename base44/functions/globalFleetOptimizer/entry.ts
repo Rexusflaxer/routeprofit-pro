@@ -313,12 +313,10 @@ function getTaskTiming(task) {
   const useArrivalDeadline = task.task_type === 'Sluitbegeleiding' || (task.task_type === 'Openingsronde' && task.use_arrival_deadline && task.arrival_deadline_time);
   const arrivalDeadline = parseTime(task.arrival_deadline_time) ?? 1439;
   const latestDeparture = parseTime(task.latest_departure_time);
-  const deadlineEnd = latestDeparture !== null
-    ? Math.min(arrivalDeadline, Math.max(0, latestDeparture - (task.duration_minutes || 0)))
-    : arrivalDeadline;
+  const departureDeadline = latestDeparture ?? arrivalDeadline;
   return {
-    time_window_start: useArrivalDeadline ? '00:00' : (task.time_window_start || '00:00'),
-    time_window_end: useArrivalDeadline ? formatTime(deadlineEnd) : (task.time_window_end || '23:59'),
+    time_window_start: useArrivalDeadline ? formatTime(arrivalDeadline) : (task.time_window_start || '00:00'),
+    time_window_end: useArrivalDeadline ? formatTime(departureDeadline) : (task.time_window_end || '23:59'),
     use_arrival_deadline: useArrivalDeadline,
     arrival_deadline_time: task.arrival_deadline_time || '',
     latest_departure_time: task.latest_departure_time || '',
@@ -421,6 +419,7 @@ async function scheduleSequence(sequence, depot, horizon, apiKey, travelCache, s
     const departure = start + (task.duration_minutes || 0);
 
     if (start < window.start) return null;
+    if (task.use_arrival_deadline && arrival > window.start) return null;
     if (settings.finishWithinTimeWindow && departure > window.end) return null;
     if (!settings.finishWithinTimeWindow && start > window.end) return null;
     if (departure > horizon.end_minute) return null;
@@ -683,6 +682,7 @@ async function scheduleSequenceInManualWindow(sequence, routeState, apiKey, trav
     const start = Math.max(arrival, window.start);
     const departure = start + (task.duration_minutes || 0);
 
+    if (task.use_arrival_deadline && arrival > window.start) return null;
     if (settings.finishWithinTimeWindow && departure > window.end) return null;
     if (!settings.finishWithinTimeWindow && start > window.end) return null;
     if (departure > horizon.end_minute) return null;

@@ -106,12 +106,10 @@ function getTaskTiming(task) {
   const useArrivalDeadline = task.task_type === 'Sluitbegeleiding' || (task.task_type === 'Openingsronde' && task.use_arrival_deadline && task.arrival_deadline_time);
   const arrivalDeadline = parseTime(task.arrival_deadline_time) ?? 1439;
   const latestDeparture = parseTime(task.latest_departure_time);
-  const deadlineEnd = latestDeparture !== null
-    ? Math.min(arrivalDeadline, Math.max(0, latestDeparture - (task.duration_minutes || 0)))
-    : arrivalDeadline;
+  const departureDeadline = latestDeparture ?? arrivalDeadline;
   return {
-    time_window_start: useArrivalDeadline ? '00:00' : (task.time_window_start || '00:00'),
-    time_window_end: useArrivalDeadline ? formatMinute(deadlineEnd) : (task.time_window_end || '23:59'),
+    time_window_start: useArrivalDeadline ? formatMinute(arrivalDeadline) : (task.time_window_start || '00:00'),
+    time_window_end: useArrivalDeadline ? formatMinute(departureDeadline) : (task.time_window_end || '23:59'),
     use_arrival_deadline: useArrivalDeadline,
     arrival_deadline_time: task.arrival_deadline_time || '',
     latest_departure_time: task.latest_departure_time || '',
@@ -241,7 +239,7 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
 
   const shipments = taskInstances.map((task, index) => {
     const start = parseTime(task.time_window_start) ?? 0;
-    let end = parseTime(task.time_window_end) ?? 1439;
+    let end = task.use_arrival_deadline ? start : (parseTime(task.time_window_end) ?? 1439);
     if (end <= start) end += 1440;
     task._shipmentIndex = index;
     return {

@@ -52,6 +52,24 @@ Deno.serve(async (req) => {
       return obj;
     };
 
+    const getTaskTiming = (task) => {
+      const useArrivalDeadline = task.task_type === 'Sluitbegeleiding' || (task.task_type === 'Openingsronde' && task.use_arrival_deadline && task.arrival_deadline_time);
+      if (!useArrivalDeadline) {
+        return {
+          time_window_start: task.time_window_start || route.time_window_start || '00:00',
+          time_window_end: task.time_window_end || route.time_window_end || '23:59',
+          use_arrival_deadline: false,
+        };
+      }
+      return {
+        time_window_start: task.arrival_deadline_time || '00:00',
+        time_window_end: task.latest_departure_time || task.arrival_deadline_time || '23:59',
+        use_arrival_deadline: true,
+        arrival_deadline_time: task.arrival_deadline_time || '',
+        latest_departure_time: task.latest_departure_time || '',
+      };
+    };
+
     // Get start and end locations (kan object of kantoor zijn)
     const startLocation = route.start_location_id ? 
       fixCoords(allObjects.find(o => o.id === route.start_location_id) || allOffices.find(o => o.id === route.start_location_id)) : null;
@@ -74,6 +92,7 @@ Deno.serve(async (req) => {
           const obj = rawObj ? fixCoords(rawObj) : null;
           if (obj && obj.latitude && obj.longitude) {
             const assignedMeta = assignedTaskMetaById.get(task.id) || {};
+            const timing = getTaskTiming(task);
             taskObjects.push({
               task_id: `${task.id}_${idx}`,
               parent_task_id: task.id,
@@ -83,8 +102,11 @@ Deno.serve(async (req) => {
               latitude: obj.latitude,
               longitude: obj.longitude,
               duration_minutes: durationPerObject,
-              time_window_start: task.time_window_start || route.time_window_start || '00:00',
-              time_window_end: task.time_window_end || route.time_window_end || '23:59',
+              time_window_start: timing.time_window_start,
+              time_window_end: timing.time_window_end,
+              use_arrival_deadline: timing.use_arrival_deadline,
+              arrival_deadline_time: timing.arrival_deadline_time,
+              latest_departure_time: timing.latest_departure_time,
               task_type: task.task_type,
               sequence_index: assignedMeta.sequence_index ?? idx,
               locked_sequence: !!assignedMeta.locked_sequence,
@@ -100,6 +122,7 @@ Deno.serve(async (req) => {
         const obj = rawObj ? fixCoords(rawObj) : null;
         if (obj && obj.latitude && obj.longitude) {
         const assignedMeta = assignedTaskMetaById.get(task.id) || {};
+        const timing = getTaskTiming(task);
         taskObjects.push({
           task_id: task.id,
           object_id: obj.id,
@@ -108,8 +131,11 @@ Deno.serve(async (req) => {
           latitude: obj.latitude,
           longitude: obj.longitude,
           duration_minutes: task.duration_minutes || 0,
-          time_window_start: task.time_window_start || route.time_window_start || '00:00',
-          time_window_end: task.time_window_end || route.time_window_end || '23:59',
+          time_window_start: timing.time_window_start,
+          time_window_end: timing.time_window_end,
+          use_arrival_deadline: timing.use_arrival_deadline,
+          arrival_deadline_time: timing.arrival_deadline_time,
+          latest_departure_time: timing.latest_departure_time,
           task_type: task.task_type,
           sequence_index: assignedMeta.sequence_index,
           locked_sequence: !!assignedMeta.locked_sequence,
@@ -266,6 +292,7 @@ Deno.serve(async (req) => {
         if (arrivalTime > taskEnd) continue; // te laat — sla over
 
         const waitingTime = Math.max(0, taskStart - arrivalTime);
+        if (task.use_arrival_deadline && arrivalTime > taskStart) continue;
         const canFinishBeforeWindowEnds = Math.max(arrivalTime, taskStart) + task.duration_minutes <= taskEnd;
         if (!canFinishBeforeWindowEnds) continue;
 
@@ -346,6 +373,7 @@ Deno.serve(async (req) => {
         const actualStartTime = Math.max(arrivalTime, taskStart);
         const departureTime = actualStartTime + task.duration_minutes;
 
+        if (task.use_arrival_deadline && arrivalTime > taskStart) return null;
         if (arrivalTime > taskEnd || departureTime > taskEnd) return null;
 
         simulatedOrder.push({
@@ -530,6 +558,7 @@ Deno.serve(async (req) => {
             const actualStartTime = Math.max(arrivalTime, taskStart);
             const departureTime = actualStartTime + task.duration_minutes;
 
+            if (task.use_arrival_deadline && arrivalTime > taskStart) continue;
             if (arrivalTime > taskEnd || departureTime > taskEnd) continue;
 
             const nextVisitedIds = new Set(state.visitedIds);
