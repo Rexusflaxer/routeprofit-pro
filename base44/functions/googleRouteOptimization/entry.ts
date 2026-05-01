@@ -129,23 +129,11 @@ function getTaskTiming(task) {
 
 function buildRepeatWindows(task, timing) {
   const repeatCount = Math.max(1, Math.floor(Number(task.repeat_count || 1)));
-  if (repeatCount === 1 || timing.use_arrival_deadline) return [{ start: timing.time_window_start, end: timing.time_window_end, index: 1 }];
-
-  const duration = Math.max(1, Number(task.duration_minutes || 1));
-  const minGap = Math.max(0, Number(task.min_minutes_between_visits || 0));
-  const start = parseTime(timing.time_window_start) ?? 0;
-  let end = parseTime(timing.time_window_end) ?? 1439;
-  if (end <= start) end += 1440;
-
-  const usable = end - start - (minGap * (repeatCount - 1));
-  if (usable < duration * repeatCount) return [{ start: timing.time_window_start, end: timing.time_window_end, index: 1 }];
-
-  const slotSize = usable / repeatCount;
-  return Array.from({ length: repeatCount }, (_, index) => {
-    const slotStart = start + index * (slotSize + minGap);
-    const slotEnd = index === repeatCount - 1 ? end : slotStart + slotSize;
-    return { start: formatMinute(slotStart), end: formatMinute(slotEnd), index: index + 1 };
-  });
+  return Array.from({ length: repeatCount }, (_, index) => ({
+    start: timing.time_window_start,
+    end: timing.time_window_end,
+    index: index + 1,
+  }));
 }
 
 function buildTargetedAdvice(task, vehicles) {
@@ -190,7 +178,7 @@ function buildTargetedAdvice(task, vehicles) {
   }
 
   if (task.repeat_count > 1) {
-    return `Verruim het taakvenster of verlaag de minimale tussentijd tussen de herhalingen; de huidige herhaalregels maken de planning krap.`;
+    return `Verruim het taakvenster of verlaag de minimale tussentijd tussen de herhalingen; de herhalingen gebruiken nu hetzelfde volledige venster maar moeten wel ${task.min_minutes_between_visits || 0} minuten uit elkaar blijven.`;
   }
 
   return `Maak het taakvenster ruimer of verleng een route die dit tijdblok raakt met ongeveer 15 minuten.`;
@@ -361,12 +349,35 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
     costPerHour: Number(vehicle.kostenPerMinuutVoertuig ?? 0.12) * 60,
   }));
 
+  const precedenceRules = [];
+  const repeatGroups = new Map();
+  taskInstances.forEach((task, index) => {
+    if ((task.repeat_count || 1) <= 1 || !task.min_minutes_between_visits) return;
+    const key = `${task.task_id || task.id}_${task.object_id || ''}`;
+    if (!repeatGroups.has(key)) repeatGroups.set(key, []);
+    repeatGroups.get(key).push({ index, repeatIndex: task.repeat_index || 1, gap: Number(task.min_minutes_between_visits || 0) });
+  });
+
+  for (const group of repeatGroups.values()) {
+    group.sort((a, b) => a.repeatIndex - b.repeatIndex);
+    for (let i = 1; i < group.length; i++) {
+      precedenceRules.push({
+        firstIndex: group[i - 1].index,
+        firstIsDelivery: true,
+        secondIndex: group[i].index,
+        secondIsDelivery: true,
+        offsetDuration: `${Math.max(0, group[i].gap) * 60}s`,
+      });
+    }
+  }
+
   return {
     model: {
       globalStartTime: isoForMinute(date, globalStart),
       globalEndTime: isoForMinute(date, globalEnd),
       shipments,
       vehicles: googleVehicles,
+      ...(precedenceRules.length ? { precedenceRules } : {}),
     },
   };
 }
