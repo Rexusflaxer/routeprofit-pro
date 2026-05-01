@@ -23,6 +23,7 @@ function Metric({ label, value, tone = "slate" }) {
 }
 
 const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
+const MONDAY_ONLY = [1];
 
 export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   const [loading, setLoading] = useState(false);
@@ -31,14 +32,16 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   const [saving, setSaving] = useState(false);
   const [expandedRoute, setExpandedRoute] = useState(null);
   const [showDebug, setShowDebug] = useState(false);
+  const [planningDays, setPlanningDays] = useState(ALL_WEEKDAYS);
 
-  const runOptimizer = async () => {
+  const runOptimizer = async (days = ALL_WEEKDAYS) => {
+    setPlanningDays(days);
     setLoading(true);
     setError(null);
     setResult(null);
     try {
       const res = await base44.functions.invoke('globalFleetOptimizer', {
-        weekdays: ALL_WEEKDAYS,
+        weekdays: days,
         save_routes: false,
       });
       setResult(res.data);
@@ -55,7 +58,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
     setError(null);
     try {
       await base44.functions.invoke('globalFleetOptimizer', {
-        weekdays: ALL_WEEKDAYS,
+        weekdays: planningDays,
         save_routes: true,
       });
       onRoutesCreated?.();
@@ -76,7 +79,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base flex items-center gap-2 text-blue-900">
             <Zap className="w-5 h-5 text-blue-600" />
-            Automatische Vlootoptimalisatie — Alle dagen
+            Automatische Vlootoptimalisatie — {planningDays.length === 1 ? WEEKDAY_LABELS[planningDays[0]] : 'Alle dagen'}
           </CardTitle>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
             <X className="w-4 h-4" />
@@ -89,9 +92,13 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
 
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
-          <Button onClick={runOptimizer} disabled={loading} className="bg-blue-700 hover:bg-blue-800 text-white">
+          <Button onClick={() => runOptimizer(ALL_WEEKDAYS)} disabled={loading} className="bg-blue-700 hover:bg-blue-800 text-white">
             <Zap className="w-4 h-4 mr-1.5" />
-            {loading ? 'Automatisch plannen...' : 'Automatisch plannen'}
+            {loading ? 'Automatisch plannen...' : 'Alle dagen plannen'}
+          </Button>
+          <Button onClick={() => runOptimizer(MONDAY_ONLY)} disabled={loading} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50">
+            <Zap className="w-4 h-4 mr-1.5" />
+            Alleen maandag
           </Button>
           {result?.routes?.length > 0 && (
             <Button onClick={saveRoutes} disabled={saving || result.has_estimated_travel} variant="outline" className="border-green-300 text-green-700 hover:bg-green-50">
