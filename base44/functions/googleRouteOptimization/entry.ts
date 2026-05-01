@@ -218,8 +218,8 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
         totalDistanceMeters += Number(transition.travelDistanceMeters || 0);
       }
 
-      const tasks = route.visits.map((visit, index) => {
-        const task = taskInstances[visit.shipmentIndex] || {};
+      const tasks = (route.visits || []).filter(visit => Number.isInteger(visit.shipmentIndex) && taskInstances[visit.shipmentIndex]?.task_id).map((visit, index) => {
+        const task = taskInstances[visit.shipmentIndex];
         plannedShipmentIndexes.add(visit.shipmentIndex);
         const transition = route.transitions?.[index] || {};
         const travelMinutes = Math.round(secondsFromDuration(transition.travelDuration || transition.totalDuration) / 60);
@@ -393,7 +393,7 @@ Deno.serve(async (req) => {
           time_window_start: route.time_window_start,
           time_window_end: route.time_window_end,
           weekdays: [weekday],
-          assigned_tasks: route.tasks.map((task, index) => ({
+          assigned_tasks: route.tasks.filter(task => task.task_id).map((task, index) => ({
             task_id: task.task_id,
             days: [weekday],
             sequence_index: index,
