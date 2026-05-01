@@ -86,10 +86,10 @@ export default function RouteExportPdf({ route, optimizedRoute }) {
       const cols = optimizedRoute.alarm_standby ? 5 : 4;
       const colW = contentW / cols;
       const summaryItems = [
-        { label: "Totale diensttijd", value: formatMinutes(optimizedRoute.actual_shift_minutes ?? optimizedRoute.total_route_time) },
-        { label: "Reistijd", value: formatMinutes(optimizedRoute.total_travel_time) },
-        { label: "Taaktijd", value: formatMinutes(optimizedRoute.total_service_time) },
-        { label: "Afstand", value: `${optimizedRoute.total_distance_km} km` },
+        { label: "Totale diensttijd", value: formatMinutes(optimizedRoute.actual_shift_minutes ?? optimizedRoute.total_route_time ?? optimizedRoute.stats?.total_route_minutes) },
+        { label: "Reistijd", value: formatMinutes(optimizedRoute.total_travel_time ?? optimizedRoute.stats?.total_travel_minutes) },
+        { label: "Taaktijd", value: formatMinutes(optimizedRoute.total_service_time ?? optimizedRoute.stats?.total_service_minutes) },
+        { label: "Afstand", value: `${optimizedRoute.total_distance_km ?? optimizedRoute.stats?.total_distance_km ?? 0} km` },
       ];
       if (optimizedRoute.alarm_standby) {
         summaryItems.push({ label: "Alarmdienst", value: formatMinutes(optimizedRoute.total_alarm_standby_time) });

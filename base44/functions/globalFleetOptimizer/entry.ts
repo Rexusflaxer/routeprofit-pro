@@ -670,6 +670,74 @@ function hasVehicleOverlap(routes) {
   return false;
 }
 
+function calculateManualRouteVariableScore(route, settings) {
+  if (!route?.stats) return 0;
+  const vehicle = route.vehicle || {};
+  const perKm = Number(vehicle.kostenPerKm ?? vehicle.fuel_cost_per_km ?? settings.costPerKm);
+  const perVehicleMinute = Number(vehicle.kostenPerMinuutVoertuig ?? settings.costPerVehicleMinute);
+  return r2(
+    route.stats.total_travel_minutes * perVehicleMinute +
+    route.stats.total_distance_km * perKm +
+    route.stats.total_wait_minutes * settings.waitingCostFactor
+  );
+}
+
+async function improveManualRouteAssignments(routeStates, apiKey, travelCache, settings, debug) {
+  let improved = true;
+  let iterations = 0;
+
+  while (improved && iterations < 4) {
+    improved = false;
+    iterations++;
+
+    for (let fromIndex = 0; fromIndex < routeStates.length; fromIndex++) {
+      for (let taskIndex = 0; taskIndex < (routeStates[fromIndex].tasks || []).length; taskIndex++) {
+        const task = routeStates[fromIndex].tasks[taskIndex];
+
+        for (let toIndex = 0; toIndex < routeStates.length; toIndex++) {
+          if (fromIndex === toIndex) continue;
+
+          for (let position = 0; position <= (routeStates[toIndex].tasks || []).length; position++) {
+            const fromRoute = routeStates[fromIndex];
+            const toRoute = routeStates[toIndex];
+            const fromSequence = fromRoute.tasks.filter((_, i) => i !== taskIndex);
+            const toSequence = [...toRoute.tasks.slice(0, position), task, ...toRoute.tasks.slice(position)];
+
+            const scheduledFrom = await scheduleSequenceInManualWindow(fromSequence, fromRoute, apiKey, travelCache, settings);
+            const scheduledTo = await scheduleSequenceInManualWindow(toSequence, toRoute, apiKey, travelCache, settings);
+            if (!scheduledFrom || !scheduledTo) continue;
+
+            const currentScore = calculateManualRouteVariableScore(fromRoute, settings) + calculateManualRouteVariableScore(toRoute, settings);
+            const candidateFrom = { ...fromRoute, ...scheduledFrom, tasks: scheduledFrom.tasks };
+            const candidateTo = { ...toRoute, ...scheduledTo, tasks: scheduledTo.tasks };
+            const candidateScore = calculateManualRouteVariableScore(candidateFrom, settings) + calculateManualRouteVariableScore(candidateTo, settings);
+
+            if (candidateScore + 0.5 < currentScore) {
+              routeStates[fromIndex] = candidateFrom;
+              routeStates[toIndex] = candidateTo;
+              debug.relocation_improvements = debug.relocation_improvements || [];
+              debug.relocation_improvements.push({
+                task: task.name,
+                from: fromRoute.name,
+                to: toRoute.name,
+                saving_score: r2(currentScore - candidateScore),
+                reason: 'Taak verplaatst omdat dit minder reisafstand/reistijd/wachttijd geeft over de bestaande routes heen.',
+              });
+              improved = true;
+              break;
+            }
+          }
+          if (improved) break;
+        }
+        if (improved) break;
+      }
+      if (improved) break;
+    }
+  }
+
+  return routeStates;
+}
+
 async function fillExistingManualRoutesOptimizer(taskInstances, manualRoutes, vehicles, objects, offices, apiKey, travelCache, weekday, settings) {
   let routeStates = buildManualRouteStates(manualRoutes, vehicles, objects, offices);
   const missingCoordTasks = taskInstances.filter(t => t.missing_coords).map(t => ({
@@ -708,9 +776,9 @@ async function fillExistingManualRoutesOptimizer(taskInstances, manualRoutes, ve
           attempts.push({ route: route.name, position: pos, feasible: false, reason: 'tijdvenster, depotrit of route-eindtijd past niet' });
           continue;
         }
-        const previousCost = route.stats ? calculateRouteCost(route, settings) : 0;
+        const previousCost = calculateManualRouteVariableScore(route, settings);
         const candidate = { ...route, ...scheduled, tasks: scheduled.tasks };
-        const extraCost = calculateRouteCost(candidate, settings) - previousCost - settings.existingManualRoutePreferenceBonus;
+        const extraCost = calculateManualRouteVariableScore(candidate, settings) - previousCost;
         const extraTravel = scheduled.stats.total_travel_minutes - (route.stats?.total_travel_minutes || 0);
         const extraDistance = scheduled.stats.total_distance_km - (route.stats?.total_distance_km || 0);
         const extraWait = scheduled.stats.total_wait_minutes - (route.stats?.total_wait_minutes || 0);
@@ -736,8 +804,10 @@ async function fillExistingManualRoutesOptimizer(taskInstances, manualRoutes, ve
     }
   }
 
+  routeStates = await improveManualRouteAssignments(routeStates, apiKey, travelCache, settings, debug);
+
   const outputRoutes = routeStates.map((route, index) => {
-    const withCost = { ...route, route_cost: calculateRouteCost(route.stats ? route : { ...route, stats: { total_route_minutes: route.horizon.end_minute - route.horizon.start_minute, total_distance_km: 0, total_wait_minutes: 0 } }, settings) };
+    const withCost = { ...route, route_cost: calculateManualRouteVariableScore(route, settings) };
     return buildOutputRoute({ ...withCost, horizon_id: route.horizon.id, validation: validateRouteRun(withCost, vehicles.length) }, index);
   });
 
