@@ -80,12 +80,7 @@ export default function ObjectTable({ objects, onEdit, onDelete }) {
                     )}
                     {directTaskCount > 0 && (
                       <Badge variant="secondary" className="bg-amber-50 text-amber-700 border border-amber-200 text-xs w-fit">
-                        {directTaskCount} {directTaskCount === 1 ? 'eigen taak' : 'eigen taken'}
-                      </Badge>
-                    )}
-                    {directExecutionCount > directTaskCount && (
-                      <Badge variant="secondary" className="bg-orange-50 text-orange-700 border border-orange-200 text-xs w-fit">
-                        {directExecutionCount} uitvoeringen totaal
+                        {directExecutionCount} {directExecutionCount === 1 ? 'eigen taak' : 'eigen taken'}
                       </Badge>
                     )}
                     {collectiefTasks.length > 0 && (
