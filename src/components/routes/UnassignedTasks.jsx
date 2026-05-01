@@ -1,7 +1,7 @@
 import React, { useMemo, useState } from "react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
-import { AlertCircle, Clock, Euro, Package, ChevronDown, ChevronUp } from "lucide-react";
+import { AlertCircle, Clock, Euro, Package, ChevronDown, ChevronUp, Filter, X } from "lucide-react";
 
 const WEEKDAYS = [
   { value: 1, label: "Ma" },
@@ -15,6 +15,17 @@ const WEEKDAYS = [
 
 export default function UnassignedTasks({ tasks, routes, objects, collectiefs }) {
   const [open, setOpen] = useState(false);
+  const [selectedDays, setSelectedDays] = useState([]);
+  const [selectedObjectIds, setSelectedObjectIds] = useState([]);
+
+  const toggleValue = (value, setter) => {
+    setter(current => current.includes(value) ? current.filter(item => item !== value) : [...current, value]);
+  };
+
+  const taskMatchesObject = (task, objectId) => {
+    return task.object_id === objectId || (task.selected_object_ids || []).includes(objectId);
+  };
+
   const unassignedTasks = useMemo(() => {
     // Verzamel welke taken op welke dagen al zijn toegewezen
     const taskDayUsage = {};
@@ -48,6 +59,27 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
       })
       .filter(task => !task.isFullyAssigned);
   }, [tasks, routes]);
+
+  const objectOptions = useMemo(() => {
+    return objects
+      .filter(obj => unassignedTasks.some(task => taskMatchesObject(task, obj.id)))
+      .sort((a, b) => (a.name || '').localeCompare(b.name || ''));
+  }, [objects, unassignedTasks]);
+
+  const filteredUnassignedTasks = useMemo(() => {
+    return unassignedTasks.filter(task => {
+      const dayMatch = selectedDays.length === 0 || (task.availableDays || []).some(day => selectedDays.includes(day));
+      const objectMatch = selectedObjectIds.length === 0 || selectedObjectIds.some(objectId => taskMatchesObject(task, objectId));
+      return dayMatch && objectMatch;
+    });
+  }, [unassignedTasks, selectedDays, selectedObjectIds]);
+
+  const activeFilterCount = selectedDays.length + selectedObjectIds.length;
+
+  const clearFilters = () => {
+    setSelectedDays([]);
+    setSelectedObjectIds([]);
+  };
 
   const getObjectName = (task) => {
     const obj = objects.find(o => o.id === task.object_id);
@@ -83,15 +115,71 @@ export default function UnassignedTasks({ tasks, routes, objects, collectiefs })
           <div className="flex items-center gap-2">
             <AlertCircle className="w-5 h-5 text-amber-600" />
             <CardTitle className="text-base">Nog niet toegewezen taken</CardTitle>
-            <Badge className="bg-amber-100 text-amber-800 border-0">{unassignedTasks.length}</Badge>
+            <Badge className="bg-amber-100 text-amber-800 border-0">{filteredUnassignedTasks.length}/{unassignedTasks.length}</Badge>
           </div>
           {open ? <ChevronUp className="w-4 h-4 text-slate-400" /> : <ChevronDown className="w-4 h-4 text-slate-400" />}
         </div>
       </CardHeader>
       {open && (
       <CardContent>
+        <div className="mb-4 space-y-3 rounded-lg border border-amber-200 bg-white/70 p-3">
+          <div className="flex items-center justify-between gap-2">
+            <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wider text-amber-700">
+              <Filter className="w-3.5 h-3.5" /> Filters
+              {activeFilterCount > 0 && <span className="normal-case tracking-normal text-slate-500">({activeFilterCount} actief)</span>}
+            </div>
+            {activeFilterCount > 0 && (
+              <button onClick={clearFilters} className="flex items-center gap-1 text-xs text-slate-500 hover:text-slate-800">
+                <X className="w-3 h-3" /> Wissen
+              </button>
+            )}
+          </div>
+
+          <div className="space-y-2">
+            <p className="text-xs font-medium text-slate-500">Dag</p>
+            <div className="flex flex-wrap gap-1.5">
+              {WEEKDAYS.map(day => {
+                const active = selectedDays.includes(day.value);
+                return (
+                  <button
+                    key={day.value}
+                    onClick={() => toggleValue(day.value, setSelectedDays)}
+                    className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${active ? 'border-amber-500 bg-amber-100 text-amber-800' : 'border-slate-200 bg-white text-slate-600 hover:border-amber-300'}`}
+                  >
+                    {day.label}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+
+          {objectOptions.length > 0 && (
+            <div className="space-y-2">
+              <p className="text-xs font-medium text-slate-500">Object</p>
+              <div className="flex flex-wrap gap-1.5 max-h-24 overflow-y-auto pr-1">
+                {objectOptions.map(obj => {
+                  const active = selectedObjectIds.includes(obj.id);
+                  return (
+                    <button
+                      key={obj.id}
+                      onClick={() => toggleValue(obj.id, setSelectedObjectIds)}
+                      className={`rounded-full border px-2.5 py-1 text-xs font-medium transition-colors ${active ? 'border-slate-700 bg-slate-900 text-white' : 'border-slate-200 bg-white text-slate-600 hover:border-slate-400'}`}
+                    >
+                      {obj.name}
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="space-y-2 max-h-72 overflow-y-auto pr-1">
-          {unassignedTasks.map(task => (
+          {filteredUnassignedTasks.length === 0 ? (
+            <div className="text-center py-6 text-sm text-slate-500 bg-white rounded-lg border border-slate-200">
+              Geen taken gevonden met deze filters.
+            </div>
+          ) : filteredUnassignedTasks.map(task => (
             <div key={task.id} className="bg-white rounded-lg p-3 border border-slate-200">
               <div className="flex items-start gap-3">
                 <div className="flex-1 min-w-0">
