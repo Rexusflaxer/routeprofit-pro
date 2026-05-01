@@ -72,6 +72,19 @@ function r2(value) {
   return Math.round((Number(value) || 0) * 100) / 100;
 }
 
+const sleep = (ms) => new Promise(resolve => setTimeout(resolve, ms));
+
+async function withRateLimitRetry(action, retries = 4) {
+  for (let attempt = 0; attempt <= retries; attempt++) {
+    try {
+      return await action();
+    } catch (error) {
+      if (error?.status !== 429 || attempt === retries) throw error;
+      await sleep(750 * (attempt + 1));
+    }
+  }
+}
+
 function fixCoords(obj) {
   if (!obj) return obj;
   const lat = Number(obj.latitude);
@@ -271,8 +284,8 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
     let end = parseTime(task.time_window_end) ?? 1439;
     return end <= start ? end + 1440 : end;
   });
-  const globalStart = Math.min(...vehicles.map(v => v._windowStart ?? 0));
-  const globalEnd = Math.max(...vehicles.map(v => v._windowEnd ?? 1439));
+  const globalStart = Math.min(...vehicles.map(v => v._windowStart ?? 0), ...shipmentStarts);
+  const globalEnd = Math.max(...vehicles.map(v => v._windowEnd ?? 1439), ...shipmentEnds);
 
   const shipments = taskInstances.map((task, index) => {
     const start = parseTime(task.time_window_start) ?? 0;
@@ -535,7 +548,7 @@ Deno.serve(async (req) => {
     if (saveRoutes) {
       let folderId = folders[0]?.id;
       if (!folderId) {
-        const newFolder = await base44.asServiceRole.entities.RouteFolder.create({ name: 'Google Route Optimization', color: 'green' });
+        const newFolder = await withRateLimitRetry(() => base44.asServiceRole.entities.RouteFolder.create({ name: 'Google Route Optimization', color: 'green' }));
         folderId = newFolder.id;
       }
 
@@ -568,15 +581,15 @@ Deno.serve(async (req) => {
           };
 
           if (route.manual_route_id) {
-            await base44.asServiceRole.entities.Route.update(route.manual_route_id, routeData);
+            await withRateLimitRetry(() => base44.asServiceRole.entities.Route.update(route.manual_route_id, routeData));
           } else {
-            await base44.asServiceRole.entities.Route.create({
+            await withRateLimitRetry(() => base44.asServiceRole.entities.Route.create({
               ...routeData,
               name: `${weekdayLabels[weekday]} - Google route ${i + 1}${route.vehicle ? ` (${route.vehicle.license_plate || route.vehicle.name})` : ''}`,
               time_window_start: route.time_window_start,
               time_window_end: route.time_window_end,
               source: 'automatic',
-            });
+            }));
           }
         }
       }
