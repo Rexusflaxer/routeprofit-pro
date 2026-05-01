@@ -10,7 +10,10 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const { route_id, force_recalculate } = body;
+    const { route_id, force_recalculate, respect_existing_sequence, enforce_route_window, no_task_dropping } = body;
+    const respectExistingSequence = !!respect_existing_sequence;
+    const enforceRouteWindow = !!enforce_route_window;
+    const noTaskDropping = !!no_task_dropping;
 
     if (!route_id) {
       return Response.json({ error: 'route_id is required' }, { status: 400 });
@@ -29,8 +32,12 @@ Deno.serve(async (req) => {
     const allObjects = await base44.entities.SurveillanceObject.list();
     const allOffices = await base44.entities.Office.list();
     
-    const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
-    const routeTasks = allTasks.filter(t => assignedTaskIds.includes(t.id));
+    const assignedTaskEntries = route.assigned_tasks || [];
+    const assignedTaskIds = assignedTaskEntries.map(at => at.task_id);
+    const assignedTaskMetaById = new Map(assignedTaskEntries.map((at, index) => [at.task_id, { ...at, sequence_index: at.sequence_index ?? index }]));
+    const routeTasks = assignedTaskEntries
+      .map(at => allTasks.find(t => t.id === at.task_id))
+      .filter(Boolean);
 
     // Normalize coordinates: in de database zijn lat/lng omgedraaid (latitude bevat ~6 = lengtegraad, longitude bevat ~52 = breedtegraad)
     // We corrigeren dit hier door te wisselen wanneer longitude > latitude (wat betekent dat ze omgedraaid zijn opgeslagen)
@@ -66,8 +73,10 @@ Deno.serve(async (req) => {
           const rawObj = allObjects.find(o => o.id === objId);
           const obj = rawObj ? fixCoords(rawObj) : null;
           if (obj && obj.latitude && obj.longitude) {
+            const assignedMeta = assignedTaskMetaById.get(task.id) || {};
             taskObjects.push({
               task_id: `${task.id}_${idx}`,
+              parent_task_id: task.id,
               object_id: obj.id,
               name: obj.name,
               address: obj.address,
@@ -76,7 +85,12 @@ Deno.serve(async (req) => {
               duration_minutes: durationPerObject,
               time_window_start: task.time_window_start || route.time_window_start || '00:00',
               time_window_end: task.time_window_end || route.time_window_end || '23:59',
-              task_type: task.task_type
+              task_type: task.task_type,
+              sequence_index: assignedMeta.sequence_index ?? idx,
+              locked_sequence: !!assignedMeta.locked_sequence,
+              planned_arrival_time: assignedMeta.planned_arrival_time,
+              planned_start_time: assignedMeta.planned_start_time,
+              planned_departure_time: assignedMeta.planned_departure_time
             });
           }
         });
@@ -85,18 +99,24 @@ Deno.serve(async (req) => {
         const rawObj = allObjects.find(o => o.id === task.object_id);
         const obj = rawObj ? fixCoords(rawObj) : null;
         if (obj && obj.latitude && obj.longitude) {
-          taskObjects.push({
-            task_id: task.id,
-            object_id: obj.id,
-            name: obj.name,
-            address: obj.address,
-            latitude: obj.latitude,
-            longitude: obj.longitude,
-            duration_minutes: task.duration_minutes || 0,
-            time_window_start: task.time_window_start || route.time_window_start || '00:00',
-            time_window_end: task.time_window_end || route.time_window_end || '23:59',
-            task_type: task.task_type
-          });
+        const assignedMeta = assignedTaskMetaById.get(task.id) || {};
+        taskObjects.push({
+          task_id: task.id,
+          object_id: obj.id,
+          name: obj.name,
+          address: obj.address,
+          latitude: obj.latitude,
+          longitude: obj.longitude,
+          duration_minutes: task.duration_minutes || 0,
+          time_window_start: task.time_window_start || route.time_window_start || '00:00',
+          time_window_end: task.time_window_end || route.time_window_end || '23:59',
+          task_type: task.task_type,
+          sequence_index: assignedMeta.sequence_index,
+          locked_sequence: !!assignedMeta.locked_sequence,
+          planned_arrival_time: assignedMeta.planned_arrival_time,
+          planned_start_time: assignedMeta.planned_start_time,
+          planned_departure_time: assignedMeta.planned_departure_time
+        });
         }
       }
     });
@@ -354,7 +374,34 @@ Deno.serve(async (req) => {
     };
 
     let sequenceTasks = optimizedOrder.filter(item => !item.is_start && !item.is_end && !item.is_alarm_standby);
-    let repairImproved = true;
+
+    if (respectExistingSequence) {
+      const lockedSequenceTasks = [...taskObjects].sort((a, b) => (a.sequence_index ?? 9999) - (b.sequence_index ?? 9999));
+      const lockedSimulation = await simulateSequence(lockedSequenceTasks);
+      if (!lockedSimulation) {
+        return Response.json({
+          error: 'De vastgezette auto-planning past niet binnen de route- en taakvensters.',
+          strict_validation_failed: true,
+          tasks_skipped: taskObjects.length,
+          skipped_tasks: lockedSequenceTasks.map(task => ({
+            name: task.name,
+            time_window: `${task.time_window_start} - ${task.time_window_end}`,
+            reason: 'Vastgezette volgorde kon niet volledig worden doorgerekend binnen de beschikbare tijdvensters.'
+          }))
+        }, { status: 409 });
+      }
+      sequenceTasks = lockedSequenceTasks;
+      optimizedOrder.length = 0;
+      optimizedOrder.push(...lockedSimulation.order);
+      totalTravelTime = lockedSimulation.totalTravelTime;
+      totalDistanceKm = lockedSimulation.totalDistanceKm;
+      currentTime = lockedSimulation.currentTime;
+      currentLocation = lockedSimulation.currentLocation;
+      visited.clear();
+      lockedSequenceTasks.forEach(task => visited.add(task.task_id));
+    }
+
+    let repairImproved = !respectExistingSequence;
     while (repairImproved) {
       repairImproved = false;
       const remainingTasks = taskObjects.filter(task => !visited.has(task.task_id));
@@ -517,18 +564,20 @@ Deno.serve(async (req) => {
       return bestState;
     };
 
-    const bestSequenceState = await findBestSequence();
-    const bestSimulation = await buildOrderFromSequence(bestSequenceState.sequence);
-    if (bestSimulation && isBetterSimulation(bestSimulation, sequenceTasks.length, totalTravelTime, totalDistanceKm, currentTime)) {
-      sequenceTasks = bestSequenceState.sequence;
-      optimizedOrder.length = 0;
-      optimizedOrder.push(...bestSimulation.order);
-      totalTravelTime = bestSimulation.totalTravelTime;
-      totalDistanceKm = bestSimulation.totalDistanceKm;
-      currentTime = bestSimulation.currentTime;
-      currentLocation = bestSimulation.currentLocation;
-      visited.clear();
-      sequenceTasks.forEach(task => visited.add(task.task_id));
+    if (!respectExistingSequence) {
+      const bestSequenceState = await findBestSequence();
+      const bestSimulation = await buildOrderFromSequence(bestSequenceState.sequence);
+      if (bestSimulation && isBetterSimulation(bestSimulation, sequenceTasks.length, totalTravelTime, totalDistanceKm, currentTime)) {
+        sequenceTasks = bestSequenceState.sequence;
+        optimizedOrder.length = 0;
+        optimizedOrder.push(...bestSimulation.order);
+        totalTravelTime = bestSimulation.totalTravelTime;
+        totalDistanceKm = bestSimulation.totalDistanceKm;
+        currentTime = bestSimulation.currentTime;
+        currentLocation = bestSimulation.currentLocation;
+        visited.clear();
+        sequenceTasks.forEach(task => visited.add(task.task_id));
+      }
     }
 
     const applySimulation = (simulation, sequence) => {
@@ -553,7 +602,7 @@ Deno.serve(async (req) => {
     };
 
     // Wachttijd-invulstap: als er lang gewacht wordt bij/voor een stop, probeer ruime taken daarin te plaatsen.
-    let idleImproved = true;
+    let idleImproved = !respectExistingSequence;
     while (idleImproved) {
       idleImproved = false;
       const currentSimulation = await simulateSequence(sequenceTasks);
@@ -626,7 +675,7 @@ Deno.serve(async (req) => {
 
     // Lokale verbeterstap: verplaats één taak naar een andere positie als alle taken behouden blijven
     // en de totale reistijd/afstand daalt. Dit benut bestaande wachttijd beter zonder taken te verliezen.
-    let localImproved = true;
+    let localImproved = !respectExistingSequence;
     while (localImproved) {
       localImproved = false;
       let bestLocalSimulation = null;
@@ -817,8 +866,9 @@ Deno.serve(async (req) => {
 
     const plannedWindowMinutes = routeEndMinutes - routeStartMinutes;
     const actualShiftMinutes = actualShiftEndMinutes - routeStartMinutes;
-    const finishedEarly = !alarmStandby && currentTime < routeEndMinutes;
-    const finishedLate = currentTime > routeEndMinutes;
+    const finishedEarly = !alarmStandby && actualShiftEndMinutes < routeEndMinutes;
+    const routeOverrunMinutes = Math.max(0, actualShiftEndMinutes - routeEndMinutes);
+    const finishedLate = routeOverrunMinutes > 0;
 
     const totalRouteTime = totalServiceTime + totalTravelTime + (alarmStandby ? totalWaitingTime : 0) + alarmAfterRoute;
 
@@ -834,13 +884,24 @@ Deno.serve(async (req) => {
       planned_window_minutes: plannedWindowMinutes,
       finished_early: finishedEarly,
       finished_late: finishedLate,
-      early_by_minutes: finishedEarly ? routeEndMinutes - currentTime : 0,
-      late_by_minutes: finishedLate ? currentTime - routeEndMinutes : 0,
+      early_by_minutes: finishedEarly ? routeEndMinutes - actualShiftEndMinutes : 0,
+      late_by_minutes: routeOverrunMinutes,
+      route_overrun_minutes: routeOverrunMinutes,
       alarm_standby: alarmStandby,
       tasks_optimized: visited.size,
       tasks_skipped: taskObjects.length - visited.size,
       skipped_tasks: skippedTasksList
     };
+
+    if ((noTaskDropping && result.tasks_skipped > 0) || (enforceRouteWindow && result.route_overrun_minutes > 0)) {
+      return Response.json({
+        ...result,
+        error: result.tasks_skipped > 0
+          ? 'Strikte auto-planning afgekeurd: niet alle taken konden worden behouden.'
+          : 'Strikte auto-planning afgekeurd: route loopt buiten het routevenster.',
+        strict_validation_failed: true
+      }, { status: 409 });
+    }
 
     // Sla resultaat op in de route (cache)
     const updateData = {

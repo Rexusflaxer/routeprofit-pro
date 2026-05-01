@@ -1164,13 +1164,27 @@ Deno.serve(async (req) => {
           for (const route of dayResult.routes) {
             if (route.validation && !route.validation.valid) continue;
             await base44.asServiceRole.entities.Route.update(route.id, {
-              assigned_tasks: route.tasks.map(task => ({ task_id: task.task_id, days: [weekday] })),
+              assigned_tasks: route.tasks.map((task, index) => ({
+                task_id: task.task_id,
+                days: [weekday],
+                sequence_index: index,
+                locked_sequence: true,
+                planned_arrival_time: task.arrival_time,
+                planned_start_time: task.actual_start_time,
+                planned_departure_time: task.departure_time
+              })),
               total_service_minutes: route.stats.total_service_minutes,
               total_distance_km: route.stats.total_distance_km,
               total_route_minutes: route.stats.total_route_minutes,
               status: 'geoptimaliseerd',
             });
-            await base44.functions.invoke('optimizeRoute', { route_id: route.id, force_recalculate: true });
+            await base44.functions.invoke('optimizeRoute', {
+              route_id: route.id,
+              force_recalculate: true,
+              respect_existing_sequence: true,
+              enforce_route_window: true,
+              no_task_dropping: true
+            });
           }
         } else {
           for (let i = 0; i < dayResult.routes.length; i++) {
@@ -1183,13 +1197,27 @@ Deno.serve(async (req) => {
               time_window_start: route.time_window_start,
               time_window_end: route.time_window_end,
               weekdays: [weekday],
-              assigned_tasks: route.tasks.map(task => ({ task_id: task.task_id, days: [weekday] })),
+              assigned_tasks: route.tasks.map((task, index) => ({
+                task_id: task.task_id,
+                days: [weekday],
+                sequence_index: index,
+                locked_sequence: true,
+                planned_arrival_time: task.arrival_time,
+                planned_start_time: task.actual_start_time,
+                planned_departure_time: task.departure_time
+              })),
               total_service_minutes: route.stats.total_service_minutes,
               total_distance_km: route.stats.total_distance_km,
               total_route_minutes: route.stats.total_route_minutes,
               status: 'geoptimaliseerd',
             });
-            await base44.functions.invoke('optimizeRoute', { route_id: createdRoute.id, force_recalculate: true });
+            await base44.functions.invoke('optimizeRoute', {
+              route_id: createdRoute.id,
+              force_recalculate: true,
+              respect_existing_sequence: true,
+              enforce_route_window: true,
+              no_task_dropping: true
+            });
           }
         }
       }
