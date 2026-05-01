@@ -182,7 +182,7 @@ function buildTargetedAdvice(task, vehicles) {
   }
 
   if (task.repeat_count > 1) {
-    return `Verruim het taakvenster of verlaag de minimale tussentijd tussen de herhalingen; de herhalingen gebruiken nu hetzelfde volledige venster maar moeten wel ${task.min_minutes_between_visits || 0} minuten uit elkaar blijven.`;
+    return `Verruim het taakvenster of verlaag de minimale tussentijd tussen de herhalingen; dezelfde delen van herhaalde uitvoeringen moeten ${task.min_minutes_between_visits || 0} minuten uit elkaar blijven.`;
   }
 
   return `Maak het taakvenster ruimer of verleng een route die dit tijdblok raakt met ongeveer 15 minuten.`;
@@ -266,7 +266,10 @@ function prepareTaskInstances(tasks, objects, weekday) {
     if (task.collectief_id && task.selected_object_ids?.length > 0) {
       const durationPerObject = Math.max(1, Math.round((task.duration_minutes || 15) / task.selected_object_ids.length));
       for (const objectId of task.selected_object_ids) addInstance(objectId, `_${objectId}`);
-      instances.filter(i => i.task_id === task.id).forEach(i => { i.duration_minutes = durationPerObject; i.is_collectief = true; });
+      instances.filter(i => i.task_id === task.id).forEach(i => {
+        i.duration_minutes = i.allow_split ? Math.max(1, Math.ceil(durationPerObject / (i.split_part_count || 1))) : durationPerObject;
+        i.is_collectief = true;
+      });
     } else if (task.object_id) {
       addInstance(task.object_id);
     } else {
@@ -369,7 +372,7 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
   const repeatGroups = new Map();
   taskInstances.forEach((task, index) => {
     if ((task.repeat_count || 1) <= 1 || !task.min_minutes_between_visits) return;
-    const key = `${task.task_id || task.id}_${task.object_id || ''}`;
+    const key = `${task.task_id || task.id}_${task.object_id || ''}_${task.split_index || 1}`;
     if (!repeatGroups.has(key)) repeatGroups.set(key, []);
     repeatGroups.get(key).push({ index, repeatIndex: task.repeat_index || 1, gap: Number(task.min_minutes_between_visits || 0) });
   });
