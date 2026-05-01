@@ -350,6 +350,7 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
     task._shipmentIndex = index;
     return {
       label: task.id,
+      penaltyCost: 1000000,
       deliveries: [{
         arrivalLocation: { latitude: task.latitude, longitude: task.longitude },
         duration: `${Math.max(1, task.duration_minutes || 1) * 60}s`,
