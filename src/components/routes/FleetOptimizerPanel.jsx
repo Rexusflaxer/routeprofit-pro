@@ -3,6 +3,7 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Zap, CheckCircle, AlertTriangle, Info, ChevronDown, ChevronRight, Save, Clock, MapPin, Car, X, Bug, Activity } from "lucide-react";
 
 const WEEKDAY_LABELS = { 1:"Maandag",2:"Dinsdag",3:"Woensdag",4:"Donderdag",5:"Vrijdag",6:"Zaterdag",7:"Zondag" };
@@ -23,7 +24,6 @@ function Metric({ label, value, tone = "slate" }) {
 }
 
 const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
-const MONDAY_ONLY = [1];
 
 export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   const [loading, setLoading] = useState(false);
@@ -33,6 +33,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   const [expandedRoute, setExpandedRoute] = useState(null);
   const [showDebug, setShowDebug] = useState(false);
   const [planningDays, setPlanningDays] = useState(ALL_WEEKDAYS);
+  const [selectedDay, setSelectedDay] = useState("1");
 
   const runOptimizer = async (days = ALL_WEEKDAYS) => {
     setPlanningDays(days);
@@ -96,10 +97,22 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
             <Zap className="w-4 h-4 mr-1.5" />
             {loading ? 'Google planning maken...' : 'Alle dagen plannen met Google'}
           </Button>
-          <Button onClick={() => runOptimizer(MONDAY_ONLY)} disabled={loading} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50">
-            <Zap className="w-4 h-4 mr-1.5" />
-            Alleen maandag
-          </Button>
+          <div className="flex items-center gap-2">
+            <Select value={selectedDay} onValueChange={setSelectedDay} disabled={loading}>
+              <SelectTrigger className="w-40 bg-white border-blue-200">
+                <SelectValue placeholder="Kies dag" />
+              </SelectTrigger>
+              <SelectContent>
+                {ALL_WEEKDAYS.map(day => (
+                  <SelectItem key={day} value={String(day)}>{WEEKDAY_LABELS[day]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Button onClick={() => runOptimizer([Number(selectedDay)])} disabled={loading} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50">
+              <Zap className="w-4 h-4 mr-1.5" />
+              Gekozen dag plannen
+            </Button>
+          </div>
 
           {result?.routes?.length > 0 && (
             <Button onClick={saveRoutes} disabled={saving || result.has_estimated_travel} variant="outline" className="border-green-300 text-green-700 hover:bg-green-50">
