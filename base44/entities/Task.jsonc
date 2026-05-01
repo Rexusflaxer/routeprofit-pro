@@ -17,7 +17,8 @@
         "Externe Controleronde",
         "Externe Sluitronde",
         "Brand- en Sluitronde",
-        "Openingsronde"
+        "Openingsronde",
+        "Sluitbegeleiding"
       ],
       "description": "Type taak"
     },
@@ -32,6 +33,15 @@
     "time_window_end": {
       "type": "string",
       "description": "Uiterste eindtijd (HH:MM)"
+    },
+    "use_arrival_deadline": {
+      "type": "boolean",
+      "description": "Gebruik een minimale aankomsttijd/deadline in plaats van een volledig tijdvenster",
+      "default": false
+    },
+    "arrival_deadline_time": {
+      "type": "string",
+      "description": "Uiterste aankomsttijd voor taken zoals Sluitbegeleiding of optionele Openingsronde (HH:MM)"
     },
     "extra_time_windows": {
       "type": "array",

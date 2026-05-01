@@ -56,9 +56,10 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
       const dayToCheck = onNextDay && !onSelectedDay ? nextDay : selectedDay;
       if (usedDays.includes(dayToCheck)) return false;
 
-      // Check of taak qua tijdvenster binnen de route past (middernacht-bewust)
-      const taskStartStr = task.time_window_start || "00:00";
-      const taskEndStr = task.time_window_end || "23:59";
+      // Check of taak qua tijdvenster/deadline binnen de route past (middernacht-bewust)
+      const usesDeadline = task.task_type === "Sluitbegeleiding" || (task.task_type === "Openingsronde" && task.use_arrival_deadline && task.arrival_deadline_time);
+      const taskStartStr = usesDeadline ? "00:00" : (task.time_window_start || "00:00");
+      const taskEndStr = usesDeadline ? (task.arrival_deadline_time || "23:59") : (task.time_window_end || "23:59");
       let taskStartMin = toMinutes(taskStartStr);
       let taskEndMin = toMinutes(taskEndStr);
 
@@ -174,7 +175,11 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
                       <Euro className="w-3 h-3 mr-1" />
                       €{getPricePerMinute(task).toFixed(2)}/min
                     </Badge>
-                    {task.time_window_start && task.time_window_end && (
+                    {(task.task_type === "Sluitbegeleiding" || (task.task_type === "Openingsronde" && task.use_arrival_deadline)) && task.arrival_deadline_time ? (
+                      <Badge variant="outline" className="text-xs">
+                        Aankomst vóór {task.arrival_deadline_time}
+                      </Badge>
+                    ) : task.time_window_start && task.time_window_end && (
                       <Badge variant="outline" className="text-xs">
                         {task.time_window_start} - {task.time_window_end}
                       </Badge>

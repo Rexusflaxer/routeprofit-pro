@@ -11,7 +11,8 @@ const TASK_TYPES = [
   "Externe Controleronde",
   "Externe Sluitronde",
   "Brand- en Sluitronde",
-  "Openingsronde"
+  "Openingsronde",
+  "Sluitbegeleiding"
 ];
 
 const WEEKDAYS = [
@@ -30,6 +31,8 @@ export default function TaskForm({ task, onSave, onCancel }) {
     duration_minutes: 15,
     time_window_start: "",
     time_window_end: "",
+    use_arrival_deadline: false,
+    arrival_deadline_time: "",
     weekdays: [],
     pricing_type: "per_taak",
     price_amount: 0,
@@ -49,9 +52,16 @@ export default function TaskForm({ task, onSave, onCancel }) {
     }));
   };
 
+  const usesArrivalDeadline = form.task_type === "Sluitbegeleiding" || (form.task_type === "Openingsronde" && form.use_arrival_deadline);
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSave(form);
+    onSave({
+      ...form,
+      use_arrival_deadline: usesArrivalDeadline,
+      time_window_start: usesArrivalDeadline ? "" : form.time_window_start,
+      time_window_end: usesArrivalDeadline ? "" : form.time_window_end,
+    });
   };
 
   const pricePerMinute = form.pricing_type === 'per_minuut' 
@@ -86,28 +96,56 @@ export default function TaskForm({ task, onSave, onCancel }) {
           </div>
         </div>
 
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-          <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tijdvenster van</Label>
-            <Input 
-              type="time" 
-              value={form.time_window_start} 
-              onChange={(e) => handleChange("time_window_start", e.target.value)} 
+        {form.task_type === "Openingsronde" && (
+          <label className="flex items-center gap-3 cursor-pointer bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+            <Checkbox
+              checked={!!form.use_arrival_deadline}
+              onCheckedChange={(v) => handleChange("use_arrival_deadline", v)}
             />
-          </div>
+            <div>
+              <p className="text-sm font-medium text-blue-800">Gebruik minimale aankomsttijd</p>
+              <p className="text-xs text-blue-600 mt-0.5">De taak moet vóór deze tijd starten in plaats van binnen een volledig tijdvenster.</p>
+            </div>
+          </label>
+        )}
 
+        {usesArrivalDeadline ? (
           <div className="space-y-2">
-            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tijdvenster tot</Label>
-            <Input 
-              type="time" 
-              value={form.time_window_end} 
-              onChange={(e) => handleChange("time_window_end", e.target.value)} 
+            <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Aankomst vóór</Label>
+            <Input
+              type="time"
+              value={form.arrival_deadline_time || ""}
+              onChange={(e) => handleChange("arrival_deadline_time", e.target.value)}
+              required
             />
-            {form.time_window_start && form.time_window_end && form.time_window_end <= form.time_window_start && (
-              <p className="text-xs text-blue-600">⏱ Eindtijd ligt na middernacht (volgende dag)</p>
+            {form.task_type === "Sluitbegeleiding" && (
+              <p className="text-xs text-slate-500">Sluitbegeleiding gebruikt geen tijdsvenster; alleen een uiterste aankomsttijd.</p>
             )}
           </div>
-        </div>
+        ) : (
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tijdvenster van</Label>
+              <Input 
+                type="time" 
+                value={form.time_window_start} 
+                onChange={(e) => handleChange("time_window_start", e.target.value)} 
+              />
+            </div>
+
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tijdvenster tot</Label>
+              <Input 
+                type="time" 
+                value={form.time_window_end} 
+                onChange={(e) => handleChange("time_window_end", e.target.value)} 
+              />
+              {form.time_window_start && form.time_window_end && form.time_window_end <= form.time_window_start && (
+                <p className="text-xs text-blue-600">⏱ Eindtijd ligt na middernacht (volgende dag)</p>
+              )}
+            </div>
+          </div>
+        )}
 
         <div className="space-y-2">
           <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Dagen van de week</Label>

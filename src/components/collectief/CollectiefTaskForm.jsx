@@ -13,6 +13,7 @@ const TASK_TYPES = [
   "Externe Sluitronde",
   "Brand- en Sluitronde",
   "Openingsronde",
+  "Sluitbegeleiding",
 ];
 
 const WEEKDAYS = [
@@ -32,6 +33,8 @@ export default function CollectiefTaskForm({ task, collectief, objects, allColle
     duration_minutes: task?.duration_minutes || 15,
     time_window_start: task?.time_window_start || "",
     time_window_end: task?.time_window_end || "",
+    use_arrival_deadline: task?.use_arrival_deadline || false,
+    arrival_deadline_time: task?.arrival_deadline_time || "",
     extra_time_windows: task?.extra_time_windows || [],
     allow_split: task?.allow_split || false,
     weekdays: task?.weekdays || [],
@@ -87,9 +90,18 @@ export default function CollectiefTaskForm({ task, collectief, objects, allColle
     ? form.price_amount
     : form.duration_minutes > 0 ? form.price_amount / form.duration_minutes : 0;
 
+  const usesArrivalDeadline = form.task_type === "Sluitbegeleiding" || (form.task_type === "Openingsronde" && form.use_arrival_deadline);
+
   const handleSubmit = (e) => {
     e.preventDefault();
-    onSave(form);
+    onSave({
+      ...form,
+      use_arrival_deadline: usesArrivalDeadline,
+      time_window_start: usesArrivalDeadline ? "" : form.time_window_start,
+      time_window_end: usesArrivalDeadline ? "" : form.time_window_end,
+      extra_time_windows: usesArrivalDeadline ? [] : form.extra_time_windows,
+      allow_split: usesArrivalDeadline ? false : form.allow_split,
+    });
   };
 
   return (
@@ -176,58 +188,88 @@ export default function CollectiefTaskForm({ task, collectief, objects, allColle
 
         {/* Tijdvensters */}
         <div className="space-y-3">
-          <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tijdvenster</Label>
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-1.5">
-              <Label className="text-xs text-slate-400">Van</Label>
-              <Input type="time" value={form.time_window_start} onChange={(e) => handleChange("time_window_start", e.target.value)} />
-            </div>
-            <div className="space-y-1.5">
-              <Label className="text-xs text-slate-400">Tot</Label>
-              <Input type="time" value={form.time_window_end} onChange={(e) => handleChange("time_window_end", e.target.value)} />
-            </div>
-          </div>
-
-          {/* Extra tijdvensters */}
-          {form.extra_time_windows.map((w, i) => (
-            <div key={i} className="grid grid-cols-2 gap-4 relative">
-              <div className="space-y-1.5">
-                <Label className="text-xs text-slate-400">Extra venster {i + 2} — Van</Label>
-                <Input type="time" value={w.start} onChange={(e) => updateExtraWindow(i, "start", e.target.value)} />
+          {form.task_type === "Openingsronde" && (
+            <label className="flex items-center gap-3 cursor-pointer bg-blue-50 border border-blue-200 rounded-lg px-4 py-3">
+              <Checkbox
+                checked={!!form.use_arrival_deadline}
+                onCheckedChange={(v) => handleChange("use_arrival_deadline", v)}
+              />
+              <div>
+                <p className="text-sm font-medium text-blue-800">Gebruik minimale aankomsttijd</p>
+                <p className="text-xs text-blue-600 mt-0.5">De taak moet vóór deze tijd starten in plaats van binnen een volledig tijdvenster.</p>
               </div>
-              <div className="space-y-1.5">
-                <Label className="text-xs text-slate-400">Tot</Label>
-                <div className="flex gap-2">
-                  <Input type="time" value={w.end} onChange={(e) => updateExtraWindow(i, "end", e.target.value)} />
-                  <Button type="button" variant="ghost" size="icon" className="h-10 w-10 text-red-400 hover:text-red-600 flex-shrink-0" onClick={() => removeExtraWindow(i)}>
-                    <Trash2 className="w-4 h-4" />
-                  </Button>
+            </label>
+          )}
+
+          {usesArrivalDeadline ? (
+            <div className="space-y-2">
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Aankomst vóór</Label>
+              <Input
+                type="time"
+                value={form.arrival_deadline_time || ""}
+                onChange={(e) => handleChange("arrival_deadline_time", e.target.value)}
+                required
+              />
+              {form.task_type === "Sluitbegeleiding" && (
+                <p className="text-xs text-slate-500">Sluitbegeleiding gebruikt geen tijdsvenster; alleen een uiterste aankomsttijd.</p>
+              )}
+            </div>
+          ) : (
+            <>
+              <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tijdvenster</Label>
+              <div className="grid grid-cols-2 gap-4">
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Van</Label>
+                  <Input type="time" value={form.time_window_start} onChange={(e) => handleChange("time_window_start", e.target.value)} />
+                </div>
+                <div className="space-y-1.5">
+                  <Label className="text-xs text-slate-400">Tot</Label>
+                  <Input type="time" value={form.time_window_end} onChange={(e) => handleChange("time_window_end", e.target.value)} />
                 </div>
               </div>
+
+              {form.extra_time_windows.map((w, i) => (
+                <div key={i} className="grid grid-cols-2 gap-4 relative">
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-slate-400">Extra venster {i + 2} — Van</Label>
+                    <Input type="time" value={w.start} onChange={(e) => updateExtraWindow(i, "start", e.target.value)} />
+                  </div>
+                  <div className="space-y-1.5">
+                    <Label className="text-xs text-slate-400">Tot</Label>
+                    <div className="flex gap-2">
+                      <Input type="time" value={w.end} onChange={(e) => updateExtraWindow(i, "end", e.target.value)} />
+                      <Button type="button" variant="ghost" size="icon" className="h-10 w-10 text-red-400 hover:text-red-600 flex-shrink-0" onClick={() => removeExtraWindow(i)}>
+                        <Trash2 className="w-4 h-4" />
+                      </Button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+
+              <button
+                type="button"
+                onClick={addExtraWindow}
+                className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors"
+              >
+                <Plus className="w-3.5 h-3.5" /> Extra tijdvenster toevoegen
+              </button>
+            </>
+          )}
+        </div>
+
+        {!usesArrivalDeadline && (
+          <div className="flex items-start gap-3 bg-white border border-slate-200 rounded-lg px-4 py-3">
+            <Checkbox
+              checked={form.allow_split}
+              onCheckedChange={(v) => handleChange("allow_split", v)}
+              className="mt-0.5"
+            />
+            <div>
+              <p className="text-sm font-medium text-slate-800">Taak mag in meerdere delen worden uitgevoerd</p>
+              <p className="text-xs text-slate-500 mt-0.5">De route-optimizer mag de taak opsplitsen over meerdere momenten binnen de tijdvensters.</p>
             </div>
-          ))}
-
-          <button
-            type="button"
-            onClick={addExtraWindow}
-            className="text-xs text-blue-600 hover:text-blue-800 flex items-center gap-1 transition-colors"
-          >
-            <Plus className="w-3.5 h-3.5" /> Extra tijdvenster toevoegen
-          </button>
-        </div>
-
-        {/* Opdelen */}
-        <div className="flex items-start gap-3 bg-white border border-slate-200 rounded-lg px-4 py-3">
-          <Checkbox
-            checked={form.allow_split}
-            onCheckedChange={(v) => handleChange("allow_split", v)}
-            className="mt-0.5"
-          />
-          <div>
-            <p className="text-sm font-medium text-slate-800">Taak mag in meerdere delen worden uitgevoerd</p>
-            <p className="text-xs text-slate-500 mt-0.5">De route-optimizer mag de taak opsplitsen over meerdere momenten binnen de tijdvensters.</p>
           </div>
-        </div>
+        )}
 
         {/* Weekdagen */}
         <div className="space-y-2">

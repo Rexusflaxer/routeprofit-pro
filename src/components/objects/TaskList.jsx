@@ -132,7 +132,9 @@ export default function TaskList({ objectId }) {
                       Service
                     </Badge>
                   ) : null}
-                  {task.time_window_start && task.time_window_end && (
+                  {(task.task_type === "Sluitbegeleiding" || (task.task_type === "Openingsronde" && task.use_arrival_deadline)) && task.arrival_deadline_time ? (
+                    <span className="text-xs text-slate-500">Aankomst vóór {task.arrival_deadline_time}</span>
+                  ) : task.time_window_start && task.time_window_end && (
                     <span className="text-xs text-slate-500">{task.time_window_start} - {task.time_window_end}</span>
                   )}
                 </div>
@@ -183,7 +185,12 @@ export default function TaskList({ objectId }) {
                         </div>
                       )}
 
-                      {task.time_window_start && task.time_window_end && (
+                      {(task.task_type === "Sluitbegeleiding" || (task.task_type === "Openingsronde" && task.use_arrival_deadline)) && task.arrival_deadline_time ? (
+                        <div className="flex items-center gap-1.5 col-span-2">
+                          <Clock className="w-3.5 h-3.5 text-slate-400" />
+                          <span>Aankomst vóór {task.arrival_deadline_time}</span>
+                        </div>
+                      ) : task.time_window_start && task.time_window_end && (
                         <div className="flex items-center gap-1.5 col-span-2">
                           <Clock className="w-3.5 h-3.5 text-slate-400" />
                           <span>{task.time_window_start} - {task.time_window_end}</span>

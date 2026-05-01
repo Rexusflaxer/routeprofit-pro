@@ -97,6 +97,16 @@ function isoForMinute(date, minute) {
   return value.toISOString();
 }
 
+function getTaskTiming(task) {
+  const useArrivalDeadline = task.task_type === 'Sluitbegeleiding' || (task.task_type === 'Openingsronde' && task.use_arrival_deadline && task.arrival_deadline_time);
+  return {
+    time_window_start: useArrivalDeadline ? '00:00' : (task.time_window_start || '00:00'),
+    time_window_end: useArrivalDeadline ? (task.arrival_deadline_time || '23:59') : (task.time_window_end || '23:59'),
+    use_arrival_deadline: useArrivalDeadline,
+    arrival_deadline_time: task.arrival_deadline_time || '',
+  };
+}
+
 function prepareTaskInstances(tasks, objects, weekday) {
   const instances = [];
   const nonRelevant = [];
@@ -109,11 +119,14 @@ function prepareTaskInstances(tasks, objects, weekday) {
       continue;
     }
 
+    const timing = getTaskTiming(task);
     const base = {
       task_id: task.id,
       duration_minutes: task.duration_minutes || 15,
-      time_window_start: task.time_window_start || '00:00',
-      time_window_end: task.time_window_end || '23:59',
+      time_window_start: timing.time_window_start,
+      time_window_end: timing.time_window_end,
+      use_arrival_deadline: timing.use_arrival_deadline,
+      arrival_deadline_time: timing.arrival_deadline_time,
       task_type: task.task_type,
       price_amount: task.is_free ? 0 : (task.price_amount || 0),
       pricing_type: task.pricing_type,
