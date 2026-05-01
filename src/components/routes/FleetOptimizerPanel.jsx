@@ -34,14 +34,13 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   const [showDebug, setShowDebug] = useState(false);
   const [planningDays, setPlanningDays] = useState(ALL_WEEKDAYS);
 
-  const runOptimizer = async (days = ALL_WEEKDAYS, engine = 'custom') => {
+  const runOptimizer = async (days = ALL_WEEKDAYS) => {
     setPlanningDays(days);
     setLoading(true);
     setError(null);
     setResult(null);
     try {
-      const functionName = engine === 'google' ? 'googleRouteOptimization' : 'globalFleetOptimizer';
-      const res = await base44.functions.invoke(functionName, {
+      const res = await base44.functions.invoke('googleRouteOptimization', {
         weekdays: days,
         save_routes: false,
       });
@@ -58,7 +57,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
     setSaving(true);
     setError(null);
     try {
-      await base44.functions.invoke('globalFleetOptimizer', {
+      await base44.functions.invoke('googleRouteOptimization', {
         weekdays: planningDays,
         save_routes: true,
       });
@@ -80,14 +79,14 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base flex items-center gap-2 text-blue-900">
             <Zap className="w-5 h-5 text-blue-600" />
-            Automatische Vlootoptimalisatie — {planningDays.length === 1 ? WEEKDAY_LABELS[planningDays[0]] : 'Alle dagen'}
+            Google Route Optimization — {planningDays.length === 1 ? WEEKDAY_LABELS[planningDays[0]] : 'Alle dagen'}
           </CardTitle>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
             <X className="w-4 h-4" />
           </Button>
         </div>
         <p className="text-xs text-blue-700">
-          Geen handmatige planningshorizon nodig: de optimizer bepaalt zelf horizons, routeblokken, voertuigen en taakvolgorde.
+          Google Route Optimization plant de taken direct op basis van tijdvensters, locaties en beschikbare voertuigen.
         </p>
       </CardHeader>
 
@@ -95,16 +94,13 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => runOptimizer(ALL_WEEKDAYS)} disabled={loading} className="bg-blue-700 hover:bg-blue-800 text-white">
             <Zap className="w-4 h-4 mr-1.5" />
-            {loading ? 'Automatisch plannen...' : 'Alle dagen plannen'}
+            {loading ? 'Google planning maken...' : 'Alle dagen plannen met Google'}
           </Button>
           <Button onClick={() => runOptimizer(MONDAY_ONLY)} disabled={loading} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50">
             <Zap className="w-4 h-4 mr-1.5" />
             Alleen maandag
           </Button>
-          <Button onClick={() => runOptimizer(ALL_WEEKDAYS, 'google')} disabled={loading} variant="outline" className="border-emerald-300 text-emerald-700 hover:bg-emerald-50">
-            <Zap className="w-4 h-4 mr-1.5" />
-            Google optimalisatie
-          </Button>
+
           {result?.routes?.length > 0 && (
             <Button onClick={saveRoutes} disabled={saving || result.has_estimated_travel} variant="outline" className="border-green-300 text-green-700 hover:bg-green-50">
               <Save className="w-4 h-4 mr-1.5" />

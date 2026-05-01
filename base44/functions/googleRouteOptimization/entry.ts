@@ -322,6 +322,7 @@ Deno.serve(async (req) => {
 
     const body = await req.json();
     const weekdays = body.weekdays ?? (body.weekday ? [body.weekday] : [1]);
+    const saveRoutes = !!body.save_routes;
     const serviceAccountJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
     const projectId = Deno.env.get('GOOGLE_CLOUD_PROJECT_ID');
     if (!serviceAccountJson || !projectId) return Response.json({ error: 'Google service-account secrets ontbreken.' }, { status: 500 });
@@ -329,11 +330,12 @@ Deno.serve(async (req) => {
     const serviceAccount = JSON.parse(serviceAccountJson);
     const accessToken = await getAccessToken(serviceAccount);
 
-    const [tasks, objects, vehicles, offices] = await Promise.all([
+    const [tasks, objects, vehicles, offices, folders] = await Promise.all([
       base44.entities.Task.list(),
       base44.entities.SurveillanceObject.list(),
       base44.entities.Vehicle.list(),
       base44.entities.Office.list(),
+      base44.entities.RouteFolder.list(),
     ]);
 
     const activeVehicles = vehicles.filter(v => v.is_active !== false);
@@ -373,6 +375,46 @@ Deno.serve(async (req) => {
       total_cost: r2(perDay.reduce((s, d) => s + (d.totals?.total_cost || 0), 0)),
     };
 
+    if (saveRoutes) {
+      let folderId = folders[0]?.id;
+      if (!folderId) {
+        const newFolder = await base44.asServiceRole.entities.RouteFolder.create({ name: 'Google Route Optimization', color: 'green' });
+        folderId = newFolder.id;
+      }
+
+      const weekdayLabels = { 1: 'Maandag', 2: 'Dinsdag', 3: 'Woensdag', 4: 'Donderdag', 5: 'Vrijdag', 6: 'Zaterdag', 7: 'Zondag' };
+      for (const weekday of weekdays) {
+        const dayRoutes = routes.filter(route => route.id?.startsWith(`google_route_${weekday}_`));
+        for (let i = 0; i < dayRoutes.length; i++) {
+          const route = dayRoutes[i];
+          await base44.asServiceRole.entities.Route.create({
+            name: `${weekdayLabels[weekday]} - Google route ${i + 1}${route.vehicle ? ` (${route.vehicle.license_plate || route.vehicle.name})` : ''}`,
+            folder_id: folderId,
+            vehicle_id: route.vehicle?.id || null,
+            time_window_start: route.time_window_start,
+            time_window_end: route.time_window_end,
+            weekdays: [weekday],
+            source: 'automatic',
+            assigned_tasks: route.tasks.map((task, index) => ({
+              task_id: task.task_id,
+              days: [weekday],
+              sequence_index: index,
+              locked_sequence: true,
+              planned_arrival_time: task.arrival_time,
+              planned_start_time: task.actual_start_time,
+              planned_departure_time: task.departure_time,
+            })),
+            total_service_minutes: route.stats.total_service_minutes,
+            total_distance_km: route.stats.total_distance_km,
+            total_route_minutes: route.stats.total_route_minutes,
+            status: 'geoptimaliseerd',
+            cached_optimization: route,
+            optimization_calculated_at: new Date().toISOString(),
+          });
+        }
+      }
+    }
+
     return Response.json({
       planning_mode: 'google_route_optimization',
       google_route_optimization: true,
@@ -393,7 +435,7 @@ Deno.serve(async (req) => {
       has_estimated_travel: false,
       weekdays,
       generated_at: new Date().toISOString(),
-      saved: false,
+      saved: saveRoutes,
     });
   } catch (error) {
     console.error('Google Route Optimization error:', error);
