@@ -484,6 +484,7 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const weekdays = body.weekdays ?? (body.weekday ? [body.weekday] : [1]);
     const saveRoutes = !!body.save_routes;
+    const plannedResult = body.planned_result || null;
     const serviceAccountJson = Deno.env.get('GOOGLE_SERVICE_ACCOUNT_JSON');
     const projectId = Deno.env.get('GOOGLE_CLOUD_PROJECT_ID');
     if (!serviceAccountJson || !projectId) return Response.json({ error: 'Google service-account secrets ontbreken.' }, { status: 500 });
@@ -534,10 +535,10 @@ Deno.serve(async (req) => {
       perDay.push(mapGoogleResult(apiResult, instances, planningVehicles, skipped, nonRelevant, weekday));
     }
 
-    const routes = perDay.flatMap(day => day.routes || []);
-    const skippedTasks = perDay.flatMap(day => day.skipped_tasks || []);
-    const nonRelevantTasks = perDay.flatMap(day => day.non_relevant_tasks || []);
-    const totals = {
+    const routes = plannedResult?.routes || perDay.flatMap(day => day.routes || []);
+    const skippedTasks = plannedResult?.skipped_tasks || perDay.flatMap(day => day.skipped_tasks || []);
+    const nonRelevantTasks = plannedResult?.non_relevant_tasks || perDay.flatMap(day => day.non_relevant_tasks || []);
+    const totals = plannedResult?.totals || {
       total_travel_minutes: perDay.reduce((s, d) => s + (d.totals?.total_travel_minutes || 0), 0),
       total_service_minutes: perDay.reduce((s, d) => s + (d.totals?.total_service_minutes || 0), 0),
       total_wait_minutes: perDay.reduce((s, d) => s + (d.totals?.total_wait_minutes || 0), 0),
@@ -607,8 +608,8 @@ Deno.serve(async (req) => {
       totals,
       vehicle_count: activeVehicles.length,
       max_concurrent_routes: routes.length,
-      total_tasks_input: perDay.reduce((s, d) => s + (d.total_tasks_input || 0), 0),
-      total_tasks_planned: routes.reduce((s, r) => s + r.tasks.length, 0),
+      total_tasks_input: plannedResult?.total_tasks_input ?? perDay.reduce((s, d) => s + (d.total_tasks_input || 0), 0),
+      total_tasks_planned: plannedResult?.total_tasks_planned ?? routes.reduce((s, r) => s + r.tasks.length, 0),
       total_tasks_skipped: skippedTasks.length,
       total_tasks_not_relevant: nonRelevantTasks.length,
       total_routes_created: routes.length,
