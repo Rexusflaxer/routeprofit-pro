@@ -214,8 +214,15 @@ function buildPlanningVehicles(manualRoutes, activeVehicles, objects, offices) {
   });
 }
 
-function buildTaskTimeWindows(date, start, end) {
-  return [{ startTime: isoForMinute(date, start), endTime: isoForMinute(date, end) }];
+function buildTaskTimeWindows(date, start, end, globalStart, globalEnd) {
+  const candidates = [
+    { start, end },
+    { start: start + 1440, end: end + 1440 },
+  ];
+
+  return candidates
+    .filter(window => window.end > globalStart && window.start < globalEnd)
+    .map(window => ({ startTime: isoForMinute(date, window.start), endTime: isoForMinute(date, window.end) }));
 }
 
 function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) {
@@ -226,12 +233,12 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
     let end = parseTime(task.time_window_end) ?? 1439;
     return end <= start ? end + 1440 : end;
   });
-  const globalStart = Math.min(...vehicles.map(v => v._windowStart ?? 0), ...shipmentStarts);
-  const globalEnd = Math.max(...vehicles.map(v => v._windowEnd ?? 1439), ...shipmentEnds, ...shipmentEnds.map(end => end + 1440));
+  const globalStart = Math.min(...vehicles.map(v => v._windowStart ?? 0));
+  const globalEnd = Math.max(...vehicles.map(v => v._windowEnd ?? 1439));
 
   const shipments = taskInstances.map((task, index) => {
     const start = parseTime(task.time_window_start) ?? 0;
-    let end = task.use_arrival_deadline ? start : (parseTime(task.time_window_end) ?? 1439);
+    let end = task.use_arrival_deadline ? start + 1 : (parseTime(task.time_window_end) ?? 1439);
     if (end <= start) end += 1440;
     task._shipmentIndex = index;
     return {
