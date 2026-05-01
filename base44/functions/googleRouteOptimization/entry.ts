@@ -368,27 +368,6 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
     costPerHour: Number(vehicle.kostenPerMinuutVoertuig ?? 0.12) * 60,
   }));
 
-  const precedenceRules = [];
-  const repeatGroups = new Map();
-  taskInstances.forEach((task, index) => {
-    if ((task.repeat_count || 1) <= 1 || !task.min_minutes_between_visits) return;
-    const key = `${task.task_id || task.id}_${task.object_id || ''}_${task.split_index || 1}`;
-    if (!repeatGroups.has(key)) repeatGroups.set(key, []);
-    repeatGroups.get(key).push({ index, repeatIndex: task.repeat_index || 1, gap: Number(task.min_minutes_between_visits || 0) });
-  });
-
-  for (const group of repeatGroups.values()) {
-    group.sort((a, b) => a.repeatIndex - b.repeatIndex);
-    for (let i = 1; i < group.length; i++) {
-      precedenceRules.push({
-        firstIndex: group[i - 1].index,
-        firstIsDelivery: true,
-        secondIndex: group[i].index,
-        secondIsDelivery: true,
-        offsetDuration: `${Math.max(0, group[i].gap) * 60}s`,
-      });
-    }
-  }
 
   return {
     model: {
@@ -396,7 +375,6 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
       globalEndTime: isoForMinute(date, globalEnd),
       shipments,
       vehicles: googleVehicles,
-      ...(precedenceRules.length ? { precedenceRules } : {}),
     },
   };
 }
