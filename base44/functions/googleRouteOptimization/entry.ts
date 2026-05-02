@@ -380,6 +380,112 @@ function buildGoogleRequest(taskInstances, vehicles, offices, objects, weekday) 
   };
 }
 
+function minutesForTime(time) {
+  const parsed = parseTime(time);
+  return parsed ?? 0;
+}
+
+function taskWindowCandidates(task) {
+  const start = parseTime(task.time_window_start) ?? 0;
+  let end = parseTime(task.time_window_end) ?? 1439;
+  if (end <= start) end += 1440;
+  return [
+    { start, end },
+    { start: start + 1440, end: end + 1440 },
+  ];
+}
+
+function sameLocation(a, b) {
+  if (!a || !b) return false;
+  return Math.abs(Number(a.latitude) - Number(b.latitude)) < 0.0002 && Math.abs(Number(a.longitude) - Number(b.longitude)) < 0.0002;
+}
+
+function routeTaskStartMinute(task, referenceStart = 0) {
+  let minute = minutesForTime(task.actual_start_time || task.arrival_time);
+  if (minute + 720 < referenceStart) minute += 1440;
+  return minute;
+}
+
+function canRespectRepeatSpacing(candidateMinute, task, routes) {
+  const minGap = Number(task.min_minutes_between_visits || 0);
+  if (!minGap || !task.task_id) return true;
+  const relatedStarts = routes.flatMap(route => (route.tasks || [])
+    .filter(existing => existing.task_id === task.task_id)
+    .map(existing => routeTaskStartMinute(existing, candidateMinute)));
+  return relatedStarts.every(existingMinute => Math.abs(existingMinute - candidateMinute) >= minGap);
+}
+
+function repairDepotSkippedTasks(routes, skippedTasks) {
+  const repaired = [];
+  const remaining = [];
+
+  for (const task of skippedTasks) {
+    const duration = Number(task.duration_minutes || 0);
+    let placed = false;
+
+    for (const route of routes) {
+      const depotMatch = sameLocation(task, route.vehicle?._startDepot) || sameLocation(task, route.vehicle?._endDepot);
+      if (!depotMatch) continue;
+
+      const routeStart = route.vehicle?._windowStart ?? parseTime(route.time_window_start) ?? 0;
+      const routeEnd = route.vehicle?._windowEnd ?? parseTime(route.time_window_end) ?? 1439;
+      const normalizedRouteEnd = routeEnd <= routeStart ? routeEnd + 1440 : routeEnd;
+      const windows = taskWindowCandidates(task);
+      const candidates = windows
+        .map(window => ({ start: Math.max(window.start, routeStart), end: Math.min(window.end, normalizedRouteEnd) }))
+        .filter(window => window.end - window.start >= duration)
+        .flatMap(window => [window.end - duration, window.start])
+        .filter(minute => canRespectRepeatSpacing(minute, task, routes))
+        .sort((a, b) => b - a);
+
+      if (!candidates.length) continue;
+
+      const startMinute = candidates[0];
+      const departureMinute = startMinute + duration;
+      const repairedTask = {
+        task_id: task.task_id || task.id,
+        object_id: task.object_id,
+        name: task.name,
+        address: task.address || '',
+        duration_minutes: duration,
+        time_window_start: task.time_window_start,
+        time_window_end: task.time_window_end,
+        task_type: task.task_type,
+        repeat_index: task.repeat_index,
+        repeat_count: task.repeat_count,
+        min_minutes_between_visits: task.min_minutes_between_visits,
+        allow_split: task.allow_split,
+        split_index: task.split_index,
+        split_part_count: task.split_part_count,
+        arrival_time: formatMinute(startMinute),
+        actual_start_time: formatMinute(startMinute),
+        departure_time: formatMinute(departureMinute),
+        travel_time_minutes: 0,
+        distance_km: 0,
+        waiting_time: 0,
+        estimated_travel: false,
+        sequence_index: route.tasks.length,
+        placement_explanation: 'Automatisch toegevoegd: taak ligt op het start/einddepot en past binnen het routevenster.',
+      };
+
+      route.tasks.push(repairedTask);
+      route.optimized_order.splice(Math.max(1, route.optimized_order.length - 1), 0, repairedTask);
+      route.stats.total_tasks += 1;
+      route.stats.total_service_minutes += duration;
+      route.stats.total_route_minutes += duration;
+      route.total_service_time += duration;
+      route.total_route_time += duration;
+      repaired.push(repairedTask);
+      placed = true;
+      break;
+    }
+
+    if (!placed) remaining.push(task);
+  }
+
+  return { repaired, remaining };
+}
+
 function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevant, weekday) {
   const plannedShipmentIndexes = new Set();
   const routes = (apiResult.routes || [])
@@ -506,7 +612,8 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
       return { ...task, primaryReason: 'Niet ingepland', skip_reason: details.reason, advice: details.advice };
     });
 
-  const allSkipped = [...skipped, ...googleSkipped, ...notVisited];
+  const initialSkipped = [...skipped, ...googleSkipped, ...notVisited];
+  const { remaining: allSkipped } = repairDepotSkippedTasks(routes, initialSkipped);
   const totals = {
     total_travel_minutes: routes.reduce((s, r) => s + r.stats.total_travel_minutes, 0),
     total_service_minutes: routes.reduce((s, r) => s + r.stats.total_service_minutes, 0),
