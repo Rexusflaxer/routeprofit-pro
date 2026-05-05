@@ -256,13 +256,14 @@ export default function RouteDetails() {
     if (existingStartIndex >= 0 && firstTaskIndex >= 0) {
       const startItem = order[existingStartIndex];
       const firstTask = order[firstTaskIndex];
-      const inferredStartTravel = Number(firstTask.waiting_time || 0);
-      if (inferredStartTravel > 0 && !Number(firstTask.travel_time_minutes || 0)) {
+      const inferredStartTravel = Number(startItem.travel_to_next_minutes || firstTask.travel_time_minutes || firstTask.waiting_time || startItem.waiting_time || 0);
+      if (inferredStartTravel > 0) {
         startItem.departure_time = startItem.arrival_time;
         startItem.travel_to_next_minutes = inferredStartTravel;
-        startItem.distance_to_next_km = firstTask.distance_km || 0;
+        startItem.distance_to_next_km = startItem.distance_to_next_km || firstTask.distance_km || 0;
         startItem.waiting_time = 0;
         firstTask.travel_time_minutes = inferredStartTravel;
+        firstTask.distance_km = firstTask.distance_km || startItem.distance_to_next_km || 0;
         firstTask.waiting_time = 0;
         firstTask.actual_start_time = firstTask.arrival_time;
       }
