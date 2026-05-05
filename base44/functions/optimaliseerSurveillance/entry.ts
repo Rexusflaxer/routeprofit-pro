@@ -105,24 +105,22 @@ function normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles) {
     .sort((a, b) => b.overlap - a.overlap)[0];
 }
 
-function normalizeDeadlineWindowForVehicles(deadlineSeconds, serviceSeconds, vehicles, earliestStartSeconds = null) {
+function normalizeDeadlineWindowForVehicles(deadlineSeconds, serviceSeconds, vehicles, latestDepartureSeconds = null) {
   const candidates = [0, 86400]
     .map(offset => {
       const deadline = deadlineSeconds + offset;
-      let earliest = deadline - Math.max(3600, serviceSeconds);
-      if (Number.isFinite(earliestStartSeconds)) {
-        earliest = earliestStartSeconds <= deadlineSeconds
-          ? earliestStartSeconds + offset
-          : earliestStartSeconds + offset - 86400;
-        if (earliest >= deadline) earliest = deadline - Math.max(300, serviceSeconds);
-      }
-      const normalizedEarliest = Math.max(0, earliest);
+      let end = Number.isFinite(latestDepartureSeconds)
+        ? latestDepartureSeconds + offset
+        : deadline + serviceSeconds;
+      if (end <= deadline) end += 86400;
+      if (end < deadline + serviceSeconds) end = deadline + serviceSeconds;
+
       return {
-        start: normalizedEarliest,
-        end: deadline,
+        start: deadline,
+        end,
         deadline,
         overlap: vehicles.reduce((sum, vehicle) => {
-          const overlap = Math.min(deadline, vehicle.shift_end) - Math.max(normalizedEarliest, vehicle.shift_start);
+          const overlap = Math.min(end, vehicle.shift_end) - Math.max(deadline, vehicle.shift_start);
           return sum + Math.max(0, overlap);
         }, 0),
       };
@@ -162,11 +160,8 @@ function buildTasksForDay(day, tasks, objects, vehicles) {
     const latestDeparture = usesArrivalDeadline && task.latest_departure_time
       ? parseTimeToSeconds(task.latest_departure_time, NaN)
       : NaN;
-    const deadlineWindowStart = Number.isFinite(latestDeparture)
-      ? latestDeparture - serviceSeconds
-      : windowStart;
     const normalizedWindow = usesArrivalDeadline
-      ? normalizeDeadlineWindowForVehicles(parseTimeToSeconds(inferredDeadline, 86340), serviceSeconds, vehicles, deadlineWindowStart)
+      ? normalizeDeadlineWindowForVehicles(parseTimeToSeconds(inferredDeadline, 86340), serviceSeconds, vehicles, latestDeparture)
       : normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles);
     const windowLength = Math.max(serviceSeconds, normalizedWindow.end - normalizedWindow.start);
     const totalGapSeconds = repeatCount > 1 ? (repeatCount - 1) * (minGapSeconds + serviceSeconds) : 0;
@@ -287,7 +282,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         uses_arrival_deadline: source._usesArrivalDeadline,
         arrival_deadline_time: source._arrivalDeadlineTime,
         arrival_time: formatSeconds(arrivalSeconds),
-        actual_start_time: formatSeconds(arrivalSeconds - waitingSeconds),
+        actual_start_time: formatSeconds(arrivalSeconds),
         departure_time: formatSeconds(arrivalSeconds + serviceSeconds),
         travel_time_minutes: Math.round(travelSeconds / 60),
         distance_km: previousStep ? Number(previousStep.distance_to_next_km || 0) : Number(step.distance_km || step.travel_distance_km || 0),
