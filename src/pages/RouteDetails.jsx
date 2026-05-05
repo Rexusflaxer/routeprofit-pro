@@ -338,15 +338,17 @@ export default function RouteDetails() {
 
   const getWaitBeforeStop = (item, index) => {
     if (!item || item.is_start || item.is_end || item.is_alarm_standby) return null;
-    if (index > 0 && visibleOptimizedOrder[index - 1]?.is_start) return null;
-    if (!item.arrival_time || !item.actual_start_time) return null;
+    const previousItem = visibleOptimizedOrder[index - 1];
+    if (!previousItem || previousItem.is_start || !item.actual_start_time) return null;
 
-    const arrival = getRouteClockMinutes(item.arrival_time);
+    const previousDeparture = getRouteClockMinutes(previousItem.departure_time || previousItem.actual_start_time || previousItem.arrival_time);
+    const travelMinutes = Number(previousItem.travel_to_next_minutes || item.travel_time_minutes || 0);
+    const arrival = previousDeparture + travelMinutes;
     let start = getRouteClockMinutes(item.actual_start_time);
     if (start < arrival) start += 1440;
     const minutes = Math.max(0, Math.round(start - arrival));
 
-    return minutes > 0 ? { minutes, start: item.arrival_time, end: item.actual_start_time } : null;
+    return minutes > 0 ? { minutes, start: formatClockMinutes(arrival), end: item.actual_start_time } : null;
   };
 
   if (!routeId) {
