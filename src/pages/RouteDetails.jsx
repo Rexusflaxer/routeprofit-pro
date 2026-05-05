@@ -595,7 +595,7 @@ export default function RouteDetails() {
 
                           {!item.is_alarm_standby && (
                             <>
-                              {index > 0 && (item.travel_time_minutes > 0 || item.distance_km > 0) && (
+                              {!item.is_start && (item.travel_time_minutes > 0 || item.distance_km > 0) && (
                                 <div className="flex items-center justify-center py-2">
                                   <div className="flex items-center gap-2 px-3 py-1 bg-blue-100 rounded-full">
                                     <Navigation className="w-3 h-3 text-blue-600" />
@@ -619,29 +619,53 @@ export default function RouteDetails() {
                                     <div className="flex items-center gap-2 px-3 py-1 bg-green-100 rounded-full">
                                       <Clock className="w-3 h-3 text-green-600" />
                                       <span className="text-xs font-medium text-green-700">
-                                        Vrije tijd tussen stops: {item.waiting_time} min ({item.actual_start_time} – {item.arrival_time})
+                                        {item.is_start ? 'Vrije tijd aan begin dienst' : 'Vrije tijd tussen stops'}: {item.waiting_time} min ({item.is_start ? `${item.arrival_time} – ${item.departure_time}` : `${item.actual_start_time} – ${item.arrival_time}`})
                                       </span>
                                     </div>
                                   )}
                                 </div>
                               )}
 
-                              <div className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border-l-4 border-blue-600">
-                                <div className="flex-shrink-0 w-8 h-8 rounded-full bg-blue-600 text-white flex items-center justify-center text-sm font-bold">
-                                  {index + 1}
+                              <div className={`flex items-start gap-3 p-4 rounded-lg border-l-4 ${item.is_start ? 'bg-green-50 border-green-600' : item.is_end ? 'bg-red-50 border-red-600' : item.is_split_part ? 'bg-purple-50 border-purple-600' : 'bg-slate-50 border-blue-600'}`}>
+                                <div className={`flex-shrink-0 min-w-8 h-8 px-2 rounded-full text-white flex items-center justify-center text-xs font-bold ${item.is_start ? 'bg-green-600' : item.is_end ? 'bg-red-600' : item.is_split_part ? 'bg-purple-600' : 'bg-blue-600'}`}>
+                                  {item.is_start ? 'START' : item.is_end ? 'EIND' : optimizedRoute.optimized_order.slice(0, index).filter(stop => !stop.is_start && !stop.is_end).length + 1}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-semibold text-slate-900">{item.name}</p>
                                   <p className="text-xs text-slate-500 mb-2">{item.address}</p>
-                                  {item.task_type && (
-                                    <Badge variant="outline" className="text-xs mb-2">{item.task_type}</Badge>
-                                  )}
+                                  <div className="flex flex-wrap gap-2 mb-2">
+                                    {item.task_type && (
+                                      <Badge variant="outline" className="text-xs">{item.task_type}</Badge>
+                                    )}
+                                    {item.is_split_part && (
+                                      <Badge className="text-xs bg-purple-100 text-purple-700 border-purple-200">Deel {item.split_index}/{item.split_part_count}</Badge>
+                                    )}
+                                    {item.uses_arrival_deadline && (
+                                      <Badge className="text-xs bg-amber-100 text-amber-700 border-amber-200">Aanwezig vóór {item.arrival_deadline_time}</Badge>
+                                    )}
+                                  </div>
                                   <div className="grid grid-cols-2 gap-2 mt-2">
                                     {item.arrival_time && (
                                       <div className="text-xs">
                                         <span className="text-slate-500">Aankomst:</span>
                                         <span className="ml-1 font-medium text-slate-900">{item.arrival_time}</span>
                                       </div>
+                                    )}
+                                    {(item.is_start || item.is_end) && (
+                                      <>
+                                        {item.departure_time && (
+                                          <div className="text-xs">
+                                            <span className="text-slate-500">Vertrek:</span>
+                                            <span className="ml-1 font-medium text-slate-900">{item.departure_time}</span>
+                                          </div>
+                                        )}
+                                        {item.travel_to_next_minutes > 0 && (
+                                          <div className="text-xs">
+                                            <span className="text-slate-500">Naar eerste taak:</span>
+                                            <span className="ml-1 font-medium text-slate-900">{item.travel_to_next_minutes} min{item.distance_to_next_km ? ` · ${Number(item.distance_to_next_km).toFixed(2)} km` : ''}</span>
+                                          </div>
+                                        )}
+                                      </>
                                     )}
                                     {!item.is_start && !item.is_end && (
                                       <>

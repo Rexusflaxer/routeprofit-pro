@@ -60,6 +60,8 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices) {
       skills: [1],
       _vehicle: vehicle,
       _manualRoute: route,
+      _startDepot: startDepot,
+      _endDepot: endDepot,
     };
   }).filter(vehicle => Number.isFinite(vehicle.start_lat) && Number.isFinite(vehicle.start_lon));
 }
@@ -101,8 +103,18 @@ function buildTasksForDay(day, tasks, objects, vehicles) {
     const baseDuration = Number(durationOverrideMinutes ?? task.duration_minutes ?? 15);
     const serviceSeconds = Math.max(60, Math.ceil((baseDuration * 60) / splitCount));
     const minGapSeconds = Math.max(0, Number(task.min_minutes_between_visits || 0) * 60);
-    const windowStart = parseTimeToSeconds(task.time_window_start, 0);
-    const windowEnd = parseTimeToSeconds(task.time_window_end, 86340);
+    const usesArrivalDeadline = !!task.arrival_deadline_time && (
+      task.use_arrival_deadline ||
+      task.task_type === 'Openingsronde' ||
+      task.task_type === 'Sluitbegeleiding' ||
+      String(task.task_type || '').includes('Sluitronde')
+    );
+    const windowStart = usesArrivalDeadline
+      ? parseTimeToSeconds(task.latest_departure_time || task.time_window_start, 0)
+      : parseTimeToSeconds(task.time_window_start, 0);
+    const windowEnd = usesArrivalDeadline
+      ? parseTimeToSeconds(task.arrival_deadline_time, 86340)
+      : parseTimeToSeconds(task.time_window_end, 86340);
     const normalizedWindow = normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles);
     const windowLength = Math.max(serviceSeconds, normalizedWindow.end - normalizedWindow.start);
     const repeatSegment = repeatCount > 1 ? Math.max(serviceSeconds, Math.floor(windowLength / repeatCount)) : windowLength;
@@ -124,7 +136,7 @@ function buildTasksForDay(day, tasks, objects, vehicles) {
           service_seconds: serviceSeconds,
           window_start: repeatStart,
           window_end: repeatEnd,
-          priority: 80,
+          priority: usesArrivalDeadline ? 95 : 80,
           skills: [1],
           _task: task,
           _object: object,
@@ -134,6 +146,8 @@ function buildTasksForDay(day, tasks, objects, vehicles) {
           _repeatCount: repeatCount,
           _splitIndex: splitIndex,
           _splitCount: splitCount,
+          _usesArrivalDeadline: usesArrivalDeadline,
+          _arrivalDeadlineTime: task.arrival_deadline_time || '',
         });
       }
     }
@@ -193,8 +207,11 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
       const serviceSeconds = Number(step.service_seconds || source.service_seconds || 0);
       const previousArrival = previousStep ? Number(previousStep.arrival_seconds || 0) : null;
       const previousService = previousStep ? Number(previousStep.service_seconds || previousSource?.service_seconds || 0) : 0;
-      const travelSeconds = previousStep ? Number(previousStep.travel_to_next_seconds || 0) : 0;
-      const waitingSeconds = previousStep ? Math.max(0, arrivalSeconds - previousArrival - previousService - travelSeconds) : 0;
+      const startTravelSeconds = Number(step.travel_seconds || step.travel_time_seconds || 0);
+      const travelSeconds = previousStep ? Number(previousStep.travel_to_next_seconds || 0) : startTravelSeconds;
+      const waitingSeconds = previousStep
+        ? Math.max(0, arrivalSeconds - previousArrival - previousService - travelSeconds)
+        : Math.max(0, arrivalSeconds - (vehicle.shift_start || 0) - travelSeconds);
       return {
         task_id: source._originalTaskId || String(step.task_id),
         object_id: source._object?.id,
@@ -208,11 +225,14 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         repeat_count: source._repeatCount,
         split_index: source._splitIndex,
         split_part_count: source._splitCount,
+        is_split_part: (source._splitCount || 1) > 1,
+        uses_arrival_deadline: source._usesArrivalDeadline,
+        arrival_deadline_time: source._arrivalDeadlineTime,
         arrival_time: step.arrival_time || formatSeconds(arrivalSeconds),
         actual_start_time: formatSeconds(arrivalSeconds - waitingSeconds),
         departure_time: formatSeconds(arrivalSeconds + serviceSeconds),
         travel_time_minutes: Math.round(travelSeconds / 60),
-        distance_km: Number(previousStep?.distance_to_next_km || 0),
+        distance_km: previousStep ? Number(previousStep.distance_to_next_km || 0) : Number(step.distance_km || step.travel_distance_km || 0),
         waiting_time: Math.round(waitingSeconds / 60),
         travel_to_next_minutes: Number(step.travel_to_next_minutes ?? Math.round(Number(step.travel_to_next_seconds || 0) / 60)),
         distance_to_next_km: Number(step.distance_to_next_km || 0),
@@ -221,6 +241,33 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
       };
     });
 
+    const startLocation = vehicle._manualRoute?._startDepot || null;
+    const endLocation = vehicle._manualRoute?._endDepot || null;
+    const firstTask = routeTasks[0];
+    const lastTask = routeTasks[routeTasks.length - 1];
+    const startBlock = startLocation ? {
+      name: `START: ${startLocation.name || 'Startlocatie'}`,
+      address: startLocation.address || '',
+      is_start: true,
+      arrival_time: formatSeconds(vehicle.shift_start || 0),
+      actual_start_time: formatSeconds(vehicle.shift_start || 0),
+      departure_time: firstTask ? formatSeconds((parseTimeToSeconds(firstTask.arrival_time, 0) + (firstTask.arrival_time < formatSeconds(vehicle.shift_start || 0) ? 86400 : 0)) - ((firstTask.travel_time_minutes || 0) * 60)) : formatSeconds(vehicle.shift_start || 0),
+      travel_to_next_minutes: firstTask?.travel_time_minutes || 0,
+      distance_to_next_km: firstTask?.distance_km || 0,
+      waiting_time: firstTask ? Math.max(0, Math.round((((parseTimeToSeconds(firstTask.arrival_time, 0) + (firstTask.arrival_time < formatSeconds(vehicle.shift_start || 0) ? 86400 : 0)) - ((firstTask.travel_time_minutes || 0) * 60)) - (vehicle.shift_start || 0)) / 60)) : 0,
+    } : null;
+    const endBlock = endLocation ? {
+      name: `EIND: ${endLocation.name || 'Eindlocatie'}`,
+      address: endLocation.address || '',
+      is_end: true,
+      arrival_time: lastTask?.departure_time || formatSeconds(route.end_time_seconds || vehicle.shift_end || 0),
+      actual_start_time: lastTask?.departure_time || formatSeconds(route.end_time_seconds || vehicle.shift_end || 0),
+      departure_time: formatSeconds(route.end_time_seconds || vehicle.shift_end || 0),
+      travel_time_minutes: lastTask?.travel_to_next_minutes || 0,
+      distance_km: lastTask?.distance_to_next_km || 0,
+      waiting_time: 0,
+    } : null;
+    const optimizedOrder = [startBlock, ...routeTasks, endBlock].filter(Boolean);
     const totalServiceMinutes = routeTasks.reduce((sum, task) => sum + (task.duration_minutes || 0), 0);
     const travelMinutes = Math.round(Number(route.total_travel_seconds || 0) / 60);
     const totalDistanceKm = Number(route.total_distance_km ?? ((Number(route.total_distance_meters || 0) / 1000).toFixed(2)));
@@ -238,7 +285,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
       route_cost: 0,
       validation: { valid: true, errors: [] },
       tasks: routeTasks,
-      optimized_order: routeTasks,
+      optimized_order: optimizedOrder,
       total_route_time: totalServiceMinutes + travelMinutes + totalWaitMinutes,
       total_travel_time: travelMinutes,
       total_service_time: totalServiceMinutes,
