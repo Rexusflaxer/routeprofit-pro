@@ -86,6 +86,29 @@ function normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles) {
     .sort((a, b) => b.overlap - a.overlap)[0];
 }
 
+function normalizeDeadlineWindowForVehicles(deadlineSeconds, serviceSeconds, vehicles) {
+  const candidates = [deadlineSeconds, deadlineSeconds + 86400]
+    .map(deadline => ({
+      start: Math.max(0, deadline - 300),
+      end: deadline + 60,
+      deadline,
+      overlap: vehicles.reduce((sum, vehicle) => {
+        const latestStart = Math.min(deadline, vehicle.shift_end - serviceSeconds);
+        const overlap = latestStart - Math.max(deadline - 300, vehicle.shift_start);
+        return sum + Math.max(0, overlap);
+      }, 0),
+    }))
+    .sort((a, b) => b.overlap - a.overlap);
+
+  return candidates[0];
+}
+
+function automaticSplitCount(task, durationMinutes) {
+  if (!task.allow_split) return 1;
+  if (durationMinutes < 60) return 1;
+  return Math.min(4, Math.max(2, Math.ceil(durationMinutes / 60)));
+}
+
 function buildTasksForDay(day, tasks, objects, vehicles) {
   const optimizerTasks = [];
   const skipped = [];
@@ -99,23 +122,18 @@ function buildTasksForDay(day, tasks, objects, vehicles) {
     }
 
     const repeatCount = Math.max(1, Math.floor(Number(task.repeat_count || 1)));
-    const splitCount = task.allow_split ? Math.max(1, Math.floor(Number(task.split_part_count || 1))) : 1;
     const baseDuration = Number(durationOverrideMinutes ?? task.duration_minutes ?? 15);
+    const splitCount = automaticSplitCount(task, baseDuration);
     const serviceSeconds = Math.max(60, Math.ceil((baseDuration * 60) / splitCount));
     const minGapSeconds = Math.max(0, Number(task.min_minutes_between_visits || 0) * 60);
-    const usesArrivalDeadline = !!task.arrival_deadline_time && (
-      task.use_arrival_deadline ||
-      task.task_type === 'Openingsronde' ||
-      task.task_type === 'Sluitbegeleiding' ||
-      String(task.task_type || '').includes('Sluitronde')
-    );
-    const windowStart = usesArrivalDeadline
-      ? parseTimeToSeconds(task.latest_departure_time || task.time_window_start, 0)
-      : parseTimeToSeconds(task.time_window_start, 0);
-    const windowEnd = usesArrivalDeadline
-      ? parseTimeToSeconds(task.arrival_deadline_time, 86340)
-      : parseTimeToSeconds(task.time_window_end, 86340);
-    const normalizedWindow = normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles);
+    const isDeadlineType = task.task_type === 'Openingsronde' || task.task_type === 'Sluitbegeleiding';
+    const inferredDeadline = task.arrival_deadline_time || (isDeadlineType ? task.time_window_end : '');
+    const usesArrivalDeadline = !!inferredDeadline && (task.use_arrival_deadline || isDeadlineType);
+    const windowStart = parseTimeToSeconds(task.time_window_start, 0);
+    const windowEnd = parseTimeToSeconds(task.time_window_end, 86340);
+    const normalizedWindow = usesArrivalDeadline
+      ? normalizeDeadlineWindowForVehicles(parseTimeToSeconds(inferredDeadline, 86340), serviceSeconds, vehicles)
+      : normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles);
     const windowLength = Math.max(serviceSeconds, normalizedWindow.end - normalizedWindow.start);
     const repeatSegment = repeatCount > 1 ? Math.max(serviceSeconds, Math.floor(windowLength / repeatCount)) : windowLength;
 
@@ -128,14 +146,17 @@ function buildTasksForDay(day, tasks, objects, vehicles) {
       for (let splitIndex = 1; splitIndex <= splitCount; splitIndex++) {
         const repeatLabel = repeatCount > 1 ? ` (${repeatIndex}/${repeatCount})` : '';
         const splitLabel = splitCount > 1 ? ` deel ${splitIndex}/${splitCount}` : '';
+        const splitSegment = splitCount > 1 ? Math.max(serviceSeconds, Math.floor((repeatEnd - repeatStart) / splitCount)) : (repeatEnd - repeatStart);
+        const splitStart = splitCount > 1 ? repeatStart + ((splitIndex - 1) * splitSegment) : repeatStart;
+        const splitEnd = splitCount > 1 ? Math.min(repeatEnd, repeatStart + (splitIndex * splitSegment)) : repeatEnd;
         optimizerTasks.push({
           id: numericId++,
           name: `${object.name || task.task_type || 'Taak'}${repeatLabel}${splitLabel}`,
           lon: object.longitude,
           lat: object.latitude,
           service_seconds: serviceSeconds,
-          window_start: repeatStart,
-          window_end: repeatEnd,
+          window_start: splitStart,
+          window_end: splitEnd,
           priority: usesArrivalDeadline ? 95 : 80,
           skills: [1],
           _task: task,
@@ -147,7 +168,7 @@ function buildTasksForDay(day, tasks, objects, vehicles) {
           _splitIndex: splitIndex,
           _splitCount: splitCount,
           _usesArrivalDeadline: usesArrivalDeadline,
-          _arrivalDeadlineTime: task.arrival_deadline_time || '',
+          _arrivalDeadlineTime: inferredDeadline || '',
         });
       }
     }

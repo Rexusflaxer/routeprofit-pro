@@ -40,7 +40,6 @@ export default function CollectiefTaskForm({ task, collectief, objects, allColle
     arrival_deadline_time: task?.arrival_deadline_time || "",
     extra_time_windows: task?.extra_time_windows || [],
     allow_split: task?.allow_split || false,
-    split_part_count: task?.split_part_count || 2,
     weekdays: task?.weekdays || [],
     pricing_type: task?.pricing_type || "per_taak",
     price_amount: task?.price_amount || 0,
@@ -107,7 +106,7 @@ export default function CollectiefTaskForm({ task, collectief, objects, allColle
       time_window_end: usesArrivalDeadline ? "" : form.time_window_end,
       extra_time_windows: usesArrivalDeadline ? [] : form.extra_time_windows,
       allow_split: usesArrivalDeadline ? false : form.allow_split,
-      split_part_count: usesArrivalDeadline || !form.allow_split ? 1 : Math.max(2, Number(form.split_part_count || 2)),
+      split_part_count: 1,
     });
   };
 
@@ -286,15 +285,10 @@ export default function CollectiefTaskForm({ task, collectief, objects, allColle
               />
               <div>
                 <p className="text-sm font-medium text-slate-800">Taak mag in meerdere delen worden uitgevoerd</p>
-                <p className="text-xs text-slate-500 mt-0.5">Google mag deze taak als losse deelbezoeken binnen hetzelfde tijdvenster plannen.</p>
+                <p className="text-xs text-slate-500 mt-0.5">Het programma bepaalt zelf of splitsen nodig is en in hoeveel delen.</p>
               </div>
             </div>
-            {form.allow_split && (
-              <div className="max-w-xs space-y-1.5 pl-7">
-                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Aantal delen</Label>
-                <Input type="number" min="2" value={form.split_part_count || 2} onChange={(e) => handleChange("split_part_count", Number(e.target.value) || 2)} />
-              </div>
-            )}
+
           </div>
         )}
 
