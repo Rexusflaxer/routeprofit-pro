@@ -41,7 +41,7 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
     time_window_start: "",
     time_window_end: "",
     flexible_end_time: false,
-    max_route_minutes: 720,
+    max_route_minutes: 600,
     weekdays: [],
     notes: "",
     overhead_cost_ids: [],
@@ -68,7 +68,7 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
     };
 
     const newStart = parseMin(form.time_window_start);
-    let newEnd = form.flexible_end_time ? newStart + Math.min(Number(form.max_route_minutes || 720), 720) : parseMin(form.time_window_end);
+    let newEnd = form.flexible_end_time ? newStart + Math.min(Number(form.max_route_minutes || 600), 600) : parseMin(form.time_window_end);
     if (newEnd === null || newStart === null) return [];
     if (!form.flexible_end_time && newEnd <= newStart) newEnd += 1440; // over middernacht
 
@@ -81,7 +81,7 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
         .filter(r => r.time_window_start && (r.flexible_end_time || r.time_window_end))
         .filter(r => {
           const rStart = parseMin(r.time_window_start);
-          let rEnd = r.flexible_end_time ? rStart + Math.min(Number(r.max_route_minutes || 720), 720) : parseMin(r.time_window_end);
+          let rEnd = r.flexible_end_time ? rStart + Math.min(Number(r.max_route_minutes || 600), 600) : parseMin(r.time_window_end);
           if (!r.flexible_end_time && rEnd <= rStart) rEnd += 1440;
           return newStart < rEnd && rEnd > newStart && newEnd > rStart;
         });
@@ -145,7 +145,7 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
     onSave({
       ...form,
       time_window_end: form.flexible_end_time ? "" : form.time_window_end,
-      max_route_minutes: Math.min(Number(form.max_route_minutes || 720), 720),
+      max_route_minutes: Math.min(Number(form.max_route_minutes || 600), 600),
     });
   };
 
@@ -323,7 +323,7 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
                 Flexibele eindtijd
               </label>
               <p className="text-xs text-blue-700 mt-0.5">
-                De optimizer bepaalt zelf wanneer de route klaar is. De route mag maximaal 12 uur duren.
+                De optimizer bepaalt zelf wanneer de route klaar is. De route mag maximaal 10 uur duren.
               </p>
               {form.flexible_end_time && (
                 <div className="mt-3 max-w-xs space-y-1">
@@ -331,8 +331,8 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
                   <Input
                     type="number"
                     min="60"
-                    max="720"
-                    value={form.max_route_minutes || 720}
+                    max="600"
+                    value={form.max_route_minutes || 600}
                     onChange={(e) => handleChange("max_route_minutes", e.target.value)}
                   />
                 </div>

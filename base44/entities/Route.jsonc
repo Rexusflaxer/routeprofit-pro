@@ -61,7 +61,7 @@
     },
     "max_route_minutes": {
       "type": "number",
-      "default": 720,
+      "default": 600,
       "description": "Maximale routelengte in minuten bij flexibele eindtijd"
     },
     "weekdays": {
@@ -194,7 +194,7 @@
     },
     "optimization_calculated_at": {
       "type": "string",
-      "description": "Tijdstip waarop optimalisatie voor het laatst is berekend (ISO string)"
+      "description": "Tijdstip waarop optimalisatie voor het laatst is berekend"
     },
     "optimization_hash": {
       "type": "string",

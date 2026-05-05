@@ -42,13 +42,13 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices) {
   const manualWindows = manualRoutes.map(route => {
     const start = parseTimeToSeconds(route.time_window_start, 0);
     let end = route.flexible_end_time
-      ? start + Math.min(Number(route.max_route_minutes || 720), 720) * 60
+      ? start + Math.min(Number(route.max_route_minutes || 600), 600) * 60
       : parseTimeToSeconds(route.time_window_end, start + 43200);
     if (!route.flexible_end_time && end <= start) end += 86400;
     return { start, end };
   });
   const fallbackStart = manualWindows.length ? Math.min(...manualWindows.map(window => window.start)) : 0;
-  const fallbackEnd = manualWindows.length ? Math.max(...manualWindows.map(window => window.end)) : 86340;
+  const fallbackEnd = manualWindows.length ? Math.min(Math.max(...manualWindows.map(window => window.end)), fallbackStart + 600 * 60) : fallbackStart + 600 * 60;
   const source = [
     ...manualRoutes.map(route => ({ route, vehicle: activeVehicles.find(v => v.id === route.vehicle_id) })),
     ...extraVehicles.map(vehicle => ({ route: null, vehicle })),
@@ -62,7 +62,7 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices) {
     const shiftStart = route ? parseTimeToSeconds(route.time_window_start, 0) : fallbackStart;
     let shiftEnd = route
       ? (route.flexible_end_time
-        ? shiftStart + Math.min(Number(route.max_route_minutes || 720), 720) * 60
+        ? shiftStart + Math.min(Number(route.max_route_minutes || 600), 600) * 60
         : parseTimeToSeconds(route.time_window_end, shiftStart + 43200))
       : fallbackEnd;
     if (route && !route.flexible_end_time && shiftEnd <= shiftStart) shiftEnd += 86400;
