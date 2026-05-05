@@ -88,7 +88,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
           </Button>
         </div>
         <p className="text-xs text-blue-700">
-          De eigen routing server plant de taken direct op basis van tijdvensters, locaties en beschikbare voertuigen.
+          De eigen routing server plant de taken direct op basis van tijdvensters, locaties, beschikbare voertuigen en de laagste totale dienstduur.
         </p>
       </CardHeader>
 

@@ -509,7 +509,18 @@ Deno.serve(async (req) => {
       if (!routingVehicles.length) throw new Error('Geen bruikbare voertuigen of depots gevonden.');
 
       const serverResult = optimizerTasks.length
-        ? await callRoutingServer({ max_solver_seconds: body.max_solver_seconds || 60, vehicles: routingVehicles, tasks: optimizerTasks })
+        ? await callRoutingServer({
+            max_solver_seconds: body.max_solver_seconds || 60,
+            objective: 'minimize_total_shift_duration',
+            primary_optimization_goal: 'minimize_total_service_duration',
+            vehicles: routingVehicles.map(vehicle => ({
+              ...vehicle,
+              fixed_cost: 0,
+              cost_per_km: 0,
+              cost_per_minute: 1,
+            })),
+            tasks: optimizerTasks,
+          })
         : { routes: [], unassigned: [], summary: { tasks_received: 0, tasks_assigned: 0, tasks_unassigned: 0 } };
       perDay.push(mapServerResult(serverResult, weekday, routingVehicles, optimizerTasks, skipped));
     }
