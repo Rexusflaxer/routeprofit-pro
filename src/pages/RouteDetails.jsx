@@ -670,7 +670,7 @@ export default function RouteDetails() {
                                 </div>
                               )}
 
-                              {item.waiting_time > 0 && (
+                              {item.waiting_time > 0 && !(index > 0 && visibleOptimizedOrder[index - 1]?.is_start) && (
                                 <div className="flex items-center justify-center py-2">
                                   {optimizedRoute.alarm_standby ? (
                                     <div className="flex items-center gap-2 px-3 py-1 bg-amber-100 rounded-full">
