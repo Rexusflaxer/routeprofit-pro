@@ -242,6 +242,9 @@ export default function RouteDetails() {
     return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
   };
 
+  const displayClockTime = (time) => time ? formatClockMinutes(parseClockMinutes(time)) : "–";
+  const displayClockRange = (start, end) => `${displayClockTime(start)} – ${displayClockTime(end)}`;
+
   const getLocation = (id) => objects.find(o => o.id === id) || offices.find(o => o.id === id);
 
   const buildVisibleOptimizedOrder = () => {
@@ -642,7 +645,7 @@ export default function RouteDetails() {
                     <p className="text-sm font-semibold text-slate-700 mb-3">Optimale volgorde:</p>
                     <div className="space-y-3">
                       {visibleOptimizedOrder.map((item, index) => (
-                        <div key={item.task_id || index}>
+                        <div key={`${item.task_id || item.name || 'stop'}-${index}`}>
                           {/* Alarmdienst eindblok */}
                           {item.is_alarm_standby && (
                             <div className="flex items-start gap-3 p-4 bg-amber-50 rounded-lg border-l-4 border-amber-500">
@@ -673,14 +676,14 @@ export default function RouteDetails() {
                                     <div className="flex items-center gap-2 px-3 py-1 bg-amber-100 rounded-full">
                                       <span className="text-xs">🚨</span>
                                       <span className="text-xs font-medium text-amber-700">
-                                        Alarmdienst: {item.waiting_time} min ({item.arrival_time} – {item.actual_start_time})
+                                        Alarmdienst: {item.waiting_time} min ({displayClockRange(item.arrival_time, item.actual_start_time)})
                                       </span>
                                     </div>
                                   ) : (
                                     <div className="flex items-center gap-2 px-3 py-1 bg-green-100 rounded-full">
                                       <Clock className="w-3 h-3 text-green-600" />
                                       <span className="text-xs font-medium text-green-700">
-                                        {item.is_start ? 'Vrije tijd aan begin dienst' : 'Vrije tijd tussen stops'}: {item.waiting_time} min ({item.is_start ? `${item.arrival_time} – ${item.departure_time}` : `${item.actual_start_time} – ${item.arrival_time}`})
+                                        {item.is_start ? 'Vrije tijd aan begin dienst' : 'Vrije tijd tussen stops'}: {item.waiting_time} min ({item.is_start ? displayClockRange(item.arrival_time, item.departure_time) : displayClockRange(item.actual_start_time, item.arrival_time)})
                                       </span>
                                     </div>
                                   )}
@@ -702,14 +705,14 @@ export default function RouteDetails() {
                                       <Badge className="text-xs bg-purple-100 text-purple-700 border-purple-200">Deel {item.split_index}/{item.split_part_count}</Badge>
                                     )}
                                     {item.uses_arrival_deadline && (
-                                      <Badge className="text-xs bg-amber-100 text-amber-700 border-amber-200">Aanwezig vóór {item.arrival_deadline_time}</Badge>
+                                      <Badge className="text-xs bg-amber-100 text-amber-700 border-amber-200">Aanwezig vóór {displayClockTime(item.arrival_deadline_time)}</Badge>
                                     )}
                                   </div>
                                   <div className="grid grid-cols-2 gap-2 mt-2">
                                     {item.arrival_time && (
                                       <div className="text-xs">
                                         <span className="text-slate-500">Aankomst:</span>
-                                        <span className="ml-1 font-medium text-slate-900">{item.arrival_time}</span>
+                                        <span className="ml-1 font-medium text-slate-900">{displayClockTime(item.arrival_time)}</span>
                                       </div>
                                     )}
                                     {(item.is_start || item.is_end) && (
@@ -717,7 +720,7 @@ export default function RouteDetails() {
                                         {item.departure_time && (
                                           <div className="text-xs">
                                             <span className="text-slate-500">Vertrek:</span>
-                                            <span className="ml-1 font-medium text-slate-900">{item.departure_time}</span>
+                                            <span className="ml-1 font-medium text-slate-900">{displayClockTime(item.departure_time)}</span>
                                           </div>
                                         )}
                                         {item.travel_to_next_minutes > 0 && (
@@ -732,7 +735,7 @@ export default function RouteDetails() {
                                       <>
                                         <div className="text-xs">
                                           <span className="text-slate-500">Tijdsvenster:</span>
-                                          <span className="ml-1 font-medium text-slate-900">{item.time_window_start} - {item.time_window_end}</span>
+                                          <span className="ml-1 font-medium text-slate-900">{displayClockRange(item.time_window_start, item.time_window_end)}</span>
                                         </div>
                                         <div className="text-xs">
                                           <span className="text-slate-500">Taakduur:</span>
@@ -741,7 +744,7 @@ export default function RouteDetails() {
                                         {item.departure_time && (
                                           <div className="text-xs">
                                             <span className="text-slate-500">Vertrek:</span>
-                                            <span className="ml-1 font-medium text-slate-900">{item.departure_time}</span>
+                                            <span className="ml-1 font-medium text-slate-900">{displayClockTime(item.departure_time)}</span>
                                           </div>
                                         )}
                                         {item.travel_to_next_minutes > 0 && (

@@ -157,7 +157,7 @@ function buildTasksForDay(day, tasks, objects, vehicles) {
           service_seconds: serviceSeconds,
           window_start: splitStart,
           window_end: splitEnd,
-          priority: usesArrivalDeadline ? 95 : 80,
+          priority: usesArrivalDeadline ? 1000000 : 500000,
           skills: [1],
           _task: task,
           _object: object,
@@ -249,7 +249,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         is_split_part: (source._splitCount || 1) > 1,
         uses_arrival_deadline: source._usesArrivalDeadline,
         arrival_deadline_time: source._arrivalDeadlineTime,
-        arrival_time: step.arrival_time || formatSeconds(arrivalSeconds),
+        arrival_time: formatSeconds(arrivalSeconds),
         actual_start_time: formatSeconds(arrivalSeconds - waitingSeconds),
         departure_time: formatSeconds(arrivalSeconds + serviceSeconds),
         travel_time_minutes: Math.round(travelSeconds / 60),
@@ -445,7 +445,7 @@ Deno.serve(async (req) => {
       if (!routingVehicles.length) throw new Error('Geen bruikbare voertuigen of depots gevonden.');
 
       const serverResult = optimizerTasks.length
-        ? await callRoutingServer({ max_solver_seconds: body.max_solver_seconds || 30, vehicles: routingVehicles, tasks: optimizerTasks })
+        ? await callRoutingServer({ max_solver_seconds: body.max_solver_seconds || 60, vehicles: routingVehicles, tasks: optimizerTasks })
         : { routes: [], unassigned: [], summary: { tasks_received: 0, tasks_assigned: 0, tasks_unassigned: 0 } };
       perDay.push(mapServerResult(serverResult, weekday, routingVehicles, optimizerTasks, skipped));
     }
