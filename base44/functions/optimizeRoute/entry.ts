@@ -61,11 +61,14 @@ Deno.serve(async (req) => {
           use_arrival_deadline: false,
         };
       }
+      const deadline = task.arrival_deadline_time || task.time_window_start || '00:00';
+      const latestDeparture = task.latest_departure_time || task.time_window_end || formatMinutesToTime(parseTimeToMinutes(deadline) + (task.duration_minutes || 0));
       return {
-        time_window_start: task.arrival_deadline_time || '00:00',
-        time_window_end: formatMinutesToTime((parseTimeToMinutes(task.arrival_deadline_time || '00:00') + (task.duration_minutes || 0))),
+        time_window_start: deadline,
+        time_window_end: latestDeparture,
         use_arrival_deadline: true,
-        arrival_deadline_time: task.arrival_deadline_time || '',
+        arrival_deadline_time: deadline,
+        latest_departure_time: latestDeparture,
       };
     };
 

@@ -141,18 +141,21 @@ function normalizeDeadlineWindowForVehicles(deadlineSeconds, serviceSeconds, veh
   const candidates = [0, 86400]
     .map(offset => {
       const deadline = deadlineSeconds + offset;
-      let end = Number.isFinite(latestDepartureSeconds)
+      let latestDeparture = Number.isFinite(latestDepartureSeconds)
         ? latestDepartureSeconds + offset
         : deadline + serviceSeconds;
-      if (end <= deadline) end += 86400;
-      if (end < deadline + serviceSeconds) end = deadline + serviceSeconds;
+      if (latestDeparture <= deadline) latestDeparture += 86400;
+
+      const latestStart = Math.min(deadline, latestDeparture - serviceSeconds);
+      const start = latestStart - Math.max(serviceSeconds, 3600);
+      const end = latestStart;
 
       return {
-        start: deadline,
+        start,
         end,
         deadline,
         overlap: vehicles.reduce((sum, vehicle) => {
-          const overlap = Math.min(end, vehicle.shift_end) - Math.max(deadline, vehicle.shift_start);
+          const overlap = Math.min(end, vehicle.shift_end) - Math.max(start, vehicle.shift_start);
           return sum + Math.max(0, overlap);
         }, 0),
       };
@@ -482,6 +485,8 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
         folder_id: folderId,
         vehicle_id: route.vehicle?.id || null,
         weekdays: [weekday],
+        time_window_start: route.time_window_start,
+        time_window_end: route.time_window_end,
         assigned_tasks: route.tasks.filter(task => task.task_id).map((task, taskIndex) => ({
           task_id: task.task_id,
           days: [weekday],
