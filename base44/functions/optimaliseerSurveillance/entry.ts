@@ -103,6 +103,7 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices) {
       ...getVehicleCostProfile(vehicle),
       _vehicle: vehicle,
       _manualRoute: route,
+      _isExtraRoute: !route,
       _startDepot: startDepot,
       _endDepot: endDepot,
     };
@@ -325,12 +326,18 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
     const firstArrivalSeconds = firstTask ? parseTimeToSeconds(firstTask.arrival_time, 0) + (firstTask.arrival_time < formatSeconds(vehicle.shift_start || 0) ? 86400 : 0) : null;
     const firstTravelSeconds = firstTask ? (firstTask.travel_time_minutes || 0) * 60 : 0;
     const startDepartureSeconds = firstTask ? Math.max(vehicle.shift_start || 0, firstArrivalSeconds - firstTravelSeconds) : (vehicle.shift_start || 0);
+    const lastDepartureSeconds = lastTask ? parseTimeToSeconds(lastTask.departure_time, 0) + (lastTask.departure_time < formatSeconds(vehicle.shift_start || 0) ? 86400 : 0) : null;
+    const returnTravelSeconds = lastTask ? (lastTask.travel_to_next_minutes || 0) * 60 : 0;
+    const compactStart = !!vehicle._isExtraRoute;
+    const compactEnd = !!vehicle._isExtraRoute || !!vehicle._manualRoute?.flexible_end_time;
+    const actualRouteStartSeconds = compactStart && firstTask ? startDepartureSeconds : (vehicle.shift_start || 0);
+    const actualRouteEndSeconds = compactEnd && lastTask ? lastDepartureSeconds + returnTravelSeconds : (vehicle.shift_end || route.end_time_seconds || 0);
     const startBlock = startLocation ? {
       name: `START: ${startLocation.name || 'Startlocatie'}`,
       address: startLocation.address || '',
       is_start: true,
-      arrival_time: formatSeconds(vehicle.shift_start || 0),
-      actual_start_time: formatSeconds(vehicle.shift_start || 0),
+      arrival_time: formatSeconds(actualRouteStartSeconds),
+      actual_start_time: formatSeconds(actualRouteStartSeconds),
       departure_time: formatSeconds(startDepartureSeconds),
       travel_to_next_minutes: firstTask?.travel_time_minutes || 0,
       distance_to_next_km: firstTask?.distance_km || 0,
@@ -340,9 +347,9 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
       name: `EIND: ${endLocation.name || 'Eindlocatie'}`,
       address: endLocation.address || '',
       is_end: true,
-      arrival_time: lastTask?.departure_time || formatSeconds(route.end_time_seconds || vehicle.shift_end || 0),
-      actual_start_time: lastTask?.departure_time || formatSeconds(route.end_time_seconds || vehicle.shift_end || 0),
-      departure_time: formatSeconds(route.end_time_seconds || vehicle.shift_end || 0),
+      arrival_time: formatSeconds(actualRouteEndSeconds),
+      actual_start_time: formatSeconds(actualRouteEndSeconds),
+      departure_time: formatSeconds(actualRouteEndSeconds),
       travel_time_minutes: lastTask?.travel_to_next_minutes || 0,
       distance_km: lastTask?.distance_to_next_km || 0,
       waiting_time: 0,
@@ -352,7 +359,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
     const travelMinutes = Math.round(Number(route.total_travel_seconds || 0) / 60);
     const totalDistanceKm = Number(route.total_distance_km ?? ((Number(route.total_distance_meters || 0) / 1000).toFixed(2)));
     const totalWaitMinutes = routeTasks.reduce((sum, task) => sum + (task.waiting_time || 0), 0);
-    const routeCost = calculateRouteCost(route, vehicle);
+    const routeCost = calculateRouteCost({ ...route, start_time_seconds: actualRouteStartSeconds, end_time_seconds: actualRouteEndSeconds }, vehicle);
 
     return {
       id: vehicle._manualRoute?.id || `server_route_${day}_${routeIndex + 1}`,
@@ -361,8 +368,8 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
       manual_route_name: vehicle._manualRoute?.name || null,
       vehicle: vehicle._vehicle || { name: vehicle.name },
       weekday: day,
-      time_window_start: formatSeconds(vehicle.shift_start || 0),
-      time_window_end: formatSeconds(route.end_time_seconds || vehicle.shift_end || 0),
+      time_window_start: formatSeconds(actualRouteStartSeconds),
+      time_window_end: formatSeconds(actualRouteEndSeconds),
       flexible_end_time: !!vehicle._manualRoute?.flexible_end_time,
       max_route_minutes: vehicle._manualRoute?.max_route_minutes || null,
       route_cost: routeCost,
@@ -380,7 +387,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         total_travel_minutes: travelMinutes,
         total_distance_km: totalDistanceKm,
         total_wait_minutes: totalWaitMinutes,
-        total_route_minutes: totalServiceMinutes + travelMinutes + totalWaitMinutes,
+        total_route_minutes: Math.round((actualRouteEndSeconds - actualRouteStartSeconds) / 60),
         has_estimated_travel: false,
       },
     };
