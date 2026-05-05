@@ -150,12 +150,15 @@ function buildTasksForDay(day, tasks, objects, vehicles) {
       ? normalizeDeadlineWindowForVehicles(parseTimeToSeconds(inferredDeadline, 86340), serviceSeconds, vehicles, deadlineWindowStart)
       : normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles);
     const windowLength = Math.max(serviceSeconds, normalizedWindow.end - normalizedWindow.start);
-    const repeatSegment = repeatCount > 1 ? Math.max(serviceSeconds, Math.floor(windowLength / repeatCount)) : windowLength;
+    const totalGapSeconds = repeatCount > 1 ? (repeatCount - 1) * (minGapSeconds + serviceSeconds) : 0;
+    const availableRepeatWindow = Math.max(serviceSeconds * repeatCount, windowLength - totalGapSeconds);
+    const repeatSegment = repeatCount > 1 ? Math.max(serviceSeconds, Math.floor(availableRepeatWindow / repeatCount)) : windowLength;
+    const repeatStep = repeatCount > 1 ? repeatSegment + minGapSeconds + serviceSeconds : repeatSegment;
 
     for (let repeatIndex = 1; repeatIndex <= repeatCount; repeatIndex++) {
-      const repeatStart = repeatCount > 1 ? normalizedWindow.start + ((repeatIndex - 1) * repeatSegment) : normalizedWindow.start;
+      const repeatStart = repeatCount > 1 ? normalizedWindow.start + ((repeatIndex - 1) * repeatStep) : normalizedWindow.start;
       const repeatEnd = repeatCount > 1
-        ? Math.min(normalizedWindow.end, normalizedWindow.start + (repeatIndex * repeatSegment) + minGapSeconds)
+        ? Math.min(normalizedWindow.end, repeatStart + repeatSegment)
         : normalizedWindow.end;
 
       for (let splitIndex = 1; splitIndex <= splitCount; splitIndex++) {
