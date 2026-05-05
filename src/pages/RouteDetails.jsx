@@ -248,8 +248,25 @@ export default function RouteDetails() {
   const getLocation = (id) => objects.find(o => o.id === id) || offices.find(o => o.id === id);
 
   const buildVisibleOptimizedOrder = () => {
-    const order = [...(optimizedRoute?.optimized_order || [])];
+    const order = (optimizedRoute?.optimized_order || []).map(item => ({ ...item }));
     if (!optimizedRoute || order.length === 0) return order;
+
+    const existingStartIndex = order.findIndex(item => item.is_start);
+    const firstTaskIndex = existingStartIndex >= 0 ? order.findIndex((item, index) => index > existingStartIndex && !item.is_start && !item.is_end && !item.is_alarm_standby) : -1;
+    if (existingStartIndex >= 0 && firstTaskIndex >= 0) {
+      const startItem = order[existingStartIndex];
+      const firstTask = order[firstTaskIndex];
+      const inferredStartTravel = Number(firstTask.waiting_time || 0);
+      if (inferredStartTravel > 0 && !Number(firstTask.travel_time_minutes || 0)) {
+        startItem.departure_time = startItem.arrival_time;
+        startItem.travel_to_next_minutes = inferredStartTravel;
+        startItem.distance_to_next_km = firstTask.distance_km || 0;
+        startItem.waiting_time = 0;
+        firstTask.travel_time_minutes = inferredStartTravel;
+        firstTask.waiting_time = 0;
+        firstTask.actual_start_time = firstTask.arrival_time;
+      }
+    }
 
     const startLocation = getLocation(route.start_location_id || vehicle?.startDepotLocationId);
     const endLocation = getLocation(route.end_location_id || vehicle?.eindDepotLocationId);
