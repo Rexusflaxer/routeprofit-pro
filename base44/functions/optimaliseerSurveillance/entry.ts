@@ -544,28 +544,54 @@ Deno.serve(async (req) => {
 
     const perDay = [];
     for (const weekday of weekdays) {
-      const routingVehicles = buildVehiclesForDay(weekday, routes, vehicles, objects, offices, {
-        extraRouteStart: body.extra_route_start,
-        extraRouteEnd: body.extra_route_end,
-      });
-      const { optimizerTasks, skipped } = buildTasksForDay(weekday, tasks, objects, routingVehicles);
-      if (!routingVehicles.length) throw new Error('Geen bruikbare voertuigen of depots gevonden.');
+      const hasExplicitExtraWindow = !!(body.extra_route_start || body.extra_route_end);
+      const extraWindowCandidates = hasExplicitExtraWindow
+        ? [{ start: body.extra_route_start, end: body.extra_route_end }]
+        : [
+            { start: '18:00', end: '03:00' },
+            { start: '18:30', end: '03:00' },
+            { start: '19:00', end: '03:00' },
+            { start: '19:30', end: '03:00' },
+            { start: '19:00', end: '03:30' },
+            { start: '19:30', end: '03:30' },
+          ];
 
-      const serverResult = optimizerTasks.length
-        ? await callRoutingServer({
-            max_solver_seconds: body.max_solver_seconds || 60,
-            objective: 'minimize_total_shift_duration',
-            primary_optimization_goal: 'minimize_total_service_duration',
-            vehicles: routingVehicles.map(vehicle => ({
-              ...vehicle,
-              fixed_cost: 0,
-              cost_per_km: 0,
-              cost_per_minute: 1,
-            })),
-            tasks: optimizerTasks,
-          })
-        : { routes: [], unassigned: [], summary: { tasks_received: 0, tasks_assigned: 0, tasks_unassigned: 0 } };
-      perDay.push(mapServerResult(serverResult, weekday, routingVehicles, optimizerTasks, skipped));
+      const dayResults = [];
+      for (const candidate of extraWindowCandidates) {
+        const routingVehicles = buildVehiclesForDay(weekday, routes, vehicles, objects, offices, {
+          extraRouteStart: candidate.start,
+          extraRouteEnd: candidate.end,
+        });
+        const { optimizerTasks, skipped } = buildTasksForDay(weekday, tasks, objects, routingVehicles);
+        if (!routingVehicles.length) throw new Error('Geen bruikbare voertuigen of depots gevonden.');
+
+        const serverResult = optimizerTasks.length
+          ? await callRoutingServer({
+              max_solver_seconds: body.max_solver_seconds || (hasExplicitExtraWindow ? 60 : 20),
+              objective: 'minimize_total_shift_duration',
+              primary_optimization_goal: 'minimize_total_service_duration',
+              vehicles: routingVehicles.map(vehicle => ({
+                ...vehicle,
+                fixed_cost: 0,
+                cost_per_km: 0,
+                cost_per_minute: 1,
+              })),
+              tasks: optimizerTasks,
+            })
+          : { routes: [], unassigned: [], summary: { tasks_received: 0, tasks_assigned: 0, tasks_unassigned: 0 } };
+
+        const mappedResult = mapServerResult(serverResult, weekday, routingVehicles, optimizerTasks, skipped);
+        mappedResult._extra_window = candidate;
+        mappedResult._total_duty_minutes = (mappedResult.routes || []).reduce((sum, route) => sum + (route.stats?.total_route_minutes || 0), 0);
+        dayResults.push(mappedResult);
+      }
+
+      dayResults.sort((a, b) => {
+        const skippedDiff = (a.total_tasks_skipped || 0) - (b.total_tasks_skipped || 0);
+        if (skippedDiff !== 0) return skippedDiff;
+        return (a._total_duty_minutes || 0) - (b._total_duty_minutes || 0);
+      });
+      perDay.push(dayResults[0]);
     }
 
     const routesOut = perDay.flatMap(day => day.routes || []);
