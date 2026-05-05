@@ -16,6 +16,17 @@ function formatMinutes(minutes) {
   return m > 0 ? `${h}u ${m}min` : `${h}u`;
 }
 
+function formatClockTime(time) {
+  if (!time) return "–";
+  const [hours, minutes] = String(time).split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return time;
+  return `${String(((hours % 24) + 24) % 24).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`;
+}
+
+function formatClockRange(start, end) {
+  return `${formatClockTime(start)} – ${formatClockTime(end)}`;
+}
+
 export default function RouteExportPdf({ route, optimizedRoute }) {
   const [loading, setLoading] = useState(false);
 
@@ -111,7 +122,8 @@ export default function RouteExportPdf({ route, optimizedRoute }) {
       y += 38;
 
       // Taken teller badges
-      const opgenomenCount = optimizedRoute.tasks_optimized || 0;
+      const stops = optimizedRoute.optimized_order || [];
+      const opgenomenCount = optimizedRoute.tasks_optimized || optimizedRoute.total_tasks_planned || optimizedRoute.tasks?.length || stops.filter(item => !item.is_start && !item.is_end && !item.is_alarm_standby).length;
       const overgeslagenCount = optimizedRoute.tasks_skipped || 0;
 
       doc.setFillColor(220, 252, 231);
@@ -140,7 +152,6 @@ export default function RouteExportPdf({ route, optimizedRoute }) {
       doc.text("Optimale volgorde", margin, y);
       y += 8;
 
-      const stops = optimizedRoute.optimized_order || [];
       let stopIndex = 0;
 
       for (const item of stops) {
@@ -159,7 +170,7 @@ export default function RouteExportPdf({ route, optimizedRoute }) {
           doc.text("🚨  Alarmdienst", margin + 5, y + 7);
           doc.setFont(undefined, "normal");
           doc.setTextColor(120, 80, 0);
-          doc.text(`${item.arrival_time} – ${item.departure_time}  ·  ${item.duration_minutes} min`, margin + 5, y + 13);
+          doc.text(`${formatClockRange(item.arrival_time, item.departure_time)}  ·  ${item.duration_minutes} min`, margin + 5, y + 13);
           y += 22;
           continue;
         }
@@ -174,7 +185,7 @@ export default function RouteExportPdf({ route, optimizedRoute }) {
           const label = item.is_start ? "▶  START" : "■  EIND";
           doc.text(`${label}: ${item.name.replace("START: ", "").replace("EIND: ", "")}`, margin + 5, y + 5);
           doc.setFont(undefined, "normal");
-          doc.text(`Aankomst: ${item.arrival_time}`, margin + 5, y + 10);
+          doc.text(`${item.is_start ? 'Vertrek' : 'Aankomst'}: ${formatClockTime(item.is_start ? item.departure_time : item.arrival_time)}`, margin + 5, y + 10);
           y += 16;
           continue;
         }
@@ -204,7 +215,7 @@ export default function RouteExportPdf({ route, optimizedRoute }) {
           }
           doc.roundedRect(margin + 20, y, contentW - 40, 6, 2, 2, "F");
           const wachtLabel = optimizedRoute.alarm_standby ? "🚨 Alarmdienst" : "⏱ Vrije tijd";
-          doc.text(`${wachtLabel}: ${item.waiting_time} min  (${item.arrival_time} – ${item.actual_start_time})`, pageW / 2, y + 4, { align: "center" });
+          doc.text(`${wachtLabel}: ${item.waiting_time} min  (${formatClockRange(item.arrival_time, item.actual_start_time)})`, pageW / 2, y + 4, { align: "center" });
           y += 8;
         }
 
@@ -230,13 +241,34 @@ export default function RouteExportPdf({ route, optimizedRoute }) {
         const addressLines = doc.splitTextToSize(item.address || "", contentW - 60);
         doc.text(addressLines[0] || "", margin + 14, y + 14);
 
+        let badgeX = margin + 14;
         if (item.task_type) {
           doc.setFillColor(226, 232, 240);
           const typeW = doc.getTextWidth(item.task_type) + 4;
-          doc.roundedRect(margin + 14, y + 17, typeW, 5, 1, 1, "F");
+          doc.roundedRect(badgeX, y + 17, typeW, 5, 1, 1, "F");
           doc.setFontSize(6.5);
           doc.setTextColor(71, 85, 105);
-          doc.text(item.task_type, margin + 16, y + 21);
+          doc.text(item.task_type, badgeX + 2, y + 21);
+          badgeX += typeW + 2;
+        }
+        if (item.uses_arrival_deadline) {
+          const deadlineText = `Aanwezig vóór ${formatClockTime(item.arrival_deadline_time)}`;
+          doc.setFillColor(254, 243, 199);
+          const deadlineW = doc.getTextWidth(deadlineText) + 4;
+          doc.roundedRect(badgeX, y + 17, deadlineW, 5, 1, 1, "F");
+          doc.setFontSize(6.5);
+          doc.setTextColor(146, 64, 14);
+          doc.text(deadlineText, badgeX + 2, y + 21);
+          badgeX += deadlineW + 2;
+        }
+        if (item.is_split_part) {
+          const splitText = `Deel ${item.split_index}/${item.split_part_count}`;
+          doc.setFillColor(243, 232, 255);
+          const splitW = doc.getTextWidth(splitText) + 4;
+          doc.roundedRect(badgeX, y + 17, splitW, 5, 1, 1, "F");
+          doc.setFontSize(6.5);
+          doc.setTextColor(126, 34, 206);
+          doc.text(splitText, badgeX + 2, y + 21);
         }
 
         // Tijden rechts
@@ -244,11 +276,11 @@ export default function RouteExportPdf({ route, optimizedRoute }) {
         doc.setFontSize(7.5);
         doc.setFont(undefined, "bold");
         doc.setTextColor(30, 30, 46);
-        doc.text(`Aankomst: ${item.arrival_time}`, rightX, y + 8, { align: "right" });
+        doc.text(`Aankomst: ${formatClockTime(item.arrival_time)}`, rightX, y + 8, { align: "right" });
         doc.setFont(undefined, "normal");
         doc.setTextColor(100, 116, 139);
-        doc.text(`Venster: ${item.time_window_start} – ${item.time_window_end}`, rightX, y + 14, { align: "right" });
-        doc.text(`Duur: ${item.duration_minutes} min  ·  Vertrek: ${item.departure_time}`, rightX, y + 20, { align: "right" });
+        doc.text(`Venster: ${formatClockRange(item.time_window_start, item.time_window_end)}`, rightX, y + 14, { align: "right" });
+        doc.text(`Duur: ${item.duration_minutes} min  ·  Vertrek: ${formatClockTime(item.departure_time)}`, rightX, y + 20, { align: "right" });
 
         y += 30;
         stopIndex++;

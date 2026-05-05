@@ -589,7 +589,7 @@ export default function RouteDetails() {
                   Routeoptimalisatie
                 </CardTitle>
                 <div className="flex gap-2">
-                  <RouteExportPdf route={route} optimizedRoute={optimizedRoute} />
+                <RouteExportPdf route={route} optimizedRoute={optimizedRoute ? { ...optimizedRoute, optimized_order: visibleOptimizedOrder } : null} />
                   <Button
                     size="sm"
                     variant="outline"
