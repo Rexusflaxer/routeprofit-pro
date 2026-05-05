@@ -145,17 +145,14 @@ function normalizeDeadlineWindowForVehicles(deadlineSeconds, serviceSeconds, veh
         ? latestDepartureSeconds + offset
         : deadline + serviceSeconds;
       if (latestDeparture <= deadline) latestDeparture += 86400;
-
-      const latestStart = Math.min(deadline, latestDeparture - serviceSeconds);
-      const start = latestStart - Math.max(serviceSeconds, 3600);
-      const end = latestStart;
+      if (latestDeparture < deadline + serviceSeconds) latestDeparture = deadline + serviceSeconds;
 
       return {
-        start,
-        end,
+        start: deadline,
+        end: latestDeparture,
         deadline,
         overlap: vehicles.reduce((sum, vehicle) => {
-          const overlap = Math.min(end, vehicle.shift_end) - Math.max(start, vehicle.shift_start);
+          const overlap = Math.min(latestDeparture, vehicle.shift_end) - Math.max(deadline, vehicle.shift_start);
           return sum + Math.max(0, overlap);
         }, 0),
       };
@@ -319,13 +316,17 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
       const previousSource = previousStep ? (taskById.get(previousStep.task_id) || {}) : null;
       const arrivalSeconds = Number(step.arrival_seconds || 0);
       const serviceSeconds = Number(step.service_seconds || source.service_seconds || 0);
+      const serviceStartSeconds = source._usesArrivalDeadline ? Math.max(arrivalSeconds, Number(source.window_start || arrivalSeconds)) : arrivalSeconds;
+      const departureSeconds = serviceStartSeconds + serviceSeconds;
       const previousArrival = previousStep ? Number(previousStep.arrival_seconds || 0) : null;
       const previousService = previousStep ? Number(previousStep.service_seconds || previousSource?.service_seconds || 0) : 0;
       const startTravelSeconds = Number(step.travel_seconds || step.travel_time_seconds || step.travel_to_next_seconds || 0);
       const travelSeconds = previousStep ? Number(previousStep.travel_to_next_seconds || 0) : startTravelSeconds;
-      const waitingSeconds = previousStep
+      const travelWaitingSeconds = previousStep
         ? Math.max(0, arrivalSeconds - previousArrival - previousService - travelSeconds)
         : Math.max(0, arrivalSeconds - (vehicle.shift_start || 0) - travelSeconds);
+      const deadlineWaitingSeconds = Math.max(0, serviceStartSeconds - arrivalSeconds);
+      const waitingSeconds = source._usesArrivalDeadline ? deadlineWaitingSeconds : travelWaitingSeconds;
       return {
         task_id: source._originalTaskId || String(step.task_id),
         object_id: source._object?.id,
@@ -343,8 +344,8 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         uses_arrival_deadline: source._usesArrivalDeadline,
         arrival_deadline_time: source._arrivalDeadlineTime,
         arrival_time: formatSeconds(arrivalSeconds),
-        actual_start_time: formatSeconds(arrivalSeconds),
-        departure_time: formatSeconds(arrivalSeconds + serviceSeconds),
+        actual_start_time: formatSeconds(serviceStartSeconds),
+        departure_time: formatSeconds(departureSeconds),
         travel_time_minutes: Math.round(travelSeconds / 60),
         distance_km: previousStep ? Number(previousStep.distance_to_next_km || 0) : Number(step.distance_km || step.travel_distance_km || 0),
         waiting_time: Math.round(waitingSeconds / 60),

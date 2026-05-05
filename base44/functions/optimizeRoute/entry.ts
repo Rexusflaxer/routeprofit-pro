@@ -325,9 +325,10 @@ Deno.serve(async (req) => {
         // (ook al zijn we vroeg en moeten we wachten)
         if (arrivalTime > taskEnd) continue; // te laat — sla over
 
-        const waitingTime = task.use_arrival_deadline ? 0 : Math.max(0, taskStart - arrivalTime);
+        const actualStartCandidate = Math.max(arrivalTime, taskStart);
+        const waitingTime = Math.max(0, actualStartCandidate - arrivalTime);
         if (task.use_arrival_deadline && arrivalTime > taskStart) continue;
-        const canFinishBeforeWindowEnds = (task.use_arrival_deadline ? arrivalTime : Math.max(arrivalTime, taskStart)) + task.duration_minutes <= taskEnd;
+        const canFinishBeforeWindowEnds = actualStartCandidate + task.duration_minutes <= taskEnd;
         if (!canFinishBeforeWindowEnds) continue;
 
         // Urgente taken met vroege eindtijd krijgen prioriteit, daarna kortste reistijd/wachttijd.
@@ -347,8 +348,8 @@ Deno.serve(async (req) => {
       // Bereken aankomst en vertrektijd voor de gekozen taak
       const { taskStart: chosenStart } = normalizeTaskWindow(bestTask);
       const arrivalTime = currentTime + bestTravelTime;
-      const actualStartTime = bestTask.use_arrival_deadline ? arrivalTime : Math.max(arrivalTime, chosenStart);
-      const waitingTime = bestTask.use_arrival_deadline ? 0 : actualStartTime - arrivalTime;
+      const actualStartTime = Math.max(arrivalTime, chosenStart);
+      const waitingTime = actualStartTime - arrivalTime;
       const departureTime = actualStartTime + bestTask.duration_minutes;
 
       optimizedOrder.push({
@@ -404,7 +405,7 @@ Deno.serve(async (req) => {
 
         const { taskStart, taskEnd } = normalizeTaskWindow(task);
         const arrivalTime = simCurrentTime + travel.travelMinutes;
-        const actualStartTime = task.use_arrival_deadline ? arrivalTime : Math.max(arrivalTime, taskStart);
+        const actualStartTime = Math.max(arrivalTime, taskStart);
         const departureTime = actualStartTime + task.duration_minutes;
 
         if (task.use_arrival_deadline && arrivalTime > taskStart) return null;
@@ -589,7 +590,7 @@ Deno.serve(async (req) => {
 
             const { taskStart, taskEnd } = normalizeTaskWindow(task);
             const arrivalTime = state.currentTime + travel.travelMinutes;
-            const actualStartTime = task.use_arrival_deadline ? arrivalTime : Math.max(arrivalTime, taskStart);
+            const actualStartTime = Math.max(arrivalTime, taskStart);
             const departureTime = actualStartTime + task.duration_minutes;
 
             if (task.use_arrival_deadline && arrivalTime > taskStart) continue;
