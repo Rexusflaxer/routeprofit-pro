@@ -41,7 +41,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
     setError(null);
     setResult(null);
     try {
-      const res = await base44.functions.invoke('googleRouteOptimization', {
+      const res = await base44.functions.invoke('optimaliseerSurveillance', {
         weekdays: days,
         save_routes: false,
       });
@@ -58,7 +58,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
     setSaving(true);
     setError(null);
     try {
-      await base44.functions.invoke('googleRouteOptimization', {
+      await base44.functions.invoke('optimaliseerSurveillance', {
         weekdays: planningDays,
         save_routes: true,
         planned_result: result,
@@ -81,14 +81,14 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base flex items-center gap-2 text-blue-900">
             <Zap className="w-5 h-5 text-blue-600" />
-            Google Route Optimization — {planningDays.length === 1 ? WEEKDAY_LABELS[planningDays[0]] : 'Alle dagen'}
+            Eigen routing server — {planningDays.length === 1 ? WEEKDAY_LABELS[planningDays[0]] : 'Alle dagen'}
           </CardTitle>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
             <X className="w-4 h-4" />
           </Button>
         </div>
         <p className="text-xs text-blue-700">
-          Google Route Optimization plant de taken direct op basis van tijdvensters, locaties en beschikbare voertuigen.
+          De eigen routing server plant de taken direct op basis van tijdvensters, locaties en beschikbare voertuigen.
         </p>
       </CardHeader>
 
@@ -96,7 +96,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => runOptimizer(ALL_WEEKDAYS)} disabled={loading} className="bg-blue-700 hover:bg-blue-800 text-white">
             <Zap className="w-4 h-4 mr-1.5" />
-            {loading ? 'Google planning maken...' : 'Alle dagen plannen met Google'}
+            {loading ? 'Serverplanning maken...' : 'Alle dagen plannen met server'}
           </Button>
           <div className="flex items-center gap-2">
             <Select value={selectedDay} onValueChange={setSelectedDay} disabled={loading}>

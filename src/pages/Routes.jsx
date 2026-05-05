@@ -79,7 +79,7 @@ export default function Routes() {
         actions={
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => { setShowOptimizer(!showOptimizer); setShowForm(false); }} className="border-blue-300 text-blue-700 hover:bg-blue-50">
-              <Zap className="w-4 h-4 mr-1" /> Google plannen
+              <Zap className="w-4 h-4 mr-1" /> Server plannen
             </Button>
             <Button onClick={() => { setEditing(null); setShowForm(true); setShowOptimizer(false); }} className="bg-slate-900 hover:bg-slate-800">
               <Plus className="w-4 h-4 mr-1" /> Handmatig
