@@ -313,6 +313,22 @@ export default function RouteDetails() {
 
   const visibleOptimizedOrder = buildVisibleOptimizedOrder();
 
+  const getTravelIntoStop = (item, index) => {
+    const previousItem = visibleOptimizedOrder[index - 1];
+    if (previousItem?.is_start) {
+      return {
+        label: 'Startlocatie naar taak 1',
+        minutes: Number(previousItem.travel_to_next_minutes || item.travel_time_minutes || 0),
+        distance: Number(previousItem.distance_to_next_km || item.distance_km || 0),
+      };
+    }
+    return {
+      label: 'Tussen stops',
+      minutes: Number(item.travel_time_minutes || 0),
+      distance: Number(item.distance_km || 0),
+    };
+  };
+
   if (!routeId) {
     return (
       <div className="text-center py-12">
@@ -677,12 +693,12 @@ export default function RouteDetails() {
 
                           {!item.is_alarm_standby && (
                             <>
-                              {!item.is_start && (item.travel_time_minutes > 0 || item.distance_km > 0) && (
+                              {!item.is_start && (getTravelIntoStop(item, index).minutes > 0 || getTravelIntoStop(item, index).distance > 0) && (
                                 <div className="flex items-center justify-center py-2">
                                   <div className="flex items-center gap-2 px-3 py-1 bg-blue-100 rounded-full">
                                     <Navigation className="w-3 h-3 text-blue-600" />
                                     <span className="text-xs font-medium text-blue-700">
-                                      Tussen stops: {item.travel_time_minutes || 0} min{item.distance_km ? ` · ${Number(item.distance_km).toFixed(2)} km` : ''}
+                                      {getTravelIntoStop(item, index).label}: {getTravelIntoStop(item, index).minutes || 0} min{getTravelIntoStop(item, index).distance ? ` · ${Number(getTravelIntoStop(item, index).distance).toFixed(2)} km` : ''}
                                     </span>
                                   </div>
                                 </div>
