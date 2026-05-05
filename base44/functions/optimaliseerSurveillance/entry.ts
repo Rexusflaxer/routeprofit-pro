@@ -243,7 +243,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
       const serviceSeconds = Number(step.service_seconds || source.service_seconds || 0);
       const previousArrival = previousStep ? Number(previousStep.arrival_seconds || 0) : null;
       const previousService = previousStep ? Number(previousStep.service_seconds || previousSource?.service_seconds || 0) : 0;
-      const startTravelSeconds = Number(step.travel_seconds || step.travel_time_seconds || 0);
+      const startTravelSeconds = Number(step.travel_seconds || step.travel_time_seconds || step.travel_to_next_seconds || 0);
       const travelSeconds = previousStep ? Number(previousStep.travel_to_next_seconds || 0) : startTravelSeconds;
       const waitingSeconds = previousStep
         ? Math.max(0, arrivalSeconds - previousArrival - previousService - travelSeconds)
@@ -281,16 +281,19 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
     const endLocation = vehicle._manualRoute?._endDepot || null;
     const firstTask = routeTasks[0];
     const lastTask = routeTasks[routeTasks.length - 1];
+    const firstArrivalSeconds = firstTask ? parseTimeToSeconds(firstTask.arrival_time, 0) + (firstTask.arrival_time < formatSeconds(vehicle.shift_start || 0) ? 86400 : 0) : null;
+    const firstTravelSeconds = firstTask ? (firstTask.travel_time_minutes || 0) * 60 : 0;
+    const startDepartureSeconds = firstTask ? Math.max(vehicle.shift_start || 0, firstArrivalSeconds - firstTravelSeconds) : (vehicle.shift_start || 0);
     const startBlock = startLocation ? {
       name: `START: ${startLocation.name || 'Startlocatie'}`,
       address: startLocation.address || '',
       is_start: true,
       arrival_time: formatSeconds(vehicle.shift_start || 0),
       actual_start_time: formatSeconds(vehicle.shift_start || 0),
-      departure_time: firstTask ? formatSeconds((parseTimeToSeconds(firstTask.arrival_time, 0) + (firstTask.arrival_time < formatSeconds(vehicle.shift_start || 0) ? 86400 : 0)) - ((firstTask.travel_time_minutes || 0) * 60)) : formatSeconds(vehicle.shift_start || 0),
+      departure_time: formatSeconds(startDepartureSeconds),
       travel_to_next_minutes: firstTask?.travel_time_minutes || 0,
       distance_to_next_km: firstTask?.distance_km || 0,
-      waiting_time: firstTask ? Math.max(0, Math.round((((parseTimeToSeconds(firstTask.arrival_time, 0) + (firstTask.arrival_time < formatSeconds(vehicle.shift_start || 0) ? 86400 : 0)) - ((firstTask.travel_time_minutes || 0) * 60)) - (vehicle.shift_start || 0)) / 60)) : 0,
+      waiting_time: Math.max(0, Math.round((startDepartureSeconds - (vehicle.shift_start || 0)) / 60)),
     } : null;
     const endBlock = endLocation ? {
       name: `EIND: ${endLocation.name || 'Eindlocatie'}`,
