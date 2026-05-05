@@ -344,8 +344,7 @@ export default function RouteDetails() {
     const previousDeparture = getRouteClockMinutes(previousItem.departure_time || previousItem.actual_start_time || previousItem.arrival_time);
     const travelMinutes = Number(previousItem.travel_to_next_minutes || item.travel_time_minutes || 0);
     const arrival = previousDeparture + travelMinutes;
-    let start = getRouteClockMinutes(item.actual_start_time);
-    if (start < arrival) start += 1440;
+    const start = getRouteClockMinutes(item.actual_start_time);
     const minutes = Math.max(0, Math.round(start - arrival));
 
     return minutes > 0 ? { minutes, start: formatClockMinutes(arrival), end: item.actual_start_time } : null;
