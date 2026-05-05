@@ -86,18 +86,22 @@ function normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles) {
     .sort((a, b) => b.overlap - a.overlap)[0];
 }
 
-function normalizeDeadlineWindowForVehicles(deadlineSeconds, serviceSeconds, vehicles) {
+function normalizeDeadlineWindowForVehicles(deadlineSeconds, serviceSeconds, vehicles, earliestStartSeconds = null) {
   const candidates = [deadlineSeconds, deadlineSeconds + 86400]
-    .map(deadline => ({
-      start: Math.max(0, deadline - 300),
-      end: deadline + 60,
-      deadline,
-      overlap: vehicles.reduce((sum, vehicle) => {
-        const latestStart = Math.min(deadline, vehicle.shift_end - serviceSeconds);
-        const overlap = latestStart - Math.max(deadline - 300, vehicle.shift_start);
-        return sum + Math.max(0, overlap);
-      }, 0),
-    }))
+    .map(deadline => {
+      const earliest = Number.isFinite(earliestStartSeconds) && earliestStartSeconds < deadline
+        ? earliestStartSeconds
+        : deadline - Math.max(3600, serviceSeconds);
+      return {
+        start: Math.max(0, earliest),
+        end: deadline,
+        deadline,
+        overlap: vehicles.reduce((sum, vehicle) => {
+          const overlap = Math.min(deadline, vehicle.shift_end) - Math.max(earliest, vehicle.shift_start);
+          return sum + Math.max(0, overlap);
+        }, 0),
+      };
+    })
     .sort((a, b) => b.overlap - a.overlap);
 
   return candidates[0];
@@ -126,13 +130,12 @@ function buildTasksForDay(day, tasks, objects, vehicles) {
     const splitCount = automaticSplitCount(task, baseDuration);
     const serviceSeconds = Math.max(60, Math.ceil((baseDuration * 60) / splitCount));
     const minGapSeconds = Math.max(0, Number(task.min_minutes_between_visits || 0) * 60);
-    const isDeadlineType = task.task_type === 'Openingsronde' || task.task_type === 'Sluitbegeleiding';
-    const inferredDeadline = task.arrival_deadline_time || (isDeadlineType ? task.time_window_end : '');
-    const usesArrivalDeadline = !!inferredDeadline && (task.use_arrival_deadline || isDeadlineType);
+    const usesArrivalDeadline = task.task_type === 'Sluitbegeleiding' || !!task.use_arrival_deadline;
+    const inferredDeadline = usesArrivalDeadline ? (task.arrival_deadline_time || task.time_window_end) : '';
     const windowStart = parseTimeToSeconds(task.time_window_start, 0);
     const windowEnd = parseTimeToSeconds(task.time_window_end, 86340);
     const normalizedWindow = usesArrivalDeadline
-      ? normalizeDeadlineWindowForVehicles(parseTimeToSeconds(inferredDeadline, 86340), serviceSeconds, vehicles)
+      ? normalizeDeadlineWindowForVehicles(parseTimeToSeconds(inferredDeadline, 86340), serviceSeconds, vehicles, windowStart)
       : normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles);
     const windowLength = Math.max(serviceSeconds, normalizedWindow.end - normalizedWindow.start);
     const repeatSegment = repeatCount > 1 ? Math.max(serviceSeconds, Math.floor(windowLength / repeatCount)) : windowLength;
