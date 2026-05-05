@@ -160,7 +160,7 @@ export default function Routes() {
                             {route.time_window_start && (
                               <span className="flex items-center gap-1">
                                 <Clock className="w-3 h-3" />
-                                {route.time_window_start} – {route.time_window_end}
+                                {route.time_window_start} – {route.flexible_end_time ? 'flexibel max. 12u' : route.time_window_end}
                               </span>
                             )}
                             <span className="flex items-center gap-1">

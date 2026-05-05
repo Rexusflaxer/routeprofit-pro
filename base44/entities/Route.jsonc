@@ -54,6 +54,16 @@
       "type": "string",
       "description": "Uiterste eindtijd route (HH:MM)"
     },
+    "flexible_end_time": {
+      "type": "boolean",
+      "default": false,
+      "description": "Eindtijd is flexibel; optimizer bepaalt route-einde met maximale duur"
+    },
+    "max_route_minutes": {
+      "type": "number",
+      "default": 720,
+      "description": "Maximale routelengte in minuten bij flexibele eindtijd"
+    },
     "weekdays": {
       "type": "array",
       "description": "Dagen van de week waarop deze route actief is: 1=Maandag, 7=Zondag",

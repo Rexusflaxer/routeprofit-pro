@@ -34,23 +34,42 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices) {
     (route.source || 'manual') === 'manual' &&
     route.status !== 'vergrendeld' &&
     route.time_window_start &&
-    route.time_window_end
+    (route.flexible_end_time || route.time_window_end)
   );
   const depot = fixCoords(offices[0]);
-  const source = manualRoutes.length ? manualRoutes : activeVehicles;
+  const usedVehicleIds = new Set(manualRoutes.map(route => route.vehicle_id).filter(Boolean));
+  const extraVehicles = activeVehicles.filter(vehicle => !usedVehicleIds.has(vehicle.id));
+  const manualWindows = manualRoutes.map(route => {
+    const start = parseTimeToSeconds(route.time_window_start, 0);
+    let end = route.flexible_end_time
+      ? start + Math.min(Number(route.max_route_minutes || 720), 720) * 60
+      : parseTimeToSeconds(route.time_window_end, start + 43200);
+    if (!route.flexible_end_time && end <= start) end += 86400;
+    return { start, end };
+  });
+  const fallbackStart = manualWindows.length ? Math.min(...manualWindows.map(window => window.start)) : 0;
+  const fallbackEnd = manualWindows.length ? Math.max(...manualWindows.map(window => window.end)) : 86340;
+  const source = [
+    ...manualRoutes.map(route => ({ route, vehicle: activeVehicles.find(v => v.id === route.vehicle_id) })),
+    ...extraVehicles.map(vehicle => ({ route: null, vehicle })),
+  ];
 
   return source.map((item, index) => {
-    const route = manualRoutes.length ? item : null;
-    const vehicle = route ? (activeVehicles.find(v => v.id === route.vehicle_id) || activeVehicles[index % activeVehicles.length]) : item;
+    const route = item.route;
+    const vehicle = item.vehicle || activeVehicles[index % activeVehicles.length];
     const startDepot = locationById(route?.start_location_id || vehicle?.startDepotLocationId, objects, offices) || depot;
     const endDepot = locationById(route?.end_location_id || vehicle?.eindDepotLocationId, objects, offices) || startDepot;
-    const shiftStart = parseTimeToSeconds(route?.time_window_start, 0);
-    let shiftEnd = parseTimeToSeconds(route?.time_window_end, 86340);
-    if (shiftEnd <= shiftStart) shiftEnd += 86400;
+    const shiftStart = route ? parseTimeToSeconds(route.time_window_start, 0) : fallbackStart;
+    let shiftEnd = route
+      ? (route.flexible_end_time
+        ? shiftStart + Math.min(Number(route.max_route_minutes || 720), 720) * 60
+        : parseTimeToSeconds(route.time_window_end, shiftStart + 43200))
+      : fallbackEnd;
+    if (route && !route.flexible_end_time && shiftEnd <= shiftStart) shiftEnd += 86400;
 
     return {
       id: index + 1,
-      name: route?.name || vehicle?.license_plate || vehicle?.name || `Voertuig ${index + 1}`,
+      name: route?.name || vehicle?.license_plate || vehicle?.name || `Extra route ${index + 1}`, 
       start_lon: startDepot?.longitude,
       start_lat: startDepot?.latitude,
       end_lon: endDepot?.longitude,
@@ -324,6 +343,8 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
       weekday: day,
       time_window_start: formatSeconds(vehicle.shift_start || 0),
       time_window_end: formatSeconds(route.end_time_seconds || vehicle.shift_end || 0),
+      flexible_end_time: !!vehicle._manualRoute?.flexible_end_time,
+      max_route_minutes: vehicle._manualRoute?.max_route_minutes || null,
       route_cost: 0,
       validation: { valid: true, errors: [] },
       tasks: routeTasks,
@@ -414,6 +435,8 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
         total_distance_km: route.stats.total_distance_km,
         total_route_minutes: route.stats.total_route_minutes,
         status: 'geoptimaliseerd',
+        flexible_end_time: !!route.flexible_end_time,
+        max_route_minutes: route.max_route_minutes || null,
         cached_optimization: route,
         optimization_calculated_at: new Date().toISOString(),
       };
