@@ -23,6 +23,29 @@ function fixCoords(location) {
   return { ...location, latitude: lat, longitude: lon };
 }
 
+function r2(value) {
+  return Math.round((Number(value) || 0) * 100) / 100;
+}
+
+function getVehicleCostProfile(vehicle = {}) {
+  return {
+    cost_per_km: Number(vehicle.kostenPerKm ?? vehicle.fuel_cost_per_km ?? 0.35),
+    cost_per_minute: Number(vehicle.kostenPerMinuutVoertuig ?? 0.12),
+    fixed_cost: Number(vehicle.vasteKostenPerRoute ?? 8),
+  };
+}
+
+function calculateRouteCost(route, routingVehicle) {
+  const profile = getVehicleCostProfile(routingVehicle?._vehicle || routingVehicle);
+  const distanceKm = Number(route.total_distance_km ?? (Number(route.total_distance_meters || 0) / 1000));
+  const startSeconds = Number(route.start_time_seconds ?? routingVehicle?.shift_start ?? 0);
+  const endSeconds = Number(route.end_time_seconds ?? routingVehicle?.shift_end ?? startSeconds);
+  const routeMinutes = Math.max(0, Math.round((endSeconds - startSeconds) / 60));
+  const travelMinutes = Math.round(Number(route.total_travel_seconds || 0) / 60);
+  const paidMinutes = Math.max(routeMinutes, travelMinutes);
+  return r2(profile.fixed_cost + (distanceKm * profile.cost_per_km) + (paidMinutes * profile.cost_per_minute));
+}
+
 function locationById(id, objects, offices) {
   return fixCoords(objects.find(item => item.id === id) || offices.find(item => item.id === id));
 }
@@ -77,6 +100,7 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices) {
       shift_start: shiftStart,
       shift_end: shiftEnd,
       skills: [1],
+      ...getVehicleCostProfile(vehicle),
       _vehicle: vehicle,
       _manualRoute: route,
       _startDepot: startDepot,
@@ -328,6 +352,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
     const travelMinutes = Math.round(Number(route.total_travel_seconds || 0) / 60);
     const totalDistanceKm = Number(route.total_distance_km ?? ((Number(route.total_distance_meters || 0) / 1000).toFixed(2)));
     const totalWaitMinutes = routeTasks.reduce((sum, task) => sum + (task.waiting_time || 0), 0);
+    const routeCost = calculateRouteCost(route, vehicle);
 
     return {
       id: vehicle._manualRoute?.id || `server_route_${day}_${routeIndex + 1}`,
@@ -340,7 +365,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
       time_window_end: formatSeconds(route.end_time_seconds || vehicle.shift_end || 0),
       flexible_end_time: !!vehicle._manualRoute?.flexible_end_time,
       max_route_minutes: vehicle._manualRoute?.max_route_minutes || null,
-      route_cost: 0,
+      route_cost: routeCost,
       validation: { valid: true, errors: [] },
       tasks: routeTasks,
       optimized_order: optimizedOrder,
@@ -376,7 +401,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
     total_service_minutes: routes.reduce((sum, route) => sum + route.stats.total_service_minutes, 0),
     total_wait_minutes: routes.reduce((sum, route) => sum + route.stats.total_wait_minutes, 0),
     total_distance_km: Math.round(routes.reduce((sum, route) => sum + route.stats.total_distance_km, 0) * 100) / 100,
-    total_cost: 0,
+    total_cost: r2(routes.reduce((sum, route) => sum + (route.route_cost || 0), 0)),
   };
 
   return {
@@ -496,7 +521,7 @@ Deno.serve(async (req) => {
       total_service_minutes: perDay.reduce((sum, day) => sum + (day.totals?.total_service_minutes || 0), 0),
       total_wait_minutes: perDay.reduce((sum, day) => sum + (day.totals?.total_wait_minutes || 0), 0),
       total_distance_km: Math.round(perDay.reduce((sum, day) => sum + (day.totals?.total_distance_km || 0), 0) * 100) / 100,
-      total_cost: 0,
+      total_cost: r2(perDay.reduce((sum, day) => sum + (day.totals?.total_cost || 0), 0)),
     };
 
     return Response.json({
