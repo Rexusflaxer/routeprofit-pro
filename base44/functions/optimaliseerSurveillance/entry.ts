@@ -13,7 +13,8 @@ Deno.serve(async (req) => {
     }
 
     const payload = await req.json();
-    const response = await fetch(routingApiUrl, {
+    const endpoint = `${routingApiUrl.trim().replace(/\/$/, '')}/optimize`;
+    const response = await fetch(endpoint, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
