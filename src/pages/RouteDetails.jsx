@@ -231,6 +231,67 @@ export default function RouteDetails() {
     }
   }, [route?.id]);
 
+  const parseClockMinutes = (time) => {
+    if (!time) return 0;
+    const [hours, minutes] = String(time).split(':').map(Number);
+    return (Number.isFinite(hours) ? hours : 0) * 60 + (Number.isFinite(minutes) ? minutes : 0);
+  };
+
+  const formatClockMinutes = (minutes) => {
+    const value = ((Math.round(minutes) % 1440) + 1440) % 1440;
+    return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+  };
+
+  const getLocation = (id) => objects.find(o => o.id === id) || offices.find(o => o.id === id);
+
+  const buildVisibleOptimizedOrder = () => {
+    const order = [...(optimizedRoute?.optimized_order || [])];
+    if (!optimizedRoute || order.length === 0) return order;
+
+    const startLocation = getLocation(route.start_location_id || vehicle?.startDepotLocationId);
+    const endLocation = getLocation(route.end_location_id || vehicle?.eindDepotLocationId);
+
+    if (startLocation && !order.some(item => item.is_start)) {
+      const firstTask = order.find(item => !item.is_end && !item.is_alarm_standby);
+      const routeStart = parseClockMinutes(optimizedRoute.time_window_start || route.time_window_start);
+      const firstArrival = firstTask ? parseClockMinutes(firstTask.arrival_time) : routeStart;
+      const normalizedArrival = firstArrival < routeStart ? firstArrival + 1440 : firstArrival;
+      const travelMinutes = firstTask?.travel_time_minutes || 0;
+      const departureMinute = firstTask ? Math.max(routeStart, normalizedArrival - travelMinutes) : routeStart;
+
+      order.unshift({
+        name: `START: ${startLocation.name || 'Startlocatie'}`,
+        address: startLocation.address || '',
+        is_start: true,
+        arrival_time: formatClockMinutes(routeStart),
+        actual_start_time: formatClockMinutes(routeStart),
+        departure_time: formatClockMinutes(departureMinute),
+        travel_to_next_minutes: travelMinutes,
+        distance_to_next_km: firstTask?.distance_km || 0,
+        waiting_time: Math.max(0, departureMinute - routeStart),
+      });
+    }
+
+    if (endLocation && !order.some(item => item.is_end)) {
+      const lastTask = [...order].reverse().find(item => !item.is_start && !item.is_alarm_standby);
+      order.push({
+        name: `EIND: ${endLocation.name || 'Eindlocatie'}`,
+        address: endLocation.address || '',
+        is_end: true,
+        arrival_time: lastTask?.departure_time || optimizedRoute.time_window_end || route.time_window_end,
+        actual_start_time: lastTask?.departure_time || optimizedRoute.time_window_end || route.time_window_end,
+        departure_time: optimizedRoute.time_window_end || route.time_window_end,
+        travel_time_minutes: lastTask?.travel_to_next_minutes || 0,
+        distance_km: lastTask?.distance_to_next_km || 0,
+        waiting_time: 0,
+      });
+    }
+
+    return order;
+  };
+
+  const visibleOptimizedOrder = buildVisibleOptimizedOrder();
+
   if (!routeId) {
     return (
       <div className="text-center py-12">
@@ -580,7 +641,7 @@ export default function RouteDetails() {
                   <div>
                     <p className="text-sm font-semibold text-slate-700 mb-3">Optimale volgorde:</p>
                     <div className="space-y-3">
-                      {optimizedRoute.optimized_order?.map((item, index) => (
+                      {visibleOptimizedOrder.map((item, index) => (
                         <div key={item.task_id || index}>
                           {/* Alarmdienst eindblok */}
                           {item.is_alarm_standby && (
@@ -628,7 +689,7 @@ export default function RouteDetails() {
 
                               <div className={`flex items-start gap-3 p-4 rounded-lg border-l-4 ${item.is_start ? 'bg-green-50 border-green-600' : item.is_end ? 'bg-red-50 border-red-600' : item.is_split_part ? 'bg-purple-50 border-purple-600' : 'bg-slate-50 border-blue-600'}`}>
                                 <div className={`flex-shrink-0 min-w-8 h-8 px-2 rounded-full text-white flex items-center justify-center text-xs font-bold ${item.is_start ? 'bg-green-600' : item.is_end ? 'bg-red-600' : item.is_split_part ? 'bg-purple-600' : 'bg-blue-600'}`}>
-                                  {item.is_start ? 'START' : item.is_end ? 'EIND' : optimizedRoute.optimized_order.slice(0, index).filter(stop => !stop.is_start && !stop.is_end).length + 1}
+                                  {item.is_start ? 'START' : item.is_end ? 'EIND' : visibleOptimizedOrder.slice(0, index).filter(stop => !stop.is_start && !stop.is_end).length + 1}
                                 </div>
                                 <div className="flex-1 min-w-0">
                                   <p className="text-sm font-semibold text-slate-900">{item.name}</p>
