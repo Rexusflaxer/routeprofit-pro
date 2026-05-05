@@ -23,6 +23,14 @@ const WEEKDAYS = [
   { value: 7, label: "Zondag" },
 ];
 
+function formatDuration(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (!hours) return `${mins} min`;
+  return mins ? `${hours}u ${mins}min` : `${hours}u`;
+}
+
 export default function Routes() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -137,9 +145,20 @@ export default function Routes() {
         {(() => {
           const dayRoutes = routes.filter(r => r.weekdays?.includes(activeDay));
           const dayLabel = WEEKDAYS.find(d => d.value === activeDay)?.label;
+          const dayTaskMinutes = dayRoutes.reduce((sum, route) => {
+            return sum + (route.assigned_tasks || []).reduce((routeSum, assignedTask) => {
+              if (assignedTask.days?.length && !assignedTask.days.includes(activeDay)) return routeSum;
+              const task = tasks.find(t => t.id === assignedTask.task_id);
+              return routeSum + Number(task?.duration_minutes || 0);
+            }, 0);
+          }, 0);
           return (
             <div>
-              <div className="flex items-center justify-end mb-3">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="flex items-center gap-1.5 text-sm font-medium text-slate-700">
+                  <Clock className="w-4 h-4 text-slate-400" />
+                  Totale taakduur {dayLabel}: {formatDuration(dayTaskMinutes)}
+                </div>
                 <button
                   onClick={() => { setEditing({ weekdays: [activeDay] }); setShowForm(true); }}
                   className="text-xs text-slate-400 hover:text-slate-700 flex items-center gap-1 transition-colors"
