@@ -149,8 +149,9 @@ function normalizeDeadlineWindowForVehicles(deadlineSeconds, serviceSeconds, veh
 
       return {
         start: deadline,
-        end: latestDeparture,
+        end: deadline,
         deadline,
+        latestDeparture,
         overlap: vehicles.reduce((sum, vehicle) => {
           const overlap = Math.min(latestDeparture, vehicle.shift_end) - Math.max(deadline, vehicle.shift_start);
           return sum + Math.max(0, overlap);
@@ -233,6 +234,7 @@ function buildTasksForDay(day, tasks, objects, vehicles) {
           _splitCount: splitCount,
           _usesArrivalDeadline: usesArrivalDeadline,
           _arrivalDeadlineTime: inferredDeadline || '',
+          _latestDepartureSeconds: usesArrivalDeadline ? normalizedWindow.latestDeparture : null,
         });
       }
     }
@@ -334,7 +336,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         address: source._object?.address || '',
         duration_minutes: Math.round(serviceSeconds / 60),
         time_window_start: source._usesArrivalDeadline ? (source._task?.time_window_start || formatSeconds(source.window_start || 0)) : formatSeconds(source.window_start || 0),
-        time_window_end: source._usesArrivalDeadline ? (source._task?.latest_departure_time || source._task?.time_window_end || formatSeconds(source.window_end || 86340)) : formatSeconds(source.window_end || 86340),
+        time_window_end: source._usesArrivalDeadline ? (source._task?.latest_departure_time || source._task?.time_window_end || formatSeconds(source._latestDepartureSeconds || source.window_start || 0)) : formatSeconds(source.window_end || 86340),
         task_type: source._task?.task_type,
         repeat_index: source._repeatIndex,
         repeat_count: source._repeatCount,
