@@ -64,7 +64,27 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices) {
   }).filter(vehicle => Number.isFinite(vehicle.start_lat) && Number.isFinite(vehicle.start_lon));
 }
 
-function buildTasksForDay(day, tasks, objects) {
+function normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles) {
+  let normalizedEnd = windowEnd;
+  if (normalizedEnd <= windowStart) normalizedEnd += 86400;
+
+  const candidates = [
+    { start: windowStart, end: normalizedEnd },
+    { start: windowStart + 86400, end: normalizedEnd + 86400 },
+  ];
+
+  return candidates
+    .map(candidate => ({
+      ...candidate,
+      overlap: vehicles.reduce((sum, vehicle) => {
+        const overlap = Math.min(candidate.end, vehicle.shift_end) - Math.max(candidate.start, vehicle.shift_start);
+        return sum + Math.max(0, overlap);
+      }, 0),
+    }))
+    .sort((a, b) => b.overlap - a.overlap)[0];
+}
+
+function buildTasksForDay(day, tasks, objects, vehicles) {
   const optimizerTasks = [];
   const skipped = [];
   let numericId = 1;
@@ -77,16 +97,16 @@ function buildTasksForDay(day, tasks, objects) {
     }
     const serviceSeconds = Math.max(60, Number(task.duration_minutes || 15) * 60);
     const windowStart = parseTimeToSeconds(task.time_window_start, 0);
-    let windowEnd = parseTimeToSeconds(task.time_window_end, 86340);
-    if (windowEnd <= windowStart) windowEnd += 86400;
+    const windowEnd = parseTimeToSeconds(task.time_window_end, 86340);
+    const normalizedWindow = normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles);
     optimizerTasks.push({
       id: numericId++,
       name: object.name || task.task_type || 'Taak',
       lon: object.longitude,
       lat: object.latitude,
       service_seconds: serviceSeconds,
-      window_start: windowStart,
-      window_end: windowEnd,
+      window_start: normalizedWindow.start,
+      window_end: normalizedWindow.end,
       priority: 80,
       skills: [1],
       _task: task,
@@ -314,7 +334,7 @@ Deno.serve(async (req) => {
     const perDay = [];
     for (const weekday of weekdays) {
       const routingVehicles = buildVehiclesForDay(weekday, routes, vehicles, objects, offices);
-      const { optimizerTasks, skipped } = buildTasksForDay(weekday, tasks, objects);
+      const { optimizerTasks, skipped } = buildTasksForDay(weekday, tasks, objects, routingVehicles);
       if (!routingVehicles.length) throw new Error('Geen bruikbare voertuigen of depots gevonden.');
 
       const serverResult = optimizerTasks.length
