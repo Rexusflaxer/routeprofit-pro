@@ -329,6 +329,26 @@ export default function RouteDetails() {
     };
   };
 
+  const getRouteClockMinutes = (time) => {
+    const routeStart = parseClockMinutes(optimizedRoute?.time_window_start || route?.time_window_start || '00:00');
+    let minutes = parseClockMinutes(time);
+    if (minutes < routeStart) minutes += 1440;
+    return minutes;
+  };
+
+  const getWaitBeforeStop = (item, index) => {
+    if (!item || item.is_start || item.is_end || item.is_alarm_standby) return null;
+    if (index > 0 && visibleOptimizedOrder[index - 1]?.is_start) return null;
+    if (!item.arrival_time || !item.actual_start_time) return null;
+
+    const arrival = getRouteClockMinutes(item.arrival_time);
+    let start = getRouteClockMinutes(item.actual_start_time);
+    if (start < arrival) start += 1440;
+    const minutes = Math.max(0, Math.round(start - arrival));
+
+    return minutes > 0 ? { minutes, start: item.arrival_time, end: item.actual_start_time } : null;
+  };
+
   if (!routeId) {
     return (
       <div className="text-center py-12">
@@ -704,20 +724,20 @@ export default function RouteDetails() {
                                 </div>
                               )}
 
-                              {item.waiting_time > 0 && !(index > 0 && visibleOptimizedOrder[index - 1]?.is_start) && (
+                              {getWaitBeforeStop(item, index) && (
                                 <div className="flex items-center justify-center py-2">
                                   {optimizedRoute.alarm_standby ? (
                                     <div className="flex items-center gap-2 px-3 py-1 bg-amber-100 rounded-full">
                                       <span className="text-xs">🚨</span>
                                       <span className="text-xs font-medium text-amber-700">
-                                        Alarmdienst: {item.waiting_time} min ({displayClockRange(item.arrival_time, item.actual_start_time)})
+                                        Alarmdienst: {getWaitBeforeStop(item, index).minutes} min ({displayClockRange(getWaitBeforeStop(item, index).start, getWaitBeforeStop(item, index).end)})
                                       </span>
                                     </div>
                                   ) : (
                                     <div className="flex items-center gap-2 px-3 py-1 bg-green-100 rounded-full">
                                       <Clock className="w-3 h-3 text-green-600" />
                                       <span className="text-xs font-medium text-green-700">
-                                        {item.is_start ? 'Vrije tijd aan begin dienst' : 'Vrije tijd tussen stops'}: {item.waiting_time} min ({item.is_start ? displayClockRange(item.arrival_time, item.departure_time) : displayClockRange(item.actual_start_time, item.arrival_time)})
+                                        Vrije tijd tussen stops: {getWaitBeforeStop(item, index).minutes} min ({displayClockRange(getWaitBeforeStop(item, index).start, getWaitBeforeStop(item, index).end)})
                                       </span>
                                     </div>
                                   )}
