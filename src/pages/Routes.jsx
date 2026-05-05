@@ -23,6 +23,23 @@ const WEEKDAYS = [
   { value: 7, label: "Zondag" },
 ];
 
+function formatDutyMinutes(minutes) {
+  const total = Math.max(0, Math.round(Number(minutes) || 0));
+  const hours = Math.floor(total / 60);
+  const mins = total % 60;
+  if (hours === 0) return `${mins} min`;
+  return mins > 0 ? `${hours}u ${mins}min` : `${hours}u`;
+}
+
+function getRouteDutyMinutes(route) {
+  return Number(
+    route.cached_optimization?.actual_shift_minutes ??
+    route.cached_optimization?.stats?.total_route_minutes ??
+    route.total_route_minutes ??
+    0
+  );
+}
+
 export default function Routes() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
@@ -137,9 +154,14 @@ export default function Routes() {
         {(() => {
           const dayRoutes = routes.filter(r => r.weekdays?.includes(activeDay));
           const dayLabel = WEEKDAYS.find(d => d.value === activeDay)?.label;
+          const totalDutyMinutes = dayRoutes.reduce((sum, route) => sum + getRouteDutyMinutes(route), 0);
           return (
             <div>
-              <div className="flex items-center justify-end mb-3">
+              <div className="flex items-center justify-between gap-3 mb-3">
+                <div className="flex items-center gap-2 text-sm text-slate-700">
+                  <Clock className="w-4 h-4 text-slate-400" />
+                  <span>Totale diensttijd {dayLabel}: <strong className="text-slate-900">{formatDutyMinutes(totalDutyMinutes)}</strong></span>
+                </div>
                 <button
                   onClick={() => { setEditing({ weekdays: [activeDay] }); setShowForm(true); }}
                   className="text-xs text-slate-400 hover:text-slate-700 flex items-center gap-1 transition-colors"
