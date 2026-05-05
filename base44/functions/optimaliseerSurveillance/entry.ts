@@ -50,7 +50,7 @@ function locationById(id, objects, offices) {
   return fixCoords(objects.find(item => item.id === id) || offices.find(item => item.id === id));
 }
 
-function buildVehiclesForDay(day, routes, vehicles, objects, offices) {
+function buildVehiclesForDay(day, routes, vehicles, objects, offices, options = {}) {
   const activeVehicles = vehicles.filter(vehicle => vehicle.is_active !== false);
   const manualRoutes = routes.filter(route =>
     (route.weekdays || []).includes(day) &&
@@ -70,8 +70,15 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices) {
     if (!route.flexible_end_time && end <= start) end += 86400;
     return { start, end };
   });
-  const fallbackStart = manualWindows.length ? Math.min(...manualWindows.map(window => window.start)) : 0;
-  const fallbackEnd = manualWindows.length ? Math.min(Math.max(...manualWindows.map(window => window.end)), fallbackStart + 600 * 60) : fallbackStart + 600 * 60;
+  const fallbackStart = options.extraRouteStart
+    ? parseTimeToSeconds(options.extraRouteStart, 0)
+    : (manualWindows.length ? Math.min(...manualWindows.map(window => window.start)) : 0);
+  const configuredFallbackEnd = options.extraRouteEnd
+    ? parseTimeToSeconds(options.extraRouteEnd, fallbackStart + 600 * 60)
+    : NaN;
+  const fallbackEnd = Number.isFinite(configuredFallbackEnd)
+    ? (configuredFallbackEnd <= fallbackStart ? configuredFallbackEnd + 86400 : configuredFallbackEnd)
+    : (manualWindows.length ? Math.min(Math.max(...manualWindows.map(window => window.end)), fallbackStart + 600 * 60) : fallbackStart + 600 * 60);
   const source = [
     ...manualRoutes.map(route => ({ route, vehicle: activeVehicles.find(v => v.id === route.vehicle_id) })),
     ...extraVehicles.map(vehicle => ({ route: null, vehicle })),
@@ -267,6 +274,32 @@ async function callRoutingServer(payload) {
   const data = text ? JSON.parse(text) : {};
   if (!response.ok) throw new Error(data?.error || data?.message || JSON.stringify(data) || 'Routing server gaf een fout terug.');
   return data;
+}
+
+function summarizePlanningResult(result) {
+  const routes = result.routes || [];
+  const routeSummaries = routes.map(route => ({
+    name: route.manual_route_name || route.vehicle?.license_plate || route.id,
+    manual_route_id: route.manual_route_id || null,
+    start: route.time_window_start,
+    end: route.time_window_end,
+    service_minutes: route.stats?.total_service_minutes || 0,
+    travel_minutes: route.stats?.total_travel_minutes || 0,
+    wait_minutes: route.stats?.total_wait_minutes || 0,
+    duty_minutes: route.stats?.total_route_minutes || route.total_route_time || 0,
+    task_count: route.tasks?.length || 0,
+  }));
+
+  return {
+    routes: routeSummaries,
+    total_duty_minutes: routeSummaries.reduce((sum, route) => sum + route.duty_minutes, 0),
+    total_service_minutes: result.totals?.total_service_minutes || 0,
+    total_travel_minutes: result.totals?.total_travel_minutes || 0,
+    total_wait_minutes: result.totals?.total_wait_minutes || 0,
+    total_tasks_planned: result.total_tasks_planned || 0,
+    total_tasks_skipped: result.total_tasks_skipped || 0,
+    skipped_tasks: (result.skipped_tasks || []).map(task => ({ name: task.name || task.task_type || 'Taak', reason: task.skip_reason || task.reason || '' })),
+  };
 }
 
 function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped) {
@@ -511,7 +544,10 @@ Deno.serve(async (req) => {
 
     const perDay = [];
     for (const weekday of weekdays) {
-      const routingVehicles = buildVehiclesForDay(weekday, routes, vehicles, objects, offices);
+      const routingVehicles = buildVehiclesForDay(weekday, routes, vehicles, objects, offices, {
+        extraRouteStart: body.extra_route_start,
+        extraRouteEnd: body.extra_route_end,
+      });
       const { optimizerTasks, skipped } = buildTasksForDay(weekday, tasks, objects, routingVehicles);
       if (!routingVehicles.length) throw new Error('Geen bruikbare voertuigen of depots gevonden.');
 
@@ -542,7 +578,7 @@ Deno.serve(async (req) => {
       total_cost: r2(perDay.reduce((sum, day) => sum + (day.totals?.total_cost || 0), 0)),
     };
 
-    return Response.json({
+    const finalResult = {
       planning_mode: 'eigen_routing_server',
       google_route_optimization: false,
       manual_routes_used: routesOut.some(route => route.manual_route_id),
@@ -563,7 +599,13 @@ Deno.serve(async (req) => {
       weekdays,
       generated_at: new Date().toISOString(),
       saved: false,
-    });
+    };
+
+    if (body.summary_only) {
+      return Response.json(summarizePlanningResult(finalResult));
+    }
+
+    return Response.json(finalResult);
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
   }
