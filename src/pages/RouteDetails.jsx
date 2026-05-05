@@ -595,12 +595,12 @@ export default function RouteDetails() {
 
                           {!item.is_alarm_standby && (
                             <>
-                              {index > 0 && item.travel_time_minutes > 0 && (
+                              {index > 0 && (item.travel_time_minutes > 0 || item.distance_km > 0) && (
                                 <div className="flex items-center justify-center py-2">
                                   <div className="flex items-center gap-2 px-3 py-1 bg-blue-100 rounded-full">
                                     <Navigation className="w-3 h-3 text-blue-600" />
                                     <span className="text-xs font-medium text-blue-700">
-                                      Reistijd: {item.travel_time_minutes} min{item.distance_km ? ` · ${item.distance_km} km` : ''}
+                                      Tussen stops: {item.travel_time_minutes || 0} min{item.distance_km ? ` · ${Number(item.distance_km).toFixed(2)} km` : ''}
                                     </span>
                                   </div>
                                 </div>
@@ -619,7 +619,7 @@ export default function RouteDetails() {
                                     <div className="flex items-center gap-2 px-3 py-1 bg-green-100 rounded-full">
                                       <Clock className="w-3 h-3 text-green-600" />
                                       <span className="text-xs font-medium text-green-700">
-                                        Vrije tijd: {item.waiting_time} min ({item.arrival_time} – {item.actual_start_time})
+                                        Vrije tijd tussen stops: {item.waiting_time} min ({item.actual_start_time} – {item.arrival_time})
                                       </span>
                                     </div>
                                   )}
@@ -657,6 +657,12 @@ export default function RouteDetails() {
                                           <div className="text-xs">
                                             <span className="text-slate-500">Vertrek:</span>
                                             <span className="ml-1 font-medium text-slate-900">{item.departure_time}</span>
+                                          </div>
+                                        )}
+                                        {item.travel_to_next_minutes > 0 && (
+                                          <div className="text-xs">
+                                            <span className="text-slate-500">Naar volgende:</span>
+                                            <span className="ml-1 font-medium text-slate-900">{item.travel_to_next_minutes} min{item.distance_to_next_km ? ` · ${Number(item.distance_to_next_km).toFixed(2)} km` : ''}</span>
                                           </div>
                                         )}
                                       </>
