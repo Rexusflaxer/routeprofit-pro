@@ -36,6 +36,18 @@ function getTaskTime(task) {
 const HOUR_HEIGHT = 36;
 const HOURS = Array.from({ length: 25 }, (_, index) => index);
 
+const TASK_TYPE_STYLES = {
+  "Mobiele Controleronde": "border-blue-300 bg-blue-100/55 hover:bg-blue-100/75",
+  "Externe Controleronde": "border-emerald-300 bg-emerald-100/55 hover:bg-emerald-100/75",
+  "Externe Sluitronde": "border-orange-300 bg-orange-100/55 hover:bg-orange-100/75",
+  "Brand- en Sluitronde": "border-red-300 bg-red-100/55 hover:bg-red-100/75",
+  "Openingsronde": "border-violet-300 bg-violet-100/55 hover:bg-violet-100/75",
+  "Sluitbegeleiding": "border-amber-300 bg-amber-100/55 hover:bg-amber-100/75",
+  "Grote collectief": "border-cyan-300 bg-cyan-100/55 hover:bg-cyan-100/75",
+};
+
+const getTaskTypeStyle = (taskType) => TASK_TYPE_STYLES[taskType] || "border-slate-300 bg-slate-100/55 hover:bg-slate-100/75";
+
 function getTaskPlacement(task) {
   const start = timeToMinutes(task.display_start || task.arrival_deadline_time || task.time_window_start);
   const end = timeToMinutes(task.display_end || task.time_window_end);
@@ -82,10 +94,19 @@ function getTaskSegmentsForDay(task, day) {
 function CalendarTaskBlock({ task, onEdit }) {
   const placement = getTaskPlacement(task);
   const isContinuation = task.continued_from_previous_day;
+  const isCompact = placement.height < 54;
+  const tooltipText = [
+    task.task_type,
+    getTaskTime(task),
+    `${task.duration_minutes || 0} minuten`,
+    Number(task.repeat_count || 1) > 1 ? `${task.repeat_count}x herhalen` : null,
+    Number(task.min_minutes_between_other_tasks || 0) > 0 ? `${task.min_minutes_between_other_tasks} minuten buffer` : null,
+  ].filter(Boolean).join("\n");
 
   return (
     <div
-      className={`absolute left-1 right-1 overflow-hidden border border-blue-300 bg-blue-100/55 shadow-sm transition-all backdrop-blur-[1px] ${isContinuation ? "rounded-b-md border-t-0" : "rounded-md p-1.5 hover:bg-blue-100/75 hover:shadow-md group"}`}
+      title={tooltipText}
+      className={`absolute left-1 right-1 overflow-hidden border shadow-sm transition-all backdrop-blur-[1px] ${getTaskTypeStyle(task.task_type)} ${isContinuation ? "rounded-b-md border-t-0" : "rounded-md p-1.5 hover:shadow-md group"}`}
       style={{ top: placement.top + 2, height: Math.max(18, placement.height - 4) }}
     >
       {!isContinuation && (
@@ -93,19 +114,23 @@ function CalendarTaskBlock({ task, onEdit }) {
           <div className="flex items-start justify-between gap-1">
             <div className="min-w-0">
               <p className="truncate text-xs font-bold text-slate-900">{task.task_type}</p>
-              <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-700">
-                <Clock className="w-3 h-3" /> {getTaskTime(task)}
-              </p>
+              {!isCompact && (
+                <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-700">
+                  <Clock className="w-3 h-3" /> {getTaskTime(task)}
+                </p>
+              )}
             </div>
             <button className="rounded p-1 text-slate-500 hover:bg-white/70 hover:text-slate-900" onClick={() => onEdit(task)}>
               <Pencil className="w-3 h-3" />
             </button>
           </div>
-          <div className="mt-1 flex flex-wrap gap-1">
-            <span className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">{task.duration_minutes || 0} min</span>
-            {Number(task.repeat_count || 1) > 1 && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">{task.repeat_count}x</span>}
-            {Number(task.min_minutes_between_other_tasks || 0) > 0 && <span className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">{task.min_minutes_between_other_tasks}m buffer</span>}
-          </div>
+          {!isCompact && (
+            <div className="mt-1 flex flex-wrap gap-1">
+              <span className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">{task.duration_minutes || 0} min</span>
+              {Number(task.repeat_count || 1) > 1 && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">{task.repeat_count}x</span>}
+              {Number(task.min_minutes_between_other_tasks || 0) > 0 && <span className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">{task.min_minutes_between_other_tasks}m buffer</span>}
+            </div>
+          )}
         </>
       )}
     </div>
