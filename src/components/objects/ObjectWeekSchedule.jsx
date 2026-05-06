@@ -135,7 +135,7 @@ export default function ObjectWeekSchedule({ tasks, onEditTask }) {
               return (
                 <div key={day.value} className="border-r border-slate-200 px-3 py-3 last:border-r-0">
                   <p className="text-sm font-bold text-slate-900">{day.label}</p>
-                  <p className="text-xs text-slate-400">{dayTasks.length} taak{dayTasks.length === 1 ? "" : "en"}</p>
+                  <p className="text-xs text-slate-400">{dayTasks.length} {dayTasks.length === 1 ? "taak" : "taken"}</p>
                 </div>
               );
             })}
