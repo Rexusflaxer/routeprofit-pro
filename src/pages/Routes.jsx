@@ -2,7 +2,7 @@ import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
-import { Plus, Pencil, Trash2, MapPin, Clock, Zap } from "lucide-react";
+import { Plus, Pencil, Trash2, MapPin, Clock, Zap, Navigation } from "lucide-react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
 import { AnimatePresence, motion } from "framer-motion";
@@ -192,6 +192,11 @@ export default function Routes() {
                           </div>
                         </Link>
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">
+                          <Button asChild variant="ghost" size="icon" className="h-7 w-7 text-amber-600 hover:text-amber-700">
+                            <Link to={`/SurveillanceNavigation?routeId=${route.id}`}>
+                              <Navigation className="w-3.5 h-3.5" />
+                            </Link>
+                          </Button>
                           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => { setEditing(route); setShowForm(true); }}>
                             <Pencil className="w-3.5 h-3.5" />
                           </Button>

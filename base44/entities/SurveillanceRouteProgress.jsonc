@@ -1,0 +1,64 @@
+{
+  "name": "SurveillanceRouteProgress",
+  "type": "object",
+  "properties": {
+    "route_id": {
+      "type": "string",
+      "description": "ID van de route die wordt gereden"
+    },
+    "route_name": {
+      "type": "string",
+      "description": "Naam van de route op het moment van starten"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "completed",
+        "cancelled"
+      ],
+      "default": "active",
+      "description": "Status van de gereden route"
+    },
+    "started_at": {
+      "type": "string",
+      "description": "Starttijd van de route als ISO datum"
+    },
+    "completed_at": {
+      "type": "string",
+      "description": "Eindtijd van de route als ISO datum"
+    },
+    "last_latitude": {
+      "type": "number",
+      "description": "Laatst bekende breedtegraad"
+    },
+    "last_longitude": {
+      "type": "number",
+      "description": "Laatst bekende lengtegraad"
+    },
+    "visited_objects": {
+      "type": "array",
+      "description": "Objecten waar de gebruiker langs is gereden",
+      "items": {
+        "type": "object",
+        "properties": {
+          "object_id": {
+            "type": "string"
+          },
+          "visited_at": {
+            "type": "string"
+          },
+          "distance_meters": {
+            "type": "number"
+          }
+        }
+      }
+    }
+  },
+  "required": [
+    "route_id",
+    "route_name",
+    "status",
+    "started_at"
+  ]
+}
