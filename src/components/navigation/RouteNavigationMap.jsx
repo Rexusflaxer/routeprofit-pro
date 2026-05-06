@@ -30,6 +30,24 @@ function getBearing(a, b) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
+function highlightCustomerBuildings(map, stops) {
+  if (!map.getLayer("customer-3d-buildings") || !stops.length) return;
+
+  const buildingIds = new Set();
+  stops.forEach(stop => {
+    const point = map.project([stop.longitude, stop.latitude]);
+    const features = map.queryRenderedFeatures(
+      [[point.x - 18, point.y - 18], [point.x + 18, point.y + 18]],
+      { layers: ["3d-buildings"] }
+    );
+    features.forEach(feature => {
+      if (feature.id !== undefined && feature.id !== null) buildingIds.add(feature.id);
+    });
+  });
+
+  map.setFilter("customer-3d-buildings", ["in", ["id"], ["literal", Array.from(buildingIds)]]);
+}
+
 async function fetchDirections(stops) {
   if (stops.length < 2) return emptyRoute;
   const coordinates = stops.slice(0, 25).map(stop => `${stop.longitude},${stop.latitude}`).join(";");
@@ -89,6 +107,21 @@ export default function RouteNavigationMap({ stops, userPosition, visitedIds }) 
         },
       }, labelLayer);
 
+      map.addLayer({
+        id: "customer-3d-buildings",
+        source: "composite",
+        "source-layer": "building",
+        filter: ["in", ["id"], ["literal", []]],
+        type: "fill-extrusion",
+        minzoom: 15,
+        paint: {
+          "fill-extrusion-color": "#f59e0b",
+          "fill-extrusion-height": ["interpolate", ["linear"], ["zoom"], 15, 0, 16, ["get", "height"]],
+          "fill-extrusion-base": ["interpolate", ["linear"], ["zoom"], 15, 0, 16, ["get", "min_height"]],
+          "fill-extrusion-opacity": 0.9,
+        },
+      }, labelLayer);
+
       map.addSource("navigation-route", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
       map.addLayer({
         id: "navigation-route-glow",
@@ -129,6 +162,7 @@ export default function RouteNavigationMap({ stops, userPosition, visitedIds }) 
         const bounds = new mapboxgl.LngLatBounds();
         info.geometry.coordinates.forEach(coord => bounds.extend(coord));
         map.fitBounds(bounds, { padding: { top: 140, bottom: 180, left: 80, right: 420 }, pitch: 62, bearing: getBearing(stops[0], stops[1]), duration: 900 });
+        map.once("idle", () => highlightCustomerBuildings(map, stops));
       }
     });
   }, [stops, visitedIds]);
