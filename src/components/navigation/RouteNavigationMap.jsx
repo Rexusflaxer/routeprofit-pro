@@ -51,9 +51,9 @@ function getBuildingProximityFilter(items, radiusMeters = 45) {
   ];
 }
 
-async function fetchDirections(stops) {
-  if (stops.length < 2) return emptyRoute;
-  const coordinates = stops.slice(0, 25).map(stop => `${stop.longitude},${stop.latitude}`).join(";");
+async function fetchDirections(points) {
+  if (points.length < 2) return emptyRoute;
+  const coordinates = points.slice(0, 25).map(point => `${point.longitude},${point.latitude}`).join(";");
   const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?geometries=geojson&overview=full&steps=true&language=nl&access_token=${MAPBOX_PUBLIC_TOKEN}`;
   const response = await fetch(url);
   const data = await response.json();
@@ -146,14 +146,14 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
         type: "line",
         source: "navigation-route",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#60a5fa", "line-width": 14, "line-opacity": 0.25 },
+        paint: { "line-color": "#60a5fa", "line-width": 18, "line-opacity": 0.28 },
       });
       map.addLayer({
         id: "navigation-route-line",
         type: "line",
         source: "navigation-route",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#1d9bf0", "line-width": 7, "line-opacity": 0.95 },
+        paint: { "line-color": "#1d9bf0", "line-width": 9, "line-opacity": 0.98 },
       });
     });
 
@@ -179,16 +179,10 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
       return new mapboxgl.Marker(markerEl).setLngLat([stop.longitude, stop.latitude]).setPopup(new mapboxgl.Popup().setHTML(`<strong>${stop.sequence}. ${stop.name}</strong><br>${stop.address || ""}`)).addTo(map);
     });
 
-    fetchDirections(stops).then(info => {
-      setRouteInfo(info);
-      const source = map.getSource("navigation-route");
-      if (source && info.geometry) {
-        source.setData({ type: "Feature", properties: {}, geometry: info.geometry });
-        const bounds = new mapboxgl.LngLatBounds();
-        info.geometry.coordinates.forEach(coord => bounds.extend(coord));
-        map.fitBounds(bounds, { padding: { top: 140, bottom: 180, left: 80, right: 420 }, pitch: 62, bearing: getBearing(stops[0], stops[1]), duration: 900 });
-      }
-    });
+    const source = map.getSource("navigation-route");
+    if (source) {
+      source.setData({ type: "FeatureCollection", features: [] });
+    }
   }, [stops, objects, visitedIds]);
 
   React.useEffect(() => {
@@ -204,8 +198,27 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
         .addTo(map);
     }
 
+    const nextStop = stops.find(stop => !visitedIds.has(stop.id));
     userMarkerRef.current.setLngLat([userPosition.longitude, userPosition.latitude]);
-    map.easeTo({ center: [userPosition.longitude, userPosition.latitude], zoom: Math.max(map.getZoom(), 17), pitch: 66, bearing: getBearing(userPosition, stops.find(stop => !visitedIds.has(stop.id)) || stops[0]), duration: 700 });
+
+    if (nextStop) {
+      fetchDirections([userPosition, nextStop]).then(info => {
+        setRouteInfo(info);
+        const source = map.getSource("navigation-route");
+        if (source && info.geometry) {
+          source.setData({ type: "Feature", properties: {}, geometry: info.geometry });
+        }
+      });
+    }
+
+    map.easeTo({
+      center: [userPosition.longitude, userPosition.latitude],
+      zoom: 18.2,
+      pitch: 72,
+      bearing: getBearing(userPosition, nextStop || stops[0]),
+      duration: 700,
+      padding: { top: 120, bottom: 220, left: 60, right: 60 },
+    });
   }, [userPosition, stops, visitedIds]);
 
   return (
