@@ -74,6 +74,7 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
   const markersRef = React.useRef([]);
   const userMarkerRef = React.useRef(null);
   const [routeInfo, setRouteInfo] = React.useState(emptyRoute);
+  const [mapReady, setMapReady] = React.useState(false);
 
   React.useEffect(() => {
     if (!mapNode.current || mapRef.current) return;
@@ -146,22 +147,30 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
         type: "line",
         source: "navigation-route",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#60a5fa", "line-width": 18, "line-opacity": 0.28 },
-      });
+        paint: { "line-color": "#60a5fa", "line-width": 22, "line-opacity": 0.45 },
+      }, labelLayer);
       map.addLayer({
         id: "navigation-route-line",
         type: "line",
         source: "navigation-route",
         layout: { "line-cap": "round", "line-join": "round" },
-        paint: { "line-color": "#1d9bf0", "line-width": 9, "line-opacity": 0.98 },
-      });
+        paint: { "line-color": "#0ea5ff", "line-width": 11, "line-opacity": 1 },
+      }, labelLayer);
+      map.addLayer({
+        id: "navigation-route-core",
+        type: "line",
+        source: "navigation-route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#bfdbfe", "line-width": 3, "line-opacity": 0.9 },
+      }, labelLayer);
+      setMapReady(true);
     });
 
     return () => map.remove();
   }, []);
 
   React.useEffect(() => {
-    if (!mapRef.current || stops.length === 0) return;
+    if (!mapRef.current || !mapReady || stops.length === 0) return;
     const map = mapRef.current;
 
     if (map.getLayer("customer-3d-buildings")) {
@@ -183,10 +192,10 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
     if (source) {
       source.setData({ type: "FeatureCollection", features: [] });
     }
-  }, [stops, objects, visitedIds]);
+  }, [stops, objects, visitedIds, mapReady]);
 
   React.useEffect(() => {
-    if (!mapRef.current || !userPosition) return;
+    if (!mapRef.current || !mapReady || !userPosition) return;
     const map = mapRef.current;
 
     if (!userMarkerRef.current) {
@@ -206,7 +215,10 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
         setRouteInfo(info);
         const source = map.getSource("navigation-route");
         if (source && info.geometry) {
-          source.setData({ type: "Feature", properties: {}, geometry: info.geometry });
+          source.setData({
+            type: "FeatureCollection",
+            features: [{ type: "Feature", properties: {}, geometry: info.geometry }],
+          });
         }
       });
     }
@@ -219,7 +231,7 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
       duration: 700,
       padding: { top: 120, bottom: 220, left: 60, right: 60 },
     });
-  }, [userPosition, stops, visitedIds]);
+  }, [userPosition, stops, visitedIds, mapReady]);
 
   return (
     <div className="relative h-full w-full">
