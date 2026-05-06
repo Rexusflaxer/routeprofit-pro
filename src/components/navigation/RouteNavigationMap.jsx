@@ -141,7 +141,9 @@ export default function RouteNavigationMap({ stops, userPosition, visitedIds }) 
       const markerEl = document.createElement("div");
       markerEl.className = "relative flex h-10 w-10 items-center justify-center rounded-full bg-blue-500 text-white shadow-xl ring-4 ring-blue-400/30";
       markerEl.innerHTML = "➤";
-      userMarkerRef.current = new mapboxgl.Marker(markerEl).addTo(map);
+      userMarkerRef.current = new mapboxgl.Marker(markerEl)
+        .setLngLat([userPosition.longitude, userPosition.latitude])
+        .addTo(map);
     }
 
     userMarkerRef.current.setLngLat([userPosition.longitude, userPosition.latitude]);
