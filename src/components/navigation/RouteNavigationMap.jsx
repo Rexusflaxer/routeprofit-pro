@@ -96,6 +96,40 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
       const layers = map.getStyle().layers;
       const labelLayer = layers.find(layer => layer.type === "symbol" && layer.layout?.["text-field"])?.id;
 
+      map.setFog({
+        color: "rgb(18, 28, 44)",
+        "high-color": "rgb(55, 85, 130)",
+        "horizon-blend": 0.18,
+        "space-color": "rgb(4, 7, 14)",
+        "star-intensity": 0.18,
+      });
+
+      map.addSource("mapbox-dem", {
+        type: "raster-dem",
+        url: "mapbox://mapbox.mapbox-terrain-dem-v1",
+        tileSize: 512,
+        maxzoom: 14,
+      });
+      map.setTerrain({ source: "mapbox-dem", exaggeration: 1.25 });
+
+      map.addLayer({
+        id: "enhanced-grass-areas",
+        source: "composite",
+        "source-layer": "landuse",
+        filter: ["in", ["get", "class"], ["literal", ["park", "grass", "recreation_ground", "cemetery", "golf_course"]]],
+        type: "fill",
+        paint: { "fill-color": "#315f4b", "fill-opacity": 0.55 },
+      }, labelLayer);
+
+      map.addLayer({
+        id: "enhanced-tree-areas",
+        source: "composite",
+        "source-layer": "landcover",
+        filter: ["in", ["get", "class"], ["literal", ["wood", "scrub", "grass"]]],
+        type: "fill",
+        paint: { "fill-color": "#214c3a", "fill-opacity": 0.5 },
+      }, labelLayer);
+
       map.addLayer({
         id: "3d-buildings",
         source: "composite",
@@ -104,10 +138,10 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
         type: "fill-extrusion",
         minzoom: 15,
         paint: {
-          "fill-extrusion-color": "#334155",
+          "fill-extrusion-color": "#3d4858",
           "fill-extrusion-height": ["interpolate", ["linear"], ["zoom"], 15, 0, 16, ["get", "height"]],
           "fill-extrusion-base": ["interpolate", ["linear"], ["zoom"], 15, 0, 16, ["get", "min_height"]],
-          "fill-extrusion-opacity": 0.72,
+          "fill-extrusion-opacity": 0.78,
         },
       }, labelLayer);
 
@@ -226,7 +260,7 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
     map.easeTo({
       center: [userPosition.longitude, userPosition.latitude],
       zoom: 18.2,
-      pitch: 72,
+      pitch: 76,
       bearing: getBearing(userPosition, nextStop || stops[0]),
       duration: 700,
       padding: { top: 120, bottom: 220, left: 60, right: 60 },
