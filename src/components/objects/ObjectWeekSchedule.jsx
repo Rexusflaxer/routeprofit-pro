@@ -11,10 +11,18 @@ const WEEKDAYS = [
   { value: 7, label: "Zondag", short: "Zo" },
 ];
 
+const DAY_MINUTES = 24 * 60;
+
 const timeToMinutes = (time) => {
   if (!time) return 0;
+  if (time === "24:00") return DAY_MINUTES;
   const [hours, minutes] = String(time).split(":").map(Number);
   return (Number.isFinite(hours) ? hours : 0) * 60 + (Number.isFinite(minutes) ? minutes : 0);
+};
+
+const minutesToTime = (minutes) => {
+  const value = Math.max(0, Math.min(DAY_MINUTES, Math.round(minutes)));
+  return `${String(Math.floor(value / 60)).padStart(2, "0")}:${String(value % 60).padStart(2, "0")}`;
 };
 
 function getTaskTime(task) {
@@ -25,23 +33,14 @@ function getTaskTime(task) {
 }
 
 const HOUR_HEIGHT = 36;
-const DAY_MINUTES = 24 * 60;
 const HOURS = Array.from({ length: 25 }, (_, index) => index);
 
 function getTaskPlacement(task) {
-  const usesDeadline = task.task_type === "Sluitbegeleiding" || (task.task_type === "Openingsronde" && task.use_arrival_deadline);
-  const start = usesDeadline
-    ? timeToMinutes(task.arrival_deadline_time || task.time_window_start)
-    : timeToMinutes(task.time_window_start);
-  let end = usesDeadline
-    ? start + Number(task.duration_minutes || 30)
-    : timeToMinutes(task.time_window_end);
-
-  if (!usesDeadline && task.time_window_end && end <= start) end = DAY_MINUTES;
-  if (usesDeadline || !task.time_window_end) end = Math.max(end, start + Number(task.duration_minutes || 30));
-
+  const start = timeToMinutes(task.display_start || task.arrival_deadline_time || task.time_window_start);
+  const end = timeToMinutes(task.display_end || task.time_window_end);
+  const fallbackEnd = start + Number(task.duration_minutes || 30);
   const clippedStart = Math.max(0, Math.min(DAY_MINUTES, start));
-  const clippedEnd = Math.max(clippedStart + 15, Math.min(DAY_MINUTES, end));
+  const clippedEnd = Math.max(clippedStart + 15, Math.min(DAY_MINUTES, end > start ? end : fallbackEnd));
 
   return {
     top: (clippedStart / 60) * HOUR_HEIGHT,
@@ -49,19 +48,44 @@ function getTaskPlacement(task) {
   };
 }
 
+function getTaskSegmentsForDay(task, day) {
+  const usesDeadline = task.task_type === "Sluitbegeleiding" || (task.task_type === "Openingsronde" && task.use_arrival_deadline);
+  const taskDays = task.weekdays?.length ? task.weekdays : WEEKDAYS.map(item => item.value);
+  const previousDay = day === 1 ? 7 : day - 1;
+  const segments = [];
+
+  if (taskDays.includes(day)) {
+    const start = usesDeadline ? (task.arrival_deadline_time || task.time_window_start) : task.time_window_start;
+    const end = usesDeadline
+      ? minutesToTime(timeToMinutes(start) + Number(task.duration_minutes || 30))
+      : task.time_window_end;
+
+    if (start && end) {
+      const crossesMidnight = !usesDeadline && timeToMinutes(end) <= timeToMinutes(start);
+      segments.push({ ...task, display_start: start, display_end: crossesMidnight ? "24:00" : end });
+    }
+  }
+
+  if (!usesDeadline && taskDays.includes(previousDay) && task.time_window_start && task.time_window_end && timeToMinutes(task.time_window_end) <= timeToMinutes(task.time_window_start)) {
+    segments.push({ ...task, display_start: "00:00", display_end: task.time_window_end, continued_from_previous_day: true });
+  }
+
+  return segments;
+}
+
 function CalendarTaskBlock({ task, onEdit }) {
   const placement = getTaskPlacement(task);
 
   return (
     <div
-      className="absolute left-1 right-1 overflow-hidden rounded-md border border-blue-200 bg-blue-100/90 p-1.5 shadow-sm hover:bg-blue-100 hover:shadow-md transition-all group"
+      className="absolute left-1 right-1 overflow-hidden rounded-md border border-blue-300 bg-blue-100/55 p-1.5 shadow-sm hover:bg-blue-100/75 hover:shadow-md transition-all group backdrop-blur-[1px]"
       style={{ top: placement.top + 2, height: Math.max(18, placement.height - 4) }}
     >
       <div className="flex items-start justify-between gap-1">
         <div className="min-w-0">
           <p className="truncate text-xs font-bold text-slate-900">{task.task_type}</p>
           <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-700">
-            <Clock className="w-3 h-3" /> {getTaskTime(task)}
+            <Clock className="w-3 h-3" /> {task.display_start && task.display_end ? `${task.display_start} – ${task.display_end}` : getTaskTime(task)}
           </p>
         </div>
         <button className="rounded p-1 text-slate-500 hover:bg-white/70 hover:text-slate-900" onClick={() => onEdit(task)}>
@@ -79,8 +103,8 @@ function CalendarTaskBlock({ task, onEdit }) {
 
 export default function ObjectWeekSchedule({ tasks, onEditTask }) {
   const tasksForDay = (day) => tasks
-    .filter(task => !task.weekdays?.length || task.weekdays.includes(day))
-    .sort((a, b) => timeToMinutes(a.arrival_deadline_time || a.time_window_start) - timeToMinutes(b.arrival_deadline_time || b.time_window_start));
+    .flatMap(task => getTaskSegmentsForDay(task, day))
+    .sort((a, b) => timeToMinutes(a.display_start || a.arrival_deadline_time || a.time_window_start) - timeToMinutes(b.display_start || b.arrival_deadline_time || b.time_window_start));
 
   return (
     <div className="rounded-2xl border border-slate-200 bg-slate-50/80 p-4">
@@ -123,7 +147,7 @@ export default function ObjectWeekSchedule({ tasks, onEditTask }) {
                     <div key={hour} className="absolute left-0 right-0 border-t border-slate-200" style={{ top: hour * HOUR_HEIGHT }} />
                   ))}
                   {dayTasks.map((task, index) => (
-                    <CalendarTaskBlock key={`${task.id}-${day.value}-${index}`} task={task} onEdit={onEditTask} />
+                    <CalendarTaskBlock key={`${task.id}-${day.value}-${task.display_start}-${index}`} task={task} onEdit={onEditTask} />
                   ))}
                 </div>
               );
