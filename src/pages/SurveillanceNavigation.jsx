@@ -12,7 +12,9 @@ const VISIT_DISTANCE_METERS = 75;
 
 export default function SurveillanceNavigation() {
   const queryClient = useQueryClient();
-  const routeId = new URLSearchParams(window.location.search).get("routeId");
+  const urlParams = new URLSearchParams(window.location.search);
+  const routeId = urlParams.get("routeId");
+  const plannedDate = urlParams.get("date") || new Date().toISOString().slice(0, 10);
   const [userPosition, setUserPosition] = useState(null);
   const [watchId, setWatchId] = useState(null);
   const [locationError, setLocationError] = useState("");
@@ -20,7 +22,7 @@ export default function SurveillanceNavigation() {
   const { data: routes = [] } = useQuery({ queryKey: ["routes"], queryFn: () => base44.entities.Route.list() });
   const { data: tasks = [] } = useQuery({ queryKey: ["tasks"], queryFn: () => base44.entities.Task.list() });
   const { data: objects = [] } = useQuery({ queryKey: ["objects"], queryFn: () => base44.entities.SurveillanceObject.list() });
-  const { data: progresses = [] } = useQuery({ queryKey: ["route-progress", routeId], queryFn: () => base44.entities.SurveillanceRouteProgress.filter({ route_id: routeId }), enabled: !!routeId });
+  const { data: progresses = [] } = useQuery({ queryKey: ["route-progress", routeId, plannedDate], queryFn: () => base44.entities.SurveillanceRouteProgress.filter({ route_id: routeId, planned_date: plannedDate }), enabled: !!routeId });
 
   const route = routes.find(item => item.id === routeId);
   const progress = progresses.find(item => item.status === "active");
@@ -30,17 +32,18 @@ export default function SurveillanceNavigation() {
   const createProgress = useMutation({
     mutationFn: () => base44.entities.SurveillanceRouteProgress.create({
       route_id: route.id,
+      planned_date: plannedDate,
       route_name: route.name || "Route",
       status: "active",
       started_at: new Date().toISOString(),
       visited_objects: [],
     }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["route-progress", routeId] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["route-progress", routeId, plannedDate] }),
   });
 
   const updateProgress = useMutation({
     mutationFn: (data) => base44.entities.SurveillanceRouteProgress.update(progress.id, data),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["route-progress", routeId] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["route-progress", routeId, plannedDate] }),
   });
 
   useEffect(() => {
@@ -98,8 +101,8 @@ export default function SurveillanceNavigation() {
         <div className="max-w-md text-center">
           <AlertTriangle className="mx-auto h-10 w-10 text-amber-400" />
           <h1 className="mt-4 text-xl font-bold">Geen route geselecteerd</h1>
-          <p className="mt-2 text-sm text-slate-400">Start navigatie vanuit de Routes-pagina.</p>
-          <Button asChild className="mt-5 bg-amber-500 text-slate-950 hover:bg-amber-400"><Link to="/Routes">Terug naar routes</Link></Button>
+          <p className="mt-2 text-sm text-slate-400">Start navigatie vanuit de Uitvoering-kalender.</p>
+          <Button asChild className="mt-5 bg-amber-500 text-slate-950 hover:bg-amber-400"><Link to="/Uitvoering">Terug naar uitvoering</Link></Button>
         </div>
       </div>
     );
@@ -110,7 +113,7 @@ export default function SurveillanceNavigation() {
       <RouteNavigationMap stops={stops} userPosition={userPosition} visitedIds={visitedIds} />
       <div className="absolute left-3 top-3 z-[500] flex gap-2">
         <Button asChild variant="outline" className="border-white/20 bg-slate-950/80 text-white backdrop-blur hover:bg-white/10">
-          <Link to="/Routes"><ArrowLeft className="h-4 w-4" /> Routes</Link>
+          <Link to="/Uitvoering"><ArrowLeft className="h-4 w-4" /> Uitvoering</Link>
         </Button>
       </div>
       {locationError && (

@@ -6,6 +6,11 @@
       "type": "string",
       "description": "ID van de route die wordt gereden"
     },
+    "planned_date": {
+      "type": "string",
+      "format": "date",
+      "description": "Datum waarop deze route-uitvoering gepland staat"
+    },
     "route_name": {
       "type": "string",
       "description": "Naam van de route op het moment van starten"
@@ -57,6 +62,7 @@
   },
   "required": [
     "route_id",
+    "planned_date",
     "route_name",
     "status",
     "started_at"

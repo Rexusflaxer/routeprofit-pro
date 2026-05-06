@@ -8,6 +8,7 @@ import PageNotFound from './lib/PageNotFound';
 import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import SurveillanceNavigation from './pages/SurveillanceNavigation';
+import Uitvoering from './pages/Uitvoering';
 
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
@@ -49,6 +50,7 @@ const AuthenticatedApp = () => {
         </LayoutWrapper>
       } />
       <Route path="/SurveillanceNavigation" element={<SurveillanceNavigation />} />
+      <Route path="/Uitvoering" element={<LayoutWrapper currentPageName="Uitvoering"><Uitvoering /></LayoutWrapper>} />
       {Object.entries(Pages).map(([path, Page]) => (
         <Route
           key={path}

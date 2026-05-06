@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
-import { MapPin, Route, Users, Layers } from "lucide-react";
+import { CalendarCheck, MapPin, Route, Users, Layers } from "lucide-react";
 
 const TILES = [
   {
@@ -31,6 +31,13 @@ const TILES = [
     icon: Route,
     color: "from-slate-700 to-slate-900",
     page: "Routes",
+  },
+  {
+    label: "Uitvoering",
+    description: "Start routes vanuit de kalenderplanning",
+    icon: CalendarCheck,
+    color: "from-amber-500 to-orange-700",
+    page: "Uitvoering",
   },
 ];
 
