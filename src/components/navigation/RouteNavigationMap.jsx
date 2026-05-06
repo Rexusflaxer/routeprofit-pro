@@ -30,6 +30,24 @@ function getBearing(a, b) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
+function getRouteBearing(geometry, fallbackBearing) {
+  const coordinates = geometry?.coordinates || [];
+  if (coordinates.length < 2) return fallbackBearing;
+
+  for (let index = 1; index < Math.min(coordinates.length, 8); index += 1) {
+    const [startLng, startLat] = coordinates[index - 1];
+    const [endLng, endLat] = coordinates[index];
+    if (Math.abs(startLng - endLng) > 0.00001 || Math.abs(startLat - endLat) > 0.00001) {
+      return getBearing(
+        { latitude: startLat, longitude: startLng },
+        { latitude: endLat, longitude: endLng }
+      );
+    }
+  }
+
+  return fallbackBearing;
+}
+
 function normalizeMapCoordinates(item) {
   const latitude = Number(item?.latitude);
   const longitude = Number(item?.longitude);
@@ -244,6 +262,8 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
     const nextStop = stops.find(stop => !visitedIds.has(stop.id));
     userMarkerRef.current.setLngLat([userPosition.longitude, userPosition.latitude]);
 
+    const fallbackBearing = getBearing(userPosition, nextStop || stops[0]);
+
     if (nextStop) {
       fetchDirections([userPosition, nextStop]).then(info => {
         setRouteInfo(info);
@@ -254,14 +274,24 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
             features: [{ type: "Feature", properties: {}, geometry: info.geometry }],
           });
         }
+
+        map.easeTo({
+          center: [userPosition.longitude, userPosition.latitude],
+          zoom: 18.2,
+          pitch: 76,
+          bearing: getRouteBearing(info.geometry, fallbackBearing),
+          duration: 700,
+          padding: { top: 120, bottom: 220, left: 60, right: 60 },
+        });
       });
+      return;
     }
 
     map.easeTo({
       center: [userPosition.longitude, userPosition.latitude],
       zoom: 18.2,
       pitch: 76,
-      bearing: getBearing(userPosition, nextStop || stops[0]),
+      bearing: fallbackBearing,
       duration: 700,
       padding: { top: 120, bottom: 220, left: 60, right: 60 },
     });
