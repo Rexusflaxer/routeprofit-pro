@@ -9,6 +9,10 @@ export default function NavigationStatusPanel({ route, stops, visitedIds, tracki
   const nextStop = stops.find(stop => !visitedIds.has(stop.id));
   const showCompact = tracking && !expanded;
 
+  React.useEffect(() => {
+    if (tracking) setExpanded(false);
+  }, [tracking, nextStop?.id]);
+
   return (
     <div className="absolute inset-x-3 bottom-3 z-[500] rounded-2xl border border-white/10 bg-slate-950/90 p-4 text-white shadow-2xl backdrop-blur md:left-auto md:right-4 md:w-96">
       <div className="flex cursor-pointer items-start justify-between gap-3" onClick={() => tracking && setExpanded(value => !value)}>
