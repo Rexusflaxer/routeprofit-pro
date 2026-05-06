@@ -1,5 +1,22 @@
+function normalizeObjectCoordinates(object) {
+  if (!object) return null;
+  const latitude = Number(object.latitude);
+  const longitude = Number(object.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+
+  if (latitude > 40 && latitude < 60 && longitude > -10 && longitude < 15) {
+    return { ...object, latitude, longitude };
+  }
+
+  if (longitude > 40 && longitude < 60 && latitude > -10 && latitude < 15) {
+    return { ...object, latitude: longitude, longitude: latitude };
+  }
+
+  return { ...object, latitude, longitude };
+}
+
 export function routeStopsFromData(route, tasks, objects) {
-  const objectById = new Map(objects.map(object => [object.id, object]));
+  const objectById = new Map(objects.map(object => [object.id, normalizeObjectCoordinates(object)]));
   const taskById = new Map(tasks.map(task => [task.id, task]));
   const seen = new Set();
 
