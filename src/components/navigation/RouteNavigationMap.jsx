@@ -30,22 +30,18 @@ function getBearing(a, b) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-function highlightCustomerBuildings(map, stops) {
-  if (!map.getLayer("customer-3d-buildings") || !stops.length) return;
+function getCustomerBuildingFilter(stops) {
+  const coordinates = stops
+    .filter(stop => Number.isFinite(Number(stop.longitude)) && Number.isFinite(Number(stop.latitude)))
+    .map(stop => [Number(stop.longitude), Number(stop.latitude)]);
 
-  const buildingIds = new Set();
-  stops.forEach(stop => {
-    const point = map.project([stop.longitude, stop.latitude]);
-    const features = map.queryRenderedFeatures(
-      [[point.x - 18, point.y - 18], [point.x + 18, point.y + 18]],
-      { layers: ["3d-buildings"] }
-    );
-    features.forEach(feature => {
-      if (feature.id !== undefined && feature.id !== null) buildingIds.add(feature.id);
-    });
-  });
+  if (!coordinates.length) return ["all", ["==", ["get", "extrude"], "true"], false];
 
-  map.setFilter("customer-3d-buildings", ["in", ["id"], ["literal", Array.from(buildingIds)]]);
+  return [
+    "all",
+    ["==", ["get", "extrude"], "true"],
+    ["<=", ["distance", { type: "MultiPoint", coordinates }], 45]
+  ];
 }
 
 async function fetchDirections(stops) {
@@ -111,7 +107,7 @@ export default function RouteNavigationMap({ stops, userPosition, visitedIds }) 
         id: "customer-3d-buildings",
         source: "composite",
         "source-layer": "building",
-        filter: ["in", ["id"], ["literal", []]],
+        filter: getCustomerBuildingFilter(stops),
         type: "fill-extrusion",
         minzoom: 15,
         paint: {
@@ -146,6 +142,10 @@ export default function RouteNavigationMap({ stops, userPosition, visitedIds }) 
     if (!mapRef.current || stops.length === 0) return;
     const map = mapRef.current;
 
+    if (map.getLayer("customer-3d-buildings")) {
+      map.setFilter("customer-3d-buildings", getCustomerBuildingFilter(stops));
+    }
+
     markersRef.current.forEach(marker => marker.remove());
     markersRef.current = stops.map(stop => {
       const markerEl = document.createElement("div");
@@ -162,7 +162,6 @@ export default function RouteNavigationMap({ stops, userPosition, visitedIds }) 
         const bounds = new mapboxgl.LngLatBounds();
         info.geometry.coordinates.forEach(coord => bounds.extend(coord));
         map.fitBounds(bounds, { padding: { top: 140, bottom: 180, left: 80, right: 420 }, pitch: 62, bearing: getBearing(stops[0], stops[1]), duration: 900 });
-        map.once("idle", () => highlightCustomerBuildings(map, stops));
       }
     });
   }, [stops, visitedIds]);
