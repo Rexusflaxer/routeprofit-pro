@@ -19,6 +19,18 @@ function formatDuration(seconds) {
   return minutes >= 60 ? `${Math.floor(minutes / 60)}u ${minutes % 60}m` : `${minutes} min`;
 }
 
+function distanceMeters(a, b) {
+  if (!a || !b) return 0;
+  const earthRadius = 6371000;
+  const toRad = value => (value * Math.PI) / 180;
+  const dLat = toRad(b.latitude - a.latitude);
+  const dLon = toRad(b.longitude - a.longitude);
+  const lat1 = toRad(a.latitude);
+  const lat2 = toRad(b.latitude);
+  const h = Math.sin(dLat / 2) ** 2 + Math.cos(lat1) * Math.cos(lat2) * Math.sin(dLon / 2) ** 2;
+  return 2 * earthRadius * Math.asin(Math.sqrt(h));
+}
+
 function getBearing(a, b) {
   if (!a || !b) return 0;
   const startLat = a.latitude * Math.PI / 180;
@@ -108,7 +120,7 @@ function getBuildingProximityFilter(items, radiusMeters = 45) {
 async function fetchDirections(points) {
   if (points.length < 2) return emptyRoute;
   const coordinates = points.slice(0, 25).map(point => `${point.longitude},${point.latitude}`).join(";");
-  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?geometries=geojson&overview=full&steps=true&language=nl&access_token=${MAPBOX_PUBLIC_TOKEN}`;
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?geometries=geojson&overview=full&steps=true&continue_straight=false&language=nl&access_token=${MAPBOX_PUBLIC_TOKEN}`;
   const response = await fetch(url);
   const data = await response.json();
   const route = data.routes?.[0];
@@ -127,6 +139,8 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
   const mapRef = React.useRef(null);
   const markersRef = React.useRef([]);
   const userMarkerRef = React.useRef(null);
+  const previousPositionRef = React.useRef(null);
+  const gpsBearingRef = React.useRef(null);
   const [routeInfo, setRouteInfo] = React.useState(emptyRoute);
   const [mapReady, setMapReady] = React.useState(false);
 
@@ -296,9 +310,16 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
     }
 
     const nextStop = stops.find(stop => !visitedIds.has(stop.id));
+    const previousPosition = previousPositionRef.current;
+    const movedMeters = previousPosition ? distanceMeters(previousPosition, userPosition) : 0;
+    if (previousPosition && movedMeters >= 4) {
+      gpsBearingRef.current = getBearing(previousPosition, userPosition);
+    }
+    previousPositionRef.current = userPosition;
+
     userMarkerRef.current.setLngLat([userPosition.longitude, userPosition.latitude]);
 
-    const fallbackBearing = getBearing(userPosition, nextStop || stops[0]);
+    const fallbackBearing = gpsBearingRef.current ?? getBearing(userPosition, nextStop || stops[0]);
 
     if (nextStop) {
       fetchDirections([userPosition, nextStop]).then(info => {
@@ -311,11 +332,14 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
           });
         }
 
+        const cameraBearing = gpsBearingRef.current ?? getRouteBearing(info.geometry, userPosition, fallbackBearing);
+        userMarkerRef.current?.setRotation(cameraBearing);
+
         map.easeTo({
           center: [userPosition.longitude, userPosition.latitude],
           zoom: 18.2,
           pitch: 76,
-          bearing: getRouteBearing(info.geometry, userPosition, fallbackBearing),
+          bearing: cameraBearing,
           duration: 700,
           padding: { top: 120, bottom: 220, left: 60, right: 60 },
         });
@@ -323,6 +347,7 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
       return;
     }
 
+    userMarkerRef.current?.setRotation(fallbackBearing);
     map.easeTo({
       center: [userPosition.longitude, userPosition.latitude],
       zoom: 18.2,
