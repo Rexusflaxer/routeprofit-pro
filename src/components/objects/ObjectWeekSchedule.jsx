@@ -41,7 +41,7 @@ const TASK_TYPE_STYLES = {
   "Externe Controleronde": "border-emerald-300 bg-emerald-100/55 hover:bg-emerald-100/75",
   "Externe Sluitronde": "border-orange-300 bg-orange-100/55 hover:bg-orange-100/75",
   "Brand- en Sluitronde": "border-red-300 bg-red-100/55 hover:bg-red-100/75",
-  "Openingsronde": "border-violet-300 bg-violet-100/55 hover:bg-violet-100/75",
+  "Openingsronde": "border-green-300 bg-green-100/55 hover:bg-green-100/75",
   "Sluitbegeleiding": "border-amber-300 bg-amber-100/55 hover:bg-amber-100/75",
   "Grote collectief": "border-cyan-300 bg-cyan-100/55 hover:bg-cyan-100/75",
 };
