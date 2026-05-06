@@ -13,6 +13,8 @@ export default function Uitvoering() {
   const [monthDate, setMonthDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
 
   const { data: routes = [] } = useQuery({ queryKey: ["routes"], queryFn: () => base44.entities.Route.list() });
+  const { data: tasks = [] } = useQuery({ queryKey: ["tasks"], queryFn: () => base44.entities.Task.list() });
+  const { data: objects = [] } = useQuery({ queryKey: ["objects"], queryFn: () => base44.entities.SurveillanceObject.list() });
   const monthDays = buildMonthDays(monthDate);
   const canGoNext = monthDate.getFullYear() < endOfYear.getFullYear() || monthDate.getMonth() < endOfYear.getMonth();
   const canGoPrev = monthDate.getFullYear() > today.getFullYear() || monthDate.getMonth() > today.getMonth();
@@ -49,6 +51,8 @@ export default function Uitvoering() {
             key={toDateKey(date)}
             date={date}
             routes={routes}
+            tasks={tasks}
+            objects={objects}
             isToday={toDateKey(date) === toDateKey(today)}
           />
         ))}

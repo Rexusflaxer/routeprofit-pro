@@ -4,8 +4,9 @@ import { CalendarDays, Clock, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getDayLabel, getRoutesForDate, toDateKey } from "./executionCalendarUtils";
+import { routeTaskCopiesFromData } from "../navigation/routeStopUtils";
 
-export default function ExecutionDayCard({ date, routes, isToday }) {
+export default function ExecutionDayCard({ date, routes, tasks, objects, isToday }) {
   const dateKey = toDateKey(date);
   const dayRoutes = getRoutesForDate(routes, date);
 
@@ -24,24 +25,41 @@ export default function ExecutionDayCard({ date, routes, isToday }) {
           <div className="rounded-xl border border-dashed border-slate-200 p-3 text-sm text-slate-400">
             Geen routes gepland
           </div>
-        ) : dayRoutes.map(route => (
-          <div key={route.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
-            <div className="flex items-start justify-between gap-2">
-              <div className="min-w-0">
-                <p className="truncate text-sm font-bold text-slate-900">{route.name || "Naamloze route"}</p>
-                <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
-                  <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {route.time_window_start || "--:--"} – {route.flexible_end_time ? "flexibel" : (route.time_window_end || "--:--")}</span>
-                  <span className="flex items-center gap-1"><CalendarDays className="h-3 w-3" /> {route.assigned_tasks?.length || 0} taken</span>
+        ) : dayRoutes.map(route => {
+          const copiedTasks = routeTaskCopiesFromData(route, tasks, objects);
+          return (
+            <div key={route.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
+              <div className="flex items-start justify-between gap-2">
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-bold text-slate-900">{route.name || "Naamloze route"}</p>
+                  <div className="mt-1 flex flex-wrap gap-2 text-xs text-slate-500">
+                    <span className="flex items-center gap-1"><Clock className="h-3 w-3" /> {route.time_window_start || "--:--"} – {route.flexible_end_time ? "flexibel" : (route.time_window_end || "--:--")}</span>
+                    <span className="flex items-center gap-1"><CalendarDays className="h-3 w-3" /> {copiedTasks.length} taken</span>
+                  </div>
                 </div>
+                <Button asChild size="sm" className="bg-slate-900 hover:bg-slate-800">
+                  <Link to={`/SurveillanceNavigation?routeId=${route.id}&date=${dateKey}`}>
+                    <Navigation className="h-3.5 w-3.5" /> Start
+                  </Link>
+                </Button>
               </div>
-              <Button asChild size="sm" className="bg-slate-900 hover:bg-slate-800">
-                <Link to={`/SurveillanceNavigation?routeId=${route.id}&date=${dateKey}`}>
-                  <Navigation className="h-3.5 w-3.5" /> Start
-                </Link>
-              </Button>
+
+              {copiedTasks.length > 0 && (
+                <div className="mt-3 space-y-1 border-t border-slate-200 pt-2">
+                  {copiedTasks.map(task => (
+                    <div key={`${route.id}-${task.id}-${task.sequence}`} className="flex gap-2 text-xs text-slate-600">
+                      <span className="font-bold text-slate-900">{task.sequence}.</span>
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-slate-800">{task.name}</p>
+                        <p className="truncate text-slate-400">{task.task_type || "Taak"}{task.arrival_time ? ` · ${task.arrival_time}` : ""}</p>
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              )}
             </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
