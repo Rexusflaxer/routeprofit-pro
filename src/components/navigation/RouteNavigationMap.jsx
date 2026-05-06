@@ -1,43 +1,168 @@
 import React from "react";
-import { MapContainer, Marker, Polyline, Popup, TileLayer, CircleMarker, useMap } from "react-leaflet";
-import { getMapboxTileUrl } from "./mapboxConfig";
-import "leaflet/dist/leaflet.css";
+import mapboxgl from "mapbox-gl";
+import "mapbox-gl/dist/mapbox-gl.css";
+import { MAPBOX_PUBLIC_TOKEN } from "./mapboxConfig";
+import { Navigation } from "lucide-react";
 
-function Recenter({ position }) {
-  const map = useMap();
-  React.useEffect(() => {
-    if (position) map.setView([position.latitude, position.longitude], Math.max(map.getZoom(), 16));
-  }, [map, position]);
-  return null;
+mapboxgl.accessToken = MAPBOX_PUBLIC_TOKEN;
+
+const emptyRoute = { geometry: null, instruction: "Route laden...", distance: "", duration: "" };
+
+function formatDistance(meters) {
+  if (!Number.isFinite(meters)) return "";
+  return meters >= 1000 ? `${(meters / 1000).toFixed(1)} km` : `${Math.round(meters)} m`;
+}
+
+function formatDuration(seconds) {
+  if (!Number.isFinite(seconds)) return "";
+  const minutes = Math.round(seconds / 60);
+  return minutes >= 60 ? `${Math.floor(minutes / 60)}u ${minutes % 60}m` : `${minutes} min`;
+}
+
+function getBearing(a, b) {
+  if (!a || !b) return 0;
+  const startLat = a.latitude * Math.PI / 180;
+  const startLng = a.longitude * Math.PI / 180;
+  const endLat = b.latitude * Math.PI / 180;
+  const endLng = b.longitude * Math.PI / 180;
+  const y = Math.sin(endLng - startLng) * Math.cos(endLat);
+  const x = Math.cos(startLat) * Math.sin(endLat) - Math.sin(startLat) * Math.cos(endLat) * Math.cos(endLng - startLng);
+  return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
+}
+
+async function fetchDirections(stops) {
+  if (stops.length < 2) return emptyRoute;
+  const coordinates = stops.slice(0, 25).map(stop => `${stop.longitude},${stop.latitude}`).join(";");
+  const url = `https://api.mapbox.com/directions/v5/mapbox/driving/${coordinates}?geometries=geojson&overview=full&steps=true&language=nl&access_token=${MAPBOX_PUBLIC_TOKEN}`;
+  const response = await fetch(url);
+  const data = await response.json();
+  const route = data.routes?.[0];
+  const firstStep = route?.legs?.[0]?.steps?.[0];
+
+  return {
+    geometry: route?.geometry || null,
+    instruction: firstStep?.maneuver?.instruction || "Volg de blauwe route",
+    distance: formatDistance(route?.distance),
+    duration: formatDuration(route?.duration),
+  };
 }
 
 export default function RouteNavigationMap({ stops, userPosition, visitedIds }) {
-  const center = userPosition || stops[0] || { latitude: 52.0907, longitude: 5.1214 };
-  const line = stops.map(stop => [stop.latitude, stop.longitude]);
+  const mapNode = React.useRef(null);
+  const mapRef = React.useRef(null);
+  const markersRef = React.useRef([]);
+  const userMarkerRef = React.useRef(null);
+  const [routeInfo, setRouteInfo] = React.useState(emptyRoute);
+
+  React.useEffect(() => {
+    if (!mapNode.current || mapRef.current) return;
+
+    const center = userPosition || stops[0] || { latitude: 52.0907, longitude: 5.1214 };
+    const map = new mapboxgl.Map({
+      container: mapNode.current,
+      style: "mapbox://styles/mapbox/navigation-night-v1",
+      center: [center.longitude, center.latitude],
+      zoom: 16,
+      pitch: 62,
+      bearing: getBearing(userPosition || stops[0], stops[1]),
+      antialias: true,
+    });
+
+    mapRef.current = map;
+
+    map.on("load", () => {
+      const layers = map.getStyle().layers;
+      const labelLayer = layers.find(layer => layer.type === "symbol" && layer.layout?.["text-field"])?.id;
+
+      map.addLayer({
+        id: "3d-buildings",
+        source: "composite",
+        "source-layer": "building",
+        filter: ["==", "extrude", "true"],
+        type: "fill-extrusion",
+        minzoom: 15,
+        paint: {
+          "fill-extrusion-color": "#334155",
+          "fill-extrusion-height": ["interpolate", ["linear"], ["zoom"], 15, 0, 16, ["get", "height"]],
+          "fill-extrusion-base": ["interpolate", ["linear"], ["zoom"], 15, 0, 16, ["get", "min_height"]],
+          "fill-extrusion-opacity": 0.72,
+        },
+      }, labelLayer);
+
+      map.addSource("navigation-route", { type: "geojson", data: { type: "FeatureCollection", features: [] } });
+      map.addLayer({
+        id: "navigation-route-glow",
+        type: "line",
+        source: "navigation-route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#60a5fa", "line-width": 14, "line-opacity": 0.25 },
+      });
+      map.addLayer({
+        id: "navigation-route-line",
+        type: "line",
+        source: "navigation-route",
+        layout: { "line-cap": "round", "line-join": "round" },
+        paint: { "line-color": "#1d9bf0", "line-width": 7, "line-opacity": 0.95 },
+      });
+    });
+
+    return () => map.remove();
+  }, []);
+
+  React.useEffect(() => {
+    if (!mapRef.current || stops.length === 0) return;
+    const map = mapRef.current;
+
+    markersRef.current.forEach(marker => marker.remove());
+    markersRef.current = stops.map(stop => {
+      const markerEl = document.createElement("div");
+      markerEl.className = `flex h-7 w-7 items-center justify-center rounded-full border-2 border-white text-xs font-bold shadow-lg ${visitedIds.has(stop.id) ? "bg-emerald-500 text-white" : "bg-amber-400 text-slate-950"}`;
+      markerEl.textContent = stop.sequence;
+      return new mapboxgl.Marker(markerEl).setLngLat([stop.longitude, stop.latitude]).setPopup(new mapboxgl.Popup().setHTML(`<strong>${stop.sequence}. ${stop.name}</strong><br>${stop.address || ""}`)).addTo(map);
+    });
+
+    fetchDirections(stops).then(info => {
+      setRouteInfo(info);
+      const source = map.getSource("navigation-route");
+      if (source && info.geometry) {
+        source.setData({ type: "Feature", properties: {}, geometry: info.geometry });
+        const bounds = new mapboxgl.LngLatBounds();
+        info.geometry.coordinates.forEach(coord => bounds.extend(coord));
+        map.fitBounds(bounds, { padding: { top: 140, bottom: 180, left: 80, right: 420 }, pitch: 62, bearing: getBearing(stops[0], stops[1]), duration: 900 });
+      }
+    });
+  }, [stops, visitedIds]);
+
+  React.useEffect(() => {
+    if (!mapRef.current || !userPosition) return;
+    const map = mapRef.current;
+
+    if (!userMarkerRef.current) {
+      const markerEl = document.createElement("div");
+      markerEl.className = "relative flex h-10 w-10 items-center justify-center rounded-full bg-blue-500 text-white shadow-xl ring-4 ring-blue-400/30";
+      markerEl.innerHTML = "➤";
+      userMarkerRef.current = new mapboxgl.Marker(markerEl).addTo(map);
+    }
+
+    userMarkerRef.current.setLngLat([userPosition.longitude, userPosition.latitude]);
+    map.easeTo({ center: [userPosition.longitude, userPosition.latitude], zoom: Math.max(map.getZoom(), 17), pitch: 66, bearing: getBearing(userPosition, stops.find(stop => !visitedIds.has(stop.id)) || stops[0]), duration: 700 });
+  }, [userPosition, stops, visitedIds]);
 
   return (
-    <MapContainer center={[center.latitude, center.longitude]} zoom={14} className="h-full w-full" zoomControl={false}>
-      <TileLayer url={getMapboxTileUrl()} attribution="© Mapbox © OpenStreetMap" />
-      {line.length > 1 && <Polyline positions={line} pathOptions={{ color: "#f59e0b", weight: 5, opacity: 0.85 }} />}
-      {stops.map(stop => {
-        const visited = visitedIds.has(stop.id);
-        return (
-          <CircleMarker
-            key={stop.id}
-            center={[stop.latitude, stop.longitude]}
-            radius={visited ? 9 : 7}
-            pathOptions={{ color: visited ? "#22c55e" : "#f59e0b", fillColor: visited ? "#22c55e" : "#f59e0b", fillOpacity: 0.9 }}
-          >
-            <Popup>{stop.sequence}. {stop.name}<br />{visited ? "Bezocht" : "Nog te bezoeken"}</Popup>
-          </CircleMarker>
-        );
-      })}
-      {userPosition && (
-        <Marker position={[userPosition.latitude, userPosition.longitude]}>
-          <Popup>Jouw huidige locatie</Popup>
-        </Marker>
-      )}
-      <Recenter position={userPosition} />
-    </MapContainer>
+    <div className="relative h-full w-full">
+      <div ref={mapNode} className="h-full w-full" />
+      <div className="absolute left-3 right-3 top-16 z-[500] rounded-2xl bg-slate-950/90 p-4 text-white shadow-2xl backdrop-blur md:left-20 md:right-auto md:top-20 md:w-[430px]">
+        <div className="flex items-start gap-4">
+          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-500 text-white">
+            <Navigation className="h-7 w-7" />
+          </div>
+          <div className="min-w-0">
+            <p className="text-3xl font-bold leading-none">{routeInfo.distance || "--"}</p>
+            <p className="mt-2 text-lg text-slate-200">{routeInfo.instruction}</p>
+            {routeInfo.duration && <p className="mt-1 text-sm text-slate-400">Geschatte rijtijd: {routeInfo.duration}</p>}
+          </div>
+        </div>
+      </div>
+    </div>
   );
 }
