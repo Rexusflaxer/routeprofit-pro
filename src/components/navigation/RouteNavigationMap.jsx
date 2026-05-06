@@ -30,17 +30,24 @@ function getBearing(a, b) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-function getCustomerBuildingFilter(stops) {
-  const coordinates = stops
-    .filter(stop => Number.isFinite(Number(stop.longitude)) && Number.isFinite(Number(stop.latitude)))
-    .map(stop => [Number(stop.longitude), Number(stop.latitude)]);
+function normalizeMapCoordinates(item) {
+  const latitude = Number(item?.latitude);
+  const longitude = Number(item?.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
 
-  if (!coordinates.length) return ["all", ["==", ["get", "extrude"], "true"], false];
+  if (latitude > 40 && latitude < 60 && longitude > -10 && longitude < 15) return [longitude, latitude];
+  if (longitude > 40 && longitude < 60 && latitude > -10 && latitude < 15) return [latitude, longitude];
+  return [longitude, latitude];
+}
+
+function getBuildingProximityFilter(items, radiusMeters = 45) {
+  const coordinates = items.map(normalizeMapCoordinates).filter(Boolean);
+  if (!coordinates.length) return ["in", ["id"], ["literal", []]];
 
   return [
     "all",
     ["==", ["get", "extrude"], "true"],
-    ["<=", ["distance", { type: "MultiPoint", coordinates }], 45]
+    ["<=", ["distance", { type: "MultiPoint", coordinates }], radiusMeters]
   ];
 }
 
@@ -61,7 +68,7 @@ async function fetchDirections(stops) {
   };
 }
 
-export default function RouteNavigationMap({ stops, userPosition, visitedIds }) {
+export default function RouteNavigationMap({ stops, objects = [], userPosition, visitedIds }) {
   const mapNode = React.useRef(null);
   const mapRef = React.useRef(null);
   const markersRef = React.useRef([]);
@@ -107,14 +114,29 @@ export default function RouteNavigationMap({ stops, userPosition, visitedIds }) 
         id: "customer-3d-buildings",
         source: "composite",
         "source-layer": "building",
-        filter: getCustomerBuildingFilter(stops),
+        filter: getBuildingProximityFilter(objects),
+        type: "fill-extrusion",
+        minzoom: 15,
+        paint: {
+          "fill-extrusion-color": "#2563eb",
+          "fill-extrusion-height": ["interpolate", ["linear"], ["zoom"], 15, 0, 16, ["get", "height"]],
+          "fill-extrusion-base": ["interpolate", ["linear"], ["zoom"], 15, 0, 16, ["get", "min_height"]],
+          "fill-extrusion-opacity": 0.9,
+        },
+      }, labelLayer);
+
+      map.addLayer({
+        id: "task-3d-buildings",
+        source: "composite",
+        "source-layer": "building",
+        filter: getBuildingProximityFilter(stops.filter(stop => !visitedIds.has(stop.id))),
         type: "fill-extrusion",
         minzoom: 15,
         paint: {
           "fill-extrusion-color": "#f59e0b",
           "fill-extrusion-height": ["interpolate", ["linear"], ["zoom"], 15, 0, 16, ["get", "height"]],
           "fill-extrusion-base": ["interpolate", ["linear"], ["zoom"], 15, 0, 16, ["get", "min_height"]],
-          "fill-extrusion-opacity": 0.9,
+          "fill-extrusion-opacity": 0.94,
         },
       }, labelLayer);
 
@@ -143,7 +165,10 @@ export default function RouteNavigationMap({ stops, userPosition, visitedIds }) 
     const map = mapRef.current;
 
     if (map.getLayer("customer-3d-buildings")) {
-      map.setFilter("customer-3d-buildings", getCustomerBuildingFilter(stops));
+      map.setFilter("customer-3d-buildings", getBuildingProximityFilter(objects));
+    }
+    if (map.getLayer("task-3d-buildings")) {
+      map.setFilter("task-3d-buildings", getBuildingProximityFilter(stops.filter(stop => !visitedIds.has(stop.id))));
     }
 
     markersRef.current.forEach(marker => marker.remove());
@@ -164,7 +189,7 @@ export default function RouteNavigationMap({ stops, userPosition, visitedIds }) 
         map.fitBounds(bounds, { padding: { top: 140, bottom: 180, left: 80, right: 420 }, pitch: 62, bearing: getBearing(stops[0], stops[1]), duration: 900 });
       }
     });
-  }, [stops, visitedIds]);
+  }, [stops, objects, visitedIds]);
 
   React.useEffect(() => {
     if (!mapRef.current || !userPosition) return;

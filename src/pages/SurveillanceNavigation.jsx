@@ -110,7 +110,7 @@ export default function SurveillanceNavigation() {
 
   return (
     <div className="fixed inset-0 z-50 bg-slate-950">
-      <RouteNavigationMap stops={stops} userPosition={userPosition} visitedIds={visitedIds} />
+      <RouteNavigationMap stops={stops} objects={objects} userPosition={userPosition} visitedIds={visitedIds} />
       <div className="absolute left-3 top-3 z-[500] flex gap-2">
         <Button asChild variant="outline" className="border-white/20 bg-slate-950/80 text-white backdrop-blur hover:bg-white/10">
           <Link to="/Uitvoering"><ArrowLeft className="h-4 w-4" /> Uitvoering</Link>
