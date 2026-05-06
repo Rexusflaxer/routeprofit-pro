@@ -28,6 +28,7 @@ const minutesToTime = (minutes) => {
 function getTaskTime(task) {
   const usesDeadline = task.task_type === "Sluitbegeleiding" || (task.task_type === "Openingsronde" && task.use_arrival_deadline);
   if (usesDeadline && task.arrival_deadline_time) return `Aankomst vóór ${task.arrival_deadline_time}`;
+  if (task.display_time_label) return task.display_time_label;
   if (task.time_window_start && task.time_window_end) return `${task.time_window_start} – ${task.time_window_end}`;
   return "Geen tijdvenster";
 }
@@ -62,7 +63,12 @@ function getTaskSegmentsForDay(task, day) {
 
     if (start && end) {
       const crossesMidnight = !usesDeadline && timeToMinutes(end) <= timeToMinutes(start);
-      segments.push({ ...task, display_start: start, display_end: crossesMidnight ? "24:00" : end });
+      segments.push({
+        ...task,
+        display_start: start,
+        display_end: crossesMidnight ? "24:00" : end,
+        display_time_label: crossesMidnight ? `${start} – ${end}` : null,
+      });
     }
   }
 
@@ -75,28 +81,33 @@ function getTaskSegmentsForDay(task, day) {
 
 function CalendarTaskBlock({ task, onEdit }) {
   const placement = getTaskPlacement(task);
+  const isContinuation = task.continued_from_previous_day;
 
   return (
     <div
-      className="absolute left-1 right-1 overflow-hidden rounded-md border border-blue-300 bg-blue-100/55 p-1.5 shadow-sm hover:bg-blue-100/75 hover:shadow-md transition-all group backdrop-blur-[1px]"
+      className={`absolute left-1 right-1 overflow-hidden border border-blue-300 bg-blue-100/55 shadow-sm transition-all backdrop-blur-[1px] ${isContinuation ? "rounded-b-md border-t-0" : "rounded-md p-1.5 hover:bg-blue-100/75 hover:shadow-md group"}`}
       style={{ top: placement.top + 2, height: Math.max(18, placement.height - 4) }}
     >
-      <div className="flex items-start justify-between gap-1">
-        <div className="min-w-0">
-          <p className="truncate text-xs font-bold text-slate-900">{task.task_type}</p>
-          <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-700">
-            <Clock className="w-3 h-3" /> {task.display_start && task.display_end ? `${task.display_start} – ${task.display_end}` : getTaskTime(task)}
-          </p>
-        </div>
-        <button className="rounded p-1 text-slate-500 hover:bg-white/70 hover:text-slate-900" onClick={() => onEdit(task)}>
-          <Pencil className="w-3 h-3" />
-        </button>
-      </div>
-      <div className="mt-1 flex flex-wrap gap-1">
-        <span className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">{task.duration_minutes || 0} min</span>
-        {Number(task.repeat_count || 1) > 1 && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">{task.repeat_count}x</span>}
-        {Number(task.min_minutes_between_other_tasks || 0) > 0 && <span className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">{task.min_minutes_between_other_tasks}m buffer</span>}
-      </div>
+      {!isContinuation && (
+        <>
+          <div className="flex items-start justify-between gap-1">
+            <div className="min-w-0">
+              <p className="truncate text-xs font-bold text-slate-900">{task.task_type}</p>
+              <p className="mt-0.5 flex items-center gap-1 text-[11px] text-slate-700">
+                <Clock className="w-3 h-3" /> {getTaskTime(task)}
+              </p>
+            </div>
+            <button className="rounded p-1 text-slate-500 hover:bg-white/70 hover:text-slate-900" onClick={() => onEdit(task)}>
+              <Pencil className="w-3 h-3" />
+            </button>
+          </div>
+          <div className="mt-1 flex flex-wrap gap-1">
+            <span className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-slate-700">{task.duration_minutes || 0} min</span>
+            {Number(task.repeat_count || 1) > 1 && <span className="rounded bg-amber-100 px-1.5 py-0.5 text-[10px] font-medium text-amber-700">{task.repeat_count}x</span>}
+            {Number(task.min_minutes_between_other_tasks || 0) > 0 && <span className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">{task.min_minutes_between_other_tasks}m buffer</span>}
+          </div>
+        </>
+      )}
     </div>
   );
 }
