@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Pencil, Trash2, MapPin, Layers } from "lucide-react";
 
-export default function ObjectTable({ objects, onEdit, onDelete }) {
+export default function ObjectTable({ objects, onEdit, onDelete, onSelect }) {
   const { data: allTasks = [] } = useQuery({
     queryKey: ['all-tasks'],
     queryFn: () => base44.entities.Task.list(),
@@ -55,7 +55,7 @@ export default function ObjectTable({ objects, onEdit, onDelete }) {
             const directExecutionCount = getExecutionCount(obj.id);
             const collectiefTasks = getCollectiefTasks(obj.id);
             return (
-              <TableRow key={obj.id} className="hover:bg-slate-50/50 transition-colors">
+              <TableRow key={obj.id} onClick={() => onSelect?.(obj)} className="hover:bg-slate-50/50 transition-colors cursor-pointer">
                 <TableCell>
                   {obj.object_code
                     ? <span className="text-xs font-mono bg-slate-100 text-slate-600 px-1.5 py-0.5 rounded">{obj.object_code}</span>
@@ -92,10 +92,10 @@ export default function ObjectTable({ objects, onEdit, onDelete }) {
                 </TableCell>
                 <TableCell className="text-right">
                   <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" onClick={() => onEdit(obj)} className="h-8 w-8 text-slate-400 hover:text-slate-700">
+                    <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); onEdit(obj); }} className="h-8 w-8 text-slate-400 hover:text-slate-700">
                       <Pencil className="w-3.5 h-3.5" />
                     </Button>
-                    <Button variant="ghost" size="icon" onClick={() => onDelete(obj.id)} className="h-8 w-8 text-slate-400 hover:text-red-600">
+                    <Button variant="ghost" size="icon" onClick={(e) => { e.stopPropagation(); onDelete(obj.id); }} className="h-8 w-8 text-slate-400 hover:text-red-600">
                       <Trash2 className="w-3.5 h-3.5" />
                     </Button>
                   </div>

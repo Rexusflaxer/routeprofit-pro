@@ -9,13 +9,12 @@ import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
 import ObjectForm from "../components/objects/ObjectForm";
 import ObjectTable from "../components/objects/ObjectTable";
-import TaskList from "../components/objects/TaskList";
+import ObjectDetailView from "../components/objects/ObjectDetailView";
 
 export default function Objects() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [showTasks, setShowTasks] = useState(false);
-  const [taskObject, setTaskObject] = useState(null);
+  const [selectedObject, setSelectedObject] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const queryClient = useQueryClient();
 
@@ -64,16 +63,36 @@ export default function Objects() {
     setShowForm(true);
   };
 
-  const handleViewTasks = (obj) => {
-    setTaskObject(obj);
-    setShowTasks(true);
-  };
-
   const filteredObjects = objects.filter(obj =>
     obj.object_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     obj.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
     obj.address?.toLowerCase().includes(searchTerm.toLowerCase())
   );
+
+  const objectFormDialog = (
+    <Dialog open={showForm} onOpenChange={setShowForm}>
+      <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle>{editing ? "Object bewerken" : "Nieuw object"}</DialogTitle>
+        </DialogHeader>
+        <ObjectForm object={editing} onSave={handleSave} onCancel={() => { setShowForm(false); setEditing(null); }} />
+      </DialogContent>
+    </Dialog>
+  );
+
+  if (selectedObject) {
+    const currentObject = objects.find(obj => obj.id === selectedObject.id) || selectedObject;
+    return (
+      <>
+        {objectFormDialog}
+        <ObjectDetailView
+          object={currentObject}
+          onBack={() => setSelectedObject(null)}
+          onEditObject={handleEdit}
+        />
+      </>
+    );
+  }
 
   return (
     <div className="space-y-6">
@@ -87,23 +106,7 @@ export default function Objects() {
         }
       />
 
-      <Dialog open={showForm} onOpenChange={setShowForm}>
-        <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{editing ? "Object bewerken" : "Nieuw object"}</DialogTitle>
-          </DialogHeader>
-          <ObjectForm object={editing} onSave={handleSave} onCancel={() => { setShowForm(false); setEditing(null); }} />
-        </DialogContent>
-      </Dialog>
-
-      <Dialog open={showTasks} onOpenChange={setShowTasks}>
-         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
-           <DialogHeader>
-             <DialogTitle>Taken voor {taskObject?.name}</DialogTitle>
-           </DialogHeader>
-           {taskObject && <TaskList objectId={taskObject.id} />}
-         </DialogContent>
-       </Dialog>
+      {objectFormDialog}
 
        {objects.length > 0 ? (
          <div className="space-y-4">
@@ -127,7 +130,7 @@ export default function Objects() {
            {filteredObjects.length === 0 ? (
              <EmptyState icon={MapPin} title="Geen resultaten" description={`Geen objecten gevonden met "${searchTerm}".`} />
            ) : (
-             <ObjectTable objects={filteredObjects} onEdit={handleEdit} onDelete={(id) => deleteMutation.mutate(id)} />
+             <ObjectTable objects={filteredObjects} onSelect={setSelectedObject} onEdit={handleEdit} onDelete={(id) => deleteMutation.mutate(id)} />
            )}
          </div>
        ) : !showForm && (
