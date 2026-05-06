@@ -154,8 +154,17 @@ export default function TaskList({ objectId }) {
           </div>
         ) : tasks.length === 0 ? null : (
           <div className="space-y-3">
-            {tasks.map((task) => (
-              <div key={task.id} className="border border-slate-200 rounded-lg p-4 hover:border-slate-300 transition-colors">
+            {tasks.map((task, index) => (
+              <div key={task.id} className="relative border border-slate-200 rounded-lg p-4 hover:border-slate-300 transition-colors">
+                {index < tasks.length - 1 && (
+                  <div className="absolute left-6 top-full h-3 border-l-2 border-dashed border-blue-200">
+                    {Number(task.min_minutes_between_other_tasks || 0) > 0 && (
+                      <span className="absolute -left-1 top-1 text-[10px] whitespace-nowrap bg-blue-50 text-blue-700 border border-blue-200 rounded-full px-2 py-0.5">
+                        min. {task.min_minutes_between_other_tasks} min buffer
+                      </span>
+                    )}
+                  </div>
+                )}
                 <div className="flex items-start justify-between mb-3">
                   <div className="flex-1">
                     <div className="flex items-center gap-2 mb-2">
@@ -207,7 +216,14 @@ export default function TaskList({ objectId }) {
                         </div>
                       )}
 
-                      {task.weekdays && task.weekdays.length > 0 && (
+                      {Number(task.min_minutes_between_other_tasks || 0) > 0 && (
+                        <div className="flex items-center gap-1.5 col-span-2 text-blue-700">
+                          <Clock className="w-3.5 h-3.5 text-blue-400" />
+                          <span>Buffer t.o.v. andere taken: {task.min_minutes_between_other_tasks} min</span>
+                        </div>
+                      )}
+
+                       {task.weekdays && task.weekdays.length > 0 && (
                         <div className="flex items-center gap-1.5 col-span-2">
                           <Calendar className="w-3.5 h-3.5 text-slate-400" />
                           <div className="flex gap-1">

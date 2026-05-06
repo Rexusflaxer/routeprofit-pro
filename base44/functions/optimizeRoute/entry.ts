@@ -135,6 +135,7 @@ Deno.serve(async (req) => {
                 repeat_index: repeatWindow.index,
                 repeat_count: repeatWindows.length,
                 min_minutes_between_visits: task.min_minutes_between_visits || 0,
+                min_minutes_between_other_tasks: task.min_minutes_between_other_tasks || 0,
                 sequence_index: assignedMeta.sequence_index ?? idx,
                 locked_sequence: !!assignedMeta.locked_sequence,
                 planned_arrival_time: assignedMeta.planned_arrival_time,
@@ -170,6 +171,7 @@ Deno.serve(async (req) => {
             repeat_index: repeatWindow.index,
             repeat_count: repeatWindows.length,
             min_minutes_between_visits: task.min_minutes_between_visits || 0,
+            min_minutes_between_other_tasks: task.min_minutes_between_other_tasks || 0,
             sequence_index: assignedMeta.sequence_index,
             locked_sequence: !!assignedMeta.locked_sequence,
             planned_arrival_time: assignedMeta.planned_arrival_time,
@@ -198,7 +200,7 @@ Deno.serve(async (req) => {
       time_window_start: route.time_window_start,
       time_window_end: route.time_window_end,
       alarm_standby: route.alarm_standby,
-      task_ids: taskObjects.map(t => t.task_id + ':' + t.duration_minutes + ':' + t.time_window_start + ':' + t.time_window_end)
+      task_ids: taskObjects.map(t => t.task_id + ':' + t.duration_minutes + ':' + t.time_window_start + ':' + t.time_window_end + ':' + (t.min_minutes_between_other_tasks || 0))
     });
     const hashBuffer = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(hashInput));
     const currentHash = Array.from(new Uint8Array(hashBuffer)).map(b => b.toString(16).padStart(2, '0')).join('').slice(0, 16);
@@ -215,6 +217,12 @@ Deno.serve(async (req) => {
     }
 
     // Greedy nearest neighbor algoritme
+    const getRequiredOtherTaskBufferMinutes = (previousTask, nextTask) => {
+      if (!previousTask || !nextTask) return 0;
+      if ((previousTask.parent_task_id || previousTask.task_id) === (nextTask.parent_task_id || nextTask.task_id)) return 0;
+      return Math.max(Number(previousTask.min_minutes_between_other_tasks || 0), Number(nextTask.min_minutes_between_other_tasks || 0));
+    };
+
     const visited = new Set();
     const optimizedOrder = [];
     // skippedReasons wordt pas gevuld NA de volledige optimalisatie-loop
@@ -320,12 +328,13 @@ Deno.serve(async (req) => {
 
         const { travelMinutes, distanceKm } = travel;
         const arrivalTime = currentTime + travelMinutes;
+        const requiredBuffer = getRequiredOtherTaskBufferMinutes(currentLocation, task);
 
         // We kunnen deze taak uitvoeren als we aankomen VÓÓR het einde van het tijdvenster
         // (ook al zijn we vroeg en moeten we wachten)
         if (arrivalTime > taskEnd) continue; // te laat — sla over
 
-        const actualStartCandidate = Math.max(arrivalTime, taskStart);
+        const actualStartCandidate = Math.max(arrivalTime + requiredBuffer, taskStart);
         const waitingTime = Math.max(0, actualStartCandidate - arrivalTime);
         if (task.use_arrival_deadline && arrivalTime > taskStart) continue;
         const canFinishBeforeWindowEnds = actualStartCandidate + task.duration_minutes <= taskEnd;
@@ -348,7 +357,8 @@ Deno.serve(async (req) => {
       // Bereken aankomst en vertrektijd voor de gekozen taak
       const { taskStart: chosenStart } = normalizeTaskWindow(bestTask);
       const arrivalTime = currentTime + bestTravelTime;
-      const actualStartTime = Math.max(arrivalTime, chosenStart);
+      const requiredBuffer = getRequiredOtherTaskBufferMinutes(currentLocation, bestTask);
+      const actualStartTime = Math.max(arrivalTime + requiredBuffer, chosenStart);
       const waitingTime = actualStartTime - arrivalTime;
       const departureTime = actualStartTime + bestTask.duration_minutes;
 
@@ -405,7 +415,8 @@ Deno.serve(async (req) => {
 
         const { taskStart, taskEnd } = normalizeTaskWindow(task);
         const arrivalTime = simCurrentTime + travel.travelMinutes;
-        const actualStartTime = Math.max(arrivalTime, taskStart);
+        const requiredBuffer = getRequiredOtherTaskBufferMinutes(simCurrentLocation, task);
+        const actualStartTime = Math.max(arrivalTime + requiredBuffer, taskStart);
         const departureTime = actualStartTime + task.duration_minutes;
 
         if (task.use_arrival_deadline && arrivalTime > taskStart) return null;

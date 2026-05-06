@@ -223,6 +223,7 @@ function prepareTaskInstances(tasks, objects, weekday) {
       weekdays: days,
       repeat_count: repeatWindows.length,
       min_minutes_between_visits: task.min_minutes_between_visits || 0,
+      min_minutes_between_other_tasks: task.min_minutes_between_other_tasks || 0,
       allow_split: !!task.allow_split,
       split_part_count: task.allow_split ? Math.max(2, Math.floor(Number(task.split_part_count || 2))) : 1,
     };
@@ -406,6 +407,19 @@ function routeTaskStartMinute(task, referenceStart = 0) {
   return minute;
 }
 
+function getRequiredOtherTaskBufferMinutes(previousTask, nextTask) {
+  if (!previousTask || !nextTask) return 0;
+  if ((previousTask.task_id || previousTask.id) === (nextTask.task_id || nextTask.id)) return 0;
+  return Math.max(Number(previousTask.min_minutes_between_other_tasks || 0), Number(nextTask.min_minutes_between_other_tasks || 0));
+}
+
+function applyOtherTaskBuffersToRouteTasks(tasks) {
+  return tasks.map((task, index) => {
+    const requiredBuffer = getRequiredOtherTaskBufferMinutes(tasks[index - 1], task);
+    return requiredBuffer ? { ...task, waiting_time: (task.waiting_time || 0) + requiredBuffer, required_buffer_minutes: requiredBuffer } : task;
+  });
+}
+
 function canRespectRepeatSpacing(candidateMinute, task, routes) {
   const minGap = Number(task.min_minutes_between_visits || 0);
   if (!minGap || !task.task_id) return true;
@@ -505,7 +519,7 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
         totalDistanceMeters += Number(transition.travelDistanceMeters || 0);
       }
 
-      const tasks = (route.visits || [])
+      const tasks = applyOtherTaskBuffersToRouteTasks((route.visits || [])
         .map((visit, index) => ({ visit, index }))
         .filter(({ visit }) => Number.isInteger(visit.shipmentIndex) && taskInstances[visit.shipmentIndex]?.task_id)
         .map(({ visit, index }) => {
@@ -528,6 +542,7 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
           repeat_index: task.repeat_index,
           repeat_count: task.repeat_count,
           min_minutes_between_visits: task.min_minutes_between_visits,
+          min_minutes_between_other_tasks: task.min_minutes_between_other_tasks,
           allow_split: task.allow_split,
           split_index: task.split_index,
           split_part_count: task.split_part_count,
@@ -541,9 +556,9 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
           sequence_index: index,
           placement_explanation: 'Gepland door Google Route Optimization API.',
         };
-      });
+        }));
 
-      const startTime = formatTimeFromIso(route.vehicleStartTime || route.routeStartTime || tasks[0]?.actual_start_time);
+        const startTime = formatTimeFromIso(route.vehicleStartTime || route.routeStartTime || tasks[0]?.actual_start_time);
       const endTime = formatTimeFromIso(route.vehicleEndTime || route.routeEndTime || tasks[tasks.length - 1]?.departure_time);
       const optimizedOrder = [
         ...(vehicle._startDepot ? [{
@@ -566,7 +581,7 @@ function mapGoogleResult(apiResult, taskInstances, vehicles, skipped, nonRelevan
       ];
       const serviceMinutes = tasks.reduce((sum, task) => sum + (task.duration_minutes || 0), 0);
       const travelMinutes = Math.round(totalTravelSeconds / 60);
-      const waitMinutes = Math.round(totalWaitSeconds / 60);
+      const waitMinutes = Math.round(totalWaitSeconds / 60) + tasks.reduce((sum, task) => sum + (task.required_buffer_minutes || 0), 0);
       const routeMinutes = Math.max(serviceMinutes + travelMinutes + waitMinutes, 0);
 
       return {
