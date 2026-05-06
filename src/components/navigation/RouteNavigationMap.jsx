@@ -361,15 +361,15 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
   return (
     <div className="relative h-full w-full">
       <div ref={mapNode} className="h-full w-full" />
-      <div className="absolute left-3 right-3 top-16 z-[500] rounded-2xl bg-slate-950/90 p-4 text-white shadow-2xl backdrop-blur md:left-20 md:right-auto md:top-20 md:w-[430px]">
-        <div className="flex items-start gap-4">
-          <div className="flex h-14 w-14 shrink-0 items-center justify-center rounded-2xl bg-blue-500 text-white">
-            <Navigation className="h-7 w-7" />
+      <div className="absolute left-3 right-3 top-16 z-[500] rounded-xl bg-slate-950/90 p-3 text-white shadow-2xl backdrop-blur md:left-20 md:right-auto md:top-20 md:w-[360px]">
+        <div className="flex items-start gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-blue-500 text-white">
+            <Navigation className="h-5 w-5" />
           </div>
           <div className="min-w-0">
-            <p className="text-3xl font-bold leading-none">{routeInfo.distance || "--"}</p>
-            <p className="mt-2 text-lg text-slate-200">{routeInfo.instruction}</p>
-            {routeInfo.duration && <p className="mt-1 text-sm text-slate-400">Geschatte rijtijd: {routeInfo.duration}</p>}
+            <p className="text-2xl font-bold leading-none">{routeInfo.distance || "--"}</p>
+            <p className="mt-1 text-sm leading-snug text-slate-200">{routeInfo.instruction}</p>
+            {routeInfo.duration && <p className="mt-0.5 text-xs text-slate-400">Rijtijd: {routeInfo.duration}</p>}
           </div>
         </div>
       </div>
