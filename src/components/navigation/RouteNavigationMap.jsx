@@ -30,11 +30,47 @@ function getBearing(a, b) {
   return (Math.atan2(y, x) * 180 / Math.PI + 360) % 360;
 }
 
-function getRouteBearing(geometry, fallbackBearing) {
-  const coordinates = geometry?.coordinates || [];
-  if (coordinates.length < 2) return fallbackBearing;
+function distanceToSegmentSquared(point, start, end) {
+  const x = point.longitude;
+  const y = point.latitude;
+  const x1 = start.longitude;
+  const y1 = start.latitude;
+  const x2 = end.longitude;
+  const y2 = end.latitude;
+  const dx = x2 - x1;
+  const dy = y2 - y1;
 
-  for (let index = 1; index < Math.min(coordinates.length, 8); index += 1) {
+  if (dx === 0 && dy === 0) return (x - x1) ** 2 + (y - y1) ** 2;
+
+  const t = Math.max(0, Math.min(1, ((x - x1) * dx + (y - y1) * dy) / (dx * dx + dy * dy)));
+  const projectionX = x1 + t * dx;
+  const projectionY = y1 + t * dy;
+  return (x - projectionX) ** 2 + (y - projectionY) ** 2;
+}
+
+function getRouteBearing(geometry, userPosition, fallbackBearing) {
+  const coordinates = geometry?.coordinates || [];
+  if (coordinates.length < 2 || !userPosition) return fallbackBearing;
+
+  let nearestIndex = 0;
+  let nearestDistance = Infinity;
+
+  for (let index = 1; index < coordinates.length; index += 1) {
+    const [startLng, startLat] = coordinates[index - 1];
+    const [endLng, endLat] = coordinates[index];
+    const distance = distanceToSegmentSquared(
+      userPosition,
+      { latitude: startLat, longitude: startLng },
+      { latitude: endLat, longitude: endLng }
+    );
+
+    if (distance < nearestDistance) {
+      nearestDistance = distance;
+      nearestIndex = index - 1;
+    }
+  }
+
+  for (let index = nearestIndex + 1; index < coordinates.length; index += 1) {
     const [startLng, startLat] = coordinates[index - 1];
     const [endLng, endLat] = coordinates[index];
     if (Math.abs(startLng - endLng) > 0.00001 || Math.abs(startLat - endLat) > 0.00001) {
@@ -279,7 +315,7 @@ export default function RouteNavigationMap({ stops, objects = [], userPosition, 
           center: [userPosition.longitude, userPosition.latitude],
           zoom: 18.2,
           pitch: 76,
-          bearing: getRouteBearing(info.geometry, fallbackBearing),
+          bearing: getRouteBearing(info.geometry, userPosition, fallbackBearing),
           duration: 700,
           padding: { top: 120, bottom: 220, left: 60, right: 60 },
         });
