@@ -24,7 +24,7 @@ function getTaskTime(task) {
   return "Geen tijdvenster";
 }
 
-const HOUR_HEIGHT = 56;
+const HOUR_HEIGHT = 36;
 const DAY_MINUTES = 24 * 60;
 const HOURS = Array.from({ length: 25 }, (_, index) => index);
 
@@ -37,14 +37,15 @@ function getTaskPlacement(task) {
     ? start + Number(task.duration_minutes || 30)
     : timeToMinutes(task.time_window_end);
 
-  if (!Number.isFinite(end) || end <= start) end = start + Number(task.duration_minutes || 30);
+  if (!usesDeadline && task.time_window_end && end <= start) end = DAY_MINUTES;
+  if (usesDeadline || !task.time_window_end) end = Math.max(end, start + Number(task.duration_minutes || 30));
 
   const clippedStart = Math.max(0, Math.min(DAY_MINUTES, start));
-  const clippedEnd = Math.max(clippedStart + 28, Math.min(DAY_MINUTES, end));
+  const clippedEnd = Math.max(clippedStart + 15, Math.min(DAY_MINUTES, end));
 
   return {
     top: (clippedStart / 60) * HOUR_HEIGHT,
-    height: Math.max(36, ((clippedEnd - clippedStart) / 60) * HOUR_HEIGHT),
+    height: Math.max(18, ((clippedEnd - clippedStart) / 60) * HOUR_HEIGHT),
   };
 }
 
@@ -53,8 +54,8 @@ function CalendarTaskBlock({ task, onEdit }) {
 
   return (
     <div
-      className="absolute left-1 right-1 overflow-hidden rounded-lg border border-blue-200 bg-blue-100/90 p-2 shadow-sm hover:bg-blue-100 hover:shadow-md transition-all group"
-      style={{ top: placement.top + 4, height: placement.height - 8 }}
+      className="absolute left-1 right-1 overflow-hidden rounded-md border border-blue-200 bg-blue-100/90 p-1.5 shadow-sm hover:bg-blue-100 hover:shadow-md transition-all group"
+      style={{ top: placement.top + 2, height: Math.max(18, placement.height - 4) }}
     >
       <div className="flex items-start justify-between gap-1">
         <div className="min-w-0">
