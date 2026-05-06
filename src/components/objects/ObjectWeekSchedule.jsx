@@ -105,8 +105,8 @@ function CalendarTaskBlock({ task, onEdit }) {
 
   return (
     <div
-      title={tooltipText}
-      className={`absolute left-1 right-1 overflow-hidden border shadow-sm transition-all backdrop-blur-[1px] ${getTaskTypeStyle(task.task_type)} ${isContinuation ? "rounded-b-md border-t-0" : "rounded-md p-1.5 hover:shadow-md group"}`}
+      aria-label={tooltipText}
+      className={`absolute left-1 right-1 overflow-visible border shadow-sm transition-all backdrop-blur-[1px] ${getTaskTypeStyle(task.task_type)} ${isContinuation ? "rounded-b-md border-t-0" : "group rounded-md p-1.5 hover:shadow-md"}`}
       style={{ top: placement.top + 2, height: Math.max(18, placement.height - 4) }}
     >
       {!isContinuation && (
@@ -131,6 +131,15 @@ function CalendarTaskBlock({ task, onEdit }) {
               {Number(task.min_minutes_between_other_tasks || 0) > 0 && <span className="rounded bg-white/70 px-1.5 py-0.5 text-[10px] font-medium text-blue-700">{task.min_minutes_between_other_tasks}m buffer</span>}
             </div>
           )}
+          <div className="pointer-events-none absolute left-0 top-full z-50 mt-2 w-56 rounded-xl border border-slate-200 bg-white p-3 text-left opacity-0 shadow-xl ring-1 ring-slate-900/5 transition-all duration-150 group-hover:translate-y-0 group-hover:opacity-100">
+            <p className="text-xs font-bold text-slate-900">{task.task_type}</p>
+            <p className="mt-1 flex items-center gap-1 text-xs text-slate-600"><Clock className="w-3 h-3" /> {getTaskTime(task)}</p>
+            <div className="mt-2 flex flex-wrap gap-1">
+              <span className="rounded-md bg-slate-100 px-2 py-1 text-[11px] font-medium text-slate-700">{task.duration_minutes || 0} min</span>
+              {Number(task.repeat_count || 1) > 1 && <span className="rounded-md bg-amber-100 px-2 py-1 text-[11px] font-medium text-amber-700">{task.repeat_count}x herhalen</span>}
+              {Number(task.min_minutes_between_other_tasks || 0) > 0 && <span className="rounded-md bg-blue-100 px-2 py-1 text-[11px] font-medium text-blue-700">{task.min_minutes_between_other_tasks}m buffer</span>}
+            </div>
+          </div>
         </>
       )}
     </div>
