@@ -2,9 +2,9 @@ import React from "react";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Pencil, Trash2, Car, DollarSign, Gauge } from "lucide-react";
+import { Pencil, Trash2, Car, DollarSign, Gauge, Power } from "lucide-react";
 
-export default function VehicleTable({ vehicles, onEdit, onDelete, onSell, onAddMileage }) {
+export default function VehicleTable({ vehicles, onEdit, onDelete, onSell, onAddMileage, onToggleActive }) {
   return (
     <div className="bg-white rounded-xl border border-slate-200 overflow-hidden">
       <Table>
@@ -72,8 +72,8 @@ export default function VehicleTable({ vehicles, onEdit, onDelete, onSell, onAdd
                 <TableCell>€{(vehicle.insurance_per_month || 0).toFixed(2)}</TableCell>
                 <TableCell>
                   <div className="flex flex-col gap-1">
-                    <Badge className={vehicle.is_active ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-600"}>
-                      {vehicle.is_active ? "Actief" : "Inactief"}
+                    <Badge className={vehicle.is_active !== false ? "bg-green-100 text-green-800" : "bg-slate-100 text-slate-600"}>
+                      {vehicle.is_active !== false ? "Actief" : "Inactief"}
                     </Badge>
                     {vehicle.disposal_date && (
                       <Badge className="bg-amber-100 text-amber-800 text-[10px]">
@@ -89,6 +89,14 @@ export default function VehicleTable({ vehicles, onEdit, onDelete, onSell, onAdd
                     </Button>
                     <Button variant="ghost" size="icon" onClick={() => onAddMileage(vehicle)} title="KM-stand toevoegen">
                       <Gauge className="w-4 h-4 text-blue-500" />
+                    </Button>
+                    <Button
+                      variant="ghost"
+                      size="icon"
+                      onClick={() => onToggleActive(vehicle)}
+                      title={vehicle.is_active !== false ? "Op inactief zetten" : "Op actief zetten"}
+                    >
+                      <Power className={`w-4 h-4 ${vehicle.is_active !== false ? "text-green-600" : "text-slate-400"}`} />
                     </Button>
                     {!vehicle.disposal_date && (
                       <Button variant="ghost" size="icon" onClick={() => onSell(vehicle)} title="Auto verkopen">

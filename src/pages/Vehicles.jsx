@@ -78,6 +78,10 @@ export default function VehiclesPage() {
     setMileageVehicle(vehicle);
   };
 
+  const handleToggleActive = (vehicle) => {
+    updateMutation.mutate({ id: vehicle.id, data: { is_active: vehicle.is_active === false } });
+  };
+
   const handleSaveSell = (data) => {
     updateMutation.mutate({ id: data.id, data });
     setSellVehicle(null);
@@ -129,6 +133,7 @@ export default function VehiclesPage() {
           onDelete={(id) => deleteMutation.mutate(id)}
           onSell={handleSell}
           onAddMileage={handleAddMileage}
+          onToggleActive={handleToggleActive}
         />
       ) : (
         !showForm && (
