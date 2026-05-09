@@ -1,0 +1,159 @@
+{
+  "name": "CAOConfiguration",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Naam van de CAO configuratie",
+      "default": "CAO Particuliere Beveiliging 2025"
+    },
+    "valid_from": {
+      "type": "string",
+      "format": "date",
+      "description": "Geldig vanaf datum"
+    },
+    "valid_until": {
+      "type": "string",
+      "format": "date",
+      "description": "Geldig tot datum"
+    },
+    "wage_scales": {
+      "type": "object",
+      "description": "Loonschalen per schaal en periode (uurloon in euro)",
+      "additionalProperties": true
+    },
+    "surcharge_weekend": {
+      "type": "number",
+      "description": "Weekendtoeslag percentage (za 00:00 - zo 24:00)",
+      "default": 35
+    },
+    "surcharge_night": {
+      "type": "number",
+      "description": "Nachttoeslag percentage (ma-vr 00:00-07:00)",
+      "default": 20
+    },
+    "surcharge_evening": {
+      "type": "number",
+      "description": "Avondtoeslag percentage (ma-vr 18:00-24:00)",
+      "default": 10
+    },
+    "surcharge_holiday": {
+      "type": "number",
+      "description": "Feestdagentoeslag percentage",
+      "default": 50
+    },
+    "surcharge_new_years_eve_after_16": {
+      "type": "number",
+      "description": "Oudejaarsdag na 16:00 toeslag percentage",
+      "default": 100
+    },
+    "vacation_allowance": {
+      "type": "number",
+      "description": "Vakantiegeld percentage",
+      "default": 8
+    },
+    "year_end_bonus": {
+      "type": "number",
+      "description": "Eindejaarsuitkering percentage",
+      "default": 2.01
+    },
+    "pension_base_salary_threshold": {
+      "type": "number",
+      "description": "Franchise bedrag pensioen (jaarlijks)",
+      "default": 16164
+    },
+    "pension_premium_rate_total": {
+      "type": "number",
+      "description": "Totale pensioenpremie percentage",
+      "default": 24.1
+    },
+    "pension_premium_employer": {
+      "type": "number",
+      "description": "Werkgeversbijdrage pensioen percentage van totaal",
+      "default": 60
+    },
+    "pension_premium_employee": {
+      "type": "number",
+      "description": "Werknemersbijdrage pensioen percentage van totaal",
+      "default": 40
+    },
+    "premium_sfpb": {
+      "type": "number",
+      "description": "Premie SFPB (Stichting Fonds Particuliere Beveiliging) percentage",
+      "default": 0.061
+    },
+    "premium_paww_employee": {
+      "type": "number",
+      "description": "PAWW werknemersdeel percentage",
+      "default": 0.1
+    },
+    "premium_wga_employee": {
+      "type": "number",
+      "description": "Gedifferentieerde WGA werknemersdeel percentage",
+      "default": 0.81
+    },
+    "premium_awf_employer": {
+      "type": "number",
+      "description": "Awf werkgeversdeel percentage (WW basis)",
+      "default": 2.64
+    },
+    "premium_ww_employer_fixed": {
+      "type": "number",
+      "description": "WW werkgeversdeel vast percentage",
+      "default": 0
+    },
+    "premium_ww_employer_variable": {
+      "type": "number",
+      "description": "WW werkgeversdeel variabel percentage (per bedrijf)",
+      "default": 1.5
+    },
+    "premium_wia_employer": {
+      "type": "number",
+      "description": "WIA basispremie werkgeversdeel percentage",
+      "default": 0.72
+    },
+    "premium_wga_employer": {
+      "type": "number",
+      "description": "Gedifferentieerde WGA werkgeversdeel percentage",
+      "default": 1.5
+    },
+    "premium_zw_employer": {
+      "type": "number",
+      "description": "ZW premie werkgeversdeel percentage (eigen risico drager kan vari\u00ebren)",
+      "default": 0
+    },
+    "tax_rate_bracket_1": {
+      "type": "number",
+      "description": "Loonheffing tarief schijf 1 (tot \u20ac38.098)",
+      "default": 36.97
+    },
+    "tax_rate_bracket_2": {
+      "type": "number",
+      "description": "Loonheffing tarief schijf 2 (\u20ac38.098 - \u20ac75.518)",
+      "default": 36.97
+    },
+    "tax_rate_bracket_3": {
+      "type": "number",
+      "description": "Loonheffing tarief schijf 3 (boven \u20ac75.518)",
+      "default": 49.5
+    },
+    "tax_bracket_1_limit": {
+      "type": "number",
+      "description": "Grens eerste belastingschijf (jaarlijks)",
+      "default": 38098
+    },
+    "tax_bracket_2_limit": {
+      "type": "number",
+      "description": "Grens tweede belastingschijf (jaarlijks)",
+      "default": 75518
+    },
+    "labor_tax_credit_max": {
+      "type": "number",
+      "description": "Maximale arbeidskorting (jaarlijks)",
+      "default": 5672
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

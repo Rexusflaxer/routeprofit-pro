@@ -1,0 +1,39 @@
+{
+  "name": "CompanySettings",
+  "type": "object",
+  "properties": {
+    "company_name": {
+      "type": "string",
+      "description": "Bedrijfsnaam"
+    },
+    "address": {
+      "type": "string",
+      "description": "Bedrijfsadres"
+    },
+    "postal_code": {
+      "type": "string",
+      "description": "Postcode"
+    },
+    "city": {
+      "type": "string",
+      "description": "Plaats"
+    },
+    "phone": {
+      "type": "string",
+      "description": "Telefoonnummer"
+    },
+    "email": {
+      "type": "string",
+      "description": "E-mailadres"
+    },
+    "kvk_number": {
+      "type": "string",
+      "description": "KVK nummer"
+    },
+    "btw_number": {
+      "type": "string",
+      "description": "BTW nummer"
+    }
+  },
+  "required": []
+}

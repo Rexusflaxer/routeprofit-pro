@@ -1,0 +1,39 @@
+{
+  "name": "SurveillanceObject",
+  "type": "object",
+  "properties": {
+    "object_code": {
+      "type": "string",
+      "description": "Objectcode"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "ID van de gekoppelde klant"
+    },
+    "name": {
+      "type": "string",
+      "description": "Naam van het object/locatie"
+    },
+    "address": {
+      "type": "string",
+      "description": "Volledig adres van het object"
+    },
+    "latitude": {
+      "type": "number",
+      "description": "Breedtegraad"
+    },
+    "longitude": {
+      "type": "number",
+      "description": "Lengtegraad"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Opmerkingen"
+    }
+  },
+  "required": [
+    "name",
+    "address",
+    "customer_id"
+  ]
+}

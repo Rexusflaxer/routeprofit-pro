@@ -1,0 +1,52 @@
+{
+  "name": "Collectief",
+  "type": "object",
+  "properties": {
+    "object_code": {
+      "type": "string",
+      "description": "Objectcode van het bedrijfsverzamelgebouw"
+    },
+    "name": {
+      "type": "string",
+      "description": "Naam van het collectief"
+    },
+    "collectief_type": {
+      "type": "string",
+      "enum": [
+        "regio_groep",
+        "bedrijventerrein",
+        "bedrijfsverzamelgebouw"
+      ],
+      "description": "Type collectief",
+      "default": "bedrijventerrein"
+    },
+    "customer_id": {
+      "type": "string",
+      "description": "ID van de beherende klant"
+    },
+    "parent_collectief_id": {
+      "type": "string",
+      "description": "ID van het bovenliggende collectief (optioneel, voor nesting)"
+    },
+    "object_ids": {
+      "type": "array",
+      "description": "IDs van objecten die tot dit collectief behoren",
+      "items": {
+        "type": "string"
+      }
+    },
+    "address": {
+      "type": "string",
+      "description": "Adres of locatie van het collectief"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Opmerkingen"
+    }
+  },
+  "required": [
+    "name",
+    "collectief_type",
+    "customer_id"
+  ]
+}

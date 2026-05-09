@@ -1,0 +1,47 @@
+{
+  "name": "Customer",
+  "type": "object",
+  "properties": {
+    "customer_type": {
+      "type": "string",
+      "enum": [
+        "particulier",
+        "bedrijf"
+      ],
+      "description": "Type klant",
+      "default": "bedrijf"
+    },
+    "name": {
+      "type": "string",
+      "description": "Naam klant of bedrijf"
+    },
+    "contact_person": {
+      "type": "string",
+      "description": "Contactpersoon (bij bedrijf)"
+    },
+    "email": {
+      "type": "string",
+      "description": "E-mailadres"
+    },
+    "phone": {
+      "type": "string",
+      "description": "Telefoonnummer"
+    },
+    "address": {
+      "type": "string",
+      "description": "Adres"
+    },
+    "kvk_number": {
+      "type": "string",
+      "description": "KVK-nummer (alleen bij bedrijf)"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Opmerkingen"
+    }
+  },
+  "required": [
+    "name",
+    "customer_type"
+  ]
+}

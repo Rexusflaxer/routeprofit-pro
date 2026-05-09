@@ -1,0 +1,28 @@
+{
+  "name": "VehicleMileage",
+  "type": "object",
+  "properties": {
+    "vehicle_id": {
+      "type": "string",
+      "description": "ID van het voertuig"
+    },
+    "date": {
+      "type": "string",
+      "format": "date",
+      "description": "Datum van km-stand"
+    },
+    "mileage": {
+      "type": "number",
+      "description": "KM-stand"
+    },
+    "notes": {
+      "type": "string",
+      "description": "Opmerkingen"
+    }
+  },
+  "required": [
+    "vehicle_id",
+    "date",
+    "mileage"
+  ]
+}

@@ -45,6 +45,11 @@
       "description": "Minimaal aantal minuten tussen herhaalde uitvoeringen van dezelfde taak",
       "default": 0
     },
+    "min_minutes_between_other_tasks": {
+      "type": "number",
+      "description": "Minimale buffer in minuten tussen deze taak en andere taken",
+      "default": 0
+    },
     "use_arrival_deadline": {
       "type": "boolean",
       "description": "Gebruik een minimale aankomsttijd/deadline in plaats van een volledig tijdvenster",

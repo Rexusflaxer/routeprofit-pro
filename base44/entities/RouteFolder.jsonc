@@ -1,0 +1,31 @@
+{
+  "name": "RouteFolder",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Naam van de uitschuifmap"
+    },
+    "description": {
+      "type": "string",
+      "description": "Beschrijving van de map"
+    },
+    "color": {
+      "type": "string",
+      "enum": [
+        "slate",
+        "blue",
+        "green",
+        "amber",
+        "red",
+        "purple",
+        "pink"
+      ],
+      "default": "slate",
+      "description": "Kleur voor de map"
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

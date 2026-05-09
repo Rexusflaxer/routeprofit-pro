@@ -1,0 +1,143 @@
+{
+  "name": "Personnel",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Naam medewerker"
+    },
+    "function_type": {
+      "type": "string",
+      "enum": [
+        "surveillant",
+        "binnendienst"
+      ],
+      "description": "Functie type",
+      "default": "surveillant"
+    },
+    "employee_type": {
+      "type": "string",
+      "enum": [
+        "zzp",
+        "loondienst"
+      ],
+      "description": "Type medewerker",
+      "default": "loondienst"
+    },
+    "zzp_hourly_rate_excl_vat": {
+      "type": "number",
+      "description": "ZZP uurtarief exclusief BTW"
+    },
+    "zzp_evening_rate": {
+      "type": "number",
+      "description": "ZZP avondtarief (optioneel)"
+    },
+    "zzp_night_rate": {
+      "type": "number",
+      "description": "ZZP nachttarief (optioneel)"
+    },
+    "zzp_weekend_rate": {
+      "type": "number",
+      "description": "ZZP weekendtarief (optioneel)"
+    },
+    "zzp_holiday_rate": {
+      "type": "number",
+      "description": "ZZP feestdagtarief (optioneel)"
+    },
+    "contract_type": {
+      "type": "string",
+      "enum": [
+        "fulltime",
+        "parttime",
+        "0_uren",
+        "min_max"
+      ],
+      "description": "Type contract (alleen voor loondienst)"
+    },
+    "parttime_hours": {
+      "type": "number",
+      "description": "Aantal uren per week (alleen bij parttime)"
+    },
+    "min_hours": {
+      "type": "number",
+      "description": "Minimum uren (alleen bij min-max contract)"
+    },
+    "max_hours": {
+      "type": "number",
+      "description": "Maximum uren (alleen bij min-max contract)"
+    },
+    "cao": {
+      "type": "string",
+      "enum": [
+        "cao_particuliere_beveiliging",
+        "eigen_tarief"
+      ],
+      "description": "CAO of eigen tarief",
+      "default": "cao_particuliere_beveiliging"
+    },
+    "cao_scale": {
+      "type": "number",
+      "description": "CAO loonschaal (2-7)",
+      "default": 3
+    },
+    "cao_period": {
+      "type": "number",
+      "description": "CAO periode (0-16)",
+      "default": 0
+    },
+    "custom_hourly_rate": {
+      "type": "number",
+      "description": "Alternatief uurtarief (bij eigen_tarief)"
+    },
+    "is_active": {
+      "type": "boolean",
+      "description": "Is de medewerker actief?",
+      "default": true
+    },
+    "company_car_license_plate": {
+      "type": "string",
+      "description": "Kenteken auto van de zaak"
+    },
+    "company_car_brand": {
+      "type": "string",
+      "description": "Merk auto van de zaak"
+    },
+    "company_car_model": {
+      "type": "string",
+      "description": "Model auto van de zaak"
+    },
+    "company_car_year": {
+      "type": "number",
+      "description": "Bouwjaar auto van de zaak"
+    },
+    "company_car_fiscal_value": {
+      "type": "number",
+      "description": "Cataloguswaarde auto van de zaak (voor fiscale bijtelling)"
+    },
+    "company_car_bijtelling_percentage": {
+      "type": "number",
+      "description": "Bijtellingspercentage (%)",
+      "default": 16
+    },
+    "company_car_fuel_type": {
+      "type": "string",
+      "enum": [
+        "benzine",
+        "diesel",
+        "elektrisch",
+        "hybride",
+        "lpg"
+      ],
+      "description": "Brandstoftype auto van de zaak"
+    },
+    "company_car_monthly_lease_cost": {
+      "type": "number",
+      "description": "Maandelijkse leasekosten auto van de zaak"
+    }
+  },
+  "required": [
+    "name",
+    "function_type",
+    "employee_type"
+  ]
+}

@@ -1,0 +1,26 @@
+{
+  "name": "Office",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Naam kantoor"
+    },
+    "address": {
+      "type": "string",
+      "description": "Volledig adres"
+    },
+    "latitude": {
+      "type": "number",
+      "description": "Breedtegraad"
+    },
+    "longitude": {
+      "type": "number",
+      "description": "Lengtegraad"
+    }
+  },
+  "required": [
+    "name",
+    "address"
+  ]
+}

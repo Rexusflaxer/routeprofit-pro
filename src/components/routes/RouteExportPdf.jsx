@@ -27,8 +27,11 @@ function formatClockRange(start, end) {
   return `${formatClockTime(start)} – ${formatClockTime(end)}`;
 }
 
-export default function RouteExportPdf({ route, optimizedRoute }) {
+export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
   const [loading, setLoading] = useState(false);
+  const vehicleLabel = vehicle?.license_plate
+    ? `${vehicle.license_plate}${vehicle.brand || vehicle.model ? ` - ${[vehicle.brand, vehicle.model].filter(Boolean).join(' ')}` : ''}`
+    : optimizedRoute?.vehicle?.license_plate || optimizedRoute?.vehicle?.name || 'Niet ingesteld';
 
   const generatePdf = async () => {
     if (!optimizedRoute) return;
@@ -77,7 +80,7 @@ export default function RouteExportPdf({ route, optimizedRoute }) {
       const weekdayLabel = (route.weekdays || []).map(d => WEEKDAY_LABELS[d]).join(", ");
       doc.setFontSize(9);
       doc.setTextColor(160, 160, 190);
-      doc.text(`${weekdayLabel} · ${route.time_window_start} – ${route.time_window_end}`, margin, 34);
+      doc.text(`${weekdayLabel} · ${route.time_window_start} – ${route.time_window_end} · Auto: ${vehicleLabel}`, margin, 34);
 
       doc.setFontSize(9);
       doc.text(`Gegenereerd op ${new Date().toLocaleDateString("nl-NL", { day: "2-digit", month: "long", year: "numeric" })}`, pageW - margin, 34, { align: "right" });

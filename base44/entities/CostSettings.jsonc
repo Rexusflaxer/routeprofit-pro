@@ -1,0 +1,46 @@
+{
+  "name": "CostSettings",
+  "type": "object",
+  "properties": {
+    "label": {
+      "type": "string",
+      "description": "Label voor deze kosteninstelling",
+      "default": "Standaard"
+    },
+    "housing_costs": {
+      "type": "array",
+      "description": "Huisvestingskosten per kantoor",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "software_costs": {
+      "type": "array",
+      "description": "Softwarekosten",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "custom_cost_sections": {
+      "type": "array",
+      "description": "Vrije kostensecties",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "personnel_cost_sections": {
+      "type": "array",
+      "description": "Personeelsgebonden kostensecties",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    }
+  },
+  "required": [
+    "label"
+  ]
+}
