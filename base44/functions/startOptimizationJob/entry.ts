@@ -21,41 +21,126 @@ function parseTimeToSeconds(time, fallback) {
 
 function fixCoords(location) {
   if (!location) return null;
-  const latitude = Number(location.latitude);
-  const longitude = Number(location.longitude);
-  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
-  return { ...location, latitude, longitude };
+  const lat = Number(location.latitude);
+  const lon = Number(location.longitude);
+  if (!Number.isFinite(lat) || !Number.isFinite(lon)) return null;
+
+  if (lat < lon && lon > 40) {
+    return { ...location, latitude: lon, longitude: lat };
+  }
+
+  return { ...location, latitude: lat, longitude: lon };
 }
 
-function buildRoutingVehicles(vehicles, offices, body) {
-  const depot = fixCoords(offices[0]);
-  const shiftStart = parseTimeToSeconds(body.shift_start || body.extra_route_start, 18 * 3600);
-  let shiftEnd = parseTimeToSeconds(body.shift_end || body.extra_route_end, 27 * 3600);
-  if (shiftEnd <= shiftStart) shiftEnd += 86400;
+function locationById(id, objects, offices) {
+  if (!id) return null;
+  return fixCoords(objects.find(item => item.id === id) || offices.find(item => item.id === id));
+}
 
-  return vehicles
-    .filter(vehicle => vehicle.is_active !== false)
-    .map((vehicle, index) => ({
-      ...vehicle,
-      id: vehicle.id || index + 1,
-      name: vehicle.license_plate || vehicle.name || `Voertuig ${index + 1}`,
-      shift_start: shiftStart,
-      shift_end: shiftEnd,
-      start_lat: depot?.latitude,
-      start_lon: depot?.longitude,
-      end_lat: depot?.latitude,
-      end_lon: depot?.longitude,
-      skills: vehicle.skills || [1],
-      cost_per_km: Number(vehicle.kostenPerKm ?? vehicle.fuel_cost_per_km ?? vehicle.cost_per_km ?? 0.35),
-      cost_per_minute: Number(vehicle.kostenPerMinuutVoertuig ?? vehicle.cost_per_minute ?? 0.12),
-      fixed_cost: Number(vehicle.vasteKostenPerRoute ?? vehicle.fixed_cost ?? 8),
-    }))
-    .filter(vehicle =>
-      Number.isFinite(vehicle.start_lat) &&
-      Number.isFinite(vehicle.start_lon) &&
-      Number.isFinite(vehicle.end_lat) &&
-      Number.isFinite(vehicle.end_lon)
+function isGeneratedRoute(route) {
+  const source = String(route.source || 'manual').toLowerCase();
+  return ['automatic', 'server', 'generated', 'eigen_routing_server', 'suggested'].includes(source);
+}
+
+function vehicleCostProfile(vehicle = {}) {
+  return {
+    cost_per_km: Number(vehicle.kostenPerKm ?? vehicle.fuel_cost_per_km ?? vehicle.cost_per_km ?? 0.35),
+    cost_per_minute: Number(vehicle.kostenPerMinuutVoertuig ?? vehicle.cost_per_minute ?? 0.12),
+    fixed_cost: Number(vehicle.vasteKostenPerRoute ?? vehicle.fixed_cost ?? 8),
+  };
+}
+
+function makeRoutingVehicle({ id, vehicle, route, startDepot, endDepot, shiftStart, shiftEnd, weekday, isManualRoute }) {
+  return {
+    ...vehicle,
+    ...vehicleCostProfile(vehicle),
+    id,
+    source_vehicle_id: vehicle.id,
+    manual_route_id: route?.id || null,
+    manual_route_name: route?.name || null,
+    name: route?.name || vehicle.license_plate || vehicle.name || 'Voertuig',
+    license_plate: vehicle.license_plate,
+    shift_start: shiftStart,
+    shift_end: shiftEnd,
+    start_lat: startDepot?.latitude,
+    start_lon: startDepot?.longitude,
+    end_lat: endDepot?.latitude,
+    end_lon: endDepot?.longitude,
+    skills: vehicle.skills || [1],
+    weekday,
+    is_manual_route: !!isManualRoute,
+  };
+}
+
+function buildRoutingVehicles(vehicles, routes, offices, objects, weekdays, body) {
+  const activeVehicles = vehicles.filter(vehicle => vehicle.is_active !== false);
+  const depot = fixCoords(offices[0]);
+  const routingVehicles = [];
+
+  for (const weekday of weekdays) {
+    const manualRoutes = routes.filter(route =>
+      (route.weekdays || []).includes(Number(weekday)) &&
+      !isGeneratedRoute(route) &&
+      route.vehicle_id &&
+      route.time_window_start &&
+      (route.flexible_end_time || route.time_window_end)
     );
+
+    const usedVehicleIds = new Set();
+
+    for (const route of manualRoutes) {
+      const vehicle = activeVehicles.find(item => item.id === route.vehicle_id);
+      if (!vehicle) continue;
+
+      const shiftStart = parseTimeToSeconds(route.time_window_start, 18 * 3600);
+      let shiftEnd = route.flexible_end_time
+        ? shiftStart + (Number(route.max_route_minutes || 600) * 60)
+        : parseTimeToSeconds(route.time_window_end, shiftStart + (9 * 3600));
+      if (shiftEnd <= shiftStart) shiftEnd += 86400;
+
+      routingVehicles.push(makeRoutingVehicle({
+        id: `manual_${route.id}`,
+        vehicle,
+        route,
+        startDepot: locationById(route.start_location_id || vehicle.startDepotLocationId, objects, offices) || depot,
+        endDepot: locationById(route.end_location_id || vehicle.eindDepotLocationId, objects, offices) || depot,
+        shiftStart,
+        shiftEnd,
+        weekday: Number(weekday),
+        isManualRoute: true,
+      }));
+
+      usedVehicleIds.add(vehicle.id);
+    }
+
+    const extraShiftStart = parseTimeToSeconds(body.shift_start || body.extra_route_start, 18 * 3600);
+    let extraShiftEnd = parseTimeToSeconds(body.shift_end || body.extra_route_end, 27 * 3600);
+    if (extraShiftEnd <= extraShiftStart) extraShiftEnd += 86400;
+
+    for (const vehicle of activeVehicles.filter(item => !usedVehicleIds.has(item.id))) {
+      routingVehicles.push(makeRoutingVehicle({
+        id: `extra_${weekday}_${vehicle.id}`,
+        vehicle,
+        route: null,
+        startDepot: locationById(vehicle.startDepotLocationId, objects, offices) || depot,
+        endDepot: locationById(vehicle.eindDepotLocationId, objects, offices) || depot,
+        shiftStart: extraShiftStart,
+        shiftEnd: extraShiftEnd,
+        weekday: Number(weekday),
+        isManualRoute: false,
+      }));
+    }
+  }
+
+  return routingVehicles.filter(vehicle =>
+    Number.isFinite(vehicle.shift_start) &&
+    Number.isFinite(vehicle.shift_end) &&
+    vehicle.shift_end > vehicle.shift_start &&
+    Number.isFinite(vehicle.start_lat) &&
+    Number.isFinite(vehicle.start_lon) &&
+    Number.isFinite(vehicle.end_lat) &&
+    Number.isFinite(vehicle.end_lon)
+  );
 }
 
 async function readJsonResponse(response) {
@@ -88,7 +173,7 @@ Deno.serve(async (req) => {
       base44.entities.Route.list(),
     ]);
 
-    const activeVehicles = buildRoutingVehicles(vehicles, offices, body);
+    const routingVehicles = buildRoutingVehicles(vehicles, routes, offices, objects, weekdays, body);
 
     const payload = {
       ...body,
@@ -97,9 +182,23 @@ Deno.serve(async (req) => {
       description: body.description || `${weekdays.length === 1 ? 'Dagplanning' : 'Weekplanning'} optimaliseren`,
       tasks,
       objects,
-      vehicles: activeVehicles,
+      vehicles: routingVehicles,
       offices,
       routes,
+      routing_debug: {
+        routing_vehicle_count: routingVehicles.length,
+        manual_route_vehicle_count: routingVehicles.filter(vehicle => vehicle.is_manual_route).length,
+        extra_vehicle_count: routingVehicles.filter(vehicle => !vehicle.is_manual_route).length,
+        routing_vehicles: routingVehicles.map(vehicle => ({
+          id: vehicle.id,
+          license_plate: vehicle.license_plate,
+          manual_route_name: vehicle.manual_route_name,
+          shift_start: vehicle.shift_start,
+          shift_end: vehicle.shift_end,
+          weekday: vehicle.weekday,
+          is_manual_route: vehicle.is_manual_route,
+        })),
+      },
       selection: {
         route_count_penalty_minutes: body.route_count_penalty_minutes ?? 45,
         priority_order: [
@@ -115,7 +214,7 @@ Deno.serve(async (req) => {
       data: {
         tasks,
         objects,
-        vehicles: activeVehicles,
+        vehicles: routingVehicles,
         offices,
         routes,
       },

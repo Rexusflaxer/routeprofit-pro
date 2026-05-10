@@ -79,12 +79,17 @@ function normalizeCompletedResult(rawResult, requestPayload = {}) {
     const totalServiceMinutes = tasks.reduce((sum, task) => sum + (task.duration_minutes || 0), 0);
     const totalTravelMinutes = Number(route.total_travel_minutes ?? Math.round(Number(route.total_travel_seconds || 0) / 60));
     const totalDistanceKm = Number(route.total_distance_km ?? (Number(route.total_distance_meters || 0) / 1000));
-    const startTime = tasks[0]?.arrival_time || '18:00';
-    const endTime = route.end_time || (route.end_time_seconds ? formatSeconds(route.end_time_seconds) : startTime);
+    const isManualRoute = !!vehicle.manual_route_id;
+    const startTime = isManualRoute ? formatSeconds(vehicle.shift_start) : (tasks[0]?.arrival_time || formatSeconds(vehicle.shift_start || 64800));
+    const endTime = isManualRoute ? formatSeconds(vehicle.shift_end) : (route.end_time || (route.end_time_seconds ? formatSeconds(route.end_time_seconds) : startTime));
+    const displayVehicle = { ...vehicle, id: vehicle.source_vehicle_id || vehicle.id };
 
     return {
       id: route.id || route.vehicle_id || `server_route_${routeIndex + 1}`,
-      vehicle,
+      manual_route_id: vehicle.manual_route_id || null,
+      manual_route_name: vehicle.manual_route_name || null,
+      is_extra_route: !isManualRoute,
+      vehicle: displayVehicle,
       time_window_start: startTime,
       time_window_end: endTime,
       validation: { valid: true, errors: [] },

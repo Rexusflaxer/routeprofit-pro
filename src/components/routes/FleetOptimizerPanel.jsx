@@ -271,7 +271,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
                       {expandedRoute === ri ? <ChevronDown className="w-4 h-4 text-slate-400 flex-shrink-0" /> : <ChevronRight className="w-4 h-4 text-slate-400 flex-shrink-0" />}
                       <div className="flex-1 min-w-0">
                         <div className="flex items-center gap-2 flex-wrap">
-                          <span className="text-sm font-semibold text-slate-900">Route {ri + 1}</span>
+                          <span className="text-sm font-semibold text-slate-900">{route.manual_route_name || `Route ${ri + 1}`}</span>
                           <Badge variant="outline" className="text-xs"><Car className="w-3 h-3 mr-1" />{route.vehicle?.license_plate || route.vehicle?.name || 'Voertuig'}</Badge>
                           <Badge variant="secondary" className="text-xs"><Clock className="w-3 h-3 mr-1" />{route.time_window_start} – {route.time_window_end}</Badge>
                           <Badge className={route.validation?.valid ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}>{route.validation?.valid ? 'Geldig' : 'Ongeldig'}</Badge>
