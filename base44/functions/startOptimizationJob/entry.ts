@@ -163,7 +163,9 @@ Deno.serve(async (req) => {
     }
 
     const body = await req.json();
-    const weekdays = body.weekdays ?? (body.weekday ? [body.weekday] : [1]);
+    const requestedWeekdays = body.weekdays ?? (body.weekday ? [body.weekday] : [1]);
+    const displayWeekday = Number(body.display_weekday ?? requestedWeekdays[0] ?? 1);
+    const weekdays = [1, 2, 3, 4, 5, 6, 7];
 
     const [tasks, objects, vehicles, offices, routes] = await Promise.all([
       base44.entities.Task.list(),
@@ -177,9 +179,12 @@ Deno.serve(async (req) => {
 
     const payload = {
       ...body,
+      mode: 'week',
+      source: 'weekplanning',
+      display_weekday: displayWeekday,
       weekdays,
-      source: 'base44',
-      description: body.description || `${weekdays.length === 1 ? 'Dagplanning' : 'Weekplanning'} optimaliseren`,
+      service_day_cutoff: body.service_day_cutoff || '12:00',
+      description: body.description || `Weekplanning optimaliseren — tonen dag ${displayWeekday}`,
       tasks,
       objects,
       vehicles: routingVehicles,
@@ -201,6 +206,11 @@ Deno.serve(async (req) => {
       },
       selection: {
         route_count_penalty_minutes: body.route_count_penalty_minutes ?? 45,
+        min_auto_route_minutes: body.min_auto_route_minutes ?? 180,
+        wait_penalty_multiplier: body.wait_penalty_multiplier ?? 1,
+        travel_penalty_multiplier: body.travel_penalty_multiplier ?? 1,
+        max_solver_seconds: body.max_solver_seconds ?? 60,
+        max_extra_windows: body.max_extra_windows ?? 3,
         priority_order: [
           'min_unassigned_required_tasks',
           'min_total_duty_minutes',
