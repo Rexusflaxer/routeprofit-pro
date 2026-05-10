@@ -22,6 +22,13 @@ async function readJsonResponse(response) {
   }
 }
 
+function compactText(value, maxLength = 1800) {
+  if (!value) return value;
+  const text = typeof value === 'string' ? value : JSON.stringify(value);
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, maxLength)}... [ingekort]`;
+}
+
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
@@ -55,8 +62,8 @@ Deno.serve(async (req) => {
       await base44.asServiceRole.entities.OptimizationJob.update(job.id, {
         status: data.status || job.status,
         progress: Number(data.progress ?? job.progress ?? 0),
-        message: data.message || job.message,
-        error: data.error || job.error,
+        message: compactText(data.message || job.message, 800),
+        error: compactText(data.error || job.error, 1800),
         started_at: data.started_at || job.started_at,
         finished_at: data.finished_at || job.finished_at,
       });
@@ -64,6 +71,8 @@ Deno.serve(async (req) => {
 
     return Response.json({
       ...data,
+      message: compactText(data.message, 800),
+      error: compactText(data.error, 1800),
       job_id: serverJobId,
       local_job_id: job?.id,
     });
