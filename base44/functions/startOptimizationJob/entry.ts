@@ -12,6 +12,52 @@ function routingApiKey() {
   return key;
 }
 
+function parseTimeToSeconds(time, fallback) {
+  if (!time) return fallback;
+  const [hours, minutes = 0] = String(time).split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return fallback;
+  return (hours * 3600) + (minutes * 60);
+}
+
+function fixCoords(location) {
+  if (!location) return null;
+  const latitude = Number(location.latitude);
+  const longitude = Number(location.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  return { ...location, latitude, longitude };
+}
+
+function buildRoutingVehicles(vehicles, offices, body) {
+  const depot = fixCoords(offices[0]);
+  const shiftStart = parseTimeToSeconds(body.shift_start || body.extra_route_start, 18 * 3600);
+  let shiftEnd = parseTimeToSeconds(body.shift_end || body.extra_route_end, 27 * 3600);
+  if (shiftEnd <= shiftStart) shiftEnd += 86400;
+
+  return vehicles
+    .filter(vehicle => vehicle.is_active !== false)
+    .map((vehicle, index) => ({
+      ...vehicle,
+      id: vehicle.id || index + 1,
+      name: vehicle.license_plate || vehicle.name || `Voertuig ${index + 1}`,
+      shift_start: shiftStart,
+      shift_end: shiftEnd,
+      start_lat: depot?.latitude,
+      start_lon: depot?.longitude,
+      end_lat: depot?.latitude,
+      end_lon: depot?.longitude,
+      skills: vehicle.skills || [1],
+      cost_per_km: Number(vehicle.kostenPerKm ?? vehicle.fuel_cost_per_km ?? vehicle.cost_per_km ?? 0.35),
+      cost_per_minute: Number(vehicle.kostenPerMinuutVoertuig ?? vehicle.cost_per_minute ?? 0.12),
+      fixed_cost: Number(vehicle.vasteKostenPerRoute ?? vehicle.fixed_cost ?? 8),
+    }))
+    .filter(vehicle =>
+      Number.isFinite(vehicle.start_lat) &&
+      Number.isFinite(vehicle.start_lon) &&
+      Number.isFinite(vehicle.end_lat) &&
+      Number.isFinite(vehicle.end_lon)
+    );
+}
+
 async function readJsonResponse(response) {
   const text = await response.text();
   try {
@@ -42,7 +88,7 @@ Deno.serve(async (req) => {
       base44.entities.Route.list(),
     ]);
 
-    const activeVehicles = vehicles.filter(vehicle => vehicle.is_active !== false);
+    const activeVehicles = buildRoutingVehicles(vehicles, offices, body);
 
     const payload = {
       ...body,
