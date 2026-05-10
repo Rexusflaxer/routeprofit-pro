@@ -42,11 +42,18 @@ Deno.serve(async (req) => {
       base44.entities.Route.list(),
     ]);
 
+    const activeVehicles = vehicles.filter(vehicle => vehicle.is_active !== false);
+
     const payload = {
       ...body,
       weekdays,
       source: 'base44',
       description: body.description || `${weekdays.length === 1 ? 'Dagplanning' : 'Weekplanning'} optimaliseren`,
+      tasks,
+      objects,
+      vehicles: activeVehicles,
+      offices,
+      routes,
       selection: {
         route_count_penalty_minutes: body.route_count_penalty_minutes ?? 45,
         priority_order: [
@@ -62,7 +69,7 @@ Deno.serve(async (req) => {
       data: {
         tasks,
         objects,
-        vehicles: vehicles.filter(vehicle => vehicle.is_active !== false),
+        vehicles: activeVehicles,
         offices,
         routes,
       },
