@@ -1,0 +1,63 @@
+{
+  "name": "OptimizationJob",
+  "type": "object",
+  "properties": {
+    "server_job_id": {
+      "type": "string",
+      "description": "Job-ID op de externe routingserver"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "queued",
+        "running",
+        "completed",
+        "failed"
+      ],
+      "default": "queued",
+      "description": "Huidige status van de optimalisatiejob"
+    },
+    "progress": {
+      "type": "number",
+      "default": 0,
+      "description": "Voortgang in procenten"
+    },
+    "message": {
+      "type": "string",
+      "description": "Statusmelding van de routingserver"
+    },
+    "weekdays": {
+      "type": "array",
+      "description": "Geplande weekdagen",
+      "items": {
+        "type": "number"
+      }
+    },
+    "request_payload": {
+      "type": "object",
+      "description": "Payload die naar de routingserver is gestuurd",
+      "additionalProperties": true
+    },
+    "result": {
+      "type": "object",
+      "description": "Opgehaald optimalisatieresultaat",
+      "additionalProperties": true
+    },
+    "error": {
+      "type": "string",
+      "description": "Foutmelding als de job is mislukt"
+    },
+    "started_at": {
+      "type": "string",
+      "description": "Starttijd volgens de routingserver"
+    },
+    "finished_at": {
+      "type": "string",
+      "description": "Eindtijd volgens de routingserver"
+    }
+  },
+  "required": [
+    "server_job_id",
+    "status"
+  ]
+}

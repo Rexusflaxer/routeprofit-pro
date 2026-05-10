@@ -1,10 +1,11 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Zap, CheckCircle, AlertTriangle, Info, ChevronDown, ChevronRight, Save, Clock, MapPin, Car, X, Bug, Activity } from "lucide-react";
+import OptimizationJobCard from "./OptimizationJobCard";
 
 const WEEKDAY_LABELS = { 1:"Maandag",2:"Dinsdag",3:"Woensdag",4:"Donderdag",5:"Vrijdag",6:"Zaterdag",7:"Zondag" };
 
@@ -34,25 +35,78 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   const [showDebug, setShowDebug] = useState(false);
   const [planningDays, setPlanningDays] = useState(ALL_WEEKDAYS);
   const [selectedDay, setSelectedDay] = useState("1");
+  const [currentJob, setCurrentJob] = useState(null);
+  const [refreshingJob, setRefreshingJob] = useState(false);
+
+  const refreshJobStatus = async (job = currentJob) => {
+    if (!job?.job_id && !job?.server_job_id) return null;
+
+    setRefreshingJob(true);
+    try {
+      const res = await base44.functions.invoke('getOptimizationJobStatus', {
+        job_id: job.job_id || job.server_job_id,
+      });
+      const updatedJob = { ...job, ...res.data };
+      setCurrentJob(updatedJob);
+      return updatedJob;
+    } catch (e) {
+      setError(e?.response?.data?.error || e.message || 'Status ophalen mislukt');
+      return null;
+    } finally {
+      setRefreshingJob(false);
+    }
+  };
+
+  const loadJobResult = async (job = currentJob) => {
+    if (!job?.job_id && !job?.server_job_id) return;
+
+    setLoading(true);
+    setError(null);
+    try {
+      const res = await base44.functions.invoke('getOptimizationJobResult', {
+        job_id: job.job_id || job.server_job_id,
+      });
+      setResult(res.data);
+      setCurrentJob(prev => prev ? { ...prev, status: 'completed', progress: 100, message: 'Resultaat opgehaald' } : prev);
+    } catch (e) {
+      setError(e?.response?.data?.error || e.message || 'Resultaat ophalen mislukt');
+    } finally {
+      setLoading(false);
+    }
+  };
 
   const runOptimizer = async (days = ALL_WEEKDAYS) => {
     setPlanningDays(days);
     setLoading(true);
     setError(null);
     setResult(null);
+    setCurrentJob(null);
     try {
-      const res = await base44.functions.invoke('optimaliseerSurveillance', {
+      const res = await base44.functions.invoke('startOptimizationJob', {
         weekdays: days,
         save_routes: false,
       });
-      setResult(res.data);
+      setCurrentJob(res.data);
     } catch (e) {
-      setError(e?.response?.data?.error || e.message || 'Optimalisatie mislukt');
-      if (e?.response?.data?.result) setResult(e.response.data.result);
+      setError(e?.response?.data?.error || e.message || 'Optimalisatiejob starten mislukt');
     } finally {
       setLoading(false);
     }
   };
+
+  useEffect(() => {
+    if (!currentJob || ['completed', 'failed'].includes(currentJob.status)) return;
+
+    const timer = setInterval(() => {
+      refreshJobStatus(currentJob).then((updatedJob) => {
+        if (updatedJob?.status === 'completed') {
+          loadJobResult(updatedJob);
+        }
+      });
+    }, 5000);
+
+    return () => clearInterval(timer);
+  }, [currentJob?.job_id, currentJob?.server_job_id, currentJob?.status]);
 
   const saveRoutes = async () => {
     setSaving(true);
@@ -88,7 +142,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
           </Button>
         </div>
         <p className="text-xs text-blue-700">
-          De eigen routing server plant de taken direct op basis van tijdvensters, locaties, beschikbare voertuigen en de laagste totale dienstduur.
+          De routingserver rekent nu als achtergrondjob door. Je kunt de app later opnieuw openen en het resultaat ophalen zodra de job klaar is.
         </p>
       </CardHeader>
 
@@ -96,7 +150,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => runOptimizer(ALL_WEEKDAYS)} disabled={loading} className="bg-blue-700 hover:bg-blue-800 text-white">
             <Zap className="w-4 h-4 mr-1.5" />
-            {loading ? 'Serverplanning maken...' : 'Alle dagen plannen met server'}
+            {loading ? 'Job starten...' : 'Weekplanning als achtergrondjob starten'}
           </Button>
           <div className="flex items-center gap-2">
             <Select value={selectedDay} onValueChange={setSelectedDay} disabled={loading}>
@@ -111,7 +165,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
             </Select>
             <Button onClick={() => runOptimizer([Number(selectedDay)])} disabled={loading} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50">
               <Zap className="w-4 h-4 mr-1.5" />
-              Gekozen dag plannen
+              Dag als job starten
             </Button>
           </div>
 
@@ -132,10 +186,19 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
           <div className="flex items-center gap-3 p-4 bg-white rounded-xl border border-blue-100">
             <div className="w-5 h-5 border-2 border-blue-400 border-t-blue-700 rounded-full animate-spin flex-shrink-0" />
             <div>
-              <p className="text-sm font-medium text-slate-800">Planning wordt automatisch berekend...</p>
-              <p className="text-xs text-slate-500">Taakvensters, natuurlijke horizons, reistijden, voertuigbezetting en volgorde worden doorgerekend.</p>
+              <p className="text-sm font-medium text-slate-800">Bezig...</p>
+              <p className="text-xs text-slate-500">De optimalisatiejob wordt gestart of het resultaat wordt opgehaald.</p>
             </div>
           </div>
+        )}
+
+        {currentJob && (
+          <OptimizationJobCard
+            job={currentJob}
+            refreshing={refreshingJob}
+            onRefresh={() => refreshJobStatus(currentJob)}
+            onLoadResult={() => loadJobResult(currentJob)}
+          />
         )}
 
         {error && (
