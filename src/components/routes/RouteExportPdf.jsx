@@ -48,15 +48,16 @@ function getRouteClockMinutes(time, routeStartTime) {
 function getWaitBeforeStop(stops, item, index, routeStartTime) {
   if (!item || item.is_start || item.is_end || item.is_alarm_standby) return null;
   const previousItem = stops[index - 1];
-  if (!previousItem || previousItem.is_start || !item.actual_start_time) return null;
+  const startTime = item.actual_start_time || item.arrival_time;
+  if (!previousItem || previousItem.is_start || !startTime) return null;
 
   const previousDeparture = getRouteClockMinutes(previousItem.departure_time || previousItem.actual_start_time || previousItem.arrival_time, routeStartTime);
   const travelMinutes = Number(previousItem.travel_to_next_minutes || item.travel_time_minutes || 0);
   const arrival = previousDeparture + travelMinutes;
-  const start = getRouteClockMinutes(item.actual_start_time, routeStartTime);
+  const start = getRouteClockMinutes(startTime, routeStartTime);
   const minutes = Math.max(0, Math.round(start - arrival));
 
-  return minutes > 0 ? { minutes, start: formatClockMinutes(arrival), end: item.actual_start_time } : null;
+  return minutes > 0 ? { minutes, start: formatClockMinutes(arrival), end: startTime } : null;
 }
 
 export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
@@ -243,7 +244,7 @@ export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
         // Vrije tijd / wachttijd indicator
         const waitBeforeStop = getWaitBeforeStop(stops, item, itemIndex, routeStartTime);
         const directWaitingTime = Number(item.waiting_time || 0) > 0
-          ? { minutes: Number(item.waiting_time), start: item.arrival_time, end: item.actual_start_time }
+          ? { minutes: Number(item.waiting_time), start: item.arrival_time, end: item.actual_start_time || item.arrival_time }
           : null;
         const freeTime = waitBeforeStop || directWaitingTime;
 
