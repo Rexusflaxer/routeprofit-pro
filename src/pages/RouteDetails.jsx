@@ -248,7 +248,7 @@ export default function RouteDetails() {
   const getLocation = (id) => objects.find(o => o.id === id) || offices.find(o => o.id === id);
 
   const buildVisibleOptimizedOrder = () => {
-    const lockedTaskIds = new Set((route.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
+    const lockedTaskIds = new Set(((route?.assigned_tasks) || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
     const existingOrder = (optimizedRoute?.optimized_order || []).map(item => ({
       ...item,
       locked_to_route: !!item.locked_to_route || lockedTaskIds.has(String(item.task_id || '')),
