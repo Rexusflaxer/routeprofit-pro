@@ -15,6 +15,42 @@ function taskLabel(task, objects, collectiefs) {
   return target?.name || task.task_type || "Taak";
 }
 
+function parseMinutes(time) {
+  if (!time) return null;
+  const [hours, minutes = 0] = String(time).split(':').map(Number);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return hours * 60 + minutes;
+}
+
+function nextWeekday(day) {
+  return Number(day) === 7 ? 1 : Number(day) + 1;
+}
+
+function overlaps(aStart, aEnd, bStart, bEnd) {
+  return aStart < bEnd && aEnd > bStart;
+}
+
+function taskMatchesRouteWindow(task, form) {
+  const routeDays = form.weekdays || [];
+  const routeStart = parseMinutes(form.time_window_start);
+  const routeEndRaw = parseMinutes(form.time_window_end);
+  if (!routeDays.length || routeStart === null || routeEndRaw === null) return false;
+
+  const taskStart = parseMinutes(task.use_arrival_deadline ? (task.arrival_deadline_time || task.time_window_start) : task.time_window_start);
+  const taskEndRaw = parseMinutes(task.latest_departure_time || task.time_window_end || task.arrival_deadline_time);
+  if (taskStart === null || taskEndRaw === null) return false;
+
+  const taskEnd = taskEndRaw <= taskStart ? taskEndRaw + 1440 : taskEndRaw;
+  const taskDays = task.weekdays || [];
+
+  return routeDays.some(day => {
+    const crossesMidnight = routeEndRaw <= routeStart;
+    const sameDayMatch = taskDays.includes(day) && overlaps(taskStart, taskEnd, routeStart, crossesMidnight ? 1440 : routeEndRaw);
+    const nextDayMatch = crossesMidnight && taskDays.includes(nextWeekday(day)) && overlaps(taskStart, taskEnd, 0, routeEndRaw);
+    return sameDayMatch || nextDayMatch;
+  });
+}
+
 export default function RoutePinnedTasksSelector({ form, onChange }) {
   const [query, setQuery] = useState("");
 
@@ -23,18 +59,22 @@ export default function RoutePinnedTasksSelector({ form, onChange }) {
   const { data: collectiefs = [] } = useQuery({ queryKey: ["collectiefs"], queryFn: () => base44.entities.Collectief.list() });
 
   const assignedTasks = form.assigned_tasks || [];
-  const pinnedItems = assignedTasks.filter(item => item.locked_to_route);
+  const routeRelevantTasks = useMemo(() => (
+    tasks.filter(task => taskMatchesRouteWindow(task, form))
+  ), [tasks, form.weekdays, form.time_window_start, form.time_window_end]);
+  const routeRelevantTaskIds = new Set(routeRelevantTasks.map(task => String(task.id)));
+  const pinnedItems = assignedTasks.filter(item => item.locked_to_route && routeRelevantTaskIds.has(String(item.task_id)));
   const pinnedIds = new Set(pinnedItems.map(item => String(item.task_id)));
 
   const filteredTasks = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
-    if (!normalizedQuery) return tasks.slice(0, 8);
+    if (!normalizedQuery) return routeRelevantTasks.slice(0, 8);
 
-    return tasks.filter(task => {
+    return routeRelevantTasks.filter(task => {
       const label = taskLabel(task, objects, collectiefs).toLowerCase();
       return label.includes(normalizedQuery) || String(task.task_type || "").toLowerCase().includes(normalizedQuery);
     }).slice(0, 12);
-  }, [tasks, objects, collectiefs, query]);
+  }, [routeRelevantTasks, objects, collectiefs, query]);
 
   const updateAssignedTask = (taskId, patch) => {
     const id = String(taskId);
@@ -101,7 +141,7 @@ export default function RoutePinnedTasksSelector({ form, onChange }) {
               </button>
             );
           })}
-          {filteredTasks.length === 0 && <p className="px-3 py-3 text-sm text-slate-500">Geen taken gevonden</p>}
+          {filteredTasks.length === 0 && <p className="px-3 py-3 text-sm text-slate-500">Geen taken binnen deze routedag en dit tijdsvenster gevonden</p>}
         </div>
       )}
 
@@ -137,7 +177,7 @@ export default function RoutePinnedTasksSelector({ form, onChange }) {
             </div>
           );
         })}
-        {pinnedItems.length === 0 && <p className="text-xs text-slate-400 italic">Nog geen vastgezette taken gekozen.</p>}
+        {pinnedItems.length === 0 && <p className="text-xs text-slate-400 italic">Nog geen vastgezette taken binnen deze routedag en dit tijdsvenster gekozen.</p>}
       </div>
     </div>
   );
