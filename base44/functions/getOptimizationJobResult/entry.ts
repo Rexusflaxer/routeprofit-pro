@@ -64,8 +64,16 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
       const taskId = step.original_task_id || step.task_id;
       const sourceTask = taskId ? (taskById.get(String(taskId)) || {}) : {};
       const object = objectById.get(String(sourceTask.object_id || step.object_id || '')) || {};
+      const usesDeadline = !!step.uses_arrival_deadline || !!step.use_arrival_deadline || !!sourceTask.use_arrival_deadline;
       const arrivalSeconds = Number(step.arrival_seconds || 0);
       const serviceSeconds = Number(step.service_seconds || sourceTask.duration_minutes * 60 || 0);
+      const serviceStartFromText = step.fixed_service_start_time || step.service_start_time;
+      const serviceStartSeconds = usesDeadline
+        ? Number(step.fixed_service_start_seconds ?? step.service_start_seconds ?? (serviceStartFromText ? Number(String(serviceStartFromText).split(':')[0] || 0) * 3600 + Number(String(serviceStartFromText).split(':')[1] || 0) * 60 : arrivalSeconds))
+        : arrivalSeconds;
+      const serviceEndSeconds = usesDeadline
+        ? Number(step.service_end_seconds ?? (serviceStartSeconds + serviceSeconds))
+        : arrivalSeconds + serviceSeconds;
 
       return {
         task_id: taskId ? String(taskId) : '',
@@ -74,12 +82,17 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
         name: step.name || object.name || sourceTask.task_type || 'Taak',
         address: object.address || step.address || '',
         duration_minutes: Math.round(serviceSeconds / 60),
-        time_window_start: sourceTask.time_window_start || '',
-        time_window_end: sourceTask.time_window_end || '',
+        time_window_start: usesDeadline ? formatSeconds(serviceStartSeconds) : (sourceTask.time_window_start || ''),
+        time_window_end: usesDeadline ? formatSeconds(serviceEndSeconds) : (sourceTask.time_window_end || ''),
         task_type: sourceTask.task_type,
+        uses_arrival_deadline: usesDeadline,
+        arrival_deadline_time: sourceTask.arrival_deadline_time || step.arrival_deadline_time || step.fixed_service_start_time || step.service_start_time || '',
         arrival_time: formatSeconds(arrivalSeconds),
-        actual_start_time: formatSeconds(arrivalSeconds),
-        departure_time: formatSeconds(arrivalSeconds + serviceSeconds),
+        actual_start_time: formatSeconds(serviceStartSeconds),
+        departure_time: formatSeconds(serviceEndSeconds),
+        planned_arrival_time: usesDeadline ? formatSeconds(serviceStartSeconds) : formatSeconds(arrivalSeconds),
+        planned_start_time: formatSeconds(serviceStartSeconds),
+        planned_departure_time: formatSeconds(serviceEndSeconds),
         travel_time_minutes: Number(step.travel_from_previous_minutes ?? step.travel_time_minutes ?? Math.round(Number(step.travel_from_previous_seconds || step.travel_seconds || 0) / 60)),
         distance_km: Number(step.distance_from_previous_km ?? step.distance_km ?? 0),
         waiting_time: Number(step.waiting_minutes || 0),

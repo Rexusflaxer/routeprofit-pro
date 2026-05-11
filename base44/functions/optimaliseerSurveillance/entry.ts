@@ -380,10 +380,14 @@ function normalizeDeadlineWindowForVehicles(deadlineSeconds, serviceSeconds, veh
       if (latestDeparture <= deadline) latestDeparture += 86400;
       if (latestDeparture < deadline + serviceSeconds) latestDeparture = deadline + serviceSeconds;
 
+      const serviceEnd = deadline + serviceSeconds;
+
       return {
         start: deadline,
-        end: deadline,
+        end: serviceEnd,
         deadline,
+        serviceStart: deadline,
+        serviceEnd,
         latestDeparture,
         overlap: vehicles.reduce((sum, vehicle) => {
           const overlap = Math.min(latestDeparture, vehicle.shift_end) - Math.max(deadline, vehicle.shift_start);
@@ -528,18 +532,34 @@ function buildTasksForDay(day, tasks, objects, vehicles, options = {}) {
           !!task.complete_before_window_end ||
           !!task.must_finish_within_window;
 
+        const serviceStartSeconds = usesArrivalDeadline ? normalizedWindow.serviceStart : splitStart;
+        const serviceEndSeconds = serviceStartSeconds + serviceSeconds;
+
         optimizerTasks.push({
           id: numericId++,
           name: `${object.name || task.task_type || 'Taak'}${repeatLabel}${splitLabel}`,
           lon: object.longitude,
           lat: object.latitude,
+          original_task_id: task.id,
+          calendar_weekday: occurrence?.occurrenceWeekday || day,
           service_seconds: serviceSeconds,
-          window_start: splitStart,
-          window_end: splitEnd,
+          duration_minutes: Math.round(serviceSeconds / 60),
+          window_start: usesArrivalDeadline ? serviceStartSeconds : splitStart,
+          window_end: usesArrivalDeadline ? serviceEndSeconds : splitEnd,
           priority: usesArrivalDeadline ? 1000000 : 500000,
           skills: [1],
 
-          // Deze velden kan de Python API later expliciet gebruiken.
+          // Deze velden kan de Python API expliciet gebruiken voor arrival-deadline taken.
+          use_arrival_deadline: usesArrivalDeadline,
+          uses_arrival_deadline: usesArrivalDeadline,
+          arrival_deadline_time: inferredDeadline || '',
+          service_start_time: usesArrivalDeadline ? formatSeconds(serviceStartSeconds) : undefined,
+          fixed_service_start_time: usesArrivalDeadline ? formatSeconds(serviceStartSeconds) : undefined,
+          fixed_service_start_seconds: usesArrivalDeadline ? serviceStartSeconds : undefined,
+          service_start_seconds: usesArrivalDeadline ? serviceStartSeconds : undefined,
+          service_end_time: usesArrivalDeadline ? formatSeconds(serviceEndSeconds) : undefined,
+          service_end_seconds: usesArrivalDeadline ? serviceEndSeconds : undefined,
+
           required: task.required !== false,
           complete_before_window_end: completeBeforeWindowEnd,
           cost_weight: Number(task.cost_weight || 1),
@@ -555,6 +575,8 @@ function buildTasksForDay(day, tasks, objects, vehicles, options = {}) {
           _usesArrivalDeadline: usesArrivalDeadline,
           _arrivalDeadlineTime: inferredDeadline || '',
           _latestDepartureSeconds: usesArrivalDeadline ? normalizedWindow.latestDeparture : null,
+          _serviceStartSeconds: usesArrivalDeadline ? serviceStartSeconds : null,
+          _serviceEndSeconds: usesArrivalDeadline ? serviceEndSeconds : null,
           _serviceDay: day,
           _occurrenceWeekday: occurrence?.occurrenceWeekday || day,
           _occurrenceOffset: occurrenceOffset,
@@ -658,7 +680,9 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
   const routes = (serverResult.routes || [])
     .map((route, routeIndex) => {
       const vehicle = vehicles.find(item => item.id === route.vehicle_id) || vehicles[routeIndex] || {};
-      const taskSteps = (route.steps || []).filter(step => step.type === 'task');
+      const taskSteps = Array.isArray(route.steps)
+        ? route.steps.filter(step => step.type === 'task')
+        : (route.tasks || []);
 
       // Extra automatische route zonder taken niet tonen en niet laten meetellen.
       if (vehicle._isExtraRoute && taskSteps.length === 0) {
@@ -676,14 +700,16 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         const previousStep = taskSteps[stepIndex - 1];
         const previousSource = previousStep ? (taskById.get(previousStep.task_id) || {}) : null;
 
+        const usesDeadline = !!step.uses_arrival_deadline || !!step.use_arrival_deadline || !!source._usesArrivalDeadline;
         const arrivalSeconds = Number(step.arrival_seconds || 0);
         const serviceSeconds = Number(step.service_seconds || source.service_seconds || 0);
-
-        const serviceStartSeconds = source._usesArrivalDeadline
-          ? Math.max(arrivalSeconds, Number(source.window_start || arrivalSeconds))
+        const serviceStartFromText = step.fixed_service_start_time || step.service_start_time;
+        const serviceStartSeconds = usesDeadline
+          ? Number(step.fixed_service_start_seconds ?? step.service_start_seconds ?? (serviceStartFromText ? parseTimeToSeconds(serviceStartFromText, Number(source._serviceStartSeconds || source.window_start || arrivalSeconds)) + Number(source._occurrenceOffset || 0) : Number(source._serviceStartSeconds || source.window_start || arrivalSeconds)))
           : arrivalSeconds;
-
-        const departureSeconds = serviceStartSeconds + serviceSeconds;
+        const departureSeconds = usesDeadline
+          ? Number(step.service_end_seconds ?? (serviceStartSeconds + serviceSeconds))
+          : serviceStartSeconds + serviceSeconds;
 
         const previousArrival = previousStep ? Number(previousStep.arrival_seconds || 0) : null;
         const previousService = previousStep ? Number(previousStep.service_seconds || previousSource?.service_seconds || 0) : 0;
@@ -704,7 +730,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
           : Math.max(0, arrivalSeconds - (vehicle.shift_start || 0) - travelSeconds);
 
         const deadlineWaitingSeconds = Math.max(0, serviceStartSeconds - arrivalSeconds);
-        const waitingSeconds = source._usesArrivalDeadline ? deadlineWaitingSeconds : travelWaitingSeconds;
+        const waitingSeconds = usesDeadline ? deadlineWaitingSeconds : travelWaitingSeconds;
 
         return {
           task_id: originalTaskId,
@@ -715,12 +741,12 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
           address: source._object?.address || '',
           duration_minutes: Math.round(serviceSeconds / 60),
 
-          time_window_start: source._usesArrivalDeadline
-            ? (source._task?.time_window_start || formatSeconds(source.window_start || 0))
+          time_window_start: usesDeadline
+            ? formatSeconds(serviceStartSeconds)
             : formatSeconds(source.window_start || 0),
 
-          time_window_end: source._usesArrivalDeadline
-            ? (source._task?.latest_departure_time || source._task?.time_window_end || formatSeconds(source._latestDepartureSeconds || source.window_start || 0))
+          time_window_end: usesDeadline
+            ? formatSeconds(departureSeconds)
             : formatSeconds(source.window_end || 86340),
 
           task_type: source._task?.task_type,
@@ -729,8 +755,8 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
           split_index: source._splitIndex,
           split_part_count: source._splitCount,
           is_split_part: (source._splitCount || 1) > 1,
-          uses_arrival_deadline: source._usesArrivalDeadline,
-          arrival_deadline_time: source._arrivalDeadlineTime,
+          uses_arrival_deadline: usesDeadline,
+          arrival_deadline_time: source._arrivalDeadlineTime || step.arrival_deadline_time || step.fixed_service_start_time || step.service_start_time || '',
           service_day: source._serviceDay,
           occurrence_weekday: source._occurrenceWeekday,
           occurrence_reason: source._occurrenceReason,
@@ -738,6 +764,9 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
           arrival_time: formatSeconds(arrivalSeconds),
           actual_start_time: formatSeconds(serviceStartSeconds),
           departure_time: formatSeconds(departureSeconds),
+          planned_arrival_time: usesDeadline ? formatSeconds(serviceStartSeconds) : formatSeconds(arrivalSeconds),
+          planned_start_time: formatSeconds(serviceStartSeconds),
+          planned_departure_time: formatSeconds(departureSeconds),
 
           travel_time_minutes: Math.round(travelSeconds / 60),
           distance_km: previousStep
@@ -1158,14 +1187,16 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
     const routesToUse = (plannedResult.routes || []).filter(route => {
       const steps = Array.isArray(route.steps)
         ? route.steps.filter(step => step.type === 'task')
-        : [];
+        : (route.tasks || []);
       return steps.length > 0;
     });
 
     for (let index = 0; index < routesToUse.length; index++) {
       const route = routesToUse[index];
       const vehicleId = route.physical_vehicle_id || route.vehicle_id || route.vehicle?.id || null;
-      const taskSteps = (route.steps || []).filter(step => step.type === 'task');
+      const taskSteps = Array.isArray(route.steps)
+        ? route.steps.filter(step => step.type === 'task')
+        : (route.tasks || []);
       const existingRoutes = route.manual_route_id
         ? await base44.asServiceRole.entities.Route.filter({ id: route.manual_route_id })
         : [];
@@ -1175,18 +1206,26 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
         const taskId = step.original_task_id || step.task_id;
         if (!taskId) return null;
 
+        const usesDeadline = !!step.uses_arrival_deadline || !!step.use_arrival_deadline;
         const arrival = Number(step.arrival_seconds || 0);
-        const service = Number(step.service_seconds || 0);
+        const service = Number(step.service_seconds || (Number(step.duration_minutes || 0) * 60));
+        const serviceStartFromText = step.fixed_service_start_time || step.service_start_time || step.planned_start_time;
+        const serviceStart = usesDeadline
+          ? Number(step.fixed_service_start_seconds ?? step.service_start_seconds ?? (serviceStartFromText ? parseTimeToSeconds(serviceStartFromText, arrival) : arrival))
+          : arrival;
+        const serviceEnd = usesDeadline
+          ? Number(step.service_end_seconds ?? (serviceStart + service))
+          : serviceStart + service;
 
         return {
           task_id: String(taskId),
-          days: [Number(step.calendar_weekday || selectedWeekday)],
+          days: [Number(step.calendar_weekday || step.occurrence_weekday || selectedWeekday)],
           sequence_index: taskIndex,
           locked_to_route: existingPinnedTaskIds.has(String(taskId)),
           locked_sequence: false,
-          planned_arrival_time: formatSeconds(arrival),
-          planned_start_time: formatSeconds(arrival),
-          planned_departure_time: formatSeconds(arrival + service),
+          planned_arrival_time: usesDeadline ? formatSeconds(serviceStart) : formatSeconds(arrival),
+          planned_start_time: formatSeconds(serviceStart),
+          planned_departure_time: formatSeconds(serviceEnd),
         };
       }).filter(Boolean);
 
@@ -1198,7 +1237,7 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
         time_window_start: formatSeconds(route.shift_start || 0),
         time_window_end: formatSeconds(route.end_time_seconds || route.shift_end || 0),
         assigned_tasks: assignedTasks,
-        total_service_minutes: Math.round(taskSteps.reduce((sum, step) => sum + Number(step.service_seconds || 0), 0) / 60),
+        total_service_minutes: Math.round(taskSteps.reduce((sum, step) => sum + Number(step.service_seconds || (Number(step.duration_minutes || 0) * 60)), 0) / 60),
         total_distance_km: Number(route.total_distance_km || 0),
         total_route_minutes: Math.max(0, Math.round((Number(route.end_time_seconds || route.shift_end || 0) - Number(route.shift_start || 0)) / 60)),
         status: 'geoptimaliseerd',
