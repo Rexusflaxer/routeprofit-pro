@@ -429,7 +429,10 @@ export default function RouteDetails() {
             </Button>
           </Link>
           <div>
-            <h1 className="text-2xl font-bold text-slate-900">{route.name}</h1>
+            <div className="flex items-center gap-2 flex-wrap">
+              <h1 className="text-2xl font-bold text-slate-900">{route.name}</h1>
+              {route.closed_to_extra_tasks && <Badge className="bg-slate-900 text-white">Gesloten route</Badge>}
+            </div>
             {folder && <p className="text-sm text-slate-500">{folder.name}</p>}
           </div>
         </div>
@@ -555,6 +558,11 @@ export default function RouteDetails() {
                         {route.time_window_start} - {route.time_window_end}
                       </span>
                     </div>
+                    {route.closed_to_extra_tasks && (
+                      <div className="flex items-center gap-2">
+                        <Badge className="bg-slate-900 text-white">Alleen vastgezette taken</Badge>
+                      </div>
+                    )}
                     {vehicle && (
                       <div className="flex items-center gap-2">
                         <RouteIcon className="w-4 h-4 text-slate-500" />
@@ -629,6 +637,7 @@ export default function RouteDetails() {
                       const obj = task.collectief_id
                         ? collectiefs.find(c => c.id === task.collectief_id)
                         : objects.find(o => o.id === task.object_id);
+                      const assignment = (route.assigned_tasks || []).find(item => String(item.task_id) === String(task.id));
                       return (
                         <div key={task.id} className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
                           <MapPin className="w-5 h-5 text-slate-500 mt-0.5" />
@@ -647,6 +656,9 @@ export default function RouteDetails() {
                                 <Euro className="w-3 h-3 mr-1" />
                                 €{task.pricing_type === 'per_minuut' ? task.price_amount : (task.price_amount / task.duration_minutes).toFixed(2)}/min
                               </Badge>
+                              {assignment?.locked_to_route && (
+                                <Badge className="text-xs bg-slate-900 text-white">Vastgezet in route</Badge>
+                              )}
                             </div>
                           </div>
                           <Button
@@ -710,6 +722,9 @@ export default function RouteDetails() {
                 </div>
               ) : optimizedRoute ? (
                 <div className="space-y-4">
+                  {route.closed_to_extra_tasks && (
+                    <Badge className="bg-slate-900 text-white">Gesloten route</Badge>
+                  )}
                   <div className={`grid grid-cols-2 ${optimizedRoute.alarm_standby ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-4 p-4 bg-blue-50 rounded-lg`}>
                       <div>
                         <p className="text-xs text-slate-600 mb-1">Totale diensttijd</p>

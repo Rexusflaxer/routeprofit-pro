@@ -46,13 +46,16 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
   const sourceTasks = requestPayload.tasks || requestPayload.data?.tasks || [];
   const sourceObjects = requestPayload.objects || requestPayload.data?.objects || [];
   const sourceVehicles = requestPayload.vehicles || requestPayload.data?.vehicles || [];
+  const sourceRoutes = requestPayload.routes || requestPayload.data?.routes || [];
 
   const taskById = new Map(sourceTasks.map(task => [String(task.id), task]));
   const objectById = new Map(sourceObjects.map(object => [String(object.id), object]));
   const vehicleById = new Map(sourceVehicles.map(vehicle => [String(vehicle.id), vehicle]));
+  const routeById = new Map(sourceRoutes.map(route => [String(route.id), route]));
 
   const routes = routesToUse.map((route, routeIndex) => {
     const taskSteps = route.steps.filter(step => step.type === 'task');
+    const sourceRoute = route.manual_route_id ? routeById.get(String(route.manual_route_id)) : null;
     const vehicleId = route.physical_vehicle_id || route.vehicle_id || route.vehicle?.id || null;
     const vehicle = vehicleId ? vehicleById.get(String(vehicleId)) : null;
     const routeName = route.manual_route_name || route.vehicle_name || route.license_plate || 'Route';
@@ -122,6 +125,7 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
       weekday: Number(route.weekday || serverResult?.display_weekday || requestPayload.display_weekday || requestPayload.weekday || 1),
       time_window_start: formatSeconds(shiftStart),
       time_window_end: formatSeconds(routeEnd),
+      closed_to_extra_tasks: !!route.closed_to_extra_tasks || !!sourceRoute?.closed_to_extra_tasks,
       validation: { valid: true, errors: [] },
       tasks,
       stats: {

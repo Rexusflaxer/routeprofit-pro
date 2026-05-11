@@ -48,6 +48,7 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
     overhead_cost_ids: [],
     binnendienst_personnel_ids: [],
     assigned_tasks: [],
+    closed_to_extra_tasks: false,
   });
 
   // Auto-set folder_id to first available folder when folders load
@@ -347,6 +348,23 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
                 Vrije tijd tussen stops én resterende tijd na de route worden meegeteld als alarmdienst. 
                 De dienst loopt door tot het einde van het tijdsvenster ({form.time_window_end || "–"}). 
                 Dit wordt meegenomen in de kostenbepaling.
+              </p>
+            </div>
+          </div>
+
+          <div className="flex items-start gap-3 p-4 rounded-lg border border-slate-200 bg-slate-50">
+            <Checkbox
+              id="closed_to_extra_tasks"
+              checked={!!form.closed_to_extra_tasks}
+              onCheckedChange={(v) => handleChange("closed_to_extra_tasks", !!v)}
+              className="mt-0.5"
+            />
+            <div>
+              <label htmlFor="closed_to_extra_tasks" className="text-sm font-semibold text-slate-900 cursor-pointer">
+                Route sluiten voor extra taken
+              </label>
+              <p className="text-xs text-slate-500 mt-0.5">
+                Als dit aan staat mag de optimizer alleen vastgezette taken in deze route houden en geen extra taken toevoegen.
               </p>
             </div>
           </div>

@@ -63,7 +63,19 @@ function makeRoutingVehicle({ id, vehicle, route, startDepot, endDepot, shiftSta
     source_vehicle_id: vehicle.id,
     manual_route_id: route?.id || null,
     manual_route_name: route?.name || null,
-    assigned_tasks: route?.assigned_tasks || [],
+    assigned_tasks: route?.closed_to_extra_tasks
+      ? (route?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => ({
+          ...item,
+          task_id: String(item.task_id),
+          locked_to_route: true,
+          locked_sequence: !!item.locked_sequence,
+          sequence_index: item.locked_sequence ? item.sequence_index ?? null : null,
+        }))
+      : (route?.assigned_tasks || []),
+    closed_to_extra_tasks: !!route?.closed_to_extra_tasks,
+    allowed_task_ids: route?.closed_to_extra_tasks
+      ? (route?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id))
+      : undefined,
     name: route?.name || vehicle.license_plate || vehicle.name || 'Voertuig',
     license_plate: vehicle.license_plate,
     shift_start: shiftStart,
@@ -206,7 +218,19 @@ Deno.serve(async (req) => {
       objects,
       vehicles,
       offices,
-      routes,
+      routes: routes.map(route => ({
+        ...route,
+        closed_to_extra_tasks: !!route.closed_to_extra_tasks,
+        assigned_tasks: route.closed_to_extra_tasks
+          ? (route.assigned_tasks || []).filter(item => item.locked_to_route).map(item => ({
+              task_id: String(item.task_id),
+              locked_to_route: true,
+              locked_sequence: !!item.locked_sequence,
+              sequence_index: item.locked_sequence ? item.sequence_index ?? null : null,
+              days: item.days || [],
+            }))
+          : (route.assigned_tasks || []),
+      })),
     };
 
     const response = await fetch(`${routingBaseUrl()}/optimization-jobs`, {

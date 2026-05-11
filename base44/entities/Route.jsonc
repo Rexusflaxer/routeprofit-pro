@@ -62,6 +62,11 @@
         ]
       }
     },
+    "closed_to_extra_tasks": {
+      "type": "boolean",
+      "default": false,
+      "description": "Optimizer mag geen extra taken aan deze handmatige route toevoegen"
+    },
     "start_location_id": {
       "type": "string",
       "description": "ID van het startobject/depot"

@@ -84,7 +84,7 @@ export default function RoutePinnedTasksSelector({ form, onChange }) {
       : [
           ...assignedTasks,
           {
-            task_id: id,
+            task_id: String(id),
             days: form.weekdays || [],
             locked_to_route: true,
             locked_sequence: false,

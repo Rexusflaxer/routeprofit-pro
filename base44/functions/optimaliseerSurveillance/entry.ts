@@ -327,7 +327,19 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices, options = 
       shift_start: shiftStart,
       shift_end: shiftEnd,
       skills: [1],
-      assigned_tasks: route?.assigned_tasks || [],
+      assigned_tasks: route?.closed_to_extra_tasks
+        ? (route?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => ({
+            ...item,
+            task_id: String(item.task_id),
+            locked_to_route: true,
+            locked_sequence: !!item.locked_sequence,
+            sequence_index: item.locked_sequence ? item.sequence_index ?? null : null,
+          }))
+        : (route?.assigned_tasks || []),
+      closed_to_extra_tasks: !!route?.closed_to_extra_tasks,
+      allowed_task_ids: route?.closed_to_extra_tasks
+        ? (route?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id))
+        : undefined,
       ...getVehicleCostProfile(vehicle),
       _vehicle: vehicle,
       _manualRoute: route,
@@ -680,16 +692,19 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
   const routes = (serverResult.routes || [])
     .map((route, routeIndex) => {
       const vehicle = vehicles.find(item => item.id === route.vehicle_id) || vehicles[routeIndex] || {};
-      const taskSteps = Array.isArray(route.steps)
+      const rawTaskSteps = Array.isArray(route.steps)
         ? route.steps.filter(step => step.type === 'task')
         : (route.tasks || []);
+      const lockedTaskIds = new Set((vehicle.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
+      const closedToExtraTasks = !!vehicle.closed_to_extra_tasks;
+      const taskSteps = closedToExtraTasks
+        ? rawTaskSteps.filter(step => lockedTaskIds.has(String((taskById.get(step.task_id) || {})._originalTaskId || step.original_task_id || step.task_id)))
+        : rawTaskSteps;
 
       // Extra automatische route zonder taken niet tonen en niet laten meetellen.
       if (vehicle._isExtraRoute && taskSteps.length === 0) {
         return null;
       }
-
-      const lockedTaskIds = new Set((vehicle.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
 
       const routeTasks = taskSteps.map((step, stepIndex) => {
         const source = taskById.get(step.task_id) || {};
@@ -877,6 +892,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         time_window_end: formatSeconds(actualRouteEndSeconds),
         flexible_end_time: !!vehicle._manualRoute?.flexible_end_time || !!vehicle._isExtraRoute,
         max_route_minutes: vehicle._manualRoute?.max_route_minutes || null,
+        closed_to_extra_tasks: closedToExtraTasks,
         route_cost: routeCost,
         validation: { valid: true, errors: [] },
         tasks: routeTasks,
@@ -1200,7 +1216,8 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
       const existingRoutes = route.manual_route_id
         ? await base44.asServiceRole.entities.Route.filter({ id: route.manual_route_id })
         : [];
-      const existingPinnedTaskIds = new Set((existingRoutes[0]?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
+      const existingRoute = existingRoutes[0] || null;
+      const existingPinnedTaskIds = new Set((existingRoute?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
 
       const assignedTasks = taskSteps.map((step, taskIndex) => {
         const taskId = step.original_task_id || step.task_id;
@@ -1220,7 +1237,7 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
         return {
           task_id: String(taskId),
           days: [Number(step.calendar_weekday || step.occurrence_weekday || selectedWeekday)],
-          sequence_index: taskIndex,
+          sequence_index: existingPinnedTaskIds.has(String(taskId)) ? null : taskIndex,
           locked_to_route: existingPinnedTaskIds.has(String(taskId)),
           locked_sequence: false,
           planned_arrival_time: usesDeadline ? formatSeconds(serviceStart) : formatSeconds(arrival),
@@ -1242,6 +1259,7 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
         total_route_minutes: Math.max(0, Math.round((Number(route.end_time_seconds || route.shift_end || 0) - Number(route.shift_start || 0)) / 60)),
         status: 'geoptimaliseerd',
         flexible_end_time: !!route.is_extra_route,
+        closed_to_extra_tasks: route.manual_route_id ? !!existingRoute?.closed_to_extra_tasks : false,
         cached_optimization: route,
         optimization_calculated_at: new Date().toISOString(),
       };

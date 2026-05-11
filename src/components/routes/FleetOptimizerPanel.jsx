@@ -321,6 +321,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
                           <Badge variant="outline" className="text-xs"><Car className="w-3 h-3 mr-1" />{route.license_plate || route.vehicle?.license_plate || ''}</Badge>
                           <Badge variant="secondary" className="text-xs"><Clock className="w-3 h-3 mr-1" />{route.time_window_start} – {route.time_window_end}</Badge>
                           <Badge className={route.validation?.valid ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}>{route.validation?.valid ? 'Geldig' : 'Ongeldig'}</Badge>
+                          {route.closed_to_extra_tasks && <Badge className="bg-slate-900 text-white">Gesloten route</Badge>}
                         </div>
                         <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 flex-wrap">
                           <span><MapPin className="w-3 h-3 inline mr-0.5" />{route.stats.total_tasks} taken</span>
