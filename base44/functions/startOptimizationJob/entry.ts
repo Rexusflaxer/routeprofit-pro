@@ -175,59 +175,26 @@ Deno.serve(async (req) => {
       base44.entities.Route.list(),
     ]);
 
-    const routingVehicles = buildRoutingVehicles(vehicles, routes, offices, objects, weekdays, body);
-
     const payload = {
-      ...body,
       mode: 'week',
       source: 'weekplanning',
       display_weekday: displayWeekday,
       weekdays,
-      service_day_cutoff: body.service_day_cutoff || '12:00',
-      description: body.description || `Weekplanning optimaliseren — tonen dag ${displayWeekday}`,
+      service_day_cutoff: '12:00',
+      selection: {
+        route_count_penalty_minutes: 60,
+        min_auto_route_minutes: 180,
+        wait_penalty_multiplier: 1,
+        travel_penalty_multiplier: 1,
+        max_solver_seconds: 60,
+        max_extra_windows: 2,
+        allow_extra_for_manual_vehicle: false,
+      },
       tasks,
       objects,
-      vehicles: routingVehicles,
+      vehicles,
       offices,
       routes,
-      routing_debug: {
-        routing_vehicle_count: routingVehicles.length,
-        manual_route_vehicle_count: routingVehicles.filter(vehicle => vehicle.is_manual_route).length,
-        extra_vehicle_count: routingVehicles.filter(vehicle => !vehicle.is_manual_route).length,
-        routing_vehicles: routingVehicles.map(vehicle => ({
-          id: vehicle.id,
-          license_plate: vehicle.license_plate,
-          manual_route_name: vehicle.manual_route_name,
-          shift_start: vehicle.shift_start,
-          shift_end: vehicle.shift_end,
-          weekday: vehicle.weekday,
-          is_manual_route: vehicle.is_manual_route,
-        })),
-      },
-      selection: {
-        route_count_penalty_minutes: body.route_count_penalty_minutes ?? 45,
-        min_auto_route_minutes: body.min_auto_route_minutes ?? 180,
-        wait_penalty_multiplier: body.wait_penalty_multiplier ?? 1,
-        travel_penalty_multiplier: body.travel_penalty_multiplier ?? 1,
-        max_solver_seconds: body.max_solver_seconds ?? 60,
-        max_extra_windows: body.max_extra_windows ?? 3,
-        priority_order: [
-          'min_unassigned_required_tasks',
-          'min_total_duty_minutes',
-          'min_extra_routes',
-          'min_wait_minutes',
-          'min_travel_minutes',
-          'min_distance_km',
-        ],
-        ...(body.selection || {}),
-      },
-      data: {
-        tasks,
-        objects,
-        vehicles: routingVehicles,
-        offices,
-        routes,
-      },
     };
 
     const response = await fetch(`${routingBaseUrl()}/optimization-jobs`, {

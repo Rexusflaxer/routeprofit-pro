@@ -1154,40 +1154,57 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
 
     for (let index = 0; index < dayRoutes.length; index++) {
       const route = dayRoutes[index];
+      const taskSteps = Array.isArray(route.steps) ? route.steps.filter(step => step.type === 'task') : [];
+
+      if (!taskSteps.length) continue;
+
+      const vehicleId = route.physical_vehicle_id || route.vehicle_id || route.vehicle?.id || null;
+      const routeStart = Number(route.shift_start || 0);
+      const routeEnd = Number(route.end_time_seconds || route.shift_end || 0);
 
       const routeData = {
         folder_id: folderId,
-        vehicle_id: route.vehicle?.id || null,
         weekdays: [weekday],
-        time_window_start: route.time_window_start,
-        time_window_end: route.time_window_end,
-        assigned_tasks: route.tasks.filter(task => task.task_id).map((task, taskIndex) => ({
-          task_id: task.task_id,
-          days: [weekday],
-          sequence_index: taskIndex,
-          locked_sequence: true,
-          planned_arrival_time: task.arrival_time,
-          planned_start_time: task.actual_start_time,
-          planned_departure_time: task.departure_time,
-        })),
-        total_service_minutes: route.stats.total_service_minutes,
-        total_distance_km: route.stats.total_distance_km,
-        total_route_minutes: route.stats.total_route_minutes,
+        time_window_start: formatSeconds(routeStart),
+        time_window_end: formatSeconds(routeEnd),
+        assigned_tasks: taskSteps.map((step, taskIndex) => {
+          const taskId = step.original_task_id || step.task_id;
+          if (!taskId) return null;
+
+          const arrival = Number(step.arrival_seconds || 0);
+          const service = Number(step.service_seconds || 0);
+
+          return {
+            task_id: String(taskId),
+            days: [weekday],
+            sequence_index: taskIndex,
+            locked_sequence: true,
+            planned_arrival_time: formatSeconds(arrival),
+            planned_start_time: formatSeconds(arrival),
+            planned_departure_time: formatSeconds(arrival + service),
+          };
+        }).filter(Boolean),
+        total_service_minutes: Math.round(taskSteps.reduce((sum, step) => sum + Number(step.service_seconds || 0), 0) / 60),
+        total_distance_km: Number(route.total_distance_km || 0),
+        total_route_minutes: Math.max(0, Math.round((routeEnd - routeStart) / 60)),
         status: 'geoptimaliseerd',
-        flexible_end_time: !!route.flexible_end_time,
-        max_route_minutes: route.max_route_minutes || null,
+        flexible_end_time: !!route.is_extra_route,
         cached_optimization: route,
         optimization_calculated_at: new Date().toISOString(),
       };
 
+      if (!routeData.assigned_tasks.length) continue;
+
+      if (vehicleId) {
+        routeData.vehicle_id = String(vehicleId);
+      }
+
       if (route.manual_route_id) {
         await base44.asServiceRole.entities.Route.update(route.manual_route_id, routeData);
-      } else if (route.tasks.length) {
+      } else {
         await base44.asServiceRole.entities.Route.create({
           ...routeData,
-          name: `${WEEKDAY_LABELS[weekday]} - server route ${index + 1}`,
-          time_window_start: route.time_window_start,
-          time_window_end: route.time_window_end,
+          name: route.manual_route_name || route.vehicle_name || route.license_plate || `${WEEKDAY_LABELS[weekday]} - server route ${index + 1}`,
           source: 'automatic',
         });
       }

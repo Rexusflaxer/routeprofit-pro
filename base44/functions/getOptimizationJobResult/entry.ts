@@ -31,100 +31,124 @@ function formatSeconds(seconds) {
   return `${String(Math.floor(value / 3600)).padStart(2, '0')}:${String(Math.floor((value % 3600) / 60)).padStart(2, '0')}`;
 }
 
-function normalizeCompletedResult(rawResult, requestPayload = {}) {
-  if (rawResult?.totals && Array.isArray(rawResult?.routes)) return rawResult;
+function normalizeCompletedResult(serverResult, requestPayload = {}, debug = false) {
+  const plannedResult = serverResult?.best_result || {
+    routes: serverResult?.routes || [],
+    unassigned: serverResult?.unassigned || [],
+    summary: serverResult?.summary || {},
+  };
 
-  const solverResult = rawResult?.best?.result || rawResult?.result || rawResult;
-  const summary = solverResult?.summary || {};
+  const routesToUse = (plannedResult.routes || []).filter(route => {
+    const steps = Array.isArray(route.steps) ? route.steps.filter(step => step.type === 'task') : [];
+    return steps.length > 0;
+  });
+
   const sourceTasks = requestPayload.tasks || requestPayload.data?.tasks || [];
   const sourceObjects = requestPayload.objects || requestPayload.data?.objects || [];
   const sourceVehicles = requestPayload.vehicles || requestPayload.data?.vehicles || [];
 
-  const taskById = new Map(sourceTasks.map(task => [task.id, task]));
-  const objectById = new Map(sourceObjects.map(object => [object.id, object]));
-  const vehicleById = new Map(sourceVehicles.map(vehicle => [vehicle.id, vehicle]));
+  const taskById = new Map(sourceTasks.map(task => [String(task.id), task]));
+  const objectById = new Map(sourceObjects.map(object => [String(object.id), object]));
+  const vehicleById = new Map(sourceVehicles.map(vehicle => [String(vehicle.id), vehicle]));
 
-  const routes = (solverResult?.routes || []).map((route, routeIndex) => {
-    const vehicle = vehicleById.get(route.vehicle_id) || { id: route.vehicle_id, license_plate: route.vehicle_name, name: route.vehicle_name };
-    const taskSteps = (route.steps || []).filter(step => step.type === 'task');
+  const routes = routesToUse.map((route, routeIndex) => {
+    const taskSteps = route.steps.filter(step => step.type === 'task');
+    const vehicleId = route.physical_vehicle_id || route.vehicle_id || route.vehicle?.id || null;
+    const vehicle = vehicleId ? vehicleById.get(String(vehicleId)) : null;
+    const routeName = route.manual_route_name || route.vehicle_name || route.license_plate || 'Route';
+    const licensePlate = route.license_plate || route.vehicle?.license_plate || vehicle?.license_plate || '';
+    const shiftStart = Number(route.shift_start || route.start_time_seconds || 0);
+    const routeEnd = Number(route.end_time_seconds || route.shift_end || 0);
 
     const tasks = taskSteps.map((step, stepIndex) => {
-      const sourceTask = taskById.get(step.task_id) || {};
-      const object = objectById.get(sourceTask.object_id) || {};
+      const taskId = step.original_task_id || step.task_id;
+      const sourceTask = taskId ? (taskById.get(String(taskId)) || {}) : {};
+      const object = objectById.get(String(sourceTask.object_id || step.object_id || '')) || {};
       const arrivalSeconds = Number(step.arrival_seconds || 0);
-      const serviceSeconds = Number(step.service_seconds || 0);
+      const serviceSeconds = Number(step.service_seconds || sourceTask.duration_minutes * 60 || 0);
 
       return {
-        task_id: step.task_id,
+        task_id: taskId ? String(taskId) : '',
         optimizer_task_id: step.task_id,
-        object_id: sourceTask.object_id,
-        name: step.name || sourceTask.task_type || 'Taak',
-        address: object.address || '',
+        object_id: sourceTask.object_id || step.object_id,
+        name: step.name || object.name || sourceTask.task_type || 'Taak',
+        address: object.address || step.address || '',
         duration_minutes: Math.round(serviceSeconds / 60),
         time_window_start: sourceTask.time_window_start || '',
         time_window_end: sourceTask.time_window_end || '',
         task_type: sourceTask.task_type,
-        arrival_time: step.arrival_time || formatSeconds(arrivalSeconds),
-        actual_start_time: step.arrival_time || formatSeconds(arrivalSeconds),
+        arrival_time: formatSeconds(arrivalSeconds),
+        actual_start_time: formatSeconds(arrivalSeconds),
         departure_time: formatSeconds(arrivalSeconds + serviceSeconds),
-        travel_time_minutes: Number(step.travel_from_previous_minutes ?? step.travel_time_minutes ?? 0),
+        travel_time_minutes: Number(step.travel_from_previous_minutes ?? step.travel_time_minutes ?? Math.round(Number(step.travel_from_previous_seconds || step.travel_seconds || 0) / 60)),
         distance_km: Number(step.distance_from_previous_km ?? step.distance_km ?? 0),
-        waiting_time: 0,
-        travel_to_next_minutes: Number(step.travel_to_next_minutes || 0),
+        waiting_time: Number(step.waiting_minutes || 0),
+        travel_to_next_minutes: Number(step.travel_to_next_minutes ?? Math.round(Number(step.travel_to_next_seconds || 0) / 60)),
         distance_to_next_km: Number(step.distance_to_next_km || 0),
         sequence_index: stepIndex,
       };
-    });
+    }).filter(task => task.task_id);
 
-    const totalServiceMinutes = tasks.reduce((sum, task) => sum + (task.duration_minutes || 0), 0);
+    const totalServiceMinutes = Math.round(taskSteps.reduce((sum, step) => sum + Number(step.service_seconds || 0), 0) / 60);
     const totalTravelMinutes = Number(route.total_travel_minutes ?? Math.round(Number(route.total_travel_seconds || 0) / 60));
-    const totalDistanceKm = Number(route.total_distance_km ?? (Number(route.total_distance_meters || 0) / 1000));
-    const isManualRoute = !!vehicle.manual_route_id;
-    const startTime = isManualRoute ? formatSeconds(vehicle.shift_start) : (tasks[0]?.arrival_time || formatSeconds(vehicle.shift_start || 64800));
-    const endTime = isManualRoute ? formatSeconds(vehicle.shift_end) : (route.end_time || (route.end_time_seconds ? formatSeconds(route.end_time_seconds) : startTime));
-    const displayVehicle = { ...vehicle, id: vehicle.source_vehicle_id || vehicle.id };
+    const totalDistanceKm = Number(route.total_distance_km || 0);
 
     return {
-      id: route.id || route.vehicle_id || `server_route_${routeIndex + 1}`,
-      manual_route_id: vehicle.manual_route_id || null,
-      manual_route_name: vehicle.manual_route_name || null,
-      is_extra_route: !isManualRoute,
-      vehicle: displayVehicle,
-      time_window_start: startTime,
-      time_window_end: endTime,
+      ...route,
+      id: route.id || route.manual_route_id || `server_route_${routeIndex + 1}`,
+      manual_route_id: route.manual_route_id || null,
+      manual_route_name: route.manual_route_name || routeName,
+      is_extra_route: !!route.is_extra_route,
+      vehicle: {
+        ...(route.vehicle || {}),
+        ...(vehicle || {}),
+        id: vehicleId ? String(vehicleId) : undefined,
+        license_plate: licensePlate,
+        name: routeName,
+      },
+      weekday: Number(route.weekday || serverResult?.display_weekday || requestPayload.display_weekday || requestPayload.weekday || 1),
+      time_window_start: formatSeconds(shiftStart),
+      time_window_end: formatSeconds(routeEnd),
       validation: { valid: true, errors: [] },
       tasks,
       stats: {
-        total_tasks: tasks.length,
+        total_tasks: taskSteps.length,
         total_service_minutes: totalServiceMinutes,
         total_travel_minutes: totalTravelMinutes,
-        total_distance_km: Math.round(totalDistanceKm * 100) / 100,
-        total_wait_minutes: 0,
-        total_route_minutes: totalServiceMinutes + totalTravelMinutes,
+        total_distance_km: totalDistanceKm,
+        total_wait_minutes: taskSteps.reduce((sum, step) => sum + Number(step.waiting_minutes || 0), 0),
+        total_route_minutes: Math.max(0, Math.round((routeEnd - shiftStart) / 60)),
       },
-      route_cost: 0,
+      route_cost: Number(route.route_cost || 0),
+      cached_optimization: route,
     };
-  });
+  }).filter(route => route.tasks.length > 0);
 
-  const unassigned = solverResult?.unassigned || rawResult?.best?.unassigned || [];
-  const skippedTasks = unassigned.map(item => {
-    const taskId = typeof item === 'object' ? (item.task_id || item.id) : item;
-    const sourceTask = taskById.get(taskId) || {};
-    const object = objectById.get(sourceTask.object_id) || {};
+  const skippedTasks = (plannedResult.unassigned || []).map(item => {
+    const taskId = typeof item === 'object' ? (item.original_task_id || item.task_id || item.id) : item;
+    const sourceTask = taskById.get(String(taskId)) || {};
+    const object = objectById.get(String(sourceTask.object_id || '')) || {};
     return {
       ...sourceTask,
-      name: object.name || sourceTask.task_type || 'Taak',
-      skip_reason: item?.reason || 'Niet ingepland door de routingserver.',
+      id: taskId ? String(taskId) : sourceTask.id,
+      name: object.name || sourceTask.task_type || item?.name || 'Taak',
+      skip_reason: item?.reason || item?.skip_reason || 'Niet ingepland door de routingserver.',
     };
   });
 
+  const uniqueVehicles = new Set(routesToUse.map(route => route.physical_vehicle_id || route.vehicle_id || route.license_plate).filter(Boolean).map(String));
+  const totalServiceMinutes = Math.round(routesToUse.reduce((sum, route) => {
+    const taskSteps = Array.isArray(route.steps) ? route.steps.filter(step => step.type === 'task') : [];
+    return sum + taskSteps.reduce((stepSum, step) => stepSum + Number(step.service_seconds || 0), 0);
+  }, 0) / 60);
+
   const totals = {
-    total_travel_minutes: Number(summary.total_travel_minutes || 0),
-    total_service_minutes: routes.reduce((sum, route) => sum + route.stats.total_service_minutes, 0),
-    total_wait_minutes: 0,
-    total_duty_minutes: routes.reduce((sum, route) => sum + route.stats.total_route_minutes, 0),
-    total_distance_km: Number(summary.total_distance_km || 0),
-    total_cost: 0,
+    total_travel_minutes: routesToUse.reduce((sum, route) => sum + Number(route.total_travel_minutes ?? Math.round(Number(route.total_travel_seconds || 0) / 60)), 0),
+    total_service_minutes: totalServiceMinutes,
+    total_wait_minutes: routes.reduce((sum, route) => sum + (route.stats?.total_wait_minutes || 0), 0),
+    total_duty_minutes: routes.reduce((sum, route) => sum + (route.stats?.total_route_minutes || 0), 0),
+    total_distance_km: Math.round(routesToUse.reduce((sum, route) => sum + Number(route.total_distance_km || 0), 0) * 100) / 100,
+    total_cost: routes.reduce((sum, route) => sum + Number(route.route_cost || 0), 0),
   };
 
   return {
@@ -139,16 +163,16 @@ function normalizeCompletedResult(rawResult, requestPayload = {}) {
     }] : [],
     horizons: [],
     totals,
-    vehicle_count: Number(summary.vehicles || routes.length || 0),
+    vehicle_count: uniqueVehicles.size,
     max_concurrent_routes: routes.length,
-    total_tasks_input: Number(summary.tasks_received || 0),
-    total_tasks_planned: Number(summary.tasks_assigned || routes.reduce((sum, route) => sum + route.tasks.length, 0)),
-    total_tasks_skipped: Number(summary.tasks_unassigned || skippedTasks.length),
+    total_tasks_input: Number(plannedResult.summary?.tasks_received || 0),
+    total_tasks_planned: routesToUse.reduce((sum, route) => sum + route.steps.filter(step => step.type === 'task').length, 0),
+    total_tasks_skipped: (plannedResult.unassigned || []).length,
     total_tasks_not_relevant: 0,
     total_routes_created: routes.length,
     has_estimated_travel: false,
-    server_summary: summary,
-    raw_result: rawResult,
+    server_summary: plannedResult.summary || {},
+    debug_report: debug ? { full_week_result: serverResult?.full_week_result || null } : undefined,
   };
 }
 
@@ -181,7 +205,7 @@ Deno.serve(async (req) => {
     const rawResult = normalizeResult(data);
     const jobs = await base44.asServiceRole.entities.OptimizationJob.filter({ server_job_id: serverJobId });
     const job = jobs[0];
-    const result = normalizeCompletedResult(rawResult, job?.request_payload || {});
+    const result = normalizeCompletedResult(rawResult, job?.request_payload || {}, !!body.debug);
 
     if (job) {
       await base44.asServiceRole.entities.OptimizationJob.update(job.id, {
