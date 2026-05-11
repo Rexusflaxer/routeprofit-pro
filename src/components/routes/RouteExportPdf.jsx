@@ -147,6 +147,8 @@ export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
       doc.setTextColor(0, 0, 0);
       y += 20;
 
+      const lockedTaskIds = new Set(((route?.assigned_tasks) || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
+
       // === ROUTEVOLGORDE ===
       doc.setFontSize(12);
       doc.setFont(undefined, "bold");
@@ -253,6 +255,16 @@ export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
           doc.setTextColor(71, 85, 105);
           doc.text(item.task_type, badgeX + 2, y + 21);
           badgeX += typeW + 2;
+        }
+        if (item.locked_to_route || lockedTaskIds.has(String(item.task_id || ''))) {
+          const lockedText = "Vastgezet in route";
+          doc.setFillColor(30, 41, 59);
+          const lockedW = doc.getTextWidth(lockedText) + 4;
+          doc.roundedRect(badgeX, y + 17, lockedW, 5, 1, 1, "F");
+          doc.setFontSize(6.5);
+          doc.setTextColor(255, 255, 255);
+          doc.text(lockedText, badgeX + 2, y + 21);
+          badgeX += lockedW + 2;
         }
         if (item.uses_arrival_deadline) {
           const deadlineText = `Aanwezig vóór ${formatClockTime(item.arrival_deadline_time)}`;
