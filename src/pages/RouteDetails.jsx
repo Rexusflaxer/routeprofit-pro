@@ -248,7 +248,41 @@ export default function RouteDetails() {
   const getLocation = (id) => objects.find(o => o.id === id) || offices.find(o => o.id === id);
 
   const buildVisibleOptimizedOrder = () => {
-    const order = (optimizedRoute?.optimized_order || []).map(item => ({ ...item }));
+    const existingOrder = (optimizedRoute?.optimized_order || []).map(item => ({ ...item }));
+    const serverTaskSteps = Array.isArray(optimizedRoute?.steps)
+      ? optimizedRoute.steps.filter(step => step.type === 'task')
+      : [];
+
+    const order = existingOrder.length > 0
+      ? existingOrder
+      : serverTaskSteps.map((step, stepIndex) => {
+          const taskId = String(step.original_task_id || step.task_id || '');
+          const task = tasks.find(t => t.id === taskId);
+          const location = task?.collectief_id
+            ? collectiefs.find(c => c.id === task.collectief_id)
+            : objects.find(o => o.id === task?.object_id);
+          const arrival = Number(step.arrival_seconds || 0);
+          const service = Number(step.service_seconds || (task?.duration_minutes || 0) * 60);
+
+          return {
+            task_id: taskId,
+            name: step.name || location?.name || task?.task_type || `Stop ${stepIndex + 1}`,
+            address: location?.address || step.address || '',
+            task_type: task?.task_type,
+            duration_minutes: Math.round(service / 60),
+            time_window_start: task?.time_window_start || '',
+            time_window_end: task?.time_window_end || '',
+            arrival_time: formatClockMinutes(Math.round(arrival / 60)),
+            actual_start_time: formatClockMinutes(Math.round(arrival / 60)),
+            departure_time: formatClockMinutes(Math.round((arrival + service) / 60)),
+            travel_time_minutes: Number(step.travel_from_previous_minutes ?? Math.round(Number(step.travel_from_previous_seconds || step.travel_seconds || 0) / 60)),
+            distance_km: Number(step.distance_from_previous_km ?? step.distance_km ?? 0),
+            travel_to_next_minutes: Number(step.travel_to_next_minutes ?? Math.round(Number(step.travel_to_next_seconds || 0) / 60)),
+            distance_to_next_km: Number(step.distance_to_next_km || 0),
+            sequence_index: stepIndex,
+          };
+        });
+
     if (!optimizedRoute || order.length === 0) return order;
 
     const existingStartIndex = order.findIndex(item => item.is_start);
@@ -674,15 +708,15 @@ export default function RouteDetails() {
                   <div className={`grid grid-cols-2 ${optimizedRoute.alarm_standby ? 'md:grid-cols-5' : 'md:grid-cols-4'} gap-4 p-4 bg-blue-50 rounded-lg`}>
                       <div>
                         <p className="text-xs text-slate-600 mb-1">Totale diensttijd</p>
-                        <p className="text-xl font-bold text-blue-700">{formatMinutes(optimizedRoute.actual_shift_minutes ?? optimizedRoute.total_route_time)}</p>
+                        <p className="text-xl font-bold text-blue-700">{formatMinutes(optimizedRoute.actual_shift_minutes ?? optimizedRoute.total_route_time ?? route.total_route_minutes ?? optimizedRoute.stats?.total_route_minutes)}</p>
                       </div>
                       <div>
                         <p className="text-xs text-slate-600 mb-1">Reistijd</p>
-                        <p className="text-xl font-bold">{formatMinutes(optimizedRoute.total_travel_time)}</p>
+                        <p className="text-xl font-bold">{formatMinutes(optimizedRoute.total_travel_time ?? optimizedRoute.total_travel_minutes ?? optimizedRoute.stats?.total_travel_minutes)}</p>
                       </div>
                       <div>
                         <p className="text-xs text-slate-600 mb-1">Taaktijd</p>
-                        <p className="text-xl font-bold">{formatMinutes(optimizedRoute.total_service_time)}</p>
+                        <p className="text-xl font-bold">{formatMinutes(optimizedRoute.total_service_time ?? route.total_service_minutes ?? optimizedRoute.stats?.total_service_minutes)}</p>
                       </div>
                       {optimizedRoute.alarm_standby && (
                         <div>
@@ -692,7 +726,7 @@ export default function RouteDetails() {
                       )}
                       <div>
                         <p className="text-xs text-slate-600 mb-1">Totale afstand</p>
-                        <p className="text-xl font-bold">{optimizedRoute.total_distance_km} km</p>
+                        <p className="text-xl font-bold">{optimizedRoute.total_distance_km ?? route.total_distance_km ?? optimizedRoute.stats?.total_distance_km ?? 0} km</p>
                       </div>
                     </div>
 
