@@ -32,10 +32,10 @@ function formatSeconds(seconds) {
 }
 
 function normalizeCompletedResult(serverResult, requestPayload = {}, debug = false) {
-  const plannedResult = serverResult?.best_result || {
-    routes: serverResult?.routes || [],
-    unassigned: serverResult?.unassigned || [],
-    summary: serverResult?.summary || {},
+  const plannedResult = serverResult.best_result || {
+    routes: serverResult.routes || [],
+    unassigned: serverResult.unassigned || [],
+    summary: serverResult.summary || {},
   };
 
   const routesToUse = (plannedResult.routes || []).filter(route => {
@@ -141,9 +141,12 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
     const taskSteps = Array.isArray(route.steps) ? route.steps.filter(step => step.type === 'task') : [];
     return sum + taskSteps.reduce((stepSum, step) => stepSum + Number(step.service_seconds || 0), 0);
   }, 0) / 60);
+  const summary = plannedResult.summary || {};
+  const tasksAssigned = Number(summary.tasks_assigned || 0);
+  const tasksUnassigned = Number(summary.tasks_unassigned || 0);
 
   const totals = {
-    total_travel_minutes: routesToUse.reduce((sum, route) => sum + Number(route.total_travel_minutes ?? Math.round(Number(route.total_travel_seconds || 0) / 60)), 0),
+    total_travel_minutes: routesToUse.reduce((sum, route) => sum + Number(route.total_travel_minutes || 0), 0),
     total_service_minutes: totalServiceMinutes,
     total_wait_minutes: routes.reduce((sum, route) => sum + (route.stats?.total_wait_minutes || 0), 0),
     total_duty_minutes: routes.reduce((sum, route) => sum + (route.stats?.total_route_minutes || 0), 0),
@@ -165,14 +168,14 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
     totals,
     vehicle_count: uniqueVehicles.size,
     max_concurrent_routes: routes.length,
-    total_tasks_input: Number(plannedResult.summary?.tasks_received || 0),
-    total_tasks_planned: routesToUse.reduce((sum, route) => sum + route.steps.filter(step => step.type === 'task').length, 0),
-    total_tasks_skipped: (plannedResult.unassigned || []).length,
+    total_tasks_input: tasksAssigned + tasksUnassigned,
+    total_tasks_planned: tasksAssigned,
+    total_tasks_skipped: tasksUnassigned,
     total_tasks_not_relevant: 0,
-    total_routes_created: routes.length,
+    total_routes_created: routesToUse.length,
     has_estimated_travel: false,
-    server_summary: plannedResult.summary || {},
-    debug_report: debug ? { full_week_result: serverResult?.full_week_result || null } : undefined,
+    server_summary: summary,
+    debug_report: debug ? { best_result: plannedResult } : undefined,
   };
 }
 

@@ -19,6 +19,11 @@ function parseTimeToSeconds(time, fallback) {
   return (hours * 3600) + (minutes * 60);
 }
 
+function nextWeekday(day) {
+  const n = Number(day);
+  return n === 7 ? 1 : n + 1;
+}
+
 function fixCoords(location) {
   if (!location) return null;
   const lat = Number(location.latitude);
@@ -165,7 +170,11 @@ Deno.serve(async (req) => {
     const body = await req.json();
     const requestedWeekdays = body.weekdays ?? (body.weekday ? [body.weekday] : [1]);
     const displayWeekday = Number(body.display_weekday ?? requestedWeekdays[0] ?? 1);
-    const weekdays = [1, 2, 3, 4, 5, 6, 7];
+    const selectedWeekday = displayWeekday;
+    const selectedStartTime = body.planning_start_time || body.start_time || '17:30';
+    const selectedEndWeekday = Number(body.planning_end_weekday || nextWeekday(selectedWeekday));
+    const selectedEndTime = body.planning_end_time || body.end_time || '08:30';
+    const weekdays = [selectedWeekday];
 
     const [tasks, objects, vehicles, offices, routes] = await Promise.all([
       base44.entities.Task.list(),
@@ -176,11 +185,13 @@ Deno.serve(async (req) => {
     ]);
 
     const payload = {
-      mode: 'week',
-      source: 'weekplanning',
-      display_weekday: displayWeekday,
-      weekdays,
-      service_day_cutoff: '12:00',
+      mode: 'time_block',
+      source: 'timeblock_planning',
+      display_weekday: selectedWeekday,
+      planning_start_weekday: selectedWeekday,
+      planning_start_time: selectedStartTime,
+      planning_end_weekday: selectedEndWeekday,
+      planning_end_time: selectedEndTime,
       selection: {
         route_count_penalty_minutes: 60,
         min_auto_route_minutes: 180,

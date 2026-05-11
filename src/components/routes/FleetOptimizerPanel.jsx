@@ -26,6 +26,11 @@ function Metric({ label, value, tone = "slate" }) {
 
 const ALL_WEEKDAYS = [1, 2, 3, 4, 5, 6, 7];
 
+function nextWeekday(day) {
+  const n = Number(day);
+  return n === 7 ? 1 : n + 1;
+}
+
 export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   const [loading, setLoading] = useState(false);
   const [result, setResult] = useState(null);
@@ -35,6 +40,10 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   const [showDebug, setShowDebug] = useState(false);
   const [planningDays, setPlanningDays] = useState(ALL_WEEKDAYS);
   const [selectedDay, setSelectedDay] = useState("1");
+  const [planningStartTime, setPlanningStartTime] = useState("17:30");
+  const [planningEndDay, setPlanningEndDay] = useState("2");
+  const [planningEndTime, setPlanningEndTime] = useState("08:30");
+  const [endDayManuallyChanged, setEndDayManuallyChanged] = useState(false);
   const [currentJob, setCurrentJob] = useState(null);
   const [refreshingJob, setRefreshingJob] = useState(false);
 
@@ -76,14 +85,19 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   };
 
   const runOptimizer = async (days = ALL_WEEKDAYS) => {
-    setPlanningDays(days);
+    const selectedWeekday = Number(days[0] || selectedDay || 1);
+    setPlanningDays([selectedWeekday]);
     setLoading(true);
     setError(null);
     setResult(null);
     setCurrentJob(null);
     try {
       const res = await base44.functions.invoke('startOptimizationJob', {
-        weekdays: days,
+        weekdays: [selectedWeekday],
+        display_weekday: selectedWeekday,
+        planning_start_time: planningStartTime || '17:30',
+        planning_end_weekday: Number(planningEndDay || nextWeekday(selectedWeekday)),
+        planning_end_time: planningEndTime || '08:30',
         save_routes: false,
       });
       setCurrentJob(res.data);
@@ -107,6 +121,12 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
 
     return () => clearInterval(timer);
   }, [currentJob?.job_id, currentJob?.server_job_id, currentJob?.status]);
+
+  useEffect(() => {
+    if (!endDayManuallyChanged) {
+      setPlanningEndDay(String(nextWeekday(selectedDay)));
+    }
+  }, [selectedDay, endDayManuallyChanged]);
 
   const saveRoutes = async () => {
     setSaving(true);
@@ -135,7 +155,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
         <div className="flex items-center justify-between gap-3">
           <CardTitle className="text-base flex items-center gap-2 text-blue-900">
             <Zap className="w-5 h-5 text-blue-600" />
-            Eigen routing server — {planningDays.length === 1 ? WEEKDAY_LABELS[planningDays[0]] : 'Alle dagen'}
+            Eigen routing server — {planningDays.length === 1 ? `${WEEKDAY_LABELS[planningDays[0]]} ${planningStartTime} t/m ${WEEKDAY_LABELS[Number(planningEndDay)]} ${planningEndTime}` : 'Alle dagen'}
           </CardTitle>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onClose}>
             <X className="w-4 h-4" />
@@ -148,14 +168,14 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
 
       <CardContent className="space-y-4">
         <div className="flex flex-wrap gap-2">
-          <Button onClick={() => runOptimizer(ALL_WEEKDAYS)} disabled={loading} className="bg-blue-700 hover:bg-blue-800 text-white">
+          <Button onClick={() => runOptimizer([Number(selectedDay)])} disabled={loading} className="bg-blue-700 hover:bg-blue-800 text-white">
             <Zap className="w-4 h-4 mr-1.5" />
-            {loading ? 'Job starten...' : 'Weekplanning als achtergrondjob starten'}
+            {loading ? 'Job starten...' : 'Tijdsblok als achtergrondjob starten'}
           </Button>
-          <div className="flex items-center gap-2">
+          <div className="flex flex-wrap items-center gap-2">
             <Select value={selectedDay} onValueChange={setSelectedDay} disabled={loading}>
               <SelectTrigger className="w-40 bg-white border-blue-200">
-                <SelectValue placeholder="Kies dag" />
+                <SelectValue placeholder="Startdag" />
               </SelectTrigger>
               <SelectContent>
                 {ALL_WEEKDAYS.map(day => (
@@ -163,9 +183,35 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
                 ))}
               </SelectContent>
             </Select>
+            <input
+              type="time"
+              value={planningStartTime}
+              onChange={(e) => setPlanningStartTime(e.target.value)}
+              disabled={loading}
+              className="h-9 w-28 rounded-md border border-blue-200 bg-white px-3 text-sm"
+              aria-label="Starttijd"
+            />
+            <Select value={planningEndDay} onValueChange={(value) => { setPlanningEndDay(value); setEndDayManuallyChanged(true); }} disabled={loading}>
+              <SelectTrigger className="w-40 bg-white border-blue-200">
+                <SelectValue placeholder="Einddag" />
+              </SelectTrigger>
+              <SelectContent>
+                {ALL_WEEKDAYS.map(day => (
+                  <SelectItem key={day} value={String(day)}>{WEEKDAY_LABELS[day]}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <input
+              type="time"
+              value={planningEndTime}
+              onChange={(e) => setPlanningEndTime(e.target.value)}
+              disabled={loading}
+              className="h-9 w-28 rounded-md border border-blue-200 bg-white px-3 text-sm"
+              aria-label="Eindtijd"
+            />
             <Button onClick={() => runOptimizer([Number(selectedDay)])} disabled={loading} variant="outline" className="border-blue-300 text-blue-700 hover:bg-blue-50">
               <Zap className="w-4 h-4 mr-1.5" />
-              Dag als job starten
+              Tijdsblok optimaliseren
             </Button>
           </div>
 
