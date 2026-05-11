@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Save, X, Route, AlertTriangle } from "lucide-react";
 import RouteOverheadSelector from "./RouteOverheadSelector";
+import RoutePinnedTasksSelector from "./RoutePinnedTasksSelector";
 
 const WEEKDAYS = [
   { value: 1, label: "Maandag" },
@@ -46,6 +47,7 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
     notes: "",
     overhead_cost_ids: [],
     binnendienst_personnel_ids: [],
+    assigned_tasks: [],
   });
 
   // Auto-set folder_id to first available folder when folders load
@@ -348,6 +350,8 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
               </p>
             </div>
           </div>
+
+          <RoutePinnedTasksSelector form={form} onChange={setForm} />
 
           {/* Overhead & binnendienst */}
           <div className="border-t border-slate-100 pt-4">

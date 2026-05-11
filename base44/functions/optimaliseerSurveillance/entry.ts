@@ -327,6 +327,7 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices, options = 
       shift_start: shiftStart,
       shift_end: shiftEnd,
       skills: [1],
+      assigned_tasks: route?.assigned_tasks || [],
       ...getVehicleCostProfile(vehicle),
       _vehicle: vehicle,
       _manualRoute: route,
@@ -664,8 +665,12 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         return null;
       }
 
+      const lockedTaskIds = new Set((vehicle.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
+
       const routeTasks = taskSteps.map((step, stepIndex) => {
         const source = taskById.get(step.task_id) || {};
+        const originalTaskId = String(source._originalTaskId || step.original_task_id || step.task_id);
+        const lockedToRoute = !!step.locked_to_route || lockedTaskIds.has(originalTaskId);
         plannedTaskIds.add(step.task_id);
 
         const previousStep = taskSteps[stepIndex - 1];
@@ -702,8 +707,9 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         const waitingSeconds = source._usesArrivalDeadline ? deadlineWaitingSeconds : travelWaitingSeconds;
 
         return {
-          task_id: source._originalTaskId || String(step.task_id),
+          task_id: originalTaskId,
           optimizer_task_id: step.task_id,
+          locked_to_route: lockedToRoute,
           object_id: source._object?.id,
           name: step.name || source.name || 'Taak',
           address: source._object?.address || '',
@@ -1160,6 +1166,10 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
       const route = routesToUse[index];
       const vehicleId = route.physical_vehicle_id || route.vehicle_id || route.vehicle?.id || null;
       const taskSteps = (route.steps || []).filter(step => step.type === 'task');
+      const existingRoutes = route.manual_route_id
+        ? await base44.asServiceRole.entities.Route.filter({ id: route.manual_route_id })
+        : [];
+      const existingPinnedTaskIds = new Set((existingRoutes[0]?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
 
       const assignedTasks = taskSteps.map((step, taskIndex) => {
         const taskId = step.original_task_id || step.task_id;
@@ -1172,7 +1182,8 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
           task_id: String(taskId),
           days: [Number(step.calendar_weekday || selectedWeekday)],
           sequence_index: taskIndex,
-          locked_sequence: true,
+          locked_to_route: existingPinnedTaskIds.has(String(taskId)),
+          locked_sequence: false,
           planned_arrival_time: formatSeconds(arrival),
           planned_start_time: formatSeconds(arrival),
           planned_departure_time: formatSeconds(arrival + service),

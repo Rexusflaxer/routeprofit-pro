@@ -63,6 +63,7 @@ function makeRoutingVehicle({ id, vehicle, route, startDepot, endDepot, shiftSta
     source_vehicle_id: vehicle.id,
     manual_route_id: route?.id || null,
     manual_route_name: route?.name || null,
+    assigned_tasks: route?.assigned_tasks || [],
     name: route?.name || vehicle.license_plate || vehicle.name || 'Voertuig',
     license_plate: vehicle.license_plate,
     shift_start: shiftStart,

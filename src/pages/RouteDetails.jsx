@@ -248,7 +248,11 @@ export default function RouteDetails() {
   const getLocation = (id) => objects.find(o => o.id === id) || offices.find(o => o.id === id);
 
   const buildVisibleOptimizedOrder = () => {
-    const existingOrder = (optimizedRoute?.optimized_order || []).map(item => ({ ...item }));
+    const lockedTaskIds = new Set((route.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
+    const existingOrder = (optimizedRoute?.optimized_order || []).map(item => ({
+      ...item,
+      locked_to_route: !!item.locked_to_route || lockedTaskIds.has(String(item.task_id || '')),
+    }));
     const serverTaskSteps = Array.isArray(optimizedRoute?.steps)
       ? optimizedRoute.steps.filter(step => step.type === 'task')
       : [];
@@ -280,6 +284,7 @@ export default function RouteDetails() {
             travel_to_next_minutes: Number(step.travel_to_next_minutes ?? Math.round(Number(step.travel_to_next_seconds || 0) / 60)),
             distance_to_next_km: Number(step.distance_to_next_km || 0),
             sequence_index: stepIndex,
+            locked_to_route: !!step.locked_to_route || lockedTaskIds.has(taskId),
           };
         });
 
@@ -792,6 +797,9 @@ export default function RouteDetails() {
                                     )}
                                     {item.is_split_part && (
                                       <Badge className="text-xs bg-purple-100 text-purple-700 border-purple-200">Deel {item.split_index}/{item.split_part_count}</Badge>
+                                    )}
+                                    {item.locked_to_route && (
+                                      <Badge className="text-xs bg-slate-900 text-white">Vastgezet in route</Badge>
                                     )}
                                     {item.uses_arrival_deadline && (
                                       <Badge className="text-xs bg-amber-100 text-amber-700 border-amber-200">Aanwezig vóór {displayClockTime(item.arrival_deadline_time)}</Badge>

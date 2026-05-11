@@ -12,7 +12,7 @@
     },
     "assigned_tasks": {
       "type": "array",
-      "description": "Taken met hun toegewezen dagen",
+      "description": "Taken met hun toegewezen dagen en optionele route-pinning",
       "items": {
         "type": "object",
         "properties": {
@@ -26,11 +26,39 @@
             "items": {
               "type": "number"
             }
+          },
+          "locked_to_route": {
+            "type": "boolean",
+            "default": false,
+            "description": "Deze taak moet verplicht in deze route blijven"
+          },
+          "locked_sequence": {
+            "type": "boolean",
+            "default": false,
+            "description": "Volgorde van deze taak is vastgezet"
+          },
+          "sequence_index": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Optionele vaste of geplande volgorde-index"
+          },
+          "planned_arrival_time": {
+            "type": "string",
+            "description": "Geplande aankomsttijd"
+          },
+          "planned_start_time": {
+            "type": "string",
+            "description": "Geplande starttijd"
+          },
+          "planned_departure_time": {
+            "type": "string",
+            "description": "Geplande vertrektijd"
           }
         },
         "required": [
-          "task_id",
-          "days"
+          "task_id"
         ]
       }
     },
