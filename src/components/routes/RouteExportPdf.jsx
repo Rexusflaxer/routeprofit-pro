@@ -27,6 +27,38 @@ function formatClockRange(start, end) {
   return `${formatClockTime(start)} – ${formatClockTime(end)}`;
 }
 
+function parseClockMinutes(time) {
+  if (!time) return 0;
+  const [hours, minutes] = String(time).split(':').map(Number);
+  return (Number.isFinite(hours) ? hours : 0) * 60 + (Number.isFinite(minutes) ? minutes : 0);
+}
+
+function formatClockMinutes(minutes) {
+  const value = ((Math.round(minutes) % 1440) + 1440) % 1440;
+  return `${String(Math.floor(value / 60)).padStart(2, '0')}:${String(value % 60).padStart(2, '0')}`;
+}
+
+function getRouteClockMinutes(time, routeStartTime) {
+  const routeStart = parseClockMinutes(routeStartTime || '00:00');
+  let minutes = parseClockMinutes(time);
+  if (minutes < routeStart) minutes += 1440;
+  return minutes;
+}
+
+function getWaitBeforeStop(stops, item, index, routeStartTime) {
+  if (!item || item.is_start || item.is_end || item.is_alarm_standby) return null;
+  const previousItem = stops[index - 1];
+  if (!previousItem || previousItem.is_start || !item.actual_start_time) return null;
+
+  const previousDeparture = getRouteClockMinutes(previousItem.departure_time || previousItem.actual_start_time || previousItem.arrival_time, routeStartTime);
+  const travelMinutes = Number(previousItem.travel_to_next_minutes || item.travel_time_minutes || 0);
+  const arrival = previousDeparture + travelMinutes;
+  const start = getRouteClockMinutes(item.actual_start_time, routeStartTime);
+  const minutes = Math.max(0, Math.round(start - arrival));
+
+  return minutes > 0 ? { minutes, start: formatClockMinutes(arrival), end: item.actual_start_time } : null;
+}
+
 export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
   const [loading, setLoading] = useState(false);
   const vehicleLabel = vehicle?.license_plate
@@ -126,6 +158,7 @@ export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
 
       // Taken teller badges
       const stops = optimizedRoute.optimized_order || [];
+      const routeStartTime = optimizedRoute.time_window_start || route.time_window_start;
       const opgenomenCount = optimizedRoute.tasks_optimized || optimizedRoute.total_tasks_planned || optimizedRoute.tasks?.length || stops.filter(item => !item.is_start && !item.is_end && !item.is_alarm_standby).length;
       const overgeslagenCount = optimizedRoute.tasks_skipped || 0;
 
@@ -159,7 +192,8 @@ export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
 
       let stopIndex = 0;
 
-      for (const item of stops) {
+      for (let itemIndex = 0; itemIndex < stops.length; itemIndex++) {
+        const item = stops[itemIndex];
         if (item.is_alarm_standby) {
           checkNewPage(22);
           doc.setFillColor(255, 251, 235);
@@ -206,8 +240,14 @@ export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
           y += 8;
         }
 
-        // Wachttijd indicator
-        if (item.waiting_time > 0) {
+        // Vrije tijd / wachttijd indicator
+        const waitBeforeStop = getWaitBeforeStop(stops, item, itemIndex, routeStartTime);
+        const directWaitingTime = Number(item.waiting_time || 0) > 0
+          ? { minutes: Number(item.waiting_time), start: item.arrival_time, end: item.actual_start_time }
+          : null;
+        const freeTime = waitBeforeStop || directWaitingTime;
+
+        if (freeTime?.minutes > 0) {
           checkNewPage(8);
           if (optimizedRoute.alarm_standby) {
             doc.setFillColor(255, 251, 235);
@@ -219,8 +259,8 @@ export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
             doc.setTextColor(22, 101, 52);
           }
           doc.roundedRect(margin + 20, y, contentW - 40, 6, 2, 2, "F");
-          const wachtLabel = optimizedRoute.alarm_standby ? "🚨 Alarmdienst" : "⏱ Vrije tijd";
-          doc.text(`${wachtLabel}: ${item.waiting_time} min  (${formatClockRange(item.arrival_time, item.actual_start_time)})`, pageW / 2, y + 4, { align: "center" });
+          const wachtLabel = optimizedRoute.alarm_standby ? "Alarmdienst" : "Vrije tijd tussen stops";
+          doc.text(`${wachtLabel}: ${freeTime.minutes} min  (${formatClockRange(freeTime.start, freeTime.end)})`, pageW / 2, y + 4, { align: "center" });
           y += 8;
         }
 
