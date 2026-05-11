@@ -54,8 +54,16 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
   const routeById = new Map(sourceRoutes.map(route => [String(route.id), route]));
 
   const routes = routesToUse.map((route, routeIndex) => {
-    const taskSteps = route.steps.filter(step => step.type === 'task');
     const sourceRoute = route.manual_route_id ? routeById.get(String(route.manual_route_id)) : null;
+    const allowedTaskTypes = sourceRoute?.allowed_task_types || route.allowed_task_types || [];
+    const excludedTaskIds = (sourceRoute?.excluded_task_ids || route.excluded_task_ids || []).map(String);
+    const taskSteps = route.steps.filter(step => step.type === 'task').filter(step => {
+      const taskId = String(step.original_task_id || step.task_id || '');
+      const sourceTask = taskById.get(taskId) || {};
+      if (excludedTaskIds.includes(taskId)) return false;
+      if (allowedTaskTypes.length > 0 && !allowedTaskTypes.includes(sourceTask.task_type)) return false;
+      return true;
+    });
     const vehicleId = route.physical_vehicle_id || route.vehicle_id || route.vehicle?.id || null;
     const vehicle = vehicleId ? vehicleById.get(String(vehicleId)) : null;
     const routeName = route.manual_route_name || route.vehicle_name || route.license_plate || 'Route';
@@ -88,6 +96,8 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
         time_window_start: usesDeadline ? formatSeconds(serviceStartSeconds) : (sourceTask.time_window_start || ''),
         time_window_end: usesDeadline ? formatSeconds(serviceEndSeconds) : (sourceTask.time_window_end || ''),
         task_type: sourceTask.task_type,
+        locked_to_route: !!step.locked_to_route || !!(sourceRoute?.assigned_tasks || []).find(item => String(item.task_id) === String(taskId) && item.locked_to_route),
+        excluded_from_route_names: step.excluded_from_route_names || [],
         uses_arrival_deadline: usesDeadline,
         arrival_deadline_time: sourceTask.arrival_deadline_time || step.arrival_deadline_time || step.fixed_service_start_time || step.service_start_time || '',
         arrival_time: formatSeconds(arrivalSeconds),
@@ -126,6 +136,10 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
       time_window_start: formatSeconds(shiftStart),
       time_window_end: formatSeconds(routeEnd),
       closed_to_extra_tasks: !!route.closed_to_extra_tasks || !!sourceRoute?.closed_to_extra_tasks,
+      allowed_task_types: allowedTaskTypes,
+      excluded_task_ids: excludedTaskIds,
+      task_type_filter_enabled: allowedTaskTypes.length > 0,
+      route_exclusions_enabled: excludedTaskIds.length > 0,
       validation: { valid: true, errors: [] },
       tasks,
       stats: {

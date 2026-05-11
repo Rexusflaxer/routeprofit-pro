@@ -322,6 +322,8 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
                           <Badge variant="secondary" className="text-xs"><Clock className="w-3 h-3 mr-1" />{route.time_window_start} – {route.time_window_end}</Badge>
                           <Badge className={route.validation?.valid ? "bg-green-100 text-green-700" : "bg-red-100 text-red-700"}>{route.validation?.valid ? 'Geldig' : 'Ongeldig'}</Badge>
                           {route.closed_to_extra_tasks && <Badge className="bg-slate-900 text-white">Gesloten route</Badge>}
+                          {route.task_type_filter_enabled && <Badge className="bg-blue-100 text-blue-700 border-blue-200">Alleen {route.allowed_task_types?.join(", ")}</Badge>}
+                          {route.route_exclusions_enabled && <Badge className="bg-amber-100 text-amber-700 border-amber-200">{route.excluded_task_ids?.length || 0} uitgesloten taken</Badge>}
                         </div>
                         <div className="flex items-center gap-3 mt-1 text-xs text-slate-500 flex-wrap">
                           <span><MapPin className="w-3 h-3 inline mr-0.5" />{route.stats.total_tasks} taken</span>
@@ -347,6 +349,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
                               <div className="col-span-5 min-w-0">
                                 <p className="font-medium text-slate-800 truncate">{task.name}</p>
                                 <p className="text-xs text-slate-500 truncate">{task.address}</p>
+                                {task.locked_to_route && <Badge className="mt-1 bg-slate-900 text-white text-xs">Vastgezet in route</Badge>}
                               </div>
                               <div className="col-span-3 text-xs text-slate-500">
                                 <p>Aankomst {task.arrival_time}</p>

@@ -432,6 +432,8 @@ export default function RouteDetails() {
             <div className="flex items-center gap-2 flex-wrap">
               <h1 className="text-2xl font-bold text-slate-900">{route.name}</h1>
               {route.closed_to_extra_tasks && <Badge className="bg-slate-900 text-white">Gesloten route</Badge>}
+              {route.allowed_task_types?.length > 0 && <Badge className="bg-blue-100 text-blue-700 border-blue-200">Alleen: {route.allowed_task_types.join(", ")}</Badge>}
+              {route.excluded_task_ids?.length > 0 && <Badge className="bg-amber-100 text-amber-700 border-amber-200">{route.excluded_task_ids.length} uitgesloten taken</Badge>}
             </div>
             {folder && <p className="text-sm text-slate-500">{folder.name}</p>}
           </div>
@@ -558,11 +560,11 @@ export default function RouteDetails() {
                         {route.time_window_start} - {route.time_window_end}
                       </span>
                     </div>
-                    {route.closed_to_extra_tasks && (
-                      <div className="flex items-center gap-2">
-                        <Badge className="bg-slate-900 text-white">Alleen vastgezette taken</Badge>
-                      </div>
-                    )}
+                    <div className="flex flex-wrap gap-2">
+                      {route.closed_to_extra_tasks && <Badge className="bg-slate-900 text-white">Alleen vastgezette taken</Badge>}
+                      {route.allowed_task_types?.length > 0 && <Badge className="bg-blue-100 text-blue-700 border-blue-200">Taaktype-filter actief</Badge>}
+                      {route.excluded_task_ids?.length > 0 && <Badge className="bg-amber-100 text-amber-700 border-amber-200">Taken uitgesloten</Badge>}
+                    </div>
                     {vehicle && (
                       <div className="flex items-center gap-2">
                         <RouteIcon className="w-4 h-4 text-slate-500" />

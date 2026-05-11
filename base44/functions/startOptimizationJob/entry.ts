@@ -63,16 +63,15 @@ function makeRoutingVehicle({ id, vehicle, route, startDepot, endDepot, shiftSta
     source_vehicle_id: vehicle.id,
     manual_route_id: route?.id || null,
     manual_route_name: route?.name || null,
-    assigned_tasks: route?.closed_to_extra_tasks
-      ? (route?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => ({
-          ...item,
-          task_id: String(item.task_id),
-          locked_to_route: true,
-          locked_sequence: !!item.locked_sequence,
-          sequence_index: item.locked_sequence ? item.sequence_index ?? null : null,
-        }))
-      : (route?.assigned_tasks || []),
+    assigned_tasks: (route?.assigned_tasks || []).map(item => ({
+      task_id: String(item.task_id),
+      locked_to_route: !!item.locked_to_route,
+      locked_sequence: !!item.locked_sequence,
+      sequence_index: item.sequence_index ?? null,
+    })),
     closed_to_extra_tasks: !!route?.closed_to_extra_tasks,
+    allowed_task_types: route?.allowed_task_types || [],
+    excluded_task_ids: (route?.excluded_task_ids || []).map(String),
     allowed_task_ids: route?.closed_to_extra_tasks
       ? (route?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id))
       : undefined,
@@ -214,22 +213,27 @@ Deno.serve(async (req) => {
         max_extra_windows: 2,
         allow_extra_for_manual_vehicle: false,
       },
-      tasks,
+      tasks: tasks.map(task => ({ ...task, id: String(task.id), task_type: task.task_type })),
       objects,
       vehicles,
       offices,
       routes: routes.map(route => ({
-        ...route,
+        id: String(route.id),
+        name: route.name,
+        weekdays: route.weekdays || [],
+        time_window_start: route.time_window_start,
+        time_window_end: route.time_window_end,
+        vehicle_id: route.vehicle_id,
         closed_to_extra_tasks: !!route.closed_to_extra_tasks,
-        assigned_tasks: route.closed_to_extra_tasks
-          ? (route.assigned_tasks || []).filter(item => item.locked_to_route).map(item => ({
-              task_id: String(item.task_id),
-              locked_to_route: true,
-              locked_sequence: !!item.locked_sequence,
-              sequence_index: item.locked_sequence ? item.sequence_index ?? null : null,
-              days: item.days || [],
-            }))
-          : (route.assigned_tasks || []),
+        allowed_task_types: route.allowed_task_types || [],
+        excluded_task_ids: (route.excluded_task_ids || []).map(String),
+        assigned_tasks: (route.assigned_tasks || []).map(item => ({
+          task_id: String(item.task_id),
+          locked_to_route: !!item.locked_to_route,
+          locked_sequence: !!item.locked_sequence,
+          sequence_index: item.sequence_index ?? null,
+          days: item.days || [],
+        })),
       })),
     };
 

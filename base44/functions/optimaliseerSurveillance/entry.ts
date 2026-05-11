@@ -327,16 +327,15 @@ function buildVehiclesForDay(day, routes, vehicles, objects, offices, options = 
       shift_start: shiftStart,
       shift_end: shiftEnd,
       skills: [1],
-      assigned_tasks: route?.closed_to_extra_tasks
-        ? (route?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => ({
-            ...item,
-            task_id: String(item.task_id),
-            locked_to_route: true,
-            locked_sequence: !!item.locked_sequence,
-            sequence_index: item.locked_sequence ? item.sequence_index ?? null : null,
-          }))
-        : (route?.assigned_tasks || []),
+      assigned_tasks: (route?.assigned_tasks || []).map(item => ({
+        task_id: String(item.task_id),
+        locked_to_route: !!item.locked_to_route,
+        locked_sequence: !!item.locked_sequence,
+        sequence_index: item.sequence_index ?? null,
+      })),
       closed_to_extra_tasks: !!route?.closed_to_extra_tasks,
+      allowed_task_types: route?.allowed_task_types || [],
+      excluded_task_ids: (route?.excluded_task_ids || []).map(String),
       allowed_task_ids: route?.closed_to_extra_tasks
         ? (route?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id))
         : undefined,
@@ -552,7 +551,8 @@ function buildTasksForDay(day, tasks, objects, vehicles, options = {}) {
           name: `${object.name || task.task_type || 'Taak'}${repeatLabel}${splitLabel}`,
           lon: object.longitude,
           lat: object.latitude,
-          original_task_id: task.id,
+          original_task_id: String(task.id),
+          task_type: task.task_type,
           calendar_weekday: occurrence?.occurrenceWeekday || day,
           service_seconds: serviceSeconds,
           duration_minutes: Math.round(serviceSeconds / 60),
@@ -578,7 +578,7 @@ function buildTasksForDay(day, tasks, objects, vehicles, options = {}) {
 
           _task: task,
           _object: object,
-          _originalTaskId: task.id,
+          _originalTaskId: String(task.id),
           _instanceId: `${task.id}${suffix}_d${occurrence?.occurrenceWeekday || day}_o${occurrence?.offset || 0}_r${repeatIndex}_p${splitIndex}`,
           _repeatIndex: repeatIndex,
           _repeatCount: repeatCount,
@@ -697,9 +697,16 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         : (route.tasks || []);
       const lockedTaskIds = new Set((vehicle.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
       const closedToExtraTasks = !!vehicle.closed_to_extra_tasks;
-      const taskSteps = closedToExtraTasks
-        ? rawTaskSteps.filter(step => lockedTaskIds.has(String((taskById.get(step.task_id) || {})._originalTaskId || step.original_task_id || step.task_id)))
-        : rawTaskSteps;
+      const allowedTaskTypes = vehicle.allowed_task_types || [];
+      const excludedTaskIds = new Set((vehicle.excluded_task_ids || []).map(String));
+      const taskSteps = rawTaskSteps.filter(step => {
+        const source = taskById.get(step.task_id) || {};
+        const originalTaskId = String(source._originalTaskId || step.original_task_id || step.task_id);
+        if (excludedTaskIds.has(originalTaskId)) return false;
+        if (allowedTaskTypes.length > 0 && !allowedTaskTypes.includes(source._task?.task_type || step.task_type)) return false;
+        if (closedToExtraTasks && !lockedTaskIds.has(originalTaskId)) return false;
+        return true;
+      });
 
       // Extra automatische route zonder taken niet tonen en niet laten meetellen.
       if (vehicle._isExtraRoute && taskSteps.length === 0) {
@@ -765,6 +772,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
             : formatSeconds(source.window_end || 86340),
 
           task_type: source._task?.task_type,
+          excluded_from_route_names: step.excluded_from_route_names || [],
           repeat_index: source._repeatIndex,
           repeat_count: source._repeatCount,
           split_index: source._splitIndex,
@@ -893,6 +901,10 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
         flexible_end_time: !!vehicle._manualRoute?.flexible_end_time || !!vehicle._isExtraRoute,
         max_route_minutes: vehicle._manualRoute?.max_route_minutes || null,
         closed_to_extra_tasks: closedToExtraTasks,
+        allowed_task_types: allowedTaskTypes,
+        excluded_task_ids: Array.from(excludedTaskIds),
+        task_type_filter_enabled: allowedTaskTypes.length > 0,
+        route_exclusions_enabled: excludedTaskIds.size > 0,
         route_cost: routeCost,
         validation: { valid: true, errors: [] },
         tasks: routeTasks,
@@ -1220,7 +1232,7 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
       const existingPinnedTaskIds = new Set((existingRoute?.assigned_tasks || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
 
       const assignedTasks = taskSteps.map((step, taskIndex) => {
-        const taskId = step.original_task_id || step.task_id;
+        const taskId = String(step.original_task_id || step.task_id);
         if (!taskId) return null;
 
         const usesDeadline = !!step.uses_arrival_deadline || !!step.use_arrival_deadline;
@@ -1260,6 +1272,8 @@ async function savePlannedRoutes(base44, plannedResult, weekdays) {
         status: 'geoptimaliseerd',
         flexible_end_time: !!route.is_extra_route,
         closed_to_extra_tasks: route.manual_route_id ? !!existingRoute?.closed_to_extra_tasks : false,
+        allowed_task_types: route.manual_route_id ? (existingRoute?.allowed_task_types || []) : [],
+        excluded_task_ids: route.manual_route_id ? (existingRoute?.excluded_task_ids || []).map(String) : [],
         cached_optimization: route,
         optimization_calculated_at: new Date().toISOString(),
       };

@@ -67,6 +67,20 @@
       "default": false,
       "description": "Optimizer mag geen extra taken aan deze handmatige route toevoegen"
     },
+    "allowed_task_types": {
+      "type": "array",
+      "description": "Taaktypes die deze route mag aannemen; leeg betekent alle taaktypes",
+      "items": {
+        "type": "string"
+      }
+    },
+    "excluded_task_ids": {
+      "type": "array",
+      "description": "Taken die niet in deze route ingepland mogen worden",
+      "items": {
+        "type": "string"
+      }
+    },
     "start_location_id": {
       "type": "string",
       "description": "ID van het startobject/depot"

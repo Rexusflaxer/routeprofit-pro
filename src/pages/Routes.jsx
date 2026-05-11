@@ -2,6 +2,7 @@ import React, { useState, useMemo } from "react";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { Plus, Pencil, Trash2, MapPin, Clock, Zap } from "lucide-react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
@@ -189,6 +190,11 @@ export default function Routes() {
                               <MapPin className="w-3 h-3" />
                               {route.assigned_tasks?.length || 0} taken
                             </span>
+                          </div>
+                          <div className="flex flex-wrap gap-1.5 mt-2">
+                            {route.allowed_task_types?.length > 0 && <Badge className="bg-blue-100 text-blue-700 border-blue-200 text-xs">Alleen: {route.allowed_task_types.join(", ")}</Badge>}
+                            {route.excluded_task_ids?.length > 0 && <Badge className="bg-amber-100 text-amber-700 border-amber-200 text-xs">{route.excluded_task_ids.length} uitgesloten taken</Badge>}
+                            {route.closed_to_extra_tasks && <Badge className="bg-slate-900 text-white text-xs">Gesloten route</Badge>}
                           </div>
                         </Link>
                         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity flex-shrink-0">

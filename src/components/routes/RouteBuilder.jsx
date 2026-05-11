@@ -11,6 +11,7 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Save, X, Route, AlertTriangle } from "lucide-react";
 import RouteOverheadSelector from "./RouteOverheadSelector";
 import RoutePinnedTasksSelector from "./RoutePinnedTasksSelector";
+import RouteRulesSelector from "./RouteRulesSelector";
 
 const WEEKDAYS = [
   { value: 1, label: "Maandag" },
@@ -49,6 +50,8 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
     binnendienst_personnel_ids: [],
     assigned_tasks: [],
     closed_to_extra_tasks: false,
+    allowed_task_types: [],
+    excluded_task_ids: [],
   });
 
   // Auto-set folder_id to first available folder when folders load
@@ -105,6 +108,11 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
     queryFn: () => base44.entities.Office.list(),
   });
 
+  const { data: tasks = [] } = useQuery({
+    queryKey: ['all-tasks'],
+    queryFn: () => base44.entities.Task.list(),
+  });
+
   const handleChange = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
 
   const toggleWeekday = (day) => {
@@ -145,8 +153,30 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
       return;
     }
 
+    const lockedAssignments = (form.assigned_tasks || []).filter(item => item.locked_to_route);
+    const excludedIds = new Set((form.excluded_task_ids || []).map(String));
+    const conflictingLockedTask = lockedAssignments.find(item => excludedIds.has(String(item.task_id)));
+    if (conflictingLockedTask) {
+      alert("Deze taak is vastgezet én uitgesloten voor dezelfde route. Kies één van beide.");
+      return;
+    }
+
+    const allowedTypes = form.allowed_task_types || [];
+    if (allowedTypes.length > 0) {
+      const invalidPinnedTask = lockedAssignments
+        .map(item => tasks.find(task => String(task.id) === String(item.task_id)))
+        .find(task => task && !allowedTypes.includes(task.task_type));
+      if (invalidPinnedTask) {
+        alert(`Deze route staat alleen ${allowedTypes.join(", ")} toe, maar deze vastgezette taak is ${invalidPinnedTask.task_type}.`);
+        return;
+      }
+    }
+
     onSave({
       ...form,
+      allowed_task_types: form.allowed_task_types || [],
+      excluded_task_ids: (form.excluded_task_ids || []).map(String),
+      assigned_tasks: (form.assigned_tasks || []).map(item => ({ ...item, task_id: String(item.task_id) })),
       time_window_end: form.flexible_end_time ? "" : form.time_window_end,
       max_route_minutes: 600,
     });
@@ -368,6 +398,8 @@ export default function RouteBuilder({ route, vehicles, folders, routes = [], on
               </p>
             </div>
           </div>
+
+          <RouteRulesSelector form={form} onChange={setForm} />
 
           <RoutePinnedTasksSelector form={form} onChange={setForm} />
 
