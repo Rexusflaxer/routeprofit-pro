@@ -325,6 +325,16 @@ export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
           doc.setFontSize(6.5);
           doc.setTextColor(126, 34, 206);
           doc.text(splitText, badgeX + 2, y + 21);
+          badgeX += splitW + 2;
+        }
+        if (item.custom_block_label) {
+          const blockText = `Blok: ${item.custom_block_label}`;
+          doc.setFillColor(243, 232, 255);
+          const blockW = doc.getTextWidth(blockText) + 4;
+          doc.roundedRect(badgeX, y + 17, blockW, 5, 1, 1, "F");
+          doc.setFontSize(6.5);
+          doc.setTextColor(126, 34, 206);
+          doc.text(blockText, badgeX + 2, y + 21);
         }
 
         // Tijden rechts

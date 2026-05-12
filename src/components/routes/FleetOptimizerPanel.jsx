@@ -349,7 +349,10 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
                               <div className="col-span-5 min-w-0">
                                 <p className="font-medium text-slate-800 truncate">{task.name}</p>
                                 <p className="text-xs text-slate-500 truncate">{task.address}</p>
-                                {task.locked_to_route && <Badge className="mt-1 bg-slate-900 text-white text-xs">Vastgezet in route</Badge>}
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  {task.locked_to_route && <Badge className="bg-slate-900 text-white text-xs">Vastgezet in route</Badge>}
+                                  {task.custom_block_label && <Badge className="bg-purple-100 text-purple-700 border-purple-200 text-xs">Blok: {task.custom_block_label}</Badge>}
+                                </div>
                               </div>
                               <div className="col-span-3 text-xs text-slate-500">
                                 <p>Aankomst {task.arrival_time}</p>

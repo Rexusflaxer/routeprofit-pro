@@ -417,6 +417,28 @@ function automaticSplitCount(task, durationMinutes) {
   return Math.min(4, Math.max(2, Math.ceil(durationMinutes / 60)));
 }
 
+function normalizedCustomExecutionBlocks(task, occurrenceOffset) {
+  if (!task.use_custom_execution_blocks || !Array.isArray(task.custom_execution_blocks) || task.custom_execution_blocks.length === 0) return [];
+  const mainStart = parseTimeToSeconds(task.time_window_start, 0) + occurrenceOffset;
+
+  return task.custom_execution_blocks
+    .filter(block => block.time_window_start && block.time_window_end)
+    .map((block, index) => {
+      let start = parseTimeToSeconds(block.time_window_start, 0) + occurrenceOffset;
+      let end = parseTimeToSeconds(block.time_window_end, 86340) + occurrenceOffset;
+      while (start < mainStart) start += 86400;
+      if (end <= start) end += 86400;
+      return { ...block, index: index + 1, start, end };
+    });
+}
+
+function getTaskSpacingRules(task, object) {
+  return [
+    ...(Array.isArray(object?.task_spacing_rules) ? object.task_spacing_rules : []),
+    ...(Array.isArray(task?.task_spacing_rules) ? task.task_spacing_rules : []),
+  ].filter(rule => rule.task_type_a && rule.task_type_b && Number(rule.min_minutes) > 0);
+}
+
 function getTaskOccurrencesForServiceDay(serviceDay, task, options) {
   const days = task.weekdays || [];
   const startSeconds = parseTimeToSeconds(task.time_window_start, 0);
@@ -504,24 +526,35 @@ function buildTasksForDay(day, tasks, objects, vehicles, options = {}) {
         )
       : normalizeTaskWindowForVehicles(windowStart, windowEnd, vehicles);
 
-    const windowLength = Math.max(serviceSeconds, normalizedWindow.end - normalizedWindow.start);
-    const totalGapSeconds = repeatCount > 1 ? (repeatCount - 1) * (minGapSeconds + serviceSeconds) : 0;
-    const availableRepeatWindow = Math.max(serviceSeconds * repeatCount, windowLength - totalGapSeconds);
-    const repeatSegment = repeatCount > 1
-      ? Math.max(serviceSeconds, Math.floor(availableRepeatWindow / repeatCount))
-      : windowLength;
-    const repeatStep = repeatCount > 1
-      ? repeatSegment + minGapSeconds + serviceSeconds
-      : repeatSegment;
+    const customBlocks = usesArrivalDeadline ? [] : normalizedCustomExecutionBlocks(task, occurrenceOffset);
+    const repeatWindows = customBlocks.length
+      ? customBlocks.map(block => ({ repeatIndex: block.index, start: block.start, end: block.end, label: block.label || `Uitvoering ${block.index}` }))
+      : (() => {
+          const windowLength = Math.max(serviceSeconds, normalizedWindow.end - normalizedWindow.start);
+          const totalGapSeconds = repeatCount > 1 ? (repeatCount - 1) * (minGapSeconds + serviceSeconds) : 0;
+          const availableRepeatWindow = Math.max(serviceSeconds * repeatCount, windowLength - totalGapSeconds);
+          const repeatSegment = repeatCount > 1
+            ? Math.max(serviceSeconds, Math.floor(availableRepeatWindow / repeatCount))
+            : windowLength;
+          const repeatStep = repeatCount > 1
+            ? repeatSegment + minGapSeconds + serviceSeconds
+            : repeatSegment;
 
-    for (let repeatIndex = 1; repeatIndex <= repeatCount; repeatIndex++) {
-      const repeatStart = repeatCount > 1
-        ? normalizedWindow.start + ((repeatIndex - 1) * repeatStep)
-        : normalizedWindow.start;
+          return Array.from({ length: repeatCount }, (_, index) => {
+            const repeatStart = repeatCount > 1
+              ? normalizedWindow.start + (index * repeatStep)
+              : normalizedWindow.start;
+            const repeatEnd = repeatCount > 1
+              ? Math.min(normalizedWindow.end, repeatStart + repeatSegment)
+              : normalizedWindow.end;
+            return { repeatIndex: index + 1, start: repeatStart, end: repeatEnd, label: '' };
+          });
+        })();
 
-      const repeatEnd = repeatCount > 1
-        ? Math.min(normalizedWindow.end, repeatStart + repeatSegment)
-        : normalizedWindow.end;
+    for (const repeatWindow of repeatWindows) {
+      const repeatIndex = repeatWindow.repeatIndex;
+      const repeatStart = repeatWindow.start;
+      const repeatEnd = repeatWindow.end;
 
       for (let splitIndex = 1; splitIndex <= splitCount; splitIndex++) {
         const repeatLabel = repeatCount > 1 ? ` (${repeatIndex}/${repeatCount})` : '';
@@ -560,6 +593,13 @@ function buildTasksForDay(day, tasks, objects, vehicles, options = {}) {
           window_end: usesArrivalDeadline ? serviceEndSeconds : splitEnd,
           priority: usesArrivalDeadline ? 1000000 : 500000,
           skills: [1],
+          object_id: String(object.id),
+          use_custom_execution_blocks: !!task.use_custom_execution_blocks,
+          custom_execution_blocks: Array.isArray(task.custom_execution_blocks) ? task.custom_execution_blocks : [],
+          custom_block_label: repeatWindow.label || '',
+          repeat_count: repeatCount,
+          min_minutes_between_visits: Number(task.min_minutes_between_visits || 0),
+          task_spacing_rules: getTaskSpacingRules(task, object),
 
           // Deze velden kan de Python API expliciet gebruiken voor arrival-deadline taken.
           use_arrival_deadline: usesArrivalDeadline,
@@ -582,6 +622,8 @@ function buildTasksForDay(day, tasks, objects, vehicles, options = {}) {
           _instanceId: `${task.id}${suffix}_d${occurrence?.occurrenceWeekday || day}_o${occurrence?.offset || 0}_r${repeatIndex}_p${splitIndex}`,
           _repeatIndex: repeatIndex,
           _repeatCount: repeatCount,
+          _customBlockLabel: repeatWindow.label || '',
+          _taskSpacingRules: getTaskSpacingRules(task, object),
           _splitIndex: splitIndex,
           _splitCount: splitCount,
           _usesArrivalDeadline: usesArrivalDeadline,
@@ -772,6 +814,7 @@ function mapServerResult(serverResult, day, vehicles, optimizerTasks, preSkipped
             : formatSeconds(source.window_end || 86340),
 
           task_type: source._task?.task_type,
+          custom_block_label: step.custom_block_label || step.execution_block_label || source._customBlockLabel || '',
           excluded_from_route_names: step.excluded_from_route_names || [],
           repeat_index: source._repeatIndex,
           repeat_count: source._repeatCount,
@@ -1105,6 +1148,11 @@ async function evaluateScenario({
         })),
 
         tasks: optimizerTasks,
+        objects: objects.map(object => ({
+          id: String(object.id),
+          task_spacing_rules: Array.isArray(object.task_spacing_rules) ? object.task_spacing_rules : [],
+        })),
+        task_spacing_rules: objects.flatMap(object => (object.task_spacing_rules || []).map(rule => ({ ...rule, object_id: String(object.id) }))),
       })
     : {
         routes: [],

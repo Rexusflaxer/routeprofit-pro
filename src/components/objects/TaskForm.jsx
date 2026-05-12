@@ -5,6 +5,8 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
 import { X, Save } from "lucide-react";
+import ExecutionBlocksEditor from "./ExecutionBlocksEditor";
+import TaskSpacingRulesEditor from "./TaskSpacingRulesEditor";
 
 const TASK_TYPES = [
   "Mobiele Controleronde",
@@ -34,6 +36,9 @@ export default function TaskForm({ task, onSave, onCancel }) {
     time_window_end: "",
     repeat_count: 1,
     min_minutes_between_visits: 0,
+    use_custom_execution_blocks: false,
+    custom_execution_blocks: [],
+    task_spacing_rules: [],
     use_arrival_deadline: false,
     arrival_deadline_time: "",
     allow_split: false,
@@ -60,11 +65,18 @@ export default function TaskForm({ task, onSave, onCancel }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (!usesArrivalDeadline && form.use_custom_execution_blocks && !(form.custom_execution_blocks || []).length) {
+      alert("Voeg minimaal één aangepast uitvoeringsblok toe.");
+      return;
+    }
     onSave({
       ...form,
       use_arrival_deadline: usesArrivalDeadline,
       repeat_count: usesArrivalDeadline ? 1 : Math.max(1, Number(form.repeat_count || 1)),
       min_minutes_between_visits: usesArrivalDeadline ? 0 : Math.max(0, Number(form.min_minutes_between_visits || 0)),
+      use_custom_execution_blocks: usesArrivalDeadline ? false : !!form.use_custom_execution_blocks,
+      custom_execution_blocks: usesArrivalDeadline || !form.use_custom_execution_blocks ? [] : (form.custom_execution_blocks || []).filter(block => block.label || block.time_window_start || block.time_window_end),
+      task_spacing_rules: (form.task_spacing_rules || []).filter(rule => rule.task_type_a && rule.task_type_b && Number(rule.min_minutes) > 0),
       time_window_start: usesArrivalDeadline ? "" : form.time_window_start,
       time_window_end: usesArrivalDeadline ? "" : form.time_window_end,
       allow_split: usesArrivalDeadline ? false : form.allow_split,
@@ -175,6 +187,7 @@ export default function TaskForm({ task, onSave, onCancel }) {
               />
             </div>
             <p className="md:col-span-2 text-xs text-slate-500">Voor bijvoorbeeld 2 nachtrondes kies je één ruim tijdvenster, aantal 2 en een minimale tussentijd.</p>
+            <ExecutionBlocksEditor form={form} onChange={handleChange} />
           </div>
         )}
 
@@ -209,6 +222,8 @@ export default function TaskForm({ task, onSave, onCancel }) {
             ))}
           </div>
         </div>
+
+        <TaskSpacingRulesEditor rules={form.task_spacing_rules || []} onChange={(rules) => handleChange("task_spacing_rules", rules)} />
 
         <div className="space-y-3">
           <label className="flex items-center gap-3 cursor-pointer bg-green-50 border border-green-200 rounded-lg px-4 py-3">

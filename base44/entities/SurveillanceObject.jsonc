@@ -26,6 +26,24 @@
       "type": "number",
       "description": "Lengtegraad"
     },
+    "task_spacing_rules": {
+      "type": "array",
+      "description": "Minimale afstand tussen verschillende taaktypes op hetzelfde object",
+      "items": {
+        "type": "object",
+        "properties": {
+          "task_type_a": {
+            "type": "string"
+          },
+          "task_type_b": {
+            "type": "string"
+          },
+          "min_minutes": {
+            "type": "number"
+          }
+        }
+      }
+    },
     "notes": {
       "type": "string",
       "description": "Opmerkingen"

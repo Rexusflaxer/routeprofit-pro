@@ -8,6 +8,7 @@ import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import TaskList from "./TaskList";
 import CustomerSelect from "../ui-custom/CustomerSelect";
+import TaskSpacingRulesEditor from "./TaskSpacingRulesEditor";
 
 export default function ObjectForm({ object, onSave, onCancel }) {
   const [form, setForm] = useState(object || {
@@ -16,6 +17,7 @@ export default function ObjectForm({ object, onSave, onCancel }) {
     name: "",
     address: "",
     notes: "",
+    task_spacing_rules: [],
   });
 
   const { data: customers = [] } = useQuery({
@@ -83,7 +85,10 @@ export default function ObjectForm({ object, onSave, onCancel }) {
       alert("Selecteer een klant voor dit object");
       return;
     }
-    onSave(form);
+    onSave({
+      ...form,
+      task_spacing_rules: (form.task_spacing_rules || []).filter(rule => rule.task_type_a && rule.task_type_b && Number(rule.min_minutes) > 0),
+    });
   };
 
   return (
@@ -144,6 +149,8 @@ export default function ObjectForm({ object, onSave, onCancel }) {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Opmerkingen</Label>
               <Textarea value={form.notes} onChange={(e) => handleChange("notes", e.target.value)} rows={2} placeholder="Extra informatie..." />
             </div>
+
+            <TaskSpacingRulesEditor rules={form.task_spacing_rules || []} onChange={(rules) => handleChange("task_spacing_rules", rules)} />
 
             <div className="flex justify-end gap-3 pt-2">
               <Button type="button" variant="outline" onClick={onCancel}><X className="w-4 h-4 mr-1" /> Annuleren</Button>

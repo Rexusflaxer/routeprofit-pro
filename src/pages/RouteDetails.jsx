@@ -285,6 +285,7 @@ export default function RouteDetails() {
             distance_to_next_km: Number(step.distance_to_next_km || 0),
             sequence_index: stepIndex,
             locked_to_route: !!step.locked_to_route || lockedTaskIds.has(taskId),
+            custom_block_label: step.custom_block_label || step.execution_block_label || task?.custom_execution_blocks?.[Number(step.repeat_index || step.execution_index || 1) - 1]?.label || '',
           };
         });
 
@@ -820,6 +821,9 @@ export default function RouteDetails() {
                                     )}
                                     {item.uses_arrival_deadline && (
                                       <Badge className="text-xs bg-amber-100 text-amber-700 border-amber-200">Aanwezig vóór {displayClockTime(item.arrival_deadline_time)}</Badge>
+                                    )}
+                                    {item.custom_block_label && (
+                                      <Badge className="text-xs bg-purple-100 text-purple-700 border-purple-200">Blok: {item.custom_block_label}</Badge>
                                     )}
                                   </div>
                                   <div className="grid grid-cols-2 gap-2 mt-2">

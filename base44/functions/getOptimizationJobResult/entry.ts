@@ -96,6 +96,7 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
         time_window_start: usesDeadline ? formatSeconds(serviceStartSeconds) : (sourceTask.time_window_start || ''),
         time_window_end: usesDeadline ? formatSeconds(serviceEndSeconds) : (sourceTask.time_window_end || ''),
         task_type: sourceTask.task_type,
+        custom_block_label: step.custom_block_label || step.execution_block_label || sourceTask.custom_execution_blocks?.[Number(step.repeat_index || step.execution_index || 1) - 1]?.label || '',
         locked_to_route: !!step.locked_to_route || !!(sourceRoute?.assigned_tasks || []).find(item => String(item.task_id) === String(taskId) && item.locked_to_route),
         excluded_from_route_names: step.excluded_from_route_names || [],
         uses_arrival_deadline: usesDeadline,

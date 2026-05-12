@@ -45,6 +45,47 @@
       "description": "Minimaal aantal minuten tussen herhaalde uitvoeringen van dezelfde taak",
       "default": 0
     },
+    "use_custom_execution_blocks": {
+      "type": "boolean",
+      "description": "Gebruik aangepaste uitvoeringsblokken per herhaling",
+      "default": false
+    },
+    "custom_execution_blocks": {
+      "type": "array",
+      "description": "Aangepaste tijdblokken per uitvoering",
+      "items": {
+        "type": "object",
+        "properties": {
+          "label": {
+            "type": "string"
+          },
+          "time_window_start": {
+            "type": "string"
+          },
+          "time_window_end": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "task_spacing_rules": {
+      "type": "array",
+      "description": "Optionele taak-specifieke minimale afstand tussen taaktypes",
+      "items": {
+        "type": "object",
+        "properties": {
+          "task_type_a": {
+            "type": "string"
+          },
+          "task_type_b": {
+            "type": "string"
+          },
+          "min_minutes": {
+            "type": "number"
+          }
+        }
+      }
+    },
     "min_minutes_between_other_tasks": {
       "type": "number",
       "description": "Minimale buffer in minuten tussen deze taak en andere taken",
