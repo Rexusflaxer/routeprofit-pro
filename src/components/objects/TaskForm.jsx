@@ -209,8 +209,9 @@ export default function TaskForm({ task, onSave, onCancel }) {
               </div>
               {repeatCount > 1 && (
                 <div className="space-y-2">
-                  <Label>Minimale tijd ertussen</Label>
+                  <Label>Min. tijd tussen herhalingen</Label>
                   <Input type="number" min="0" value={form.min_minutes_between_visits || 0} onChange={(e) => handleChange("min_minutes_between_visits", Number(e.target.value) || 0)} />
+                  <p className="text-xs text-slate-500">Dit geldt alleen tussen herhalingen van deze taak.</p>
                 </div>
               )}
             </div>
@@ -236,7 +237,7 @@ export default function TaskForm({ task, onSave, onCancel }) {
                 {distribution === "custom" && <ExecutionBlocksEditor form={form} onChange={handleChange} errors={blockErrors} />}
 
                 <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                  Deze taak wordt {repeatCount} keer uitgevoerd{distribution === "evening_night" ? ": één keer in de avond en één keer in de nacht" : ""}. Er moet minimaal {form.min_minutes_between_visits || 0} minuten tussen zitten.
+                  Deze taak wordt {repeatCount} keer uitgevoerd{distribution === "evening_night" ? ": één keer in de avond en één keer in de nacht" : ""}. Er moet minimaal {form.min_minutes_between_visits || 0} minuten tussen herhalingen zitten.
                 </p>
               </div>
             )}

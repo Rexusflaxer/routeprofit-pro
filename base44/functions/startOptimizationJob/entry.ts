@@ -49,28 +49,36 @@ function isGeneratedRoute(route) {
 
 function expandTaskSpacingGroups(groups = []) {
   const rules = [];
+
   for (const group of groups || []) {
     const types = [...new Set(group.task_types || [])].filter(Boolean);
     const minutes = Number(group.min_minutes || 0);
+
     if (types.length < 2 || minutes <= 0) continue;
 
     for (let i = 0; i < types.length; i++) {
-      if (group.include_same_type) {
-        rules.push({ task_type_a: types[i], task_type_b: types[i], min_minutes: minutes });
-      }
       for (let j = i + 1; j < types.length; j++) {
-        rules.push({ task_type_a: types[i], task_type_b: types[j], min_minutes: minutes });
+        if (types[i] === types[j]) continue;
+        rules.push({
+          task_type_a: types[i],
+          task_type_b: types[j],
+          min_minutes: minutes,
+        });
       }
     }
   }
+
   return rules;
 }
 
 function getObjectTaskSpacingRules(object = {}) {
-  return [
-    ...expandTaskSpacingGroups(object.task_spacing_groups || []),
-    ...(Array.isArray(object.task_spacing_rules) ? object.task_spacing_rules : []),
-  ].filter(rule => rule.task_type_a && rule.task_type_b && Number(rule.min_minutes) > 0);
+  const fromGroups = expandTaskSpacingGroups(object.task_spacing_groups || []);
+  const manualRules = Array.isArray(object.task_spacing_rules) ? object.task_spacing_rules : [];
+
+  return [...fromGroups, ...manualRules]
+    .filter(rule => rule.task_type_a && rule.task_type_b)
+    .filter(rule => rule.task_type_a !== rule.task_type_b)
+    .filter(rule => Number(rule.min_minutes) > 0);
 }
 
 function vehicleCostProfile(vehicle = {}) {
@@ -253,29 +261,39 @@ Deno.serve(async (req) => {
       objects: objects.map(object => ({
         ...object,
         id: String(object.id),
-        task_spacing_groups: Array.isArray(object.task_spacing_groups) ? object.task_spacing_groups : [],
+        task_spacing_groups: Array.isArray(object.task_spacing_groups)
+          ? object.task_spacing_groups.map(group => ({ ...group, task_types: [...new Set(group.task_types || [])].filter(Boolean), include_same_type: false }))
+          : [],
         task_spacing_rules: getObjectTaskSpacingRules(object),
       })),
       vehicles,
       offices,
-      routes: routes.map(route => ({
-        id: String(route.id),
-        name: route.name,
-        weekdays: route.weekdays || [],
-        time_window_start: route.time_window_start,
-        time_window_end: route.time_window_end,
-        vehicle_id: route.vehicle_id,
-        closed_to_extra_tasks: !!route.closed_to_extra_tasks,
-        allowed_task_types: route.allowed_task_types || [],
-        excluded_task_ids: (route.excluded_task_ids || []).map(String),
-        assigned_tasks: (route.assigned_tasks || []).map(item => ({
-          task_id: String(item.task_id),
-          locked_to_route: !!item.locked_to_route,
-          locked_sequence: !!item.locked_sequence,
-          sequence_index: item.sequence_index ?? null,
-          days: item.days || [],
+      routes: routes
+        .filter(route => !isGeneratedRoute(route))
+        .map(route => ({
+          id: String(route.id),
+          name: route.name,
+          source: route.source || 'manual',
+          status: route.status || null,
+          weekdays: route.weekdays || [],
+          time_window_start: route.time_window_start,
+          time_window_end: route.time_window_end,
+          flexible_end_time: !!route.flexible_end_time,
+          max_route_minutes: route.max_route_minutes || null,
+          vehicle_id: route.vehicle_id ? String(route.vehicle_id) : null,
+          start_location_id: route.start_location_id || null,
+          end_location_id: route.end_location_id || null,
+          closed_to_extra_tasks: !!route.closed_to_extra_tasks,
+          allowed_task_types: route.allowed_task_types || [],
+          excluded_task_ids: (route.excluded_task_ids || []).map(String),
+          assigned_tasks: (route.assigned_tasks || []).map(item => ({
+            task_id: String(item.task_id),
+            locked_to_route: !!item.locked_to_route,
+            locked_sequence: !!item.locked_sequence,
+            sequence_index: item.sequence_index ?? null,
+            days: item.days || [],
+          })),
         })),
-      })),
     };
 
     const response = await fetch(`${routingBaseUrl()}/optimization-jobs`, {

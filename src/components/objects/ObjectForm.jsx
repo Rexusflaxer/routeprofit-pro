@@ -8,7 +8,7 @@ import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import TaskList from "./TaskList";
 import CustomerSelect from "../ui-custom/CustomerSelect";
-import TaskSpacingGroupsEditor, { expandTaskSpacingGroups, validateTaskSpacingGroups } from "./TaskSpacingGroupsEditor";
+import TaskSpacingGroupsEditor, { expandTaskSpacingGroups, normalizeTaskSpacingGroups, validateTaskSpacingGroups } from "./TaskSpacingGroupsEditor";
 
 export default function ObjectForm({ object, onSave, onCancel }) {
   const [form, setForm] = useState(object || {
@@ -92,12 +92,13 @@ export default function ObjectForm({ object, onSave, onCancel }) {
       alert("Selecteer een klant voor dit object");
       return;
     }
-    const groupErrors = validateTaskSpacingGroups(form.task_spacing_groups || []);
+    const normalizedGroups = normalizeTaskSpacingGroups(form.task_spacing_groups || []);
+    const groupErrors = validateTaskSpacingGroups(normalizedGroups);
     if (groupErrors.length) {
       alert(groupErrors[0]);
       return;
     }
-    const taskSpacingGroups = (form.task_spacing_groups || []).filter(group => (group.task_types || []).length >= 2 && Number(group.min_minutes) > 0);
+    const taskSpacingGroups = normalizedGroups.filter(group => (group.task_types || []).length >= 2 && Number(group.min_minutes) > 0);
     onSave({
       ...form,
       task_spacing_groups: taskSpacingGroups,
@@ -167,7 +168,7 @@ export default function ObjectForm({ object, onSave, onCancel }) {
             <TaskSpacingGroupsEditor
               groups={form.task_spacing_groups || []}
               objectTaskTypes={[...new Set(objectTasks.map(task => task.task_type).filter(Boolean))]}
-              onChange={(groups) => handleChange("task_spacing_groups", groups)}
+              onChange={(groups) => handleChange("task_spacing_groups", normalizeTaskSpacingGroups(groups))}
             />
 
             <div className="flex justify-end gap-3 pt-2">

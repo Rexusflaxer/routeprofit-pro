@@ -2,7 +2,6 @@ import React, { useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2 } from "lucide-react";
 
@@ -18,27 +17,33 @@ export const TASK_TYPES = [
 
 export function expandTaskSpacingGroups(groups = []) {
   const rules = [];
+
   for (const group of groups || []) {
     const types = [...new Set(group.task_types || [])].filter(Boolean);
     const minutes = Number(group.min_minutes || 0);
+
     if (types.length < 2 || minutes <= 0) continue;
 
     for (let i = 0; i < types.length; i++) {
-      if (group.include_same_type) {
-        rules.push({ task_type_a: types[i], task_type_b: types[i], min_minutes: minutes });
-      }
       for (let j = i + 1; j < types.length; j++) {
-        rules.push({ task_type_a: types[i], task_type_b: types[j], min_minutes: minutes });
+        if (types[i] === types[j]) continue;
+        rules.push({
+          task_type_a: types[i],
+          task_type_b: types[j],
+          min_minutes: minutes,
+        });
       }
     }
   }
+
   return rules;
 }
 
 export function validateTaskSpacingGroups(groups = []) {
   return (groups || []).flatMap((group, index) => {
     const errors = [];
-    if ((group.task_types || []).length < 2) errors.push(`Regel ${index + 1}: kies minimaal twee taaksoorten.`);
+    const uniqueTypes = [...new Set(group.task_types || [])].filter(Boolean);
+    if (uniqueTypes.length < 2) errors.push(`Regel ${index + 1}: Kies minimaal twee verschillende taaksoorten.`);
     if (Number(group.min_minutes || 0) <= 0) errors.push(`Regel ${index + 1}: vul het minimaal aantal minuten in.`);
     return errors;
   });
@@ -49,6 +54,14 @@ function readableList(items) {
   return `${items.slice(0, -1).join(", ")} en ${items[items.length - 1]}`;
 }
 
+export function normalizeTaskSpacingGroups(groups = []) {
+  return (groups || []).map(group => ({
+    ...group,
+    task_types: [...new Set(group.task_types || [])].filter(Boolean),
+    include_same_type: false,
+  }));
+}
+
 export default function TaskSpacingGroupsEditor({ groups = [], objectTaskTypes = [], onChange }) {
   const [openDetails, setOpenDetails] = useState({});
   const safeGroups = Array.isArray(groups) ? groups : [];
@@ -57,7 +70,7 @@ export default function TaskSpacingGroupsEditor({ groups = [], objectTaskTypes =
   const availablePresetTypes = objectTaskTypes.length ? objectTaskTypes : TASK_TYPES;
 
   const updateGroup = (index, field, value) => {
-    onChange(safeGroups.map((group, i) => i === index ? { ...group, [field]: value } : group));
+    onChange(normalizeTaskSpacingGroups(safeGroups.map((group, i) => i === index ? { ...group, [field]: value } : group)));
   };
 
   const toggleTaskType = (index, type) => {
@@ -66,23 +79,23 @@ export default function TaskSpacingGroupsEditor({ groups = [], objectTaskTypes =
   };
 
   const addGroup = (preset = false) => {
-    onChange([
+    onChange(normalizeTaskSpacingGroups([
       ...safeGroups,
       {
         id: `group_${Date.now()}`,
-        label: "Algemene afstand tussen taaksoorten",
+        label: "Taaksoorten uit elkaar houden",
         task_types: preset ? availablePresetTypes : [],
         min_minutes: preset ? 60 : 0,
         include_same_type: false,
       },
-    ]);
+    ]));
   };
 
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
       <div>
         <h3 className="text-sm font-semibold text-slate-900">Plannerregels voor dit object</h3>
-        <p className="text-xs text-slate-500 mt-1">Welke taken moeten uit elkaar blijven?</p>
+        <p className="text-xs text-slate-500 mt-1">Welke verschillende taaksoorten moeten niet te snel na elkaar gebeuren?</p>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -99,7 +112,7 @@ export default function TaskSpacingGroupsEditor({ groups = [], objectTaskTypes =
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
                 <Label>Taaksoorten</Label>
-                <p className="text-xs text-slate-500">Kies welke soorten taken minimaal uit elkaar moeten blijven.</p>
+                <p className="text-xs text-slate-500">Welke verschillende taaksoorten moeten uit elkaar blijven?</p>
               </div>
               <Button type="button" variant="ghost" size="icon" className="text-red-600" onClick={() => onChange(safeGroups.filter((_, i) => i !== index))}>
                 <Trash2 className="w-4 h-4" />
@@ -121,7 +134,7 @@ export default function TaskSpacingGroupsEditor({ groups = [], objectTaskTypes =
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label>Minimaal aantal minuten ertussen</Label>
+                <Label>Min. tijd tussen verschillende taaksoorten</Label>
                 <Input type="number" min="1" value={group.min_minutes || ""} onChange={(e) => updateGroup(index, "min_minutes", Number(e.target.value || 0))} placeholder="Bijv. 60" />
                 <div className="flex flex-wrap gap-2">
                   {[15, 30, 60, 120].map(minutes => (
@@ -130,18 +143,11 @@ export default function TaskSpacingGroupsEditor({ groups = [], objectTaskTypes =
                 </div>
               </div>
 
-              <label className="flex items-start gap-3 rounded-lg border border-slate-200 bg-slate-50 p-3 cursor-pointer">
-                <Checkbox checked={!!group.include_same_type} onCheckedChange={(checked) => updateGroup(index, "include_same_type", !!checked)} className="mt-0.5" />
-                <div>
-                  <p className="text-sm font-medium text-slate-800">Ook tussen taken van hetzelfde type</p>
-                  {group.include_same_type && <p className="text-xs text-slate-500 mt-1">Ook twee mobiele controlerondes op dit object moeten dan minimaal deze tijd uit elkaar zitten.</p>}
-                </div>
-              </label>
             </div>
 
             {selected.length > 0 && Number(group.min_minutes || 0) > 0 && (
               <p className="text-sm text-slate-700 rounded-lg bg-blue-50 border border-blue-200 p-3">
-                De planner houdt minimaal {group.min_minutes} minuten tussen alle geselecteerde taaksoorten op dit object.
+                De planner houdt minimaal {group.min_minutes} minuten tussen deze verschillende taaksoorten op dit object.
               </p>
             )}
             {isStrict && <p className="text-xs text-amber-700 rounded-lg bg-amber-50 border border-amber-200 p-3">Deze regel kan streng zijn. Taken kunnen niet ingepland worden als de afstand niet past.</p>}
@@ -184,7 +190,7 @@ export function TaskSpacingGroupsSummary({ groups = [] }) {
       <p className="text-xs font-semibold uppercase tracking-wider text-slate-500 mb-2">Plannerregels</p>
       <ul className="space-y-1 text-sm text-slate-700">
         {validGroups.map(group => (
-          <li key={group.id || group.label}>- {group.min_minutes} min tussen {readableList(group.task_types || [])}</li>
+          <li key={group.id || group.label}>- {group.min_minutes} min tussen verschillende taaksoorten: {readableList([...new Set(group.task_types || [])].filter(Boolean))}</li>
         ))}
       </ul>
     </div>
