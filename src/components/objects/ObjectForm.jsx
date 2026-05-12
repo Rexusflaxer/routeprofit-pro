@@ -150,7 +150,12 @@ export default function ObjectForm({ object, onSave, onCancel }) {
               <Textarea value={form.notes} onChange={(e) => handleChange("notes", e.target.value)} rows={2} placeholder="Extra informatie..." />
             </div>
 
-            <TaskSpacingRulesEditor rules={form.task_spacing_rules || []} onChange={(rules) => handleChange("task_spacing_rules", rules)} />
+            <TaskSpacingRulesEditor
+              rules={form.task_spacing_rules || []}
+              onChange={(rules) => handleChange("task_spacing_rules", rules)}
+              title="Plannerregels voor dit object"
+              description="Welke taken mogen niet te snel na elkaar gebeuren?"
+            />
 
             <div className="flex justify-end gap-3 pt-2">
               <Button type="button" variant="outline" onClick={onCancel}><X className="w-4 h-4 mr-1" /> Annuleren</Button>

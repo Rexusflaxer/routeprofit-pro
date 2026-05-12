@@ -15,7 +15,12 @@ const TASK_TYPES = [
   "Grote collectief",
 ];
 
-export default function TaskSpacingRulesEditor({ rules = [], onChange }) {
+export default function TaskSpacingRulesEditor({
+  rules = [],
+  onChange,
+  title = "Plannerregels voor dit object",
+  description = "Welke taken mogen niet te snel na elkaar gebeuren?",
+}) {
   const safeRules = Array.isArray(rules) ? rules : [];
 
   const updateRule = (index, field, value) => {
@@ -25,28 +30,28 @@ export default function TaskSpacingRulesEditor({ rules = [], onChange }) {
   return (
     <div className="space-y-3 rounded-xl border border-slate-200 bg-slate-50 p-4">
       <div>
-        <h3 className="text-sm font-semibold text-slate-900">Minimale afstand tussen taaktypes</h3>
-        <p className="text-xs text-slate-500 mt-1">Deze harde regels gelden voor verschillende taken op hetzelfde object en kunnen ervoor zorgen dat taken niet ingepland worden.</p>
+        <h3 className="text-sm font-semibold text-slate-900">{title}</h3>
+        <p className="text-xs text-slate-500 mt-1">{description}</p>
       </div>
 
       {safeRules.map((rule, index) => (
         <div key={index} className="grid grid-cols-1 md:grid-cols-12 gap-3 items-end rounded-lg border border-slate-200 bg-white p-3">
           <div className="md:col-span-4 space-y-1">
-            <Label className="text-xs text-slate-500">Taaktype A</Label>
+            <Label className="text-xs text-slate-500">Tussen</Label>
             <Select value={rule.task_type_a || ""} onValueChange={(value) => updateRule(index, "task_type_a", value)}>
-              <SelectTrigger><SelectValue placeholder="Kies taaktype" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Kies soort taak" /></SelectTrigger>
               <SelectContent>{TASK_TYPES.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="md:col-span-4 space-y-1">
-            <Label className="text-xs text-slate-500">Taaktype B</Label>
+            <Label className="text-xs text-slate-500">En</Label>
             <Select value={rule.task_type_b || ""} onValueChange={(value) => updateRule(index, "task_type_b", value)}>
-              <SelectTrigger><SelectValue placeholder="Kies taaktype" /></SelectTrigger>
+              <SelectTrigger><SelectValue placeholder="Kies soort taak" /></SelectTrigger>
               <SelectContent>{TASK_TYPES.map(type => <SelectItem key={type} value={type}>{type}</SelectItem>)}</SelectContent>
             </Select>
           </div>
           <div className="md:col-span-3 space-y-1">
-            <Label className="text-xs text-slate-500">Minuten ertussen</Label>
+            <Label className="text-xs text-slate-500">Minimaal minuten</Label>
             <Input type="number" min="1" value={rule.min_minutes || 60} onChange={(e) => updateRule(index, "min_minutes", Math.max(1, Number(e.target.value || 1)))} />
           </div>
           <Button type="button" variant="ghost" size="icon" className="md:col-span-1 text-red-600" onClick={() => onChange(safeRules.filter((_, i) => i !== index))}>
