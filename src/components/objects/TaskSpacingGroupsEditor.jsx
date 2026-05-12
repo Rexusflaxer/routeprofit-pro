@@ -146,7 +146,14 @@ export default function TaskSpacingGroupsEditor({ groups = [], objectTaskTypes =
             )}
             {isStrict && <p className="text-xs text-amber-700 rounded-lg bg-amber-50 border border-amber-200 p-3">Deze regel kan streng zijn. Taken kunnen niet ingepland worden als de afstand niet past.</p>}
 
-            <details open={!!openDetails[index]} onToggle={(e) => setOpenDetails(prev => ({ ...prev, [index]: e.currentTarget.open }))} className="text-sm">
+            <details
+              open={!!openDetails[index]}
+              onToggle={(e) => {
+                const isOpen = e.currentTarget.open;
+                setOpenDetails(prev => ({ ...prev, [index]: isOpen }));
+              }}
+              className="text-sm"
+            >
               <summary className="cursor-pointer font-medium text-slate-700">Technische details tonen</summary>
               <div className="mt-3 rounded-lg bg-slate-50 border border-slate-200 p-3">
                 <p className="text-xs text-slate-600 mb-2">Deze groepsregel maakt automatisch {combinations.length} combinaties.</p>
