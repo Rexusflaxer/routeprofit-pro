@@ -207,6 +207,7 @@ function normalizeCompletedResult(serverResult, requestPayload = {}, debug = fal
     total_routes_created: routesToUse.length,
     has_estimated_travel: false,
     server_summary: summary,
+    meta: serverResult.meta || plannedResult.meta || {},
     debug_report: debug ? { best_result: plannedResult } : undefined,
   };
 }

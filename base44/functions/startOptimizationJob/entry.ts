@@ -309,6 +309,7 @@ Deno.serve(async (req) => {
       planning_end_time: selectedEndTime,
       planning_block: planningBlock,
       selection: {
+        enforce_cross_type_spacing_hard: false,
         route_count_penalty_minutes: Number(body.route_count_penalty_minutes || 60),
         min_auto_route_minutes: Number(body.min_auto_route_minutes || 180),
         wait_penalty_multiplier: Number(body.wait_penalty_multiplier || 1),

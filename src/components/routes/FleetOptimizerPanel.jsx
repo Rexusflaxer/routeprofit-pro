@@ -301,6 +301,13 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
               <Metric label="Afstand" value={`${totals.total_distance_km || 0} km`} />
             </div>
 
+            {result.meta?.cross_type_spacing_mode === "soft" && (
+              <div className="flex items-start gap-2 p-3 bg-slate-50 border border-slate-200 rounded-lg text-sm text-slate-600">
+                <Info className="w-4 h-4 flex-shrink-0 mt-0.5" />
+                Let op: regels tussen verschillende taaktypes zijn als voorkeur/controle meegenomen. Herhalingsafstanden zijn wel hard afgedwongen.
+              </div>
+            )}
+
             {result.has_estimated_travel && (
               <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 rounded-lg text-sm text-amber-800">
                 <AlertTriangle className="w-4 h-4 flex-shrink-0 mt-0.5" />

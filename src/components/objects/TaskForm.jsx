@@ -209,9 +209,9 @@ export default function TaskForm({ task, onSave, onCancel }) {
               </div>
               {repeatCount > 1 && (
                 <div className="space-y-2">
-                  <Label>Min. tijd tussen herhalingen</Label>
+                  <Label>Minimale tijd tussen herhalingen van deze taak</Label>
                   <Input type="number" min="0" value={form.min_minutes_between_visits || 0} onChange={(e) => handleChange("min_minutes_between_visits", Number(e.target.value) || 0)} />
-                  <p className="text-xs text-slate-500">Dit geldt alleen tussen herhalingen van deze taak.</p>
+                  <p className="text-xs text-slate-500">Gebruik dit wanneer dezelfde taak meerdere keren in hetzelfde venster uitgevoerd moet worden, bijvoorbeeld een avondronde en nachtronde.</p>
                 </div>
               )}
             </div>
