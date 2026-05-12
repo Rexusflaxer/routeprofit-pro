@@ -26,9 +26,36 @@
       "type": "number",
       "description": "Lengtegraad"
     },
+    "task_spacing_groups": {
+      "type": "array",
+      "description": "Gebruiksvriendelijke plannerregels om meerdere taaksoorten uit elkaar te houden",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "task_types": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "min_minutes": {
+            "type": "number"
+          },
+          "include_same_type": {
+            "type": "boolean"
+          }
+        }
+      }
+    },
     "task_spacing_rules": {
       "type": "array",
-      "description": "Minimale afstand tussen verschillende taaktypes op hetzelfde object",
+      "description": "Technische serverregels met minimale afstand tussen taaktypes op hetzelfde object",
       "items": {
         "type": "object",
         "properties": {

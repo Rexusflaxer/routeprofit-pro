@@ -432,9 +432,35 @@ function normalizedCustomExecutionBlocks(task, occurrenceOffset) {
     });
 }
 
+function expandTaskSpacingGroups(groups = []) {
+  const rules = [];
+  for (const group of groups || []) {
+    const types = [...new Set(group.task_types || [])].filter(Boolean);
+    const minutes = Number(group.min_minutes || 0);
+    if (types.length < 2 || minutes <= 0) continue;
+
+    for (let i = 0; i < types.length; i++) {
+      if (group.include_same_type) {
+        rules.push({ task_type_a: types[i], task_type_b: types[i], min_minutes: minutes });
+      }
+      for (let j = i + 1; j < types.length; j++) {
+        rules.push({ task_type_a: types[i], task_type_b: types[j], min_minutes: minutes });
+      }
+    }
+  }
+  return rules;
+}
+
+function getObjectTaskSpacingRules(object = {}) {
+  return [
+    ...expandTaskSpacingGroups(object.task_spacing_groups || []),
+    ...(Array.isArray(object.task_spacing_rules) ? object.task_spacing_rules : []),
+  ].filter(rule => rule.task_type_a && rule.task_type_b && Number(rule.min_minutes) > 0);
+}
+
 function getTaskSpacingRules(task, object) {
   return [
-    ...(Array.isArray(object?.task_spacing_rules) ? object.task_spacing_rules : []),
+    ...getObjectTaskSpacingRules(object),
     ...(Array.isArray(task?.task_spacing_rules) ? task.task_spacing_rules : []),
   ].filter(rule => rule.task_type_a && rule.task_type_b && Number(rule.min_minutes) > 0);
 }
@@ -1150,9 +1176,11 @@ async function evaluateScenario({
         tasks: optimizerTasks,
         objects: objects.map(object => ({
           id: String(object.id),
-          task_spacing_rules: Array.isArray(object.task_spacing_rules) ? object.task_spacing_rules : [],
+          task_spacing_groups: Array.isArray(object.task_spacing_groups) ? object.task_spacing_groups : [],
+          task_spacing_rules: getObjectTaskSpacingRules(object),
         })),
-        task_spacing_rules: objects.flatMap(object => (object.task_spacing_rules || []).map(rule => ({ ...rule, object_id: String(object.id) }))),
+        task_spacing_groups: objects.flatMap(object => (object.task_spacing_groups || []).map(group => ({ ...group, object_id: String(object.id) }))),
+        task_spacing_rules: objects.flatMap(object => getObjectTaskSpacingRules(object).map(rule => ({ ...rule, object_id: String(object.id) }))),
       })
     : {
         routes: [],

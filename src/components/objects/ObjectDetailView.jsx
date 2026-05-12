@@ -8,6 +8,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { ArrowLeft, Building2, Mail, MapPin, Pencil, Phone, User, Hash } from "lucide-react";
 import TaskForm from "./TaskForm";
 import ObjectWeekSchedule from "./ObjectWeekSchedule";
+import { TaskSpacingGroupsSummary } from "./TaskSpacingGroupsEditor";
 
 export default function ObjectDetailView({ object, onBack, onEditObject }) {
   const [editingTask, setEditingTask] = useState(null);
@@ -66,6 +67,7 @@ export default function ObjectDetailView({ object, onBack, onEditObject }) {
               </div>
             )}
             {object.notes && <p className="rounded-lg bg-slate-50 p-3 text-sm text-slate-600 whitespace-pre-wrap">{object.notes}</p>}
+            <TaskSpacingGroupsSummary groups={object.task_spacing_groups || []} />
           </CardContent>
         </Card>
 
