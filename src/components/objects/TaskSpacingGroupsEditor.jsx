@@ -93,12 +93,13 @@ export default function TaskSpacingGroupsEditor({ groups = [], objectTaskTypes =
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
       <div>
-        <h3 className="text-sm font-semibold text-slate-900">Afstand tussen verschillende taaktypes op dit object</h3>
-        <p className="text-xs text-slate-500 mt-1">Deze regels worden gebruikt als planningscontrole en optimalisatievoorkeur. Ze voorkomen dat taken logisch te dicht op elkaar komen te liggen, maar blokkeren de planning niet volledig.</p>
+        <h3 className="text-sm font-semibold text-slate-900">Minimale afstand tussen taaksoorten op dit object</h3>
+        <p className="text-xs text-slate-500 mt-1">Gebruik dit als een klant meerdere soorten taken heeft, bijvoorbeeld een mobiele controleronde en een sluitronde. De planner probeert deze taken minimaal het ingestelde aantal minuten uit elkaar te houden, zodat controles niet vlak vóór of vlak na een sluitronde plaatsvinden.</p>
       </div>
 
-      <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800">
-        Voorbeeld: Mobiele Controleronde en Externe Sluitronde moeten minimaal 60 minuten uit elkaar zitten.
+      <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800 space-y-2">
+        <p><span className="font-semibold">Voorbeeld:</span> Mobiele Controleronde ↔ Externe Sluitronde: 60 minuten</p>
+        <p><span className="font-semibold">Betekenis:</span> Een mobiele controleronde mag niet vlak voor of vlak na de sluitronde worden gepland, tenzij het echt niet anders kan.</p>
       </div>
 
       <div className="flex flex-wrap gap-2">

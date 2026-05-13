@@ -310,6 +310,11 @@ Deno.serve(async (req) => {
       planning_block: planningBlock,
       selection: {
         enforce_cross_type_spacing_hard: false,
+        spacing_repair_enabled: true,
+        spacing_repair_iterations: 2,
+        spacing_repair_max_constraints: 40,
+        spacing_violation_fixed_penalty: 2500000,
+        spacing_violation_minute_penalty: 100000,
         route_count_penalty_minutes: Number(body.route_count_penalty_minutes || 60),
         min_auto_route_minutes: Number(body.min_auto_route_minutes || 180),
         wait_penalty_multiplier: Number(body.wait_penalty_multiplier || 1),
