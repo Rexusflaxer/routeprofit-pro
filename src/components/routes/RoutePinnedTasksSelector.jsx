@@ -53,6 +53,7 @@ function taskMatchesRouteWindow(task, form) {
 
 export default function RoutePinnedTasksSelector({ form, onChange }) {
   const [query, setQuery] = useState("");
+  const [repeatChoices, setRepeatChoices] = useState({});
 
   const { data: tasks = [] } = useQuery({ queryKey: ["all-tasks"], queryFn: () => base44.entities.Task.list() });
   const { data: objects = [] } = useQuery({ queryKey: ["objects"], queryFn: () => base44.entities.SurveillanceObject.list() });
@@ -80,13 +81,14 @@ export default function RoutePinnedTasksSelector({ form, onChange }) {
     const id = String(taskId);
     const existing = assignedTasks.find(item => String(item.task_id) === id);
     const next = existing
-      ? assignedTasks.map(item => String(item.task_id) === id ? { ...item, ...patch } : item)
+      ? assignedTasks.map(item => String(item.task_id) === id ? { ...item, ...patch, task_id: id } : item)
       : [
           ...assignedTasks,
           {
-            task_id: String(id),
+            task_id: id,
             days: form.weekdays || [],
             locked_to_route: true,
+            locked_occurrence_count: 1,
             locked_sequence: false,
             sequence_index: null,
             ...patch,
@@ -94,6 +96,30 @@ export default function RoutePinnedTasksSelector({ form, onChange }) {
         ];
 
     onChange(prev => ({ ...prev, assigned_tasks: next }));
+  };
+
+  const buildRepeatPatch = (task, choice = { mode: "single", repeat_index: 1 }) => {
+    const repeatCount = Math.max(1, Number(task?.repeat_count || 1));
+    if (repeatCount <= 1 || choice.mode === "single") return { locked_occurrence_count: 1, repeat_index: null, lock_all_occurrences: false };
+    if (choice.mode === "specific") return { locked_occurrence_count: 1, repeat_index: Number(choice.repeat_index || 1), lock_all_occurrences: false };
+    return { locked_occurrence_count: repeatCount, repeat_index: null, lock_all_occurrences: true };
+  };
+
+  const addPinnedTask = (task) => {
+    const id = String(task.id);
+    if (assignedTasks.some(item => String(item.task_id) === id)) {
+      if (!confirm("Wil je nog een extra uitvoering van deze taak vastzetten?")) return;
+    }
+    const choice = repeatChoices[id] || { mode: "single", repeat_index: 1 };
+    updateAssignedTask(id, { locked_to_route: true, locked_sequence: false, sequence_index: null, ...buildRepeatPatch(task, choice) });
+  };
+
+  const getPinnedRepeatLabel = (item, task) => {
+    const repeatCount = Math.max(1, Number(task?.repeat_count || 1));
+    if (repeatCount <= 1) return "Vastgezet";
+    if (item.lock_all_occurrences || Number(item.locked_occurrence_count || 0) >= repeatCount) return "Alle uitvoeringen vastgezet";
+    if (item.repeat_index) return `Uitvoering ${item.repeat_index}/${repeatCount} vastgezet`;
+    return "1 uitvoering vastgezet";
   };
 
   const removePinnedTask = (taskId) => {
@@ -130,7 +156,7 @@ export default function RoutePinnedTasksSelector({ form, onChange }) {
                 key={task.id}
                 type="button"
                 disabled={isPinned}
-                onClick={() => updateAssignedTask(task.id, { locked_to_route: true, locked_sequence: false, sequence_index: null })}
+                onClick={() => addPinnedTask(task)}
                 className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-50"
               >
                 <div className="min-w-0">
@@ -139,6 +165,37 @@ export default function RoutePinnedTasksSelector({ form, onChange }) {
                 </div>
                 <Plus className="w-4 h-4 text-slate-400" />
               </button>
+              {Number(task.repeat_count || 1) > 1 && !isPinned && (
+                <div className="px-3 pb-3 bg-white space-y-2">
+                  <p className="text-xs font-semibold text-slate-900">Deze taak heeft meerdere uitvoeringen</p>
+                  <div className="space-y-1 text-xs text-slate-700">
+                    {[
+                      ["single", "Eén uitvoering vastzetten"],
+                      ["specific", "Specifieke uitvoering kiezen"],
+                      ["all", "Alle uitvoeringen vastzetten"],
+                    ].map(([mode, label]) => (
+                      <label key={mode} className="flex items-center gap-2">
+                        <input
+                          type="radio"
+                          name={`pinned-repeat-${task.id}`}
+                          checked={(repeatChoices[String(task.id)]?.mode || "single") === mode}
+                          onChange={() => setRepeatChoices(prev => ({ ...prev, [String(task.id)]: { mode, repeat_index: 1 } }))}
+                        />
+                        {label}
+                      </label>
+                    ))}
+                  </div>
+                  {repeatChoices[String(task.id)]?.mode === "specific" && (
+                    <div className="flex flex-wrap gap-2 pl-5">
+                      {Array.from({ length: Math.max(1, Number(task.repeat_count || 1)) }, (_, i) => i + 1).map(index => (
+                        <Button key={index} type="button" size="sm" variant={Number(repeatChoices[String(task.id)]?.repeat_index || 1) === index ? "default" : "outline"} onClick={() => setRepeatChoices(prev => ({ ...prev, [String(task.id)]: { ...(prev[String(task.id)] || { mode: "specific" }), mode: "specific", repeat_index: index } }))}>
+                          Uitvoering {index}/{task.repeat_count}
+                        </Button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
             );
           })}
           {filteredTasks.length === 0 && <p className="px-3 py-3 text-sm text-slate-500">Geen taken binnen deze routedag en dit tijdsvenster gevonden</p>}
@@ -156,7 +213,7 @@ export default function RoutePinnedTasksSelector({ form, onChange }) {
                   <p className="text-sm font-semibold text-slate-900 truncate">{taskLabel(task, objects, collectiefs)}</p>
                   <div className="flex flex-wrap gap-2 mt-1">
                     <Badge variant="outline" className="text-xs">{task.task_type}</Badge>
-                    <Badge className="text-xs bg-slate-900 text-white"><Lock className="w-3 h-3 mr-1" />Vastgezet</Badge>
+                    <Badge className="text-xs bg-slate-900 text-white"><Lock className="w-3 h-3 mr-1" />{getPinnedRepeatLabel(item, task)}</Badge>
                   </div>
                 </div>
                 <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-slate-400 hover:text-red-600" onClick={() => removePinnedTask(item.task_id)}>

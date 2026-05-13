@@ -206,6 +206,9 @@ function relevantAssignedTasksForRoute(route) {
   return (route.assigned_tasks || []).map(item => ({
     task_id: String(item.task_id),
     locked_to_route: !!item.locked_to_route,
+    locked_occurrence_count: item.locked_occurrence_count ?? null,
+    repeat_index: item.repeat_index ?? null,
+    lock_all_occurrences: !!item.lock_all_occurrences,
     locked_sequence: !!item.locked_sequence,
     sequence_index: item.sequence_index ?? null,
     days: item.days || [],

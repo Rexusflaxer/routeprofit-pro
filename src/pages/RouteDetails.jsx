@@ -166,13 +166,19 @@ export default function RouteDetails() {
   };
 
   const addTaskMutation = useMutation({
-    mutationFn: async ({ routeId, taskIds }) => {
+    mutationFn: async ({ routeId, assignments }) => {
       const selectedDay = route?.weekdays?.[0];
-      const newTasks = taskIds.map(taskId => ({ 
-        task_id: taskId, 
-        days: selectedDay ? [selectedDay] : [] 
+      const newTasks = assignments.map(assignment => ({
+        days: selectedDay ? [selectedDay] : [],
+        locked_to_route: true,
+        locked_sequence: false,
+        sequence_index: null,
+        ...assignment,
+        task_id: String(assignment.task_id),
       }));
-      const updatedTasks = [...(route?.assigned_tasks || []), ...newTasks];
+      const mergedByTaskId = new Map((route?.assigned_tasks || []).map(item => [String(item.task_id), item]));
+      newTasks.forEach(item => mergedByTaskId.set(String(item.task_id), { ...(mergedByTaskId.get(String(item.task_id)) || {}), ...item }));
+      const updatedTasks = [...mergedByTaskId.values()];
       
       // Bereken totale taaktijd
       const allTaskIds = updatedTasks.map(at => at.task_id);
@@ -209,7 +215,15 @@ export default function RouteDetails() {
 
   const folder = folders.find(f => f.id === route?.folder_id);
   const vehicle = vehicles.find(v => v.id === route?.vehicle_id);
-  const routeTasks = tasks.filter(t => (route?.assigned_tasks || []).some(at => at.task_id === t.id));
+  const routeTasks = tasks.filter(t => (route?.assigned_tasks || []).some(at => String(at.task_id) === String(t.id)));
+
+  const getPinnedRepeatLabel = (assignment, task) => {
+    const repeatCount = Math.max(1, Number(task?.repeat_count || 1));
+    if (!assignment?.locked_to_route || repeatCount <= 1) return "Vastgezet in route";
+    if (assignment.lock_all_occurrences || Number(assignment.locked_occurrence_count || 0) >= repeatCount) return "Alle uitvoeringen vastgezet";
+    if (assignment.repeat_index) return `Uitvoering ${assignment.repeat_index}/${repeatCount} vastgezet`;
+    return "1 uitvoering vastgezet";
+  };
 
   // Bereken omzet per route
   let totalRevenue = 0;
@@ -248,10 +262,12 @@ export default function RouteDetails() {
   const getLocation = (id) => objects.find(o => o.id === id) || offices.find(o => o.id === id);
 
   const buildVisibleOptimizedOrder = () => {
-    const lockedTaskIds = new Set(((route?.assigned_tasks) || []).filter(item => item.locked_to_route).map(item => String(item.task_id)));
+    const lockedAssignments = new Map(((route?.assigned_tasks) || []).filter(item => item.locked_to_route).map(item => [String(item.task_id), item]));
+    const lockedTaskIds = new Set(lockedAssignments.keys());
     const existingOrder = (optimizedRoute?.optimized_order || []).map(item => ({
       ...item,
       locked_to_route: !!item.locked_to_route || lockedTaskIds.has(String(item.task_id || '')),
+      locked_assignment: lockedAssignments.get(String(item.task_id || '')) || null,
     }));
     const serverTaskSteps = Array.isArray(optimizedRoute?.steps)
       ? optimizedRoute.steps.filter(step => step.type === 'task')
@@ -285,6 +301,7 @@ export default function RouteDetails() {
             distance_to_next_km: Number(step.distance_to_next_km || 0),
             sequence_index: stepIndex,
             locked_to_route: !!step.locked_to_route || lockedTaskIds.has(taskId),
+            locked_assignment: lockedAssignments.get(taskId) || null,
             custom_block_label: step.custom_block_label || step.execution_block_label || task?.custom_execution_blocks?.[Number(step.repeat_index || step.execution_index || 1) - 1]?.label || '',
           };
         });
@@ -660,7 +677,7 @@ export default function RouteDetails() {
                                 €{task.pricing_type === 'per_minuut' ? task.price_amount : (task.price_amount / task.duration_minutes).toFixed(2)}/min
                               </Badge>
                               {assignment?.locked_to_route && (
-                                <Badge className="text-xs bg-slate-900 text-white">Vastgezet in route</Badge>
+                                <Badge className="text-xs bg-slate-900 text-white">{getPinnedRepeatLabel(assignment, task)}</Badge>
                               )}
                             </div>
                           </div>
@@ -817,7 +834,7 @@ export default function RouteDetails() {
                                       <Badge className="text-xs bg-purple-100 text-purple-700 border-purple-200">Deel {item.split_index}/{item.split_part_count}</Badge>
                                     )}
                                     {item.locked_to_route && (
-                                      <Badge className="text-xs bg-slate-900 text-white">Vastgezet in route</Badge>
+                                      <Badge className="text-xs bg-slate-900 text-white">{getPinnedRepeatLabel(item.locked_assignment, tasks.find(task => String(task.id) === String(item.task_id)))}</Badge>
                                     )}
                                     {item.uses_arrival_deadline && (
                                       <Badge className="text-xs bg-amber-100 text-amber-700 border-amber-200">Aanwezig vóór {displayClockTime(item.arrival_deadline_time)}</Badge>
@@ -958,9 +975,9 @@ export default function RouteDetails() {
         objects={objects}
         collectiefs={collectiefs}
         routes={routes}
-        onAddTask={(taskIds) => {
-          const ids = Array.isArray(taskIds) ? taskIds : [taskIds];
-          addTaskMutation.mutate({ routeId: route.id, taskIds: ids });
+        onAddTask={(assignments) => {
+          const items = Array.isArray(assignments) ? assignments : [assignments];
+          addTaskMutation.mutate({ routeId: route.id, assignments: items });
         }}
       />
     </div>

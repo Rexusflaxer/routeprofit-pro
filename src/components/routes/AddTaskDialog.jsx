@@ -7,6 +7,7 @@ import { Clock, Euro, MapPin, Plus } from "lucide-react";
 
 export default function AddTaskDialog({ open, onOpenChange, route, tasks, objects, collectiefs = [], routes, onAddTask }) {
   const [selectedTaskIds, setSelectedTaskIds] = useState([]);
+  const [repeatChoices, setRepeatChoices] = useState({});
 
   const availableTasks = useMemo(() => {
     if (!route || !route.time_window_start || !route.time_window_end || !route.weekdays || route.weekdays.length === 0) {
@@ -24,7 +25,7 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
     if (routeCrossesMiddnight) routeEndMin += 24 * 60;
 
     // Verzamel alle al toegewezen taken
-    const assignedTaskIds = (route.assigned_tasks || []).map(at => at.task_id);
+    const assignedTaskIds = new Set((route.assigned_tasks || []).map(at => String(at.task_id)));
 
     // Vind taken die al in andere routes zitten op dezelfde dag
     const taskDayUsage = {};
@@ -42,8 +43,8 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
 
     // Filter taken
     return tasks.filter(task => {
-      // Check of taak al in deze route zit
-      if (assignedTaskIds.includes(task.id)) return false;
+      // Voorkom dat dezelfde taak automatisch meerdere keren in dezelfde route komt
+      if (assignedTaskIds.has(String(task.id))) return false;
 
       // Check of taak op de juiste dag(en) is
       const taskWeekdays = task.weekdays || [];
@@ -109,22 +110,66 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
   const handleOpenChange = (isOpen) => {
     if (!isOpen) {
       setSelectedTaskIds([]);
+      setRepeatChoices({});
     }
     onOpenChange(isOpen);
   };
 
   const toggleTask = (taskId) => {
-    setSelectedTaskIds(prev => 
-      prev.includes(taskId) 
-        ? prev.filter(id => id !== taskId)
-        : [...prev, taskId]
-    );
+    const task = tasks.find(item => String(item.id) === String(taskId));
+    setSelectedTaskIds(prev => {
+      if (prev.includes(taskId)) {
+        setRepeatChoices(current => {
+          const next = { ...current };
+          delete next[taskId];
+          return next;
+        });
+        return prev.filter(id => id !== taskId);
+      }
+
+      if (Number(task?.repeat_count || 1) > 1) {
+        setRepeatChoices(current => ({
+          ...current,
+          [taskId]: { mode: "single", repeat_index: 1 }
+        }));
+      }
+
+      return [...prev, taskId];
+    });
+  };
+
+  const handleRepeatChoiceChange = (taskId, patch) => {
+    setRepeatChoices(prev => ({
+      ...prev,
+      [taskId]: { mode: "single", repeat_index: 1, ...(prev[taskId] || {}), ...patch }
+    }));
+  };
+
+  const buildAssignment = (taskId) => {
+    const task = tasks.find(item => String(item.id) === String(taskId));
+    const repeatCount = Math.max(1, Number(task?.repeat_count || 1));
+    const choice = repeatChoices[taskId] || { mode: "single", repeat_index: 1 };
+    const base = {
+      task_id: String(taskId),
+      locked_to_route: true,
+    };
+
+    if (repeatCount <= 1 || choice.mode === "single") {
+      return { ...base, locked_occurrence_count: 1 };
+    }
+
+    if (choice.mode === "specific") {
+      return { ...base, repeat_index: Number(choice.repeat_index || 1), locked_occurrence_count: 1 };
+    }
+
+    return { ...base, lock_all_occurrences: true, locked_occurrence_count: repeatCount };
   };
 
   const handleAddSelected = () => {
     if (selectedTaskIds.length > 0) {
-      onAddTask(selectedTaskIds);
+      onAddTask(selectedTaskIds.map(buildAssignment));
       setSelectedTaskIds([]);
+      setRepeatChoices({});
       onOpenChange(false);
     }
   };
@@ -144,18 +189,22 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
               </p>
             </div>
           ) : (
-            availableTasks.map(task => (
+            availableTasks.map(task => {
+              const repeatCount = Math.max(1, Number(task.repeat_count || 1));
+              const isSelected = selectedTaskIds.includes(task.id);
+              const repeatChoice = repeatChoices[task.id] || { mode: "single", repeat_index: 1 };
+              return (
               <div 
                 key={task.id} 
                 className={`flex items-start gap-3 p-4 rounded-lg border-2 transition-colors cursor-pointer ${
-                  selectedTaskIds.includes(task.id)
-                    ? 'bg-blue-50 border-blue-500'
+                  isSelected
+                   ? 'bg-blue-50 border-blue-500'
                     : 'bg-slate-50 border-slate-200 hover:bg-slate-100'
                 }`}
                 onClick={() => toggleTask(task.id)}
               >
                 <Checkbox 
-                  checked={selectedTaskIds.includes(task.id)}
+                  checked={isSelected}
                   onCheckedChange={() => toggleTask(task.id)}
                   className="mt-1"
                 />
@@ -184,10 +233,45 @@ export default function AddTaskDialog({ open, onOpenChange, route, tasks, object
                         {task.time_window_start} - {task.time_window_end}
                       </Badge>
                     )}
+                    {repeatCount > 1 && (
+                      <Badge className="text-xs bg-purple-100 text-purple-700 border-purple-200">
+                        {repeatCount} uitvoeringen
+                      </Badge>
+                    )}
                   </div>
+
+                  {isSelected && repeatCount > 1 && (
+                    <div className="mt-3 rounded-lg bg-white border border-blue-200 p-3 space-y-3" onClick={(e) => e.stopPropagation()}>
+                      <p className="text-sm font-semibold text-slate-900">Deze taak heeft meerdere uitvoeringen</p>
+                      <div className="space-y-2 text-sm text-slate-700">
+                        <label className="flex items-center gap-2">
+                          <input type="radio" name={`repeat-${task.id}`} checked={repeatChoice.mode === "single"} onChange={() => handleRepeatChoiceChange(task.id, { mode: "single", repeat_index: 1 })} />
+                          Eén uitvoering vastzetten
+                        </label>
+                        <label className="flex items-center gap-2">
+                          <input type="radio" name={`repeat-${task.id}`} checked={repeatChoice.mode === "specific"} onChange={() => handleRepeatChoiceChange(task.id, { mode: "specific", repeat_index: 1 })} />
+                          Specifieke uitvoering kiezen
+                        </label>
+                        {repeatChoice.mode === "specific" && (
+                          <div className="ml-6 flex flex-wrap gap-2">
+                            {Array.from({ length: repeatCount }, (_, i) => i + 1).map(index => (
+                              <Button key={index} type="button" size="sm" variant={Number(repeatChoice.repeat_index || 1) === index ? "default" : "outline"} onClick={() => handleRepeatChoiceChange(task.id, { repeat_index: index })}>
+                                Uitvoering {index}/{repeatCount}
+                              </Button>
+                            ))}
+                          </div>
+                        )}
+                        <label className="flex items-center gap-2">
+                          <input type="radio" name={`repeat-${task.id}`} checked={repeatChoice.mode === "all"} onChange={() => handleRepeatChoiceChange(task.id, { mode: "all" })} />
+                          Alle uitvoeringen vastzetten
+                        </label>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
-            ))
+            );
+            })
           )}
         </div>
 

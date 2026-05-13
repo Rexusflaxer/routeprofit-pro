@@ -32,6 +32,23 @@
             "default": false,
             "description": "Deze taak moet verplicht in deze route blijven"
           },
+          "locked_occurrence_count": {
+            "type": "number",
+            "default": 1,
+            "description": "Aantal herhalingen van deze taak dat in deze route is vastgezet"
+          },
+          "repeat_index": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "description": "Specifieke herhaling die in deze route is vastgezet"
+          },
+          "lock_all_occurrences": {
+            "type": "boolean",
+            "default": false,
+            "description": "Alle herhalingen van deze taak zijn in deze route vastgezet"
+          },
           "locked_sequence": {
             "type": "boolean",
             "default": false,
