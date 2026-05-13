@@ -43,6 +43,7 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
   const [planningStartTime, setPlanningStartTime] = useState("17:30");
   const [planningEndDay, setPlanningEndDay] = useState("2");
   const [planningEndTime, setPlanningEndTime] = useState("08:30");
+  const [optimizationGoal, setOptimizationGoal] = useState("fewer_routes");
   const [endDayManuallyChanged, setEndDayManuallyChanged] = useState(false);
   const [currentJob, setCurrentJob] = useState(null);
   const [refreshingJob, setRefreshingJob] = useState(false);
@@ -98,6 +99,8 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
         planning_start_time: planningStartTime || '17:30',
         planning_end_weekday: Number(planningEndDay || nextWeekday(selectedWeekday)),
         planning_end_time: planningEndTime || '08:30',
+        optimization_goal: optimizationGoal,
+        prefer_fewer_routes_first: optimizationGoal === "fewer_routes",
         save_routes: false,
       });
       setCurrentJob(res.data);
@@ -167,6 +170,23 @@ export default function FleetOptimizerPanel({ onRoutesCreated, onClose }) {
       </CardHeader>
 
       <CardContent className="space-y-4">
+        <div className="rounded-xl bg-white border border-blue-100 p-3 space-y-2">
+          <div className="flex flex-wrap items-center gap-3">
+            <span className="text-sm font-medium text-slate-800">Optimalisatiedoel:</span>
+            <Select value={optimizationGoal} onValueChange={setOptimizationGoal} disabled={loading}>
+              <SelectTrigger className="w-64 bg-white border-blue-200">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="fewer_routes">Zo weinig mogelijk diensten</SelectItem>
+                <SelectItem value="balanced">Balans</SelectItem>
+                <SelectItem value="less_travel">Zo weinig mogelijk kilometers/reistijd</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <p className="text-xs text-slate-500">De planner maakt alleen een extra dienst aan als dit nodig is om taken goed in te plannen. Hij maakt geen extra korte dienst alleen om enkele kilometers te besparen.</p>
+        </div>
+
         <div className="flex flex-wrap gap-2">
           <Button onClick={() => runOptimizer([Number(selectedDay)])} disabled={loading} className="bg-blue-700 hover:bg-blue-800 text-white">
             <Zap className="w-4 h-4 mr-1.5" />

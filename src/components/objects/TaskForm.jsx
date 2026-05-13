@@ -209,9 +209,13 @@ export default function TaskForm({ task, onSave, onCancel }) {
               </div>
               {repeatCount > 1 && (
                 <div className="space-y-2">
-                  <Label>Minimale tijd tussen herhalingen van deze taak</Label>
-                  <Input type="number" min="0" value={form.min_minutes_between_visits || 0} onChange={(e) => handleChange("min_minutes_between_visits", Number(e.target.value) || 0)} />
-                  <p className="text-xs text-slate-500">Gebruik dit wanneer dezelfde taak meerdere keren in hetzelfde venster uitgevoerd moet worden, bijvoorbeeld een avondronde en nachtronde.</p>
+                  <Label>Minimale tijd tussen herhalingen</Label>
+                  <Input type="number" min="0" value={form.min_minutes_between_visits || ""} onChange={(e) => handleChange("min_minutes_between_visits", Number(e.target.value) || 0)} placeholder="Bijv. 120" />
+                  <p className="text-xs text-slate-500">Gebruik dit als dezelfde taak meerdere keren binnen hetzelfde venster moet gebeuren. Bijvoorbeeld een mobiele controleronde één keer in de avond en één keer in de nacht.</p>
+                  <p className="text-xs text-blue-700 bg-blue-50 border border-blue-200 rounded-lg p-2">Deze afstand geldt alleen tussen herhalingen van deze taak.</p>
+                  {Number(form.min_minutes_between_visits || 0) <= 0 && (
+                    <p className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-lg p-2">Advies: vul een minimale tijd in zodat herhalingen beter over het venster worden verspreid.</p>
+                  )}
                 </div>
               )}
             </div>
@@ -219,7 +223,7 @@ export default function TaskForm({ task, onSave, onCancel }) {
             {repeatCount > 1 && !usesArrivalDeadline && (
               <div className="space-y-4">
                 <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
-                  <Button type="button" variant={distribution === "auto" ? "default" : "outline"} onClick={() => applyDistribution("auto")}>Automatisch verdelen</Button>
+                  <Button type="button" variant={distribution === "auto" ? "default" : "outline"} onClick={() => applyDistribution("auto")}>Automatisch verspreiden</Button>
                   {canUseEveningNight && <Button type="button" variant={distribution === "evening_night" ? "default" : "outline"} onClick={() => applyDistribution("evening_night")}>Avond + Nacht</Button>}
                   <Button type="button" variant={distribution === "custom" ? "default" : "outline"} onClick={() => applyDistribution("custom")}>Zelf blokken instellen</Button>
                 </div>
@@ -237,7 +241,9 @@ export default function TaskForm({ task, onSave, onCancel }) {
                 {distribution === "custom" && <ExecutionBlocksEditor form={form} onChange={handleChange} errors={blockErrors} />}
 
                 <p className="text-sm text-slate-600 bg-slate-50 border border-slate-200 rounded-lg p-3">
-                  Deze taak wordt {repeatCount} keer uitgevoerd{distribution === "evening_night" ? ": één keer in de avond en één keer in de nacht" : ""}. Er moet minimaal {form.min_minutes_between_visits || 0} minuten tussen herhalingen zitten.
+                  {distribution === "auto"
+                    ? "De server gebruikt het volledige tijdvenster en verspreidt de herhalingen zo goed mogelijk."
+                    : `Deze taak wordt ${repeatCount} keer uitgevoerd${distribution === "evening_night" ? ": één keer in de avond en één keer in de nacht" : ""}.`} Er moet minimaal {form.min_minutes_between_visits || 0} minuten tussen herhalingen zitten.
                 </p>
               </div>
             )}

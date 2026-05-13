@@ -43,7 +43,7 @@ export function validateTaskSpacingGroups(groups = []) {
   return (groups || []).flatMap((group, index) => {
     const errors = [];
     const uniqueTypes = [...new Set(group.task_types || [])].filter(Boolean);
-    if (uniqueTypes.length < 2) errors.push(`Regel ${index + 1}: Kies minimaal twee verschillende taaksoorten.`);
+    if (uniqueTypes.length < 2) errors.push(`Regel ${index + 1}: Kies minimaal twee verschillende taaktypes.`);
     if (Number(group.min_minutes || 0) <= 0) errors.push(`Regel ${index + 1}: vul het minimaal aantal minuten in.`);
     return errors;
   });
@@ -93,13 +93,13 @@ export default function TaskSpacingGroupsEditor({ groups = [], objectTaskTypes =
   return (
     <div className="space-y-4 rounded-xl border border-slate-200 bg-slate-50 p-4">
       <div>
-        <h3 className="text-sm font-semibold text-slate-900">Minimale afstand tussen taaksoorten op dit object</h3>
-        <p className="text-xs text-slate-500 mt-1">Gebruik dit als een klant meerdere soorten taken heeft, bijvoorbeeld een mobiele controleronde en een sluitronde. De planner probeert deze taken minimaal het ingestelde aantal minuten uit elkaar te houden, zodat controles niet vlak vóór of vlak na een sluitronde plaatsvinden.</p>
+        <h3 className="text-sm font-semibold text-slate-900">Minimale tijd tussen verschillende taaksoorten</h3>
+        <p className="text-xs text-slate-500 mt-1">Gebruik dit als bijvoorbeeld een mobiele controleronde niet vlak vóór of vlak na een sluitronde moet plaatsvinden.</p>
       </div>
 
       <div className="rounded-lg bg-blue-50 border border-blue-200 p-3 text-sm text-blue-800 space-y-2">
         <p><span className="font-semibold">Voorbeeld:</span> Mobiele Controleronde ↔ Externe Sluitronde: 60 minuten</p>
-        <p><span className="font-semibold">Betekenis:</span> Een mobiele controleronde mag niet vlak voor of vlak na de sluitronde worden gepland, tenzij het echt niet anders kan.</p>
+        <p><span className="font-semibold">Betekenis:</span> De planner probeert de mobiele controleronde en sluitronde op dit object minimaal 60 minuten uit elkaar te houden.</p>
       </div>
 
       <div className="flex flex-wrap gap-2">
@@ -114,7 +114,7 @@ export default function TaskSpacingGroupsEditor({ groups = [], objectTaskTypes =
             <div className="flex items-start justify-between gap-3">
               <div className="space-y-1">
                 <Label>Taaksoorten</Label>
-                <p className="text-xs text-slate-500">Welke verschillende taaksoorten moeten uit elkaar blijven?</p>
+                <p className="text-xs text-slate-500">Deze instelling is alleen voor verschillende taaktypes. Voor herhalingen van hetzelfde type gebruik je taakniveau.</p>
               </div>
               <Button type="button" variant="ghost" size="icon" className="text-red-600" onClick={() => onChange(safeGroups.filter((_, i) => i !== index))}>
                 <Trash2 className="w-4 h-4" />
@@ -153,6 +153,11 @@ export default function TaskSpacingGroupsEditor({ groups = [], objectTaskTypes =
             {selected.length > 0 && Number(group.min_minutes || 0) > 0 && (
               <p className="text-sm text-slate-700 rounded-lg bg-blue-50 border border-blue-200 p-3">
                 De planner neemt minimaal {group.min_minutes} minuten afstand mee tussen deze verschillende taaktypes op dit object.
+              </p>
+            )}
+            {selected.length >= 2 && Number(group.min_minutes || 0) >= 60 && (
+              <p className="text-sm text-amber-700 rounded-lg bg-amber-50 border border-amber-200 p-3">
+                Deze regel kan zorgen voor een langere route of extra wachttijd.
               </p>
             )}
           </div>
