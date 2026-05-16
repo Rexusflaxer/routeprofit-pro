@@ -71,6 +71,122 @@
         }
       }
     },
+    "parking_instruction": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "entry_instruction": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "walking_instruction": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "access_instruction": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "alarm_instruction": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key_instruction": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "object_notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "safety_notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_incident_notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "object_map_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "object_map_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "parking_point_latitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "parking_point_longitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "entry_point_latitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "entry_point_longitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "building_polygon_geojson": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "object_area_geojson": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "show_on_mobile_map": {
+      "type": "boolean",
+      "default": true
+    },
+    "is_active_customer_object": {
+      "type": "boolean",
+      "default": true
+    },
+    "mobile_map_priority": {
+      "type": "number",
+      "default": 0
+    },
     "notes": {
       "type": "string",
       "description": "Opmerkingen"

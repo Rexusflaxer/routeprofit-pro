@@ -1,0 +1,290 @@
+{
+  "name": "TaskExecution",
+  "type": "object",
+  "properties": {
+    "route_execution_id": {
+      "type": "string"
+    },
+    "source_route_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "original_task_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "sequence_index": {
+      "type": "number"
+    },
+    "task_name": {
+      "type": "string"
+    },
+    "object_name": {
+      "type": "string"
+    },
+    "task_type": {
+      "type": "string"
+    },
+    "repeat_index": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "repeat_count": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "split_index": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "split_count": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "custom_block_label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "en_route",
+        "arrived",
+        "started",
+        "postponed",
+        "skipped",
+        "completed",
+        "failed"
+      ],
+      "default": "pending"
+    },
+    "planned_arrival_time": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "planned_start_time": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "planned_departure_time": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "planned_arrival_seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "planned_departure_seconds": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "actual_arrival_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actual_started_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actual_completed_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actual_postponed_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actual_skipped_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "duration_minutes": {
+      "type": "number"
+    },
+    "travel_from_previous_minutes": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "distance_from_previous_km": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "travel_to_next_minutes": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "distance_to_next_km": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "latitude": {
+      "type": "number"
+    },
+    "longitude": {
+      "type": "number"
+    },
+    "address": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "locked_to_route": {
+      "type": "boolean",
+      "default": false
+    },
+    "locked_sequence": {
+      "type": "boolean",
+      "default": false
+    },
+    "route_pin_hard": {
+      "type": "boolean",
+      "default": false
+    },
+    "arrival_deadline_time": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "uses_arrival_deadline": {
+      "type": "boolean",
+      "default": false
+    },
+    "service_must_start_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "postpone_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "skip_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "failure_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "gps_arrival_latitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "gps_arrival_longitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "gps_started_latitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "gps_started_longitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "gps_completed_latitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "gps_completed_longitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "report_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mobile_notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "route_execution_id",
+    "original_task_id",
+    "object_id",
+    "sequence_index",
+    "task_name",
+    "object_name",
+    "task_type",
+    "status",
+    "duration_minutes",
+    "latitude",
+    "longitude"
+  ]
+}

@@ -1,0 +1,189 @@
+{
+  "name": "RouteExecution",
+  "type": "object",
+  "properties": {
+    "route_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Gekoppelde route"
+    },
+    "route_name": {
+      "type": "string"
+    },
+    "source_route_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "weekday": {
+      "type": "number"
+    },
+    "service_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "employee_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "employee_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "vehicle_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "vehicle_license_plate": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "planned",
+        "downloaded",
+        "active",
+        "paused",
+        "completed",
+        "cancelled"
+      ],
+      "default": "planned"
+    },
+    "shift_start_time": {
+      "type": "string"
+    },
+    "shift_end_time": {
+      "type": "string"
+    },
+    "actual_started_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actual_completed_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "start_location_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "start_latitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "start_longitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "end_location_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "end_latitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "end_longitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "total_planned_distance_km": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "total_planned_travel_minutes": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "total_planned_service_minutes": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "total_planned_route_minutes": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "downloaded_by_employee_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_mobile_sync_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "generated_at": {
+      "type": "string"
+    },
+    "optimization_job_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mobile_route_package_cache": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "route_name",
+    "weekday",
+    "status",
+    "shift_start_time",
+    "shift_end_time",
+    "generated_at"
+  ]
+}

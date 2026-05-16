@@ -1,7 +1,7 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "./utils";
-import { LayoutDashboard, Users, Settings, Shield, Menu, X, CarFront } from "lucide-react";
+import { LayoutDashboard, Users, Settings, Shield, Menu, X, CarFront, Smartphone, ClipboardList } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const NAV_ITEMS = [
@@ -9,6 +9,8 @@ const NAV_ITEMS = [
   { name: "Mobiele Surveillance", icon: CarFront, page: "MobileSurveillance" },
   { name: "Personeel", icon: Users, page: "Personnel" },
   { name: "Voertuigen", icon: Settings, page: "Vehicles" },
+  { name: "Mobiele diensten", icon: Smartphone, page: "RouteExecutions" },
+  { name: "Rapportagetemplates", icon: ClipboardList, page: "ReportTemplates" },
   { name: "Overig", icon: Settings, page: "CostSettings" },
   { name: "Instellingen", icon: Settings, page: "Settings" },
 ];

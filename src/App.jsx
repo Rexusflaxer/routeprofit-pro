@@ -9,6 +9,9 @@ import { AuthProvider, useAuth } from '@/lib/AuthContext';
 import UserNotRegisteredError from '@/components/UserNotRegisteredError';
 import SurveillanceNavigation from './pages/SurveillanceNavigation';
 import Uitvoering from './pages/Uitvoering';
+import RouteExecutions from './pages/RouteExecutions';
+import RouteExecutionDetails from './pages/RouteExecutionDetails';
+import ReportTemplates from './pages/ReportTemplates';
 
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
@@ -51,6 +54,9 @@ const AuthenticatedApp = () => {
       } />
       <Route path="/SurveillanceNavigation" element={<SurveillanceNavigation />} />
       <Route path="/Uitvoering" element={<LayoutWrapper currentPageName="Uitvoering"><Uitvoering /></LayoutWrapper>} />
+      <Route path="/RouteExecutions" element={<LayoutWrapper currentPageName="RouteExecutions"><RouteExecutions /></LayoutWrapper>} />
+      <Route path="/RouteExecutionDetails" element={<LayoutWrapper currentPageName="RouteExecutions"><RouteExecutionDetails /></LayoutWrapper>} />
+      <Route path="/ReportTemplates" element={<LayoutWrapper currentPageName="ReportTemplates"><ReportTemplates /></LayoutWrapper>} />
       {Object.entries(Pages).map(([path, Page]) => (
         <Route
           key={path}

@@ -19,6 +19,23 @@ export default function ObjectForm({ object, onSave, onCancel }) {
     notes: "",
     task_spacing_groups: [],
     task_spacing_rules: [],
+    parking_instruction: "",
+    entry_instruction: "",
+    walking_instruction: "",
+    access_instruction: "",
+    alarm_instruction: "",
+    key_instruction: "",
+    object_notes: "",
+    safety_notes: "",
+    last_incident_notes: "",
+    object_map_url: "",
+    parking_point_latitude: null,
+    parking_point_longitude: null,
+    entry_point_latitude: null,
+    entry_point_longitude: null,
+    show_on_mobile_map: true,
+    is_active_customer_object: true,
+    mobile_map_priority: 0,
   });
 
   const { data: customers = [] } = useQuery({
@@ -170,6 +187,29 @@ export default function ObjectForm({ object, onSave, onCancel }) {
               objectTaskTypes={[...new Set(objectTasks.map(task => task.task_type).filter(Boolean))]}
               onChange={(groups) => handleChange("task_spacing_groups", normalizeTaskSpacingGroups(groups))}
             />
+
+            <div className="rounded-xl border border-slate-200 bg-slate-50 p-4 space-y-4">
+              <div>
+                <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Mobiele app</Label>
+                <p className="text-xs text-slate-500 mt-1">Instructies en kaartgegevens voor de surveillant.</p>
+              </div>
+              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                <Textarea value={form.parking_instruction || ""} onChange={(e) => handleChange("parking_instruction", e.target.value)} rows={2} placeholder="Parkeerinstructie" />
+                <Textarea value={form.entry_instruction || ""} onChange={(e) => handleChange("entry_instruction", e.target.value)} rows={2} placeholder="Ingangsinstructie" />
+                <Textarea value={form.walking_instruction || ""} onChange={(e) => handleChange("walking_instruction", e.target.value)} rows={2} placeholder="Loopinstructie" />
+                <Textarea value={form.access_instruction || ""} onChange={(e) => handleChange("access_instruction", e.target.value)} rows={2} placeholder="Toegangsinstructie" />
+                <Textarea value={form.alarm_instruction || ""} onChange={(e) => handleChange("alarm_instruction", e.target.value)} rows={2} placeholder="Alarminstructie" />
+                <Textarea value={form.key_instruction || ""} onChange={(e) => handleChange("key_instruction", e.target.value)} rows={2} placeholder="Sleutelinstructie" />
+                <Textarea value={form.object_notes || ""} onChange={(e) => handleChange("object_notes", e.target.value)} rows={2} placeholder="Objectnotities" />
+                <Textarea value={form.safety_notes || ""} onChange={(e) => handleChange("safety_notes", e.target.value)} rows={2} placeholder="Veiligheidsnotities" />
+              </div>
+              <Textarea value={form.last_incident_notes || ""} onChange={(e) => handleChange("last_incident_notes", e.target.value)} rows={2} placeholder="Laatste incidenten / bijzonderheden" />
+              <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
+                <Input value={form.object_map_url || ""} onChange={(e) => handleChange("object_map_url", e.target.value)} placeholder="Objectkaart URL" />
+                <Input type="number" value={form.mobile_map_priority || 0} onChange={(e) => handleChange("mobile_map_priority", Number(e.target.value))} placeholder="Kaartprioriteit" />
+                <label className="flex items-center gap-2 text-sm text-slate-700"><input type="checkbox" checked={form.show_on_mobile_map !== false} onChange={(e) => handleChange("show_on_mobile_map", e.target.checked)} /> Toon op mobiele kaart</label>
+              </div>
+            </div>
 
             <div className="flex justify-end gap-3 pt-2">
               <Button type="button" variant="outline" onClick={onCancel}><X className="w-4 h-4 mr-1" /> Annuleren</Button>

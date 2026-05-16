@@ -1,0 +1,112 @@
+{
+  "name": "MobileReport",
+  "type": "object",
+  "properties": {
+    "task_execution_id": {
+      "type": "string"
+    },
+    "route_execution_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "employee_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "submitted",
+        "synced",
+        "failed"
+      ],
+      "default": "submitted"
+    },
+    "report_type": {
+      "type": "string"
+    },
+    "report_text": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "checklist_answers": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "extra_fields": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "created_offline_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "submitted_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "synced_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "gps_latitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "gps_longitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "photo_count": {
+      "type": "number",
+      "default": 0
+    },
+    "photos": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "task_execution_id",
+    "route_execution_id",
+    "object_id",
+    "status",
+    "report_type",
+    "checklist_answers",
+    "created_at",
+    "photo_count"
+  ]
+}

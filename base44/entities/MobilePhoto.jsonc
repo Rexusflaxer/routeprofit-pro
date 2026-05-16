@@ -1,0 +1,77 @@
+{
+  "name": "MobilePhoto",
+  "type": "object",
+  "properties": {
+    "report_id": {
+      "type": "string"
+    },
+    "task_execution_id": {
+      "type": "string"
+    },
+    "route_execution_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": "string"
+    },
+    "file_url": {
+      "type": "string"
+    },
+    "thumbnail_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "caption": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "taken_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "uploaded_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_offline_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "gps_latitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "gps_longitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "report_id",
+    "task_execution_id",
+    "route_execution_id",
+    "object_id",
+    "file_url"
+  ]
+}

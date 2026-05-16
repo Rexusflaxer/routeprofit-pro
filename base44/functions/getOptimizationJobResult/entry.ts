@@ -251,6 +251,12 @@ Deno.serve(async (req) => {
         result,
         finished_at: data.finished_at || result?.finished_at || new Date().toISOString(),
       });
+      await base44.asServiceRole.functions.invoke('createRouteExecutionsFromOptimization', {
+        plannedResult: result,
+        optimization_job_id: job.id,
+        service_date: body.service_date || null,
+        force_overwrite: !!body.force_overwrite,
+      });
     }
 
     return Response.json({

@@ -1,0 +1,81 @@
+{
+  "name": "MobileAuditLog",
+  "type": "object",
+  "properties": {
+    "employee_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "route_execution_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "task_execution_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "object_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "action": {
+      "type": "string"
+    },
+    "payload": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "created_offline_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "synced_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "latitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "longitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "device_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "app_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "action",
+    "payload",
+    "created_at"
+  ]
+}
