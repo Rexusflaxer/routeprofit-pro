@@ -152,50 +152,51 @@ export default function RoutePinnedTasksSelector({ form, onChange }) {
             const label = taskLabel(task, objects, collectiefs);
             const isPinned = pinnedIds.has(String(task.id));
             return (
-              <button
-                key={task.id}
-                type="button"
-                disabled={isPinned}
-                onClick={() => addPinnedTask(task)}
-                className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-50"
-              >
-                <div className="min-w-0">
-                  <p className="text-sm font-medium text-slate-800 truncate">{label}</p>
-                  <p className="text-xs text-slate-500 truncate">{task.task_type} · {task.duration_minutes || 0} min</p>
-                </div>
-                <Plus className="w-4 h-4 text-slate-400" />
-              </button>
-              {Number(task.repeat_count || 1) > 1 && !isPinned && (
-                <div className="px-3 pb-3 bg-white space-y-2">
-                  <p className="text-xs font-semibold text-slate-900">Deze taak heeft meerdere uitvoeringen</p>
-                  <div className="space-y-1 text-xs text-slate-700">
-                    {[
-                      ["single", "Eén uitvoering vastzetten"],
-                      ["specific", "Specifieke uitvoering kiezen"],
-                      ["all", "Alle uitvoeringen vastzetten"],
-                    ].map(([mode, label]) => (
-                      <label key={mode} className="flex items-center gap-2">
-                        <input
-                          type="radio"
-                          name={`pinned-repeat-${task.id}`}
-                          checked={(repeatChoices[String(task.id)]?.mode || "single") === mode}
-                          onChange={() => setRepeatChoices(prev => ({ ...prev, [String(task.id)]: { mode, repeat_index: 1 } }))}
-                        />
-                        {label}
-                      </label>
-                    ))}
+              <div key={task.id}>
+                <button
+                  type="button"
+                  disabled={isPinned}
+                  onClick={() => addPinnedTask(task)}
+                  className="w-full flex items-center justify-between gap-3 px-3 py-2 text-left hover:bg-slate-50 disabled:opacity-50"
+                >
+                  <div className="min-w-0">
+                    <p className="text-sm font-medium text-slate-800 truncate">{label}</p>
+                    <p className="text-xs text-slate-500 truncate">{task.task_type} · {task.duration_minutes || 0} min</p>
                   </div>
-                  {repeatChoices[String(task.id)]?.mode === "specific" && (
-                    <div className="flex flex-wrap gap-2 pl-5">
-                      {Array.from({ length: Math.max(1, Number(task.repeat_count || 1)) }, (_, i) => i + 1).map(index => (
-                        <Button key={index} type="button" size="sm" variant={Number(repeatChoices[String(task.id)]?.repeat_index || 1) === index ? "default" : "outline"} onClick={() => setRepeatChoices(prev => ({ ...prev, [String(task.id)]: { ...(prev[String(task.id)] || { mode: "specific" }), mode: "specific", repeat_index: index } }))}>
-                          Uitvoering {index}/{task.repeat_count}
-                        </Button>
+                  <Plus className="w-4 h-4 text-slate-400" />
+                </button>
+                {Number(task.repeat_count || 1) > 1 && !isPinned && (
+                  <div className="px-3 pb-3 bg-white space-y-2">
+                    <p className="text-xs font-semibold text-slate-900">Deze taak heeft meerdere uitvoeringen</p>
+                    <div className="space-y-1 text-xs text-slate-700">
+                      {[
+                        ["single", "Eén uitvoering vastzetten"],
+                        ["specific", "Specifieke uitvoering kiezen"],
+                        ["all", "Alle uitvoeringen vastzetten"],
+                      ].map(([mode, label]) => (
+                        <label key={mode} className="flex items-center gap-2">
+                          <input
+                            type="radio"
+                            name={`pinned-repeat-${task.id}`}
+                            checked={(repeatChoices[String(task.id)]?.mode || "single") === mode}
+                            onChange={() => setRepeatChoices(prev => ({ ...prev, [String(task.id)]: { mode, repeat_index: 1 } }))}
+                          />
+                          {label}
+                        </label>
                       ))}
                     </div>
-                  )}
-                </div>
-              )}
+                    {repeatChoices[String(task.id)]?.mode === "specific" && (
+                      <div className="flex flex-wrap gap-2 pl-5">
+                        {Array.from({ length: Math.max(1, Number(task.repeat_count || 1)) }, (_, i) => i + 1).map(index => (
+                          <Button key={index} type="button" size="sm" variant={Number(repeatChoices[String(task.id)]?.repeat_index || 1) === index ? "default" : "outline"} onClick={() => setRepeatChoices(prev => ({ ...prev, [String(task.id)]: { ...(prev[String(task.id)] || { mode: "specific" }), mode: "specific", repeat_index: index } }))}>
+                            Uitvoering {index}/{task.repeat_count}
+                          </Button>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+              </div>
             );
           })}
           {filteredTasks.length === 0 && <p className="px-3 py-3 text-sm text-slate-500">Geen taken binnen deze routedag en dit tijdsvenster gevonden</p>}
