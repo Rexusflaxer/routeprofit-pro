@@ -13,6 +13,7 @@ export default function Uitvoering() {
   const [monthDate, setMonthDate] = useState(new Date(today.getFullYear(), today.getMonth(), 1));
 
   const { data: routes = [] } = useQuery({ queryKey: ["routes"], queryFn: () => base44.entities.Route.list() });
+  const { data: mobileExecutions = [] } = useQuery({ queryKey: ["route-executions"], queryFn: () => base44.entities.RouteExecution.list("-generated_at") });
   const monthDays = buildMonthDays(monthDate);
   const canGoNext = monthDate.getFullYear() < endOfYear.getFullYear() || monthDate.getMonth() < endOfYear.getMonth();
   const canGoPrev = monthDate.getFullYear() > today.getFullYear() || monthDate.getMonth() > today.getMonth();
@@ -49,6 +50,7 @@ export default function Uitvoering() {
             key={toDateKey(date)}
             date={date}
             routes={routes}
+            mobileExecutions={mobileExecutions}
             isToday={toDateKey(date) === toDateKey(today)}
           />
         ))}

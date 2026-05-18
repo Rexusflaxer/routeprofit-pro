@@ -4,8 +4,9 @@ import { CalendarDays, Clock, Navigation } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { getDayLabel, getRoutesForDate, toDateKey } from "./executionCalendarUtils";
+import MobileRoutePublishButton from "./MobileRoutePublishButton";
 
-export default function ExecutionDayCard({ date, routes, isToday }) {
+export default function ExecutionDayCard({ date, routes, mobileExecutions = [], isToday }) {
   const dateKey = toDateKey(date);
   const dayRoutes = getRoutesForDate(routes, date);
 
@@ -24,7 +25,9 @@ export default function ExecutionDayCard({ date, routes, isToday }) {
           <div className="rounded-xl border border-dashed border-slate-200 p-3 text-sm text-slate-400">
             Geen routes gepland
           </div>
-        ) : dayRoutes.map(route => (
+        ) : dayRoutes.map(route => {
+          const existingExecution = mobileExecutions.find(item => item.service_date === dateKey && String(item.source_route_id || item.route_id || "") === String(route.id));
+          return (
           <div key={route.id} className="rounded-xl border border-slate-100 bg-slate-50 p-3">
             <div className="flex items-start justify-between gap-2">
               <div className="min-w-0">
@@ -34,14 +37,18 @@ export default function ExecutionDayCard({ date, routes, isToday }) {
                   <span className="flex items-center gap-1"><CalendarDays className="h-3 w-3" /> {route.assigned_tasks?.length || 0} taken</span>
                 </div>
               </div>
-              <Button asChild size="sm" className="bg-slate-900 hover:bg-slate-800">
-                <Link to={`/SurveillanceNavigation?routeId=${route.id}&date=${dateKey}`}>
-                  <Navigation className="h-3.5 w-3.5" /> Start
-                </Link>
-              </Button>
+              <div className="flex shrink-0 flex-col gap-2 sm:flex-row">
+                <MobileRoutePublishButton route={route} dateKey={dateKey} existingExecution={existingExecution} />
+                <Button asChild size="sm" className="bg-slate-900 hover:bg-slate-800">
+                  <Link to={`/SurveillanceNavigation?routeId=${route.id}&date=${dateKey}`}>
+                    <Navigation className="h-3.5 w-3.5" /> Start
+                  </Link>
+                </Button>
+              </div>
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
     </div>
   );
