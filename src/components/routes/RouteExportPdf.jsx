@@ -91,7 +91,7 @@ export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
         doc.rect(0, 0, pageW, 12, "F");
         doc.setFontSize(8);
         doc.setTextColor(180, 180, 200);
-        doc.text(`RouteCalc – ${route.name}`, margin, 8);
+        doc.text(`LOQ – ${route.name}`, margin, 8);
         doc.text(`Gegenereerd op ${new Date().toLocaleDateString("nl-NL")}`, pageW - margin, 8, { align: "right" });
         doc.setTextColor(0, 0, 0);
       };
@@ -499,7 +499,7 @@ export default function RouteExportPdf({ route, optimizedRoute, vehicle }) {
         doc.setFontSize(7);
         doc.setTextColor(150, 150, 170);
         doc.text(`Pagina ${p} van ${totalPages}`, pageW / 2, pageH - 8, { align: "center" });
-        doc.text("RouteCalc – Surveillance Planner", margin, pageH - 8);
+        doc.text("LOQ – Surveillance Planner", margin, pageH - 8);
       }
 
       const filename = `route-${route.name.toLowerCase().replace(/\s+/g, "-")}-${new Date().toISOString().slice(0, 10)}.pdf`;
