@@ -1,11 +1,12 @@
 import React, { useState } from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "./utils";
-import { LayoutDashboard, Users, Settings, Shield, Menu, X, CarFront, Smartphone, ClipboardList } from "lucide-react";
+import { LayoutDashboard, Users, Settings, Shield, Menu, X, CarFront, Smartphone, ClipboardList, Building2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 
 const NAV_ITEMS = [
   { name: "Dashboard", icon: LayoutDashboard, page: "Dashboard" },
+  { name: "Bedrijven", icon: Building2, page: "Companies" },
   { name: "Mobiele Surveillance", icon: CarFront, page: "MobileSurveillance" },
   { name: "Personeel", icon: Users, page: "Personnel" },
   { name: "Voertuigen", icon: Settings, page: "Vehicles" },
@@ -36,7 +37,7 @@ export default function Layout({ children, currentPageName }) {
             <p className="text-[10px] text-slate-400 font-medium">Surveillance planner</p>
           </div>
         </div>
-        <nav className="flex-1 px-3 py-4 space-y-1">
+        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
           {NAV_ITEMS.map(item => {
             const isActive = currentPageName === item.page;
             return (

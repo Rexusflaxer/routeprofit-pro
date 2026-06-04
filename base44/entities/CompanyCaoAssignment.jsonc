@@ -1,0 +1,51 @@
+{
+  "name": "CompanyCaoAssignment",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "description": "ID van het bedrijf"
+    },
+    "cao_configuration_id": {
+      "type": "string",
+      "description": "ID van de CAO-configuratie"
+    },
+    "is_primary": {
+      "type": "boolean",
+      "default": false
+    },
+    "applies_to_activities": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "company_id",
+    "cao_configuration_id"
+  ]
+}

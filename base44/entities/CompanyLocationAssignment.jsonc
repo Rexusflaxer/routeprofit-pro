@@ -1,0 +1,53 @@
+{
+  "name": "CompanyLocationAssignment",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "description": "ID van het bedrijf"
+    },
+    "location_id": {
+      "type": "string",
+      "description": "ID van de vestiging"
+    },
+    "is_primary": {
+      "type": "boolean",
+      "default": false
+    },
+    "usage_type": {
+      "type": "string",
+      "enum": [
+        "registered_address",
+        "operational_branch",
+        "postal_address",
+        "shared_location",
+        "other"
+      ],
+      "default": "operational_branch"
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "company_id",
+    "location_id"
+  ]
+}

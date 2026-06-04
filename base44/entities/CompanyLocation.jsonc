@@ -1,0 +1,100 @@
+{
+  "name": "CompanyLocation",
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string",
+      "description": "Naam van de vestiging"
+    },
+    "location_type": {
+      "type": "string",
+      "enum": [
+        "head_office",
+        "branch",
+        "warehouse",
+        "shared_office",
+        "customer_site",
+        "other"
+      ],
+      "default": "branch"
+    },
+    "street_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number_addition": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "postal_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "city": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "country": {
+      "type": "string",
+      "default": "Nederland"
+    },
+    "full_address": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Volledig opgemaakt adres"
+    },
+    "latitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "longitude": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "is_active": {
+      "type": "boolean",
+      "default": true
+    },
+    "is_route_office": {
+      "type": "boolean",
+      "default": false,
+      "description": "Gebruik als route start/eindlocatie"
+    },
+    "linked_office_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Gekoppeld Office record voor routeoptimalisatie"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

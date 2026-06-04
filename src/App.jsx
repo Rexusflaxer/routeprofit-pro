@@ -12,6 +12,7 @@ import Uitvoering from './pages/Uitvoering';
 import RouteExecutions from './pages/RouteExecutions';
 import RouteExecutionDetails from './pages/RouteExecutionDetails';
 import ReportTemplates from './pages/ReportTemplates';
+import Companies from './pages/Companies';
 
 const { Pages, Layout, mainPage } = pagesConfig;
 const mainPageKey = mainPage ?? Object.keys(Pages)[0];
@@ -57,6 +58,7 @@ const AuthenticatedApp = () => {
       <Route path="/RouteExecutions" element={<LayoutWrapper currentPageName="RouteExecutions"><RouteExecutions /></LayoutWrapper>} />
       <Route path="/RouteExecutionDetails" element={<LayoutWrapper currentPageName="RouteExecutions"><RouteExecutionDetails /></LayoutWrapper>} />
       <Route path="/ReportTemplates" element={<LayoutWrapper currentPageName="ReportTemplates"><ReportTemplates /></LayoutWrapper>} />
+      <Route path="/Companies" element={<LayoutWrapper currentPageName="Companies"><Companies /></LayoutWrapper>} />
       {Object.entries(Pages).map(([path, Page]) => (
         <Route
           key={path}

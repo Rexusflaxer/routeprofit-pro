@@ -1,0 +1,92 @@
+{
+  "name": "CompanyBankAccount",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "description": "ID van het bedrijf"
+    },
+    "account_type": {
+      "type": "string",
+      "enum": [
+        "normal",
+        "g_account"
+      ],
+      "default": "normal"
+    },
+    "iban": {
+      "type": "string",
+      "description": "IBAN-nummer"
+    },
+    "account_holder_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "bank_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "bic": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "is_default": {
+      "type": "boolean",
+      "default": false
+    },
+    "is_default_for_invoicing": {
+      "type": "boolean",
+      "default": false
+    },
+    "is_default_for_payroll": {
+      "type": "boolean",
+      "default": false
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "proof_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive",
+        "pending",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "company_id",
+    "iban"
+  ]
+}

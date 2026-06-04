@@ -7,6 +7,63 @@
       "description": "Naam van de CAO configuratie",
       "default": "CAO Particuliere Beveiliging 2025"
     },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Unieke sleutel, bijv. cao_particuliere_beveiliging"
+    },
+    "display_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Weergavenaam"
+    },
+    "sector": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Sector"
+    },
+    "source_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "URL naar officieel CAO-document"
+    },
+    "registration_number": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Registratienummer bij SZW"
+    },
+    "version_label": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Versielabel, bijv. 2025"
+    },
+    "is_active": {
+      "type": "boolean",
+      "default": true
+    },
+    "is_payroll_ready": {
+      "type": "boolean",
+      "default": false,
+      "description": "Zijn de loonschalen volledig ingevuld?"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "valid_from": {
       "type": "string",
       "format": "date",
@@ -79,7 +136,7 @@
     },
     "premium_sfpb": {
       "type": "number",
-      "description": "Premie SFPB (Stichting Fonds Particuliere Beveiliging) percentage",
+      "description": "Premie SFPB percentage",
       "default": 0.061
     },
     "premium_paww_employee": {
@@ -119,7 +176,7 @@
     },
     "premium_zw_employer": {
       "type": "number",
-      "description": "ZW premie werkgeversdeel percentage (eigen risico drager kan vari\u00ebren)",
+      "description": "ZW premie werkgeversdeel percentage",
       "default": 0
     },
     "tax_rate_bracket_1": {

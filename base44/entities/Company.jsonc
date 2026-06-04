@@ -1,0 +1,209 @@
+{
+  "name": "Company",
+  "type": "object",
+  "properties": {
+    "display_name": {
+      "type": "string",
+      "description": "Weergavenaam"
+    },
+    "legal_name": {
+      "type": "string",
+      "description": "Juridische naam"
+    },
+    "trade_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Handelsnaam"
+    },
+    "kvk_number": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "KvK-nummer"
+    },
+    "rsin": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "RSIN-nummer"
+    },
+    "btw_number": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "BTW-nummer"
+    },
+    "legal_form": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Rechtsvorm, bijv. BV, VOF, ZZP"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "company_role": {
+      "type": "string",
+      "enum": [
+        "holding",
+        "operating_company",
+        "sole_proprietor",
+        "other"
+      ],
+      "default": "operating_company"
+    },
+    "holding_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ID van holding"
+    },
+    "primary_activity": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Primaire activiteit"
+    },
+    "activities": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Activiteiten"
+    },
+    "wpbr_license_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "ND",
+        "HND",
+        "BD",
+        "PAC",
+        "VTC",
+        "PGW",
+        "POB",
+        "none",
+        "other",
+        null
+      ],
+      "description": "Wpbr-vergunningstype"
+    },
+    "wpbr_license_number": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Wpbr-vergunningsnummer"
+    },
+    "wpbr_license_valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Geldig tot"
+    },
+    "street_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number_addition": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "postal_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "city": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "country": {
+      "type": "string",
+      "default": "Nederland"
+    },
+    "phone": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "website": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "logo_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "letterhead_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "default_cao_configuration_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "primary_location_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "display_name",
+    "legal_name"
+  ]
+}
