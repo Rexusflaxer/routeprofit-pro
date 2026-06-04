@@ -1,0 +1,124 @@
+{
+  "name": "PersonnelDocument",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "identity_document",
+        "drivers_license",
+        "vog",
+        "cv",
+        "bank_account_proof",
+        "payroll_tax_statement",
+        "diploma",
+        "certificate",
+        "wpbr_permission",
+        "wpbr_badge",
+        "photo",
+        "other"
+      ]
+    },
+    "document_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "front_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "back_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "verification_status": {
+      "type": "string",
+      "enum": [
+        "uploaded",
+        "pending_review",
+        "verified",
+        "rejected",
+        "expired"
+      ],
+      "default": "uploaded"
+    },
+    "verified_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "verified_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "expiry_reminder_days": {
+      "type": "number",
+      "default": 30
+    },
+    "is_sensitive": {
+      "type": "boolean",
+      "default": true
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "personnel_id",
+    "category"
+  ]
+}

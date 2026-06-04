@@ -1,0 +1,68 @@
+{
+  "name": "PersonnelBankAccount",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string"
+    },
+    "iban": {
+      "type": "string"
+    },
+    "account_holder_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "bank_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "proof_document_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "is_primary": {
+      "type": "boolean",
+      "default": false
+    },
+    "verification_status": {
+      "type": "string",
+      "enum": [
+        "pending_review",
+        "verified",
+        "rejected",
+        "expired"
+      ],
+      "default": "pending_review"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "personnel_id",
+    "iban"
+  ]
+}

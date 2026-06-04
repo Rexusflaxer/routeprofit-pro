@@ -1,0 +1,49 @@
+{
+  "name": "PersonnelSensitiveData",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string",
+      "description": "ID van de medewerker"
+    },
+    "bsn": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "BSN \u2013 uitsluitend voor loonadministratie/loonheffingen"
+    },
+    "identity_verified_at_hire": {
+      "type": "boolean",
+      "default": false
+    },
+    "identity_verified_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "identity_verified_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "identity_copy_retention_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "payroll_notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "personnel_id"
+  ]
+}

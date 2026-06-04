@@ -1,0 +1,86 @@
+{
+  "name": "PersonnelQualification",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "qualification_type": {
+      "type": "string",
+      "enum": [
+        "beveiliger_2",
+        "beveiliger_3",
+        "horecaportier",
+        "voetbalsteward",
+        "verkeersregelaar",
+        "bhv",
+        "brandwacht",
+        "alarminstallateur",
+        "particulier_onderzoeker",
+        "other"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "issuer": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "certificate_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "document_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "verification_status": {
+      "type": "string",
+      "enum": [
+        "pending_review",
+        "verified",
+        "rejected",
+        "expired"
+      ],
+      "default": "pending_review"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "personnel_id",
+    "qualification_type",
+    "name"
+  ]
+}

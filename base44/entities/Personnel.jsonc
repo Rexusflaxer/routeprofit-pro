@@ -4,15 +4,314 @@
   "properties": {
     "name": {
       "type": "string",
-      "description": "Naam medewerker"
+      "description": "Weergavenaam (backwards compatible)"
+    },
+    "personnel_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "onboarding",
+        "active",
+        "inactive",
+        "archived"
+      ],
+      "default": "draft"
+    },
+    "hr_completeness_status": {
+      "type": "string",
+      "enum": [
+        "incomplete",
+        "needs_review",
+        "complete"
+      ],
+      "default": "incomplete"
+    },
+    "primary_company_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "login_email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "linked_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "linked_user_email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "linked_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "initials": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "legal_first_names": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "first_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "call_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name_prefix": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "gender": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "male",
+        "female",
+        "other",
+        "unknown",
+        null
+      ]
+    },
+    "date_of_birth": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "photo_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "phone": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "street_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number_addition": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "postal_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "city": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "country": {
+      "type": "string",
+      "default": "Nederland"
+    },
+    "travel_expense_address_differs": {
+      "type": "boolean",
+      "default": false
+    },
+    "travel_street_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "travel_house_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "travel_house_number_addition": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "travel_postal_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "travel_city": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "travel_country": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "place_of_birth": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "country_of_birth": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "nationality": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payroll_tax_credit_applies": {
+      "type": [
+        "boolean",
+        "null"
+      ]
+    },
+    "payroll_tax_statement_signed_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payroll_tax_statement_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "wpbr_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "wpbr_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "not_required",
+        "not_started",
+        "requested",
+        "approved",
+        "rejected",
+        "expired",
+        null
+      ]
+    },
+    "wpbr_authority": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "korpschef",
+        "kmar",
+        "justis",
+        "other",
+        null
+      ]
+    },
+    "wpbr_permission_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "wpbr_permission_valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "wpbr_permission_valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
     },
     "function_type": {
       "type": "string",
       "enum": [
         "surveillant",
-        "binnendienst"
+        "binnendienst",
+        "planner",
+        "centralist",
+        "verkeersregelaar",
+        "brandwacht",
+        "installateur",
+        "rechercheur",
+        "host",
+        "other"
       ],
-      "description": "Functie type",
       "default": "surveillant"
     },
     "employee_type": {
@@ -21,28 +320,7 @@
         "zzp",
         "loondienst"
       ],
-      "description": "Type medewerker",
       "default": "loondienst"
-    },
-    "zzp_hourly_rate_excl_vat": {
-      "type": "number",
-      "description": "ZZP uurtarief exclusief BTW"
-    },
-    "zzp_evening_rate": {
-      "type": "number",
-      "description": "ZZP avondtarief (optioneel)"
-    },
-    "zzp_night_rate": {
-      "type": "number",
-      "description": "ZZP nachttarief (optioneel)"
-    },
-    "zzp_weekend_rate": {
-      "type": "number",
-      "description": "ZZP weekendtarief (optioneel)"
-    },
-    "zzp_holiday_rate": {
-      "type": "number",
-      "description": "ZZP feestdagtarief (optioneel)"
     },
     "contract_type": {
       "type": "string",
@@ -51,20 +329,16 @@
         "parttime",
         "0_uren",
         "min_max"
-      ],
-      "description": "Type contract (alleen voor loondienst)"
+      ]
     },
     "parttime_hours": {
-      "type": "number",
-      "description": "Aantal uren per week (alleen bij parttime)"
+      "type": "number"
     },
     "min_hours": {
-      "type": "number",
-      "description": "Minimum uren (alleen bij min-max contract)"
+      "type": "number"
     },
     "max_hours": {
-      "type": "number",
-      "description": "Maximum uren (alleen bij min-max contract)"
+      "type": "number"
     },
     "cao": {
       "type": "string",
@@ -72,51 +346,55 @@
         "cao_particuliere_beveiliging",
         "eigen_tarief"
       ],
-      "description": "CAO of eigen tarief",
       "default": "cao_particuliere_beveiliging"
     },
     "cao_scale": {
       "type": "number",
-      "description": "CAO loonschaal (2-7)",
       "default": 3
     },
     "cao_period": {
       "type": "number",
-      "description": "CAO periode (0-16)",
       "default": 0
     },
     "custom_hourly_rate": {
-      "type": "number",
-      "description": "Alternatief uurtarief (bij eigen_tarief)"
+      "type": "number"
+    },
+    "zzp_hourly_rate_excl_vat": {
+      "type": "number"
+    },
+    "zzp_evening_rate": {
+      "type": "number"
+    },
+    "zzp_night_rate": {
+      "type": "number"
+    },
+    "zzp_weekend_rate": {
+      "type": "number"
+    },
+    "zzp_holiday_rate": {
+      "type": "number"
     },
     "is_active": {
       "type": "boolean",
-      "description": "Is de medewerker actief?",
       "default": true
     },
     "company_car_license_plate": {
-      "type": "string",
-      "description": "Kenteken auto van de zaak"
+      "type": "string"
     },
     "company_car_brand": {
-      "type": "string",
-      "description": "Merk auto van de zaak"
+      "type": "string"
     },
     "company_car_model": {
-      "type": "string",
-      "description": "Model auto van de zaak"
+      "type": "string"
     },
     "company_car_year": {
-      "type": "number",
-      "description": "Bouwjaar auto van de zaak"
+      "type": "number"
     },
     "company_car_fiscal_value": {
-      "type": "number",
-      "description": "Cataloguswaarde auto van de zaak (voor fiscale bijtelling)"
+      "type": "number"
     },
     "company_car_bijtelling_percentage": {
       "type": "number",
-      "description": "Bijtellingspercentage (%)",
       "default": 16
     },
     "company_car_fuel_type": {
@@ -127,12 +405,16 @@
         "elektrisch",
         "hybride",
         "lpg"
-      ],
-      "description": "Brandstoftype auto van de zaak"
+      ]
     },
     "company_car_monthly_lease_cost": {
-      "type": "number",
-      "description": "Maandelijkse leasekosten auto van de zaak"
+      "type": "number"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
     }
   },
   "required": [

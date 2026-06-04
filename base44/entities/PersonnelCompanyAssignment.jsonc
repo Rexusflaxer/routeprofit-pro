@@ -1,0 +1,77 @@
+{
+  "name": "PersonnelCompanyAssignment",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": "string"
+    },
+    "assignment_status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "active",
+        "ended"
+      ],
+      "default": "active"
+    },
+    "is_primary": {
+      "type": "boolean",
+      "default": false
+    },
+    "available_for_planning": {
+      "type": "boolean",
+      "default": true
+    },
+    "relation_type": {
+      "type": "string",
+      "enum": [
+        "employee",
+        "contractor",
+        "intern",
+        "temporary",
+        "other"
+      ],
+      "default": "employee"
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "default_cao_configuration_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "future_contract_placeholder": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "personnel_id",
+    "company_id"
+  ]
+}
