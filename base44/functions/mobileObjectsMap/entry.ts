@@ -20,22 +20,34 @@ Deno.serve(async (req) => {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
     const body = await req.json();
-    const [objects, tasks] = await Promise.all([
+    const [objects, tasks, floorPlans] = await Promise.all([
       base44.asServiceRole.entities.SurveillanceObject.list(),
       body.route_execution_id ? base44.asServiceRole.entities.TaskExecution.filter({ route_execution_id: body.route_execution_id }) : Promise.resolve([]),
+      base44.asServiceRole.entities.ObjectFloorPlan.filter({ is_current: true, status: 'published' }),
     ]);
+    const floorPlanByObjectId = new Map(floorPlans.map(fp => [String(fp.object_id), fp]));
     return Response.json({
       objects: objects
         .filter(object => object.show_on_mobile_map !== false && object.is_active_customer_object !== false)
-        .map(object => ({
-          object_id: object.id,
-          name: object.name,
-          latitude: safeNumber(object.latitude),
-          longitude: safeNumber(object.longitude),
-          address: object.address || null,
-          ...statusForObject(object.id, tasks),
-          building_polygon_geojson: object.building_polygon_geojson || null,
-        }))
+        .map(object => {
+          const fp = floorPlanByObjectId.get(String(object.id));
+          return {
+            object_id: object.id,
+            name: object.name,
+            latitude: safeNumber(object.latitude),
+            longitude: safeNumber(object.longitude),
+            address: object.address || null,
+            ...statusForObject(object.id, tasks),
+            building_polygon_geojson: object.building_polygon_geojson || null,
+            floor_plan_summary: fp ? {
+              floor_plan_id: fp.id,
+              revision: fp.revision,
+              usdz_file_url: fp.usdz_file_url || null,
+              preview_2d_file_url: fp.preview_2d_file_url || null,
+              updated_at: fp.published_at || fp.updated_date || null,
+            } : null,
+          };
+        })
         .filter(object => object.latitude !== null && object.longitude !== null),
     });
   } catch (error) {

@@ -45,15 +45,17 @@ function mapStatus(objectId, taskExecutions) {
 }
 
 async function buildPackage(base44, routeExecution) {
-  const [taskExecutions, objects, templates, vehicles, personnel] = await Promise.all([
+  const [taskExecutions, objects, templates, vehicles, personnel, floorPlans] = await Promise.all([
     base44.asServiceRole.entities.TaskExecution.filter({ route_execution_id: routeExecution.id }),
     base44.asServiceRole.entities.SurveillanceObject.list(),
     base44.asServiceRole.entities.ReportTemplate.list(),
     base44.asServiceRole.entities.Vehicle.list(),
     base44.asServiceRole.entities.Personnel.list(),
+    base44.asServiceRole.entities.ObjectFloorPlan.filter({ is_current: true, status: 'published' }),
   ]);
   const sortedTasks = taskExecutions.sort((a, b) => Number(a.sequence_index || 0) - Number(b.sequence_index || 0));
   const objectById = new Map(objects.map(object => [String(object.id), object]));
+  const floorPlanByObjectId = new Map(floorPlans.map(fp => [String(fp.object_id), fp]));
   const vehicle = vehicles.find(v => String(v.id) === String(routeExecution.vehicle_id)) || null;
   const employee = personnel.find(p => String(p.id) === String(routeExecution.employee_id)) || null;
   const relevantObjectIds = new Set(sortedTasks.map(task => String(task.object_id)));
@@ -110,6 +112,16 @@ async function buildPackage(base44, routeExecution) {
       building_polygon_geojson: object.building_polygon_geojson || null,
       object_area_geojson: object.object_area_geojson || null,
       mobile_map_priority: Number(object.mobile_map_priority || 0),
+      floor_plan_summary: (() => {
+        const fp = floorPlanByObjectId.get(String(object.id));
+        return fp ? {
+          floor_plan_id: fp.id,
+          revision: fp.revision,
+          usdz_file_url: fp.usdz_file_url || null,
+          preview_2d_file_url: fp.preview_2d_file_url || null,
+          updated_at: fp.published_at || fp.updated_date || null,
+        } : null;
+      })(),
     }))
     .filter(object => object.latitude !== null && object.longitude !== null || relevantObjectIds.has(String(object.object_id)));
 

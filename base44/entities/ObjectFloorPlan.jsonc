@@ -1,0 +1,129 @@
+{
+  "name": "ObjectFloorPlan",
+  "type": "object",
+  "properties": {
+    "object_id": {
+      "type": "string",
+      "description": "ID van het gekoppelde object"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "published",
+        "archived",
+        "failed"
+      ],
+      "default": "published",
+      "description": "Status van de plattegrond"
+    },
+    "revision": {
+      "type": "number",
+      "description": "Revisienummer",
+      "default": 1
+    },
+    "is_current": {
+      "type": "boolean",
+      "default": false,
+      "description": "Is dit de actieve versie?"
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bron, bijv. ios_roomplan"
+    },
+    "captured_by": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Naam of ID van de opnemer"
+    },
+    "captured_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datum van opname"
+    },
+    "published_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datum van publicatie"
+    },
+    "usdz_file_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "URL naar USDZ 3D model"
+    },
+    "raw_roomplan_file_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "URL naar ruwe RoomPlan JSON"
+    },
+    "preview_2d_file_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "URL naar 2D preview afbeelding"
+    },
+    "fallback_pdf_file_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "URL naar fallback PDF"
+    },
+    "floorplan_2d_json": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Bewerkbare 2D plattegrond data"
+    },
+    "annotations_json": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Zones en sensor-annotaties"
+    },
+    "sensor_catalog_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Versie van de sensorcatalogus"
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "object_id",
+    "status",
+    "revision",
+    "is_current"
+  ]
+}

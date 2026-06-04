@@ -5,14 +5,17 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { ArrowLeft, Building2, Mail, MapPin, Pencil, Phone, User, Hash } from "lucide-react";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { ArrowLeft, Building2, Mail, MapPin, Pencil, Phone, User, Hash, Box } from "lucide-react";
 import TaskForm from "./TaskForm";
 import ObjectWeekSchedule from "./ObjectWeekSchedule";
 import { TaskSpacingGroupsSummary } from "./TaskSpacingGroupsEditor";
+import ObjectFloorPlanTab from "./ObjectFloorPlanTab";
 
 export default function ObjectDetailView({ object, onBack, onEditObject }) {
   const [editingTask, setEditingTask] = useState(null);
   const queryClient = useQueryClient();
+
 
   const { data: customers = [] } = useQuery({ queryKey: ["customers"], queryFn: () => base44.entities.Customer.list() });
   const { data: directTasks = [] } = useQuery({ queryKey: ["tasks", object.id], queryFn: () => base44.entities.Task.filter({ object_id: object.id }) });
@@ -96,7 +99,18 @@ export default function ObjectDetailView({ object, onBack, onEditObject }) {
         </Card>
       </div>
 
-      <ObjectWeekSchedule tasks={tasks} onEditTask={setEditingTask} />
+      <Tabs defaultValue="taken">
+        <TabsList className="mb-4">
+          <TabsTrigger value="taken">Taken & Schema</TabsTrigger>
+          <TabsTrigger value="plattegrond"><Box className="w-4 h-4 mr-1.5 inline-block" />Plattegrond</TabsTrigger>
+        </TabsList>
+        <TabsContent value="taken">
+          <ObjectWeekSchedule tasks={tasks} onEditTask={setEditingTask} />
+        </TabsContent>
+        <TabsContent value="plattegrond">
+          <ObjectFloorPlanTab objectId={object.id} />
+        </TabsContent>
+      </Tabs>
 
       <Dialog open={!!editingTask} onOpenChange={(open) => !open && setEditingTask(null)}>
         <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
