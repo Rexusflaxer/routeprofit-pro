@@ -103,7 +103,7 @@ export default function VehiclesPage() {
         title="Voertuigen"
         subtitle="Beheer uw voertuigen en voertuigkosten"
         actions={
-          <Button onClick={() => setShowForm(!showForm)} className="bg-slate-900 hover:bg-slate-800">
+          <Button onClick={() => setShowForm(!showForm)}>
             <Plus className="w-4 h-4 mr-2" /> Voertuig toevoegen
           </Button>
         }
@@ -152,20 +152,20 @@ export default function VehiclesPage() {
         <div className="mt-10">
           <div className="flex items-center gap-2 mb-4">
             <Users className="w-5 h-5 text-purple-600" />
-            <h2 className="text-base font-bold text-slate-800">Auto's van de zaak – Personeel</h2>
-            <Badge className="bg-purple-100 text-purple-800">{personnelWithCar.length}</Badge>
+            <h2 className="text-base font-bold text-foreground">Auto's van de zaak – Personeel</h2>
+            <Badge className="bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-300">{personnelWithCar.length}</Badge>
           </div>
-          <p className="text-xs text-slate-500 mb-4">Deze voertuigen zijn gekoppeld aan een medewerker. Beheer ze via de <a href="/Personnel" className="text-blue-600 underline">personeelspagina</a>.</p>
-          <div className="bg-white rounded-xl border border-purple-200 overflow-hidden">
+          <p className="text-xs text-muted-foreground mb-4">Deze voertuigen zijn gekoppeld aan een medewerker. Beheer ze via de <a href="/Personnel" className="text-blue-500 underline">personeelspagina</a>.</p>
+          <div className="bg-card rounded-xl border border-border overflow-hidden">
             <table className="w-full text-sm">
               <thead>
-                <tr className="bg-purple-50 border-b border-purple-100">
-                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Medewerker</th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Kenteken</th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Voertuig</th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Bijtelling</th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Leasekosten/mnd</th>
-                  <th className="text-left px-4 py-3 font-semibold text-slate-700">Fiscale bijtelling/mnd</th>
+                <tr className="bg-muted/50 border-b border-border">
+                  <th className="text-left px-4 py-3 font-semibold text-foreground">Medewerker</th>
+                  <th className="text-left px-4 py-3 font-semibold text-foreground">Kenteken</th>
+                  <th className="text-left px-4 py-3 font-semibold text-foreground">Voertuig</th>
+                  <th className="text-left px-4 py-3 font-semibold text-foreground">Bijtelling</th>
+                  <th className="text-left px-4 py-3 font-semibold text-foreground">Leasekosten/mnd</th>
+                  <th className="text-left px-4 py-3 font-semibold text-foreground">Fiscale bijtelling/mnd</th>
                 </tr>
               </thead>
               <tbody>
@@ -174,18 +174,18 @@ export default function VehiclesPage() {
                     ? (p.company_car_fiscal_value * p.company_car_bijtelling_percentage / 100) / 12
                     : null;
                   return (
-                    <tr key={p.id} className="border-b border-slate-100 hover:bg-purple-50/30">
+                    <tr key={p.id} className="border-b border-border hover:bg-muted/30">
                       <td className="px-4 py-3">
-                        <div className="font-medium text-slate-900">{p.name}</div>
-                        <div className="text-xs text-slate-500">{p.function_type}</div>
+                        <div className="font-medium text-foreground">{p.name}</div>
+                        <div className="text-xs text-muted-foreground">{p.function_type}</div>
                       </td>
-                      <td className="px-4 py-3 font-mono font-semibold text-slate-900">{p.company_car_license_plate}</td>
+                      <td className="px-4 py-3 font-mono font-semibold text-foreground">{p.company_car_license_plate}</td>
                       <td className="px-4 py-3">
-                        <div className="font-medium text-slate-900">{p.company_car_brand} {p.company_car_model}</div>
+                        <div className="font-medium text-foreground">{p.company_car_brand} {p.company_car_model}</div>
                         <div className="flex items-center gap-2 mt-0.5">
-                          {p.company_car_year && <span className="text-xs text-slate-500">{p.company_car_year}</span>}
+                          {p.company_car_year && <span className="text-xs text-muted-foreground">{p.company_car_year}</span>}
                           {p.company_car_fuel_type && (
-                            <Badge variant="secondary" className="text-xs bg-slate-100 text-slate-600">{p.company_car_fuel_type}</Badge>
+                            <Badge variant="secondary" className="text-xs">{p.company_car_fuel_type}</Badge>
                           )}
                         </div>
                       </td>

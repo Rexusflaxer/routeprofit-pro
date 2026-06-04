@@ -122,8 +122,8 @@ export default function Settings() {
   return (
     <div className="space-y-6">
       <div>
-        <h1 className="text-2xl font-bold text-slate-900">Instellingen</h1>
-        <p className="text-sm text-slate-500 mt-1">Beheer bedrijfsgegevens en kantoren</p>
+        <h1 className="text-2xl font-bold text-foreground">Instellingen</h1>
+        <p className="text-sm text-muted-foreground mt-1">Beheer bedrijfsgegevens en kantoren</p>
       </div>
 
       {/* Bedrijfsgegevens */}
@@ -131,7 +131,7 @@ export default function Settings() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
-              <Building2 className="w-5 h-5 text-slate-600" />
+              <Building2 className="w-5 h-5 text-muted-foreground" />
               Bedrijfsgegevens
             </CardTitle>
             {!editingSettings ? (
@@ -192,27 +192,27 @@ export default function Settings() {
           ) : (
             <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
               <div>
-                <p className="text-xs text-slate-500 mb-1">Bedrijfsnaam</p>
+                <p className="text-xs text-muted-foreground mb-1">Bedrijfsnaam</p>
                 <p className="text-sm font-medium">{companySetting.company_name || "-"}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 mb-1">KVK nummer</p>
+                </div>
+                <div>
+                <p className="text-xs text-muted-foreground mb-1">KVK nummer</p>
                 <p className="text-sm font-medium">{companySetting.kvk_number || "-"}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 mb-1">Adres</p>
+                </div>
+                <div>
+                <p className="text-xs text-muted-foreground mb-1">Adres</p>
                 <p className="text-sm font-medium">{companySetting.address || "-"}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 mb-1">BTW nummer</p>
+                </div>
+                <div>
+                <p className="text-xs text-muted-foreground mb-1">BTW nummer</p>
                 <p className="text-sm font-medium">{companySetting.btw_number || "-"}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 mb-1">Postcode & Plaats</p>
+                </div>
+                <div>
+                <p className="text-xs text-muted-foreground mb-1">Postcode & Plaats</p>
                 <p className="text-sm font-medium">{companySetting.postal_code || "-"} {companySetting.city || "-"}</p>
-              </div>
-              <div>
-                <p className="text-xs text-slate-500 mb-1">Contact</p>
+                </div>
+                <div>
+                <p className="text-xs text-muted-foreground mb-1">Contact</p>
                 <p className="text-sm font-medium">{companySetting.phone || "-"}</p>
                 <p className="text-sm font-medium">{companySetting.email || "-"}</p>
               </div>
@@ -226,7 +226,7 @@ export default function Settings() {
         <CardHeader>
           <div className="flex items-center justify-between">
             <CardTitle className="flex items-center gap-2">
-              <MapPin className="w-5 h-5 text-slate-600" />
+              <MapPin className="w-5 h-5 text-muted-foreground" />
               Kantoren
             </CardTitle>
             <Button size="sm" onClick={() => {
@@ -292,11 +292,11 @@ export default function Settings() {
 
           <div className="space-y-3">
             {offices.map(office => (
-              <div key={office.id} className="flex items-start gap-3 p-4 bg-slate-50 rounded-lg border border-slate-200">
-                <MapPin className="w-5 h-5 text-slate-500 mt-0.5" />
+              <div key={office.id} className="flex items-start gap-3 p-4 bg-muted/50 rounded-lg border border-border">
+                <MapPin className="w-5 h-5 text-muted-foreground mt-0.5" />
                 <div className="flex-1 min-w-0">
-                  <p className="text-sm font-semibold text-slate-900">{office.name}</p>
-                  <p className="text-xs text-slate-500">{office.address}</p>
+                  <p className="text-sm font-semibold text-foreground">{office.name}</p>
+                  <p className="text-xs text-muted-foreground">{office.address}</p>
                 </div>
                 <div className="flex gap-1">
                   <Button size="icon" variant="ghost" onClick={() => {
@@ -317,7 +317,7 @@ export default function Settings() {
               </div>
             ))}
             {offices.length === 0 && !showOfficeForm && (
-              <div className="text-center py-8 text-slate-500">
+              <div className="text-center py-8 text-muted-foreground">
                 <p className="text-sm">Nog geen kantoren toegevoegd</p>
               </div>
             )}

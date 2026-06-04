@@ -65,7 +65,7 @@ export default function Dashboard() {
         subtitle="Overzicht van uw surveillancediensten"
         actions={
           <Link to={createPageUrl("Routes")}>
-            <Button className="bg-slate-900 hover:bg-slate-800">
+            <Button>
               <Plus className="w-4 h-4 mr-1" /> Nieuwe route
             </Button>
           </Link>
@@ -107,7 +107,7 @@ export default function Dashboard() {
       {routes.length > 0 && cs ? (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-slate-900">Route-analyses</h2>
+            <h2 className="text-lg font-semibold text-foreground">Route-analyses</h2>
             <Link to={createPageUrl("Routes")}>
               <Button variant="ghost" size="sm" className="text-slate-500">
                 Alle routes <ArrowRight className="w-3.5 h-3.5 ml-1" />

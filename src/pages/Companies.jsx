@@ -28,9 +28,9 @@ const ACTIVITY_LABELS = {
 };
 
 const STATUS_COLORS = {
-  active: "bg-green-100 text-green-800",
-  inactive: "bg-slate-100 text-slate-600",
-  archived: "bg-red-50 text-red-600",
+  active: "bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-300",
+  inactive: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
+  archived: "bg-red-50 text-red-600 dark:bg-red-900 dark:text-red-300",
 };
 
 export default function Companies() {
@@ -104,10 +104,10 @@ export default function Companies() {
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
-          <h1 className="text-2xl font-bold text-slate-900">Bedrijven</h1>
-          <p className="text-sm text-slate-500 mt-0.5">Beheer juridische entiteiten, holdings en vestigingen</p>
+          <h1 className="text-2xl font-bold text-foreground">Bedrijven</h1>
+          <p className="text-sm text-muted-foreground mt-0.5">Beheer juridische entiteiten, holdings en vestigingen</p>
         </div>
-        <Button onClick={openNew} className="bg-slate-900 hover:bg-slate-800">
+        <Button onClick={openNew}>
           <Plus className="w-4 h-4 mr-1" /> Bedrijf toevoegen
         </Button>
       </div>
@@ -139,19 +139,19 @@ export default function Companies() {
 
         {/* BEDRIJVEN TAB */}
         <TabsContent value="companies" className="pt-4">
-          {isLoading && <p className="text-sm text-slate-400 py-8 text-center">Laden...</p>}
+          {isLoading && <p className="text-sm text-muted-foreground py-8 text-center">Laden...</p>}
           {!isLoading && companies.length === 0 && (
-            <div className="py-12 text-center text-slate-400">
-              <Building2 className="w-12 h-12 mx-auto mb-3 text-slate-300" />
+            <div className="py-12 text-center text-muted-foreground">
+              <Building2 className="w-12 h-12 mx-auto mb-3 text-muted-foreground/50" />
               <p className="text-sm">Geen bedrijven aangemaakt.</p>
               <Button className="mt-4" size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" />Eerste bedrijf toevoegen</Button>
             </div>
           )}
           {companies.length > 0 && (
-            <div className="overflow-x-auto rounded-xl border border-slate-200 shadow-sm">
+            <div className="overflow-x-auto rounded-xl border border-border shadow-sm">
               <Table>
                 <TableHeader>
-                  <TableRow className="bg-slate-50">
+                  <TableRow className="bg-muted/40">
                     <TableHead>Bedrijf</TableHead>
                     <TableHead>KvK</TableHead>
                     <TableHead>Rol</TableHead>
@@ -163,30 +163,30 @@ export default function Companies() {
                 </TableHeader>
                 <TableBody>
                   {companies.map(company => (
-                    <TableRow key={company.id} className="hover:bg-slate-50/50">
+                    <TableRow key={company.id} className="hover:bg-muted/20">
                       <TableCell>
                         <div>
-                          <p className="font-medium text-sm text-slate-900">{company.display_name}</p>
+                          <p className="font-medium text-sm text-foreground">{company.display_name}</p>
                           {company.trade_name && company.trade_name !== company.display_name && (
-                            <p className="text-xs text-slate-400">{company.trade_name}</p>
+                            <p className="text-xs text-muted-foreground">{company.trade_name}</p>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-sm text-slate-600">{company.kvk_number || "—"}</TableCell>
+                      <TableCell className="text-sm text-muted-foreground">{company.kvk_number || "—"}</TableCell>
                       <TableCell>
                         <Badge variant="outline" className="text-xs">{ROLE_LABELS[company.company_role] || company.company_role}</Badge>
                       </TableCell>
                       <TableCell>
                         <div className="flex flex-wrap gap-1">
                           {(company.activities || []).slice(0, 2).map(a => (
-                            <span key={a} className="text-xs bg-slate-100 text-slate-700 px-1.5 py-0.5 rounded">{ACTIVITY_LABELS[a] || a}</span>
+                            <span key={a} className="text-xs bg-muted text-foreground px-1.5 py-0.5 rounded">{ACTIVITY_LABELS[a] || a}</span>
                           ))}
                           {(company.activities || []).length > 2 && (
-                            <span className="text-xs text-slate-400">+{(company.activities || []).length - 2}</span>
+                            <span className="text-xs text-muted-foreground">+{(company.activities || []).length - 2}</span>
                           )}
                         </div>
                       </TableCell>
-                      <TableCell className="text-xs text-slate-500">
+                      <TableCell className="text-xs text-muted-foreground">
                         {company.default_cao_configuration_id ? getCaoName(company.default_cao_configuration_id) : "—"}
                       </TableCell>
                       <TableCell>
@@ -224,7 +224,7 @@ export default function Companies() {
 
         <TabsContent value="bank" className="pt-4">
           {companies.length === 0
-            ? <p className="text-sm text-slate-400 py-8 text-center">Voeg eerst een bedrijf toe.</p>
+            ? <p className="text-sm text-muted-foreground py-8 text-center">Voeg eerst een bedrijf toe.</p>
             : <CompanyBankTab companies={companies} />}
         </TabsContent>
       </Tabs>

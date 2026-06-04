@@ -26,11 +26,11 @@ export default function RouteExecutions() {
           const routeTasks = tasks.filter(task => task.route_execution_id === route.id);
           const done = routeTasks.filter(task => ["completed", "skipped"].includes(task.status)).length;
           return (
-            <Link key={route.id} to={`/RouteExecutionDetails?id=${route.id}`} className="bg-white border border-slate-200 rounded-xl p-4 hover:shadow-md transition-shadow">
+            <Link key={route.id} to={`/RouteExecutionDetails?id=${route.id}`} className="bg-card border border-border rounded-xl p-4 hover:shadow-md transition-shadow">
               <div className="flex items-start justify-between gap-3">
                 <div>
-                  <h3 className="font-semibold text-slate-900">{route.route_name}</h3>
-                  <div className="mt-2 space-y-1 text-sm text-slate-500">
+                  <h3 className="font-semibold text-foreground">{route.route_name}</h3>
+                  <div className="mt-2 space-y-1 text-sm text-muted-foreground">
                     <p className="flex items-center gap-2"><Clock className="w-4 h-4" />{route.shift_start_time} – {route.shift_end_time}</p>
                     <p className="flex items-center gap-2"><User className="w-4 h-4" />{route.employee_name || "Geen medewerker"}</p>
                     <p className="flex items-center gap-2"><Car className="w-4 h-4" />{route.vehicle_license_plate || "Geen voertuig"}</p>
@@ -38,7 +38,7 @@ export default function RouteExecutions() {
                 </div>
                 <Badge>{STATUS_LABELS[route.status] || route.status}</Badge>
               </div>
-              <div className="mt-4 flex items-center gap-2 text-sm text-slate-600"><CheckCircle2 className="w-4 h-4" />{done}/{routeTasks.length} taken afgerond</div>
+              <div className="mt-4 flex items-center gap-2 text-sm text-muted-foreground"><CheckCircle2 className="w-4 h-4" />{done}/{routeTasks.length} taken afgerond</div>
             </Link>
           );
         })}

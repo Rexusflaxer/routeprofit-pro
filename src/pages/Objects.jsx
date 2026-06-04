@@ -100,7 +100,7 @@ export default function Objects() {
         title="Objecten"
         subtitle="Beheer de te bewaken locaties"
         actions={
-          <Button onClick={() => { setEditing(null); setShowForm(true); }} className="bg-slate-900 hover:bg-slate-800">
+          <Button onClick={() => { setEditing(null); setShowForm(true); }}>
             <Plus className="w-4 h-4 mr-1" /> Nieuw object
           </Button>
         }
