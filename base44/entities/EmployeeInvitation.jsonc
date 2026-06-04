@@ -1,0 +1,99 @@
+{
+  "name": "EmployeeInvitation",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "email": {
+      "type": "string"
+    },
+    "normalized_email": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "accepted",
+        "declined",
+        "revoked",
+        "expired"
+      ],
+      "default": "pending"
+    },
+    "invitation_type": {
+      "type": "string",
+      "enum": [
+        "employee_claim"
+      ],
+      "default": "employee_claim"
+    },
+    "created_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_by_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "expires_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "accepted_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "accepted_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "declined_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "revoked_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "personnel_id",
+    "email",
+    "normalized_email",
+    "status",
+    "invitation_type",
+    "created_at"
+  ]
+}

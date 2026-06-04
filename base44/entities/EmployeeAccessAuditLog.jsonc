@@ -1,0 +1,41 @@
+{
+  "name": "EmployeeAccessAuditLog",
+  "type": "object",
+  "properties": {
+    "user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "personnel_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "company_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "action": {
+      "type": "string"
+    },
+    "payload": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "created_at": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "action",
+    "created_at"
+  ]
+}

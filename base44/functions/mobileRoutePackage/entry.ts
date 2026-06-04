@@ -1,16 +1,26 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
 const OPEN_STATUSES = ['pending', 'en_route', 'arrived', 'started', 'postponed', 'failed'];
 
 function todayIso() { return new Date().toISOString().slice(0, 10); }
 function nowIso() { return new Date().toISOString(); }
-function isPrivileged(user) { return ['admin', 'manager', 'planner'].includes(String(user?.role || '').toLowerCase()); }
+function isPrivileged(user) { return ['admin', 'director', 'hr', 'manager', 'planner'].includes(String(user?.role || '').toLowerCase()); }
 function safeNumber(value) { const n = Number(value); return Number.isFinite(n) ? n : null; }
 
 async function findEmployee(base44, user) {
-  const personnel = await base44.asServiceRole.entities.Personnel.list();
-  return personnel.find(p => String(p.email || '').toLowerCase() === String(user.email || '').toLowerCase()) ||
-    personnel.find(p => String(p.name || '').toLowerCase() === String(user.full_name || '').toLowerCase()) || null;
+  // 1. Primary: linked_user_id (explicit acceptance)
+  const linkedByUserId = await base44.asServiceRole.entities.Personnel.filter({ linked_user_id: user.id });
+  if (linkedByUserId.length > 0) return linkedByUserId[0];
+
+  // 2. Fallback: email match (backward compatible – no auto-link)
+  const byEmail = await base44.asServiceRole.entities.Personnel.filter({ email: user.email });
+  if (byEmail.length > 0) return byEmail[0];
+  const byLoginEmail = await base44.asServiceRole.entities.Personnel.filter({ login_email: user.email });
+  if (byLoginEmail.length > 0) return byLoginEmail[0];
+
+  // 3. Legacy name fallback
+  const all = await base44.asServiceRole.entities.Personnel.list();
+  return all.find(p => String(p.name || '').toLowerCase() === String(user.full_name || '').toLowerCase()) || null;
 }
 
 async function getRouteExecution(base44, user, body) {
