@@ -1,18 +1,11 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
 
 // CAO Particuliere Beveiliging - Toeslagberekening
-// Artikel 40: Toeslag bijzondere uren
-// - 35%: zaterdag 00:00 - zondag 24:00
-// - 20%: maandag t/m vrijdag 00:00 - 07:00
-// - 10%: maandag t/m vrijdag 18:00 - 24:00
-// - 100%: oudejaarsdag na 16:00
-// Artikel 41: Feestdagentoeslag 50%
+// Feestdagen komen uit CAOConfiguration.holidays — GEEN hardcoded lijsten.
 
-const HOLIDAYS_2025 = ['2025-01-01', '2025-04-20', '2025-04-21', '2025-04-27', '2025-05-29', '2025-06-08', '2025-06-09', '2025-12-25', '2025-12-26'];
-const HOLIDAYS_2026 = ['2026-01-01', '2026-04-05', '2026-04-06', '2026-04-27', '2026-05-14', '2026-05-24', '2026-05-25', '2026-12-25', '2026-12-26'];
-
-function isHoliday(dateStr) {
-  return HOLIDAYS_2025.includes(dateStr) || HOLIDAYS_2026.includes(dateStr);
+function isHoliday(dateStr, caoConfig) {
+  const holidays = (caoConfig && caoConfig.holidays) ? caoConfig.holidays : [];
+  return holidays.some(h => h.date === dateStr);
 }
 
 function isNewYearsEveAfter16(date) {
@@ -33,8 +26,8 @@ function getSurchargeType(datetime, caoConfig) {
     return { type: 'new_years_eve', percentage: caoConfig.surcharge_new_years_eve_after_16 || 100 };
   }
 
-  // Feestdagen (50%)
-  if (isHoliday(dateStr)) {
+  // Feestdagen (50%) — opgehaald uit CAOConfiguration.holidays
+  if (isHoliday(dateStr, caoConfig)) {
     return { type: 'holiday', percentage: caoConfig.surcharge_holiday || 50 };
   }
 
@@ -60,12 +53,21 @@ function getSurchargeType(datetime, caoConfig) {
 function getCAOHourlyRate(scale, period, caoConfig) {
   const scaleKey = String(scale);
   const periodKey = String(period);
-  
-  if (caoConfig.wage_scales && caoConfig.wage_scales[scaleKey]) {
-    return caoConfig.wage_scales[scaleKey][periodKey] || caoConfig.wage_scales[scaleKey]['0'] || 16.02;
+
+  // Probeer eerst gedetailleerde loontabel
+  if (caoConfig.wage_scales_detailed && caoConfig.wage_scales_detailed[scaleKey]) {
+    const entry = caoConfig.wage_scales_detailed[scaleKey][periodKey];
+    if (entry && entry.hourly_rate) return entry.hourly_rate;
   }
-  
-  return 16.02; // Fallback naar schaal 2, periode 0
+
+  // Legacy wage_scales
+  if (caoConfig.wage_scales && caoConfig.wage_scales[scaleKey]) {
+    const rate = caoConfig.wage_scales[scaleKey][periodKey];
+    if (rate !== undefined && rate !== null) return rate;
+  }
+
+  // Geen fallback — geeft null terug zodat aanroeper een fout kan genereren
+  return null;
 }
 
 // Bereken loonheffing op basis van bruto loon
@@ -107,37 +109,30 @@ Deno.serve(async (req) => {
     // Haal medewerker op
     const personnel = await base44.entities.Personnel.get(personnel_id);
     
-    // Haal CAO configuratie op (neem de eerste/meest recente)
-    const caoConfigs = await base44.entities.CAOConfiguration.list('-created_date', 1);
-    const caoConfig = caoConfigs[0] || {
-      surcharge_weekend: 35,
-      surcharge_night: 20,
-      surcharge_evening: 10,
-      surcharge_holiday: 50,
-      surcharge_new_years_eve_after_16: 100,
-      vacation_allowance: 8,
-      year_end_bonus: 2.01,
-      pension_premium_rate_total: 24.1,
-      pension_premium_employer: 60,
-      pension_premium_employee: 40,
-      pension_base_salary_threshold: 16164,
-      premium_sfpb: 0.061,
-      premium_paww_employee: 0.1,
-      premium_wga_employee: 0.81,
-      premium_awf_employer: 2.64,
-      premium_ww_employer_fixed: 0,
-      premium_ww_employer_variable: 1.5,
-      premium_wia_employer: 0.72,
-      premium_wga_employer: 1.5,
-      premium_zw_employer: 0,
-      tax_rate_bracket_1: 36.97,
-      tax_rate_bracket_2: 36.97,
-      tax_rate_bracket_3: 49.5,
-      tax_bracket_1_limit: 38098,
-      tax_bracket_2_limit: 75518,
-      labor_tax_credit_max: 5672,
-      wage_scales: {}
-    };
+    // Bepaal referentiedatum op basis van de eerste dienst
+    const firstShiftDate = work_schedule[0]?.date || new Date().toISOString().split('T')[0];
+    const refDate = new Date(firstShiftDate);
+
+    // Haal ACTIEVE CAO op op basis van datum (niet op created_date)
+    const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({ status: 'active' });
+    const eligibleCaos = allCaos.filter(c => {
+      if (c.valid_from && new Date(c.valid_from) > refDate) return false;
+      if (c.valid_until && new Date(c.valid_until) < refDate) return false;
+      return true;
+    });
+    eligibleCaos.sort((a, b) => {
+      const da = a.valid_from ? new Date(a.valid_from) : new Date(0);
+      const db = b.valid_from ? new Date(b.valid_from) : new Date(0);
+      return db - da;
+    });
+
+    const caoConfig = eligibleCaos[0];
+    if (!caoConfig) {
+      return Response.json({
+        error: `Geen actieve CAO-configuratie gevonden voor datum ${firstShiftDate}. Activeer eerst een CAO-configuratie.`,
+        calculation_warnings: [`Geen actieve CAO voor ${firstShiftDate}`]
+      }, { status: 400 });
+    }
 
     let totalHours = 0;
     let hoursByType = {
@@ -208,13 +203,22 @@ Deno.serve(async (req) => {
       is_call_worker: isCallWorker
     };
 
+    const calculationWarnings = [];
+
     // Bepaal basis uurloon
     let baseHourlyRate = 0;
     if (personnel.employee_type === 'loondienst') {
       if (personnel.cao === 'cao_particuliere_beveiliging') {
-        baseHourlyRate = getCAOHourlyRate(personnel.cao_scale || 3, personnel.cao_period || 0, caoConfig);
+        const rate = getCAOHourlyRate(personnel.cao_scale || 3, personnel.cao_period || 0, caoConfig);
+        if (rate === null) {
+          return Response.json({
+            error: `Geen uurloon gevonden voor schaal ${personnel.cao_scale}, periodiek ${personnel.cao_period} in CAO-versie "${caoConfig.version_label || caoConfig.name}". Controleer de loontabel.`,
+            calculation_warnings: [`Ontbrekende schaal/periodiek combinatie: ${personnel.cao_scale}/${personnel.cao_period}`]
+          }, { status: 400 });
+        }
+        baseHourlyRate = rate;
       } else {
-        baseHourlyRate = personnel.custom_hourly_rate || 16;
+        baseHourlyRate = personnel.custom_hourly_rate || 0;
       }
     }
 
@@ -493,6 +497,12 @@ Deno.serve(async (req) => {
       cao_scale: personnel.cao_scale,
       cao_period: personnel.cao_period,
       base_hourly_rate: baseHourlyRate,
+      // CAO metadata
+      cao_configuration_id: caoConfig.id,
+      cao_version_label: caoConfig.version_label || caoConfig.name,
+      cao_valid_from: caoConfig.valid_from,
+      pay_period_year: refDate.getFullYear(),
+      calculation_warnings: calculationWarnings,
       total_hours: Math.round(totalHours * 100) / 100,
       hours_by_type: hoursByType,
       payslip: {

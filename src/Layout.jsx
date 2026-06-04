@@ -17,6 +17,7 @@ const NAV_ITEMS = [
   { name: "Diensten",             icon: Smartphone,      page: "RouteExecutions" },
   { name: "Rapportages",          icon: ClipboardList,   page: "ReportTemplates" },
   { name: "Overig",               icon: Settings,        page: "CostSettings" },
+  { name: "CAO Beheer",           icon: ClipboardList,   page: "CAOBeheer" },
   { name: "Instellingen",         icon: Settings,        page: "Settings" },
 ];
 
