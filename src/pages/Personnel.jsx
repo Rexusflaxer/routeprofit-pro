@@ -16,22 +16,22 @@ import PersonnelWizard from "../components/personnel/PersonnelWizard";
 import CostCalculator from "../components/personnel/CostCalculator";
 
 const STATUS_COLORS = {
-  draft: "bg-slate-100 text-slate-600",
-  onboarding: "bg-blue-100 text-blue-700",
-  active: "bg-emerald-100 text-emerald-700",
-  inactive: "bg-amber-100 text-amber-700",
-  archived: "bg-red-50 text-red-600",
+  draft: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
+  onboarding: "bg-blue-100 text-blue-700 dark:bg-blue-800 dark:text-blue-300",
+  active: "bg-emerald-100 text-emerald-700 dark:bg-emerald-800 dark:text-emerald-300",
+  inactive: "bg-amber-100 text-amber-700 dark:bg-amber-800 dark:text-amber-300",
+  archived: "bg-red-50 text-red-600 dark:bg-red-900 dark:text-red-300",
 };
 const STATUS_LABELS = { draft: "Concept", onboarding: "Onboarding", active: "Actief", inactive: "Inactief", archived: "Gearchiveerd" };
-const HR_COLORS = { complete: "bg-emerald-100 text-emerald-700", needs_review: "bg-amber-100 text-amber-700", incomplete: "bg-red-50 text-red-600" };
+const HR_COLORS = { complete: "bg-emerald-100 text-emerald-700 dark:bg-emerald-800 dark:text-emerald-300", needs_review: "bg-amber-100 text-amber-700 dark:bg-amber-800 dark:text-amber-300", incomplete: "bg-red-50 text-red-600 dark:bg-red-900 dark:text-red-300" };
 const HR_LABELS = { complete: "Volledig", needs_review: "Beoordeling", incomplete: "Onvolledig" };
 
 function getExpiryBadge(dateStr) {
   if (!dateStr) return null;
   const diff = (new Date(dateStr) - new Date()) / (1000 * 60 * 60 * 24);
-  if (diff < 0) return <Badge className="bg-red-100 text-red-700 text-xs">Verlopen</Badge>;
-  if (diff <= 30) return <Badge className="bg-orange-100 text-orange-700 text-xs">Verloopt &lt;30d</Badge>;
-  if (diff <= 60) return <Badge className="bg-amber-100 text-amber-700 text-xs">Verloopt &lt;60d</Badge>;
+  if (diff < 0) return <Badge className="bg-red-100 text-red-700 dark:bg-red-900 dark:text-red-300 text-xs">Verlopen</Badge>;
+  if (diff <= 30) return <Badge className="bg-orange-100 text-orange-700 dark:bg-orange-900 dark:text-orange-300 text-xs">Verloopt &lt;30d</Badge>;
+  if (diff <= 60) return <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-900 dark:text-amber-300 text-xs">Verloopt &lt;60d</Badge>;
   return null;
 }
 
@@ -165,7 +165,7 @@ export default function Personnel() {
                           <TableCell className="text-sm text-muted-foreground">{p.primary_company_id ? getCompanyName(p.primary_company_id) : "—"}</TableCell>
                           <TableCell className="text-sm capitalize">{p.function_type || "—"}</TableCell>
                           <TableCell>
-                            <Badge variant="secondary" className={p.employee_type === "zzp" ? "bg-purple-100 text-purple-700" : "bg-blue-100 text-blue-700"}>
+                            <Badge className={p.employee_type === "zzp" ? "bg-purple-100 text-purple-700 dark:bg-purple-800 dark:text-purple-300" : "bg-blue-100 text-blue-700 dark:bg-blue-800 dark:text-blue-300"}>
                               {p.employee_type === "zzp" ? "ZZP" : "Loondienst"}
                             </Badge>
                           </TableCell>
@@ -181,8 +181,8 @@ export default function Personnel() {
                           </TableCell>
                           <TableCell>
                             <div className="flex items-center gap-1 flex-wrap">
-                              {p.wpbr_status === "approved" && <Badge className="bg-green-100 text-green-700 text-xs">Wpbr ✓</Badge>}
-                              {p.wpbr_required && p.wpbr_status !== "approved" && <Badge className="bg-amber-100 text-amber-700 text-xs"><AlertTriangle className="w-2.5 h-2.5 mr-0.5" />Wpbr</Badge>}
+                              {p.wpbr_status === "approved" && <Badge className="bg-green-100 text-green-700 dark:bg-green-800 dark:text-green-300 text-xs">Wpbr ✓</Badge>}
+                              {p.wpbr_required && p.wpbr_status !== "approved" && <Badge className="bg-amber-100 text-amber-700 dark:bg-amber-800 dark:text-amber-300 text-xs"><AlertTriangle className="w-2.5 h-2.5 mr-0.5" />Wpbr</Badge>}
                               {getExpiryBadge(p.wpbr_permission_valid_until)}
                             </div>
                           </TableCell>
