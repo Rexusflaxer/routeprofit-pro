@@ -90,7 +90,14 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
   };
 
   const selectAddress = (s) => {
-    setForm(f => ({ ...f, street_name: s.address, full_address: s.address }));
+    setForm(f => ({
+      ...f,
+      street_name: s.street_name || s.address,
+      house_number: s.house_number || f.house_number,
+      postal_code: s.postal_code || f.postal_code,
+      city: s.city || f.city,
+      full_address: s.address,
+    }));
     setShowAddressSugg(false);
   };
 
@@ -125,8 +132,8 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
         {/* IDENTITEIT */}
         <TabsContent value="identity" className="space-y-4 pt-2">
           {/* KvK zoeken */}
-          <div className="rounded-lg bg-slate-50 p-3 border border-slate-200">
-            <Label className="text-xs font-semibold text-slate-500 uppercase tracking-wide">KvK zoeken (optioneel)</Label>
+          <div className="rounded-lg bg-muted/50 p-3 border border-border">
+            <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wide">KvK zoeken (optioneel)</Label>
             <div className="flex gap-2 mt-2">
               <Input value={kvkSearch} onChange={e => setKvkSearch(e.target.value)} placeholder="Bedrijfsnaam of KvK-nummer" onKeyDown={e => e.key === "Enter" && handleKvkSearch()} />
               <Button type="button" variant="outline" onClick={handleKvkSearch} disabled={kvkLoading}>
@@ -137,7 +144,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
               <div className="mt-2 space-y-1 max-h-40 overflow-y-auto">
                 {kvkResults.map((r, i) => (
                   <button key={i} type="button" onClick={() => applyKvkResult(r)}
-                    className="w-full text-left px-3 py-2 rounded bg-white border border-slate-200 text-sm hover:bg-blue-50 hover:border-blue-300">
+                    className="w-full text-left px-3 py-2 rounded bg-background border border-border text-sm hover:bg-accent hover:border-ring text-foreground">
                     <strong>{r.name}</strong> — {r.kvk_number || r.kvkNumber} — {r.city}
                   </button>
                 ))}
@@ -231,7 +238,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
             <Label className="mb-2 block">Activiteiten (meerdere mogelijk)</Label>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {ACTIVITIES.map(a => (
-                <label key={a.key} className="flex items-center gap-2 text-sm cursor-pointer p-2 rounded hover:bg-slate-50">
+                <label key={a.key} className="flex items-center gap-2 text-sm cursor-pointer p-2 rounded hover:bg-muted/50">
                   <Checkbox checked={(form.activities || []).includes(a.key)} onCheckedChange={() => toggleActivity(a.key)} />
                   {a.label}
                 </label>
@@ -239,7 +246,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
             </div>
           </div>
           <div className="border-t pt-4">
-            <Label className="text-sm font-semibold text-slate-700 mb-3 block">Wpbr-vergunning</Label>
+            <Label className="text-sm font-semibold text-foreground mb-3 block">Wpbr-vergunning</Label>
             <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
               <div className="space-y-1">
                 <Label>Type</Label>
@@ -270,10 +277,10 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
               <Label>Straatnaam</Label>
               <Input value={form.street_name || ""} onChange={e => handleAddressQuery(e.target.value)} autoComplete="off" />
               {showAddressSugg && addressSuggestions.length > 0 && (
-                <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-48 overflow-y-auto">
+                <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
                   {addressSuggestions.map((s, i) => (
-                    <button key={i} type="button" onClick={() => selectAddress(s)} className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex gap-2">
-                      <MapPin className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />{s.address}
+                    <button key={i} type="button" onClick={() => selectAddress(s)} className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex gap-2 text-foreground">
+                      <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />{s.address}
                     </button>
                   ))}
                 </div>
@@ -326,7 +333,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
             <div className="space-y-2">
               <Label>Logo</Label>
               {form.logo_file_url && (
-                <div className="relative w-32 h-20 border rounded-lg overflow-hidden bg-slate-50">
+                <div className="relative w-32 h-20 border border-border rounded-lg overflow-hidden bg-muted/50">
                   <img src={form.logo_file_url} alt="logo" className="object-contain w-full h-full p-1" />
                   <button type="button" onClick={() => set("logo_file_url", null)} className="absolute top-1 right-1 bg-white rounded-full p-0.5 shadow">
                     <X className="w-3 h-3 text-red-500" />
@@ -372,7 +379,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
               </SelectContent>
             </Select>
           </div>
-          <p className="text-xs text-slate-400">Gedetailleerde CAO-koppelingen per activiteit en periode zijn beschikbaar via het tabblad CAO-catalogus op de Bedrijven-pagina.</p>
+          <p className="text-xs text-muted-foreground">Gedetailleerde CAO-koppelingen per activiteit en periode zijn beschikbaar via het tabblad CAO-catalogus op de Bedrijven-pagina.</p>
         </TabsContent>
       </Tabs>
 
