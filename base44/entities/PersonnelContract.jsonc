@@ -1,0 +1,108 @@
+{
+  "name": "PersonnelContract",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string",
+      "description": "ID van de medewerker"
+    },
+    "contract_form": {
+      "type": "string",
+      "enum": [
+        "bepaalde_tijd",
+        "onbepaalde_tijd",
+        "oproep",
+        "stage",
+        "uitzend",
+        "zzp",
+        "unknown"
+      ],
+      "default": "unknown",
+      "description": "Contractvorm conform CAO"
+    },
+    "contract_start_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "contract_end_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "contract_duration_months": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Berekende contractduur in maanden"
+    },
+    "probation_period_months": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Berekende proeftijd in maanden conform CAO"
+    },
+    "probation_period_source_rule_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bronregel voor de berekende proeftijd, bijv. CAO-PB-2024-R0315"
+    },
+    "probation_override_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Reden voor afwijking van CAO-standaard proeftijd"
+    },
+    "security_role_status": {
+      "type": "string",
+      "enum": [
+        "aspirant_beveiliger",
+        "beveiliger",
+        "leidinggevende",
+        "not_applicable",
+        "unknown"
+      ],
+      "default": "unknown",
+      "description": "Beveiligingsfunctie-status conform CAO"
+    },
+    "industry_seniority_pay_periods": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Brancheancienniteit in loonperioden (relevant voor wachtdag ziekte)"
+    },
+    "industry_start_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Startdatum brancheancienniteit"
+    },
+    "is_current": {
+      "type": "boolean",
+      "default": true,
+      "description": "Is dit het huidige actieve contract?"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "personnel_id",
+    "contract_form"
+  ]
+}

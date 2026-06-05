@@ -1,0 +1,61 @@
+{
+  "name": "PayrollCalculationRun",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "route_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cao_configuration_id": {
+      "type": "string"
+    },
+    "cao_version_label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pay_period_year": {
+      "type": "number"
+    },
+    "pay_period_number": {
+      "type": "number"
+    },
+    "calculation_input": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "calculation_output": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "created_by_function": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "cao_configuration_id",
+    "pay_period_year",
+    "pay_period_number",
+    "created_at",
+    "created_by_function"
+  ]
+}

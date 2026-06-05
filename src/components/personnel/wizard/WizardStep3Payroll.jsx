@@ -5,8 +5,9 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Upload, Eye, EyeOff, Lock } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import ContractRulesPanel from "@/components/personnel/ContractRulesPanel";
 
-export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSensitiveChange }) {
+export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSensitiveChange, personnelId }) {
   const [showBsn, setShowBsn] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
@@ -19,6 +20,9 @@ export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSe
 
   return (
     <div className="space-y-6">
+      {/* Contract & CAO-regels */}
+      <ContractRulesPanel form={form} onChange={onChange} personnelId={personnelId} />
+
       {/* Geboortegegevens */}
       <div>
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Geboorte & Nationaliteit</p>

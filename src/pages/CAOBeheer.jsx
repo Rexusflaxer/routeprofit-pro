@@ -17,9 +17,11 @@ import CAOWijzigingenTab from "@/components/cao/CAOWijzigingenTab";
 import CAORegelsTab from "@/components/cao/CAORegelsTab";
 import CAOActiefTab from "@/components/cao/CAOActiefTab";
 import CAOPayrollTestTab from "@/components/cao/CAOPayrollTestTab";
+import CAOCoverageDashboard from "@/components/cao/CAOCoverageDashboard";
+import { BarChart2 } from "lucide-react";
 
 export default function CAOBeheer() {
-  const [activeTab, setActiveTab] = useState("bronnen");
+  const [activeTab, setActiveTab] = useState("coverage");
   const { toast } = useToast();
   const queryClient = useQueryClient();
 
@@ -102,6 +104,9 @@ export default function CAOBeheer() {
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="flex-wrap h-auto gap-1">
+          <TabsTrigger value="coverage" className="gap-1.5">
+            <BarChart2 className="w-3.5 h-3.5" />Coverage
+          </TabsTrigger>
           <TabsTrigger value="bronnen" className="gap-1.5">
             <FileText className="w-3.5 h-3.5" />Bronnen
           </TabsTrigger>
@@ -128,6 +133,9 @@ export default function CAOBeheer() {
           </TabsTrigger>
         </TabsList>
 
+        <TabsContent value="coverage" className="mt-4">
+          <CAOCoverageDashboard />
+        </TabsContent>
         <TabsContent value="bronnen" className="mt-4">
           <CAOBronnenTab />
         </TabsContent>

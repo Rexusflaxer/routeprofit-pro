@@ -1,0 +1,222 @@
+{
+  "name": "CAORule",
+  "type": "object",
+  "properties": {
+    "rule_id": {
+      "type": "string",
+      "description": "Uniek rule ID, bijv. CAO-PB-2024-R0315"
+    },
+    "cao_key": {
+      "type": "string",
+      "description": "CAO sleutel, bijv. cao_particuliere_beveiliging"
+    },
+    "version_label": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Versielabel van de CAO"
+    },
+    "source_pdf": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bronbestand PDF"
+    },
+    "source_document_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Gekoppeld CAOSourceDocument ID"
+    },
+    "pdf_page_start": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "pdf_page_end": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "chapter": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "article": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "appendix": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "protocol": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "domain": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Domein bijv. payroll_wages_allowances, contract_employment, leave_holidays"
+    },
+    "impact": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Impact type bijv. automatic_or_calculation, reference_or_context"
+    },
+    "automation_level": {
+      "type": "string",
+      "enum": [
+        "automatic_or_calculation",
+        "validation_or_policy",
+        "workflow_or_documentation",
+        "reference_or_policy",
+        "reference"
+      ],
+      "default": "reference"
+    },
+    "implementation_status": {
+      "type": "string",
+      "enum": [
+        "IMPLEMENTED",
+        "PARTIAL",
+        "MISSING",
+        "REFERENCE"
+      ],
+      "default": "MISSING"
+    },
+    "manual_review_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "risk_level": {
+      "type": "string",
+      "enum": [
+        "low",
+        "medium",
+        "high",
+        "critical"
+      ],
+      "default": "low"
+    },
+    "rule_text": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Volledige regeltekst"
+    },
+    "rule_text_summary": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Samenvatting van de regel"
+    },
+    "sha1": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "SHA1 hash van de bronregel"
+    },
+    "applies_when": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Condities waaronder de regel van toepassing is"
+    },
+    "default_action": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "validation_action": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "calculation_policy": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "automatic",
+        "manual_review_required",
+        "policy_only",
+        "not_payroll",
+        null
+      ]
+    },
+    "implemented_in": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Lijst van functies/componenten waar deze regel is ge\u00efmplementeerd"
+    },
+    "tests": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "last_verified_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cao_configuration_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "pending_review",
+        "active",
+        "archived"
+      ],
+      "default": "active"
+    }
+  },
+  "required": [
+    "rule_id",
+    "cao_key"
+  ]
+}

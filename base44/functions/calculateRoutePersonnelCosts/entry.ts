@@ -1,10 +1,10 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
-const HOLIDAYS_2025 = ['2025-01-01', '2025-04-20', '2025-04-21', '2025-04-27', '2025-05-29', '2025-06-08', '2025-06-09', '2025-12-25', '2025-12-26'];
-const HOLIDAYS_2026 = ['2026-01-01', '2026-04-05', '2026-04-06', '2026-04-27', '2026-05-14', '2026-05-24', '2026-05-25', '2026-12-25', '2026-12-26'];
+// Feestdagen komen UITSLUITEND uit CAOConfiguration.holidays — geen hardcoded lijsten
 
-function isHoliday(dateStr) {
-  return HOLIDAYS_2025.includes(dateStr) || HOLIDAYS_2026.includes(dateStr);
+function isHoliday(dateStr, caoConfig) {
+  const holidays = (caoConfig && caoConfig.holidays) ? caoConfig.holidays : [];
+  return holidays.some(h => h.date === dateStr);
 }
 
 function isNewYearsEveAfter16(date) {
@@ -17,7 +17,7 @@ function getSurchargeType(datetime, caoConfig) {
   const hours = date.getHours();
   const dateStr = date.toISOString().split('T')[0];
   if (isNewYearsEveAfter16(date)) return { type: 'new_years_eve', percentage: caoConfig.surcharge_new_years_eve_after_16 || 100 };
-  if (isHoliday(dateStr)) return { type: 'holiday', percentage: caoConfig.surcharge_holiday || 50 };
+  if (isHoliday(dateStr, caoConfig)) return { type: 'holiday', percentage: caoConfig.surcharge_holiday || 50 };
   if (dayOfWeek === 0 || dayOfWeek === 6) return { type: 'weekend', percentage: caoConfig.surcharge_weekend || 35 };
   if (hours >= 0 && hours < 7) return { type: 'night', percentage: caoConfig.surcharge_night || 20 };
   if (hours >= 18) return { type: 'evening', percentage: caoConfig.surcharge_evening || 10 };
@@ -27,10 +27,18 @@ function getSurchargeType(datetime, caoConfig) {
 function getCAOHourlyRate(scale, period, caoConfig) {
   const scaleKey = String(scale);
   const periodKey = String(period);
-  if (caoConfig.wage_scales && caoConfig.wage_scales[scaleKey]) {
-    return caoConfig.wage_scales[scaleKey][periodKey] || caoConfig.wage_scales[scaleKey]['0'] || 16.02;
+  // Probeer eerst gedetailleerde loontabel
+  if (caoConfig.wage_scales_detailed && caoConfig.wage_scales_detailed[scaleKey]) {
+    const entry = caoConfig.wage_scales_detailed[scaleKey][periodKey];
+    if (entry && entry.hourly_rate) return entry.hourly_rate;
   }
-  return 16.02;
+  // Legacy wage_scales
+  if (caoConfig.wage_scales && caoConfig.wage_scales[scaleKey]) {
+    const rate = caoConfig.wage_scales[scaleKey][periodKey];
+    if (rate !== undefined && rate !== null) return rate;
+  }
+  // Geen fallback — geeft null terug zodat aanroeper een fout kan genereren
+  return null;
 }
 
 function getNextDateForWeekday(routeWeekday) {
@@ -68,7 +76,7 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
     let zzpRate = personnel.zzp_hourly_rate_excl_vat || 0;
     const dow = startDate.getDay();
     const isWeekend = dow === 0 || dow === 6;
-    const isHolidayDay = isHoliday(date);
+    const isHolidayDay = isHoliday(date, caoConfig);
     const hrs = startDate.getHours();
     if (isHolidayDay && personnel.zzp_holiday_rate) zzpRate = personnel.zzp_holiday_rate;
     else if (isWeekend && personnel.zzp_weekend_rate) zzpRate = personnel.zzp_weekend_rate;
@@ -88,9 +96,19 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
   }
 
   // Loondienst
-  const baseHourlyRate = personnel.cao === 'cao_particuliere_beveiliging'
-    ? getCAOHourlyRate(personnel.cao_scale || 3, personnel.cao_period || 0, caoConfig)
-    : (personnel.custom_hourly_rate || 16);
+  let baseHourlyRate;
+  if (personnel.cao === 'cao_particuliere_beveiliging') {
+    const rate = getCAOHourlyRate(personnel.cao_scale || 3, personnel.cao_period || 0, caoConfig);
+    if (rate === null) {
+      throw new Error(`Geen uurloon gevonden voor schaal ${personnel.cao_scale}, periodiek ${personnel.cao_period} in CAO "${caoConfig.version_label || caoConfig.name}". Controleer de loontabel.`);
+    }
+    baseHourlyRate = rate;
+  } else {
+    baseHourlyRate = personnel.custom_hourly_rate || null;
+    if (!baseHourlyRate) {
+      throw new Error(`Geen uurloon gevonden voor medewerker ${personnel.name} (geen CAO en geen custom_hourly_rate).`);
+    }
+  }
 
   let baseSalary = 0;
   const surchargeAmounts = { evening: 0, night: 0, weekend: 0, holiday: 0, new_years_eve: 0 };
@@ -213,15 +231,25 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Geen actieve surveillanten gevonden' }, { status: 404 });
     }
 
-    const caoConfigList = await base44.entities.CAOConfiguration.list('-created_date', 1);
-    const caoConfig = caoConfigList[0] || {
-      surcharge_weekend: 35, surcharge_night: 20, surcharge_evening: 10,
-      surcharge_holiday: 50, surcharge_new_years_eve_after_16: 100,
-      vacation_allowance: 8, year_end_bonus: 2.01, pension_premium_rate_total: 24.1,
-      pension_premium_employer: 60, pension_base_salary_threshold: 16164,
-      premium_awf_employer: 2.64, premium_ww_employer_fixed: 0, premium_ww_employer_variable: 1.5,
-      premium_wia_employer: 0.72, premium_wga_employer: 1.5, wage_scales: {}
-    };
+    // Haal ACTIEVE CAO op op basis van datum (identiek aan calculatePersonnelCosts)
+    const shiftDateRef = new Date(shiftDate);
+    const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({ status: 'active' });
+    const eligibleCaos = allCaos.filter(c => {
+      if (c.valid_from && new Date(c.valid_from) > shiftDateRef) return false;
+      if (c.valid_until && new Date(c.valid_until) < shiftDateRef) return false;
+      return true;
+    });
+    eligibleCaos.sort((a, b) => {
+      const da = a.valid_from ? new Date(a.valid_from) : new Date(0);
+      const db = b.valid_from ? new Date(b.valid_from) : new Date(0);
+      return db - da;
+    });
+    const caoConfig = eligibleCaos[0];
+    if (!caoConfig) {
+      return Response.json({
+        error: `Geen actieve CAO-configuratie gevonden voor datum ${shiftDate}. Activeer eerst een CAO-configuratie.`
+      }, { status: 400 });
+    }
 
     const results = surveillants.map(p => {
       const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig);

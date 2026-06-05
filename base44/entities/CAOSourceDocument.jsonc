@@ -1,0 +1,114 @@
+{
+  "name": "CAOSourceDocument",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "description": "Titel van het brondocument"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "cao_page",
+        "cao_pdf",
+        "wage_table_pdf",
+        "pay_periods_pdf",
+        "fonds_cao_pdf",
+        "faq_page",
+        "sociale_commissie_pdf",
+        "other"
+      ],
+      "description": "Type brondocument"
+    },
+    "url": {
+      "type": "string",
+      "description": "URL van het document"
+    },
+    "canonical_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "content_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "SHA-256 hash van de inhoud"
+    },
+    "etag": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_modified": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "first_seen_at": {
+      "type": "string",
+      "description": "Eerste keer gezien (ISO datetime)"
+    },
+    "last_checked_at": {
+      "type": "string",
+      "description": "Laatste controle (ISO datetime)"
+    },
+    "last_changed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Laatste wijziging gedetecteerd"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "changed",
+        "unreachable",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "file_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Opgeslagen kopie van het bestand"
+    },
+    "extracted_text": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Ge\u00ebxtraheerde tekst"
+    },
+    "extraction_status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "ok",
+        "failed",
+        "manual_review_required"
+      ],
+      "default": "pending"
+    },
+    "extraction_error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "title",
+    "url",
+    "first_seen_at",
+    "last_checked_at"
+  ]
+}

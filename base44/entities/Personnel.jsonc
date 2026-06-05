@@ -378,6 +378,88 @@
       "type": "boolean",
       "default": true
     },
+    "contract_form": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "bepaalde_tijd",
+        "onbepaalde_tijd",
+        "oproep",
+        "stage",
+        "uitzend",
+        "zzp",
+        "unknown",
+        null
+      ],
+      "description": "Contractvorm conform CAO PB"
+    },
+    "contract_start_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "contract_end_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "probation_period_months": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Proeftijd in maanden conform CAO-berekening"
+    },
+    "probation_period_source_rule_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bronregel voor de proeftijd, bijv. CAO-PB-2024-R0315"
+    },
+    "probation_override_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Reden voor handmatige afwijking van de CAO-proeftijdberekening"
+    },
+    "security_role_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "aspirant_beveiliger",
+        "beveiliger",
+        "leidinggevende",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Beveiligingsfunctie-status conform CAO PB"
+    },
+    "industry_seniority_pay_periods": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Brancheancienniteit in loonperioden"
+    },
+    "industry_start_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Startdatum brancheancienniteit"
+    },
     "company_car_license_plate": {
       "type": "string"
     },

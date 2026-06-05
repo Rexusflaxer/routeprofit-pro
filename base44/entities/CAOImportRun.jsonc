@@ -1,0 +1,80 @@
+{
+  "name": "CAOImportRun",
+  "type": "object",
+  "properties": {
+    "started_at": {
+      "type": "string",
+      "description": "Starttijd (ISO datetime)"
+    },
+    "finished_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "trigger_type": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "scheduled",
+        "source_changed"
+      ],
+      "default": "manual"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "running",
+        "completed",
+        "completed_with_review",
+        "failed"
+      ],
+      "default": "running"
+    },
+    "source_document_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Gecontroleerde brondocumenten"
+    },
+    "detected_changes": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "description": "Gedetecteerde wijzigingen"
+    },
+    "created_configuration_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Gecre\u00eberde concept-CAO configuratie"
+    },
+    "created_review_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      }
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "error_message": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "started_at",
+    "status",
+    "trigger_type"
+  ]
+}
