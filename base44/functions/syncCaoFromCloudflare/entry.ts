@@ -3,16 +3,13 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 /**
  * syncCaoFromCloudflare
  * Haalt de owner-approved CAO op uit Cloudflare en synchroniseert naar Base44.
- * Kan direct worden aangeroepen of via lazy-sync vanuit berekenfuncties.
+ * Revisie-gebaseerd: slaat volledige fetch over ALLEEN als cloudflare_revision gelijk is
+ * aan de actieve CAOConfiguration.cloudflare_revision. Geen tijdgebaseerde skip.
  */
 
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
-
-    // Toegestaan voor zowel service-role (scheduled) als ingelogde gebruikers
-    // We doen auth check NIET want dit kan ook intern (service-to-service) worden aangeroepen
-    // maar we valideren altijd de Cloudflare payload zelf.
 
     const body = await req.json().catch(() => ({}));
     const { force = false, trigger_source = 'manual' } = body;
@@ -25,7 +22,7 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'CAO Cloudflare secrets niet geconfigureerd' }, { status: 500 });
     }
 
-    // ── Stap 1: Haal status op uit Cloudflare ──
+    // ── Stap 1: Haal status op uit Cloudflare (lichtgewicht) ──
     let statusData;
     try {
       const statusRes = await fetch(statusUrl, {
@@ -51,7 +48,8 @@ Deno.serve(async (req) => {
 
     const cloudflareRevision = statusData.current_revision;
 
-    // ── Stap 2: Vergelijk met actieve Base44 CAO ──
+    // ── Stap 2: Vergelijk revision met actieve Base44 CAO ──
+    // Skip volledige fetch ALLEEN als revision al overeenkomt — geen tijdgebaseerde skip
     const activeConfigs = await base44.asServiceRole.entities.CAOConfiguration.filter({
       cao_key: 'cao_particuliere_beveiliging',
       is_active: true
@@ -189,7 +187,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Stap 10: Maak/activeer nieuwe CAOConfiguration ──
+    // ── Stap 10: Maak nieuwe CAOConfiguration met VOLLEDIGE payload velden ──
     const candidateCfg = payload.candidate_configuration || {};
     const newConfig = await base44.asServiceRole.entities.CAOConfiguration.create({
       name: candidateCfg.name || `CAO PB - ${payload.revision}`,
@@ -200,18 +198,41 @@ Deno.serve(async (req) => {
       valid_from: candidateCfg.valid_from || null,
       valid_until: candidateCfg.valid_until || null,
       is_active: true,
-      is_payroll_ready: true,
+      is_payroll_ready: candidateCfg.is_payroll_ready !== undefined ? candidateCfg.is_payroll_ready : false,
       status: 'active',
+
+      // Loontabellen
       wage_scales: candidateCfg.wage_scales || {},
       wage_scales_detailed: candidateCfg.wage_scales_detailed || null,
       holidays: candidateCfg.holidays || [],
-      // Surcharges
+
+      // Gestructureerde domein-configuraties — geen whitelist, alles uit payload bewaren
+      pay_periods: candidateCfg.pay_periods || null,
+      surcharges: candidateCfg.surcharges || null,
+      allowances: candidateCfg.allowances || null,
+      leave_rules: candidateCfg.leave_rules || null,
+      sickness_rules: candidateCfg.sickness_rules || null,
+      minus_hours_rules: candidateCfg.minus_hours_rules || null,
+      overtime_rules: candidateCfg.overtime_rules || null,
+      shift_change_rules: candidateCfg.shift_change_rules || null,
+      pension_rules: candidateCfg.pension_rules || null,
+      fund_rules: candidateCfg.fund_rules || null,
+      schiphol_rules: candidateCfg.schiphol_rules || null,
+      cash_value_logistics_rules: candidateCfg.cash_value_logistics_rules || null,
+      contract_change_rules: candidateCfg.contract_change_rules || null,
+      function_classification_rules: candidateCfg.function_classification_rules || null,
+      rule_engine_metadata: candidateCfg.rule_engine_metadata || payload.rule_engine_metadata || null,
+      source_documents_snapshot: sourceDocs.length > 0 ? sourceDocs : null,
+      coverage_summary: candidateCfg.coverage_summary || payload.coverage_summary || null,
+
+      // Losse toeslag-velden (backwards compat + eenvoudig gebruik)
       surcharge_weekend: candidateCfg.surcharge_weekend ?? 35,
       surcharge_night: candidateCfg.surcharge_night ?? 20,
       surcharge_evening: candidateCfg.surcharge_evening ?? 10,
       surcharge_holiday: candidateCfg.surcharge_holiday ?? 50,
       surcharge_new_years_eve_after_16: candidateCfg.surcharge_new_years_eve_after_16 ?? 100,
-      // Premiums/taxes
+
+      // Reserveringen en premies
       vacation_allowance: candidateCfg.vacation_allowance ?? 8,
       year_end_bonus: candidateCfg.year_end_bonus ?? 2.01,
       pension_base_salary_threshold: candidateCfg.pension_base_salary_threshold ?? 16164,
@@ -227,12 +248,15 @@ Deno.serve(async (req) => {
       premium_wia_employer: candidateCfg.premium_wia_employer ?? 0.72,
       premium_wga_employer: candidateCfg.premium_wga_employer ?? 1.5,
       premium_zw_employer: candidateCfg.premium_zw_employer ?? 0,
+
+      // Loonheffing staffels
       tax_rate_bracket_1: candidateCfg.tax_rate_bracket_1 ?? 36.97,
       tax_rate_bracket_2: candidateCfg.tax_rate_bracket_2 ?? 36.97,
       tax_rate_bracket_3: candidateCfg.tax_rate_bracket_3 ?? 49.5,
       tax_bracket_1_limit: candidateCfg.tax_bracket_1_limit ?? 38098,
       tax_bracket_2_limit: candidateCfg.tax_bracket_2_limit ?? 75518,
       labor_tax_credit_max: candidateCfg.labor_tax_credit_max ?? 5672,
+
       // Audit velden
       approval_source: payload.approval?.approval_source || 'cloudflare_relay',
       approved_by_owner_name: payload.approval?.approved_by_owner_name || null,
@@ -276,7 +300,7 @@ Deno.serve(async (req) => {
       created_review_ids: reviewIds,
       source_document_ids: sourceDocIds,
       detected_changes: detectedChanges,
-      summary: `Cloudflare sync voltooid: ${rulesUpserted} regels, ${sourceDocs.length} brondocumenten, ${reviewIds.length} wijzigingen.`
+      summary: `Cloudflare sync voltooid: ${rulesUpserted} regels, ${sourceDocs.length} brondocumenten, ${reviewIds.length} wijzigingen. Revision: ${payload.revision}`
     });
 
     return Response.json({
@@ -288,7 +312,9 @@ Deno.serve(async (req) => {
       rules_upserted: rulesUpserted,
       source_docs_upserted: sourceDocIds.length,
       change_reviews_created: reviewIds.length,
-      import_run_id: importRun.id
+      import_run_id: importRun.id,
+      is_payroll_ready: newConfig.is_payroll_ready,
+      coverage_summary: newConfig.coverage_summary || null
     });
 
   } catch (error) {

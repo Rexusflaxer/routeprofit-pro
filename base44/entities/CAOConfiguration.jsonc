@@ -11,8 +11,7 @@
       "type": [
         "string",
         "null"
-      ],
-      "description": "Unieke sleutel, bijv. cao_particuliere_beveiliging"
+      ]
     },
     "display_name": {
       "type": [
@@ -92,6 +91,145 @@
         "type": "object",
         "additionalProperties": true
       }
+    },
+    "pay_periods": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Loonperiodes per jaar (bijv. 2026 met 14e periode), uit Cloudflare payload",
+      "additionalProperties": true
+    },
+    "surcharges": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Volledige toeslagenstructuur uit payload (naast losse surcharge_* velden)",
+      "additionalProperties": true
+    },
+    "allowances": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Vergoedingen config: maaltijd, pauze, consignatie, stomerij, hond, verblijf, jubileum",
+      "additionalProperties": true
+    },
+    "leave_rules": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Verlofregels: wettelijk, bovenwettelijk, bijzonder verlof, ORT over verlof",
+      "additionalProperties": true
+    },
+    "sickness_rules": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Ziektebetaling regels per periode en brancheancienniteit",
+      "additionalProperties": true
+    },
+    "minus_hours_rules": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Minurenregels voor min/max contracten",
+      "additionalProperties": true
+    },
+    "overtime_rules": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Overwerk en meeruren definitie, afbouwregeling, structureel overwerk",
+      "additionalProperties": true
+    },
+    "shift_change_rules": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Verschuivingstoeslagregels: 5/10/20%, max 8/jaar, blokkadedagen, ingetrokken diensten",
+      "additionalProperties": true
+    },
+    "pension_rules": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Pensioenregels en ouderenbeleid",
+      "additionalProperties": true
+    },
+    "fund_rules": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Fonds-CAO regels: SFPB, sociale commissie, opleidingsfonds",
+      "additionalProperties": true
+    },
+    "schiphol_rules": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Schiphol-specifieke regels en toeslagen",
+      "additionalProperties": true
+    },
+    "cash_value_logistics_rules": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Cash/waardetransport specifieke regels en vergoedingen",
+      "additionalProperties": true
+    },
+    "contract_change_rules": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Contractwisseling: 15.000 uur grens, vakantieoverdracht, mutatielijst",
+      "additionalProperties": true
+    },
+    "function_classification_rules": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Functieclassificatie, diplomastructuur, schaalindeling",
+      "additionalProperties": true
+    },
+    "rule_engine_metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Coverage summary, versie-info, implementatie-status per domein",
+      "additionalProperties": true
+    },
+    "source_documents_snapshot": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "description": "Snapshot van bronbestanden die gebruikt zijn voor deze CAO-versie",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
+    },
+    "coverage_summary": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Per-domein coverage statistieken (IMPLEMENTED/PARTIAL/MISSING/REFERENCE tellers)",
+      "additionalProperties": true
     },
     "surcharge_weekend": {
       "type": "number",
@@ -201,64 +339,56 @@
       "type": [
         "string",
         "null"
-      ],
-      "description": "Herkomst goedkeuring, bijv. codex_chat, cloudflare_relay"
+      ]
     },
     "approved_by_owner_name": {
       "type": [
         "string",
         "null"
-      ],
-      "description": "Naam van de eigenaar die heeft goedgekeurd"
+      ]
     },
     "approved_at": {
       "type": [
         "string",
         "null"
-      ],
-      "description": "Tijdstip van goedkeuring (ISO)"
+      ]
     },
     "codex_thread_id": {
       "type": [
         "string",
         "null"
-      ],
-      "description": "Codex chat thread ID van de goedkeuring"
+      ]
     },
     "codex_approval_message": {
       "type": [
         "string",
         "null"
-      ],
-      "description": "Goedkeuringstekst uit Codex"
+      ]
     },
     "cloudflare_request_id": {
       "type": [
         "string",
         "null"
-      ],
-      "description": "CF-Ray of request ID van de Cloudflare relay"
+      ]
     },
     "cloudflare_revision": {
       "type": [
         "string",
         "null"
       ],
-      "description": "SHA256 revision hash van de Cloudflare approved payload, gebruikt voor sync-vergelijking"
+      "description": "SHA256 revision hash van Cloudflare approved payload, gebruikt voor revisievergelijking"
     },
     "idempotency_key": {
       "type": [
         "string",
         "null"
-      ],
-      "description": "Idempotency sleutel voor dubbele import-preventie"
+      ]
     },
     "automation_version": {
       "type": [
         "string",
         "null"
-      ],
-      "description": "Versie van Codex CAO automation, bijv. codex-cao-automation@1.0.0"
+      ]
     }
   },
   "required": [

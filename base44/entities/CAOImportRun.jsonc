@@ -20,9 +20,10 @@
         "source_changed",
         "codex_automation",
         "cloudflare_relay",
+        "cloudflare_pull",
         "owner_migration"
       ],
-      "default": "cloudflare_relay"
+      "default": "cloudflare_pull"
     },
     "status": {
       "type": "string",

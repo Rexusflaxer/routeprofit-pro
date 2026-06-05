@@ -62,7 +62,8 @@ const AuthenticatedApp = () => {
       <Route path="/ReportTemplates" element={<LayoutWrapper currentPageName="ReportTemplates"><ReportTemplates /></LayoutWrapper>} />
       <Route path="/Companies" element={<LayoutWrapper currentPageName="Companies"><Companies /></LayoutWrapper>} />
       <Route path="/EmployeePortal" element={<LayoutWrapper currentPageName="EmployeePortal"><EmployeePortal /></LayoutWrapper>} />
-      {/* /CAOBeheer removed — CAO governance is owner-only via Codex/Cloudflare */}
+      {/* CAOBeheer: geen route — CAO governance is owner-only via Codex/Cloudflare.
+           Klanten kunnen CAO-regels/configuraties niet zien, goedkeuren of aanpassen. */}
       {Object.entries(Pages).map(([path, Page]) => (
         <Route
           key={path}

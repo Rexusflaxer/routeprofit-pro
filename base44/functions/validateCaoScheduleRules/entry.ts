@@ -1,17 +1,8 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
-// ── Lazy CAO-sync helper ──
+// ── Revisie-gebaseerde lazy CAO-sync helper ──
 async function lazySyncCao(base44, forceCaoSync = false) {
   try {
-    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
-    if (!forceCaoSync) {
-      const recentRuns = await base44.asServiceRole.entities.CAOImportRun.filter({
-        trigger_type: 'cloudflare_pull',
-        status: 'completed'
-      });
-      const hasRecent = recentRuns.some(r => r.finished_at && r.finished_at > sixHoursAgo);
-      if (hasRecent) return { skipped: true };
-    }
     const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
       force: forceCaoSync,
       trigger_source: 'lazy_schedule_validation'
