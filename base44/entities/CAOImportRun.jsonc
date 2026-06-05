@@ -17,9 +17,12 @@
       "enum": [
         "manual",
         "scheduled",
-        "source_changed"
+        "source_changed",
+        "codex_automation",
+        "cloudflare_relay",
+        "owner_migration"
       ],
-      "default": "manual"
+      "default": "cloudflare_relay"
     },
     "status": {
       "type": "string",
@@ -31,27 +34,56 @@
       ],
       "default": "running"
     },
+    "approval_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "proposed",
+        "owner_approved",
+        "owner_rejected",
+        null
+      ],
+      "description": "Goedkeuringsstatus van de payload"
+    },
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Idempotency sleutel van de ingest payload"
+    },
+    "codex_thread_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cloudflare_request_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "source_document_ids": {
       "type": "array",
       "items": {
         "type": "string"
-      },
-      "description": "Gecontroleerde brondocumenten"
+      }
     },
     "detected_changes": {
       "type": "array",
       "items": {
         "type": "object",
         "additionalProperties": true
-      },
-      "description": "Gedetecteerde wijzigingen"
+      }
     },
     "created_configuration_id": {
       "type": [
         "string",
         "null"
-      ],
-      "description": "Gecre\u00eberde concept-CAO configuratie"
+      ]
     },
     "created_review_ids": {
       "type": "array",

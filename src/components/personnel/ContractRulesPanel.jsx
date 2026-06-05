@@ -155,39 +155,47 @@ export default function ContractRulesPanel({ form, onChange, personnelId }) {
 
         <div className="grid grid-cols-2 gap-3">
           <div className="space-y-1">
-            <Label className="text-xs">Proeftijd (maanden) — handmatig</Label>
+            <Label className="text-xs">Proeftijd (maanden) — CAO berekend</Label>
             <Input
               type="number"
               min="0"
               max="3"
               value={form.probation_period_months ?? ""}
-              onChange={e => onChange("probation_period_months", e.target.value === "" ? null : Number(e.target.value))}
-              placeholder="Berekend o.b.v. CAO"
+              readOnly
+              className="bg-muted cursor-not-allowed opacity-70"
+              placeholder="Klik 'Bereken CAO-proeftijd'"
             />
+            <p className="text-xs text-muted-foreground">Alleen instelbaar via CAO-berekening</p>
           </div>
           <div className="space-y-1">
             <Label className="text-xs">Bronregel</Label>
             <Input
               value={form.probation_period_source_rule_id || ""}
-              onChange={e => onChange("probation_period_source_rule_id", e.target.value)}
               placeholder="CAO-PB-2024-R0315"
-              className="font-mono text-xs"
+              className="font-mono text-xs bg-muted cursor-not-allowed opacity-70"
               readOnly
             />
           </div>
         </div>
 
-        {probationOverridden && (
-          <div className="space-y-1">
-            <Label className="text-xs text-amber-600">Reden voor afwijking van CAO-default</Label>
-            <Input
-              value={form.probation_override_reason || ""}
-              onChange={e => onChange("probation_override_reason", e.target.value)}
-              placeholder="Verplicht bij afwijking van CAO-berekening"
-              className="border-amber-300"
-            />
-          </div>
-        )}
+        {/* Compliance override — only show if user explicitly requests deviation */}
+        <div className="space-y-1">
+          <Label className="text-xs text-amber-600 flex items-center gap-1">
+            <AlertTriangle className="w-3 h-3" />
+            Afwijking van CAO (compliance uitzondering)
+          </Label>
+          <Input
+            value={form.probation_override_reason || ""}
+            onChange={e => onChange("probation_override_reason", e.target.value)}
+            placeholder="Laat leeg tenzij er een gedocumenteerde reden voor afwijking is"
+            className={form.probation_override_reason ? "border-amber-400 bg-amber-50 dark:bg-amber-950/20" : ""}
+          />
+          {form.probation_override_reason && (
+            <p className="text-xs text-amber-600">
+              Let op: afwijking van CAO-default wordt opgeslagen als compliance-uitzondering.
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Brancheancienniteit */}

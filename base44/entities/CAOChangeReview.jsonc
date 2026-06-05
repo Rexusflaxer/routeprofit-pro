@@ -72,20 +72,46 @@
     "status": {
       "type": "string",
       "enum": [
-        "pending",
-        "approved",
-        "rejected",
+        "proposed",
+        "owner_approved",
+        "owner_rejected",
+        "applied",
         "superseded"
       ],
-      "default": "pending"
+      "default": "proposed"
     },
-    "reviewed_by_user_id": {
+    "approval_source": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Herkomst goedkeuring"
+    },
+    "approved_by_owner_name": {
       "type": [
         "string",
         "null"
       ]
     },
-    "reviewed_at": {
+    "approved_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "codex_thread_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cloudflare_request_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "idempotency_key": {
       "type": [
         "string",
         "null"
