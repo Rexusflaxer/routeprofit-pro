@@ -3,18 +3,16 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 /**
  * syncCaoFromCloudflare
  * Haalt de owner-approved CAO op uit Cloudflare en synchroniseert naar Base44.
- * Revisie-gebaseerd: slaat volledige fetch over ALLEEN als cloudflare_revision gelijk is
- * aan de actieve CAOConfiguration.cloudflare_revision. Geen tijdgebaseerde skip.
+ * Ondersteunt batching van CAORule records om rate limits te voorkomen.
+ * Hervatbaar: een half-afgemaakte import met dezelfde idempotency_key wordt voortgezet.
  */
 
 Deno.serve(async (req) => {
-  try {
-    const base44 = createClientFromRequest(req);
+  let importRun = null;
+  const base44 = createClientFromRequest(req);
 
-    // ── Auth: vereis altijd BASE44_CAO_SYNC_TRIGGER_SECRET ──
-    // Lazy-sync vanuit andere functies stuurt sync_trigger_secret mee in de body.
-    // Directe calls (extern/owner) sturen Authorization: Bearer <secret>.
-    // Anonieme en klant-calls zonder secret krijgen altijd 403.
+  try {
+    // ── Auth ──
     const body = await req.json().catch(() => ({}));
     const syncSecret = Deno.env.get('BASE44_CAO_SYNC_TRIGGER_SECRET');
 
@@ -24,7 +22,6 @@ Deno.serve(async (req) => {
 
     const authHeader = req.headers.get('Authorization') || '';
     const bodySecret = body.sync_trigger_secret || '';
-    // Verwijder secret uit body zodat het niet doorgestuurd of gelogd wordt
     delete body.sync_trigger_secret;
 
     if (authHeader !== `Bearer ${syncSecret}` && bodySecret !== syncSecret) {
@@ -33,7 +30,11 @@ Deno.serve(async (req) => {
 
     const { force = false, trigger_source = 'manual' } = body;
 
-    console.log(`[syncCaoFromCloudflare] trigger_source=${trigger_source} force=${force}`);
+    // Batch parameters
+    const ruleBatchOffset = Math.max(0, Number(body.rule_batch_offset ?? 0));
+    const ruleBatchSize = Math.min(Math.max(1, Number(body.rule_batch_size ?? 75)), 150);
+
+    console.log(`[syncCaoFromCloudflare] trigger_source=${trigger_source} force=${force} offset=${ruleBatchOffset} batchSize=${ruleBatchSize}`);
 
     const apiKey = Deno.env.get('BASE44_CAO_API_KEY');
     const statusUrl = Deno.env.get('CAO_CLOUDFLARE_STATUS_URL');
@@ -43,7 +44,7 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'CAO Cloudflare secrets niet geconfigureerd' }, { status: 500 });
     }
 
-    // ── Stap 1: Haal status op uit Cloudflare (lichtgewicht) ──
+    // ── Stap 1: Haal status op (lichtgewicht) ──
     let statusData;
     try {
       const statusRes = await fetch(statusUrl, {
@@ -53,7 +54,6 @@ Deno.serve(async (req) => {
       if (statusRes.status === 404) {
         return Response.json({ success: true, changed: false, reason: 'no_cloudflare_current' });
       }
-
       if (!statusRes.ok) {
         return Response.json({ success: true, changed: false, reason: 'cloudflare_unavailable', http_status: statusRes.status });
       }
@@ -69,8 +69,7 @@ Deno.serve(async (req) => {
 
     const cloudflareRevision = statusData.current_revision;
 
-    // ── Stap 2: Vergelijk revision met actieve Base44 CAO ──
-    // Skip volledige fetch ALLEEN als revision al overeenkomt — geen tijdgebaseerde skip
+    // ── Stap 2: Revision check over ALLE actieve configs ──
     const activeConfigs = await base44.asServiceRole.entities.CAOConfiguration.filter({
       cao_key: 'cao_particuliere_beveiliging',
       is_active: true
@@ -88,7 +87,7 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Stap 3: Haal volledige approved payload op ──
+    // ── Stap 3: Haal volledige payload op ──
     let payload;
     try {
       const currentRes = await fetch(currentUrl, {
@@ -118,40 +117,50 @@ Deno.serve(async (req) => {
       return Response.json({ success: false, error: 'Payload mist revision of idempotency_key.' }, { status: 422 });
     }
 
-    // ── Stap 5: Idempotency check ──
+    // ── Stap 5: Idempotency check met herstelpad ──
     const existingRuns = await base44.asServiceRole.entities.CAOImportRun.filter({
       idempotency_key: payload.idempotency_key
     });
-    if (existingRuns.length > 0) {
-      const existingSameConfig = await base44.asServiceRole.entities.CAOConfiguration.filter({
-        cao_key: 'cao_particuliere_beveiliging',
-        idempotency_key: payload.idempotency_key
-      });
+    const existingRun = existingRuns[0] || null;
+
+    const existingSameConfig = await base44.asServiceRole.entities.CAOConfiguration.filter({
+      cao_key: 'cao_particuliere_beveiliging',
+      idempotency_key: payload.idempotency_key
+    });
+
+    // Completed + config aanwezig = idempotent, geen duplicaat
+    if (!force && existingRun?.status === 'completed' && existingSameConfig.length > 0) {
       return Response.json({
         success: true,
         changed: false,
         reason: 'duplicate_idempotency_key',
         idempotency_key: payload.idempotency_key,
         revision: payload.revision,
-        cao_configuration_id: existingSameConfig.length > 0 ? existingSameConfig[0].id : null
+        cao_configuration_id: existingSameConfig[0].id
       });
     }
 
-    // ── Stap 6: Start import run ──
-    const importRun = await base44.asServiceRole.entities.CAOImportRun.create({
-      started_at: new Date().toISOString(),
-      trigger_type: 'cloudflare_pull',
-      status: 'running',
-      approval_status: 'owner_approved',
-      idempotency_key: payload.idempotency_key,
-      codex_thread_id: payload.approval?.codex_thread_id || null,
-      source_document_ids: [],
-      detected_changes: [],
-      created_review_ids: [],
-      summary: `Cloudflare sync - revision ${payload.revision}`
-    });
+    // Hergebruik bestaande run (running/failed/geen config) of maak nieuw aan
+    importRun = existingRun;
+    if (!importRun) {
+      importRun = await base44.asServiceRole.entities.CAOImportRun.create({
+        started_at: new Date().toISOString(),
+        trigger_type: 'cloudflare_pull',
+        status: 'running',
+        approval_status: 'owner_approved',
+        idempotency_key: payload.idempotency_key,
+        codex_thread_id: payload.approval?.codex_thread_id || null,
+        source_document_ids: [],
+        detected_changes: [],
+        created_review_ids: [],
+        summary: `Cloudflare sync gestart - revision ${payload.revision}`
+      });
+    } else {
+      // Reset naar running bij herstel
+      await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, { status: 'running' });
+    }
 
-    // ── Stap 7: Upsert CAOSourceDocuments ──
+    // ── Stap 6: Upsert CAOSourceDocuments (alleen bij eerste batch of herstel) ──
     const sourceDocIds = [];
     const sourceDocs = payload.source_documents || [];
     for (const doc of sourceDocs) {
@@ -179,31 +188,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    // ── Stap 8: Upsert CAORules ──
-    const candidateRules = payload.candidate_rules || [];
-    let rulesUpserted = 0;
-    for (const rule of candidateRules) {
-      if (!rule.rule_id) continue;
-      const existing = await base44.asServiceRole.entities.CAORule.filter({ rule_id: rule.rule_id });
-      if (existing.length > 0) {
-        await base44.asServiceRole.entities.CAORule.update(existing[0].id, {
-          ...rule,
-          status: 'active',
-          last_verified_at: new Date().toISOString()
-        });
-      } else {
-        await base44.asServiceRole.entities.CAORule.create({
-          ...rule,
-          status: 'active',
-          last_verified_at: new Date().toISOString()
-        });
-      }
-      rulesUpserted++;
-    }
-
-    // ── Stap 9: Archiveer alleen exacte duplicaten (zelfde revision of idempotency_key) ──
-    // Configs met andere valid_from/valid_until periodes blijven actief zodat historische
-    // berekeningen de juiste config blijven vinden.
+    // ── Stap 7: Archiveer alleen exacte duplicaten (zelfde revision of idempotency_key) ──
     const duplicateConfigs = activeConfigs.filter(cfg =>
       cfg.cloudflare_revision === payload.revision ||
       cfg.idempotency_key === payload.idempotency_key
@@ -215,12 +200,10 @@ Deno.serve(async (req) => {
       });
     }
 
-    // ── Stap 9b: Normaliseer pay_periods naar { year: [...] } object-formaat ──
-    // Accepteert zowel array als object; converteert altijd naar { "2025": [...], "2026": [...] }
+    // ── Stap 8: Normaliseer pay_periods ──
     function normalizePayPeriods(raw) {
       if (!raw) return null;
       if (Array.isArray(raw)) {
-        // Array van { year, period_number, start_date, end_date, is_extra_period }
         const byYear = {};
         for (const p of raw) {
           const y = String(p.year || '');
@@ -230,16 +213,11 @@ Deno.serve(async (req) => {
         }
         return Object.keys(byYear).length > 0 ? byYear : null;
       }
-      if (typeof raw === 'object') {
-        // Al in { year: [...] } formaat — bewaar as-is
-        return raw;
-      }
+      if (typeof raw === 'object') return raw;
       return null;
     }
 
-    // ── Stap 10: Upsert CAOConfiguration — update bestaande of maak nieuwe ──
-    // Als er al een config bestaat met dezelfde idempotency_key (bijv. na gedeeltelijke sync),
-    // update die config in plaats van een duplicaat aan te maken.
+    // ── Stap 9: Upsert CAOConfiguration ──
     const candidateCfg = payload.candidate_configuration || {};
     const configData = {
       name: candidateCfg.name || `CAO PB - ${payload.revision}`,
@@ -252,13 +230,9 @@ Deno.serve(async (req) => {
       is_active: true,
       is_payroll_ready: candidateCfg.is_payroll_ready !== undefined ? candidateCfg.is_payroll_ready : false,
       status: 'active',
-
-      // Loontabellen
       wage_scales: candidateCfg.wage_scales || {},
       wage_scales_detailed: candidateCfg.wage_scales_detailed || null,
       holidays: candidateCfg.holidays || [],
-
-      // Gestructureerde domein-configuraties — geen whitelist, alles uit payload bewaren
       pay_periods: normalizePayPeriods(candidateCfg.pay_periods),
       surcharges: candidateCfg.surcharges || null,
       allowances: candidateCfg.allowances || null,
@@ -276,15 +250,11 @@ Deno.serve(async (req) => {
       rule_engine_metadata: candidateCfg.rule_engine_metadata || payload.rule_engine_metadata || null,
       source_documents_snapshot: sourceDocs.length > 0 ? sourceDocs : null,
       coverage_summary: candidateCfg.coverage_summary || payload.coverage_summary || null,
-
-      // Losse toeslag-velden (backwards compat + eenvoudig gebruik)
       surcharge_weekend: candidateCfg.surcharge_weekend ?? 35,
       surcharge_night: candidateCfg.surcharge_night ?? 20,
       surcharge_evening: candidateCfg.surcharge_evening ?? 10,
       surcharge_holiday: candidateCfg.surcharge_holiday ?? 50,
       surcharge_new_years_eve_after_16: candidateCfg.surcharge_new_years_eve_after_16 ?? 100,
-
-      // Reserveringen en premies
       vacation_allowance: candidateCfg.vacation_allowance ?? 8,
       year_end_bonus: candidateCfg.year_end_bonus ?? 2.01,
       pension_base_salary_threshold: candidateCfg.pension_base_salary_threshold ?? 16164,
@@ -300,16 +270,12 @@ Deno.serve(async (req) => {
       premium_wia_employer: candidateCfg.premium_wia_employer ?? 0.72,
       premium_wga_employer: candidateCfg.premium_wga_employer ?? 1.5,
       premium_zw_employer: candidateCfg.premium_zw_employer ?? 0,
-
-      // Loonheffing staffels
       tax_rate_bracket_1: candidateCfg.tax_rate_bracket_1 ?? 36.97,
       tax_rate_bracket_2: candidateCfg.tax_rate_bracket_2 ?? 36.97,
       tax_rate_bracket_3: candidateCfg.tax_rate_bracket_3 ?? 49.5,
       tax_bracket_1_limit: candidateCfg.tax_bracket_1_limit ?? 38098,
       tax_bracket_2_limit: candidateCfg.tax_bracket_2_limit ?? 75518,
       labor_tax_credit_max: candidateCfg.labor_tax_credit_max ?? 5672,
-
-      // Audit velden
       approval_source: payload.approval?.approval_source || 'cloudflare_relay',
       approved_by_owner_name: payload.approval?.approved_by_owner_name || null,
       approved_at: payload.approval?.approved_at || null,
@@ -321,21 +287,65 @@ Deno.serve(async (req) => {
       notes: `Automatisch gesynchroniseerd via Cloudflare (${trigger_source}) op ${new Date().toISOString()}`
     };
 
-    // Upsert: update bestaande config met zelfde idempotency_key, anders nieuw aanmaken
-    const existingSamePayload = await base44.asServiceRole.entities.CAOConfiguration.filter({
-      cao_key: 'cao_particuliere_beveiliging',
-      idempotency_key: payload.idempotency_key
-    });
-
     let newConfig;
-    if (existingSamePayload.length > 0) {
-      await base44.asServiceRole.entities.CAOConfiguration.update(existingSamePayload[0].id, configData);
-      newConfig = { ...existingSamePayload[0], ...configData };
+    if (existingSameConfig.length > 0) {
+      await base44.asServiceRole.entities.CAOConfiguration.update(existingSameConfig[0].id, configData);
+      newConfig = { ...existingSameConfig[0], ...configData, id: existingSameConfig[0].id };
     } else {
       newConfig = await base44.asServiceRole.entities.CAOConfiguration.create(configData);
     }
 
-    // ── Stap 11: Maak CAOChangeReview records ──
+    // ── Stap 10: Verwerk één batch CAORules ──
+    const candidateRules = payload.candidate_rules || [];
+    const batchRules = candidateRules.slice(ruleBatchOffset, ruleBatchOffset + ruleBatchSize);
+    let rulesUpserted = 0;
+
+    for (const rule of batchRules) {
+      if (!rule.rule_id) continue;
+      const existing = await base44.asServiceRole.entities.CAORule.filter({ rule_id: rule.rule_id });
+      const ruleData = {
+        ...rule,
+        cao_configuration_id: newConfig.id,
+        status: 'active',
+        last_verified_at: new Date().toISOString()
+      };
+      if (existing.length > 0) {
+        await base44.asServiceRole.entities.CAORule.update(existing[0].id, ruleData);
+      } else {
+        await base44.asServiceRole.entities.CAORule.create(ruleData);
+      }
+      rulesUpserted++;
+    }
+
+    const nextRuleBatchOffset = ruleBatchOffset + batchRules.length;
+    const rulesComplete = nextRuleBatchOffset >= candidateRules.length;
+
+    // ── Stap 11: Gedeeltelijke batch — nog niet klaar ──
+    if (!rulesComplete) {
+      await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, {
+        status: 'running',
+        summary: `Cloudflare sync batch: regels ${ruleBatchOffset}-${nextRuleBatchOffset - 1} van ${candidateRules.length} verwerkt. Volgende offset: ${nextRuleBatchOffset}`
+      });
+
+      return Response.json({
+        success: true,
+        changed: true,
+        partial: true,
+        reason: 'rule_batch_processed',
+        revision: payload.revision,
+        idempotency_key: payload.idempotency_key,
+        cao_configuration_id: newConfig.id,
+        import_run_id: importRun.id,
+        rules_upserted: rulesUpserted,
+        rules_total: candidateRules.length,
+        rule_batch_offset: ruleBatchOffset,
+        next_rule_batch_offset: nextRuleBatchOffset,
+        rule_batch_size: ruleBatchSize,
+        rules_complete: false
+      });
+    }
+
+    // ── Stap 12: Alle regels klaar — maak CAOChangeReview records ──
     const reviewIds = [];
     const detectedChanges = payload.detected_changes || [];
     for (const change of detectedChanges) {
@@ -358,7 +368,7 @@ Deno.serve(async (req) => {
       reviewIds.push(review.id);
     }
 
-    // ── Stap 12: Finaliseer import run ──
+    // ── Stap 13: Finaliseer import run ──
     await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, {
       finished_at: new Date().toISOString(),
       status: 'completed',
@@ -366,24 +376,40 @@ Deno.serve(async (req) => {
       created_review_ids: reviewIds,
       source_document_ids: sourceDocIds,
       detected_changes: detectedChanges,
-      summary: `Cloudflare sync voltooid: ${rulesUpserted} regels, ${sourceDocs.length} brondocumenten, ${reviewIds.length} wijzigingen. Revision: ${payload.revision}`
+      summary: `Cloudflare sync voltooid: ${candidateRules.length} regels, ${sourceDocs.length} brondocumenten, ${reviewIds.length} wijzigingen. Revision: ${payload.revision}`
     });
 
     return Response.json({
       success: true,
       changed: true,
+      partial: false,
       revision: payload.revision,
       idempotency_key: payload.idempotency_key,
       cao_configuration_id: newConfig.id,
+      import_run_id: importRun.id,
       rules_upserted: rulesUpserted,
+      rules_total: candidateRules.length,
+      rule_batch_offset: ruleBatchOffset,
+      next_rule_batch_offset: nextRuleBatchOffset,
+      rule_batch_size: ruleBatchSize,
+      rules_complete: true,
       source_docs_upserted: sourceDocIds.length,
       change_reviews_created: reviewIds.length,
-      import_run_id: importRun.id,
       is_payroll_ready: newConfig.is_payroll_ready,
       coverage_summary: newConfig.coverage_summary || null
     });
 
   } catch (error) {
+    // Markeer import run als failed bij fout
+    if (importRun?.id) {
+      try {
+        await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, {
+          status: 'failed',
+          finished_at: new Date().toISOString(),
+          error_message: error.message
+        });
+      } catch { /* negeer secundaire fout */ }
+    }
     return Response.json({ error: error.message }, { status: 500 });
   }
 });
