@@ -5,7 +5,8 @@ async function lazySyncCao(base44, forceCaoSync = false) {
   try {
     const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
       force: forceCaoSync,
-      trigger_source: 'lazy_leave_sickness'
+      trigger_source: 'lazy_leave_sickness',
+      sync_trigger_secret: Deno.env.get('BASE44_CAO_SYNC_TRIGGER_SECRET')
     });
     return res?.data || {};
   } catch {

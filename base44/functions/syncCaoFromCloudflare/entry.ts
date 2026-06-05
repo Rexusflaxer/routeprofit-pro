@@ -7,36 +7,30 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
  * aan de actieve CAOConfiguration.cloudflare_revision. Geen tijdgebaseerde skip.
  */
 
-// ── Auth helper: accepteer alleen interne service-role invocaties of secret-header ──
-// Lazy-sync vanuit andere Base44 functies werkt via asServiceRole.functions.invoke,
-// wat geen Authorization-header meestuurt. Die calls zijn herkenbaar doordat
-// BASE44_INTERNAL_CALL header aanwezig is of de call via de SDK service-rol gaat.
-// Directe klantcalls (met user JWT) worden geblokkeerd.
-function isAuthorizedCall(req) {
-  // 1. Optioneel: aparte sync-trigger secret voor externe/owner calls
-  const syncSecret = Deno.env.get('BASE44_CAO_SYNC_TRIGGER_SECRET');
-  const authHeader = req.headers.get('Authorization') || '';
-  if (syncSecret && authHeader === `Bearer ${syncSecret}`) return true;
-
-  // 2. Interne Base44 service-role invocaties (geen user JWT in header)
-  // SDK invoke via asServiceRole stuurt geen 'x-user-id' header mee.
-  const userId = req.headers.get('x-user-id') || req.headers.get('x-base44-user-id') || '';
-  if (!userId) return true; // service-role call — geen user context
-
-  // 3. Geblokkeerd: directe klantcall met user JWT
-  return false;
-}
-
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
 
-    // Bescherm tegen directe klant-aanroepen
-    if (!isAuthorizedCall(req)) {
-      return Response.json({ error: 'Forbidden — syncCaoFromCloudflare kan niet direct door app-gebruikers worden aangeroepen.' }, { status: 403 });
+    // ── Auth: vereis altijd BASE44_CAO_SYNC_TRIGGER_SECRET ──
+    // Lazy-sync vanuit andere functies stuurt sync_trigger_secret mee in de body.
+    // Directe calls (extern/owner) sturen Authorization: Bearer <secret>.
+    // Anonieme en klant-calls zonder secret krijgen altijd 403.
+    const body = await req.json().catch(() => ({}));
+    const syncSecret = Deno.env.get('BASE44_CAO_SYNC_TRIGGER_SECRET');
+
+    if (!syncSecret) {
+      return Response.json({ error: 'BASE44_CAO_SYNC_TRIGGER_SECRET niet geconfigureerd op server.' }, { status: 500 });
     }
 
-    const body = await req.json().catch(() => ({}));
+    const authHeader = req.headers.get('Authorization') || '';
+    const bodySecret = body.sync_trigger_secret || '';
+    // Verwijder secret uit body zodat het niet doorgestuurd of gelogd wordt
+    delete body.sync_trigger_secret;
+
+    if (authHeader !== `Bearer ${syncSecret}` && bodySecret !== syncSecret) {
+      return Response.json({ error: 'Forbidden' }, { status: 403 });
+    }
+
     const { force = false, trigger_source = 'manual' } = body;
 
     console.log(`[syncCaoFromCloudflare] trigger_source=${trigger_source} force=${force}`);

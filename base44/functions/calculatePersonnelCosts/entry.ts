@@ -6,7 +6,8 @@ async function lazySyncCao(base44, forceCaoSync = false) {
   try {
     const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
       force: forceCaoSync,
-      trigger_source: 'lazy_payroll_calculation'
+      trigger_source: 'lazy_payroll_calculation',
+      sync_trigger_secret: Deno.env.get('BASE44_CAO_SYNC_TRIGGER_SECRET')
     });
     return res?.data || {};
   } catch {
@@ -115,11 +116,28 @@ Deno.serve(async (req) => {
 
     const { personnel_id, work_schedule, force_cao_sync } = await req.json();
 
-    // Lazy CAO-sync vanuit Cloudflare (max 1x per 6 uur)
+    // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
-    
+
+    const calculationWarnings = [];
+    if (syncResult?.cloudflare_unavailable) {
+      calculationWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
+    }
+    if (syncResult?.reason === 'no_cloudflare_current') {
+      calculationWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
+    }
+    if (syncResult?.reason === 'cloudflare_unavailable' || syncResult?.reason === 'cloudflare_current_unavailable') {
+      calculationWarnings.push('Cloudflare onbereikbaar; actieve Base44 CAO gebruikt.');
+    }
+
+    const caoSyncStatus = {
+      changed: syncResult?.changed ?? false,
+      reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
+      revision: syncResult?.revision || null
+    };
+
     // work_schedule format: [{ date: "2025-01-15", start_time: "08:00", end_time: "17:00" }, ...]
-    
+
     if (!personnel_id || !work_schedule || !Array.isArray(work_schedule)) {
       return Response.json({ error: 'personnel_id en work_schedule zijn verplicht' }, { status: 400 });
     }
@@ -148,7 +166,8 @@ Deno.serve(async (req) => {
     if (!caoConfig) {
       return Response.json({
         error: `Geen actieve CAO-configuratie gevonden voor datum ${firstShiftDate}. Activeer eerst een CAO-configuratie.`,
-        calculation_warnings: [`Geen actieve CAO voor ${firstShiftDate}`]
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [...calculationWarnings, `Geen actieve CAO voor ${firstShiftDate}`]
       }, { status: 400 });
     }
 
@@ -221,11 +240,6 @@ Deno.serve(async (req) => {
       is_call_worker: isCallWorker
     };
 
-    const calculationWarnings = [];
-    if (syncResult?.cloudflare_unavailable) {
-      calculationWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
-    }
-
     // Bepaal basis uurloon
     let baseHourlyRate = 0;
     if (personnel.employee_type === 'loondienst') {
@@ -234,7 +248,8 @@ Deno.serve(async (req) => {
         if (rate === null) {
           return Response.json({
             error: `Geen uurloon gevonden voor schaal ${personnel.cao_scale}, periodiek ${personnel.cao_period} in CAO-versie "${caoConfig.version_label || caoConfig.name}". Controleer de loontabel.`,
-            calculation_warnings: [`Ontbrekende schaal/periodiek combinatie: ${personnel.cao_scale}/${personnel.cao_period}`]
+            cao_sync_status: caoSyncStatus,
+            calculation_warnings: [...calculationWarnings, `Ontbrekende schaal/periodiek combinatie: ${personnel.cao_scale}/${personnel.cao_period}`]
           }, { status: 400 });
         }
         baseHourlyRate = rate;
@@ -523,6 +538,7 @@ Deno.serve(async (req) => {
       cao_version_label: caoConfig.version_label || caoConfig.name,
       cao_valid_from: caoConfig.valid_from,
       pay_period_year: refDate.getFullYear(),
+      cao_sync_status: caoSyncStatus,
       calculation_warnings: calculationWarnings,
       total_hours: Math.round(totalHours * 100) / 100,
       hours_by_type: hoursByType,
