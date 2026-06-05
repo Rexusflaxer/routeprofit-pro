@@ -118,8 +118,18 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const { action, km_one_way, km_driven, hours_worked, start_time, shifts, force_cao_sync } = body;
 
-    // Lazy CAO-sync
-    await lazySyncCao(base44, !!force_cao_sync);
+    // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
+    const syncResult = await lazySyncCao(base44, !!force_cao_sync);
+    const syncWarnings = [];
+    if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'cloudflare_unavailable' || syncResult?.reason === 'cloudflare_current_unavailable') syncWarnings.push('Cloudflare onbereikbaar; actieve Base44 CAO gebruikt.');
+
+    const caoSyncStatus = {
+      changed: syncResult?.changed ?? false,
+      reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
+      revision: syncResult?.revision || null
+    };
 
     const result = {};
 
@@ -151,7 +161,7 @@ Deno.serve(async (req) => {
       { rule_id: 'CAO-PB-2024-R0905', domain: 'jubileum', message: 'Jubileumvergoeding: handmatige review vereist (CAO art. 54)', manual_review_required: true }
     ];
 
-    return Response.json({ success: true, ...result });
+    return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
 
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

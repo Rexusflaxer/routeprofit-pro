@@ -47,6 +47,7 @@
       "type": "string",
       "enum": [
         "draft",
+        "pending_review",
         "active",
         "archived"
       ],
@@ -97,7 +98,7 @@
         "object",
         "null"
       ],
-      "description": "Loonperiodes per jaar (bijv. 2026 met 14e periode), uit Cloudflare payload",
+      "description": "Loonperiodes per jaar \u2014 object met jaarkeys: { '2025': [...], '2026': [...] }. Elk item: { period_number, start_date, end_date, is_extra_period }.",
       "additionalProperties": true
     },
     "surcharges": {
@@ -105,7 +106,6 @@
         "object",
         "null"
       ],
-      "description": "Volledige toeslagenstructuur uit payload (naast losse surcharge_* velden)",
       "additionalProperties": true
     },
     "allowances": {
@@ -113,7 +113,6 @@
         "object",
         "null"
       ],
-      "description": "Vergoedingen config: maaltijd, pauze, consignatie, stomerij, hond, verblijf, jubileum",
       "additionalProperties": true
     },
     "leave_rules": {
@@ -121,7 +120,6 @@
         "object",
         "null"
       ],
-      "description": "Verlofregels: wettelijk, bovenwettelijk, bijzonder verlof, ORT over verlof",
       "additionalProperties": true
     },
     "sickness_rules": {
@@ -129,7 +127,6 @@
         "object",
         "null"
       ],
-      "description": "Ziektebetaling regels per periode en brancheancienniteit",
       "additionalProperties": true
     },
     "minus_hours_rules": {
@@ -137,7 +134,6 @@
         "object",
         "null"
       ],
-      "description": "Minurenregels voor min/max contracten",
       "additionalProperties": true
     },
     "overtime_rules": {
@@ -145,7 +141,6 @@
         "object",
         "null"
       ],
-      "description": "Overwerk en meeruren definitie, afbouwregeling, structureel overwerk",
       "additionalProperties": true
     },
     "shift_change_rules": {
@@ -153,7 +148,6 @@
         "object",
         "null"
       ],
-      "description": "Verschuivingstoeslagregels: 5/10/20%, max 8/jaar, blokkadedagen, ingetrokken diensten",
       "additionalProperties": true
     },
     "pension_rules": {
@@ -161,7 +155,6 @@
         "object",
         "null"
       ],
-      "description": "Pensioenregels en ouderenbeleid",
       "additionalProperties": true
     },
     "fund_rules": {
@@ -169,7 +162,6 @@
         "object",
         "null"
       ],
-      "description": "Fonds-CAO regels: SFPB, sociale commissie, opleidingsfonds",
       "additionalProperties": true
     },
     "schiphol_rules": {
@@ -177,7 +169,6 @@
         "object",
         "null"
       ],
-      "description": "Schiphol-specifieke regels en toeslagen",
       "additionalProperties": true
     },
     "cash_value_logistics_rules": {
@@ -185,7 +176,6 @@
         "object",
         "null"
       ],
-      "description": "Cash/waardetransport specifieke regels en vergoedingen",
       "additionalProperties": true
     },
     "contract_change_rules": {
@@ -193,7 +183,6 @@
         "object",
         "null"
       ],
-      "description": "Contractwisseling: 15.000 uur grens, vakantieoverdracht, mutatielijst",
       "additionalProperties": true
     },
     "function_classification_rules": {
@@ -201,7 +190,6 @@
         "object",
         "null"
       ],
-      "description": "Functieclassificatie, diplomastructuur, schaalindeling",
       "additionalProperties": true
     },
     "rule_engine_metadata": {
@@ -209,7 +197,6 @@
         "object",
         "null"
       ],
-      "description": "Coverage summary, versie-info, implementatie-status per domein",
       "additionalProperties": true
     },
     "source_documents_snapshot": {
@@ -217,7 +204,6 @@
         "array",
         "null"
       ],
-      "description": "Snapshot van bronbestanden die gebruikt zijn voor deze CAO-versie",
       "items": {
         "type": "object",
         "additionalProperties": true
@@ -228,7 +214,6 @@
         "object",
         "null"
       ],
-      "description": "Per-domein coverage statistieken (IMPLEMENTED/PARTIAL/MISSING/REFERENCE tellers)",
       "additionalProperties": true
     },
     "surcharge_weekend": {

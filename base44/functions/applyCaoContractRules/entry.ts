@@ -155,8 +155,18 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const { action, personnel_id, force_cao_sync } = body;
 
-    // Lazy CAO-sync
-    await lazySyncCao(base44, !!force_cao_sync);
+    // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
+    const syncResult = await lazySyncCao(base44, !!force_cao_sync);
+    const syncWarnings = [];
+    if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'cloudflare_unavailable' || syncResult?.reason === 'cloudflare_current_unavailable') syncWarnings.push('Cloudflare onbereikbaar; actieve Base44 CAO gebruikt.');
+
+    const caoSyncStatus = {
+      changed: syncResult?.changed ?? false,
+      reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
+      revision: syncResult?.revision || null
+    };
 
     if (action === 'calculate_probation') {
       const result = calculateProbationPeriod(body);
@@ -169,7 +179,7 @@ Deno.serve(async (req) => {
         });
       }
 
-      return Response.json({ success: true, ...result });
+      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
     }
 
     if (action === 'validate_dismissal') {
@@ -187,12 +197,12 @@ Deno.serve(async (req) => {
         }
       }
       const result = validateProbationDismissal({ ...body, base_hourly_rate: baseHourlyRate });
-      return Response.json({ success: true, ...result });
+      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
     }
 
     // Default: bereken proeftijd
     const result = calculateProbationPeriod(body);
-    return Response.json({ success: true, ...result });
+    return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
 
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

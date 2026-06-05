@@ -120,7 +120,7 @@ Deno.serve(async (req) => {
       const configData = {
         ...candidate_configuration,
         cao_key,
-        status: isOwnerApproved ? 'active' : 'pending_review',
+        status: isOwnerApproved ? 'active' : 'draft',
         is_active: isOwnerApproved,
         approval_source: approval?.approval_source || 'cloudflare_relay',
         approved_by_owner_name: approval?.approved_by_owner_name || null,

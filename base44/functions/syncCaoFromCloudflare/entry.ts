@@ -7,12 +7,39 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
  * aan de actieve CAOConfiguration.cloudflare_revision. Geen tijdgebaseerde skip.
  */
 
+// ── Auth helper: accepteer alleen interne service-role invocaties of secret-header ──
+// Lazy-sync vanuit andere Base44 functies werkt via asServiceRole.functions.invoke,
+// wat geen Authorization-header meestuurt. Die calls zijn herkenbaar doordat
+// BASE44_INTERNAL_CALL header aanwezig is of de call via de SDK service-rol gaat.
+// Directe klantcalls (met user JWT) worden geblokkeerd.
+function isAuthorizedCall(req) {
+  // 1. Optioneel: aparte sync-trigger secret voor externe/owner calls
+  const syncSecret = Deno.env.get('BASE44_CAO_SYNC_TRIGGER_SECRET');
+  const authHeader = req.headers.get('Authorization') || '';
+  if (syncSecret && authHeader === `Bearer ${syncSecret}`) return true;
+
+  // 2. Interne Base44 service-role invocaties (geen user JWT in header)
+  // SDK invoke via asServiceRole stuurt geen 'x-user-id' header mee.
+  const userId = req.headers.get('x-user-id') || req.headers.get('x-base44-user-id') || '';
+  if (!userId) return true; // service-role call — geen user context
+
+  // 3. Geblokkeerd: directe klantcall met user JWT
+  return false;
+}
+
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
 
+    // Bescherm tegen directe klant-aanroepen
+    if (!isAuthorizedCall(req)) {
+      return Response.json({ error: 'Forbidden — syncCaoFromCloudflare kan niet direct door app-gebruikers worden aangeroepen.' }, { status: 403 });
+    }
+
     const body = await req.json().catch(() => ({}));
     const { force = false, trigger_source = 'manual' } = body;
+
+    console.log(`[syncCaoFromCloudflare] trigger_source=${trigger_source} force=${force}`);
 
     const apiKey = Deno.env.get('BASE44_CAO_API_KEY');
     const statusUrl = Deno.env.get('CAO_CLOUDFLARE_STATUS_URL');
@@ -187,6 +214,28 @@ Deno.serve(async (req) => {
       });
     }
 
+    // ── Stap 9b: Normaliseer pay_periods naar { year: [...] } object-formaat ──
+    // Accepteert zowel array als object; converteert altijd naar { "2025": [...], "2026": [...] }
+    function normalizePayPeriods(raw) {
+      if (!raw) return null;
+      if (Array.isArray(raw)) {
+        // Array van { year, period_number, start_date, end_date, is_extra_period }
+        const byYear = {};
+        for (const p of raw) {
+          const y = String(p.year || '');
+          if (!y) continue;
+          if (!byYear[y]) byYear[y] = [];
+          byYear[y].push(p);
+        }
+        return Object.keys(byYear).length > 0 ? byYear : null;
+      }
+      if (typeof raw === 'object') {
+        // Al in { year: [...] } formaat — bewaar as-is
+        return raw;
+      }
+      return null;
+    }
+
     // ── Stap 10: Maak nieuwe CAOConfiguration met VOLLEDIGE payload velden ──
     const candidateCfg = payload.candidate_configuration || {};
     const newConfig = await base44.asServiceRole.entities.CAOConfiguration.create({
@@ -207,7 +256,7 @@ Deno.serve(async (req) => {
       holidays: candidateCfg.holidays || [],
 
       // Gestructureerde domein-configuraties — geen whitelist, alles uit payload bewaren
-      pay_periods: candidateCfg.pay_periods || null,
+      pay_periods: normalizePayPeriods(candidateCfg.pay_periods),
       surcharges: candidateCfg.surcharges || null,
       allowances: candidateCfg.allowances || null,
       leave_rules: candidateCfg.leave_rules || null,

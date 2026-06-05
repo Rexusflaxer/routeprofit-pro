@@ -196,8 +196,19 @@ Deno.serve(async (req) => {
 
     const { route_id, weekday, force_recalculate, force_cao_sync } = await req.json();
 
-    // Lazy CAO-sync vanuit Cloudflare (max 1x per 6 uur)
-    await lazySyncCao(base44, !!force_cao_sync);
+    // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
+    const syncResult = await lazySyncCao(base44, !!force_cao_sync);
+    const syncWarnings = [];
+    if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'cloudflare_unavailable' || syncResult?.reason === 'cloudflare_current_unavailable') syncWarnings.push('Cloudflare onbereikbaar; actieve Base44 CAO gebruikt.');
+
+    const caoSyncStatus = {
+      changed: syncResult?.changed ?? false,
+      reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
+      revision: syncResult?.revision || null
+    };
+
     if (!route_id) return Response.json({ error: 'route_id is required' }, { status: 400 });
 
     const routes = await base44.entities.Route.list();
@@ -417,7 +428,9 @@ Deno.serve(async (req) => {
       most_expensive: mostExpensive, cheapest, average,
       all_personnel: results,
       binnendienst: binnendienstResults,
-      vehicle_costs: vehicleCosts
+      vehicle_costs: vehicleCosts,
+      cao_sync_status: caoSyncStatus,
+      calculation_warnings: syncWarnings
     };
 
     // Sla gecachte resultaten op in de route

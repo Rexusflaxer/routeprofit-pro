@@ -195,8 +195,12 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const { shifts, period_start, period_end, personnel_id, force_cao_sync } = body;
 
-    // Lazy CAO-sync
-    await lazySyncCao(base44, !!force_cao_sync);
+    // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
+    const syncResult = await lazySyncCao(base44, !!force_cao_sync);
+    const syncWarnings = [];
+    if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'cloudflare_unavailable' || syncResult?.reason === 'cloudflare_current_unavailable') syncWarnings.push('Cloudflare onbereikbaar; actieve Base44 CAO gebruikt.');
 
     if (!Array.isArray(shifts)) {
       return Response.json({ error: 'shifts array is verplicht' }, { status: 400 });
@@ -217,11 +221,19 @@ Deno.serve(async (req) => {
 
     const result = validateSchedule(shifts, pStart, pEnd);
 
+    const caoSyncStatus = {
+      changed: syncResult?.changed ?? false,
+      reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
+      revision: syncResult?.revision || null
+    };
+
     return Response.json({
       success: true,
       period_start: pStart,
       period_end: pEnd,
       personnel_id: personnel_id || null,
+      cao_sync_status: caoSyncStatus,
+      calculation_warnings: syncWarnings,
       ...result
     });
 

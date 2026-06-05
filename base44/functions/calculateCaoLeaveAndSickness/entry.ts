@@ -127,18 +127,28 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const { action, force_cao_sync } = body;
 
-    // Lazy CAO-sync
-    await lazySyncCao(base44, !!force_cao_sync);
+    // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
+    const syncResult = await lazySyncCao(base44, !!force_cao_sync);
+    const syncWarnings = [];
+    if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'cloudflare_unavailable' || syncResult?.reason === 'cloudflare_current_unavailable') syncWarnings.push('Cloudflare onbereikbaar; actieve Base44 CAO gebruikt.');
+
+    const caoSyncStatus = {
+      changed: syncResult?.changed ?? false,
+      reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
+      revision: syncResult?.revision || null
+    };
 
     if (action === 'calculate_vacation_accrual') {
       const result = calculateVacationAccrual(body);
-      return Response.json({ success: true, ...result });
+      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
     }
 
     if (action === 'calculate_sickness_payment') {
       const result = calculateSicknessPayment(body);
       if (result.error) return Response.json({ error: result.error }, { status: 400 });
-      return Response.json({ success: true, ...result });
+      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
     }
 
     // Default: bereken beide
@@ -147,6 +157,8 @@ Deno.serve(async (req) => {
 
     return Response.json({
       success: true,
+      cao_sync_status: caoSyncStatus,
+      calculation_warnings: syncWarnings,
       vacation_accrual: vacation,
       sickness_payment: sickness
     });
