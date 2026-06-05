@@ -1,5 +1,27 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
+// ── Lazy CAO-sync helper ──
+async function lazySyncCao(base44, forceCaoSync = false) {
+  try {
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    if (!forceCaoSync) {
+      const recentRuns = await base44.asServiceRole.entities.CAOImportRun.filter({
+        trigger_type: 'cloudflare_pull',
+        status: 'completed'
+      });
+      const hasRecent = recentRuns.some(r => r.finished_at && r.finished_at > sixHoursAgo);
+      if (hasRecent) return { skipped: true };
+    }
+    const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
+      force: forceCaoSync,
+      trigger_source: 'lazy_schedule_validation'
+    });
+    return res?.data || {};
+  } catch {
+    return { cloudflare_unavailable: true };
+  }
+}
+
 /**
  * CAO PB planning-validator
  * Bronregels: R0561 (28-dagenrooster), R0562 (max tijdvakken), R0564 (vrije dagen), R0590 (overwerk)
@@ -180,7 +202,10 @@ Deno.serve(async (req) => {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const { shifts, period_start, period_end, personnel_id } = body;
+    const { shifts, period_start, period_end, personnel_id, force_cao_sync } = body;
+
+    // Lazy CAO-sync
+    await lazySyncCao(base44, !!force_cao_sync);
 
     if (!Array.isArray(shifts)) {
       return Response.json({ error: 'shifts array is verplicht' }, { status: 400 });

@@ -1,4 +1,28 @@
-import { createClientFromRequest } from 'npm:@base44/sdk@0.8.25';
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
+
+// ── Lazy CAO-sync helper ──
+async function lazySyncCao(base44, forceCaoSync = false) {
+  try {
+    const sixHoursAgo = new Date(Date.now() - 6 * 60 * 60 * 1000).toISOString();
+    // Check of recente sync bestaat
+    if (!forceCaoSync) {
+      const recentRuns = await base44.asServiceRole.entities.CAOImportRun.filter({
+        trigger_type: 'cloudflare_pull',
+        status: 'completed'
+      });
+      const hasRecent = recentRuns.some(r => r.finished_at && r.finished_at > sixHoursAgo);
+      if (hasRecent) return { skipped: true };
+    }
+    const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
+      force: forceCaoSync,
+      trigger_source: 'lazy_payroll_calculation'
+    });
+    return res?.data || {};
+  } catch {
+    // Cloudflare onbereikbaar — stille fallback, waarschuwing wordt hieronder toegevoegd
+    return { cloudflare_unavailable: true };
+  }
+}
 
 // CAO Particuliere Beveiliging - Toeslagberekening
 // Feestdagen komen uit CAOConfiguration.holidays — GEEN hardcoded lijsten.
@@ -98,7 +122,10 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { personnel_id, work_schedule } = await req.json();
+    const { personnel_id, work_schedule, force_cao_sync } = await req.json();
+
+    // Lazy CAO-sync vanuit Cloudflare (max 1x per 6 uur)
+    const syncResult = await lazySyncCao(base44, !!force_cao_sync);
     
     // work_schedule format: [{ date: "2025-01-15", start_time: "08:00", end_time: "17:00" }, ...]
     
@@ -204,6 +231,9 @@ Deno.serve(async (req) => {
     };
 
     const calculationWarnings = [];
+    if (syncResult?.cloudflare_unavailable) {
+      calculationWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
+    }
 
     // Bepaal basis uurloon
     let baseHourlyRate = 0;

@@ -44,6 +44,15 @@
         "null"
       ]
     },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "archived"
+      ],
+      "default": "draft"
+    },
     "is_active": {
       "type": "boolean",
       "default": false
@@ -69,6 +78,20 @@
     "wage_scales": {
       "type": "object",
       "additionalProperties": true
+    },
+    "wage_scales_detailed": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "holidays": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      }
     },
     "surcharge_weekend": {
       "type": "number",
@@ -215,6 +238,13 @@
         "null"
       ],
       "description": "CF-Ray of request ID van de Cloudflare relay"
+    },
+    "cloudflare_revision": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "SHA256 revision hash van de Cloudflare approved payload, gebruikt voor sync-vergelijking"
     },
     "idempotency_key": {
       "type": [
