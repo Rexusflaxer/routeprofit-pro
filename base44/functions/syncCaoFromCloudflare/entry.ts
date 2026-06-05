@@ -76,15 +76,15 @@ Deno.serve(async (req) => {
       is_active: true
     });
 
-    const activeConfig = activeConfigs[0] || null;
+    const activeConfigWithRevision = activeConfigs.find(cfg => cfg.cloudflare_revision === cloudflareRevision);
 
-    if (!force && activeConfig?.cloudflare_revision === cloudflareRevision) {
+    if (!force && activeConfigWithRevision) {
       return Response.json({
         success: true,
         changed: false,
         reason: 'already_current',
         revision: cloudflareRevision,
-        cao_configuration_id: activeConfig.id
+        cao_configuration_id: activeConfigWithRevision.id
       });
     }
 
@@ -123,12 +123,17 @@ Deno.serve(async (req) => {
       idempotency_key: payload.idempotency_key
     });
     if (existingRuns.length > 0) {
+      const existingSameConfig = await base44.asServiceRole.entities.CAOConfiguration.filter({
+        cao_key: 'cao_particuliere_beveiliging',
+        idempotency_key: payload.idempotency_key
+      });
       return Response.json({
         success: true,
         changed: false,
         reason: 'duplicate_idempotency_key',
         idempotency_key: payload.idempotency_key,
-        cao_configuration_id: activeConfig?.id || null
+        revision: payload.revision,
+        cao_configuration_id: existingSameConfig.length > 0 ? existingSameConfig[0].id : null
       });
     }
 
@@ -196,12 +201,14 @@ Deno.serve(async (req) => {
       rulesUpserted++;
     }
 
-    // ── Stap 9: Archiveer huidige actieve configs ──
-    const allActive = await base44.asServiceRole.entities.CAOConfiguration.filter({
-      cao_key: 'cao_particuliere_beveiliging',
-      is_active: true
-    });
-    for (const cfg of allActive) {
+    // ── Stap 9: Archiveer alleen exacte duplicaten (zelfde revision of idempotency_key) ──
+    // Configs met andere valid_from/valid_until periodes blijven actief zodat historische
+    // berekeningen de juiste config blijven vinden.
+    const duplicateConfigs = activeConfigs.filter(cfg =>
+      cfg.cloudflare_revision === payload.revision ||
+      cfg.idempotency_key === payload.idempotency_key
+    );
+    for (const cfg of duplicateConfigs) {
       await base44.asServiceRole.entities.CAOConfiguration.update(cfg.id, {
         is_active: false,
         status: 'archived'
@@ -230,9 +237,11 @@ Deno.serve(async (req) => {
       return null;
     }
 
-    // ── Stap 10: Maak nieuwe CAOConfiguration met VOLLEDIGE payload velden ──
+    // ── Stap 10: Upsert CAOConfiguration — update bestaande of maak nieuwe ──
+    // Als er al een config bestaat met dezelfde idempotency_key (bijv. na gedeeltelijke sync),
+    // update die config in plaats van een duplicaat aan te maken.
     const candidateCfg = payload.candidate_configuration || {};
-    const newConfig = await base44.asServiceRole.entities.CAOConfiguration.create({
+    const configData = {
       name: candidateCfg.name || `CAO PB - ${payload.revision}`,
       cao_key: 'cao_particuliere_beveiliging',
       display_name: candidateCfg.display_name || null,
@@ -310,7 +319,21 @@ Deno.serve(async (req) => {
       idempotency_key: payload.idempotency_key,
       automation_version: payload.automation_version || null,
       notes: `Automatisch gesynchroniseerd via Cloudflare (${trigger_source}) op ${new Date().toISOString()}`
+    };
+
+    // Upsert: update bestaande config met zelfde idempotency_key, anders nieuw aanmaken
+    const existingSamePayload = await base44.asServiceRole.entities.CAOConfiguration.filter({
+      cao_key: 'cao_particuliere_beveiliging',
+      idempotency_key: payload.idempotency_key
     });
+
+    let newConfig;
+    if (existingSamePayload.length > 0) {
+      await base44.asServiceRole.entities.CAOConfiguration.update(existingSamePayload[0].id, configData);
+      newConfig = { ...existingSamePayload[0], ...configData };
+    } else {
+      newConfig = await base44.asServiceRole.entities.CAOConfiguration.create(configData);
+    }
 
     // ── Stap 11: Maak CAOChangeReview records ──
     const reviewIds = [];
