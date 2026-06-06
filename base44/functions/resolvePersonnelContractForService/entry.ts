@@ -143,18 +143,60 @@ function evaluateFunctionMatch(contract, serviceContext) {
 function getCaoPayrollReadiness(caoConfig) {
   const gate = caoConfig?.payroll_readiness_gate || null;
   const status = caoConfig?.payroll_readiness_status || null;
+  const registrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
+  const registryReady = !!registrySnapshot.fingerprint && Number(registrySnapshot.rule_count || 0) > 0;
   const ready = caoConfig?.is_payroll_ready === true &&
     status === 'ready' &&
-    gate?.passed === true;
+    gate?.passed === true &&
+    registryReady;
+  const blockingFindings = gate?.blocking_findings || [];
 
   return {
     ready,
-    status: status || 'unknown',
+    status: ready ? 'ready' : !registryReady ? 'blocked_missing_rule_registry_fingerprint' : (status || 'unknown'),
     is_payroll_ready: caoConfig?.is_payroll_ready === true,
     gate_present: !!gate,
-    blocking_findings: gate?.blocking_findings || [],
+    rule_registry_fingerprint_present: !!registrySnapshot.fingerprint,
+    rule_registry_rule_count: registrySnapshot.rule_count,
+    blocking_findings: registryReady
+      ? blockingFindings
+      : [
+        {
+          code: 'missing_rule_registry_fingerprint',
+          severity: 'critical',
+          message: 'CAOConfiguration mist rule_registry_fingerprint; contractresolutie is niet payroll-final audit-proof.'
+        },
+        ...blockingFindings
+      ],
     open_payroll_critical_rules: gate?.open_payroll_critical_rules || [],
     counts: gate?.counts || null
+  };
+}
+
+function getCaoRuleRegistrySnapshot(caoConfig) {
+  const gateSnapshot = caoConfig?.payroll_readiness_gate?.persisted_rule_registry || null;
+  const configuredSnapshot = caoConfig?.rule_registry_snapshot || null;
+  const snapshot = configuredSnapshot || gateSnapshot || null;
+  const fingerprint = caoConfig?.rule_registry_fingerprint ||
+    snapshot?.fingerprint ||
+    null;
+  const ruleCount = caoConfig?.rule_registry_rule_count ??
+    snapshot?.persisted_unique_rule_count ??
+    snapshot?.fingerprint_rule_count ??
+    null;
+  const verifiedAt = caoConfig?.rule_registry_verified_at ||
+    snapshot?.verified_at ||
+    null;
+
+  return {
+    fingerprint,
+    fingerprint_algorithm: snapshot?.fingerprint_algorithm || (fingerprint ? 'sha256' : null),
+    rule_count: ruleCount,
+    verified_at: verifiedAt,
+    expected_unique_rule_count: snapshot?.expected_unique_rule_count ?? null,
+    persisted_unique_rule_count: snapshot?.persisted_unique_rule_count ?? ruleCount,
+    source_coverage_passed: snapshot?.source_coverage?.passed ?? null,
+    missing_rule_ids_truncated: snapshot?.missing_rule_ids_truncated ?? false
   };
 }
 
@@ -522,6 +564,7 @@ Deno.serve(async (req) => {
     }
 
     const caoPayrollReadiness = getCaoPayrollReadiness(caoResolution.config);
+    const caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoResolution.config);
     if (caoResolution.config && !caoPayrollReadiness.ready) {
       manualReviewReasons.push(`CAO-configuratie is niet payroll-ready (${caoPayrollReadiness.status}).`);
     }
@@ -600,7 +643,8 @@ Deno.serve(async (req) => {
       cao_version_label: caoResolution.config?.version_label || caoResolution.config?.name || null,
       cao_valid_from: caoResolution.config?.valid_from || null,
       cao_valid_until: caoResolution.config?.valid_until || null,
-      cao_payroll_readiness: caoPayrollReadiness
+      cao_payroll_readiness: caoPayrollReadiness,
+      cao_rule_registry_snapshot: caoRuleRegistrySnapshot
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

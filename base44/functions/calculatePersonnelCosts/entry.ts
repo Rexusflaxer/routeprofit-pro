@@ -785,18 +785,60 @@ function calculateTaxAmount(taxableAmount, caoConfig, annualSalaryEstimate) {
 function getCaoPayrollReadiness(caoConfig) {
   const gate = caoConfig?.payroll_readiness_gate || null;
   const status = caoConfig?.payroll_readiness_status || null;
+  const registrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
+  const registryReady = !!registrySnapshot.fingerprint && Number(registrySnapshot.rule_count || 0) > 0;
   const ready = caoConfig?.is_payroll_ready === true &&
     status === 'ready' &&
-    gate?.passed === true;
+    gate?.passed === true &&
+    registryReady;
+  const blockingFindings = gate?.blocking_findings || [];
 
   return {
     ready,
-    status: status || 'unknown',
+    status: ready ? 'ready' : !registryReady ? 'blocked_missing_rule_registry_fingerprint' : (status || 'unknown'),
     is_payroll_ready: caoConfig?.is_payroll_ready === true,
     gate_present: !!gate,
-    blocking_findings: gate?.blocking_findings || [],
+    rule_registry_fingerprint_present: !!registrySnapshot.fingerprint,
+    rule_registry_rule_count: registrySnapshot.rule_count,
+    blocking_findings: registryReady
+      ? blockingFindings
+      : [
+        {
+          code: 'missing_rule_registry_fingerprint',
+          severity: 'critical',
+          message: 'CAOConfiguration mist rule_registry_fingerprint; definitieve payroll is niet audit-proof.'
+        },
+        ...blockingFindings
+      ],
     open_payroll_critical_rules: gate?.open_payroll_critical_rules || [],
     counts: gate?.counts || null
+  };
+}
+
+function getCaoRuleRegistrySnapshot(caoConfig) {
+  const gateSnapshot = caoConfig?.payroll_readiness_gate?.persisted_rule_registry || null;
+  const configuredSnapshot = caoConfig?.rule_registry_snapshot || null;
+  const snapshot = configuredSnapshot || gateSnapshot || null;
+  const fingerprint = caoConfig?.rule_registry_fingerprint ||
+    snapshot?.fingerprint ||
+    null;
+  const ruleCount = caoConfig?.rule_registry_rule_count ??
+    snapshot?.persisted_unique_rule_count ??
+    snapshot?.fingerprint_rule_count ??
+    null;
+  const verifiedAt = caoConfig?.rule_registry_verified_at ||
+    snapshot?.verified_at ||
+    null;
+
+  return {
+    fingerprint,
+    fingerprint_algorithm: snapshot?.fingerprint_algorithm || (fingerprint ? 'sha256' : null),
+    rule_count: ruleCount,
+    verified_at: verifiedAt,
+    expected_unique_rule_count: snapshot?.expected_unique_rule_count ?? null,
+    persisted_unique_rule_count: snapshot?.persisted_unique_rule_count ?? ruleCount,
+    source_coverage_passed: snapshot?.source_coverage?.passed ?? null,
+    missing_rule_ids_truncated: snapshot?.missing_rule_ids_truncated ?? false
   };
 }
 
@@ -1097,6 +1139,7 @@ Deno.serve(async (req) => {
     }
 
     const payrollReadiness = getCaoPayrollReadiness(caoConfig);
+    const caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
     if (!payrollReadiness.ready) {
       return Response.json({
         error: `Actieve CAO-configuratie is niet payroll-ready (${payrollReadiness.status}). Definitieve loonberekening is geblokkeerd totdat de CAO coverage-gate slaagt.`,
@@ -1109,6 +1152,7 @@ Deno.serve(async (req) => {
         cao_version_label: caoConfig.version_label || caoConfig.name,
         cao_valid_from: caoConfig.valid_from,
         cao_payroll_readiness: payrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
         manual_review_required: true,
         payroll_final_allowed: false,
         calculation_status: 'blocked_cao_not_payroll_ready'
@@ -1782,6 +1826,7 @@ Deno.serve(async (req) => {
       cao_revision: caoConfig.cloudflare_revision || null,
       cao_valid_from: caoConfig.valid_from,
       cao_payroll_readiness: payrollReadiness,
+      cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
       pay_period_year: pay_period_year || refDate.getFullYear(),
       pay_period_number: pay_period_number || null,
       pay_period_start: pay_period_start || work_schedule[0]?.date || null,
@@ -1920,6 +1965,10 @@ Deno.serve(async (req) => {
         cao_version_label: caoConfig.version_label || caoConfig.name,
         cao_revision: caoConfig.cloudflare_revision || null,
         cao_payroll_readiness_status: caoConfig.payroll_readiness_status || null,
+        cao_rule_registry_fingerprint: caoRuleRegistrySnapshot.fingerprint,
+        cao_rule_registry_rule_count: caoRuleRegistrySnapshot.rule_count,
+        cao_rule_registry_verified_at: caoRuleRegistrySnapshot.verified_at,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
         correction_run_for_review_ids: [],
         supersedes_payroll_run_ids: [],
         pay_period_year: responsePayload.pay_period_year,
@@ -1953,7 +2002,11 @@ Deno.serve(async (req) => {
           pay_period_year: responsePayload.pay_period_year,
           pay_period_number: responsePayload.pay_period_number,
           pay_period_start: responsePayload.pay_period_start,
-          pay_period_end: responsePayload.pay_period_end
+          pay_period_end: responsePayload.pay_period_end,
+          cao_configuration_id: caoConfig.id,
+          cao_revision: caoConfig.cloudflare_revision || null,
+          cao_rule_registry_fingerprint: caoRuleRegistrySnapshot.fingerprint,
+          cao_rule_registry_verified_at: caoRuleRegistrySnapshot.verified_at
         },
         calculation_output: responsePayload,
         warnings: calculationWarnings.map(message => ({ message })),

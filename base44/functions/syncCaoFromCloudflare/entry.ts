@@ -347,6 +347,62 @@ function uniqueRuleIds(rules) {
   return new Set((Array.isArray(rules) ? rules : []).map(rule => rule.rule_id).filter(Boolean));
 }
 
+function stableForHash(value) {
+  if (Array.isArray(value)) return value.map(stableForHash);
+  if (!value || typeof value !== 'object') return value ?? null;
+  return Object.keys(value)
+    .sort()
+    .reduce((acc, key) => {
+      acc[key] = stableForHash(value[key]);
+      return acc;
+    }, {});
+}
+
+async function sha256Hex(value) {
+  const encoded = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  return [...new Uint8Array(digest)]
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function buildRuleRegistryFingerprint(rules) {
+  const normalizedRules = (Array.isArray(rules) ? rules : [])
+    .filter(rule => rule.rule_id)
+    .map(rule => ({
+      rule_id: rule.rule_id,
+      cao_key: rule.cao_key || null,
+      version_label: rule.version_label || null,
+      source_document_id: rule.source_document_id || null,
+      sha1: rule.sha1 || null,
+      domain: rule.domain || null,
+      impact: rule.impact || null,
+      automation_level: rule.automation_level || null,
+      implementation_status: rule.implementation_status || null,
+      manual_review_required: rule.manual_review_required === true,
+      calculation_policy: rule.calculation_policy || null,
+      runtime_binding_status: rule.runtime_binding_status || null,
+      runtime_binding_key: rule.runtime_binding_key || null,
+      runtime_binding_functions: Array.isArray(rule.runtime_binding_functions)
+        ? [...rule.runtime_binding_functions].sort()
+        : [],
+      implemented_in: Array.isArray(rule.implemented_in)
+        ? [...rule.implemented_in].sort()
+        : [],
+      tests: stableForHash(rule.tests || null),
+      rule_text: rule.rule_text || null,
+      rule_text_summary: rule.rule_text_summary || null
+    }))
+    .sort((a, b) => a.rule_id.localeCompare(b.rule_id));
+
+  const canonicalJson = JSON.stringify(stableForHash(normalizedRules));
+  return {
+    algorithm: 'sha256',
+    fingerprint: await sha256Hex(canonicalJson),
+    canonical_rule_count: normalizedRules.length
+  };
+}
+
 async function verifyPersistedRuleRegistry(base44, { caoKey, configId, candidateCfg, candidateRules }) {
   const persistedRules = await base44.asServiceRole.entities.CAORule.filter({
     cao_key: caoKey,
@@ -356,7 +412,9 @@ async function verifyPersistedRuleRegistry(base44, { caoKey, configId, candidate
   const persistedRuleIds = uniqueRuleIds(persistedRules);
   const missingRuleIds = [...expectedRuleIds].filter(ruleId => !persistedRuleIds.has(ruleId));
   const sourceCoverage = evaluateSourceCoverageCompleteness(candidateCfg, persistedRules || []);
+  const fingerprint = await buildRuleRegistryFingerprint(persistedRules || []);
   const blockingFindings = [];
+  const verifiedAt = new Date().toISOString();
 
   if (missingRuleIds.length > 0) {
     blockingFindings.push({
@@ -371,6 +429,10 @@ async function verifyPersistedRuleRegistry(base44, { caoKey, configId, candidate
     passed: blockingFindings.length === 0,
     expected_unique_rule_count: expectedRuleIds.size,
     persisted_unique_rule_count: persistedRuleIds.size,
+    fingerprint: fingerprint.fingerprint,
+    fingerprint_algorithm: fingerprint.algorithm,
+    fingerprint_rule_count: fingerprint.canonical_rule_count,
+    verified_at: verifiedAt,
     missing_rule_ids: missingRuleIds.slice(0, 100),
     missing_rule_ids_truncated: missingRuleIds.length > 100,
     source_coverage: sourceCoverage,
@@ -1160,7 +1222,14 @@ Deno.serve(async (req) => {
       is_payroll_ready: payrollReadiness.is_payroll_ready,
       payroll_readiness_status: payrollReadiness.status,
       payroll_readiness_checked_at: payrollReadiness.gate.checked_at,
-      payroll_readiness_gate: payrollReadiness.gate,
+      payroll_readiness_gate: {
+        ...payrollReadiness.gate,
+        persisted_rule_registry: persistedRegistry
+      },
+      rule_registry_fingerprint: persistedRegistry.fingerprint,
+      rule_registry_rule_count: persistedRegistry.persisted_unique_rule_count,
+      rule_registry_verified_at: persistedRegistry.verified_at,
+      rule_registry_snapshot: persistedRegistry,
       status: 'active',
       coverage_summary: {
         ...(newConfig.coverage_summary || {}),
@@ -1172,7 +1241,10 @@ Deno.serve(async (req) => {
           blocking_findings: payrollReadiness.gate.blocking_findings,
           persisted_rule_registry: {
             expected_unique_rule_count: persistedRegistry.expected_unique_rule_count,
-            persisted_unique_rule_count: persistedRegistry.persisted_unique_rule_count
+            persisted_unique_rule_count: persistedRegistry.persisted_unique_rule_count,
+            fingerprint: persistedRegistry.fingerprint,
+            fingerprint_algorithm: persistedRegistry.fingerprint_algorithm,
+            verified_at: persistedRegistry.verified_at
           }
         }
       }

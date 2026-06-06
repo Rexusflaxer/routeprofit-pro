@@ -96,6 +96,35 @@
       "additionalProperties": true,
       "description": "Coverage-gate met tellingen, open payrollkritische regels en blokkades."
     },
+    "rule_registry_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "SHA-256 fingerprint van de CAORule registry die bij deze configuratie hoort."
+    },
+    "rule_registry_rule_count": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Aantal unieke rule_id's dat in de fingerprint is meegenomen."
+    },
+    "rule_registry_verified_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datetime waarop de CAORule registry voor deze configuratie is geverifieerd."
+    },
+    "rule_registry_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Audit-snapshot van de CAORule registry: fingerprint, count, completeness en truncatie-informatie."
+    },
     "notes": {
       "type": [
         "string",

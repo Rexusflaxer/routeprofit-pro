@@ -37,6 +37,35 @@
       ],
       "description": "Payroll-readiness status van de gebruikte CAO tijdens deze run."
     },
+    "cao_rule_registry_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "SHA-256 fingerprint van de CAORule registry waarmee deze loonrun is berekend."
+    },
+    "cao_rule_registry_rule_count": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Aantal unieke CAORule records dat in de registry fingerprint is meegenomen."
+    },
+    "cao_rule_registry_verified_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datetime waarop de gebruikte CAORule registry is geverifieerd."
+    },
+    "cao_rule_registry_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Snapshot van de CAORule registry evidence die bij deze payrollrun hoort."
+    },
     "correction_run_for_review_ids": {
       "type": "array",
       "items": {
