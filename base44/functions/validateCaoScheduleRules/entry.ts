@@ -15,7 +15,7 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 
 /**
  * CAO PB planning-validator
- * Bronregels: R0547-R0549 en R0560-R0679 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd, rusttijd, nachtdienst, pauze en jeugdige werknemer)
+ * Bronregels: R0547-R0549 en R0560-R0707 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd, rusttijd, nachtdienst, pauze, jeugdige werknemer en consignatie)
  *
  * Scope-bewust:
  * - Artikel 3 lid 2 sluit uit: art. 10, art. 9 lid 1 sub c, hfdst. 4 (behalve 37/38/41), hfdst. 5, bijlage 2.
@@ -456,6 +456,145 @@ function shiftDateTime(shift, fieldPrefix = '') {
   return { start, end };
 }
 
+function textFromDutyItem(item) {
+  return [
+    item.type,
+    item.duty_type,
+    item.roster_block_type,
+    item.block_type,
+    item.service_type,
+    item.task_type,
+    item.label,
+    item.name,
+    item.description
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function isConsignmentCallbackShift(shift = {}) {
+  const explicit = booleanOrNull(
+    shift.is_consignment_callback ??
+    shift.consignment_callback ??
+    shift.is_consignation_callback ??
+    shift.consignation_callback ??
+    shift.called_out_during_consignment ??
+    shift.is_on_call_callout ??
+    shift.on_call_callout ??
+    shift.is_callout_during_standby
+  );
+  if (explicit !== null) return explicit;
+  const text = textFromDutyItem(shift);
+  return text.includes('consignatie oproep') ||
+    text.includes('consignment callback') ||
+    text.includes('consignation callback') ||
+    text.includes('on-call callback') ||
+    text.includes('callout during consignment');
+}
+
+function isAvailabilityDutyPeriod(item = {}) {
+  if (isConsignmentCallbackShift(item)) return false;
+  const explicit = booleanOrNull(
+    item.is_availability_duty ??
+    item.availability_duty ??
+    item.is_piketdienst ??
+    item.piketdienst ??
+    item.is_reachable_advice_duty
+  );
+  if (explicit !== null) return explicit;
+  const text = textFromDutyItem(item);
+  return text.includes('bereikbaarheidsdienst') ||
+    text.includes('piketdienst') ||
+    text.includes('availability duty') ||
+    text.includes('telephone advice duty');
+}
+
+function isConsignmentDutyPeriod(item = {}) {
+  if (isConsignmentCallbackShift(item) || isAvailabilityDutyPeriod(item)) return false;
+  const explicit = booleanOrNull(
+    item.is_consignment ??
+    item.consignment_duty ??
+    item.is_consignation ??
+    item.consignation_duty ??
+    item.is_consignment_duty ??
+    item.is_consignatie ??
+    item.consignatie_dienst ??
+    item.is_on_call_duty
+  );
+  if (explicit !== null) return explicit;
+  const text = textFromDutyItem(item);
+  return text.includes('consignatie') ||
+    text.includes('consignment') ||
+    text.includes('consignation') ||
+    text.includes('on-call duty');
+}
+
+function itemDateTimeInterval(item) {
+  const startDateTime = item.start_datetime || item.starts_at || item.start_at || item.from_datetime || null;
+  const endDateTime = item.end_datetime || item.ends_at || item.end_at || item.to_datetime || null;
+  if (startDateTime && endDateTime) {
+    const start = new Date(startDateTime);
+    let end = new Date(endDateTime);
+    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    if (end <= start) end.setDate(end.getDate() + 1);
+    return { start, end };
+  }
+
+  const date = asIsoDate(item.date || item.service_date || item.start_date || item.duty_date);
+  if (!date) return null;
+  const startTime = item.start_time || item.from_time || item.duty_start_time || '00:00';
+  const endDate = asIsoDate(item.end_date || item.to_date);
+  const endTime = item.end_time || item.to_time || item.duty_end_time || (endDate ? '00:00' : null);
+  if (!endTime) return null;
+  const start = new Date(`${date}T${startTime}:00`);
+  let end = new Date(`${endDate || date}T${endTime}:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  if (end <= start) end.setDate(end.getDate() + 1);
+  return { start, end };
+}
+
+function periodBounds(periodStart, periodEnd) {
+  const start = dateFromIso(periodStart);
+  const end = dateFromIso(addDays(periodEnd, 1));
+  return { start, end };
+}
+
+function intervalOverlapsRange(interval, rangeStart, rangeEnd) {
+  return interval && rangeStart && rangeEnd && interval.end > rangeStart && interval.start < rangeEnd;
+}
+
+function normalizeDutyPeriods(body, periodStart, periodEnd, periodShifts) {
+  const periodRange = periodBounds(periodStart, periodEnd);
+  const bodyItems = [
+    ...normalizeArray(body.consignment_periods || body.consignation_periods || body.consignment_duties || body.consignatie_diensten),
+    ...normalizeArray(body.on_call_periods || body.on_call_duties || body.standby_periods),
+    ...normalizeArray(body.availability_periods || body.availability_duties || body.piketdiensten)
+  ];
+  const shiftItems = periodShifts.filter(shift => isConsignmentDutyPeriod(shift) || isAvailabilityDutyPeriod(shift));
+  const rows = [...bodyItems, ...shiftItems].map((item, index) => {
+    const interval = itemDateTimeInterval(item);
+    const kind = isAvailabilityDutyPeriod(item) ? 'availability_duty' : 'consignment_duty';
+    return {
+      raw: item,
+      index,
+      source: index < bodyItems.length ? 'body' : 'shift',
+      kind,
+      id: item.id || item.duty_id || item.shift_id || null,
+      shift_id: item.shift_id || item.id || null,
+      date: asIsoDate(item.date || item.service_date || item.start_date || item.duty_date),
+      start: interval?.start || null,
+      end: interval?.end || null,
+      start_datetime: interval?.start ? formatLocalDateTime(interval.start) : null,
+      end_datetime: interval?.end ? formatLocalDateTime(interval.end) : null,
+      hours: interval ? round2(hoursBetweenDates(interval.end, interval.start)) : null,
+      night_hours_00_06: interval ? round2(nightHoursBetweenDates(interval, interval.start, interval.end)) : null
+    };
+  });
+  return rows.filter(row =>
+    !row.start ||
+    !row.end ||
+    intervalOverlapsRange(row, periodRange.start, periodRange.end)
+  );
+}
+
 function serviceIntervalsFromShifts(shifts) {
   return shifts
     .map(shift => {
@@ -514,6 +653,75 @@ function nightHoursBetweenDates(interval, windowStart, windowEnd) {
 
 function nightHoursWithinWindow(intervals, windowStart, windowEnd) {
   return intervals.reduce((sum, interval) => sum + nightHoursBetweenDates(interval, windowStart, windowEnd), 0);
+}
+
+function intervalOverlapHours(interval, windowStart, windowEnd) {
+  const start = Math.max(interval.start.getTime(), windowStart.getTime());
+  const end = Math.min(interval.end.getTime(), windowEnd.getTime());
+  return end > start ? (end - start) / 3600000 : 0;
+}
+
+function dutyHoursWithinWindow(dutyPeriods, windowStart, windowEnd) {
+  return dutyPeriods.reduce((sum, period) => {
+    if (!period.start || !period.end) return sum;
+    return sum + intervalOverlapHours(period, windowStart, windowEnd);
+  }, 0);
+}
+
+function datesWithNightDuty(dutyPeriods, periodStart, periodEnd) {
+  const dates = [];
+  for (const date of dateRange(periodStart, periodEnd)) {
+    const dayStart = new Date(`${date}T00:00:00`);
+    const dayNightEnd = new Date(`${date}T06:00:00`);
+    if (dutyPeriods.some(period => period.start && period.end && intervalOverlapHours(period, dayStart, dayNightEnd) > 0)) {
+      dates.push(date);
+    }
+  }
+  return dates;
+}
+
+function freeBlocksWithoutDuty(dutyPeriods, windowStart, windowEnd) {
+  const points = [windowStart.getTime(), windowEnd.getTime()];
+  for (const period of dutyPeriods) {
+    if (!period.start || !period.end || !intervalOverlapsRange(period, windowStart, windowEnd)) continue;
+    points.push(Math.max(period.start.getTime(), windowStart.getTime()));
+    points.push(Math.min(period.end.getTime(), windowEnd.getTime()));
+  }
+  const sorted = [...new Set(points)].sort((a, b) => a - b);
+  const blocks = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const start = new Date(sorted[i]);
+    const end = new Date(sorted[i + 1]);
+    if (end <= start) continue;
+    const hasDuty = dutyPeriods.some(period => period.start && period.end && intervalOverlapsRange(period, start, end));
+    if (!hasDuty) blocks.push({ start, end, hours: hoursBetweenDates(end, start) });
+  }
+  return blocks;
+}
+
+function rollingDutyWindows(periodStart, periodEnd, windowDays, dutyPeriods) {
+  const dates = dateRange(periodStart, periodEnd);
+  const rows = [];
+  if (dates.length < windowDays) return rows;
+  for (let i = 0; i <= dates.length - windowDays; i++) {
+    const windowStartIso = dates[i];
+    const windowEndIso = addDays(windowStartIso, windowDays);
+    const windowStart = dateFromIso(windowStartIso);
+    const windowEnd = dateFromIso(windowEndIso);
+    rows.push({
+      window_start: windowStartIso,
+      window_end_exclusive: windowEndIso,
+      duty_hours: round2(dutyHoursWithinWindow(dutyPeriods, windowStart, windowEnd))
+    });
+  }
+  return rows;
+}
+
+function fixedFreeDaysForConsignment(body) {
+  return uniqueSortedIsoDates([
+    ...normalizeArray(body.fixed_free_days || body.fixed_roster_free_days || body.employer_fixed_free_days),
+    ...normalizeArray(body.guaranteed_free_days || body.guaranteed_roster_free_days || body.consignment_protected_free_days)
+  ].map(item => typeof item === 'string' ? item : item.date || item.free_date || item.target_date));
 }
 
 function maxContinuousRestHoursWithinWindow(intervals, windowStart, windowEnd) {
@@ -785,6 +993,91 @@ function buildReferenceShifts(body, serviceShifts) {
   });
 }
 
+function normalizeConsignmentCallbacks(body, periodStart, periodEnd, serviceShifts) {
+  const periodRange = periodBounds(periodStart, periodEnd);
+  const bodyItems = [
+    ...normalizeArray(body.consignment_callouts || body.consignation_callouts || body.on_call_callouts),
+    ...normalizeArray(body.callback_shifts || body.callout_shifts || body.consignment_callback_shifts)
+  ];
+  const shiftItems = serviceShifts.filter(isConsignmentCallbackShift);
+  return [...bodyItems, ...shiftItems]
+    .map((item, index) => {
+      const interval = itemDateTimeInterval(item) || shiftDateTime(item);
+      const mandatoryTraining = booleanOrNull(
+        item.mandatory_training ??
+        item.is_mandatory_training ??
+        item.required_training ??
+        item.verplichte_opleiding
+      ) === true;
+      return {
+        raw: item,
+        index,
+        source: index < bodyItems.length ? 'body' : 'shift',
+        id: item.id || item.callback_id || item.shift_id || null,
+        shift_id: item.shift_id || item.id || null,
+        date: asIsoDate(item.date || item.service_date || item.start_date || item.duty_date),
+        start: interval?.start || null,
+        end: interval?.end || null,
+        start_datetime: interval?.start ? formatLocalDateTime(interval.start) : null,
+        end_datetime: interval?.end ? formatLocalDateTime(interval.end) : null,
+        hours: interval ? round2(hoursBetweenDates(interval.end, interval.start)) : null,
+        mandatory_training: mandatoryTraining
+      };
+    })
+    .filter(row =>
+      !row.start ||
+      !row.end ||
+      intervalOverlapsRange(row, periodRange.start, periodRange.end)
+    )
+    .sort((a, b) => (a.start?.getTime() || 0) - (b.start?.getTime() || 0));
+}
+
+function mergeConsignmentCallbackGroups(callbacks) {
+  const groups = [];
+  for (const callback of callbacks.filter(c => c.start && c.end)) {
+    const previous = groups[groups.length - 1];
+    if (previous) {
+      const gapHours = hoursBetweenDates(callback.start, previous.end);
+      if (gapHours >= 0 && gapHours <= 0.5) {
+        previous.callbacks.push(callback);
+        previous.end = callback.end > previous.end ? callback.end : previous.end;
+        previous.gap_hours_counted_as_work += gapHours;
+        previous.has_half_hour_gap_rule = true;
+        continue;
+      }
+    }
+    groups.push({
+      callbacks: [callback],
+      start: callback.start,
+      end: callback.end,
+      gap_hours_counted_as_work: 0,
+      has_half_hour_gap_rule: false
+    });
+  }
+  return groups.map((group, index) => {
+    const rawHours = group.callbacks.reduce((sum, callback) => sum + Math.max(0, hoursBetweenDates(callback.end, callback.start)), 0);
+    const workHoursIncludingShortGaps = rawHours + group.gap_hours_counted_as_work;
+    const minHalfHourPerCall = group.callbacks.length * 0.5;
+    const payableWorkHours = Math.max(workHoursIncludingShortGaps, minHalfHourPerCall);
+    const mandatoryTraining = group.callbacks.every(callback => callback.mandatory_training);
+    return {
+      index,
+      callback_count: group.callbacks.length,
+      callback_ids: group.callbacks.map(callback => callback.id).filter(Boolean),
+      shift_ids: group.callbacks.map(callback => callback.shift_id).filter(Boolean),
+      start_datetime: formatLocalDateTime(group.start),
+      end_datetime: formatLocalDateTime(group.end),
+      raw_work_hours: round2(rawHours),
+      gap_hours_counted_as_work: round2(group.gap_hours_counted_as_work),
+      payable_work_hours: round2(payableWorkHours),
+      minimum_pay_hours: mandatoryTraining ? 0 : 3,
+      payroll_hours: mandatoryTraining ? round2(payableWorkHours) : round2(Math.max(payableWorkHours, 3)),
+      mandatory_training: mandatoryTraining,
+      has_half_hour_gap_rule: group.has_half_hour_gap_rule
+    };
+  });
+}
+
 function weeklyHoursFromShifts(shifts) {
   const weekly = {};
   for (const shift of shifts) {
@@ -794,6 +1087,16 @@ function weeklyHoursFromShifts(shifts) {
     weekly[key] = (weekly[key] || 0) + calculateShiftHours({ ...shift, date });
   }
   return weekly;
+}
+
+function dailyHoursFromShifts(shifts) {
+  const daily = {};
+  for (const shift of shifts) {
+    const date = asIsoDate(shift.date || shift.service_date);
+    if (!date) continue;
+    daily[date] = (daily[date] || 0) + calculateShiftHours({ ...shift, date });
+  }
+  return daily;
 }
 
 function maxRollingWeeklyAverage(weeklyHours, windowSize) {
@@ -866,12 +1169,27 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const caoEvidenceMode = body.cao_evidence_mode || (body.enforce_cao_evidence === true ? 'strict' : 'advisory');
 
   const periodShifts = shifts.filter(s => s.date >= periodStart && s.date <= periodEnd);
-  const serviceShifts = periodShifts.filter(s => !(s.is_time_window === true || s.roster_block_type === 'time_window' || s.block_type === 'time_window'));
+  const serviceShifts = periodShifts.filter(s =>
+    !(s.is_time_window === true || s.roster_block_type === 'time_window' || s.block_type === 'time_window') &&
+    !isConsignmentDutyPeriod(s) &&
+    !isAvailabilityDutyPeriod(s)
+  );
   const referenceServiceShifts = buildReferenceShifts(body, serviceShifts);
+  const consignmentDutyPeriods = normalizeDutyPeriods(body, periodStart, periodEnd, periodShifts);
+  const consignmentPeriods = consignmentDutyPeriods.filter(period => period.kind === 'consignment_duty');
+  const availabilityPeriods = consignmentDutyPeriods.filter(period => period.kind === 'availability_duty');
+  const consignmentCallbacks = normalizeConsignmentCallbacks(body, periodStart, periodEnd, serviceShifts);
+  const consignmentCallbackGroups = mergeConsignmentCallbackGroups(consignmentCallbacks);
+  const article27To29ServiceShifts = serviceShifts.filter(shift => !isConsignmentCallbackShift(shift));
+  const article27To29ReferenceServiceShifts = buildReferenceShifts(body, article27To29ServiceShifts)
+    .filter(shift => !isConsignmentCallbackShift(shift));
   const serviceIntervals = serviceIntervalsFromShifts(serviceShifts);
   const referenceServiceIntervals = serviceIntervalsFromShifts(referenceServiceShifts);
-  const serviceNightShiftDetails = nightShiftDetailsFromIntervals(serviceIntervals, body);
-  const referenceNightShiftDetails = nightShiftDetailsFromIntervals(referenceServiceIntervals, body);
+  const article27To29ServiceIntervals = serviceIntervalsFromShifts(article27To29ServiceShifts);
+  const article27To29ReferenceServiceIntervals = serviceIntervalsFromShifts(article27To29ReferenceServiceShifts);
+  const serviceNightShiftDetails = nightShiftDetailsFromIntervals(article27To29ServiceIntervals, body);
+  const referenceNightShiftDetails = nightShiftDetailsFromIntervals(article27To29ReferenceServiceIntervals, body);
+  const workingTimeNightShiftDetails = nightShiftDetailsFromIntervals(referenceServiceIntervals, body);
   const timeWindows = getRosterTimeWindows(body, periodStart, periodEnd, periodShifts);
   const periodDistance = daysBetween(periodEnd, periodStart);
   const periodDayCount = periodDistance !== null ? periodDistance + 1 : null;
@@ -1159,6 +1477,8 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
 
   const weeklyHours = weeklyHoursFromShifts(referenceServiceShifts);
   const weeklyHourRows = Object.entries(weeklyHours).map(([week_key, hours]) => ({ week_key, hours: round2(hours) }));
+  const article27To29WeeklyHours = weeklyHoursFromShifts(article27To29ReferenceServiceShifts);
+  const article27To29WeeklyHourRows = Object.entries(article27To29WeeklyHours).map(([week_key, hours]) => ({ week_key, hours: round2(hours) }));
   for (const row of weeklyHourRows) {
     if (row.hours > 60) {
       violations.push({
@@ -1230,6 +1550,9 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const rollingAverage16 = explicitAverage16 !== null
     ? { average_hours_per_week: explicitAverage16, week_keys: [] }
     : maxRollingWeeklyAverage(weeklyHours, 16);
+  const article27To29RollingAverage16 = explicitAverage16 !== null
+    ? { average_hours_per_week: explicitAverage16, week_keys: [] }
+    : maxRollingWeeklyAverage(article27To29WeeklyHours, 16);
   if (!specialWorkingTimeException) {
     if (rollingAverage16 === null) {
       addManualReview(manualReviewItems, 'CAO-PB-2024-R0628', 'working_time_average', 'Lever 16 aaneengesloten weken referentieuren aan om gemiddeld maximaal 48 uur per week te controleren.', 'rolling_16_week_reference_shifts');
@@ -1268,12 +1591,12 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     }
   }
 
-  const hasNightWork = referenceNightShiftDetails.length > 0;
+  const hasNightWorkForArticle26 = workingTimeNightShiftDetails.length > 0;
   const explicitNightAverage13 = numberOrNull(body.night_average_hours_13_week_reference ?? body.average_hours_13_week_night_reference);
   const nightAverage13 = explicitNightAverage13 !== null
     ? { average_hours_per_week: explicitNightAverage13, week_keys: [] }
     : rollingAverage13;
-  if (hasNightWork) {
+  if (hasNightWorkForArticle26) {
     if (nightAverage13 === null) {
       addManualReview(manualReviewItems, 'CAO-PB-2024-R0639', 'night_working_time_average', 'Lever 13 weken referentieuren aan om de nachtdienstlimiet van gemiddeld 38 uur per week te controleren.', 'night_average_hours_13_week_reference');
     } else if (nightAverage13.average_hours_per_week > 38) {
@@ -1290,6 +1613,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     }
   }
 
+  const hasNightWork = referenceNightShiftDetails.length > 0;
   for (const detail of serviceNightShiftDetails) {
     const nightShiftMaxHours = specialWorkingTimeException ? 10 : 9;
     const employeeConsentForLongNightShift = booleanOrNull(
@@ -1322,7 +1646,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   }
 
   const inferredNightBounds = dateBoundsFromIntervals(
-    referenceServiceIntervals,
+    article27To29ReferenceServiceIntervals,
     body.night_reference_period_start || body.working_time_reference_period_start || body.rolling_reference_period_start,
     body.night_reference_period_end || body.working_time_reference_period_end || body.rolling_reference_period_end
   );
@@ -1333,7 +1657,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const nightWeekRows = isoWeekRowsBetween(nightBounds.start, nightBounds.end);
   const nightSixteenWeekWindows = rollingWeekWindows(nightWeekRows, 16).map(window => {
     const details = shiftsWithinWindowByStart(referenceNightShiftDetails, window.start, window.end_exclusive);
-    const hours = weeklyHourRows
+    const hours = article27To29WeeklyHourRows
       .filter(row => window.week_keys.includes(row.week_key))
       .reduce((sum, row) => sum + row.hours, 0);
     return {
@@ -1367,7 +1691,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     week_keys: window.week_keys,
     start: formatIsoDateLocal(window.start),
     end_exclusive: formatIsoDateLocal(window.end_exclusive),
-    night_hours_00_06: round2(nightHoursWithinWindow(referenceServiceIntervals, window.start, window.end_exclusive))
+    night_hours_00_06: round2(nightHoursWithinWindow(article27To29ReferenceServiceIntervals, window.start, window.end_exclusive))
   }));
   const nightThirteenWeekWindows = rollingWeekWindows(nightWeekRows, 13).map(window => {
     const details = shiftsWithinWindowByStart(referenceNightShiftDetails, window.start, window.end_exclusive);
@@ -1425,11 +1749,11 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   }
 
   for (const detail of serviceNightShiftDetails) {
-    const currentIndex = referenceServiceIntervals.findIndex(interval =>
+    const currentIndex = article27To29ReferenceServiceIntervals.findIndex(interval =>
       interval.shift_id === detail.shift_id ||
       (interval.date === detail.date && interval.start.getTime() === detail.start.getTime() && interval.end.getTime() === detail.end.getTime())
     );
-    const next = referenceServiceIntervals
+    const next = article27To29ReferenceServiceIntervals
       .slice(Math.max(0, currentIndex + 1))
       .find(interval => interval.start >= detail.end);
     if (!next) continue;
@@ -1487,9 +1811,9 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     }
   }
 
-  for (let i = 0; i < serviceIntervals.length - 1; i++) {
-    const current = serviceIntervals[i];
-    const next = serviceIntervals[i + 1];
+  for (let i = 0; i < article27To29ServiceIntervals.length - 1; i++) {
+    const current = article27To29ServiceIntervals[i];
+    const next = article27To29ServiceIntervals[i + 1];
     const restHours = hoursBetweenDates(next.start, current.end);
     if (restHours < 11) {
       violations.push({
@@ -1515,7 +1839,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     const windowEndIso = addDays(windowStartIso, 7);
     const windowStart = dateFromIso(windowStartIso);
     const windowEnd = dateFromIso(windowEndIso);
-    const maxRest = maxContinuousRestHoursWithinWindow(referenceServiceIntervals, windowStart, windowEnd);
+    const maxRest = maxContinuousRestHoursWithinWindow(article27To29ReferenceServiceIntervals, windowStart, windowEnd);
     const ok = maxRest >= 36;
     sevenDayRestResults.push({ window_start: windowStartIso, window_end_exclusive: windowEndIso, max_continuous_rest_hours: round2(maxRest), compliant: ok });
   }
@@ -1524,7 +1848,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     const windowEndIso = addDays(windowStartIso, 14);
     const windowStart = dateFromIso(windowStartIso);
     const windowEnd = dateFromIso(windowEndIso);
-    const blocks = restBlocksWithinWindow(referenceServiceIntervals, windowStart, windowEnd);
+    const blocks = restBlocksWithinWindow(article27To29ReferenceServiceIntervals, windowStart, windowEnd);
     const totalRest = blocks.reduce((sum, block) => sum + block.hours, 0);
     const maxRestBlock = blocks.reduce((max, block) => Math.max(max, block.hours), 0);
     const eligibleSplitRest = blocks
@@ -1589,7 +1913,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
 
   const sundaysInPeriod = dateRange(periodStart, periodEnd).filter(date => dateFromIso(date)?.getDay() === 0);
   const workedSundaysThisPeriod = sundaysInPeriod.filter(date =>
-    serviceIntervals.some(interval => intervalOverlapsIsoDate(interval, date))
+    article27To29ServiceIntervals.some(interval => intervalOverlapsIsoDate(interval, date))
   );
   const freeSundaysThisPeriod = sundaysInPeriod.filter(date => !workedSundaysThisPeriod.includes(date));
   const freeSundaysYtdBefore = numberOrNull(body.free_sundays_year_to_date_before_period ?? body.free_sundays_ytd_before_period);
@@ -1856,7 +2180,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   }
 
   if (!isGeneralReserve) {
-    for (const shift of serviceShifts) {
+    for (const shift of article27To29ServiceShifts) {
       const shiftHours = calculateShiftHours(shift);
       const shiftBreaks = normalizeShiftBreaks(shift);
       const qualifyingBreaks = shiftBreaks.filter(item => item.counts_for_cao_break);
@@ -2027,7 +2351,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     );
     noBreakSixteenWeekAverage = explicitNoBreakAverage16 !== null
       ? { average_hours_per_week: explicitNoBreakAverage16, week_keys: [] }
-      : rollingAverage16;
+      : article27To29RollingAverage16;
     if (noBreakSixteenWeekAverage === null) {
       addManualReview(
         manualReviewItems,
@@ -2048,6 +2372,322 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
         manual_review_required: false
       });
     }
+  }
+
+  const hasConsignmentDuty = consignmentPeriods.length > 0;
+  const hasAvailabilityDuty = availabilityPeriods.length > 0;
+  const hasConsignmentCallbacks = consignmentCallbacks.length > 0;
+  const consignmentFreeBlocks = hasConsignmentDuty
+    ? freeBlocksWithoutDuty(consignmentPeriods, dateFromIso(periodStart), dateFromIso(addDays(periodEnd, 1)))
+    : [];
+  const consignmentSevenDayFreeBlocks = consignmentFreeBlocks.filter(block => block.hours >= 168);
+  const consignmentSevenDayFreeBlockCount = consignmentSevenDayFreeBlocks
+    .reduce((sum, block) => sum + Math.floor(block.hours / 168), 0);
+  const consignmentTwoWeekWindows = hasConsignmentDuty ? rollingDutyWindows(periodStart, periodEnd, 14, consignmentPeriods) : [];
+  const consignmentThreeWeekWindows = hasConsignmentDuty ? rollingDutyWindows(periodStart, periodEnd, 21, consignmentPeriods) : [];
+  const nightConsignmentDates = hasConsignmentDuty ? datesWithNightDuty(consignmentPeriods, periodStart, periodEnd) : [];
+  const protectedFreeDays = fixedFreeDaysForConsignment(body);
+
+  if (hasConsignmentDuty) {
+    if (booleanOrNull(body.consignment_conditions_or_pvt_confirmed ?? body.consignment_conditions_employee_representation_confirmed) !== true) {
+      addManualReview(
+        manualReviewItems,
+        'CAO-PB-2024-R0683',
+        'consignment_conditions',
+        'Leg vast dat consignatievoorwaarden in overleg met OR/PVT zijn vastgesteld.',
+        'consignment_conditions_or_pvt_confirmed'
+      );
+    }
+
+    const employeeAge = youthWorkerSummary.age_at_period_start ?? numberOrNull(body.employee_age ?? body.personnel_age ?? body.age);
+    const is55Plus = booleanOrNull(body.employee_55_or_older ?? body.is_55_plus ?? body.is_older_worker_55_plus) === true ||
+      (employeeAge !== null && employeeAge >= 55);
+    if (is55Plus && booleanOrNull(body.consignment_voluntary_confirmed ?? body.older_worker_consignment_voluntary_confirmed) !== true) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0684',
+        severity: 'medium',
+        message: 'Werknemer is 55 jaar of ouder; consignatie is vrijwillig en vrijwilligheid is niet bevestigd.',
+        payroll_impact: false,
+        manual_review_required: true,
+        required_consent_field: 'consignment_voluntary_confirmed'
+      });
+    }
+
+    if (periodDayCount !== null && periodDayCount >= 28 && consignmentSevenDayFreeBlockCount < 2) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0686',
+        severity: 'high',
+        message: 'In deze 4-wekenperiode zijn minder dan 2 aaneengesloten perioden van 7x24 uur zonder consignatie gevonden.',
+        payroll_impact: false,
+        seven_day_free_block_count: consignmentSevenDayFreeBlockCount,
+        manual_review_required: false
+      });
+    } else if (periodDayCount !== null && periodDayCount < 28) {
+      addManualReview(
+        manualReviewItems,
+        'CAO-PB-2024-R0686',
+        'consignment_free_7x24_blocks',
+        'Lever een volledige 4-wekenperiode aan om 2 perioden van 7x24 uur zonder consignatie te controleren.',
+        'period_start/period_end'
+      );
+    }
+
+    for (const detail of referenceNightShiftDetails) {
+      const minRestHours = detail.ends_on_or_before_0200 ? 11 : 14;
+      const afterRestStart = detail.end;
+      const afterRestEnd = new Date(detail.end.getTime() + minRestHours * 3600000);
+      const beforeRestStart = new Date(detail.start.getTime() - minRestHours * 3600000);
+      const beforeRestEnd = detail.start;
+      const overlapping = consignmentPeriods.filter(period =>
+        (period.start && period.end && intervalOverlapsRange(period, beforeRestStart, beforeRestEnd)) ||
+        (period.start && period.end && intervalOverlapsRange(period, afterRestStart, afterRestEnd))
+      );
+      if (overlapping.length > 0) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0687',
+          severity: 'high',
+          message: `Consignatie overlapt met de onafgebroken rusttijd voor of na nachtdienst ${detail.date}.`,
+          affected_shift_ids: [detail.shift_id, ...overlapping.map(period => period.shift_id)].filter(Boolean),
+          payroll_impact: false,
+          night_shift_date: detail.date,
+          min_rest_hours: minRestHours,
+          overlapping_consignment_periods: overlapping.map(period => ({ id: period.id, start_datetime: period.start_datetime, end_datetime: period.end_datetime })),
+          manual_review_required: false
+        });
+      }
+    }
+
+    if (booleanOrNull(body.consignment_statutory_rest_compliance_confirmed ?? body.statutory_rest_compliance_confirmed) !== true) {
+      addManualReview(
+        manualReviewItems,
+        'CAO-PB-2024-R0688',
+        'consignment_statutory_rest',
+        'Bevestig dat consignatie niet tijdens wettelijke rusttijden is opgelegd.',
+        'consignment_statutory_rest_compliance_confirmed'
+      );
+    }
+
+    if (protectedFreeDays.length < 4) {
+      addManualReview(
+        manualReviewItems,
+        'CAO-PB-2024-R0689',
+        'consignment_protected_free_days',
+        'Lever de 4 vastgestelde of gegarandeerde vrije dagen aan om consignatie daarop te blokkeren.',
+        'fixed_free_days/guaranteed_free_days'
+      );
+    }
+    const consignmentOnProtectedFreeDays = protectedFreeDays.filter(date =>
+      consignmentPeriods.some(period => period.start && period.end && intervalOverlapsIsoDate(period, date))
+    );
+    if (consignmentOnProtectedFreeDays.length > 0) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0689',
+        severity: 'high',
+        message: 'Consignatie is opgelegd tijdens vastgestelde/gegarandeerde vrije dagen.',
+        payroll_impact: false,
+        protected_free_days: consignmentOnProtectedFreeDays,
+        manual_review_required: false
+      });
+    }
+
+    for (const period of consignmentPeriods) {
+      if (!period.start || !period.end) {
+        addManualReview(manualReviewItems, 'CAO-PB-2024-R0681', 'consignment_period', 'Consignatieperiode mist begin- of eindtijd.', 'consignment_periods.start_time/end_time');
+        continue;
+      }
+      if (period.hours > 168) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0690',
+          severity: 'high',
+          message: `Consignatieperiode duurt ${period.hours} uur; werknemer mag niet verplicht langer dan 1 week consignatie draaien.`,
+          payroll_impact: false,
+          consignment_period: { id: period.id, start_datetime: period.start_datetime, end_datetime: period.end_datetime, hours: period.hours },
+          manual_review_required: false
+        });
+      }
+    }
+
+    const failingTwoWeekConsignmentWindows = consignmentTwoWeekWindows.filter(row => row.duty_hours > 168);
+    if (failingTwoWeekConsignmentWindows.length > 0) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0690',
+        severity: 'high',
+        message: 'Per 2 weken is meer dan 1 week consignatie opgelegd.',
+        payroll_impact: false,
+        failing_14_day_windows: failingTwoWeekConsignmentWindows.slice(0, 5),
+        manual_review_required: false
+      });
+    }
+
+    const failingThreeWeekNightWindows = consignmentThreeWeekWindows.filter(row => {
+      const nightDatesInWindow = nightConsignmentDates.filter(date => date >= row.window_start && date < row.window_end_exclusive);
+      return nightDatesInWindow.length > 7;
+    });
+    if (failingThreeWeekNightWindows.length > 0) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0690',
+        severity: 'high',
+        message: 'Consignatie tussen 00.00 en 06.00 uur komt meer dan 1 week voor binnen een 3-wekenperiode.',
+        payroll_impact: false,
+        failing_21_day_windows: failingThreeWeekNightWindows.slice(0, 5),
+        manual_review_required: false
+      });
+    } else if (nightConsignmentDates.length > 0 && booleanOrNull(body.night_consignment_once_per_3_weeks_confirmed) !== true) {
+      addManualReview(
+        manualReviewItems,
+        'CAO-PB-2024-R0690',
+        'night_consignment_frequency',
+        'Bevestig dat consignatie tussen 00.00 en 06.00 uur maximaal 1 keer per 3 weken is opgelegd.',
+        'night_consignment_once_per_3_weeks_confirmed'
+      );
+    }
+
+    for (const row of Object.entries(dailyHoursFromShifts(referenceServiceShifts)).map(([date, hours]) => ({ date, hours: round2(hours) }))) {
+      if (row.hours > 13) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0692',
+          severity: 'high',
+          message: `Bij consignatie is ${row.hours} uur arbeidstijd in 24 uur gevonden; maximaal 13 uur toegestaan.`,
+          payroll_impact: true,
+          date: row.date,
+          work_hours_24h: row.hours,
+          max_work_hours_24h: 13,
+          manual_review_required: false
+        });
+      }
+    }
+
+    for (const row of weeklyHourRows) {
+      if (row.hours > 60) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0693',
+          severity: 'high',
+          message: `Bij consignatie is ${row.hours} uur arbeidstijd in ${row.week_key} gevonden; maximaal 60 uur per week toegestaan.`,
+          payroll_impact: true,
+          week_key: row.week_key,
+          week_hours: row.hours,
+          max_week_hours: 60,
+          manual_review_required: false
+        });
+      }
+    }
+
+    if (rollingAverage13 === null) {
+      addManualReview(
+        manualReviewItems,
+        'CAO-PB-2024-R0694',
+        'consignment_working_time_average',
+        'Lever 13 weken referentieuren aan om gemiddeld maximaal 45 uur per week bij consignatie te controleren.',
+        'rolling_13_week_reference_shifts'
+      );
+    } else if (rollingAverage13.average_hours_per_week > 45) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0694',
+        severity: 'high',
+        message: `Bij consignatie is het gemiddelde ${round2(rollingAverage13.average_hours_per_week)} uur per week in 13 weken; maximaal 45 uur toegestaan.`,
+        payroll_impact: true,
+        average_hours_per_week: round2(rollingAverage13.average_hours_per_week),
+        max_average_hours_per_week: 45,
+        week_keys: rollingAverage13.week_keys || [],
+        manual_review_required: false
+      });
+    }
+
+    if (nightConsignmentDates.length > 0) {
+      if (nightAverage13 === null) {
+        addManualReview(
+          manualReviewItems,
+          'CAO-PB-2024-R0695',
+          'night_consignment_working_time_average',
+          'Lever 13 weken referentieuren aan om gemiddeld maximaal 38 uur per week bij nachtconsignatie te controleren.',
+          'night_average_hours_13_week_reference'
+        );
+      } else if (nightAverage13.average_hours_per_week > 38) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0695',
+          severity: 'high',
+          message: `Bij consignatie tussen 00.00 en 06.00 uur is het gemiddelde ${round2(nightAverage13.average_hours_per_week)} uur per week in 13 weken; maximaal 38 uur toegestaan.`,
+          payroll_impact: true,
+          average_hours_per_week: round2(nightAverage13.average_hours_per_week),
+          max_average_hours_per_week: 38,
+          week_keys: nightAverage13.week_keys || [],
+          manual_review_required: false
+        });
+      }
+    }
+  }
+
+  if (hasConsignmentCallbacks) {
+    skippedRules.push({
+      rule_id: 'CAO-PB-2024-R0700',
+      reason: 'Gewerkte uren na een oproep tijdens consignatie zijn niet meegenomen in de toepassing van artikel 27 lid 1/2, artikel 28 en artikel 29.',
+      affected_shift_ids: consignmentCallbacks.map(callback => callback.shift_id).filter(Boolean)
+    });
+  }
+
+  for (const callback of consignmentCallbacks) {
+    if (!callback.start || !callback.end) {
+      addManualReview(
+        manualReviewItems,
+        'CAO-PB-2024-R0697',
+        'consignment_callback',
+        'Oproep tijdens consignatie mist begin- of eindtijd; arbeidstijd en minimumvergoeding kunnen niet definitief worden berekend.',
+        'consignment_callouts.start_time/end_time'
+      );
+    }
+  }
+
+  for (const group of consignmentCallbackGroups) {
+    if (group.mandatory_training) {
+      skippedRules.push({
+        rule_id: 'CAO-PB-2024-R0704',
+        reason: 'Minimum van 3 uur betaling bij oproep tijdens consignatie is niet toegepast omdat het om verplichte opleiding gaat.',
+        callback_ids: group.callback_ids,
+        affected_shift_ids: group.shift_ids
+      });
+      continue;
+    }
+
+    payrollEntitlements.push({
+      rule_id: 'CAO-PB-2024-R0703',
+      related_rule_ids: [
+        'CAO-PB-2024-R0697',
+        group.has_half_hour_gap_rule ? 'CAO-PB-2024-R0698' : null,
+        'CAO-PB-2024-R0699',
+        'CAO-PB-2024-R0702'
+      ].filter(Boolean),
+      type: 'consignment_callback_minimum_pay_required',
+      callback_count: group.callback_count,
+      callback_ids: group.callback_ids,
+      affected_shift_ids: group.shift_ids,
+      start_datetime: group.start_datetime,
+      end_datetime: group.end_datetime,
+      raw_work_hours: group.raw_work_hours,
+      gap_hours_counted_as_work: group.gap_hours_counted_as_work,
+      payable_work_hours: group.payable_work_hours,
+      payroll_hours: group.payroll_hours,
+      minimum_pay_hours: 3,
+      base_hourly_rate: baseHourlyRate,
+      amount: baseHourlyRate !== null ? round2(group.payroll_hours * baseHourlyRate) : null,
+      consignment_allowance_retained: true,
+      message: 'Oproep tijdens consignatie: gewerkte uren worden betaald, tussenruimte binnen 30 minuten telt mee, arbeidstijd is minimaal 30 minuten per oproep en betaling is minimaal 3 uur.'
+    });
+  }
+
+  if (hasAvailabilityDuty) {
+    addManualReview(
+      manualReviewItems,
+      'CAO-PB-2024-R0706',
+      'availability_duty',
+      'Bereikbaarheidsdienst/piketdienst herkend: bevestig dat het alleen telefonisch advies betreft en geen locatie-oproep.',
+      'availability_periods'
+    );
+  }
+  if (hasAvailabilityDuty && hasConsignmentDuty) {
+    skippedRules.push({
+      rule_id: 'CAO-PB-2024-R0707',
+      reason: 'Werknemer kan tegelijk consignatiedienst en bereikbaarheidsdienst hebben; beide blokken zijn apart in de summary opgenomen.'
+    });
   }
 
   if (!isGeneralReserve) {
@@ -2281,6 +2921,56 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
       shift_change_allowance_excluded: isGeneralReserve
     },
     youth_worker_summary: youthWorkerSummary,
+    consignment_summary: {
+      has_consignment_duty: hasConsignmentDuty,
+      has_availability_duty: hasAvailabilityDuty,
+      has_consignment_callbacks: hasConsignmentCallbacks,
+      source_rule_ids: [
+        'CAO-PB-2024-R0680',
+        'CAO-PB-2024-R0681',
+        'CAO-PB-2024-R0683',
+        'CAO-PB-2024-R0684',
+        'CAO-PB-2024-R0686',
+        'CAO-PB-2024-R0687',
+        'CAO-PB-2024-R0688',
+        'CAO-PB-2024-R0689',
+        'CAO-PB-2024-R0690',
+        'CAO-PB-2024-R0692',
+        'CAO-PB-2024-R0693',
+        'CAO-PB-2024-R0694',
+        'CAO-PB-2024-R0695',
+        'CAO-PB-2024-R0697',
+        'CAO-PB-2024-R0698',
+        'CAO-PB-2024-R0699',
+        'CAO-PB-2024-R0700',
+        'CAO-PB-2024-R0701',
+        'CAO-PB-2024-R0702',
+        'CAO-PB-2024-R0703',
+        'CAO-PB-2024-R0704',
+        'CAO-PB-2024-R0705',
+        'CAO-PB-2024-R0706',
+        'CAO-PB-2024-R0707'
+      ],
+      consignment_periods: consignmentPeriods.map(period => ({
+        id: period.id,
+        start_datetime: period.start_datetime,
+        end_datetime: period.end_datetime,
+        hours: period.hours,
+        night_hours_00_06: period.night_hours_00_06
+      })),
+      availability_periods: availabilityPeriods.map(period => ({
+        id: period.id,
+        start_datetime: period.start_datetime,
+        end_datetime: period.end_datetime,
+        hours: period.hours,
+        night_hours_00_06: period.night_hours_00_06
+      })),
+      callback_groups: consignmentCallbackGroups,
+      protected_free_days: protectedFreeDays,
+      seven_day_free_block_count: consignmentSevenDayFreeBlockCount,
+      two_week_windows: consignmentTwoWeekWindows,
+      night_consignment_dates: nightConsignmentDates
+    },
     working_time_summary: {
       special_working_time_exception: specialWorkingTimeException,
       weekly_hours: weeklyHourRows,
