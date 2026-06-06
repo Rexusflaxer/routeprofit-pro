@@ -21,8 +21,20 @@ const CRITICAL_RULE_ID_NEEDLES = [
   'R181'
 ];
 
+const CAO_PB_2024_2026_SOURCE_COVERAGE_MINIMUMS = {
+  total: 2110,
+  automatic_or_calculation: 852,
+  validation_or_policy: 90,
+  workflow_or_documentation: 84
+};
+
 function normalizeDate(value) {
   return value ? String(value).slice(0, 10) : null;
+}
+
+function numberOrNull(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 function hasAnyNeedle(value, needles) {
@@ -41,6 +53,78 @@ function hasPayPeriods(config) {
   if (Array.isArray(payPeriods)) return payPeriods.length > 0;
   if (typeof payPeriods === 'object') return Object.keys(payPeriods).length > 0;
   return false;
+}
+
+function getDeclaredCoverageSummary(config) {
+  return config?.coverage_summary ||
+    config?.rule_engine_metadata?.coverage_summary ||
+    config?.source_coverage_summary ||
+    {};
+}
+
+function getSourceCoverageMinimums(config) {
+  const summary = getDeclaredCoverageSummary(config);
+  const minimums = { ...CAO_PB_2024_2026_SOURCE_COVERAGE_MINIMUMS };
+  const declaredTotal = numberOrNull(
+    summary.expected_total_rules ??
+    summary.total_atomic_rules ??
+    summary.total_source_rules ??
+    summary.total
+  );
+  if (declaredTotal && declaredTotal > minimums.total) minimums.total = declaredTotal;
+
+  const byLevel = summary.expected_automation_level_counts ||
+    summary.by_automation_level ||
+    summary.automation_level_counts ||
+    {};
+  for (const key of ['automatic_or_calculation', 'validation_or_policy', 'workflow_or_documentation']) {
+    const declared = numberOrNull(byLevel[key]);
+    if (declared && declared > minimums[key]) minimums[key] = declared;
+  }
+  return minimums;
+}
+
+function countRulesByAutomationLevel(rules) {
+  return rules.reduce((acc, rule) => {
+    const key = rule.automation_level || 'unknown';
+    acc[key] = (acc[key] || 0) + 1;
+    return acc;
+  }, {});
+}
+
+function evaluateSourceCoverageCompleteness(config, rules) {
+  const minimums = getSourceCoverageMinimums(config);
+  const uniqueRuleIds = new Set(rules.map(rule => rule.rule_id).filter(Boolean));
+  const byAutomationLevel = countRulesByAutomationLevel(rules);
+  const blockingFindings = [];
+
+  if (uniqueRuleIds.size < minimums.total) {
+    blockingFindings.push({
+      code: 'incomplete_source_rule_coverage',
+      severity: 'critical',
+      message: `CAO-broncoverage is incompleet: ${uniqueRuleIds.size} unieke regels aanwezig, minimaal ${minimums.total} verwacht voor CAO PB 2024-2026.`
+    });
+  }
+
+  for (const key of ['automatic_or_calculation', 'validation_or_policy', 'workflow_or_documentation']) {
+    const actual = byAutomationLevel[key] || 0;
+    const expected = minimums[key] || 0;
+    if (actual < expected) {
+      blockingFindings.push({
+        code: `incomplete_${key}_coverage`,
+        severity: 'critical',
+        message: `CAO-broncoverage voor ${key} is incompleet: ${actual} regels aanwezig, minimaal ${expected} verwacht.`
+      });
+    }
+  }
+
+  return {
+    passed: blockingFindings.length === 0,
+    unique_rule_ids: uniqueRuleIds.size,
+    by_automation_level: byAutomationLevel,
+    minimums,
+    blocking_findings: blockingFindings
+  };
 }
 
 function isReferenceOnly(rule) {
@@ -103,8 +187,13 @@ function summarizeRule(rule, extra = {}) {
 
 function evaluateCoverageGate(config, rules, options = {}) {
   const maxOpenRules = Math.max(1, Number(options.max_open_rules || 100));
+  const sourceCoverage = evaluateSourceCoverageCompleteness(config, rules);
   const counts = {
     total: rules.length,
+    unique_rule_ids: sourceCoverage.unique_rule_ids,
+    by_automation_level: sourceCoverage.by_automation_level,
+    source_coverage_minimums: sourceCoverage.minimums,
+    source_coverage_passed: sourceCoverage.passed,
     implemented: 0,
     partial: 0,
     missing: 0,
@@ -190,6 +279,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
   }
 
   const blockingFindings = [];
+  blockingFindings.push(...sourceCoverage.blocking_findings);
   if (!config?.valid_from) {
     blockingFindings.push({
       code: 'missing_effective_date',
@@ -250,6 +340,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
   let status = 'ready';
   if (blockingFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
   else if (blockingFindings.some(f => f.code === 'missing_rules')) status = 'blocked_missing_rules';
+  else if (blockingFindings.some(f => String(f.code || '').startsWith('incomplete_'))) status = 'blocked_incomplete_source_coverage';
   else if (blockingFindings.some(f => f.code === 'missing_wage_scales' || f.code === 'missing_pay_periods')) status = 'blocked_missing_payroll_parameters';
   else if (counts.payroll_critical_open > 0) status = 'blocked_incomplete_runtime_rules';
   else if (counts.manual_review_required > 0) status = 'manual_review_required';
@@ -259,6 +350,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
     status,
     checked_at: new Date().toISOString(),
     counts,
+    source_coverage: sourceCoverage,
     by_domain: countBy(rules, rule => rule.domain),
     by_automation_level: countBy(rules, rule => rule.automation_level),
     by_implementation_status: countBy(rules, rule => String(rule.implementation_status || 'MISSING').toUpperCase()),
