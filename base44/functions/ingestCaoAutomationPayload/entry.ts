@@ -319,6 +319,63 @@ async function findExistingCaoRule(base44, { ruleId, caoKey, configId }) {
   return null;
 }
 
+function buildIncompleteRuleImportGate(gate, processedRules, totalRules) {
+  const finding = {
+    code: 'incomplete_rule_registry_import',
+    severity: 'critical',
+    message: `CAO-registry import is nog niet compleet: ${processedRules} van ${totalRules} regels verwerkt. Payroll blijft geblokkeerd tot alle regels voor deze CAO-configuratie zijn opgeslagen.`
+  };
+  return {
+    ...(gate || {}),
+    passed: false,
+    status: 'blocked_incomplete_source_coverage',
+    counts: {
+      ...(gate?.counts || {}),
+      persisted_rule_import_count: processedRules,
+      expected_rule_import_count: totalRules
+    },
+    blocking_findings: [
+      finding,
+      ...((gate?.blocking_findings || []).filter(f => f.code !== finding.code))
+    ]
+  };
+}
+
+function uniqueRuleIds(rules) {
+  return new Set((Array.isArray(rules) ? rules : []).map(rule => rule.rule_id).filter(Boolean));
+}
+
+async function verifyPersistedRuleRegistry(base44, { caoKey, configId, candidateCfg, candidateRules }) {
+  const persistedRules = await base44.asServiceRole.entities.CAORule.filter({
+    cao_key: caoKey,
+    cao_configuration_id: configId
+  });
+  const expectedRuleIds = uniqueRuleIds(candidateRules);
+  const persistedRuleIds = uniqueRuleIds(persistedRules);
+  const missingRuleIds = [...expectedRuleIds].filter(ruleId => !persistedRuleIds.has(ruleId));
+  const sourceCoverage = evaluateSourceCoverageCompleteness(candidateCfg, persistedRules || []);
+  const blockingFindings = [];
+
+  if (missingRuleIds.length > 0) {
+    blockingFindings.push({
+      code: 'persisted_rule_registry_incomplete',
+      severity: 'critical',
+      message: `Niet alle CAO-regels zijn opgeslagen voor configuratie ${configId}: ${persistedRuleIds.size}/${expectedRuleIds.size} unieke regels aanwezig.`
+    });
+  }
+  blockingFindings.push(...sourceCoverage.blocking_findings);
+
+  return {
+    passed: blockingFindings.length === 0,
+    expected_unique_rule_count: expectedRuleIds.size,
+    persisted_unique_rule_count: persistedRuleIds.size,
+    missing_rule_ids: missingRuleIds.slice(0, 100),
+    missing_rule_ids_truncated: missingRuleIds.length > 100,
+    source_coverage: sourceCoverage,
+    blocking_findings: blockingFindings
+  };
+}
+
 function hasWageScales(candidateCfg) {
   return Object.keys(candidateCfg?.wage_scales || {}).length > 0 ||
     Object.keys(candidateCfg?.wage_scales_detailed || {}).length > 0;
@@ -766,24 +823,31 @@ Deno.serve(async (req) => {
     let configId = null;
     if (Object.keys(candidate_configuration).length > 0 || isOwnerApproved) {
       const existingConfigs = await base44.asServiceRole.entities.CAOConfiguration.filter({ cao_key });
+      const inProgressReadinessGate = buildIncompleteRuleImportGate(
+        payrollReadiness.gate,
+        0,
+        candidate_rules.length
+      );
 
       const configData = {
         ...candidate_configuration,
         cao_key,
-        status: isOwnerApproved ? 'active' : 'draft',
-        is_active: isOwnerApproved,
-        is_payroll_ready: payrollReadiness.is_payroll_ready,
-        payroll_readiness_status: payrollReadiness.status,
-        payroll_readiness_checked_at: payrollReadiness.gate.checked_at,
-        payroll_readiness_gate: payrollReadiness.gate,
+        status: 'draft',
+        is_active: false,
+        is_payroll_ready: false,
+        payroll_readiness_status: isOwnerApproved ? 'blocked_incomplete_source_coverage' : payrollReadiness.status,
+        payroll_readiness_checked_at: isOwnerApproved
+          ? (inProgressReadinessGate.checked_at || payrollReadiness.gate.checked_at)
+          : payrollReadiness.gate.checked_at,
+        payroll_readiness_gate: isOwnerApproved ? inProgressReadinessGate : payrollReadiness.gate,
         coverage_summary: {
           ...(candidate_configuration.coverage_summary || {}),
           payroll_readiness: {
-            status: payrollReadiness.status,
+            status: isOwnerApproved ? 'blocked_incomplete_source_coverage' : payrollReadiness.status,
             requested_payroll_ready: payrollReadiness.requested_payroll_ready,
-            passed: payrollReadiness.gate.passed,
-            counts: payrollReadiness.gate.counts,
-            blocking_findings: payrollReadiness.gate.blocking_findings
+            passed: isOwnerApproved ? false : payrollReadiness.gate.passed,
+            counts: isOwnerApproved ? inProgressReadinessGate.counts : payrollReadiness.gate.counts,
+            blocking_findings: isOwnerApproved ? inProgressReadinessGate.blocking_findings : payrollReadiness.gate.blocking_findings
           }
         },
         approval_source: approval?.approval_source || 'cloudflare_relay',
@@ -847,6 +911,77 @@ Deno.serve(async (req) => {
         await base44.asServiceRole.entities.CAORule.create(ruleData);
       }
       rulesUpserted++;
+    }
+
+    if (isOwnerApproved && configId) {
+      const persistedRegistry = await verifyPersistedRuleRegistry(base44, {
+        caoKey: cao_key,
+        configId,
+        candidateCfg: candidate_configuration,
+        candidateRules: candidate_rules
+      });
+      if (!persistedRegistry.passed) {
+        const registryBlockedGate = {
+          ...payrollReadiness.gate,
+          passed: false,
+          status: 'blocked_incomplete_source_coverage',
+          persisted_rule_registry: persistedRegistry,
+          blocking_findings: [
+            ...persistedRegistry.blocking_findings,
+            ...(payrollReadiness.gate.blocking_findings || [])
+          ]
+        };
+        await base44.asServiceRole.entities.CAOConfiguration.update(configId, {
+          is_active: false,
+          is_payroll_ready: false,
+          status: 'draft',
+          payroll_readiness_status: 'blocked_incomplete_source_coverage',
+          payroll_readiness_checked_at: registryBlockedGate.checked_at || now,
+          payroll_readiness_gate: registryBlockedGate
+        });
+        await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, {
+          finished_at: new Date().toISOString(),
+          status: 'failed',
+          payroll_readiness_status: 'blocked_incomplete_source_coverage',
+          coverage_gate: registryBlockedGate,
+          error_message: 'CAO-registry import incompleet; configuratie niet geactiveerd.',
+          summary: `Owner-approved CAO ingest geblokkeerd: ${persistedRegistry.persisted_unique_rule_count}/${persistedRegistry.expected_unique_rule_count} regels opgeslagen voor config ${configId}.`
+        });
+        return Response.json({
+          success: false,
+          idempotency_key,
+          import_run_id: importRun.id,
+          cao_configuration_id: configId,
+          applied: false,
+          reason: 'persisted_rule_registry_incomplete',
+          payroll_readiness_status: 'blocked_incomplete_source_coverage',
+          persisted_rule_registry: persistedRegistry,
+          coverage_gate: registryBlockedGate
+        }, { status: 422 });
+      }
+
+      await base44.asServiceRole.entities.CAOConfiguration.update(configId, {
+        status: 'active',
+        is_active: true,
+        is_payroll_ready: payrollReadiness.is_payroll_ready,
+        payroll_readiness_status: payrollReadiness.status,
+        payroll_readiness_checked_at: payrollReadiness.gate.checked_at,
+        payroll_readiness_gate: payrollReadiness.gate,
+        coverage_summary: {
+          ...(candidate_configuration.coverage_summary || {}),
+          payroll_readiness: {
+            status: payrollReadiness.status,
+            requested_payroll_ready: payrollReadiness.requested_payroll_ready,
+            passed: payrollReadiness.gate.passed,
+            counts: payrollReadiness.gate.counts,
+            blocking_findings: payrollReadiness.gate.blocking_findings,
+            persisted_rule_registry: {
+              expected_unique_rule_count: persistedRegistry.expected_unique_rule_count,
+              persisted_unique_rule_count: persistedRegistry.persisted_unique_rule_count
+            }
+          }
+        }
+      });
     }
 
     // Create CAOChangeReview records
