@@ -15,7 +15,7 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 
 /**
  * CAO PB planning-validator
- * Bronregels: R0547-R0549 en R0560-R0591 (rooster, tijdvakken, roosterwijziging, verschuiving en overwerkbasis)
+ * Bronregels: R0547-R0549 en R0560-R0603 (rooster, tijdvakken, roosterwijziging, overwerkbasis en minuren)
  *
  * Scope-bewust:
  * - Artikel 3 lid 2 sluit uit: art. 10, art. 9 lid 1 sub c, hfdst. 4 (behalve 37/38/41), hfdst. 5, bijlage 2.
@@ -275,6 +275,32 @@ function addManualReview(manualReviewItems, ruleId, domain, message, field = nul
   });
 }
 
+function resolveAgreedPeriodHours(body) {
+  return numberOrNull(
+    body.contract_hours_per_period ??
+    body.agreed_hours_per_period ??
+    body.arbeidsduur_per_loonperiode ??
+    body.period_contract_hours ??
+    body.contract_period_hours
+  );
+}
+
+function maxMinusHoursBalanceForPeriod(periodStart) {
+  const year = Number(String(periodStart || '').slice(0, 4));
+  if (!Number.isFinite(year)) {
+    return {
+      max_balance: 40,
+      source_rule_id: 'CAO-PB-2024-R0602',
+      schedule_year: null
+    };
+  }
+  if (year <= 2018) return { max_balance: 80, source_rule_id: 'CAO-PB-2024-R0598', schedule_year: year };
+  if (year === 2019) return { max_balance: 70, source_rule_id: 'CAO-PB-2024-R0599', schedule_year: year };
+  if (year === 2020) return { max_balance: 60, source_rule_id: 'CAO-PB-2024-R0600', schedule_year: year };
+  if (year === 2021) return { max_balance: 50, source_rule_id: 'CAO-PB-2024-R0601', schedule_year: year };
+  return { max_balance: 40, source_rule_id: 'CAO-PB-2024-R0602', schedule_year: year };
+}
+
 function shiftHasContractContext(shift) {
   return !!(
     shift.company_id ||
@@ -303,6 +329,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const warnings = [];
   const skippedRules = [];
   const payrollEntitlements = [];
+  const payrollAdjustments = [];
   const manualReviewItems = [];
   const missingEvidence = [];
   const caoEvidenceMode = body.cao_evidence_mode || (body.enforce_cao_evidence === true ? 'strict' : 'advisory');
@@ -471,6 +498,99 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
       note: `${Math.round(overtimeHours * 10) / 10} uur boven 152h gesignaleerd - geen automatische toeslag.`
     });
     warnings.push(`${Math.round(overtimeHours * 10) / 10} uur boven 152h in deze periode. Overwerktoeslag (art. 42) niet van toepassing (art. 3 lid 2).`);
+  }
+
+  const agreedPeriodHours = resolveAgreedPeriodHours(body);
+  const previousMinusHoursBalance = numberOrNull(body.previous_minus_hours_balance ?? body.minus_hours_balance_before_period) ?? 0;
+  const recoveredMinusHours = numberOrNull(
+    body.recovered_minus_hours_this_period ??
+    body.minus_hours_recovered_this_period ??
+    body.minus_hours_makeup_hours
+  ) ?? 0;
+  const baseHourlyRate = numberOrNull(body.base_hourly_rate ?? body.base_hourly_wage ?? body.hourly_wage);
+  const minusHoursGenerated = agreedPeriodHours !== null ? Math.max(0, agreedPeriodHours - totalHours) : null;
+  const minusHoursBalanceInfo = maxMinusHoursBalanceForPeriod(periodStart);
+  const minusHoursBalanceAfterPeriod = minusHoursGenerated !== null
+    ? Math.max(0, previousMinusHoursBalance + minusHoursGenerated - recoveredMinusHours)
+    : null;
+
+  if (agreedPeriodHours === null) {
+    addManualReview(
+      manualReviewItems,
+      'CAO-PB-2024-R0593',
+      'minus_hours',
+      'Contractuele arbeidsduur per loonperiode ontbreekt; minuren kunnen niet worden vastgesteld.',
+      'contract_hours_per_period'
+    );
+    missingEvidence.push({ rule_id: 'CAO-PB-2024-R0593', field: 'contract_hours_per_period' });
+  } else if (minusHoursGenerated > 0) {
+    payrollEntitlements.push({
+      rule_id: 'CAO-PB-2024-R0593',
+      type: 'minus_hours_paid_current_period',
+      agreed_period_hours: round2(agreedPeriodHours),
+      worked_period_hours: round2(totalHours),
+      minus_hours: round2(minusHoursGenerated),
+      base_hourly_rate: baseHourlyRate,
+      amount: baseHourlyRate !== null ? round2(minusHoursGenerated * baseHourlyRate) : null,
+      message: 'Minuren ontstaan in deze loonperiode en moeten in deze loonperiode worden betaald.'
+    });
+    if (minusHoursGenerated > 24) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0597',
+        severity: 'high',
+        message: `${round2(minusHoursGenerated)} minuren opgebouwd in deze loonperiode; maximaal 24 minuren per loonperiode toegestaan.`,
+        payroll_impact: true,
+        minus_hours: round2(minusHoursGenerated),
+        max_minus_hours_per_period: 24,
+        manual_review_required: false
+      });
+    }
+  }
+
+  if (recoveredMinusHours > 0) {
+    payrollAdjustments.push({
+      rule_id: 'CAO-PB-2024-R0595',
+      type: 'minus_hours_recovery_no_second_payment',
+      recovered_minus_hours: round2(recoveredMinusHours),
+      message: 'Ingehaalde minuren worden niet nog eens betaald, omdat ze in de ontstaanperiode al zijn betaald.'
+    });
+    if (totalHours >= 144 && booleanOrNull(body.minus_hours_recovery_consultation_confirmed) !== true) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0596',
+        severity: 'medium',
+        message: `Inhalen van minuren vanaf 144 uur per loonperiode vereist overleg; ${round2(totalHours)} uur arbeidstijd gepland.`,
+        payroll_impact: true,
+        total_hours: round2(totalHours),
+        recovered_minus_hours: round2(recoveredMinusHours),
+        manual_review_required: true
+      });
+    }
+    if (isParttimeFixedModel && booleanOrNull(body.parttime_fixed_minus_hours_recovery_consent_confirmed) !== true) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0603',
+        severity: 'high',
+        message: 'Parttimer met vast model mag minuren alleen inhalen als werknemer daarmee instemt.',
+        payroll_impact: true,
+        recovered_minus_hours: round2(recoveredMinusHours),
+        required_consent_field: 'parttime_fixed_minus_hours_recovery_consent_confirmed',
+        manual_review_required: true
+      });
+    }
+  }
+
+  if (minusHoursBalanceAfterPeriod !== null && minusHoursBalanceAfterPeriod > minusHoursBalanceInfo.max_balance) {
+    violations.push({
+      rule_id: minusHoursBalanceInfo.source_rule_id,
+      severity: 'high',
+      message: `Minurensaldo na deze loonperiode is ${round2(minusHoursBalanceAfterPeriod)} uur; maximaal ${minusHoursBalanceInfo.max_balance} uur toegestaan voor ${minusHoursBalanceInfo.schedule_year || 'deze periode'}.`,
+      payroll_impact: true,
+      previous_minus_hours_balance: round2(previousMinusHoursBalance),
+      generated_minus_hours: round2(minusHoursGenerated),
+      recovered_minus_hours: round2(recoveredMinusHours),
+      minus_hours_balance_after_period: round2(minusHoursBalanceAfterPeriod),
+      max_minus_hours_balance: minusHoursBalanceInfo.max_balance,
+      manual_review_required: false
+    });
   }
 
   const start = new Date(periodStart), end = new Date(periodEnd);
@@ -737,9 +857,20 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     total_roster_block_hours: round2(rosterBlockHours),
     overtime_hours: Math.round(overtimeHours * 100) / 100,
     free_days_count: freeDaysCount,
+    minus_hours_summary: {
+      agreed_period_hours: agreedPeriodHours === null ? null : round2(agreedPeriodHours),
+      worked_period_hours: round2(totalHours),
+      generated_minus_hours: minusHoursGenerated === null ? null : round2(minusHoursGenerated),
+      recovered_minus_hours: round2(recoveredMinusHours),
+      previous_minus_hours_balance: round2(previousMinusHoursBalance),
+      minus_hours_balance_after_period: minusHoursBalanceAfterPeriod === null ? null : round2(minusHoursBalanceAfterPeriod),
+      max_minus_hours_balance: minusHoursBalanceInfo.max_balance,
+      max_minus_hours_balance_source_rule_id: minusHoursBalanceInfo.source_rule_id
+    },
     violations,
     warnings,
     payroll_entitlements: payrollEntitlements,
+    payroll_adjustments: payrollAdjustments,
     skipped_rules: skippedRules,
     missing_evidence: missingEvidence,
     manual_review_items: manualReviewItems,
