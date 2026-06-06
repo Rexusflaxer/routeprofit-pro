@@ -97,6 +97,12 @@ function shiftHasContractContext(shift) {
     shift.cao_function_level ||
     shift.required_cao_function_level ||
     shift.task_type ||
+    shift.customer_billable !== undefined ||
+    shift.counts_toward_required_staffing !== undefined ||
+    shift.internship_practice_trainer_personnel_id ||
+    shift.internship_mentor_personnel_id ||
+    shift.internship_one_to_one_guidance_confirmed !== undefined ||
+    shift.internship_uniform_label_confirmed !== undefined ||
     shift.contract_assignment_policy
   );
 }
@@ -276,6 +282,12 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
           cao_function_group: serviceContext.cao_function_group || shift.required_cao_function_group || shift.cao_function_group || null,
           cao_function_level: serviceContext.cao_function_level || shift.required_cao_function_level || shift.cao_function_level || null,
           security_role_status: serviceContext.security_role_status || shift.required_security_role_status || shift.security_role_status || null,
+          customer_billable: serviceContext.customer_billable ?? shift.customer_billable ?? null,
+          counts_toward_required_staffing: serviceContext.counts_toward_required_staffing ?? shift.counts_toward_required_staffing ?? null,
+          internship_practice_trainer_personnel_id: serviceContext.internship_practice_trainer_personnel_id || shift.internship_practice_trainer_personnel_id || null,
+          internship_mentor_personnel_id: serviceContext.internship_mentor_personnel_id || shift.internship_mentor_personnel_id || null,
+          internship_one_to_one_guidance_confirmed: serviceContext.internship_one_to_one_guidance_confirmed ?? shift.internship_one_to_one_guidance_confirmed ?? null,
+          internship_uniform_label_confirmed: serviceContext.internship_uniform_label_confirmed ?? shift.internship_uniform_label_confirmed ?? null,
           contract_assignment_policy: serviceContext.contract_assignment_policy || shift.contract_assignment_policy || body.contract_assignment_policy || 'strict_contract_match'
         }
       });

@@ -101,6 +101,46 @@ function calculateContractDurationBoundary(contract_start_date, contract_end_dat
   };
 }
 
+function calculateContractDurationBoundaryForMonths(contract_start_date, contract_end_date, months) {
+  const startIso = asIsoDate(contract_start_date);
+  const endIso = asIsoDate(contract_end_date);
+  const boundaryDate = startIso ? addCalendarMonths(startIso, months) : null;
+  const exactLastDay = boundaryDate ? addDays(boundaryDate, -1) : null;
+
+  if (!startIso || !endIso) {
+    return {
+      contract_duration_months: null,
+      boundary_date: boundaryDate,
+      exact_last_day: exactLastDay,
+      exceeds_boundary: null,
+      warning: !startIso
+        ? 'Geen startdatum opgegeven; contractduur kan niet worden bepaald.'
+        : 'Geen einddatum opgegeven; contractduur kan niet worden bepaald.'
+    };
+  }
+
+  const start = dateFromIso(startIso);
+  const end = dateFromIso(endIso);
+  if (!start || !end || end < start) {
+    return {
+      contract_duration_months: null,
+      boundary_date: boundaryDate,
+      exact_last_day: exactLastDay,
+      exceeds_boundary: null,
+      warning: 'Contractdatums zijn ongeldig of einddatum ligt voor startdatum.'
+    };
+  }
+
+  const durationMonths = (end - start) / (1000 * 60 * 60 * 24 * 30.44);
+  return {
+    contract_duration_months: Math.round(durationMonths * 10) / 10,
+    boundary_date: boundaryDate,
+    exact_last_day: exactLastDay,
+    exceeds_boundary: boundaryDate ? endIso >= boundaryDate : null,
+    warning: null
+  };
+}
+
 function normalizeScope(caoScope) {
   return caoScope || {
     cao_scope_profile: 'unknown_manual_review',
@@ -398,6 +438,12 @@ function numberOrNull(value) {
 function normalizeArray(value) {
   if (!value) return [];
   return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean);
+}
+
+function booleanOrNull(value) {
+  if (value === true || value === 'true') return true;
+  if (value === false || value === 'false') return false;
+  return null;
 }
 
 function hasFixedPayPeriodHours(input) {
@@ -962,33 +1008,329 @@ function evaluateEmployeeFixedHoursRequest(input, isCallAgreement) {
   };
 }
 
+function inferInternshipType(input) {
+  const explicit = input.internship_type || input.stage_type || input.internship_source || null;
+  if (explicit && explicit !== 'unknown') return explicit;
+  if (input.uwv_trial_placement === true) return 'uwv_trial_placement';
+  if (input.reintegration_measure === true) return 'reintegration_measure';
+  if (input.second_track_reintegration === true) return 'second_track_reintegration';
+  if (input.bol_internship === true) return 'bol';
+  if (input.contract_form === 'stage') return 'unknown';
+  return 'not_applicable';
+}
+
+function addMissingInternshipEvidence(target, condition, ruleId, message, field) {
+  if (condition) return;
+  target.push({
+    rule_id: ruleId,
+    field,
+    message
+  });
+}
+
+function evaluateInternshipContractRules(input) {
+  const internshipType = inferInternshipType(input);
+  const isInternship = input.contract_form === 'stage' ||
+    !['not_applicable', null, undefined].includes(internshipType);
+
+  if (!isInternship) {
+    return {
+      is_internship: false,
+      internship_type: 'not_applicable',
+      internship_rule_status: 'not_applicable',
+      internship_compliant: true,
+      manual_review_required: false,
+      source_rule_ids: [],
+      warnings: [],
+      contract_rule_violations: [],
+      payroll_entitlements: [],
+      recommended_contract_update: null,
+      internship_rule_profile: null
+    };
+  }
+
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0401', 'CAO-PB-2024-R0402', 'CAO-PB-2024-R0403',
+    'CAO-PB-2024-R0404', 'CAO-PB-2024-R0405', 'CAO-PB-2024-R0407',
+    'CAO-PB-2024-R0408', 'CAO-PB-2024-R0409', 'CAO-PB-2024-R0410',
+    'CAO-PB-2024-R0411', 'CAO-PB-2024-R0412', 'CAO-PB-2024-R0414',
+    'CAO-PB-2024-R0415', 'CAO-PB-2024-R0417', 'CAO-PB-2024-R0418',
+    'CAO-PB-2024-R0419', 'CAO-PB-2024-R0420', 'CAO-PB-2024-R0421',
+    'CAO-PB-2024-R0422'
+  ];
+  const warnings = [];
+  const violations = [];
+  const payrollEntitlements = [];
+  const missingEvidence = [];
+  const duration = calculateContractDurationBoundaryForMonths(input.contract_start_date, input.contract_end_date, 2);
+
+  if (input.contract_form !== 'stage') {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0414',
+      severity: 'high',
+      message: 'Stagecontext is opgegeven, maar contract_form is geen stage. Een stagiair krijgt volgens de CAO een stage-overeenkomst, geen arbeidsovereenkomst.'
+    });
+  }
+
+  if (booleanOrNull(input.internship_has_employment_contract) === true) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0414',
+      severity: 'high',
+      message: 'Stagiair is gemarkeerd met een arbeidsovereenkomst; artikel 14 schrijft een stage-overeenkomst voor.'
+    });
+  }
+
+  if (internshipType === 'unknown') {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0402',
+      field: 'internship_type',
+      message: 'Type stage ontbreekt: BOL, UWV-proefplaatsing, reintegratiemaatregel of tweede spoor moet worden vastgelegd.'
+    });
+  }
+
+  if (internshipType === 'uwv_trial_placement') {
+    if (duration.warning) {
+      warnings.push(`UWV-proefplaatsing: ${duration.warning}`);
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0403',
+        field: 'contract_start_date/contract_end_date',
+        message: 'Start- en einddatum zijn nodig om de maximale UWV-proefplaatsing van 2 maanden te controleren.'
+      });
+    } else if (duration.exceeds_boundary === true) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0403',
+        severity: 'high',
+        message: `UWV-proefplaatsing duurt langer dan maximaal 2 maanden. Laatste toegestane dag is ${duration.exact_last_day}.`,
+        contract_duration_months: duration.contract_duration_months,
+        max_duration_months: 2,
+        two_month_boundary_date: duration.boundary_date,
+        two_month_exact_last_day: duration.exact_last_day
+      });
+    }
+  }
+
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.internship_supervision_confirmed) === true,
+    'CAO-PB-2024-R0401',
+    'Bevestig dat de stagiair onder begeleiding relevante praktijkervaring opdoet.',
+    'internship_supervision_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.internship_relevant_practical_experience_confirmed) === true,
+    'CAO-PB-2024-R0401',
+    'Bevestig dat de stage relevante praktijkervaring als beveiliger betreft.',
+    'internship_relevant_practical_experience_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.internship_above_strength_confirmed) === true,
+    'CAO-PB-2024-R0407',
+    'Bevestig dat de stagiair boven de sterkte wordt ingezet en niet in plaats van een gediplomeerde beveiliger.',
+    'internship_above_strength_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.internship_not_customer_billed_confirmed) === true,
+    'CAO-PB-2024-R0408',
+    'Bevestig dat de stagiair niet aan de klant wordt doorberekend.',
+    'internship_not_customer_billed_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.internship_rostered_confirmed) === true,
+    'CAO-PB-2024-R0409',
+    'Bevestig dat de stagiair in het rooster wordt opgenomen.',
+    'internship_rostered_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    !!(input.internship_practice_trainer_personnel_id || input.internship_mentor_personnel_id || input.internship_mentor_name),
+    'CAO-PB-2024-R0410',
+    'Leg per stagiair een praktijkopleider/mentor vast.',
+    'internship_practice_trainer_personnel_id'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.internship_one_to_one_guidance_confirmed) === true,
+    'CAO-PB-2024-R0411',
+    'Bevestig 1-op-1 begeleiding: per dag evenveel stagiairs als praktijkopleiders.',
+    'internship_one_to_one_guidance_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.internship_uniform_label_confirmed) === true,
+    'CAO-PB-2024-R0412',
+    'Bevestig dat de stagiair herkenbaar is als stagiair op het uniform.',
+    'internship_uniform_label_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.internship_agreement_with_institution_confirmed) === true,
+    'CAO-PB-2024-R0415',
+    'Bevestig dat de stage-overeenkomst ook met onderwijsinstelling of re-integratie-instelling is gesloten.',
+    'internship_agreement_with_institution_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    !!input.contract_start_date && !!input.contract_end_date,
+    'CAO-PB-2024-R0417',
+    'Leg begin- en einddatum van de stage vast.',
+    'contract_start_date/contract_end_date'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    !!input.internship_assignment_description,
+    'CAO-PB-2024-R0418',
+    'Leg vast welke werkzaamheden voor de stage-opdracht worden gedaan.',
+    'internship_assignment_description'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    !!(input.internship_mentor_personnel_id || input.internship_mentor_name || input.internship_practice_trainer_personnel_id),
+    'CAO-PB-2024-R0419',
+    'Leg vast wie de mentor is.',
+    'internship_mentor_personnel_id'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.internship_working_times_documented) === true,
+    'CAO-PB-2024-R0420',
+    'Leg de werktijden in de stage-overeenkomst vast.',
+    'internship_working_times_documented'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.internship_evaluation_agreement_documented) === true,
+    'CAO-PB-2024-R0421',
+    'Leg vast wanneer en hoe de stage wordt geevalueerd.',
+    'internship_evaluation_agreement_documented'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.internship_compensation_documented) === true,
+    'CAO-PB-2024-R0422',
+    'Leg vast of een stagevergoeding geldt en zo ja hoe hoog die is.',
+    'internship_compensation_documented'
+  );
+
+  if (booleanOrNull(input.internship_compensation_applies) === true) {
+    const compensationAmount = numberOrNull(input.internship_compensation_amount);
+    if (compensationAmount === null) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0422',
+        field: 'internship_compensation_amount',
+        message: 'Stagevergoeding is van toepassing, maar de hoogte is niet vastgelegd.'
+      });
+    } else {
+      payrollEntitlements.push({
+        rule_id: 'CAO-PB-2024-R0422',
+        type: 'internship_compensation_due_if_agreed',
+        amount: compensationAmount,
+        message: 'Stagevergoeding is contractueel vastgelegd en moet volgens de stage-overeenkomst worden meegenomen.'
+      });
+    }
+  }
+
+  if (booleanOrNull(input.internship_counts_toward_required_staffing) === true) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0407',
+      severity: 'high',
+      field: 'internship_counts_toward_required_staffing',
+      message: 'Stagiair mag niet in plaats van een gediplomeerde beveiliger worden ingezet.'
+    });
+  }
+  if (booleanOrNull(input.internship_customer_billed) === true) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0408',
+      severity: 'high',
+      field: 'internship_customer_billed',
+      message: 'Stagiair mag niet aan de klant worden doorberekend.'
+    });
+  }
+
+  const hasBlockingViolation = violations.some(v => v.severity === 'high' || v.severity === 'critical');
+  const manualReviewRequired = missingEvidence.length > 0;
+
+  return {
+    is_internship: true,
+    internship_type: internshipType,
+    internship_rule_status: hasBlockingViolation
+      ? 'blocked'
+      : manualReviewRequired
+      ? 'manual_review_required'
+      : 'compliant',
+    internship_compliant: !hasBlockingViolation && !manualReviewRequired,
+    manual_review_required: manualReviewRequired,
+    source_rule_ids: [...new Set(sourceRuleIds)],
+    warnings,
+    missing_evidence: missingEvidence,
+    contract_rule_violations: violations,
+    payroll_entitlements: payrollEntitlements,
+    recommended_contract_update: {
+      internship_type: internshipType,
+      internship_roster_required: true,
+      internship_only_chapter_3_applies: true,
+      internship_has_employment_contract: false
+    },
+    internship_rule_profile: {
+      apply_only_chapter_3: true,
+      apply_wage_scales: false,
+      apply_chapter_4_allowances: false,
+      apply_chapter_5_reimbursements: false,
+      must_be_rostered: true,
+      must_be_above_strength: true,
+      customer_billing_allowed: false,
+      one_to_one_guidance_required: true,
+      visible_as_intern_required: true
+    },
+    duration_check: {
+      contract_duration_months: duration.contract_duration_months,
+      max_duration_months: internshipType === 'uwv_trial_placement' ? 2 : null,
+      two_month_boundary_date: internshipType === 'uwv_trial_placement' ? duration.boundary_date : null,
+      two_month_exact_last_day: internshipType === 'uwv_trial_placement' ? duration.exact_last_day : null,
+      exceeds_two_months: internshipType === 'uwv_trial_placement' ? duration.exceeds_boundary : null
+    }
+  };
+}
+
 function buildFullContractRuleResult(input, caoScope) {
   const probation = calculateProbationPeriod(input, caoScope);
   const callAgreement = evaluateCallAgreementRules(input);
+  const internship = evaluateInternshipContractRules(input);
   const sourceRuleIds = [...new Set([
     ...(probation.source_rule_ids || []),
-    ...(callAgreement.source_rule_ids || [])
+    ...(callAgreement.source_rule_ids || []),
+    ...(internship.source_rule_ids || [])
   ])];
   const warnings = [
     ...(probation.warnings || []),
-    ...(callAgreement.warnings || [])
+    ...(callAgreement.warnings || []),
+    ...(internship.warnings || [])
   ];
   const scopeWarnings = probation.scope_warnings || [];
   const contractRuleViolations = [
     ...(probation.contract_rule_violations || []),
-    ...(callAgreement.contract_rule_violations || [])
+    ...(callAgreement.contract_rule_violations || []),
+    ...(internship.contract_rule_violations || [])
   ];
-  const payrollEntitlements = callAgreement.payroll_entitlements || [];
+  const payrollEntitlements = [
+    ...(callAgreement.payroll_entitlements || []),
+    ...(internship.payroll_entitlements || [])
+  ];
   const hasBlockingViolation = contractRuleViolations.some(v => v.severity === 'high' || v.severity === 'critical');
   const manualReviewRequired = probation.manual_review_required === true ||
-    callAgreement.call_agreement_status === 'manual_review_required';
+    callAgreement.call_agreement_status === 'manual_review_required' ||
+    internship.internship_rule_status === 'manual_review_required';
   const contractRuleStatus = hasBlockingViolation ||
     probation.contract_rule_status === 'blocked' ||
-    callAgreement.call_agreement_status === 'blocked'
+    callAgreement.call_agreement_status === 'blocked' ||
+    internship.internship_rule_status === 'blocked'
     ? 'blocked'
     : manualReviewRequired
     ? 'manual_review_required'
-    : probation.probation_compliant === true && callAgreement.call_agreement_compliant === true
+    : probation.probation_compliant === true && callAgreement.call_agreement_compliant === true && internship.internship_compliant === true
     ? 'compliant'
     : 'calculated';
 
@@ -1010,6 +1352,7 @@ function buildFullContractRuleResult(input, caoScope) {
       contract_rule_violations: probation.contract_rule_violations
     },
     call_agreement_rule_result: callAgreement,
+    internship_rule_result: internship,
     call_agreement: {
       is_call_agreement: callAgreement.is_call_agreement,
       call_agreement_type: callAgreement.call_agreement_type,
@@ -1021,6 +1364,15 @@ function buildFullContractRuleResult(input, caoScope) {
       employee_fixed_hours_request: callAgreement.employee_fixed_hours_request,
       call_notice_validation: callAgreement.call_notice_validation
     },
+    internship: {
+      is_internship: internship.is_internship,
+      internship_type: internship.internship_type,
+      internship_rule_status: internship.internship_rule_status,
+      internship_compliant: internship.internship_compliant,
+      missing_evidence: internship.missing_evidence || [],
+      duration_check: internship.duration_check || null,
+      internship_rule_profile: internship.internship_rule_profile || null
+    },
     source_rule_ids: sourceRuleIds,
     warnings,
     scope_warnings: scopeWarnings,
@@ -1030,7 +1382,8 @@ function buildFullContractRuleResult(input, caoScope) {
     contract_rule_status: contractRuleStatus,
     recommended_contract_update: {
       ...(probation.recommended_contract_update || {}),
-      ...(callAgreement.recommended_contract_update || {})
+      ...(callAgreement.recommended_contract_update || {}),
+      ...(internship.recommended_contract_update || {})
     }
   };
 }
@@ -1084,6 +1437,34 @@ function buildContractRuleInput(body, personnel, contract) {
     fixed_hours_request_worked_weeks: pickFirst(body.fixed_hours_request_worked_weeks, body.fixed_hours_request_weekly_evidence, null),
     fixed_hours_request_weekly_evidence: pickFirst(body.fixed_hours_request_weekly_evidence, null),
     worked_weeks_evidence: pickFirst(body.worked_weeks_evidence, null),
+    internship_type: pickFirst(body.internship_type, body.stage_type, contract?.internship_type, null),
+    stage_type: pickFirst(body.stage_type, null),
+    internship_source: pickFirst(body.internship_source, null),
+    bol_internship: pickFirst(body.bol_internship, contract?.bol_internship, null),
+    uwv_trial_placement: pickFirst(body.uwv_trial_placement, contract?.uwv_trial_placement, null),
+    reintegration_measure: pickFirst(body.reintegration_measure, contract?.reintegration_measure, null),
+    second_track_reintegration: pickFirst(body.second_track_reintegration, contract?.second_track_reintegration, null),
+    internship_has_employment_contract: pickFirst(body.internship_has_employment_contract, contract?.internship_has_employment_contract, null),
+    internship_supervision_confirmed: pickFirst(body.internship_supervision_confirmed, contract?.internship_supervision_confirmed, null),
+    internship_relevant_practical_experience_confirmed: pickFirst(body.internship_relevant_practical_experience_confirmed, contract?.internship_relevant_practical_experience_confirmed, null),
+    internship_above_strength_confirmed: pickFirst(body.internship_above_strength_confirmed, contract?.internship_above_strength_confirmed, null),
+    internship_not_customer_billed_confirmed: pickFirst(body.internship_not_customer_billed_confirmed, contract?.internship_not_customer_billed_confirmed, null),
+    internship_counts_toward_required_staffing: pickFirst(body.internship_counts_toward_required_staffing, null),
+    internship_customer_billed: pickFirst(body.internship_customer_billed, null),
+    internship_rostered_confirmed: pickFirst(body.internship_rostered_confirmed, contract?.internship_rostered_confirmed, null),
+    internship_practice_trainer_personnel_id: pickFirst(body.internship_practice_trainer_personnel_id, contract?.internship_practice_trainer_personnel_id, null),
+    internship_mentor_personnel_id: pickFirst(body.internship_mentor_personnel_id, contract?.internship_mentor_personnel_id, null),
+    internship_mentor_name: pickFirst(body.internship_mentor_name, contract?.internship_mentor_name, null),
+    internship_one_to_one_guidance_confirmed: pickFirst(body.internship_one_to_one_guidance_confirmed, contract?.internship_one_to_one_guidance_confirmed, null),
+    internship_uniform_label_confirmed: pickFirst(body.internship_uniform_label_confirmed, contract?.internship_uniform_label_confirmed, null),
+    internship_agreement_with_institution_confirmed: pickFirst(body.internship_agreement_with_institution_confirmed, contract?.internship_agreement_with_institution_confirmed, null),
+    internship_institution_name: pickFirst(body.internship_institution_name, contract?.internship_institution_name, null),
+    internship_assignment_description: pickFirst(body.internship_assignment_description, contract?.internship_assignment_description, null),
+    internship_working_times_documented: pickFirst(body.internship_working_times_documented, contract?.internship_working_times_documented, null),
+    internship_evaluation_agreement_documented: pickFirst(body.internship_evaluation_agreement_documented, contract?.internship_evaluation_agreement_documented, null),
+    internship_compensation_documented: pickFirst(body.internship_compensation_documented, contract?.internship_compensation_documented, null),
+    internship_compensation_applies: pickFirst(body.internship_compensation_applies, contract?.internship_compensation_applies, null),
+    internship_compensation_amount: pickFirst(body.internship_compensation_amount, contract?.internship_compensation_amount, null),
     requested_probation_period_months: pickFirst(
       body.requested_probation_period_months,
       body.probation_period_months,
@@ -1099,7 +1480,7 @@ function buildContractRulePersistence(result) {
     contract_duration_months: result.contract_duration_months,
     probation_period_months: result.probation_period_months,
     probation_period_source_rule_id: getProbationSourceRuleId(result),
-    probation_period_manual_review_required: result.manual_review_required,
+    probation_period_manual_review_required: result.probation_rule_result?.manual_review_required ?? result.manual_review_required,
     probation_period_validation_status: result.probation_validation_status,
     is_call_agreement: result.call_agreement?.is_call_agreement ?? false,
     call_agreement_type: result.call_agreement?.call_agreement_type || null,
@@ -1118,6 +1499,15 @@ function buildContractRulePersistence(result) {
     fixed_hours_request_requested_hours_per_pay_period: result.call_agreement?.employee_fixed_hours_request?.requested_hours_per_pay_period ?? null,
     fixed_hours_request_qualifying_weeks: result.call_agreement?.employee_fixed_hours_request?.evidence?.qualifying_weeks ?? null,
     fixed_hours_request_manual_review_required: result.call_agreement?.employee_fixed_hours_request?.status === 'manual_review_required',
+    internship_type: result.internship?.internship_type || null,
+    internship_rule_status: result.internship?.internship_rule_status || null,
+    internship_manual_review_required: result.internship?.internship_rule_status === 'manual_review_required',
+    internship_roster_required: result.internship?.is_internship === true,
+    internship_only_chapter_3_applies: result.internship?.is_internship === true,
+    internship_duration_months: result.internship?.duration_check?.contract_duration_months ?? null,
+    internship_max_duration_months: result.internship?.duration_check?.max_duration_months ?? null,
+    internship_two_month_boundary_date: result.internship?.duration_check?.two_month_boundary_date || null,
+    internship_two_month_exact_last_day: result.internship?.duration_check?.two_month_exact_last_day || null,
     cao_contract_rule_status: result.contract_rule_status,
     cao_contract_rule_checked_at: new Date().toISOString(),
     cao_contract_rule_source_rule_ids: result.source_rule_ids,
@@ -1137,7 +1527,8 @@ function buildContractRulePersistence(result) {
         scope_warnings: result.scope_warnings,
         contract_rule_violations: result.contract_rule_violations
       },
-      call_agreement: result.call_agreement_rule_result || null
+      call_agreement: result.call_agreement_rule_result || null,
+      internship: result.internship_rule_result || null
     }
   };
 }

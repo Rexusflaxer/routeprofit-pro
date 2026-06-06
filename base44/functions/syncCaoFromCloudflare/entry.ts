@@ -43,6 +43,18 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0397', 'CAO-PB-2024-R0398', 'CAO-PB-2024-R0399'
     ]
   },
+  'applyCaoContractRules.internship_article_14': {
+    functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'validateCaoScheduleRules'],
+    rule_ids: [
+      'CAO-PB-2024-R0401', 'CAO-PB-2024-R0402', 'CAO-PB-2024-R0403',
+      'CAO-PB-2024-R0404', 'CAO-PB-2024-R0405', 'CAO-PB-2024-R0407',
+      'CAO-PB-2024-R0408', 'CAO-PB-2024-R0409', 'CAO-PB-2024-R0410',
+      'CAO-PB-2024-R0411', 'CAO-PB-2024-R0412', 'CAO-PB-2024-R0414',
+      'CAO-PB-2024-R0415', 'CAO-PB-2024-R0417', 'CAO-PB-2024-R0418',
+      'CAO-PB-2024-R0419', 'CAO-PB-2024-R0420', 'CAO-PB-2024-R0421',
+      'CAO-PB-2024-R0422'
+    ]
+  },
   'validateCaoScheduleRules.roster_period_constraints': {
     functions: ['validateCaoScheduleRules'],
     rule_ids: [
@@ -121,7 +133,7 @@ function isPayrollCriticalRule(rule) {
   const implementationStatus = String(rule.implementation_status || '').toUpperCase();
 
   if (calculationPolicy === 'not_payroll') return false;
-  if (automationLevel === 'reference' && implementationStatus === 'REFERENCE') return false;
+  if (['reference', 'reference_or_policy'].includes(automationLevel) && implementationStatus === 'REFERENCE') return false;
 
   return calculationPolicy === 'automatic' ||
     automationLevel === 'automatic_or_calculation' ||

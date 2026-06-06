@@ -27,6 +27,12 @@ function normalizeArray(value) {
   return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean);
 }
 
+function booleanOrNull(value) {
+  if (value === true || value === 'true') return true;
+  if (value === false || value === 'false') return false;
+  return null;
+}
+
 function listAllowsValue(list, value) {
   if (!value) return { matched: true, reason: 'no_requested_value' };
   const values = normalizeArray(list);
@@ -57,6 +63,12 @@ function inferServiceContext({ body, task, route }) {
     cao_function_group: caoFunctionGroup,
     cao_function_level: caoFunctionLevel,
     security_role_status: securityRoleStatus,
+    customer_billable: input.customer_billable ?? task?.customer_billable ?? null,
+    counts_toward_required_staffing: input.counts_toward_required_staffing ?? task?.counts_toward_required_staffing ?? null,
+    internship_practice_trainer_personnel_id: input.internship_practice_trainer_personnel_id ?? task?.internship_practice_trainer_personnel_id ?? null,
+    internship_mentor_personnel_id: input.internship_mentor_personnel_id ?? task?.internship_mentor_personnel_id ?? null,
+    internship_one_to_one_guidance_confirmed: input.internship_one_to_one_guidance_confirmed ?? task?.internship_one_to_one_guidance_confirmed ?? null,
+    internship_uniform_label_confirmed: input.internship_uniform_label_confirmed ?? task?.internship_uniform_label_confirmed ?? null,
     contract_assignment_policy: input.contract_assignment_policy || task?.contract_assignment_policy || 'strict_contract_match'
   };
 }
@@ -135,6 +147,77 @@ function getCaoPayrollReadiness(caoConfig) {
     blocking_findings: gate?.blocking_findings || [],
     open_payroll_critical_rules: gate?.open_payroll_critical_rules || [],
     counts: gate?.counts || null
+  };
+}
+
+function evaluateInternshipServiceConstraints(contract, serviceContext) {
+  if (contract?.contract_form !== 'stage') {
+    return {
+      source_rule_ids: [],
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      warnings: [],
+      payroll_rule_profile: null
+    };
+  }
+
+  const blockingReasons = [];
+  const manualReviewReasons = [];
+  const warnings = [];
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0407', 'CAO-PB-2024-R0408', 'CAO-PB-2024-R0409',
+    'CAO-PB-2024-R0410', 'CAO-PB-2024-R0411', 'CAO-PB-2024-R0412'
+  ];
+
+  const countsTowardRequiredStaffing = booleanOrNull(serviceContext.counts_toward_required_staffing);
+  const customerBillable = booleanOrNull(serviceContext.customer_billable);
+  const oneToOneConfirmed = booleanOrNull(serviceContext.internship_one_to_one_guidance_confirmed ?? contract.internship_one_to_one_guidance_confirmed);
+  const uniformConfirmed = booleanOrNull(serviceContext.internship_uniform_label_confirmed ?? contract.internship_uniform_label_confirmed);
+  const trainerId = serviceContext.internship_practice_trainer_personnel_id ||
+    serviceContext.internship_mentor_personnel_id ||
+    contract.internship_practice_trainer_personnel_id ||
+    contract.internship_mentor_personnel_id ||
+    null;
+
+  if (countsTowardRequiredStaffing === true) {
+    blockingReasons.push('CAO artikel 14: stagiair mag niet in plaats van een gediplomeerde beveiliger/vereiste bezetting worden ingezet (R0407).');
+  } else if (countsTowardRequiredStaffing === null && contract.internship_above_strength_confirmed !== true) {
+    manualReviewReasons.push('CAO artikel 14: bevestig dat stagiair boven de sterkte wordt ingepland (R0407).');
+  }
+
+  if (customerBillable === true) {
+    blockingReasons.push('CAO artikel 14: stagiair mag niet aan de klant worden doorberekend (R0408).');
+  } else if (customerBillable === null && contract.internship_not_customer_billed_confirmed !== true) {
+    manualReviewReasons.push('CAO artikel 14: bevestig dat deze stage-inzet niet aan de klant wordt doorberekend (R0408).');
+  }
+
+  if (!trainerId) {
+    manualReviewReasons.push('CAO artikel 14: leg praktijkopleider/mentor vast voor deze stage-inzet (R0410).');
+  }
+  if (oneToOneConfirmed !== true) {
+    manualReviewReasons.push('CAO artikel 14: bevestig 1-op-1 begeleiding voor de stagiair (R0411).');
+  }
+  if (uniformConfirmed !== true) {
+    manualReviewReasons.push('CAO artikel 14: bevestig dat de stagiair herkenbaar is als stagiair op het uniform (R0412).');
+  }
+
+  warnings.push('CAO artikel 14: voor stagiairs geldt alleen hoofdstuk 3 van de CAO; payroll mag geen reguliere loon-/toeslagprofielen toepassen zonder aparte stagevergoeding.');
+
+  return {
+    source_rule_ids: sourceRuleIds,
+    blocking_reasons: blockingReasons,
+    manual_review_reasons: manualReviewReasons,
+    warnings,
+    payroll_rule_profile: {
+      apply_only_chapter_3: true,
+      apply_wage_scales: false,
+      apply_chapter_4_allowances: false,
+      apply_chapter_5_reimbursements: false,
+      must_be_rostered: true,
+      must_be_above_strength: true,
+      customer_billing_allowed: false,
+      one_to_one_guidance_required: true
+    }
   };
 }
 
@@ -313,6 +396,15 @@ Deno.serve(async (req) => {
       manualReviewReasons.push('Contract mist expliciete allowed_* functievelden voor de gevraagde dienst. Dit moet worden aangevuld voor definitieve planning/payroll.');
     }
 
+    const internshipServiceCheck = selectedContract
+      ? evaluateInternshipServiceConstraints(selectedContract, serviceContext)
+      : null;
+    if (internshipServiceCheck) {
+      blockingReasons.push(...internshipServiceCheck.blocking_reasons);
+      manualReviewReasons.push(...internshipServiceCheck.manual_review_reasons);
+      warnings.push(...internshipServiceCheck.warnings);
+    }
+
     let company = null;
     let companyCaoAssignments = [];
     if (companyId) {
@@ -384,10 +476,14 @@ Deno.serve(async (req) => {
         contract_hours_per_week: selectedContract.contract_hours_per_week ?? null,
         contract_hours_per_pay_period: selectedContract.contract_hours_per_pay_period ?? null,
         min_hours_per_week: selectedContract.min_hours_per_week ?? null,
-        max_hours_per_week: selectedContract.max_hours_per_week ?? null
+        max_hours_per_week: selectedContract.max_hours_per_week ?? null,
+        internship_type: selectedContract.internship_type || null,
+        internship_rule_status: selectedContract.internship_rule_status || null,
+        internship_rule_profile: internshipServiceCheck?.payroll_rule_profile || null
       } : null,
       contract_source: selectedContract?.company_id ? 'company_contract' : selectedContract ? 'legacy_companyless_contract' : null,
       service_context: serviceContext,
+      internship_service_check: internshipServiceCheck,
       function_match: selectedItem?.function_match || null,
       evaluated_contracts: evaluatedContracts.map(item => ({
         contract_id: item.contract.id,

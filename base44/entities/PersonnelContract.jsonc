@@ -464,6 +464,180 @@
       "type": "boolean",
       "default": false
     },
+    "internship_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "bol",
+        "uwv_trial_placement",
+        "reintegration_measure",
+        "second_track_reintegration",
+        "other",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Type stage/proefplaatsing conform CAO PB artikel 14."
+    },
+    "internship_rule_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Status van CAO PB artikel 14 stage-/proefplaatsingsregels."
+    },
+    "internship_manual_review_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "internship_roster_required": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als dit stagecontract volgens CAO artikel 14 altijd in het rooster moet worden opgenomen."
+    },
+    "internship_only_chapter_3_applies": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als voor de stagiair alleen hoofdstuk 3 van de CAO geldt."
+    },
+    "internship_duration_months": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Berekende stageduur/proefplaatsingsduur in maanden."
+    },
+    "internship_max_duration_months": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Maximale duur voor UWV-proefplaatsing conform CAO PB artikel 14: 2 maanden."
+    },
+    "internship_two_month_boundary_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Eerste datum waarop een UWV-proefplaatsing langer dan 2 maanden wordt."
+    },
+    "internship_two_month_exact_last_day": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Laatste toegestane dag bij een UWV-proefplaatsing van maximaal 2 maanden."
+    },
+    "internship_has_employment_contract": {
+      "type": "boolean",
+      "default": false,
+      "description": "True betekent afwijking: stagiair heeft toch een arbeidsovereenkomst; CAO artikel 14 vereist een stage-overeenkomst."
+    },
+    "internship_supervision_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "internship_relevant_practical_experience_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "internship_above_strength_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als stagiair boven de sterkte wordt ingezet en niet in plaats van een gediplomeerde beveiliger."
+    },
+    "internship_not_customer_billed_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als de stagiair niet aan de klant wordt doorberekend."
+    },
+    "internship_rostered_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als de stagiair in het rooster wordt opgenomen."
+    },
+    "internship_practice_trainer_personnel_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Praktijkopleider voor de stagiair."
+    },
+    "internship_mentor_personnel_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_mentor_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_one_to_one_guidance_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als per dag evenveel stagiairs als praktijkopleiders worden ingezet."
+    },
+    "internship_uniform_label_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als de stagiair herkenbaar is als stagiair op het uniform."
+    },
+    "internship_agreement_with_institution_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als stage-overeenkomst ook met onderwijsinstelling of re-integratie-instelling is gesloten."
+    },
+    "internship_institution_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_assignment_description": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Werkzaamheden voor de stage-opdracht."
+    },
+    "internship_working_times_documented": {
+      "type": "boolean",
+      "default": false
+    },
+    "internship_evaluation_agreement_documented": {
+      "type": "boolean",
+      "default": false
+    },
+    "internship_compensation_documented": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als is vastgelegd of een stagevergoeding geldt en zo ja hoe hoog die is."
+    },
+    "internship_compensation_applies": {
+      "type": "boolean",
+      "default": false
+    },
+    "internship_compensation_amount": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
     "industry_seniority_pay_periods": {
       "type": [
         "number",
