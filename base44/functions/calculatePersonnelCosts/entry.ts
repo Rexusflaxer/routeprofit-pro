@@ -984,6 +984,80 @@ function collectContractResolutionScopeProfiles(results) {
     .filter(Boolean))];
 }
 
+function normalizeCorrectionAdjustments(value) {
+  return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
+}
+
+function isOpenCaoPayrollCorrection(correction) {
+  return ['queued', 'candidate', 'manual_review_required'].includes(correction?.status) &&
+    !correction?.applied_payroll_run_id;
+}
+
+async function loadOpenCaoPayrollCorrections(base44, { personnelId, caoKey }) {
+  if (!personnelId || !caoKey) return [];
+  const corrections = await base44.asServiceRole.entities.CAOPayrollCorrection.filter({
+    personnel_id: personnelId,
+    cao_key: caoKey
+  }).catch(() => []);
+  return (corrections || [])
+    .filter(isOpenCaoPayrollCorrection)
+    .sort((a, b) => String(a.effective_from || '').localeCompare(String(b.effective_from || '')) ||
+      String(a.created_at || '').localeCompare(String(b.created_at || '')));
+}
+
+function buildCaoCorrectionApplication(corrections, adjustments, shouldApply) {
+  const openCorrections = corrections || [];
+  const missingAdjustmentIds = shouldApply
+    ? openCorrections
+      .filter(correction => !adjustments[correction.id]?.delta_snapshot)
+      .map(correction => correction.id)
+    : [];
+  return {
+    open_correction_count: openCorrections.length,
+    has_open_corrections: openCorrections.length > 0,
+    apply_requested: shouldApply === true,
+    ready_to_apply: openCorrections.length === 0 || (shouldApply === true && missingAdjustmentIds.length === 0),
+    missing_adjustment_ids: missingAdjustmentIds,
+    correction_ids: openCorrections.map(correction => correction.id),
+    review_ids: [...new Set(openCorrections.map(correction => correction.cao_change_review_id).filter(Boolean))],
+    affected_payroll_run_ids: [...new Set(openCorrections.map(correction => correction.affected_payroll_run_id).filter(Boolean))],
+    corrections: openCorrections.map(correction => ({
+      id: correction.id,
+      status: correction.status,
+      cao_change_review_id: correction.cao_change_review_id || null,
+      affected_payroll_run_id: correction.affected_payroll_run_id || null,
+      rule_key: correction.rule_key || null,
+      field_path: correction.field_path || null,
+      effective_from: correction.effective_from || null,
+      effective_until: correction.effective_until || null,
+      correction_reason: correction.correction_reason || null,
+      pay_period_year: correction.pay_period_year ?? null,
+      pay_period_number: correction.pay_period_number ?? null
+    }))
+  };
+}
+
+async function markCaoCorrectionsApplied(base44, { corrections, adjustments, payrollRun, responsePayload }) {
+  const appliedCorrectionIds = [];
+  for (const correction of corrections || []) {
+    const adjustment = adjustments[correction.id] || {};
+    await base44.asServiceRole.entities.CAOPayrollCorrection.update(correction.id, {
+      status: 'applied',
+      queued_for_pay_period_year: responsePayload.pay_period_year ?? null,
+      queued_for_pay_period_number: responsePayload.pay_period_number ?? null,
+      applied_payroll_run_id: payrollRun.id,
+      new_calculation_snapshot: adjustment.new_calculation_snapshot || null,
+      delta_snapshot: adjustment.delta_snapshot,
+      notes: [
+        correction.notes || '',
+        `Toegepast in payrollrun ${payrollRun.id} (${responsePayload.pay_period_year || 'jaar onbekend'}-${responsePayload.pay_period_number || 'periode onbekend'}).`
+      ].filter(Boolean).join('\n')
+    });
+    appliedCorrectionIds.push(correction.id);
+  }
+  return appliedCorrectionIds;
+}
+
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
@@ -1179,6 +1253,61 @@ Deno.serve(async (req) => {
         payroll_final_allowed: false,
         calculation_status: 'blocked_cao_not_payroll_ready'
       }, { status: 400 });
+    }
+
+    const applyQueuedCaoCorrections = body.apply_queued_cao_corrections === true;
+    const caoCorrectionAdjustments = normalizeCorrectionAdjustments(body.cao_correction_adjustments);
+    const openCaoPayrollCorrections = await loadOpenCaoPayrollCorrections(base44, {
+      personnelId: personnel_id,
+      caoKey: caoConfig.cao_key || targetCaoKey
+    });
+    const caoCorrectionApplication = buildCaoCorrectionApplication(
+      openCaoPayrollCorrections,
+      caoCorrectionAdjustments,
+      applyQueuedCaoCorrections
+    );
+
+    if (record_payroll_run === true && caoCorrectionApplication.has_open_corrections) {
+      if (!applyQueuedCaoCorrections) {
+        return Response.json({
+          error: 'Definitieve loonrun geblokkeerd: er staan open retroactieve CAO-correcties klaar voor deze medewerker/CAO.',
+          cao_sync_status: caoSyncStatus,
+          calculation_warnings: [
+            ...calculationWarnings,
+            'Voeg apply_queued_cao_corrections=true en cao_correction_adjustments met delta_snapshot per correctie toe, of verwerk de correcties handmatig voordat deze loonrun wordt vastgelegd.'
+          ],
+          personnel_id,
+          cao_configuration_id: caoConfig.id,
+          cao_key: caoConfig.cao_key || targetCaoKey,
+          cao_version_label: caoConfig.version_label || caoConfig.name,
+          cao_valid_from: caoConfig.valid_from,
+          cao_payroll_readiness: payrollReadiness,
+          cao_payroll_corrections: caoCorrectionApplication,
+          manual_review_required: true,
+          payroll_final_allowed: false,
+          calculation_status: 'blocked_pending_cao_corrections'
+        }, { status: 400 });
+      }
+      if (!caoCorrectionApplication.ready_to_apply) {
+        return Response.json({
+          error: 'Definitieve loonrun geblokkeerd: niet alle open CAO-correcties hebben een delta_snapshot.',
+          cao_sync_status: caoSyncStatus,
+          calculation_warnings: [
+            ...calculationWarnings,
+            'CAO-correcties mogen niet zonder financiële delta/auditbewijs als toegepast worden gemarkeerd.'
+          ],
+          personnel_id,
+          cao_configuration_id: caoConfig.id,
+          cao_key: caoConfig.cao_key || targetCaoKey,
+          cao_version_label: caoConfig.version_label || caoConfig.name,
+          cao_valid_from: caoConfig.valid_from,
+          cao_payroll_readiness: payrollReadiness,
+          cao_payroll_corrections: caoCorrectionApplication,
+          manual_review_required: true,
+          payroll_final_allowed: false,
+          calculation_status: 'blocked_missing_cao_correction_adjustments'
+        }, { status: 400 });
+      }
     }
 
     const contractResolutionRequired = shouldEnforceContractResolution({ body, workSchedule: work_schedule });
@@ -1417,6 +1546,17 @@ Deno.serve(async (req) => {
     let runtimeCalculationStatus = calculationStatus;
     const payrollRuntimeReviewItems = [];
     let minimumServiceTopUpHoursForOvertime = 0;
+    if (caoCorrectionApplication.has_open_corrections && !applyQueuedCaoCorrections) {
+      runtimePayrollFinalAllowed = false;
+      runtimeCalculationStatus = 'blocked_pending_cao_corrections';
+      calculationWarnings.push('Open retroactieve CAO-correcties gevonden; deze berekening is niet payroll-final totdat correcties met delta-bewijs zijn verwerkt.');
+      payrollRuntimeReviewItems.push({
+        rule_id: 'cao_payroll_corrections',
+        domain: 'retroactive_cao_corrections',
+        message: 'Open retroactieve CAO-correcties moeten in de loonrun worden verwerkt.',
+        correction_ids: caoCorrectionApplication.correction_ids
+      });
+    }
 
     // Bereken per werkdag
     for (const shift of work_schedule) {
@@ -1892,6 +2032,7 @@ Deno.serve(async (req) => {
       cao_rule_application: caoRuleApplication,
       contract_resolution_required: contractResolutionRequired,
       contract_resolution_results: contractResolutionResults,
+      cao_payroll_corrections: caoCorrectionApplication,
       payroll_runtime_review_items: payrollRuntimeReviewItems,
       employee_type: personnel.employee_type,
       cao_scale: personnel.cao_scale,
@@ -2048,8 +2189,12 @@ Deno.serve(async (req) => {
         cao_rule_registry_rule_count: caoRuleRegistrySnapshot.rule_count,
         cao_rule_registry_verified_at: caoRuleRegistrySnapshot.verified_at,
         cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
-        correction_run_for_review_ids: [],
-        supersedes_payroll_run_ids: [],
+        correction_run_for_review_ids: applyQueuedCaoCorrections
+          ? caoCorrectionApplication.review_ids
+          : [],
+        supersedes_payroll_run_ids: applyQueuedCaoCorrections
+          ? caoCorrectionApplication.affected_payroll_run_ids
+          : [],
         pay_period_year: responsePayload.pay_period_year,
         pay_period_number: responsePayload.pay_period_number,
         pay_period_start: responsePayload.pay_period_start,
@@ -2070,6 +2215,10 @@ Deno.serve(async (req) => {
           object_id,
           service_context,
           contract_resolution_results: contractResolutionResults,
+          apply_queued_cao_corrections: applyQueuedCaoCorrections,
+          cao_payroll_correction_ids: caoCorrectionApplication.correction_ids,
+          cao_payroll_correction_review_ids: caoCorrectionApplication.review_ids,
+          supersedes_payroll_run_ids: caoCorrectionApplication.affected_payroll_run_ids,
           work_schedule_is_full_pay_period,
           paid_absence_hours,
           vacation_hours,
@@ -2094,6 +2243,22 @@ Deno.serve(async (req) => {
         created_by_function: 'calculatePersonnelCosts'
       });
       responsePayload.payroll_calculation_run_id = run.id;
+      if (applyQueuedCaoCorrections && caoCorrectionApplication.has_open_corrections) {
+        const appliedCorrectionIds = await markCaoCorrectionsApplied(base44, {
+          corrections: openCaoPayrollCorrections,
+          adjustments: caoCorrectionAdjustments,
+          payrollRun: run,
+          responsePayload
+        });
+        responsePayload.applied_cao_payroll_correction_ids = appliedCorrectionIds;
+        responsePayload.cao_payroll_corrections = {
+          ...responsePayload.cao_payroll_corrections,
+          applied_correction_ids: appliedCorrectionIds
+        };
+      }
+      await base44.asServiceRole.entities.PayrollCalculationRun.update(run.id, {
+        calculation_output: responsePayload
+      });
     }
 
     return Response.json(responsePayload);
