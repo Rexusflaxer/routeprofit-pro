@@ -1,0 +1,188 @@
+{
+  "name": "CAOPayrollCorrection",
+  "type": "object",
+  "properties": {
+    "correction_key": {
+      "type": "string",
+      "description": "Idempotency key voor deze correctiekandidaat, bijv. reviewId::payrollRunId."
+    },
+    "cao_change_review_id": {
+      "type": "string"
+    },
+    "import_run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "affected_payroll_run_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "PayrollCalculationRun die geraakt wordt. Null betekent dat er nog geen concrete run gevonden is maar wel correctierisico bestaat."
+    },
+    "personnel_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "route_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cao_configuration_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cao_revision": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "rule_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "field_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "effective_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "effective_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "pay_period_year": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "pay_period_number": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "pay_period_start": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "pay_period_end": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "candidate",
+        "queued",
+        "applied",
+        "skipped_no_affected_run",
+        "manual_review_required",
+        "superseded"
+      ],
+      "default": "candidate"
+    },
+    "payroll_impact": {
+      "type": "boolean",
+      "default": true
+    },
+    "correction_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "old_calculation_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "new_calculation_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "delta_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "created_by_function": {
+      "type": "string",
+      "default": "queueCaoPayrollCorrections"
+    },
+    "queued_for_pay_period_year": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "queued_for_pay_period_number": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "applied_payroll_run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "correction_key",
+    "cao_change_review_id",
+    "created_at",
+    "created_by_function"
+  ]
+}

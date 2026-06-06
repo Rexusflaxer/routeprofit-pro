@@ -253,7 +253,17 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
-    const { personnel_id, work_schedule, force_cao_sync } = await req.json();
+    const {
+      personnel_id,
+      work_schedule,
+      force_cao_sync,
+      record_payroll_run = false,
+      pay_period_year = null,
+      pay_period_number = null,
+      pay_period_start = null,
+      pay_period_end = null,
+      payroll_run_status = 'calculated'
+    } = await req.json();
 
     // ── Normaliseer CAO-scope: null = fail-closed (unknown_manual_review) ──
     function normalizeCaoScope(scope) {
@@ -773,7 +783,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    return Response.json({
+    const responsePayload = {
       personnel_id,
       personnel_name: personnel.name,
       cao_scope_profile: caoScope?.cao_scope_profile || null,
@@ -794,7 +804,10 @@ Deno.serve(async (req) => {
       cao_revision: caoConfig.cloudflare_revision || null,
       cao_valid_from: caoConfig.valid_from,
       cao_payroll_readiness: payrollReadiness,
-      pay_period_year: refDate.getFullYear(),
+      pay_period_year: pay_period_year || refDate.getFullYear(),
+      pay_period_number: pay_period_number || null,
+      pay_period_start: pay_period_start || work_schedule[0]?.date || null,
+      pay_period_end: pay_period_end || work_schedule[work_schedule.length - 1]?.date || null,
       cao_sync_status: caoSyncStatus,
       calculation_warnings: calculationWarnings,
       total_hours: Math.round(totalHours * 100) / 100,
@@ -869,7 +882,50 @@ Deno.serve(async (req) => {
         avg_cost_per_hour: totalHours > 0 ? Math.round((payslip.total_cost_employer / totalHours) * 100) / 100 : 0
       },
       shift_details: payslip.shift_details
-    });
+    };
+
+    if (record_payroll_run === true) {
+      if (!responsePayload.pay_period_number) {
+        return Response.json({
+          error: 'pay_period_number is verplicht als record_payroll_run=true.',
+          calculation: responsePayload
+        }, { status: 400 });
+      }
+      const run = await base44.asServiceRole.entities.PayrollCalculationRun.create({
+        personnel_id,
+        route_id: null,
+        cao_configuration_id: caoConfig.id,
+        cao_version_label: caoConfig.version_label || caoConfig.name,
+        cao_revision: caoConfig.cloudflare_revision || null,
+        cao_payroll_readiness_status: caoConfig.payroll_readiness_status || null,
+        correction_run_for_review_ids: [],
+        supersedes_payroll_run_ids: [],
+        pay_period_year: responsePayload.pay_period_year,
+        pay_period_number: responsePayload.pay_period_number,
+        pay_period_start: responsePayload.pay_period_start,
+        pay_period_end: responsePayload.pay_period_end,
+        payroll_run_status,
+        payroll_exported_at: null,
+        payroll_paid_at: null,
+        requires_cao_recalculation: false,
+        cao_recalculation_reason_ids: [],
+        calculation_input: {
+          personnel_id,
+          work_schedule,
+          pay_period_year: responsePayload.pay_period_year,
+          pay_period_number: responsePayload.pay_period_number,
+          pay_period_start: responsePayload.pay_period_start,
+          pay_period_end: responsePayload.pay_period_end
+        },
+        calculation_output: responsePayload,
+        warnings: calculationWarnings.map(message => ({ message })),
+        created_at: new Date().toISOString(),
+        created_by_function: 'calculatePersonnelCosts'
+      });
+      responsePayload.payroll_calculation_run_id = run.id;
+    }
+
+    return Response.json(responsePayload);
 
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

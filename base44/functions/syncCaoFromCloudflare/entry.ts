@@ -584,17 +584,41 @@ Deno.serve(async (req) => {
       reviewIds.push(review.id);
     }
 
+    let correctionQueueSummary = null;
+    if (reviewIds.length > 0) {
+      try {
+        const queueRes = await base44.asServiceRole.functions.invoke('queueCaoPayrollCorrections', {
+          review_ids: reviewIds,
+          import_run_id: importRun.id,
+          idempotency_key: payload.idempotency_key,
+          sync_trigger_secret: Deno.env.get('BASE44_CAO_SYNC_TRIGGER_SECRET')
+        });
+        correctionQueueSummary = queueRes?.data || null;
+      } catch (error) {
+        correctionQueueSummary = {
+          success: false,
+          error: error.message,
+          note: 'CAO-sync voltooid, maar queueCaoPayrollCorrections faalde. Handmatige queue-run vereist.'
+        };
+      }
+    }
+
     // ── Stap 13: Finaliseer import run ──
     await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, {
       finished_at: new Date().toISOString(),
       status: 'completed',
       created_configuration_id: newConfig.id,
       created_review_ids: reviewIds,
+      created_correction_ids: [
+        ...(correctionQueueSummary?.created_correction_ids || []),
+        ...(correctionQueueSummary?.updated_correction_ids || [])
+      ],
+      correction_queue_summary: correctionQueueSummary,
       source_document_ids: sourceDocIds,
       detected_changes: detectedChanges,
       payroll_readiness_status: payrollReadiness.status,
       coverage_gate: payrollReadiness.gate,
-      summary: `Cloudflare sync voltooid: ${candidateRules.length} regels, ${sourceDocs.length} brondocumenten, ${reviewIds.length} wijzigingen. Payroll-ready: ${newConfig.is_payroll_ready ? 'ja' : 'nee'} (${payrollReadiness.status}). Revision: ${payload.revision}`
+      summary: `Cloudflare sync voltooid: ${candidateRules.length} regels, ${sourceDocs.length} brondocumenten, ${reviewIds.length} wijzigingen, ${correctionQueueSummary?.corrections_created || 0} payrollcorrecties nieuw, ${correctionQueueSummary?.corrections_updated || 0} payrollcorrecties bijgewerkt. Payroll-ready: ${newConfig.is_payroll_ready ? 'ja' : 'nee'} (${payrollReadiness.status}). Revision: ${payload.revision}`
     });
 
     return Response.json({
@@ -613,6 +637,7 @@ Deno.serve(async (req) => {
       rules_complete: true,
       source_docs_upserted: sourceDocIds.length,
       change_reviews_created: reviewIds.length,
+      correction_queue_summary: correctionQueueSummary,
       is_payroll_ready: newConfig.is_payroll_ready,
       payroll_readiness_status: payrollReadiness.status,
       coverage_gate: payrollReadiness.gate,

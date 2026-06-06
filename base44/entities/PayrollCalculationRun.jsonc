@@ -57,6 +57,60 @@
     "pay_period_number": {
       "type": "number"
     },
+    "pay_period_start": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Startdatum van de loonperiode waarop deze berekening ziet."
+    },
+    "pay_period_end": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Einddatum van de loonperiode waarop deze berekening ziet."
+    },
+    "payroll_run_status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "calculated",
+        "approved",
+        "exported",
+        "paid",
+        "corrected",
+        "voided"
+      ],
+      "default": "calculated",
+      "description": "Lifecycle-status van deze payrollberekening."
+    },
+    "payroll_exported_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payroll_paid_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "requires_cao_recalculation": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als een retroactieve CAO-wijziging deze run raakt."
+    },
+    "cao_recalculation_reason_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "CAOChangeReview IDs waardoor herrekening nodig is."
+    },
     "calculation_input": {
       "type": "object",
       "additionalProperties": true

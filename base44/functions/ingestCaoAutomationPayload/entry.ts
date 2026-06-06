@@ -413,8 +413,27 @@ Deno.serve(async (req) => {
       reviewIds.push(review.id);
     }
 
+    let correctionQueueSummary = null;
+    if (reviewIds.length > 0 && isOwnerApproved) {
+      try {
+        const queueRes = await base44.asServiceRole.functions.invoke('queueCaoPayrollCorrections', {
+          review_ids: reviewIds,
+          import_run_id: importRun.id,
+          idempotency_key,
+          sync_trigger_secret: Deno.env.get('BASE44_CAO_SYNC_TRIGGER_SECRET')
+        });
+        correctionQueueSummary = queueRes?.data || null;
+      } catch (error) {
+        correctionQueueSummary = {
+          success: false,
+          error: error.message,
+          note: 'Owner-approved ingest voltooid, maar queueCaoPayrollCorrections faalde. Handmatige queue-run vereist.'
+        };
+      }
+    }
+
     const summary = isOwnerApproved
-      ? `Owner-approved CAO payload toegepast. Config: ${configId}. Regels: ${rulesUpserted}. Wijzigingen: ${reviewIds.length}.`
+      ? `Owner-approved CAO payload toegepast. Config: ${configId}. Regels: ${rulesUpserted}. Wijzigingen: ${reviewIds.length}. Payrollcorrecties nieuw: ${correctionQueueSummary?.corrections_created || 0}, bijgewerkt: ${correctionQueueSummary?.corrections_updated || 0}.`
       : `Proposed CAO payload ontvangen (niet geactiveerd — geen owner approval). Regels: ${rulesUpserted}.`;
 
     // Finalize import run
@@ -424,6 +443,11 @@ Deno.serve(async (req) => {
       source_document_ids: sourceDocIds,
       created_configuration_id: configId,
       created_review_ids: reviewIds,
+      created_correction_ids: [
+        ...(correctionQueueSummary?.created_correction_ids || []),
+        ...(correctionQueueSummary?.updated_correction_ids || [])
+      ],
+      correction_queue_summary: correctionQueueSummary,
       detected_changes,
       payroll_readiness_status: payrollReadiness.status,
       coverage_gate: payrollReadiness.gate,
@@ -439,6 +463,7 @@ Deno.serve(async (req) => {
       changes_count: reviewIds.length,
       rules_upserted: rulesUpserted,
       source_docs_upserted: sourceDocIds.length,
+      correction_queue_summary: correctionQueueSummary,
       is_payroll_ready: payrollReadiness.is_payroll_ready,
       payroll_readiness_status: payrollReadiness.status,
       coverage_gate: payrollReadiness.gate,

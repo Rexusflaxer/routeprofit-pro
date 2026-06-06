@@ -92,6 +92,21 @@
         "type": "string"
       }
     },
+    "created_correction_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "CAOPayrollCorrection IDs die naar aanleiding van deze import zijn aangemaakt of bijgewerkt."
+    },
+    "correction_queue_summary": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Samenvatting van de retroactieve payrollcorrectie-queue na CAO-import."
+    },
     "payroll_readiness_status": {
       "type": [
         "string",
