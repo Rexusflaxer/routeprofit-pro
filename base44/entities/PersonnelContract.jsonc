@@ -95,6 +95,39 @@
       "default": true,
       "description": "True als fulltime/parttime/oproep contractmodel niet definitief automatisch kan worden vastgesteld."
     },
+    "written_contract_model_terms_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Bevestigt dat de schriftelijke arbeidsovereenkomst alle onderdelen uit de CAO-modelarbeidsovereenkomst bevat."
+    },
+    "non_compete_clause_present": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als het contract een concurrentiebeding bevat. Voor beveiligers blokkeert dit CAO PB artikel 9 lid 1c."
+    },
+    "non_compete_clause_absent_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Bevestigt expliciet dat geen concurrentiebeding in het beveiligerscontract staat."
+    },
+    "contract_clause_rule_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "unknown",
+        null
+      ],
+      "description": "Validatiestatus van CAO PB artikel 9 contractclausules, waaronder modelcontract en concurrentiebeding."
+    },
+    "contract_clause_manual_review_required": {
+      "type": "boolean",
+      "default": true
+    },
     "contract_start_date": {
       "type": [
         "string",
@@ -108,6 +141,96 @@
         "null"
       ],
       "format": "date"
+    },
+    "fixed_term_end_notice_sent_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum waarop schriftelijk is aangezegd of het bepaalde-tijd contract wel/niet wordt verlengd."
+    },
+    "fixed_term_end_notice_deadline_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Uiterste aanzegdatum: 1 maand voor contract_end_date."
+    },
+    "fixed_term_end_notice_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "not_due",
+        "sent",
+        "missing_due",
+        "late",
+        "not_applicable",
+        null
+      ],
+      "description": "Status van de aanzegging voor einde bepaalde tijd conform CAO PB artikel 9."
+    },
+    "fixed_term_renewal_decision": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "renew",
+        "not_renew",
+        "unknown",
+        null
+      ],
+      "description": "Inhoud van schriftelijk bericht of arbeidsovereenkomst wel/niet wordt verlengd."
+    },
+    "contract_termination_rule_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "unknown",
+        null
+      ],
+      "description": "Validatiestatus van CAO PB artikel 9 contracteinde/opzegregels."
+    },
+    "contract_termination_manual_review_required": {
+      "type": "boolean",
+      "default": true
+    },
+    "mutual_longer_notice_weeks": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Schriftelijk overeengekomen gelijke langere opzegtermijn bij onbepaalde tijd, in weken."
+    },
+    "employee_aow_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum waarop werknemer AOW-leeftijd bereikt; contract eindigt dan van rechtswege tenzij doorwerken na AOW is bevestigd."
+    },
+    "works_after_aow": {
+      "type": "boolean",
+      "default": false
+    },
+    "employee_already_receives_aow": {
+      "type": "boolean",
+      "default": false
+    },
+    "mbo_security_practice_experience": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als werknemer praktijkervaring voor mbo opleiding beveiliger bij werkgever opdoet."
     },
     "contract_duration_months": {
       "type": [

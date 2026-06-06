@@ -2227,14 +2227,335 @@ function evaluateEmploymentContractModelRules(input, callAgreement, internship, 
   };
 }
 
+function evaluateContractClauseRules(input, caoScope) {
+  const sourceRuleIds = ['CAO-PB-2024-R0236', 'CAO-PB-2024-R0311'];
+  const warnings = [];
+  const violations = [];
+  const missingEvidence = [];
+  const normalizedScope = normalizeScope(caoScope);
+  const securityRole = input.security_role_status || 'unknown';
+  const isSecurityWorker = normalizedScope.applies_full_security_rules === true ||
+    ['aspirant_beveiliger', 'beveiliger', 'leidinggevende'].includes(securityRole);
+  const isScopeUnknown = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(normalizedScope.cao_scope_profile);
+  const writtenContractConfirmed = booleanOrNull(input.written_contract_model_terms_confirmed);
+  const nonCompetePresent = booleanOrNull(input.non_compete_clause_present ?? input.has_non_compete_clause);
+  const nonCompeteAbsentConfirmed = booleanOrNull(input.non_compete_clause_absent_confirmed);
+
+  if (writtenContractConfirmed !== true) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0236',
+      field: 'written_contract_model_terms_confirmed',
+      message: 'Bevestig dat de schriftelijke arbeidsovereenkomst alle onderdelen uit de modelarbeidsovereenkomst bevat.'
+    });
+  }
+
+  if (isSecurityWorker && nonCompetePresent === true) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0311',
+      severity: 'high',
+      field: 'non_compete_clause_present',
+      message: 'Concurrentiebeding is niet toegestaan in een arbeidsovereenkomst van een beveiliger.'
+    });
+  } else if (isSecurityWorker && nonCompetePresent !== false && nonCompeteAbsentConfirmed !== true) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0311',
+      field: 'non_compete_clause_absent_confirmed',
+      message: 'Bevestig expliciet dat er geen concurrentiebeding in het beveiligerscontract staat.'
+    });
+  } else if (!isSecurityWorker && isScopeUnknown && nonCompetePresent === true) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0311',
+      field: 'cao_scope_profile',
+      message: 'Concurrentiebeding is aanwezig, maar CAO-scope/functie is onzeker; handmatige review vereist.'
+    });
+  } else if (!isSecurityWorker && nonCompetePresent === true) {
+    warnings.push('Concurrentiebeding is aanwezig, maar artikel 9 lid 1c is alleen automatisch geblokkeerd voor beveiligers; controleer overige arbeidsrechtelijke eisen handmatig.');
+  }
+
+  const hasBlockingViolation = violations.some(v => v.severity === 'high' || v.severity === 'critical');
+  const manualReviewRequired = missingEvidence.length > 0;
+
+  return {
+    contract_clause_status: hasBlockingViolation
+      ? 'blocked'
+      : manualReviewRequired
+      ? 'manual_review_required'
+      : 'compliant',
+    contract_clause_compliant: !hasBlockingViolation && !manualReviewRequired,
+    source_rule_ids: sourceRuleIds,
+    warnings,
+    missing_evidence: missingEvidence,
+    contract_rule_violations: violations,
+    payroll_entitlements: [],
+    manual_review_required: manualReviewRequired,
+    recommended_contract_update: {
+      written_contract_model_terms_confirmed: writtenContractConfirmed === true,
+      non_compete_clause_absent_confirmed: isSecurityWorker ? nonCompetePresent === false || nonCompeteAbsentConfirmed === true : nonCompeteAbsentConfirmed === true,
+      non_compete_clause_present: nonCompetePresent === true
+    }
+  };
+}
+
+function resolveTerminationNoticeRequirement(input) {
+  const form = input.contract_form || 'unknown';
+  const aowContext = booleanOrNull(input.works_after_aow) === true ||
+    booleanOrNull(input.employee_already_receives_aow) === true;
+  const learningCompanyLossContext = booleanOrNull(input.mbo_security_practice_experience) === true &&
+    !!(input.learning_company_recognition_lost_at || input.learning_company_recognition_lost_date);
+
+  if (learningCompanyLossContext && String(input.termination_initiator || '').toLowerCase() === 'employee') {
+    return {
+      required_notice_weeks: 0,
+      source_rule_id: 'CAO-PB-2024-R0335',
+      reason: 'employee_resignation_after_learning_company_recognition_loss'
+    };
+  }
+  if (aowContext) {
+    return {
+      required_notice_weeks: 4,
+      source_rule_id: 'CAO-PB-2024-R0334',
+      reason: 'post_aow_or_already_receives_aow'
+    };
+  }
+  if (form === 'bepaalde_tijd') {
+    return {
+      required_notice_weeks: 4,
+      source_rule_id: 'CAO-PB-2024-R0328',
+      reason: 'fixed_term_interim_termination'
+    };
+  }
+  if (form === 'onbepaalde_tijd') {
+    const mutualLongerWeeks = numberOrNull(input.mutual_longer_notice_weeks);
+    return {
+      required_notice_weeks: Math.max(8, mutualLongerWeeks || 8),
+      source_rule_id: 'CAO-PB-2024-R0331',
+      reason: mutualLongerWeeks && mutualLongerWeeks > 8 ? 'mutual_longer_notice_period' : 'indefinite_term_termination'
+    };
+  }
+  return {
+    required_notice_weeks: null,
+    source_rule_id: null,
+    reason: 'not_applicable_or_unknown_contract_form'
+  };
+}
+
+function evaluateContractTerminationRules(input) {
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0323', 'CAO-PB-2024-R0324', 'CAO-PB-2024-R0325',
+    'CAO-PB-2024-R0326', 'CAO-PB-2024-R0327', 'CAO-PB-2024-R0328',
+    'CAO-PB-2024-R0329', 'CAO-PB-2024-R0330', 'CAO-PB-2024-R0331',
+    'CAO-PB-2024-R0332', 'CAO-PB-2024-R0333', 'CAO-PB-2024-R0334',
+    'CAO-PB-2024-R0335'
+  ];
+  const warnings = [];
+  const violations = [];
+  const missingEvidence = [];
+  const payrollEntitlements = [];
+  const recommendedContractUpdate = {};
+  const contractForm = input.contract_form || 'unknown';
+  const startDate = asIsoDate(input.contract_start_date);
+  const endDate = asIsoDate(input.contract_end_date);
+  const referenceDate = asIsoDate(input.reference_date || new Date().toISOString());
+  const noticeSentAt = asIsoDate(input.fixed_term_end_notice_sent_at || input.end_of_fixed_term_notice_sent_at);
+  const terminationNoticeGivenAt = asIsoDate(input.termination_notice_given_at || input.contract_termination_notice_given_at);
+  const terminationEffectiveDate = asIsoDate(input.termination_effective_date || input.contract_termination_effective_date);
+  const aowDate = asIsoDate(input.employee_aow_date || input.aow_reached_date);
+  const learningCompanyLossDate = asIsoDate(input.learning_company_recognition_lost_at || input.learning_company_recognition_lost_date);
+
+  let fixedTermEndNotice = null;
+  if (contractForm === 'bepaalde_tijd') {
+    if (!endDate) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0324',
+        field: 'contract_end_date',
+        message: 'Bepaalde tijd vereist een afgesproken einddatum; contracteinde van rechtswege kan anders niet worden vastgesteld.'
+      });
+    } else {
+      const deadline = addCalendarMonths(endDate, -1);
+      const noticeDue = referenceDate >= deadline;
+      const noticeLate = noticeSentAt && noticeSentAt > deadline;
+      fixedTermEndNotice = {
+        contract_end_date: endDate,
+        automatic_end_by_operation_of_law: true,
+        written_notice_deadline_date: deadline,
+        written_notice_sent_at: noticeSentAt,
+        notice_due: noticeDue,
+        notice_late: !!noticeLate,
+        status: noticeLate
+          ? 'late'
+          : noticeSentAt
+          ? 'sent'
+          : noticeDue
+          ? 'missing_due'
+          : 'not_due'
+      };
+      recommendedContractUpdate.fixed_term_end_notice_deadline_at = deadline;
+      recommendedContractUpdate.fixed_term_end_notice_status = fixedTermEndNotice.status;
+      if (noticeLate) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0325',
+          severity: 'high',
+          message: `Schriftelijke aanzegging voor contracteinde is te laat verstuurd (${noticeSentAt}; deadline ${deadline}).`,
+          fixed_term_end_notice_sent_at: noticeSentAt,
+          fixed_term_end_notice_deadline_at: deadline
+        });
+        payrollEntitlements.push({
+          rule_id: 'CAO-PB-2024-R0326',
+          type: 'late_fixed_term_notice_manual_extension_review',
+          message: 'Niet tijdige aanzegging kan leiden tot automatische verlenging of omzetting naar onbepaalde tijd; juridische/HR review vereist voor planning en payroll.'
+        });
+      } else if (!noticeSentAt && noticeDue) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0325',
+          severity: 'high',
+          message: `Schriftelijke aanzegging voor contracteinde ontbreekt terwijl de deadline (${deadline}) is bereikt/verstreken.`,
+          fixed_term_end_notice_deadline_at: deadline
+        });
+        payrollEntitlements.push({
+          rule_id: 'CAO-PB-2024-R0326',
+          type: 'missing_fixed_term_notice_manual_extension_review',
+          message: 'Ontbrekende tijdige aanzegging kan leiden tot automatische verlenging of omzetting naar onbepaalde tijd; blokkeer definitieve contract-/payrollafloop tot review.'
+        });
+      }
+    }
+  }
+
+  const hasTerminationContext = !!(terminationNoticeGivenAt || terminationEffectiveDate || input.termination_initiator || input.termination_reason);
+  let terminationNotice = null;
+  if (hasTerminationContext) {
+    const requirement = resolveTerminationNoticeRequirement(input);
+    const requiredWeeks = requirement.required_notice_weeks;
+    const requiredDays = requiredWeeks === null ? null : requiredWeeks * 7;
+    const actualDays = terminationNoticeGivenAt && terminationEffectiveDate ? daysBetween(terminationEffectiveDate, terminationNoticeGivenAt) : null;
+    terminationNotice = {
+      termination_notice_given_at: terminationNoticeGivenAt,
+      termination_effective_date: terminationEffectiveDate,
+      termination_initiator: input.termination_initiator || null,
+      required_notice_weeks: requiredWeeks,
+      required_notice_days: requiredDays,
+      actual_notice_days: actualDays,
+      source_rule_id: requirement.source_rule_id,
+      reason: requirement.reason,
+      can_terminate_any_day: ['CAO-PB-2024-R0329', 'CAO-PB-2024-R0332', 'CAO-PB-2024-R0334'].includes(
+        contractForm === 'bepaalde_tijd' ? 'CAO-PB-2024-R0329' : requirement.source_rule_id === 'CAO-PB-2024-R0334' ? 'CAO-PB-2024-R0334' : 'CAO-PB-2024-R0332'
+      )
+    };
+
+    if (!terminationNoticeGivenAt) {
+      missingEvidence.push({
+        rule_id: requirement.source_rule_id || 'CAO-PB-2024-R0327',
+        field: 'termination_notice_given_at',
+        message: 'Opzeggingsdatum ontbreekt; opzegtermijn kan niet worden getoetst.'
+      });
+    }
+    if (!terminationEffectiveDate) {
+      missingEvidence.push({
+        rule_id: requirement.source_rule_id || 'CAO-PB-2024-R0327',
+        field: 'termination_effective_date',
+        message: 'Beoogde einddatum ontbreekt; opzegtermijn kan niet worden getoetst.'
+      });
+    }
+    if (requiredDays === null) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0327',
+        field: 'contract_form',
+        message: 'Contractvorm is onvoldoende bekend om de opzegtermijn te bepalen.'
+      });
+    } else if (actualDays !== null && actualDays < requiredDays) {
+      violations.push({
+        rule_id: requirement.source_rule_id,
+        severity: 'high',
+        message: `Opzegtermijn is ${actualDays} dagen, maar CAO vereist ${requiredDays} dagen (${requiredWeeks} weken).`,
+        actual_notice_days: actualDays,
+        required_notice_days: requiredDays
+      });
+    }
+  }
+
+  let aowTermination = null;
+  if (aowDate) {
+    aowTermination = {
+      employee_aow_date: aowDate,
+      automatic_end_date: aowDate,
+      works_after_aow: booleanOrNull(input.works_after_aow),
+      employee_already_receives_aow: booleanOrNull(input.employee_already_receives_aow)
+    };
+    if (endDate && endDate > aowDate && booleanOrNull(input.works_after_aow) !== true) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0333',
+        severity: 'high',
+        message: `Contracteinddatum (${endDate}) ligt na AOW-datum (${aowDate}) zonder bevestiging dat werknemer na AOW doorwerkt.`,
+        contract_end_date: endDate,
+        employee_aow_date: aowDate
+      });
+    }
+  }
+
+  let learningCompanyRecognitionLoss = null;
+  if (learningCompanyLossDate || booleanOrNull(input.mbo_security_practice_experience) === true) {
+    learningCompanyRecognitionLoss = {
+      mbo_security_practice_experience: booleanOrNull(input.mbo_security_practice_experience),
+      learning_company_recognition_lost_at: learningCompanyLossDate,
+      employee_can_resign_immediately_without_notice: !!learningCompanyLossDate
+    };
+    if (booleanOrNull(input.mbo_security_practice_experience) === true && !learningCompanyLossDate) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0335',
+        field: 'learning_company_recognition_lost_at',
+        message: 'MBO-praktijkervaring is gemarkeerd; leg vast of/wanneer erkenning als leerbedrijf is verloren.'
+      });
+    }
+    if (learningCompanyLossDate) {
+      warnings.push('Verlies erkenning leerbedrijf: werkgever moet wettelijke regels volgen voor einde arbeidsovereenkomst; werknemer kan per direct zonder opzegtermijn opzeggen.');
+    }
+  }
+
+  if (startDate && endDate && endDate < startDate) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0324',
+      severity: 'high',
+      message: 'Contracteinddatum ligt voor startdatum.',
+      contract_start_date: startDate,
+      contract_end_date: endDate
+    });
+  }
+
+  const hasBlockingViolation = violations.some(v => v.severity === 'high' || v.severity === 'critical');
+  const manualReviewRequired = missingEvidence.length > 0 || payrollEntitlements.length > 0;
+
+  return {
+    contract_termination_status: hasBlockingViolation
+      ? 'blocked'
+      : manualReviewRequired
+      ? 'manual_review_required'
+      : 'compliant',
+    contract_termination_compliant: !hasBlockingViolation && !manualReviewRequired,
+    source_rule_ids: sourceRuleIds,
+    warnings,
+    missing_evidence: missingEvidence,
+    contract_rule_violations: violations,
+    payroll_entitlements: payrollEntitlements,
+    manual_review_required: manualReviewRequired,
+    fixed_term_end_notice: fixedTermEndNotice,
+    termination_notice: terminationNotice,
+    aow_termination: aowTermination,
+    learning_company_recognition_loss: learningCompanyRecognitionLoss,
+    recommended_contract_update: recommendedContractUpdate
+  };
+}
+
 function buildFullContractRuleResult(input, caoScope) {
   const probation = calculateProbationPeriod(input, caoScope);
   const callAgreement = evaluateCallAgreementRules(input);
   const internship = evaluateInternshipContractRules(input);
   const hiredWorker = evaluateHiredWorkerContractRules(input);
   const employmentContractModel = evaluateEmploymentContractModelRules(input, callAgreement, internship, hiredWorker);
+  const contractClauses = evaluateContractClauseRules(input, caoScope);
+  const contractTermination = evaluateContractTerminationRules(input);
   const sourceRuleIds = [...new Set([
     ...(employmentContractModel.source_rule_ids || []),
+    ...(contractClauses.source_rule_ids || []),
+    ...(contractTermination.source_rule_ids || []),
     ...(probation.source_rule_ids || []),
     ...(callAgreement.source_rule_ids || []),
     ...(internship.source_rule_ids || []),
@@ -2242,6 +2563,8 @@ function buildFullContractRuleResult(input, caoScope) {
   ])];
   const warnings = [
     ...(employmentContractModel.warnings || []),
+    ...(contractClauses.warnings || []),
+    ...(contractTermination.warnings || []),
     ...(probation.warnings || []),
     ...(callAgreement.warnings || []),
     ...(internship.warnings || []),
@@ -2250,6 +2573,8 @@ function buildFullContractRuleResult(input, caoScope) {
   const scopeWarnings = probation.scope_warnings || [];
   const contractRuleViolations = [
     ...(employmentContractModel.contract_rule_violations || []),
+    ...(contractClauses.contract_rule_violations || []),
+    ...(contractTermination.contract_rule_violations || []),
     ...(probation.contract_rule_violations || []),
     ...(callAgreement.contract_rule_violations || []),
     ...(internship.contract_rule_violations || []),
@@ -2257,6 +2582,8 @@ function buildFullContractRuleResult(input, caoScope) {
   ];
   const payrollEntitlements = [
     ...(employmentContractModel.payroll_entitlements || []),
+    ...(contractClauses.payroll_entitlements || []),
+    ...(contractTermination.payroll_entitlements || []),
     ...(callAgreement.payroll_entitlements || []),
     ...(internship.payroll_entitlements || []),
     ...(hiredWorker.payroll_entitlements || [])
@@ -2264,11 +2591,15 @@ function buildFullContractRuleResult(input, caoScope) {
   const hasBlockingViolation = contractRuleViolations.some(v => v.severity === 'high' || v.severity === 'critical');
   const manualReviewRequired = probation.manual_review_required === true ||
     employmentContractModel.employment_contract_model_status === 'manual_review_required' ||
+    contractClauses.contract_clause_status === 'manual_review_required' ||
+    contractTermination.contract_termination_status === 'manual_review_required' ||
     callAgreement.call_agreement_status === 'manual_review_required' ||
     internship.internship_rule_status === 'manual_review_required' ||
     hiredWorker.hired_worker_rule_status === 'manual_review_required';
   const contractRuleStatus = hasBlockingViolation ||
     employmentContractModel.employment_contract_model_status === 'blocked' ||
+    contractClauses.contract_clause_status === 'blocked' ||
+    contractTermination.contract_termination_status === 'blocked' ||
     probation.contract_rule_status === 'blocked' ||
     callAgreement.call_agreement_status === 'blocked' ||
     internship.internship_rule_status === 'blocked' ||
@@ -2278,6 +2609,8 @@ function buildFullContractRuleResult(input, caoScope) {
     ? 'manual_review_required'
     : probation.probation_compliant === true &&
       employmentContractModel.employment_contract_model_compliant === true &&
+      contractClauses.contract_clause_compliant === true &&
+      contractTermination.contract_termination_compliant === true &&
       callAgreement.call_agreement_compliant === true &&
       internship.internship_compliant === true &&
       hiredWorker.hired_worker_compliant === true
@@ -2287,6 +2620,8 @@ function buildFullContractRuleResult(input, caoScope) {
   return {
     ...probation,
     employment_contract_model_rule_result: employmentContractModel,
+    contract_clause_rule_result: contractClauses,
+    contract_termination_rule_result: contractTermination,
     employment_contract_model: {
       employment_contract_model: employmentContractModel.employment_contract_model,
       parttime_contract_model: employmentContractModel.parttime_contract_model,
@@ -2295,6 +2630,20 @@ function buildFullContractRuleResult(input, caoScope) {
       employment_contract_model_status: employmentContractModel.employment_contract_model_status,
       employment_contract_model_compliant: employmentContractModel.employment_contract_model_compliant,
       missing_evidence: employmentContractModel.missing_evidence || []
+    },
+    contract_clauses: {
+      contract_clause_status: contractClauses.contract_clause_status,
+      contract_clause_compliant: contractClauses.contract_clause_compliant,
+      missing_evidence: contractClauses.missing_evidence || []
+    },
+    contract_termination: {
+      contract_termination_status: contractTermination.contract_termination_status,
+      contract_termination_compliant: contractTermination.contract_termination_compliant,
+      fixed_term_end_notice: contractTermination.fixed_term_end_notice,
+      termination_notice: contractTermination.termination_notice,
+      aow_termination: contractTermination.aow_termination,
+      learning_company_recognition_loss: contractTermination.learning_company_recognition_loss,
+      missing_evidence: contractTermination.missing_evidence || []
     },
     probation_rule_result: {
       probation_period_months: probation.probation_period_months,
@@ -2351,6 +2700,8 @@ function buildFullContractRuleResult(input, caoScope) {
     contract_rule_status: contractRuleStatus,
     recommended_contract_update: {
       ...(employmentContractModel.recommended_contract_update || {}),
+      ...(contractClauses.recommended_contract_update || {}),
+      ...(contractTermination.recommended_contract_update || {}),
       ...(probation.recommended_contract_update || {}),
       ...(callAgreement.recommended_contract_update || {}),
       ...(internship.recommended_contract_update || {}),
@@ -2372,6 +2723,28 @@ function buildContractRuleInput(body, personnel, contract) {
     contract_form: pickFirst(body.contract_form, contract?.contract_form, personnel?.contract_form),
     contract_start_date: pickFirst(body.contract_start_date, contract?.contract_start_date, personnel?.contract_start_date),
     contract_end_date: pickFirst(body.contract_end_date, contract?.contract_end_date, personnel?.contract_end_date),
+    reference_date: pickFirst(body.reference_date, null),
+    written_contract_model_terms_confirmed: pickFirst(body.written_contract_model_terms_confirmed, contract?.written_contract_model_terms_confirmed, null),
+    non_compete_clause_present: pickFirst(body.non_compete_clause_present, body.has_non_compete_clause, contract?.non_compete_clause_present, null),
+    has_non_compete_clause: pickFirst(body.has_non_compete_clause, null),
+    non_compete_clause_absent_confirmed: pickFirst(body.non_compete_clause_absent_confirmed, contract?.non_compete_clause_absent_confirmed, null),
+    fixed_term_end_notice_sent_at: pickFirst(body.fixed_term_end_notice_sent_at, body.end_of_fixed_term_notice_sent_at, contract?.fixed_term_end_notice_sent_at, null),
+    end_of_fixed_term_notice_sent_at: pickFirst(body.end_of_fixed_term_notice_sent_at, null),
+    fixed_term_renewal_decision: pickFirst(body.fixed_term_renewal_decision, contract?.fixed_term_renewal_decision, null),
+    termination_notice_given_at: pickFirst(body.termination_notice_given_at, body.contract_termination_notice_given_at, null),
+    contract_termination_notice_given_at: pickFirst(body.contract_termination_notice_given_at, null),
+    termination_effective_date: pickFirst(body.termination_effective_date, body.contract_termination_effective_date, null),
+    contract_termination_effective_date: pickFirst(body.contract_termination_effective_date, null),
+    termination_initiator: pickFirst(body.termination_initiator, null),
+    termination_reason: pickFirst(body.termination_reason, null),
+    mutual_longer_notice_weeks: pickFirst(body.mutual_longer_notice_weeks, contract?.mutual_longer_notice_weeks, null),
+    employee_aow_date: pickFirst(body.employee_aow_date, contract?.employee_aow_date, personnel?.employee_aow_date, null),
+    aow_reached_date: pickFirst(body.aow_reached_date, null),
+    works_after_aow: pickFirst(body.works_after_aow, contract?.works_after_aow, null),
+    employee_already_receives_aow: pickFirst(body.employee_already_receives_aow, contract?.employee_already_receives_aow, null),
+    mbo_security_practice_experience: pickFirst(body.mbo_security_practice_experience, contract?.mbo_security_practice_experience, null),
+    learning_company_recognition_lost_at: pickFirst(body.learning_company_recognition_lost_at, body.learning_company_recognition_lost_date, null),
+    learning_company_recognition_lost_date: pickFirst(body.learning_company_recognition_lost_date, null),
     security_role_status: pickFirst(body.security_role_status, contract?.security_role_status, personnel?.security_role_status, 'unknown'),
     function_type: pickFirst(body.function_type, contract?.function_type, personnel?.function_type, null),
     cao_function_group: pickFirst(body.cao_function_group, contract?.cao_function_group, personnel?.cao_function_group, null),
@@ -2403,7 +2776,6 @@ function buildContractRuleInput(body, personnel, contract) {
     original_shift_start_datetime: pickFirst(body.original_shift_start_datetime, null),
     original_shift_end_datetime: pickFirst(body.original_shift_end_datetime, null),
     original_call_hours: pickFirst(body.original_call_hours, null),
-    reference_date: pickFirst(body.reference_date, null),
     fixed_hours_offer_sent_at: pickFirst(body.fixed_hours_offer_sent_at, contract?.fixed_hours_offer_sent_at, null),
     fixed_hours_offer_accepted_at: pickFirst(body.fixed_hours_offer_accepted_at, contract?.fixed_hours_offer_accepted_at, null),
     fixed_hours_offer_acceptance_deadline_date: pickFirst(body.fixed_hours_offer_acceptance_deadline_date, contract?.fixed_hours_offer_acceptance_deadline_date, null),
@@ -2489,6 +2861,20 @@ function buildContractRulePersistence(result) {
       ? result.employment_contract_model.employment_contract_model_status === 'manual_review_required'
       : undefined,
     contract_hours_per_pay_period: result.employment_contract_model?.contract_hours_per_pay_period_resolved ?? undefined,
+    written_contract_model_terms_confirmed: result.contract_clause_rule_result?.recommended_contract_update?.written_contract_model_terms_confirmed ?? undefined,
+    non_compete_clause_absent_confirmed: result.contract_clause_rule_result?.recommended_contract_update?.non_compete_clause_absent_confirmed ?? undefined,
+    non_compete_clause_present: result.contract_clause_rule_result?.recommended_contract_update?.non_compete_clause_present ?? undefined,
+    contract_clause_rule_status: result.contract_clauses?.contract_clause_status ?? undefined,
+    contract_clause_manual_review_required: result.contract_clauses
+      ? result.contract_clauses.contract_clause_status === 'manual_review_required'
+      : undefined,
+    fixed_term_end_notice_sent_at: result.contract_termination?.fixed_term_end_notice?.written_notice_sent_at ?? undefined,
+    fixed_term_end_notice_deadline_at: result.contract_termination?.fixed_term_end_notice?.written_notice_deadline_date ?? undefined,
+    fixed_term_end_notice_status: result.contract_termination?.fixed_term_end_notice?.status ?? undefined,
+    contract_termination_rule_status: result.contract_termination?.contract_termination_status ?? undefined,
+    contract_termination_manual_review_required: result.contract_termination
+      ? result.contract_termination.contract_termination_status === 'manual_review_required'
+      : undefined,
     contract_duration_months: result.contract_duration_months,
     probation_period_months: result.probation_period_months,
     probation_period_source_rule_id: getProbationSourceRuleId(result),
@@ -2548,6 +2934,8 @@ function buildContractRulePersistence(result) {
         contract_rule_violations: result.contract_rule_violations
       },
       employment_contract_model: result.employment_contract_model_rule_result || null,
+      contract_clauses: result.contract_clause_rule_result || null,
+      contract_termination: result.contract_termination_rule_result || null,
       call_agreement: result.call_agreement_rule_result || null,
       internship: result.internship_rule_result || null,
       hired_worker: result.hired_worker_rule_result || null
