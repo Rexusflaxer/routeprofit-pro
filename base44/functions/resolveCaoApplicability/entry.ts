@@ -304,6 +304,27 @@ function resolveApplicability(personnel, contract, work_context) {
   else if (isCashValueLogistics) scopeProfile = 'cash_value_logistics';
   source_rule_ids.push('CAO-PB-2024-R0728');
 
+  const functionClassification = buildFunctionClassification(p, false, source_rule_ids, false);
+
+  // Punt 5: onderscheid scope_manual_review vs function_classification_manual_review
+  // Bijlage 2 loontabel is van toepassing bij full-security; als functiegroep/niveau onbekend → manual review
+  const payrollProfile = buildPayrollProfile('full');
+  const functionReviewRequired = functionClassification.manual_review_required &&
+    payrollProfile.apply_appendix_2_function_scales === true;
+
+  if (functionReviewRequired) {
+    warnings.push('Functie-indeling/bijlage-2 schaal kon niet automatisch worden bepaald. Handmatige review vereist voor correcte loonschaal.');
+  }
+
+  // Punt 6: bijzondere scopes Schiphol / geld-waardelogistiek → special_scope_manual_review
+  const specialScopeManualReview = isSchiphol || isCashValueLogistics;
+  if (isSchiphol) {
+    warnings.push('Schiphol bijzondere regels (bijlage 8 CAO PB) zijn nog niet volledig geïmplementeerd in de runtime. Handmatige review vereist voor Schiphol-specifieke toeslagen/afspraken.');
+  }
+  if (isCashValueLogistics) {
+    warnings.push('Geld- en waardelogistiek bijzondere regels (bijlage 9 CAO PB) zijn nog niet volledig geïmplementeerd in de runtime. Handmatige review vereist.');
+  }
+
   return {
     cao_scope_profile: scopeProfile,
     applies_cao_pb: true,
@@ -313,10 +334,13 @@ function resolveApplicability(personnel, contract, work_context) {
     excluded_chapters: [],
     excluded_rule_ids_reason: {},
     applicable_exceptions: isSchiphol ? ['schiphol_special_rules'] : isCashValueLogistics ? ['cash_value_logistics_rules'] : [],
-    function_classification: buildFunctionClassification(p, false, source_rule_ids, false),
-    payroll_rule_profile: buildPayrollProfile('full'),
-    manual_review_required: false,
-    confidence: 'high',
+    function_classification: functionClassification,
+    payroll_rule_profile: payrollProfile,
+    scope_manual_review_required: false,
+    function_classification_manual_review_required: functionReviewRequired,
+    special_scope_manual_review_required: specialScopeManualReview,
+    manual_review_required: functionReviewRequired || specialScopeManualReview,
+    confidence: functionReviewRequired ? 'medium' : 'high',
     warnings,
     source_rule_ids
   };

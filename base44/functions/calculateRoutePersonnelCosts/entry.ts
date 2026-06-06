@@ -83,36 +83,85 @@ function getAbsoluteEndMinutes(startMinutes, endTime) {
  * @param {object} caoConfig - Actieve CAO-configuratie
  * @param {object|null} caoScope - Resultaat van resolveCaoApplicability (of null als onbekend)
  */
-function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, caoScope) {
+// Normaliseer CAO-scope: null = fail-closed (unknown_manual_review)
+function normalizeCaoScope(scope) {
+  if (!scope) {
+    return {
+      cao_scope_profile: 'unknown_manual_review',
+      applies_full_security_rules: false,
+      manual_review_required: true,
+      payroll_rule_profile: {
+        apply_chapter_4: false,
+        apply_article_37_wage_increase: true,
+        apply_article_38_year_end_bonus: true,
+        apply_article_40_special_hours: false,
+        apply_article_41_holidays: true,
+        apply_article_42_overtime: false,
+        apply_article_43_shift_change: false,
+        apply_chapter_5_reimbursements: false,
+        apply_appendix_2_function_scales: false
+      },
+      warnings: ['CAO-toepassingsprofiel kon niet worden bepaald. Handmatige review vereist.']
+    };
+  }
+  return scope;
+}
+
+// Composite cache fingerprint
+function buildRouteCostCacheFingerprint({ route, weekday, caoConfig, personnelList }) {
+  return JSON.stringify({
+    weekday,
+    cao: caoConfig.cloudflare_revision || caoConfig.id,
+    route: {
+      start: route.time_window_start,
+      end: route.time_window_end,
+      minutes: route.total_route_minutes,
+      alarm: !!route.alarm_standby,
+      vehicle_id: route.vehicle_id || null
+    },
+    personnel: personnelList
+      .map(p => ({
+        id: p.id,
+        updated_date: p.updated_date || null,
+        scope: p.cao_scope_profile || null,
+        scope_resolved_at: p.cao_applicability_resolved_at || null,
+        scale: p.cao_scale || null,
+        period: p.cao_period || null,
+        custom_rate: p.custom_hourly_rate || null
+      }))
+      .sort((a, b) => a.id.localeCompare(b.id))
+  });
+}
+
+function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawScope) {
+  const caoScope = normalizeCaoScope(rawScope);
   const startDate = new Date(`${date}T${startTime}:00`);
   let endDate = new Date(`${date}T${endTime}:00`);
   if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
   const totalHours = (endDate - startDate) / (1000 * 60 * 60);
 
-  // Scope gates: bepaal welke regels van toepassing zijn
-  const profile = caoScope?.payroll_rule_profile || null;
-  const applySpecialHours = profile ? (profile.apply_article_40_special_hours === true) : true; // conservatief: alleen als explicit true
-  const applyHolidays = profile ? (profile.apply_article_41_holidays !== false) : true; // holidays standaard aan
-  const applyOvertimeAccrual = profile ? (profile.apply_article_42_overtime !== false) : true;
-  const isScopeUnknown = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
+  const profile = caoScope.payroll_rule_profile;
+  const isScopeUnknown = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
+  // Fail-closed: bijzondere uren ALLEEN als expliciet true en scope niet unknown/mixed
+  const applySpecialHours = !isScopeUnknown && (profile.apply_article_40_special_hours === true);
+  const applyHolidays = profile.apply_article_41_holidays !== false;
+  const applyOvertimeAccrual = !isScopeUnknown && (profile.apply_article_42_overtime === true);
 
   const scopeWarnings = [];
-  if (!caoScope) {
-    scopeWarnings.push('CAO-toepassingsprofiel niet bepaald; beveiligingstoeslagen worden niet automatisch toegepast.');
-  } else if (isScopeUnknown) {
-    scopeWarnings.push(`CAO-toepassingsprofiel onzeker (${caoScope.cao_scope_profile}): handmatige review vereist. Bijzondere-urentoeslagen niet toegepast.`);
+  if (isScopeUnknown) {
+    scopeWarnings.push(`CAO-toepassingsprofiel onzeker (${caoScope.cao_scope_profile}): handmatige review vereist. Bijzondere-urentoeslagen NIET toegepast.`);
   } else if (!applySpecialHours) {
     scopeWarnings.push(`Artikel 3 lid 2 CAO PB (${caoScope.cao_scope_profile}): avond-/nacht-/weekendtoeslagen niet toegepast.`);
   }
 
   const caoRuleApplication = {
-    cao_scope_profile: caoScope?.cao_scope_profile || 'unknown',
-    applied_article_40_special_hours: applySpecialHours && !isScopeUnknown,
+    cao_scope_profile: caoScope.cao_scope_profile,
+    applied_article_40_special_hours: applySpecialHours,
     applied_article_41_holidays: applyHolidays,
-    applied_article_42_overtime: applyOvertimeAccrual && !isScopeUnknown,
-    applied_chapter_5_reimbursements: profile ? (profile.apply_chapter_5_reimbursements === true) : true,
-    manual_review_required: isScopeUnknown || caoScope?.manual_review_required || false,
-    source_rule_ids: caoScope?.source_rule_ids || []
+    applied_article_42_overtime: applyOvertimeAccrual,
+    applied_chapter_5_reimbursements: !isScopeUnknown && (profile.apply_chapter_5_reimbursements === true),
+    manual_review_required: isScopeUnknown || caoScope.manual_review_required || false,
+    source_rule_ids: caoScope.source_rule_ids || []
   };
 
   if (personnel.employee_type === 'zzp') {
@@ -216,7 +265,7 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, caoS
   // ORT-vakantie-reservering: 0 als geen toeslagen toegepast zijn
   const avgOrtPerHour = (totalHours > 0 && surchargesTotal > 0) ? surchargesTotal / totalHours : 0;
   const estimatedAnnualVacationHours = 200;
-  const ortVacationReservation = applySpecialHours && !isScopeUnknown
+  const ortVacationReservation = applySpecialHours
     ? (estimatedAnnualVacationHours / 13) * avgOrtPerHour
     : 0;
   const accrualsTotal = vacationAllowance + yearEndBonus + ortVacationReservation;
@@ -309,16 +358,8 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Geen actieve surveillanten gevonden' }, { status: 404 });
     }
 
-    // Check cache per surveillant (scope-aware cache key)
-    const cacheKey = `${targetWeekday}`;
-    if (!force_recalculate && route.cached_personnel_costs?.[cacheKey]) {
-      const cached = route.cached_personnel_costs[cacheKey];
-      // Invalideer cache als CAO-revisie of scope gewijzigd is
-      const cacheRevision = cached._cache_revision || null;
-      if (cacheRevision === caoConfig.cloudflare_revision) {
-        return Response.json(cached);
-      }
-    }
+    // Cache-check na laden van personeel (fingerprint vereist personnelList)
+    // Wordt later gedaan nadat personnelList beschikbaar is
 
     const startTime = route.time_window_start || '08:00';
     const plannedEndTime = route.time_window_end || '17:00';
@@ -338,6 +379,19 @@ Deno.serve(async (req) => {
       } else if (actualEndMinutes > plannedEndMinutes) {
         endTime = minutesToTime(actualEndMinutes);
         actualShiftNote = `Route loopt ${actualEndMinutes - plannedEndMinutes} min uit (${endTime} i.p.v. ${plannedEndTime})`;
+      }
+    }
+
+    // ── Fingerprint-gebaseerde cache check (na laden personeel) ──
+    const allPersonnelForCache = [...surveillants, ...binnendienst];
+    const fingerprint = buildRouteCostCacheFingerprint({
+      route, weekday: targetWeekday, caoConfig, personnelList: allPersonnelForCache
+    });
+    const cacheKey = `${targetWeekday}`;
+    if (!force_recalculate && route.cached_personnel_costs?.[cacheKey]) {
+      const cached = route.cached_personnel_costs[cacheKey];
+      if (cached._cache_fingerprint === fingerprint) {
+        return Response.json(cached);
       }
     }
 
@@ -472,7 +526,8 @@ Deno.serve(async (req) => {
       vehicle_costs: vehicleCosts,
       cao_sync_status: caoSyncStatus,
       calculation_warnings: syncWarnings,
-      _cache_revision: caoConfig.cloudflare_revision || null
+      _cache_revision: caoConfig.cloudflare_revision || null,
+      _cache_fingerprint: fingerprint
     };
 
     const existingCache = route.cached_personnel_costs || {};

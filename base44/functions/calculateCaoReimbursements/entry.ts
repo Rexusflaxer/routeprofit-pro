@@ -132,27 +132,61 @@ Deno.serve(async (req) => {
       revision: syncResult?.revision || null
     };
 
+    // ── Normaliseer CAO-scope: null = fail-closed ──
+    function normalizeCaoScope(scope) {
+      if (!scope) {
+        return {
+          cao_scope_profile: 'unknown_manual_review',
+          applies_full_security_rules: false,
+          manual_review_required: true,
+          payroll_rule_profile: {
+            apply_chapter_4: false,
+            apply_article_37_wage_increase: true,
+            apply_article_38_year_end_bonus: true,
+            apply_article_40_special_hours: false,
+            apply_article_41_holidays: true,
+            apply_article_42_overtime: false,
+            apply_article_43_shift_change: false,
+            apply_chapter_5_reimbursements: false,
+            apply_appendix_2_function_scales: false
+          },
+          warnings: ['CAO-toepassingsprofiel kon niet worden bepaald. Handmatige review vereist.']
+        };
+      }
+      return scope;
+    }
+
     // ── CAO-toepassingscheck (hoofdstuk 5 vergoedingen) ──
-    let caoScope = null;
+    let rawScope = null;
     const scopeWarnings = [];
     if (personnel_id) {
       try {
         const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
-        caoScope = scopeRes?.data || null;
+        rawScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
     }
-    if (caoScope && !caoScope.payroll_rule_profile?.apply_chapter_5_reimbursements) {
+    // Fail-closed: geen personnel_id of resolve mislukt → unknown_manual_review
+    const caoScope = normalizeCaoScope(rawScope);
+    const isUnknownOrMixed = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
+
+    // Hoofdstuk 5 alleen als expliciet apply_chapter_5_reimbursements === true
+    const applyChapter5 = caoScope.payroll_rule_profile?.apply_chapter_5_reimbursements === true;
+
+    if (!applyChapter5) {
       scopeWarnings.push({
         rule_ids: caoScope.excluded_rule_ids || [],
-        message: 'Hoofdstuk 5 vergoedingen zijn niet van toepassing op deze medewerker (artikel 3 lid 2 CAO PB). Reiskosten en maaltijdvergoeding worden niet automatisch berekend.',
+        message: isUnknownOrMixed
+          ? `CAO-toepassingsprofiel ontbreekt of onzeker (${caoScope.cao_scope_profile}); hoofdstuk 5 vergoedingen worden niet automatisch berekend. Handmatige review vereist.`
+          : 'Hoofdstuk 5 vergoedingen zijn niet van toepassing op deze medewerker (artikel 3 lid 2 CAO PB). Reiskosten en maaltijdvergoeding worden niet automatisch berekend.',
         cao_scope_profile: caoScope.cao_scope_profile
       });
       return Response.json({
         success: true,
+        manual_review_required: true,
+        chapter_5_skipped: true,
         cao_sync_status: caoSyncStatus,
         calculation_warnings: [...syncWarnings],
         scope_warnings: scopeWarnings,
-        chapter_5_skipped: true,
         cao_scope_profile: caoScope.cao_scope_profile
       });
     }

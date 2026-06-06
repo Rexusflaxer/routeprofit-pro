@@ -142,19 +142,41 @@ Deno.serve(async (req) => {
     };
 
     // ── CAO-toepassingscheck ──
-    let caoScope = null;
+    let rawCaoScope = null;
     if (personnel_id) {
       try {
         const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
-        caoScope = scopeRes?.data || null;
+        rawCaoScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
     }
 
-    const isUnknownOrMixed = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
+    // Normaliseer scope: null = fail-closed
+    function normalizeCaoScope(scope) {
+      if (!scope) {
+        return {
+          cao_scope_profile: 'unknown_manual_review',
+          applies_full_security_rules: false,
+          manual_review_required: true,
+          payroll_rule_profile: {
+            apply_chapter_4: false,
+            apply_article_37_wage_increase: true,
+            apply_article_38_year_end_bonus: true,
+            apply_article_40_special_hours: false,
+            apply_article_41_holidays: true,
+            apply_article_42_overtime: false,
+            apply_article_43_shift_change: false,
+            apply_chapter_5_reimbursements: false,
+            apply_appendix_2_function_scales: false
+          },
+          warnings: ['CAO-toepassingsprofiel kon niet worden bepaald. Handmatige review vereist.']
+        };
+      }
+      return scope;
+    }
+    const caoScope = normalizeCaoScope(rawCaoScope);
+    const isUnknownOrMixed = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
 
-    // Scope-context: verlof/ziekte is gebaseerd op hoofdstuk 3 (R0999) en specifieke artikelen.
-    // Artikel 3 lid 2 sluit verlof/ziekte-berekeningen NIET generiek uit.
-    // Alleen concrete registry-metadata zou regels kunnen uitsluiten — hier geen automatische uitsluiting.
+    // Scope-context: verlof/ziekte (hoofdstuk 3 / R0999) niet generiek uitgesloten door art. 3 lid 2.
     const scopeWarnings = [];
     if (isUnknownOrMixed) {
       scopeWarnings.push({
@@ -163,8 +185,8 @@ Deno.serve(async (req) => {
         manual_review_required: true
       });
     }
-    // ORT-verlofberekening alleen als toeslagen van toepassing zijn
-    const applyOrtVacation = !caoScope || (caoScope.payroll_rule_profile?.apply_article_40_special_hours !== false);
+    // ORT-verlofberekening alleen als toeslagen van toepassing zijn (fail-closed: false als scope unknown)
+    const applyOrtVacation = caoScope.payroll_rule_profile?.apply_article_40_special_hours === true;
 
     if (action === 'calculate_vacation_accrual') {
       const result = calculateVacationAccrual(body);

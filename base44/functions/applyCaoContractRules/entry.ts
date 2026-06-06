@@ -34,8 +34,15 @@ function calculateProbationPeriod(input, caoScope) {
   const scope_warnings = [];
 
   // Bepaal of aspirant-beveiliger-specifieke regel mag worden toegepast
-  const isUnknownOrMixed = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
-  const scopeBlocksAspirant = caoScope && caoScope.applies_full_security_rules === false;
+  // Normaliseer scope (inline helper — geen module-level init)
+  const normalizedScope = caoScope || {
+    cao_scope_profile: 'unknown_manual_review',
+    applies_full_security_rules: false,
+    manual_review_required: true,
+    payroll_rule_profile: { apply_article_40_special_hours: false, apply_article_41_holidays: true, apply_article_42_overtime: false }
+  };
+  const isUnknownOrMixed = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(normalizedScope.cao_scope_profile);
+  const scopeBlocksAspirant = normalizedScope.applies_full_security_rules === false;
 
   // Bereken contractduur in maanden
   let contractDurationMonths = null;
@@ -50,16 +57,10 @@ function calculateProbationPeriod(input, caoScope) {
     if (scopeBlocksAspirant) {
       scope_warnings.push({
         rule_id: 'CAO-PB-2024-R0317',
-        message: `Aspirant-beveiliger proeftijdregel (R0317) NIET toegepast: medewerker valt onder artikel 3 lid 2 of scope is onbekend (profiel: ${caoScope?.cao_scope_profile}). Reguliere proeftijdregels gelden.`
+        message: `Aspirant-beveiliger proeftijdregel (R0317) NIET toegepast: medewerker valt onder artikel 3 lid 2 of scope is onbekend/gemengd (profiel: ${normalizedScope.cao_scope_profile}). Reguliere proeftijdregels gelden.`
       });
       // Doorgaan met reguliere berekening hieronder
-    } else if (!caoScope) {
-      // Geen scope beschikbaar: conservatief — pas aspirant-regel NIET toe, flag manual review
-      scope_warnings.push({
-        rule_id: 'CAO-PB-2024-R0317',
-        message: 'CAO-toepassingsprofiel onbekend: aspirant-beveiliger proeftijdregel (R0317) niet automatisch toegepast. Handmatige review vereist.'
-      });
-    } else {
+    } else if (normalizedScope.cao_scope_profile !== 'unknown_manual_review' && normalizedScope.applies_full_security_rules) {
       // Full-security scope: aspirant-regel mag worden toegepast
       if (contractDurationMonths !== null && contractDurationMonths > 6) {
         source_rule_ids.push('CAO-PB-2024-R0317');
@@ -207,7 +208,7 @@ Deno.serve(async (req) => {
       } catch { /* stille fallback */ }
     }
 
-    const isUnknownOrMixed = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
+    const isUnknownOrMixed = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope?.cao_scope_profile);
 
     if (action === 'calculate_probation') {
       const result = calculateProbationPeriod(body, caoScope);

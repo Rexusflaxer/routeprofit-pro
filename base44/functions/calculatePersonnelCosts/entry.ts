@@ -116,25 +116,49 @@ Deno.serve(async (req) => {
 
     const { personnel_id, work_schedule, force_cao_sync } = await req.json();
 
+    // ── Normaliseer CAO-scope: null = fail-closed (unknown_manual_review) ──
+    function normalizeCaoScope(scope) {
+      if (!scope) {
+        return {
+          cao_scope_profile: 'unknown_manual_review',
+          applies_full_security_rules: false,
+          manual_review_required: true,
+          payroll_rule_profile: {
+            apply_chapter_4: false,
+            apply_article_37_wage_increase: true,
+            apply_article_38_year_end_bonus: true,
+            apply_article_40_special_hours: false,
+            apply_article_41_holidays: true,
+            apply_article_42_overtime: false,
+            apply_article_43_shift_change: false,
+            apply_chapter_5_reimbursements: false,
+            apply_appendix_2_function_scales: false
+          },
+          warnings: ['CAO-toepassingsprofiel kon niet worden bepaald. Handmatige review vereist.']
+        };
+      }
+      return scope;
+    }
+
     // ── CAO-toepassingscheck ──
-    let caoScope = null;
+    let rawScope = null;
     if (personnel_id) {
       try {
         const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
-        caoScope = scopeRes?.data || null;
+        rawScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
     }
+    const caoScope = normalizeCaoScope(rawScope);
     const scopeWarnings = [];
-    const isUnknownOrMixedScope = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
+    const isUnknownOrMixedScope = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
 
-    // Fail-closed bij onbekende scope: waarschuw duidelijk, pas geen security-toeslagen toe
     if (isUnknownOrMixedScope) {
       scopeWarnings.push({
         message: `CAO-toepassingsprofiel onzeker (${caoScope.cao_scope_profile}): beveiligingsspecifieke toeslagen (art. 40/42/43) worden NIET automatisch berekend. Handmatige review vereist.`,
         cao_scope_profile: caoScope.cao_scope_profile,
         manual_review_required: true
       });
-    } else if (caoScope && !caoScope.applies_full_security_rules) {
+    } else if (!caoScope.applies_full_security_rules) {
       const exclusions = [];
       if (caoScope.payroll_rule_profile?.apply_article_40_special_hours === false) exclusions.push('avond-/nacht-/weekendtoeslagen (art. 40)');
       if (caoScope.payroll_rule_profile?.apply_article_42_overtime === false) exclusions.push('overwerktoeslag (art. 42)');
@@ -142,7 +166,7 @@ Deno.serve(async (req) => {
       if (caoScope.payroll_rule_profile?.apply_chapter_5_reimbursements === false) exclusions.push('reiskosten/vergoedingen (hoofdstuk 5)');
       if (exclusions.length > 0) {
         scopeWarnings.push({
-          message: `Artikel 3 lid 2 CAO PB (${caoScope.cao_scope_profile}): niet van toepassing: ${exclusions.join(', ')}. Art. 37 (loonsverhoging), art. 38 (eindejaarsuitkering) en art. 41 (feestdagen) gelden wel.`,
+          message: `Artikel 3 lid 2 CAO PB (${caoScope.cao_scope_profile}): niet van toepassing: ${exclusions.join(', ')}. Art. 37/38/41 gelden wel.`,
           cao_scope_profile: caoScope.cao_scope_profile,
           excluded_articles: caoScope.excluded_articles || []
         });
@@ -151,13 +175,13 @@ Deno.serve(async (req) => {
 
     // cao_rule_application metadata voor output
     const caoRuleApplication = {
-      cao_scope_profile: caoScope?.cao_scope_profile || 'unknown',
-      applied_article_40_special_hours: !isUnknownOrMixedScope && (caoScope?.payroll_rule_profile?.apply_article_40_special_hours !== false),
-      applied_article_41_holidays: caoScope?.payroll_rule_profile?.apply_article_41_holidays !== false,
-      applied_article_42_overtime: !isUnknownOrMixedScope && (caoScope?.payroll_rule_profile?.apply_article_42_overtime !== false),
-      applied_chapter_5_reimbursements: !isUnknownOrMixedScope && (caoScope?.payroll_rule_profile?.apply_chapter_5_reimbursements !== false),
-      manual_review_required: isUnknownOrMixedScope || false,
-      source_rule_ids: caoScope?.source_rule_ids || []
+      cao_scope_profile: caoScope.cao_scope_profile,
+      applied_article_40_special_hours: !isUnknownOrMixedScope && (caoScope.payroll_rule_profile?.apply_article_40_special_hours === true),
+      applied_article_41_holidays: caoScope.payroll_rule_profile?.apply_article_41_holidays !== false,
+      applied_article_42_overtime: !isUnknownOrMixedScope && (caoScope.payroll_rule_profile?.apply_article_42_overtime === true),
+      applied_chapter_5_reimbursements: !isUnknownOrMixedScope && (caoScope.payroll_rule_profile?.apply_chapter_5_reimbursements === true),
+      manual_review_required: isUnknownOrMixedScope || caoScope.manual_review_required || false,
+      source_rule_ids: caoScope.source_rule_ids || []
     };
 
     // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
@@ -334,7 +358,7 @@ Deno.serve(async (req) => {
         
         const dayOfWeek = startDate.getDay();
         const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-        const isHolidayDay = isHoliday(date);
+        const isHolidayDay = isHoliday(date, caoConfig);
         const hours = startDate.getHours();
         const isNight = hours >= 0 && hours < 7;
         const isEvening = hours >= 18;
@@ -364,10 +388,10 @@ Deno.serve(async (req) => {
         });
         
       } else {
-        // CAO-scope gate: bijzondere uren (art. 40) NIET bij non-security of unknown/mixed
-        const applySpecialHours = !isUnknownOrMixedScope && (!caoScope || caoScope.payroll_rule_profile?.apply_article_40_special_hours !== false);
-        // Feestdagtoeslag (art. 41): aan tenzij expliciet uitgesloten
-        const applyHolidays = !caoScope || caoScope.payroll_rule_profile?.apply_article_41_holidays !== false;
+        // CAO-scope gate: bijzondere uren ALLEEN als expliciet true (fail-closed)
+        const applySpecialHours = !isUnknownOrMixedScope && (caoScope.payroll_rule_profile?.apply_article_40_special_hours === true);
+        // Feestdagtoeslag: aan tenzij expliciet uitgesloten
+        const applyHolidays = caoScope.payroll_rule_profile?.apply_article_41_holidays !== false;
 
         // Loondienst berekening - verwerk dienst per uur voor correcte toeslagberekening
         let currentTime = new Date(startDate);

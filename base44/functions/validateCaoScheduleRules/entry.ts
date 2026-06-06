@@ -27,8 +27,28 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 // Regels die onder art. 42 / hoofdstuk 4 vallen (uitgesloten bij non-security)
 const CHAPTER4_OVERTIME_RULES = ['CAO-PB-2024-R0590'];
 
+// Normaliseer scope: null = fail-closed (unknown → conservatief, maar planning hoofdstuk 3 geldt altijd)
+function normalizeCaoScope(scope) {
+  if (!scope) {
+    return {
+      cao_scope_profile: 'unknown_manual_review',
+      applies_full_security_rules: false,
+      manual_review_required: true,
+      payroll_rule_profile: {
+        apply_chapter_4: false, apply_article_37_wage_increase: true, apply_article_38_year_end_bonus: true,
+        apply_article_40_special_hours: false, apply_article_41_holidays: true, apply_article_42_overtime: false,
+        apply_article_43_shift_change: false, apply_chapter_5_reimbursements: false, apply_appendix_2_function_scales: false
+      },
+      excluded_articles: [], excluded_chapters: [], excluded_rule_ids: [],
+      warnings: ['CAO-toepassingsprofiel kon niet worden bepaald. Handmatige review vereist.']
+    };
+  }
+  return scope;
+}
+
 function isRuleApplicable(ruleId, caoScope) {
-  if (!caoScope || caoScope.applies_full_security_rules === true) return true;
+  // Bij onbekende scope: planning-regels (hoofdstuk 3) gelden wel, alleen art. 42 overwerk valt weg
+  if (caoScope.applies_full_security_rules === true) return true;
   const excludedArticles = caoScope.excluded_articles || [];
   const excludedChapters = caoScope.excluded_chapters || [];
   const excludedRuleIds = caoScope.excluded_rule_ids || [];
@@ -184,13 +204,14 @@ Deno.serve(async (req) => {
 
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
 
-    let caoScope = null;
+    let rawCaoScope = null;
     if (personnel_id) {
       try {
         const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
-        caoScope = scopeRes?.data || null;
+        rawCaoScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
     }
+    const caoScope = normalizeCaoScope(rawCaoScope);
 
     const syncWarnings = [];
     if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
@@ -218,9 +239,9 @@ Deno.serve(async (req) => {
 
     // Scope-context in response
     const scopeWarnings = [];
-    const isUnknownOrMixed = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
+    const isUnknownOrMixed = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
 
-    if (caoScope && !caoScope.applies_full_security_rules) {
+    if (!caoScope.applies_full_security_rules) {
       // Preciseer welke specifieke uitzonderingen zijn toegepast
       const exclusions = [];
       if (caoScope.excluded_chapters?.some(c => c.includes('chapter_4'))) {

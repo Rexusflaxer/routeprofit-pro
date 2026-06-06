@@ -73,6 +73,12 @@ function CostOwnerToggle({ label, value, onChange }) {
   );
 }
 
+/**
+ * PersonnelForm — Behoud dit component voor snelle inline edits op de Personnel-pagina.
+ * ACTIEVE ONBOARDING-FLOW: gebruik PersonnelWizard (components/personnel/PersonnelWizard).
+ * De wizard bevat volledige CAO-toepassingsprofiel bepaling via CaoApplicabilityPanel en ContractRulesPanel.
+ * Voeg hier GEEN CAO-flow toe die afwijkt van de wizard.
+ */
 export default function PersonnelForm({ person, onSave, onCancel }) {
   // Binnendienst valt ook onder CAO PB (artikel 3 lid 2). Alleen eigen_tarief als gebruiker dat expliciet kiest.
   // Niet automatisch eigen_tarief toewijzen op basis van function_type.
