@@ -107,11 +107,20 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
     ]
   },
   'validateCaoScheduleRules.roster_period_constraints': {
-    functions: ['validateCaoScheduleRules'],
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
     rule_ids: [
-      'CAO-PB-2024-R0561', 'CAO-PB-2024-R0562', 'CAO-PB-2024-R0564',
-      'CAO-PB-2024-R0570', 'CAO-PB-2024-R0575', 'CAO-PB-2024-R0580',
-      'CAO-PB-2024-R0585', 'CAO-PB-2024-R0590'
+      'CAO-PB-2024-R0547', 'CAO-PB-2024-R0548', 'CAO-PB-2024-R0549',
+      'CAO-PB-2024-R0560', 'CAO-PB-2024-R0561',
+      'CAO-PB-2024-R0562', 'CAO-PB-2024-R0563', 'CAO-PB-2024-R0564',
+      'CAO-PB-2024-R0565', 'CAO-PB-2024-R0566', 'CAO-PB-2024-R0567',
+      'CAO-PB-2024-R0568', 'CAO-PB-2024-R0569', 'CAO-PB-2024-R0570',
+      'CAO-PB-2024-R0571', 'CAO-PB-2024-R0572', 'CAO-PB-2024-R0573',
+      'CAO-PB-2024-R0574', 'CAO-PB-2024-R0575', 'CAO-PB-2024-R0576',
+      'CAO-PB-2024-R0577', 'CAO-PB-2024-R0578', 'CAO-PB-2024-R0579',
+      'CAO-PB-2024-R0580', 'CAO-PB-2024-R0581', 'CAO-PB-2024-R0582',
+      'CAO-PB-2024-R0583', 'CAO-PB-2024-R0584', 'CAO-PB-2024-R0585',
+      'CAO-PB-2024-R0586', 'CAO-PB-2024-R0587', 'CAO-PB-2024-R0588',
+      'CAO-PB-2024-R0589', 'CAO-PB-2024-R0590', 'CAO-PB-2024-R0591'
     ]
   },
   'resolveCaoFunctionClassification.appendix_2_wage_scales': {

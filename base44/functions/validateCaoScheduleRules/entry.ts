@@ -15,7 +15,7 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 
 /**
  * CAO PB planning-validator
- * Bronregels: R0561 (28-dagenrooster), R0562 (max tijdvakken), R0564 (vrije dagen), R0590 (overwerk)
+ * Bronregels: R0547-R0549 en R0560-R0591 (rooster, tijdvakken, roosterwijziging, verschuiving en overwerkbasis)
  *
  * Scope-bewust:
  * - Artikel 3 lid 2 sluit uit: art. 10, art. 9 lid 1 sub c, hfdst. 4 (behalve 37/38/41), hfdst. 5, bijlage 2.
@@ -84,6 +84,197 @@ function calculateShiftHours(shift) {
   return (end - start) / (1000 * 60 * 60);
 }
 
+function asIsoDate(value) {
+  if (!value) return null;
+  return String(value).slice(0, 10);
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function booleanOrNull(value) {
+  if (value === true || value === false) return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
+}
+
+function round2(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function parseClockMinutes(value) {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || minutes > 59) return null;
+  return hours * 60 + minutes;
+}
+
+function durationHoursForTimes(startTime, endTime) {
+  const start = parseClockMinutes(startTime);
+  let end = parseClockMinutes(endTime);
+  if (start === null || end === null) return null;
+  if (end <= start) end += 24 * 60;
+  return (end - start) / 60;
+}
+
+function isWholeHour(value) {
+  const minutes = parseClockMinutes(value);
+  return minutes !== null && minutes % 60 === 0;
+}
+
+function dateFromIso(value) {
+  const iso = asIsoDate(value);
+  if (!iso) return null;
+  const date = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function daysBetween(later, earlier) {
+  const laterDate = dateFromIso(later);
+  const earlierDate = dateFromIso(earlier);
+  if (!laterDate || !earlierDate) return null;
+  return Math.round((laterDate - earlierDate) / 86400000);
+}
+
+function addDays(dateStr, days) {
+  const date = dateFromIso(dateStr);
+  if (!date) return null;
+  date.setDate(date.getDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function nextThursdayOnOrAfter(dateStr) {
+  const date = dateFromIso(dateStr);
+  if (!date) return null;
+  const day = date.getDay();
+  const delta = (4 - day + 7) % 7;
+  date.setDate(date.getDate() + delta);
+  return date.toISOString().slice(0, 10);
+}
+
+function isThursday(value) {
+  const date = dateFromIso(value);
+  return !!date && date.getDay() === 4;
+}
+
+function normalizePercentage(value) {
+  const n = numberOrNull(value);
+  if (n === null) return null;
+  return n > 1 ? n / 100 : n;
+}
+
+function normalizeArray(value) {
+  if (Array.isArray(value)) return value;
+  return value ? [value] : [];
+}
+
+function getRosterTimeWindows(body, periodStart, periodEnd, periodShifts) {
+  const bodyWindows = normalizeArray(body.time_windows || body.roster_time_windows);
+  const shiftWindows = periodShifts.filter(shift =>
+    shift.is_time_window === true ||
+    shift.roster_block_type === 'time_window' ||
+    shift.block_type === 'time_window'
+  );
+  return [...bodyWindows, ...shiftWindows]
+    .filter(window => {
+      const date = asIsoDate(window.date || window.start_date || window.service_date);
+      return date && date >= periodStart && date <= periodEnd;
+    })
+    .map((window, index) => ({
+      ...window,
+      id: window.id || window.time_window_id || null,
+      index,
+      date: asIsoDate(window.date || window.start_date || window.service_date),
+      start_time: window.start_time || window.time_window_start || window.window_start || null,
+      end_time: window.end_time || window.time_window_end || window.window_end || null
+    }));
+}
+
+function getBreakDurationHours(breakItem) {
+  const explicitHours = numberOrNull(breakItem.hours ?? breakItem.duration_hours);
+  if (explicitHours !== null) return explicitHours;
+  const minutes = numberOrNull(breakItem.minutes ?? breakItem.duration_minutes);
+  if (minutes !== null) return minutes / 60;
+  return durationHoursForTimes(
+    breakItem.start_time || breakItem.start,
+    breakItem.end_time || breakItem.end
+  );
+}
+
+function getUnpaidBreakHours(shift) {
+  const breaks = normalizeArray(shift.breaks || shift.unpaid_breaks || shift.pause_blocks);
+  let total = 0;
+  let found = false;
+  for (const item of breaks) {
+    const paid = booleanOrNull(item.paid);
+    if (paid === true) continue;
+    const hours = getBreakDurationHours(item);
+    if (hours !== null) {
+      total += hours;
+      found = true;
+    }
+  }
+  return found ? total : 0;
+}
+
+function shiftDateTime(shift, fieldPrefix = '') {
+  const date = asIsoDate(shift.date || shift.service_date);
+  const startTime = shift[`${fieldPrefix}start_time`] || shift.start_time;
+  const endTime = shift[`${fieldPrefix}end_time`] || shift.end_time;
+  if (!date || !startTime || !endTime) return null;
+  const start = new Date(`${date}T${startTime}:00`);
+  let end = new Date(`${date}T${endTime}:00`);
+  if (end <= start) end.setDate(end.getDate() + 1);
+  return { start, end };
+}
+
+function overlapsAfterClock(shift, dateStr, clockTime) {
+  const date = asIsoDate(shift.date || shift.service_date);
+  if (date !== dateStr) return false;
+  const interval = shiftDateTime(shift);
+  if (!interval) return false;
+  const boundary = new Date(`${dateStr}T${clockTime}:00`);
+  return interval.end > boundary;
+}
+
+function shiftWithinWindow(shift, windowStartTime, windowEndTime) {
+  const date = asIsoDate(shift.date || shift.service_date);
+  if (!date || !windowStartTime || !windowEndTime) return null;
+  const shiftStart = parseClockMinutes(shift.start_time);
+  let shiftEnd = parseClockMinutes(shift.end_time);
+  const windowStart = parseClockMinutes(windowStartTime);
+  let windowEnd = parseClockMinutes(windowEndTime);
+  if ([shiftStart, shiftEnd, windowStart, windowEnd].some(v => v === null)) return null;
+  if (shiftEnd <= shiftStart) shiftEnd += 24 * 60;
+  if (windowEnd <= windowStart) windowEnd += 24 * 60;
+  return shiftStart >= windowStart && shiftEnd <= windowEnd;
+}
+
+function hasContractModel(body, shift, names) {
+  const values = [
+    body.contract_model, body.contract_type, body.employment_contract_model,
+    shift.contract_model, shift.contract_type, shift.employment_contract_model
+  ].filter(Boolean).map(v => String(v).toLowerCase());
+  return values.some(value => names.some(name => value.includes(name)));
+}
+
+function addManualReview(manualReviewItems, ruleId, domain, message, field = null) {
+  manualReviewItems.push({
+    rule_id: ruleId,
+    domain,
+    message,
+    field,
+    manual_review_required: true
+  });
+}
+
 function shiftHasContractContext(shift) {
   return !!(
     shift.company_id ||
@@ -107,44 +298,159 @@ function shiftHasContractContext(shift) {
   );
 }
 
-function validateSchedule(shifts, periodStart, periodEnd, caoScope) {
+function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const violations = [];
   const warnings = [];
   const skippedRules = [];
+  const payrollEntitlements = [];
+  const manualReviewItems = [];
+  const missingEvidence = [];
+  const caoEvidenceMode = body.cao_evidence_mode || (body.enforce_cao_evidence === true ? 'strict' : 'advisory');
 
   const periodShifts = shifts.filter(s => s.date >= periodStart && s.date <= periodEnd);
+  const serviceShifts = periodShifts.filter(s => !(s.is_time_window === true || s.roster_block_type === 'time_window' || s.block_type === 'time_window'));
+  const timeWindows = getRosterTimeWindows(body, periodStart, periodEnd, periodShifts);
+  const periodDistance = daysBetween(periodEnd, periodStart);
+  const periodDayCount = periodDistance !== null ? periodDistance + 1 : null;
+  const schedulePublishedAt = body.schedule_published_at || body.roster_published_at || body.roster_publication_datetime || null;
+  const weeklySchedulePublishedAt = body.weekly_schedule_published_at || body.weekly_roster_published_at || null;
 
-  // R0561: roosterplanning aanwezig (hoofdstuk 3 — geldt ook voor non-security)
   if (isRuleApplicable('CAO-PB-2024-R0561', caoScope)) {
-    if (!periodShifts.length) {
+    if (!periodShifts.length && !timeWindows.length) {
       violations.push({
         rule_id: 'CAO-PB-2024-R0561', severity: 'medium',
-        message: 'Geen diensten ingepland voor deze loonperiode.',
+        message: 'Geen tijdvakken of arbeidstijd ingepland voor deze loonperiode.',
         affected_shift_ids: [], payroll_impact: false, manual_review_required: false
+      });
+    }
+    if (!schedulePublishedAt) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0561', 'roster_publication', 'Leg vast wanneer het 28-dagenrooster is gepubliceerd; de CAO vereist publicatie op donderdag.', 'schedule_published_at');
+      missingEvidence.push({ rule_id: 'CAO-PB-2024-R0561', field: 'schedule_published_at' });
+    } else if (!isThursday(schedulePublishedAt)) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0561',
+        severity: 'medium',
+        message: 'Het 28-dagenrooster is niet op donderdag gepubliceerd.',
+        schedule_published_at: schedulePublishedAt,
+        payroll_impact: false,
+        manual_review_required: true
+      });
+    }
+    if (periodDayCount !== null && periodDayCount !== 28) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0561',
+        severity: 'medium',
+        message: `Deze roostercontrole beslaat ${periodDayCount} dagen; artikel 21 gaat uit van een 28-dagenrooster/loonperiode.`,
+        payroll_impact: false,
+        manual_review_required: true
       });
     }
   }
 
+  if (weeklySchedulePublishedAt && !isThursday(weeklySchedulePublishedAt)) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0568',
+      severity: 'medium',
+      message: 'De weekindeling/diensten voor de komende week zijn niet op donderdag gepubliceerd.',
+      weekly_schedule_published_at: weeklySchedulePublishedAt,
+      payroll_impact: false,
+      manual_review_required: true
+    });
+  } else if (!weeklySchedulePublishedAt) {
+    addManualReview(manualReviewItems, 'CAO-PB-2024-R0568', 'weekly_roster_publication', 'Leg vast wanneer de weekindeling met diensten is gepubliceerd.', 'weekly_schedule_published_at');
+    missingEvidence.push({ rule_id: 'CAO-PB-2024-R0568', field: 'weekly_schedule_published_at' });
+  }
+
   let totalHours = 0, totalShifts = 0;
   const shiftIds = [];
-  for (const shift of periodShifts) {
+  for (const shift of serviceShifts) {
     totalHours += calculateShiftHours(shift);
     totalShifts++;
     if (shift.id) shiftIds.push(shift.id);
   }
 
-  // R0562: max 20 tijdvakken per loonperiode (hoofdstuk 3 — geldt ook voor non-security)
-  if (isRuleApplicable('CAO-PB-2024-R0562', caoScope)) {
-    if (totalShifts > 20) {
+  let totalTimeWindowHours = 0;
+  const timeWindowIds = [];
+  for (const window of timeWindows) {
+    const hours = durationHoursForTimes(window.start_time, window.end_time);
+    if (hours !== null) totalTimeWindowHours += hours;
+    if (window.id) timeWindowIds.push(window.id);
+
+    const affected = window.id ? [window.id] : [];
+    if (!isWholeHour(window.start_time)) {
       violations.push({
-        rule_id: 'CAO-PB-2024-R0562', severity: 'high',
-        message: `${totalShifts} tijdvakken ingepland; maximaal 20 per loonperiode (CAO art. R0562).`,
-        affected_shift_ids: shiftIds, payroll_impact: true, manual_review_required: true
+        rule_id: 'CAO-PB-2024-R0563',
+        severity: 'high',
+        message: `Tijdvak ${window.date || ''} start niet op een heel uur (${window.start_time || 'onbekend'}).`,
+        affected_shift_ids: affected,
+        payroll_impact: false,
+        manual_review_required: false
+      });
+    }
+    if (hours === null) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0563', 'time_window', 'Tijdvakduur kan niet worden gecontroleerd omdat start- of eindtijd ontbreekt.', 'time_window_start/end');
+    } else if (hours > 10) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0563',
+        severity: 'high',
+        message: `Tijdvak ${window.date} duurt ${round2(hours)} uur; maximaal 10 uur toegestaan.`,
+        affected_shift_ids: affected,
+        payroll_impact: false,
+        time_window_hours: round2(hours),
+        manual_review_required: false
       });
     }
   }
 
-  // R0590: overwerk boven 152 uur (artikel 42, hoofdstuk 4 — ALLEEN full-security)
+  const rosterBlockCount = totalShifts + timeWindows.length;
+  const rosterBlockHours = totalHours + totalTimeWindowHours;
+
+  if (isRuleApplicable('CAO-PB-2024-R0562', caoScope)) {
+    if (rosterBlockCount > 20) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0562', severity: 'high',
+        message: `${rosterBlockCount} tijdvakken en/of arbeidstijdblokken ingepland; maximaal 20 per loonperiode.`,
+        affected_shift_ids: [...shiftIds, ...timeWindowIds], payroll_impact: true, manual_review_required: true
+      });
+    }
+  }
+
+  const parttimePercentage = normalizePercentage(body.parttime_percentage ?? body.contract_parttime_percentage ?? body.contract_percentage);
+  const isParttimeFixedModel = hasContractModel(body, {}, ['parttime_fixed', 'parttime_vast', 'vast_model']);
+  if (isParttimeFixedModel) {
+    if (parttimePercentage === null) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0565', 'parttime_fixed_model', 'Parttime vast model herkend, maar parttimepercentage ontbreekt voor de max-urencontrole.', 'parttime_percentage');
+      missingEvidence.push({ rule_id: 'CAO-PB-2024-R0565', field: 'parttime_percentage' });
+    } else {
+      const maxRosterHours = parttimePercentage * 200;
+      if (rosterBlockHours > maxRosterHours) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0565',
+          severity: 'high',
+          message: `Parttime vast model overschrijdt maximum tijdvakken/arbeidstijd (${round2(rosterBlockHours)}u > ${round2(maxRosterHours)}u).`,
+          affected_shift_ids: [...shiftIds, ...timeWindowIds],
+          payroll_impact: true,
+          roster_block_hours: round2(rosterBlockHours),
+          max_roster_block_hours: round2(maxRosterHours),
+          manual_review_required: false
+        });
+      }
+    }
+  }
+
+  if (totalHours > 144 && booleanOrNull(body.employee_over_144_hours_consent_confirmed ?? body.employee_overtime_consent_confirmed) !== true) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0588',
+      severity: 'high',
+      message: `${round2(totalHours)} uur arbeidstijd in deze loonperiode; boven 144 uur mag alleen met instemming van de werknemer.`,
+      affected_shift_ids: shiftIds,
+      payroll_impact: true,
+      total_hours: round2(totalHours),
+      required_consent_field: 'employee_over_144_hours_consent_confirmed',
+      manual_review_required: true
+    });
+  }
+
   const overtimeHours = Math.max(0, totalHours - 152);
   if (isRuleApplicable('CAO-PB-2024-R0590', caoScope)) {
     if (overtimeHours > 0) {
@@ -154,26 +460,28 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope) {
         affected_shift_ids: shiftIds, payroll_impact: true,
         overtime_hours: Math.round(overtimeHours * 10) / 10, manual_review_required: false
       });
+      if (booleanOrNull(body.overtime_highest_necessity_limited_confirmed) !== true) {
+        addManualReview(manualReviewItems, 'CAO-PB-2024-R0591', 'overtime_policy', 'Leg vast dat overwerk tot het hoogst noodzakelijke is beperkt.', 'overtime_highest_necessity_limited_confirmed');
+      }
     }
-  } else {
-    if (overtimeHours > 0) {
-      skippedRules.push({
-        rule_id: 'CAO-PB-2024-R0590',
-        reason: 'Overwerktoeslag (art. 42 / hoofdstuk 4) niet van toepassing: medewerker valt onder artikel 3 lid 2 CAO PB.',
-        note: `${Math.round(overtimeHours * 10) / 10} uur boven 152h gesignaleerd — geen automatische toeslag.`
-      });
-      // Informatieve waarschuwing (geen violation)
-      warnings.push(`${Math.round(overtimeHours * 10) / 10} uur boven 152h in deze periode. Overwerktoeslag (art. 42) niet van toepassing (art. 3 lid 2).`);
-    }
+  } else if (overtimeHours > 0) {
+    skippedRules.push({
+      rule_id: 'CAO-PB-2024-R0590',
+      reason: 'Overwerktoeslag (art. 42 / hoofdstuk 4) niet van toepassing: medewerker valt onder artikel 3 lid 2 CAO PB.',
+      note: `${Math.round(overtimeHours * 10) / 10} uur boven 152h gesignaleerd - geen automatische toeslag.`
+    });
+    warnings.push(`${Math.round(overtimeHours * 10) / 10} uur boven 152h in deze periode. Overwerktoeslag (art. 42) niet van toepassing (art. 3 lid 2).`);
   }
 
-  // R0564: vrije-dagenregels (hoofdstuk 3 — geldt ook voor non-security)
   const start = new Date(periodStart), end = new Date(periodEnd);
   const allDates = [];
   let cur = new Date(start);
   while (cur <= end) { allDates.push(cur.toISOString().split('T')[0]); cur.setDate(cur.getDate() + 1); }
-  const workedDates = new Set(periodShifts.map(s => s.date));
-  const freeDates = allDates.filter(d => !workedDates.has(d));
+  const occupiedDates = new Set([
+    ...serviceShifts.map(s => asIsoDate(s.date || s.service_date)).filter(Boolean),
+    ...timeWindows.map(w => asIsoDate(w.date)).filter(Boolean)
+  ]);
+  const freeDates = allDates.filter(d => !occupiedDates.has(d));
   const freeDaysCount = freeDates.length;
 
   if (isRuleApplicable('CAO-PB-2024-R0564', caoScope)) {
@@ -209,28 +517,244 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope) {
     }
   }
 
-  const manualReviewItems = [
-    { rule_id: 'CAO-PB-2024-R0570', domain: 'rusttijden', message: 'Controleer minimale rusttijden tussen diensten. Handmatige review vereist.', manual_review_required: true },
-    { rule_id: 'CAO-PB-2024-R0575', domain: 'nachtdiensten', message: 'Controleer maximale nachtdiensten per week/periode. Handmatige review vereist.', manual_review_required: true },
-    { rule_id: 'CAO-PB-2024-R0580', domain: 'consignatie', message: 'Controleer consignatieregels en vergoedingen. Handmatige review vereist.', manual_review_required: true },
-    { rule_id: 'CAO-PB-2024-R0585', domain: 'ruilen', message: 'Controleer ruilen van diensten conform CAO. Handmatige review vereist.', manual_review_required: true }
-  ];
+  const freeDayPreferenceRequests = normalizeArray(body.free_day_preference_requests || body.free_day_preference_request);
+  for (const request of freeDayPreferenceRequests) {
+    const requestDate = asIsoDate(request.request_date || request.submitted_at || request.created_at);
+    const responseDate = asIsoDate(request.response_date || request.responded_at);
+    const responseStatus = String(request.response_status || request.status || '').toLowerCase();
+    const deadline = addDays(periodStart, -35);
+    const responseDeadline = requestDate ? nextThursdayOnOrAfter(requestDate) : null;
+    if (!requestDate) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0567', 'free_day_preference', 'Vrije-dagenvoorkeur mist indieningsdatum.', 'free_day_preference_request_date');
+    } else if (deadline && requestDate > deadline) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0567',
+        severity: 'medium',
+        message: `Vrije-dagenvoorkeur is ingediend op ${requestDate}; uiterlijk ${deadline} vereist.`,
+        payroll_impact: false,
+        manual_review_required: true
+      });
+    }
+    if (!responseDate || (responseDeadline && responseDate > responseDeadline)) {
+      payrollEntitlements.push({
+        rule_id: 'CAO-PB-2024-R0567',
+        type: 'free_day_preference_definitive',
+        request_date: requestDate,
+        response_date: responseDate || null,
+        response_deadline_date: responseDeadline,
+        message: 'Werkgever reageerde niet tijdig; aangevraagde vrije dagen gelden als definitief vastgesteld.'
+      });
+    }
+    if ((responseStatus.includes('reject') || responseStatus.includes('afgewezen')) && !request.rejection_reason && !request.reason) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0567',
+        severity: 'medium',
+        message: 'Afwijzing van vrije-dagenvoorkeur mist een reden.',
+        payroll_impact: false,
+        manual_review_required: true
+      });
+    }
+  }
+
+  for (const shift of serviceShifts) {
+    const unpaidBreakHours = getUnpaidBreakHours(shift);
+    if (unpaidBreakHours > 1) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0569',
+        severity: 'high',
+        message: `Dienst ${shift.date} heeft ${round2(unpaidBreakHours)} uur onbetaalde pauze/onderbreking; maximaal 1 uur binnen een dienst.`,
+        affected_shift_ids: shift.id ? [shift.id] : [],
+        payroll_impact: true,
+        unpaid_break_hours: round2(unpaidBreakHours),
+        manual_review_required: false
+      });
+    }
+  }
+
+  for (const shift of serviceShifts) {
+    const hours = calculateShiftHours(shift);
+    if (hours > 10 && booleanOrNull(shift.voluntary_long_shift_confirmed ?? body.voluntary_long_shift_confirmed) !== true) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0571',
+        severity: 'high',
+        message: `Dienst ${shift.date} duurt ${round2(hours)} uur; langer dan 10 uur mag alleen vrijwillig.`,
+        affected_shift_ids: shift.id ? [shift.id] : [],
+        payroll_impact: true,
+        shift_hours: round2(hours),
+        manual_review_required: true
+      });
+    }
+  }
+
+  const specialHolidayCategories = new Set();
+  for (const shift of serviceShifts) {
+    const date = asIsoDate(shift.date || shift.service_date);
+    if (!date) continue;
+    if (date.endsWith('-12-25')) specialHolidayCategories.add('christmas_day_1');
+    if (date.endsWith('-12-26')) specialHolidayCategories.add('christmas_day_2');
+    if (date.endsWith('-01-01')) specialHolidayCategories.add('new_years_day');
+    if (date.endsWith('-12-31') && overlapsAfterClock(shift, date, '16:00')) specialHolidayCategories.add('new_years_eve_after_16');
+  }
+  if (specialHolidayCategories.size === 4) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0572',
+      severity: 'medium',
+      message: 'Werknemer is op alle CAO-genoemde feestmomenten ingepland; werkgever moet aantoonbaar inspanning leveren dit te voorkomen.',
+      payroll_impact: false,
+      holiday_categories: [...specialHolidayCategories],
+      manual_review_required: true
+    });
+  }
+
+  const careRequests = normalizeArray(body.care_schedule_adjustment_requests || body.care_schedule_adjustment_request);
+  for (const request of careRequests) {
+    const status = String(request.status || request.response_status || '').toLowerCase();
+    if ((status.includes('reject') || status.includes('afgewezen')) &&
+      !request.rejection_reason &&
+      booleanOrNull(request.organizationally_impossible_confirmed) !== true) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0573',
+        severity: 'medium',
+        message: 'Afwijzing van roosterverzoek voor opvoedingstaken mist reden of organisatorische onmogelijkheid.',
+        payroll_impact: false,
+        manual_review_required: true
+      });
+    }
+  }
+
+  const forcedOutsideWindowShifts = serviceShifts.filter(shift =>
+    booleanOrNull(shift.forced_outside_time_window_without_consent ?? shift.employer_forced_outside_time_window_without_consent) === true
+  );
+  const forcedCountYtd = numberOrNull(body.forced_outside_time_window_count_year_to_date);
+  const forcedCountBefore = numberOrNull(body.forced_outside_time_window_count_year_to_date_before_period);
+  const totalForcedOutsideWindowCount = forcedCountYtd !== null
+    ? forcedCountYtd
+    : (forcedCountBefore || 0) + forcedOutsideWindowShifts.length;
+  if (totalForcedOutsideWindowCount > 8) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0580',
+      severity: 'high',
+      message: `Werkgever heeft ${totalForcedOutsideWindowCount} verplichte verschuivingen buiten tijdvak/arbeidstijd zonder instemming gebruikt; maximaal 8 per jaar toegestaan.`,
+      affected_shift_ids: forcedOutsideWindowShifts.map(s => s.id).filter(Boolean),
+      payroll_impact: true,
+      forced_outside_time_window_count_year_to_date: totalForcedOutsideWindowCount,
+      manual_review_required: false
+    });
+  }
+
+  for (const shift of serviceShifts) {
+    const changedAfterRoster = booleanOrNull(shift.changed_after_roster_published) === true ||
+      !!shift.roster_change_datetime ||
+      !!shift.original_start_time ||
+      !!shift.original_time_window_start ||
+      !!shift.notified_time_window_start;
+    if (!changedAfterRoster) continue;
+
+    const originalWindowStart = shift.original_time_window_start || shift.notified_time_window_start || shift.original_start_time || null;
+    const originalWindowEnd = shift.original_time_window_end || shift.notified_time_window_end || shift.original_end_time || null;
+    const withinOriginalWindow = shiftWithinWindow(shift, originalWindowStart, originalWindowEnd);
+    const explicitOutside = booleanOrNull(shift.outside_original_time_window ?? shift.outside_notified_time_window);
+    const outsideOriginalWindow = explicitOutside === true || withinOriginalWindow === false;
+
+    if (withinOriginalWindow === null && explicitOutside === null) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0578', 'roster_change', 'Roosterwijziging mist oorspronkelijke tijdvak/arbeidstijd; verschuivingstoeslag kan niet worden beoordeeld.', 'original_time_window_start/end');
+      continue;
+    }
+    if (!outsideOriginalWindow) continue;
+
+    const isForcedWithoutConsent = booleanOrNull(shift.forced_outside_time_window_without_consent ?? shift.employer_forced_outside_time_window_without_consent) === true;
+    const isOnCall = hasContractModel(body, shift, ['oproep', 'zero_hours', 'min_max', 'call']);
+    const isParttimeFixedShift = hasContractModel(body, shift, ['parttime_fixed', 'parttime_vast', 'vast_model']);
+    const isExtraParttimeService = booleanOrNull(shift.extra_service ?? shift.extra_shift ?? shift.parttime_extra_service) === true;
+
+    if (isOnCall) {
+      skippedRules.push({
+        rule_id: 'CAO-PB-2024-R0586',
+        reason: 'Oproepkracht heeft vanwege flexibele aard van het contract geen recht op verschuivingstoeslag.',
+        affected_shift_ids: shift.id ? [shift.id] : []
+      });
+      continue;
+    }
+
+    if (isForcedWithoutConsent && totalForcedOutsideWindowCount <= 8) {
+      skippedRules.push({
+        rule_id: 'CAO-PB-2024-R0580',
+        reason: 'Verplichte verschuiving buiten tijdvak valt binnen de 8 jaarlijkse gevallen zonder instemming; geen verschuivingstoeslag.',
+        affected_shift_ids: shift.id ? [shift.id] : [],
+        forced_outside_time_window_count_year_to_date: totalForcedOutsideWindowCount
+      });
+      continue;
+    }
+
+    payrollEntitlements.push({
+      rule_id: isParttimeFixedShift && isExtraParttimeService ? 'CAO-PB-2024-R0585' : 'CAO-PB-2024-R0576',
+      type: 'shift_change_allowance_required',
+      affected_shift_ids: shift.id ? [shift.id] : [],
+      date: shift.date,
+      original_time_window_start: originalWindowStart,
+      original_time_window_end: originalWindowEnd,
+      new_start_time: shift.start_time,
+      new_end_time: shift.end_time,
+      message: isParttimeFixedShift && isExtraParttimeService
+        ? 'Parttimer werkt extra dienst buiten vastgestelde tijdvakken/arbeidstijd: verschuivingstoeslag volgens artikel 43 vereist.'
+        : 'Rooster na publicatie gewijzigd buiten medegedeeld tijdvak/arbeidstijd: verschuivingstoeslag volgens artikel 43 vereist.'
+    });
+  }
+
+  const blockingRequests = normalizeArray(body.outside_time_window_block_requests || body.roster_blocking_requests);
+  if (blockingRequests.length > 4) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0583',
+      severity: 'high',
+      message: `${blockingRequests.length} blokkadedagen opgegeven; werknemer mag maximaal 4 dagen per jaar aanwijzen.`,
+      payroll_impact: false,
+      manual_review_required: false
+    });
+  }
+  for (const request of blockingRequests) {
+    const targetDate = asIsoDate(request.date || request.target_date || request.time_window_date);
+    const requestDate = asIsoDate(request.request_date || request.submitted_at || request.created_at);
+    const noticeDays = targetDate && requestDate ? daysBetween(targetDate, requestDate) : null;
+    if (noticeDays === null) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0584', 'roster_blocking_request', 'Blokkadeverzoek mist datum of indieningsdatum.', 'outside_time_window_block_requests');
+    } else if (noticeDays < 21 || noticeDays > 28) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0584',
+        severity: 'medium',
+        message: `Blokkadeverzoek is ${noticeDays} dagen vooraf gedaan; vereist is 28 tot 21 dagen voor ingang tijdvak/arbeidstijd.`,
+        payroll_impact: false,
+        manual_review_required: true
+      });
+    }
+  }
 
   return {
     total_shifts: totalShifts,
     total_hours: Math.round(totalHours * 100) / 100,
+    total_time_windows: timeWindows.length,
+    total_time_window_hours: round2(totalTimeWindowHours),
+    total_roster_blocks: rosterBlockCount,
+    total_roster_block_hours: round2(rosterBlockHours),
     overtime_hours: Math.round(overtimeHours * 100) / 100,
     free_days_count: freeDaysCount,
     violations,
     warnings,
+    payroll_entitlements: payrollEntitlements,
     skipped_rules: skippedRules,
+    missing_evidence: missingEvidence,
     manual_review_items: manualReviewItems,
+    schedule_manual_review_required: manualReviewItems.length > 0 || violations.some(v => v.manual_review_required === true),
+    cao_evidence_mode: caoEvidenceMode,
     is_valid: violations.filter(v => v.severity === 'high').length === 0
   };
 }
 
 async function validateShiftContractResolution(base44, { shifts, periodStart, periodEnd, personnel_id, body }) {
-  const periodShifts = shifts.filter(s => s.date >= periodStart && s.date <= periodEnd);
+  const periodShifts = shifts.filter(s =>
+    s.date >= periodStart &&
+    s.date <= periodEnd &&
+    !(s.is_time_window === true || s.roster_block_type === 'time_window' || s.block_type === 'time_window')
+  );
   const enforceContractResolution = body.enforce_contract_resolution === true ||
     periodShifts.some(shiftHasContractContext);
 
@@ -442,7 +966,7 @@ Deno.serve(async (req) => {
       pEnd = fourWeeksLater.toISOString().split('T')[0];
     }
 
-    const result = validateSchedule(shifts, pStart, pEnd, caoScope);
+    const result = validateSchedule(shifts, pStart, pEnd, caoScope, body);
     const contractValidation = await validateShiftContractResolution(base44, {
       shifts,
       periodStart: pStart,
@@ -460,6 +984,8 @@ Deno.serve(async (req) => {
       ...(contractValidation.contract_warnings || []).map(w => w.message || String(w))
     ];
     result.is_valid = result.violations.filter(v => v.severity === 'high').length === 0;
+    const strictScheduleManualReviewRequired = result.schedule_manual_review_required === true &&
+      result.cao_evidence_mode === 'strict';
 
     const caoSyncStatus = {
       changed: syncResult?.changed ?? false,
@@ -514,8 +1040,8 @@ Deno.serve(async (req) => {
       contract_hours_summary: contractValidation.contract_hours_summary,
       contract_warning_items: contractValidation.contract_warnings,
       contract_payroll_final_allowed: contractValidation.contract_payroll_final_allowed,
-      manual_review_required: isUnknownOrMixed || contractValidation.contract_manual_review_required || false,
-      payroll_final_allowed: !isUnknownOrMixed && result.is_valid === true && contractValidation.contract_payroll_final_allowed === true,
+      manual_review_required: isUnknownOrMixed || contractValidation.contract_manual_review_required || strictScheduleManualReviewRequired || false,
+      payroll_final_allowed: !isUnknownOrMixed && result.is_valid === true && contractValidation.contract_payroll_final_allowed === true && !strictScheduleManualReviewRequired,
       ...result
     });
 
