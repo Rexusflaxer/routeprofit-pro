@@ -15,7 +15,7 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 
 /**
  * CAO PB planning-validator
- * Bronregels: R0547-R0549 en R0560-R0603 (rooster, tijdvakken, roosterwijziging, overwerkbasis en minuren)
+ * Bronregels: R0547-R0549 en R0560-R0639 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve en maximale arbeidstijd)
  *
  * Scope-bewust:
  * - Artikel 3 lid 2 sluit uit: art. 10, art. 9 lid 1 sub c, hfdst. 4 (behalve 37/38/41), hfdst. 5, bijlage 2.
@@ -175,6 +175,28 @@ function normalizeArray(value) {
   return value ? [value] : [];
 }
 
+function uniqueSortedIsoDates(values) {
+  return [...new Set(values.map(asIsoDate).filter(Boolean))].sort();
+}
+
+function analyzeFreeDayBlocks(dates) {
+  const freeDates = uniqueSortedIsoDates(dates);
+  let consecutiveBlocks = 0;
+  let weekendBlockFound = false;
+  for (let i = 0; i < freeDates.length - 1; i++) {
+    const d1 = freeDates[i], d2 = freeDates[i + 1];
+    if (new Date(d2) - new Date(d1) === 86400000) {
+      consecutiveBlocks++;
+      if (isWeekendBlock(d1, d2)) weekendBlockFound = true;
+    }
+  }
+  return {
+    free_dates: freeDates,
+    consecutive_blocks: consecutiveBlocks,
+    weekend_block_found: weekendBlockFound
+  };
+}
+
 function getRosterTimeWindows(body, periodStart, periodEnd, periodShifts) {
   const bodyWindows = normalizeArray(body.time_windows || body.roster_time_windows);
   const shiftWindows = periodShifts.filter(shift =>
@@ -265,6 +287,15 @@ function hasContractModel(body, shift, names) {
   return values.some(value => names.some(name => value.includes(name)));
 }
 
+function isGeneralReserveEmployee(body) {
+  return booleanOrNull(
+    body.is_general_reserve_employee ??
+    body.general_reserve_employee ??
+    body.general_reserve_2013_choice_confirmed ??
+    body.employee_general_reserve_status
+  ) === true;
+}
+
 function addManualReview(manualReviewItems, ruleId, domain, message, field = null) {
   manualReviewItems.push({
     rule_id: ruleId,
@@ -299,6 +330,69 @@ function maxMinusHoursBalanceForPeriod(periodStart) {
   if (year === 2020) return { max_balance: 60, source_rule_id: 'CAO-PB-2024-R0600', schedule_year: year };
   if (year === 2021) return { max_balance: 50, source_rule_id: 'CAO-PB-2024-R0601', schedule_year: year };
   return { max_balance: 40, source_rule_id: 'CAO-PB-2024-R0602', schedule_year: year };
+}
+
+function buildReferenceShifts(body, serviceShifts) {
+  const referenceShifts = [
+    ...normalizeArray(body.reference_shifts),
+    ...normalizeArray(body.rolling_reference_shifts),
+    ...normalizeArray(body.historical_shifts),
+    ...serviceShifts
+  ];
+  const seen = new Set();
+  return referenceShifts.filter(shift => {
+    const key = shift.id || `${shift.date || shift.service_date || ''}|${shift.start_time || ''}|${shift.end_time || ''}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return !!(shift.date || shift.service_date);
+  });
+}
+
+function weeklyHoursFromShifts(shifts) {
+  const weekly = {};
+  for (const shift of shifts) {
+    const date = asIsoDate(shift.date || shift.service_date);
+    if (!date) continue;
+    const key = getIsoWeekKey(date);
+    weekly[key] = (weekly[key] || 0) + calculateShiftHours({ ...shift, date });
+  }
+  return weekly;
+}
+
+function maxRollingWeeklyAverage(weeklyHours, windowSize) {
+  const keys = Object.keys(weeklyHours).sort();
+  if (keys.length < windowSize) return null;
+  let maxAverage = 0;
+  let maxWindow = [];
+  for (let i = 0; i <= keys.length - windowSize; i++) {
+    const windowKeys = keys.slice(i, i + windowSize);
+    const total = windowKeys.reduce((sum, key) => sum + (weeklyHours[key] || 0), 0);
+    const average = total / windowSize;
+    if (average > maxAverage) {
+      maxAverage = average;
+      maxWindow = windowKeys;
+    }
+  }
+  return {
+    average_hours_per_week: round2(maxAverage),
+    week_keys: maxWindow
+  };
+}
+
+function nightWorkHoursBetween00And06(shift) {
+  const start = parseClockMinutes(shift.start_time);
+  let end = parseClockMinutes(shift.end_time);
+  if (start === null || end === null) return 0;
+  if (end <= start) end += 24 * 60;
+  let total = 0;
+  const maxOffset = Math.ceil(end / 1440);
+  for (let offset = 0; offset <= maxOffset; offset++) {
+    const nightStart = offset * 1440;
+    const nightEnd = nightStart + 360;
+    const overlap = Math.min(end, nightEnd) - Math.max(start, nightStart);
+    if (overlap > 0) total += overlap / 60;
+  }
+  return total;
 }
 
 function shiftHasContractContext(shift) {
@@ -336,13 +430,22 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
 
   const periodShifts = shifts.filter(s => s.date >= periodStart && s.date <= periodEnd);
   const serviceShifts = periodShifts.filter(s => !(s.is_time_window === true || s.roster_block_type === 'time_window' || s.block_type === 'time_window'));
+  const referenceServiceShifts = buildReferenceShifts(body, serviceShifts);
   const timeWindows = getRosterTimeWindows(body, periodStart, periodEnd, periodShifts);
   const periodDistance = daysBetween(periodEnd, periodStart);
   const periodDayCount = periodDistance !== null ? periodDistance + 1 : null;
   const schedulePublishedAt = body.schedule_published_at || body.roster_published_at || body.roster_publication_datetime || null;
   const weeklySchedulePublishedAt = body.weekly_schedule_published_at || body.weekly_roster_published_at || null;
+  const isGeneralReserve = isGeneralReserveEmployee(body);
 
-  if (isRuleApplicable('CAO-PB-2024-R0561', caoScope)) {
+  if (isGeneralReserve) {
+    skippedRules.push({
+      rule_id: 'CAO-PB-2024-R0605',
+      reason: 'Werknemer algemene reserve: artikel 21 is niet van toepassing; artikel 25-roosterregels gelden in plaats daarvan.'
+    });
+  }
+
+  if (!isGeneralReserve && isRuleApplicable('CAO-PB-2024-R0561', caoScope)) {
     if (!periodShifts.length && !timeWindows.length) {
       violations.push({
         rule_id: 'CAO-PB-2024-R0561', severity: 'medium',
@@ -374,7 +477,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     }
   }
 
-  if (weeklySchedulePublishedAt && !isThursday(weeklySchedulePublishedAt)) {
+  if (!isGeneralReserve && weeklySchedulePublishedAt && !isThursday(weeklySchedulePublishedAt)) {
     violations.push({
       rule_id: 'CAO-PB-2024-R0568',
       severity: 'medium',
@@ -383,7 +486,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
       payroll_impact: false,
       manual_review_required: true
     });
-  } else if (!weeklySchedulePublishedAt) {
+  } else if (!isGeneralReserve && !weeklySchedulePublishedAt) {
     addManualReview(manualReviewItems, 'CAO-PB-2024-R0568', 'weekly_roster_publication', 'Leg vast wanneer de weekindeling met diensten is gepubliceerd.', 'weekly_schedule_published_at');
     missingEvidence.push({ rule_id: 'CAO-PB-2024-R0568', field: 'weekly_schedule_published_at' });
   }
@@ -402,6 +505,8 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     const hours = durationHoursForTimes(window.start_time, window.end_time);
     if (hours !== null) totalTimeWindowHours += hours;
     if (window.id) timeWindowIds.push(window.id);
+
+    if (isGeneralReserve) continue;
 
     const affected = window.id ? [window.id] : [];
     if (!isWholeHour(window.start_time)) {
@@ -432,7 +537,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const rosterBlockCount = totalShifts + timeWindows.length;
   const rosterBlockHours = totalHours + totalTimeWindowHours;
 
-  if (isRuleApplicable('CAO-PB-2024-R0562', caoScope)) {
+  if (!isGeneralReserve && isRuleApplicable('CAO-PB-2024-R0562', caoScope)) {
     if (rosterBlockCount > 20) {
       violations.push({
         rule_id: 'CAO-PB-2024-R0562', severity: 'high',
@@ -444,7 +549,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
 
   const parttimePercentage = normalizePercentage(body.parttime_percentage ?? body.contract_parttime_percentage ?? body.contract_percentage);
   const isParttimeFixedModel = hasContractModel(body, {}, ['parttime_fixed', 'parttime_vast', 'vast_model']);
-  if (isParttimeFixedModel) {
+  if (!isGeneralReserve && isParttimeFixedModel) {
     if (parttimePercentage === null) {
       addManualReview(manualReviewItems, 'CAO-PB-2024-R0565', 'parttime_fixed_model', 'Parttime vast model herkend, maar parttimepercentage ontbreekt voor de max-urencontrole.', 'parttime_percentage');
       missingEvidence.push({ rule_id: 'CAO-PB-2024-R0565', field: 'parttime_percentage' });
@@ -593,6 +698,153 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     });
   }
 
+  const specialWorkingTimeException = booleanOrNull(
+    body.special_working_time_exception_confirmed ??
+    body.special_circumstances_working_time_exception_confirmed
+  ) === true;
+  if (specialWorkingTimeException && !body.special_working_time_exception_reason && !body.unexpected_incidental_circumstance_reason && !body.nature_of_work_short_term_necessity_reason) {
+    addManualReview(
+      manualReviewItems,
+      'CAO-PB-2024-R0630',
+      'working_time_exception',
+      'Bijzondere omstandigheden zijn aangevinkt, maar de grondslag ontbreekt: onverwachte incidentele wijziging of aard van het werk voor korte tijd noodzakelijk.',
+      'special_working_time_exception_reason'
+    );
+  }
+
+  const weeklyHours = weeklyHoursFromShifts(referenceServiceShifts);
+  const weeklyHourRows = Object.entries(weeklyHours).map(([week_key, hours]) => ({ week_key, hours: round2(hours) }));
+  for (const row of weeklyHourRows) {
+    if (row.hours > 60) {
+      violations.push({
+        rule_id: specialWorkingTimeException ? 'CAO-PB-2024-R0635' : 'CAO-PB-2024-R0626',
+        severity: 'high',
+        message: `${row.hours} uur gepland in ${row.week_key}; maximaal 60 uur per week toegestaan.`,
+        payroll_impact: true,
+        week_key: row.week_key,
+        week_hours: row.hours,
+        max_week_hours: 60,
+        manual_review_required: false
+      });
+    }
+  }
+
+  for (const shift of serviceShifts) {
+    const hours = calculateShiftHours(shift);
+    const maxShiftHours = specialWorkingTimeException ? 12 : 10;
+    if (hours > maxShiftHours) {
+      violations.push({
+        rule_id: specialWorkingTimeException ? 'CAO-PB-2024-R0634' : 'CAO-PB-2024-R0625',
+        severity: 'high',
+        message: `Dienst ${shift.date} duurt ${round2(hours)} uur; maximaal ${maxShiftHours} uur toegestaan${specialWorkingTimeException ? ' bij bijzondere omstandigheden' : ''}.`,
+        affected_shift_ids: shift.id ? [shift.id] : [],
+        payroll_impact: true,
+        shift_hours: round2(hours),
+        max_shift_hours: maxShiftHours,
+        manual_review_required: false
+      });
+    }
+    const nightHours = nightWorkHoursBetween00And06(shift);
+    if (nightHours > 0 && hours > 10) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0638',
+        severity: 'high',
+        message: `Dienst ${shift.date} raakt de nachtperiode en duurt ${round2(hours)} uur; maximaal 10 uur per nachtdienst volgens artikel 26.`,
+        affected_shift_ids: shift.id ? [shift.id] : [],
+        payroll_impact: true,
+        shift_hours: round2(hours),
+        night_hours_00_06: round2(nightHours),
+        max_night_shift_hours: 10,
+        manual_review_required: false
+      });
+    }
+  }
+
+  const explicitAverage4 = numberOrNull(body.average_hours_4_week_reference ?? body.max_average_hours_4_week_reference);
+  const rollingAverage4 = explicitAverage4 !== null
+    ? { average_hours_per_week: explicitAverage4, week_keys: [] }
+    : maxRollingWeeklyAverage(weeklyHours, 4);
+  if (!specialWorkingTimeException) {
+    if (rollingAverage4 === null) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0627', 'working_time_average', 'Lever 4 aaneengesloten weken referentieuren aan om gemiddeld maximaal 55 uur per week te controleren.', 'reference_shifts');
+    } else if (rollingAverage4.average_hours_per_week > 55) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0627',
+        severity: 'high',
+        message: `Gemiddelde arbeidstijd is ${round2(rollingAverage4.average_hours_per_week)} uur per week in 4 weken; maximaal 55 uur toegestaan.`,
+        payroll_impact: true,
+        average_hours_per_week: round2(rollingAverage4.average_hours_per_week),
+        max_average_hours_per_week: 55,
+        week_keys: rollingAverage4.week_keys,
+        manual_review_required: false
+      });
+    }
+  }
+
+  const explicitAverage16 = numberOrNull(body.average_hours_16_week_reference ?? body.max_average_hours_16_week_reference);
+  const rollingAverage16 = explicitAverage16 !== null
+    ? { average_hours_per_week: explicitAverage16, week_keys: [] }
+    : maxRollingWeeklyAverage(weeklyHours, 16);
+  if (!specialWorkingTimeException) {
+    if (rollingAverage16 === null) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0628', 'working_time_average', 'Lever 16 aaneengesloten weken referentieuren aan om gemiddeld maximaal 48 uur per week te controleren.', 'rolling_16_week_reference_shifts');
+    } else if (rollingAverage16.average_hours_per_week > 48) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0628',
+        severity: 'high',
+        message: `Gemiddelde arbeidstijd is ${round2(rollingAverage16.average_hours_per_week)} uur per week in 16 weken; maximaal 48 uur toegestaan.`,
+        payroll_impact: true,
+        average_hours_per_week: round2(rollingAverage16.average_hours_per_week),
+        max_average_hours_per_week: 48,
+        week_keys: rollingAverage16.week_keys,
+        manual_review_required: false
+      });
+    }
+  }
+
+  const explicitAverage13 = numberOrNull(body.average_hours_13_week_reference ?? body.max_average_hours_13_week_reference);
+  const rollingAverage13 = explicitAverage13 !== null
+    ? { average_hours_per_week: explicitAverage13, week_keys: [] }
+    : maxRollingWeeklyAverage(weeklyHours, 13);
+  if (specialWorkingTimeException) {
+    if (rollingAverage13 === null) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0636', 'working_time_exception', 'Lever 13 aaneengesloten weken referentieuren aan om de bijzondere-omstandighedenlimiet van gemiddeld 48 uur te controleren.', 'rolling_13_week_reference_shifts');
+    } else if (rollingAverage13.average_hours_per_week > 48) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0636',
+        severity: 'high',
+        message: `Bij bijzondere omstandigheden is het gemiddelde ${round2(rollingAverage13.average_hours_per_week)} uur per week in 13 weken; maximaal 48 uur toegestaan.`,
+        payroll_impact: true,
+        average_hours_per_week: round2(rollingAverage13.average_hours_per_week),
+        max_average_hours_per_week: 48,
+        week_keys: rollingAverage13.week_keys,
+        manual_review_required: false
+      });
+    }
+  }
+
+  const hasNightWork = referenceServiceShifts.some(shift => nightWorkHoursBetween00And06({ ...shift, date: asIsoDate(shift.date || shift.service_date) }) > 0 || booleanOrNull(shift.is_night_shift) === true);
+  const explicitNightAverage13 = numberOrNull(body.night_average_hours_13_week_reference ?? body.average_hours_13_week_night_reference);
+  const nightAverage13 = explicitNightAverage13 !== null
+    ? { average_hours_per_week: explicitNightAverage13, week_keys: [] }
+    : rollingAverage13;
+  if (hasNightWork) {
+    if (nightAverage13 === null) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0639', 'night_working_time_average', 'Lever 13 weken referentieuren aan om de nachtdienstlimiet van gemiddeld 38 uur per week te controleren.', 'night_average_hours_13_week_reference');
+    } else if (nightAverage13.average_hours_per_week > 38) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0639',
+        severity: 'high',
+        message: `Bij nachtdiensten is het gemiddelde ${round2(nightAverage13.average_hours_per_week)} uur per week in 13 weken; maximaal 38 uur toegestaan.`,
+        payroll_impact: true,
+        average_hours_per_week: round2(nightAverage13.average_hours_per_week),
+        max_average_hours_per_week: 38,
+        week_keys: nightAverage13.week_keys,
+        manual_review_required: false
+      });
+    }
+  }
+
   const start = new Date(periodStart), end = new Date(periodEnd);
   const allDates = [];
   let cur = new Date(start);
@@ -604,7 +856,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const freeDates = allDates.filter(d => !occupiedDates.has(d));
   const freeDaysCount = freeDates.length;
 
-  if (isRuleApplicable('CAO-PB-2024-R0564', caoScope)) {
+  if (!isGeneralReserve && isRuleApplicable('CAO-PB-2024-R0564', caoScope)) {
     if (freeDaysCount < 8) {
       violations.push({
         rule_id: 'CAO-PB-2024-R0564', severity: 'high',
@@ -637,85 +889,233 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     }
   }
 
-  const freeDayPreferenceRequests = normalizeArray(body.free_day_preference_requests || body.free_day_preference_request);
-  for (const request of freeDayPreferenceRequests) {
-    const requestDate = asIsoDate(request.request_date || request.submitted_at || request.created_at);
-    const responseDate = asIsoDate(request.response_date || request.responded_at);
-    const responseStatus = String(request.response_status || request.status || '').toLowerCase();
-    const deadline = addDays(periodStart, -35);
-    const responseDeadline = requestDate ? nextThursdayOnOrAfter(requestDate) : null;
-    if (!requestDate) {
-      addManualReview(manualReviewItems, 'CAO-PB-2024-R0567', 'free_day_preference', 'Vrije-dagenvoorkeur mist indieningsdatum.', 'free_day_preference_request_date');
-    } else if (deadline && requestDate > deadline) {
-      violations.push({
-        rule_id: 'CAO-PB-2024-R0567',
-        severity: 'medium',
-        message: `Vrije-dagenvoorkeur is ingediend op ${requestDate}; uiterlijk ${deadline} vereist.`,
-        payroll_impact: false,
-        manual_review_required: true
-      });
+  if (isGeneralReserve) {
+    payrollEntitlements.push({
+      rule_id: 'CAO-PB-2024-R0606',
+      type: 'general_reserve_allowance',
+      allowance_percentage: 10,
+      worked_period_hours: round2(totalHours),
+      base_hourly_rate: baseHourlyRate,
+      amount: baseHourlyRate !== null ? round2(totalHours * baseHourlyRate * 0.10) : null,
+      message: 'Werknemer algemene reserve heeft recht op 10% toeslag op het basisuurloon en geen recht op verschuivingstoeslag.'
+    });
+    if (baseHourlyRate === null) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0606', 'general_reserve_allowance', 'Basisuurloon ontbreekt; 10% algemene-reservetoeslag kan niet definitief worden berekend.', 'base_hourly_rate');
     }
-    if (!responseDate || (responseDeadline && responseDate > responseDeadline)) {
-      payrollEntitlements.push({
-        rule_id: 'CAO-PB-2024-R0567',
-        type: 'free_day_preference_definitive',
-        request_date: requestDate,
-        response_date: responseDate || null,
-        response_deadline_date: responseDeadline,
-        message: 'Werkgever reageerde niet tijdig; aangevraagde vrije dagen gelden als definitief vastgesteld.'
-      });
-    }
-    if ((responseStatus.includes('reject') || responseStatus.includes('afgewezen')) && !request.rejection_reason && !request.reason) {
-      violations.push({
-        rule_id: 'CAO-PB-2024-R0567',
-        severity: 'medium',
-        message: 'Afwijzing van vrije-dagenvoorkeur mist een reden.',
-        payroll_impact: false,
-        manual_review_required: true
-      });
-    }
-  }
 
-  for (const shift of serviceShifts) {
-    const unpaidBreakHours = getUnpaidBreakHours(shift);
-    if (unpaidBreakHours > 1) {
+    const fixedFreeDays = uniqueSortedIsoDates(body.general_reserve_fixed_free_days || body.employer_fixed_free_days || body.general_reserve_employer_fixed_free_days);
+    const fixedFreeDaysPublishedAt = asIsoDate(body.general_reserve_fixed_free_days_published_at || body.employer_fixed_free_days_published_at);
+    const fixedFreeDaysDeadline = addDays(periodStart, -28);
+    if (fixedFreeDays.length < 4) {
       violations.push({
-        rule_id: 'CAO-PB-2024-R0569',
+        rule_id: 'CAO-PB-2024-R0608',
+        severity: 'medium',
+        message: `Algemene reserve: werkgever moet 4 van de 8 vrije dagen vaststellen; ${fixedFreeDays.length} vastgelegd.`,
+        payroll_impact: false,
+        fixed_free_days_count: fixedFreeDays.length,
+        manual_review_required: true
+      });
+    }
+    if (!fixedFreeDaysPublishedAt) {
+      addManualReview(manualReviewItems, 'CAO-PB-2024-R0609', 'general_reserve_free_days', 'Leg vast wanneer de 4 door werkgever vastgestelde vrije dagen zijn meegedeeld.', 'general_reserve_fixed_free_days_published_at');
+    } else if (fixedFreeDaysDeadline && fixedFreeDaysPublishedAt > fixedFreeDaysDeadline) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0609',
+        severity: 'medium',
+        message: `Algemene reserve: vaste vrije dagen zijn meegedeeld op ${fixedFreeDaysPublishedAt}; uiterlijk ${fixedFreeDaysDeadline} vereist.`,
+        payroll_impact: false,
+        manual_review_required: true
+      });
+    }
+
+    const generalReservePreferenceRequests = normalizeArray(body.general_reserve_free_day_preference_requests || body.general_reserve_free_day_preference_request);
+    for (const request of generalReservePreferenceRequests) {
+      const requestDate = asIsoDate(request.request_date || request.submitted_at || request.created_at);
+      const responseDate = asIsoDate(request.response_date || request.responded_at);
+      const responseStatus = String(request.response_status || request.status || '').toLowerCase();
+      const requestDeadline = addDays(periodStart, -35);
+      const responseDeadline = addDays(periodStart, -28);
+      if (!requestDate) {
+        addManualReview(manualReviewItems, 'CAO-PB-2024-R0611', 'general_reserve_free_day_preference', 'Voorkeur voor 4 vrije dagen mist indieningsdatum.', 'general_reserve_free_day_preference_request_date');
+      } else if (requestDeadline && requestDate > requestDeadline) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0611',
+          severity: 'medium',
+          message: `Algemene reserve: voorkeur vrije dagen ingediend op ${requestDate}; uiterlijk ${requestDeadline} vereist.`,
+          payroll_impact: false,
+          manual_review_required: true
+        });
+      }
+      if (booleanOrNull(request.written_message_confirmed) !== true) {
+        addManualReview(manualReviewItems, 'CAO-PB-2024-R0612', 'general_reserve_free_day_preference', 'Bevestig dat de voorkeur schriftelijk is gestuurd.', 'written_message_confirmed');
+      }
+      if (!responseDate || (responseDeadline && responseDate > responseDeadline)) {
+        payrollEntitlements.push({
+          rule_id: 'CAO-PB-2024-R0615',
+          type: 'general_reserve_requested_free_days_definitive',
+          request_date: requestDate,
+          response_date: responseDate || null,
+          response_deadline_date: responseDeadline,
+          message: 'Werkgever reageerde niet tijdig; aangevraagde vrije dagen gelden voor algemene reserve als vrije dagen.'
+        });
+      }
+      if ((responseStatus.includes('reject') || responseStatus.includes('afgewezen') || responseStatus.includes('objection') || responseStatus.includes('bezwaar')) &&
+        normalizeArray(request.alternative_free_days).length < 1) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0614',
+          severity: 'medium',
+          message: 'Algemene reserve: bezwaar tegen vrije-dagenvoorkeur mist gelijktijdig aangewezen alternatieve vrije dagen.',
+          payroll_impact: false,
+          manual_review_required: true
+        });
+      }
+    }
+
+    const remainingFreeDays = uniqueSortedIsoDates(
+      body.general_reserve_remaining_free_days ||
+      body.general_reserve_other_free_days ||
+      freeDates.filter(date => !fixedFreeDays.includes(date))
+    );
+    const remainingFreeDayBlocks = analyzeFreeDayBlocks(remainingFreeDays);
+    if (remainingFreeDays.length < 4) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0616',
+        severity: 'medium',
+        message: `Algemene reserve: 4 overige vrije dagen moeten worden vastgesteld; ${remainingFreeDays.length} gevonden.`,
+        payroll_impact: false,
+        manual_review_required: true
+      });
+    }
+    if (remainingFreeDayBlocks.consecutive_blocks < 2) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0617',
+        severity: 'medium',
+        message: `Algemene reserve: overige vrije dagen moeten 2 blokken van 2 aaneengesloten vrije dagen vormen; ${remainingFreeDayBlocks.consecutive_blocks} blokken gevonden.`,
+        payroll_impact: false,
+        manual_review_required: true
+      });
+    }
+    if (!remainingFreeDayBlocks.weekend_block_found) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0618',
+        severity: 'medium',
+        message: 'Algemene reserve: onder de vrije-dagenblokken moet 1 vrij weekend zitten.',
+        payroll_impact: false,
+        manual_review_required: true
+      });
+    }
+
+    const shiftedFreeDays = normalizeArray(body.general_reserve_shifted_free_days);
+    for (const change of shiftedFreeDays) {
+      const replacementDate = asIsoDate(change.replacement_date || change.new_free_day);
+      if (!replacementDate || replacementDate < periodStart || replacementDate > periodEnd || booleanOrNull(change.consultation_confirmed) !== true) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0620',
+          severity: 'medium',
+          message: 'Algemene reserve: verschoven vrije dag vereist overleg en een vervangende vrije dag in dezelfde loonperiode.',
+          payroll_impact: false,
+          manual_review_required: true
+        });
+      }
+    }
+    const withdrawnFreeDays = normalizeArray(body.general_reserve_withdrawn_free_days);
+    if (withdrawnFreeDays.length > 1) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0621',
         severity: 'high',
-        message: `Dienst ${shift.date} heeft ${round2(unpaidBreakHours)} uur onbetaalde pauze/onderbreking; maximaal 1 uur binnen een dienst.`,
-        affected_shift_ids: shift.id ? [shift.id] : [],
-        payroll_impact: true,
-        unpaid_break_hours: round2(unpaidBreakHours),
+        message: `Algemene reserve: werkgever mag maximaal 1 van de 8 vrije dagen intrekken; ${withdrawnFreeDays.length} ingetrokken.`,
+        payroll_impact: false,
+        withdrawn_free_days_count: withdrawnFreeDays.length,
         manual_review_required: false
       });
     }
+  } else {
+    const freeDayPreferenceRequests = normalizeArray(body.free_day_preference_requests || body.free_day_preference_request);
+    for (const request of freeDayPreferenceRequests) {
+      const requestDate = asIsoDate(request.request_date || request.submitted_at || request.created_at);
+      const responseDate = asIsoDate(request.response_date || request.responded_at);
+      const responseStatus = String(request.response_status || request.status || '').toLowerCase();
+      const deadline = addDays(periodStart, -35);
+      const responseDeadline = requestDate ? nextThursdayOnOrAfter(requestDate) : null;
+      if (!requestDate) {
+        addManualReview(manualReviewItems, 'CAO-PB-2024-R0567', 'free_day_preference', 'Vrije-dagenvoorkeur mist indieningsdatum.', 'free_day_preference_request_date');
+      } else if (deadline && requestDate > deadline) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0567',
+          severity: 'medium',
+          message: `Vrije-dagenvoorkeur is ingediend op ${requestDate}; uiterlijk ${deadline} vereist.`,
+          payroll_impact: false,
+          manual_review_required: true
+        });
+      }
+      if (!responseDate || (responseDeadline && responseDate > responseDeadline)) {
+        payrollEntitlements.push({
+          rule_id: 'CAO-PB-2024-R0567',
+          type: 'free_day_preference_definitive',
+          request_date: requestDate,
+          response_date: responseDate || null,
+          response_deadline_date: responseDeadline,
+          message: 'Werkgever reageerde niet tijdig; aangevraagde vrije dagen gelden als definitief vastgesteld.'
+        });
+      }
+      if ((responseStatus.includes('reject') || responseStatus.includes('afgewezen')) && !request.rejection_reason && !request.reason) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0567',
+          severity: 'medium',
+          message: 'Afwijzing van vrije-dagenvoorkeur mist een reden.',
+          payroll_impact: false,
+          manual_review_required: true
+        });
+      }
+    }
   }
 
-  for (const shift of serviceShifts) {
-    const hours = calculateShiftHours(shift);
-    if (hours > 10 && booleanOrNull(shift.voluntary_long_shift_confirmed ?? body.voluntary_long_shift_confirmed) !== true) {
-      violations.push({
-        rule_id: 'CAO-PB-2024-R0571',
-        severity: 'high',
-        message: `Dienst ${shift.date} duurt ${round2(hours)} uur; langer dan 10 uur mag alleen vrijwillig.`,
-        affected_shift_ids: shift.id ? [shift.id] : [],
-        payroll_impact: true,
-        shift_hours: round2(hours),
-        manual_review_required: true
-      });
+  if (!isGeneralReserve) {
+    for (const shift of serviceShifts) {
+      const unpaidBreakHours = getUnpaidBreakHours(shift);
+      if (unpaidBreakHours > 1) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0569',
+          severity: 'high',
+          message: `Dienst ${shift.date} heeft ${round2(unpaidBreakHours)} uur onbetaalde pauze/onderbreking; maximaal 1 uur binnen een dienst.`,
+          affected_shift_ids: shift.id ? [shift.id] : [],
+          payroll_impact: true,
+          unpaid_break_hours: round2(unpaidBreakHours),
+          manual_review_required: false
+        });
+      }
+    }
+  }
+
+  if (!isGeneralReserve) {
+    for (const shift of serviceShifts) {
+      const hours = calculateShiftHours(shift);
+      if (hours > 10 && booleanOrNull(shift.voluntary_long_shift_confirmed ?? body.voluntary_long_shift_confirmed) !== true) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0571',
+          severity: 'high',
+          message: `Dienst ${shift.date} duurt ${round2(hours)} uur; langer dan 10 uur mag alleen vrijwillig.`,
+          affected_shift_ids: shift.id ? [shift.id] : [],
+          payroll_impact: true,
+          shift_hours: round2(hours),
+          manual_review_required: true
+        });
+      }
     }
   }
 
   const specialHolidayCategories = new Set();
-  for (const shift of serviceShifts) {
-    const date = asIsoDate(shift.date || shift.service_date);
-    if (!date) continue;
-    if (date.endsWith('-12-25')) specialHolidayCategories.add('christmas_day_1');
-    if (date.endsWith('-12-26')) specialHolidayCategories.add('christmas_day_2');
-    if (date.endsWith('-01-01')) specialHolidayCategories.add('new_years_day');
-    if (date.endsWith('-12-31') && overlapsAfterClock(shift, date, '16:00')) specialHolidayCategories.add('new_years_eve_after_16');
+  if (!isGeneralReserve) {
+    for (const shift of serviceShifts) {
+      const date = asIsoDate(shift.date || shift.service_date);
+      if (!date) continue;
+      if (date.endsWith('-12-25')) specialHolidayCategories.add('christmas_day_1');
+      if (date.endsWith('-12-26')) specialHolidayCategories.add('christmas_day_2');
+      if (date.endsWith('-01-01')) specialHolidayCategories.add('new_years_day');
+      if (date.endsWith('-12-31') && overlapsAfterClock(shift, date, '16:00')) specialHolidayCategories.add('new_years_eve_after_16');
+    }
   }
-  if (specialHolidayCategories.size === 4) {
+  if (!isGeneralReserve && specialHolidayCategories.size === 4) {
     violations.push({
       rule_id: 'CAO-PB-2024-R0572',
       severity: 'medium',
@@ -729,11 +1129,12 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const careRequests = normalizeArray(body.care_schedule_adjustment_requests || body.care_schedule_adjustment_request);
   for (const request of careRequests) {
     const status = String(request.status || request.response_status || '').toLowerCase();
+    const careRuleId = isGeneralReserve ? 'CAO-PB-2024-R0622' : 'CAO-PB-2024-R0573';
     if ((status.includes('reject') || status.includes('afgewezen')) &&
       !request.rejection_reason &&
       booleanOrNull(request.organizationally_impossible_confirmed) !== true) {
       violations.push({
-        rule_id: 'CAO-PB-2024-R0573',
+        rule_id: careRuleId,
         severity: 'medium',
         message: 'Afwijzing van roosterverzoek voor opvoedingstaken mist reden of organisatorische onmogelijkheid.',
         payroll_impact: false,
@@ -750,7 +1151,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const totalForcedOutsideWindowCount = forcedCountYtd !== null
     ? forcedCountYtd
     : (forcedCountBefore || 0) + forcedOutsideWindowShifts.length;
-  if (totalForcedOutsideWindowCount > 8) {
+  if (!isGeneralReserve && totalForcedOutsideWindowCount > 8) {
     violations.push({
       rule_id: 'CAO-PB-2024-R0580',
       severity: 'high',
@@ -763,6 +1164,20 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   }
 
   for (const shift of serviceShifts) {
+    if (isGeneralReserve) {
+      if (booleanOrNull(shift.changed_after_roster_published) === true ||
+        !!shift.roster_change_datetime ||
+        !!shift.original_start_time ||
+        !!shift.original_time_window_start ||
+        !!shift.notified_time_window_start) {
+        skippedRules.push({
+          rule_id: 'CAO-PB-2024-R0606',
+          reason: 'Werknemer algemene reserve heeft geen recht op verschuivingstoeslag volgens artikel 43.',
+          affected_shift_ids: shift.id ? [shift.id] : []
+        });
+      }
+      continue;
+    }
     const changedAfterRoster = booleanOrNull(shift.changed_after_roster_published) === true ||
       !!shift.roster_change_datetime ||
       !!shift.original_start_time ||
@@ -821,30 +1236,32 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     });
   }
 
-  const blockingRequests = normalizeArray(body.outside_time_window_block_requests || body.roster_blocking_requests);
-  if (blockingRequests.length > 4) {
-    violations.push({
-      rule_id: 'CAO-PB-2024-R0583',
-      severity: 'high',
-      message: `${blockingRequests.length} blokkadedagen opgegeven; werknemer mag maximaal 4 dagen per jaar aanwijzen.`,
-      payroll_impact: false,
-      manual_review_required: false
-    });
-  }
-  for (const request of blockingRequests) {
-    const targetDate = asIsoDate(request.date || request.target_date || request.time_window_date);
-    const requestDate = asIsoDate(request.request_date || request.submitted_at || request.created_at);
-    const noticeDays = targetDate && requestDate ? daysBetween(targetDate, requestDate) : null;
-    if (noticeDays === null) {
-      addManualReview(manualReviewItems, 'CAO-PB-2024-R0584', 'roster_blocking_request', 'Blokkadeverzoek mist datum of indieningsdatum.', 'outside_time_window_block_requests');
-    } else if (noticeDays < 21 || noticeDays > 28) {
+  if (!isGeneralReserve) {
+    const blockingRequests = normalizeArray(body.outside_time_window_block_requests || body.roster_blocking_requests);
+    if (blockingRequests.length > 4) {
       violations.push({
-        rule_id: 'CAO-PB-2024-R0584',
-        severity: 'medium',
-        message: `Blokkadeverzoek is ${noticeDays} dagen vooraf gedaan; vereist is 28 tot 21 dagen voor ingang tijdvak/arbeidstijd.`,
+        rule_id: 'CAO-PB-2024-R0583',
+        severity: 'high',
+        message: `${blockingRequests.length} blokkadedagen opgegeven; werknemer mag maximaal 4 dagen per jaar aanwijzen.`,
         payroll_impact: false,
-        manual_review_required: true
+        manual_review_required: false
       });
+    }
+    for (const request of blockingRequests) {
+      const targetDate = asIsoDate(request.date || request.target_date || request.time_window_date);
+      const requestDate = asIsoDate(request.request_date || request.submitted_at || request.created_at);
+      const noticeDays = targetDate && requestDate ? daysBetween(targetDate, requestDate) : null;
+      if (noticeDays === null) {
+        addManualReview(manualReviewItems, 'CAO-PB-2024-R0584', 'roster_blocking_request', 'Blokkadeverzoek mist datum of indieningsdatum.', 'outside_time_window_block_requests');
+      } else if (noticeDays < 21 || noticeDays > 28) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0584',
+          severity: 'medium',
+          message: `Blokkadeverzoek is ${noticeDays} dagen vooraf gedaan; vereist is 28 tot 21 dagen voor ingang tijdvak/arbeidstijd.`,
+          payroll_impact: false,
+          manual_review_required: true
+        });
+      }
     }
   }
 
@@ -857,6 +1274,21 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     total_roster_block_hours: round2(rosterBlockHours),
     overtime_hours: Math.round(overtimeHours * 100) / 100,
     free_days_count: freeDaysCount,
+    general_reserve_summary: {
+      is_general_reserve: isGeneralReserve,
+      article_21_skipped: isGeneralReserve,
+      allowance_percentage: isGeneralReserve ? 10 : null,
+      shift_change_allowance_excluded: isGeneralReserve
+    },
+    working_time_summary: {
+      special_working_time_exception: specialWorkingTimeException,
+      weekly_hours: weeklyHourRows,
+      four_week_average: rollingAverage4,
+      sixteen_week_average: rollingAverage16,
+      thirteen_week_average: rollingAverage13,
+      night_thirteen_week_average: hasNightWork ? nightAverage13 : null,
+      has_night_work: hasNightWork
+    },
     minus_hours_summary: {
       agreed_period_hours: agreedPeriodHours === null ? null : round2(agreedPeriodHours),
       worked_period_hours: round2(totalHours),
