@@ -15,7 +15,7 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 
 /**
  * CAO PB planning-validator
- * Bronregels: R0547-R0549 en R0560-R0677 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd, rusttijd, nachtdienst en pauze)
+ * Bronregels: R0547-R0549 en R0560-R0679 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd, rusttijd, nachtdienst, pauze en jeugdige werknemer)
  *
  * Scope-bewust:
  * - Artikel 3 lid 2 sluit uit: art. 10, art. 9 lid 1 sub c, hfdst. 4 (behalve 37/38/41), hfdst. 5, bijlage 2.
@@ -26,6 +26,13 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 
 // Regels die onder art. 42 / hoofdstuk 4 vallen (uitgesloten bij non-security)
 const CHAPTER4_OVERTIME_RULES = ['CAO-PB-2024-R0590'];
+const ARTICLE_30_EXCLUDED_RULE_IDS = new Set([
+  'CAO-PB-2024-R0588', 'CAO-PB-2024-R0589', 'CAO-PB-2024-R0590', 'CAO-PB-2024-R0591',
+  ...Array.from({ length: 15 }, (_, i) => `CAO-PB-2024-R${String(625 + i).padStart(4, '0')}`),
+  ...Array.from({ length: 7 }, (_, i) => `CAO-PB-2024-R${String(640 + i).padStart(4, '0')}`),
+  ...Array.from({ length: 21 }, (_, i) => `CAO-PB-2024-R${String(647 + i).padStart(4, '0')}`),
+  ...Array.from({ length: 10 }, (_, i) => `CAO-PB-2024-R${String(668 + i).padStart(4, '0')}`)
+]);
 
 // Normaliseer scope: null = fail-closed (unknown → conservatief, maar planning hoofdstuk 3 geldt altijd)
 function normalizeCaoScope(scope) {
@@ -156,6 +163,60 @@ function formatLocalDateTime(date) {
   const hours = String(date.getHours()).padStart(2, '0');
   const minutes = String(date.getMinutes()).padStart(2, '0');
   return `${formatIsoDateLocal(date)}T${hours}:${minutes}:00`;
+}
+
+function calculateAgeAt(dateOfBirth, referenceDate) {
+  const birth = dateFromIso(dateOfBirth);
+  const reference = dateFromIso(referenceDate);
+  if (!birth || !reference) return null;
+  let age = reference.getFullYear() - birth.getFullYear();
+  const monthDiff = reference.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && reference.getDate() < birth.getDate())) age--;
+  return age;
+}
+
+function resolveYouthWorkerArticle30(body, periodStart) {
+  const explicitUnder18 = booleanOrNull(
+    body.is_under_18 ??
+    body.under_18 ??
+    body.is_minor_employee ??
+    body.minor_employee ??
+    body.youth_worker_under_18
+  );
+  const explicitAge = numberOrNull(body.employee_age ?? body.personnel_age ?? body.age);
+  const dateOfBirth = asIsoDate(body.date_of_birth ?? body.employee_date_of_birth ?? body.personnel_date_of_birth);
+  const ageAtPeriodStart = explicitAge !== null ? explicitAge : calculateAgeAt(dateOfBirth, periodStart);
+  const isUnder18 = explicitUnder18 !== null ? explicitUnder18 : ageAtPeriodStart !== null ? ageAtPeriodStart < 18 : false;
+  return {
+    is_under_18: isUnder18 === true,
+    source_rule_ids: ['CAO-PB-2024-R0678', 'CAO-PB-2024-R0679'],
+    age_at_period_start: ageAtPeriodStart,
+    date_of_birth: dateOfBirth,
+    reference_date: asIsoDate(periodStart),
+    evidence: explicitUnder18 !== null
+      ? 'explicit_under_18_flag'
+      : explicitAge !== null
+      ? 'explicit_age'
+      : dateOfBirth
+      ? 'date_of_birth'
+      : 'not_provided',
+    atw_youth_rules_required: isUnder18 === true
+  };
+}
+
+function isArticle30ExcludedRuleId(ruleId) {
+  return ARTICLE_30_EXCLUDED_RULE_IDS.has(ruleId);
+}
+
+function removeArticle30ExcludedItems(items) {
+  const removed = [];
+  for (let i = items.length - 1; i >= 0; i--) {
+    if (isArticle30ExcludedRuleId(items[i]?.rule_id)) {
+      removed.push(items[i]);
+      items.splice(i, 1);
+    }
+  }
+  return removed.reverse();
 }
 
 function daysBetween(later, earlier) {
@@ -817,6 +878,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const schedulePublishedAt = body.schedule_published_at || body.roster_published_at || body.roster_publication_datetime || null;
   const weeklySchedulePublishedAt = body.weekly_schedule_published_at || body.weekly_roster_published_at || null;
   const isGeneralReserve = isGeneralReserveEmployee(body);
+  const youthWorkerSummary = resolveYouthWorkerArticle30(body, periodStart);
   const breakSummaryRows = [];
   let noBreakExceptionApplied = false;
   let noBreakSixteenWeekAverage = null;
@@ -2166,6 +2228,43 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     }
   }
 
+  if (youthWorkerSummary.is_under_18) {
+    const removedViolations = removeArticle30ExcludedItems(violations);
+    const removedManualReviewItems = removeArticle30ExcludedItems(manualReviewItems);
+    const removedMissingEvidence = removeArticle30ExcludedItems(missingEvidence);
+    const removedPayrollEntitlements = removeArticle30ExcludedItems(payrollEntitlements);
+    const removedPayrollAdjustments = removeArticle30ExcludedItems(payrollAdjustments);
+    youthWorkerSummary.excluded_cao_rule_ids = Array.from(ARTICLE_30_EXCLUDED_RULE_IDS).sort();
+    youthWorkerSummary.removed_runtime_items = {
+      violations: removedViolations.map(item => item.rule_id),
+      manual_review_items: removedManualReviewItems.map(item => item.rule_id),
+      missing_evidence: removedMissingEvidence.map(item => item.rule_id),
+      payroll_entitlements: removedPayrollEntitlements.map(item => item.rule_id),
+      payroll_adjustments: removedPayrollAdjustments.map(item => item.rule_id)
+    };
+    skippedRules.push({
+      rule_id: 'CAO-PB-2024-R0679',
+      reason: 'Werknemer is jonger dan 18 jaar: CAO PB artikelen 23 en 26 tot en met 29 gelden niet; Arbeidstijdenwet voor jeugdige werknemers is leidend.',
+      excluded_rule_ids: youthWorkerSummary.excluded_cao_rule_ids
+    });
+    addManualReview(
+      manualReviewItems,
+      'CAO-PB-2024-R0679',
+      'youth_working_time_law',
+      'Werknemer is jonger dan 18 jaar. Controleer en bevestig de toepasselijke Arbeidstijdenwet-regels voor jeugdige werknemers; volwassen CAO-regels artikel 23 en 26 t/m 29 zijn niet toegepast.',
+      'arbeidstijdenwet_youth_compliance_confirmed'
+    );
+  } else {
+    youthWorkerSummary.excluded_cao_rule_ids = [];
+    youthWorkerSummary.removed_runtime_items = {
+      violations: [],
+      manual_review_items: [],
+      missing_evidence: [],
+      payroll_entitlements: [],
+      payroll_adjustments: []
+    };
+  }
+
   return {
     total_shifts: totalShifts,
     total_hours: Math.round(totalHours * 100) / 100,
@@ -2181,6 +2280,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
       allowance_percentage: isGeneralReserve ? 10 : null,
       shift_change_allowance_excluded: isGeneralReserve
     },
+    youth_worker_summary: youthWorkerSummary,
     working_time_summary: {
       special_working_time_exception: specialWorkingTimeException,
       weekly_hours: weeklyHourRows,
@@ -2467,11 +2567,15 @@ Deno.serve(async (req) => {
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
 
     let rawCaoScope = null;
+    let personnelContext = null;
     if (personnel_id) {
       try {
         const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
         rawCaoScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
+      try {
+        personnelContext = await base44.entities.Personnel.get(personnel_id);
+      } catch { /* geboortedatum is optioneel voor oudere payloads */ }
     }
     const caoScope = normalizeCaoScope(rawCaoScope);
 
@@ -2491,13 +2595,23 @@ Deno.serve(async (req) => {
       pEnd = formatIsoDateLocal(fourWeeksLater);
     }
 
-    const result = validateSchedule(shifts, pStart, pEnd, caoScope, body);
+    const scheduleBody = { ...body };
+    if (
+      personnelContext?.date_of_birth &&
+      !scheduleBody.date_of_birth &&
+      !scheduleBody.employee_date_of_birth &&
+      !scheduleBody.personnel_date_of_birth
+    ) {
+      scheduleBody.personnel_date_of_birth = personnelContext.date_of_birth;
+    }
+
+    const result = validateSchedule(shifts, pStart, pEnd, caoScope, scheduleBody);
     const contractValidation = await validateShiftContractResolution(base44, {
       shifts,
       periodStart: pStart,
       periodEnd: pEnd,
       personnel_id,
-      body
+      body: scheduleBody
     });
 
     result.violations = [
