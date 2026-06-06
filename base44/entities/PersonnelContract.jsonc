@@ -219,6 +219,13 @@
       ],
       "description": "Contracturen per loonperiode voor toekomstige CAO/payroll controles."
     },
+    "fixed_hours_per_pay_period": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Vast aantal uren per loonperiode. Ontbreekt dit bij een oproepcontext, dan kan artikel 13 oproepovereenkomst gelden."
+    },
     "min_hours_per_week": {
       "type": [
         "number",
@@ -230,6 +237,156 @@
         "number",
         "null"
       ]
+    },
+    "min_hours_per_pay_period": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Minimum/garantie-uren per loonperiode bij min-maxcontract."
+    },
+    "max_hours_per_pay_period": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Maximum uren per loonperiode bij min-maxcontract."
+    },
+    "is_call_agreement": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als dit contract als oproepovereenkomst onder artikel 13 CAO PB is geclassificeerd."
+    },
+    "call_agreement_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "pre_agreement",
+        "zero_hours",
+        "min_max",
+        "annualized_bandwidth",
+        "no_work_no_pay_first_6_months",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Type oproepovereenkomst conform artikel 13: voorovereenkomst, nul-uren, min-max, jaaruren/bandbreedte of eerste-6-maanden geen werk geen loon."
+    },
+    "annualized_hours_with_bandwidth": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als arbeidsomvang per jaar is vastgelegd met flexibel inzetbare bandbreedte."
+    },
+    "annual_contract_hours": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Vastgelegde arbeidsomvang per jaar bij jaaruren/bandbreedte."
+    },
+    "no_work_no_pay_first_6_months": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als in de eerste 6 maanden alleen loon over daadwerkelijk gewerkte uren is afgesproken."
+    },
+    "call_notice_days": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Oproeptermijn in dagen. CAO PB artikel 13: 4 dagen."
+    },
+    "employee_notice_days": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Opzegtermijn werknemer bij nul-urencontract; gelijk aan oproeptermijn."
+    },
+    "payslip_call_agreement_indicator_required": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als loonstrook moet vermelden dat sprake is van een oproepovereenkomst."
+    },
+    "call_agreement_rule_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Status van artikel 13 oproepovereenkomstregels."
+    },
+    "call_agreement_manual_review_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "fixed_hours_offer_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "not_due",
+        "due",
+        "overdue",
+        "sent",
+        "accepted",
+        "rejected",
+        "manual_review_required",
+        null
+      ],
+      "description": "Status van het 12-maanden-aanbod vaste arbeidsduur voor oproepovereenkomsten."
+    },
+    "fixed_hours_offer_sent_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "fixed_hours_offer_accepted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "fixed_hours_offer_acceptance_deadline_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "fixed_hours_offer_due_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "fixed_hours_offer_deadline_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "average_hours_last_12_months": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Gemiddelde arbeidsomvang over de afgelopen 12 maanden, nodig voor artikel 13 loonrecht bij ontbrekend aanbod."
     },
     "industry_seniority_pay_periods": {
       "type": [
