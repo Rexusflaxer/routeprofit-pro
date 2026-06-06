@@ -388,6 +388,82 @@
       ],
       "description": "Gemiddelde arbeidsomvang over de afgelopen 12 maanden, nodig voor artikel 13 loonrecht bij ontbrekend aanbod."
     },
+    "fixed_hours_request_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "not_requested",
+        "not_eligible",
+        "decision_due",
+        "decision_overdue",
+        "automatic_adjustment_due",
+        "decision_approved",
+        "decision_rejected",
+        "manual_review_required",
+        null
+      ],
+      "description": "Status van werknemersverzoek om contracturen vast te leggen op basis van artikel 13 lid 6."
+    },
+    "fixed_hours_request_submitted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "fixed_hours_request_decision_sent_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "fixed_hours_request_decision": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "approved",
+        "rejected",
+        "pending",
+        null
+      ],
+      "description": "Werkgeversbesluit op werknemersverzoek vaste arbeidsduur."
+    },
+    "fixed_hours_request_decision_deadline_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Deadline van 1 week na schriftelijk verzoek."
+    },
+    "fixed_hours_request_requested_hours_per_pay_period": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Aangevraagde arbeidsduur per loonperiode bij werknemersverzoek."
+    },
+    "fixed_hours_request_regular_13_weeks_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Owner/HR bevestiging dat 13 weken regelmatig en structureel meer is gewerkt."
+    },
+    "fixed_hours_request_qualifying_weeks": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Aantal kwalificerende weken voor artikel 13 lid 6, exclusief loonperioden 7, 8, 9 en 13."
+    },
+    "fixed_hours_request_manual_review_required": {
+      "type": "boolean",
+      "default": false
+    },
     "industry_seniority_pay_periods": {
       "type": [
         "number",

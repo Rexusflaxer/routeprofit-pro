@@ -54,6 +54,13 @@ function addDays(dateStr, days) {
   return date.toISOString().slice(0, 10);
 }
 
+function daysBetween(later, earlier) {
+  const laterDate = dateFromIso(later);
+  const earlierDate = dateFromIso(earlier);
+  if (!laterDate || !earlierDate) return null;
+  return Math.round((laterDate - earlierDate) / (1000 * 60 * 60 * 24));
+}
+
 function calculateContractDurationBoundary(contract_start_date, contract_end_date) {
   const startIso = asIsoDate(contract_start_date);
   const endIso = asIsoDate(contract_end_date);
@@ -388,6 +395,11 @@ function numberOrNull(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function normalizeArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean);
+}
+
 function hasFixedPayPeriodHours(input) {
   return numberOrNull(input.contract_hours_per_pay_period) !== null ||
     numberOrNull(input.fixed_hours_per_pay_period) !== null;
@@ -510,9 +522,16 @@ function evaluateCallAgreementRules(input) {
   payrollEntitlements.push(...fixedHoursOffer.payroll_entitlements);
   warnings.push(...fixedHoursOffer.warnings);
 
+  const employeeFixedHoursRequest = evaluateEmployeeFixedHoursRequest(input, isCallAgreement);
+  sourceRuleIds.push(...employeeFixedHoursRequest.source_rule_ids);
+  violations.push(...employeeFixedHoursRequest.contract_rule_violations);
+  payrollEntitlements.push(...employeeFixedHoursRequest.payroll_entitlements);
+  warnings.push(...employeeFixedHoursRequest.warnings);
+
   const uniqueSourceRuleIds = [...new Set(sourceRuleIds)];
   const hasBlockingViolation = violations.some(v => v.severity === 'high' || v.severity === 'critical');
   const manualReviewRequired = fixedHoursOffer.manual_review_required ||
+    employeeFixedHoursRequest.manual_review_required ||
     noticeValidation.manual_review_required ||
     warnings.some(w => String(w).includes('afzonderlijke controle'));
 
@@ -533,6 +552,7 @@ function evaluateCallAgreementRules(input) {
     payroll_entitlements: payrollEntitlements,
     recommended_contract_update: recommendedContractUpdate,
     fixed_hours_offer: fixedHoursOffer.fixed_hours_offer,
+    employee_fixed_hours_request: employeeFixedHoursRequest.employee_fixed_hours_request,
     call_notice_validation: noticeValidation.call_notice_validation
   };
 }
@@ -705,6 +725,243 @@ function evaluateFixedHoursOffer(input, isCallAgreement) {
   };
 }
 
+function roundWorkedHoursForFixedHoursRequest(entry) {
+  const rawHours = numberOrNull(entry.worked_hours);
+  const rawMinutes = numberOrNull(entry.worked_minutes);
+  if (rawHours === null && rawMinutes === null) return null;
+  const totalMinutes = rawMinutes !== null
+    ? rawMinutes
+    : Math.round(rawHours * 60);
+  const wholeHours = Math.floor(totalMinutes / 60);
+  const remainder = totalMinutes % 60;
+  return remainder >= 30 ? wholeHours + 1 : wholeHours;
+}
+
+function countedPayPeriod(periodNumber) {
+  const period = Number(periodNumber);
+  if (!Number.isFinite(period)) return null;
+  return [7, 8, 9, 13].includes(period) ? null : period;
+}
+
+function nextCountedPayPeriod(periodNumber) {
+  const current = Number(periodNumber);
+  if (!Number.isFinite(current)) return null;
+  let next = current + 1;
+  if (next > 13) next = 1;
+  while ([7, 8, 9, 13].includes(next)) {
+    next++;
+    if (next > 13) next = 1;
+  }
+  return next;
+}
+
+function fixedHoursRequestEntriesAreConsecutive(previous, current) {
+  const previousDate = asIsoDate(previous.week_start_date || previous.date);
+  const currentDate = asIsoDate(current.week_start_date || current.date);
+  const dayGap = previousDate && currentDate ? daysBetween(currentDate, previousDate) : null;
+  if (dayGap !== null && dayGap === 7) return true;
+  if (dayGap !== null && dayGap > 0 && dayGap <= 14 && previous.pay_period_number === current.pay_period_number) return true;
+
+  const previousPeriod = countedPayPeriod(previous.pay_period_number);
+  const currentPeriod = countedPayPeriod(current.pay_period_number);
+  return previousPeriod !== null &&
+    currentPeriod !== null &&
+    nextCountedPayPeriod(previousPeriod) === currentPeriod;
+}
+
+function calculateFixedHoursRequestEvidence(input) {
+  const entries = normalizeArray(
+    input.fixed_hours_request_worked_weeks ||
+    input.fixed_hours_request_weekly_evidence ||
+    input.worked_weeks_evidence
+  ).map((entry, index) => ({
+    ...entry,
+    _index: index,
+    rounded_worked_hours: roundWorkedHoursForFixedHoursRequest(entry),
+    pay_period_number: entry.pay_period_number ?? entry.period_number ?? null,
+    contract_hours: numberOrNull(entry.contract_hours ?? input.contract_hours_per_week),
+    regular_pattern: entry.regular_pattern !== false
+  })).filter(entry => countedPayPeriod(entry.pay_period_number) !== null);
+
+  if (input.fixed_hours_request_regular_13_weeks_confirmed === true) {
+    const qualifyingWeeks = numberOrNull(input.fixed_hours_request_qualifying_weeks) ?? entries.length;
+    return {
+      status: qualifyingWeeks >= 13 ? 'eligible' : 'not_eligible',
+      qualifying_weeks: qualifyingWeeks,
+      longest_qualifying_run_weeks: qualifyingWeeks,
+      rounded_hours_total: null,
+      excluded_pay_periods: [7, 8, 9, 13],
+      evidence_mode: 'owner_confirmed',
+      manual_review_required: false
+    };
+  }
+
+  if (entries.length === 0) {
+    return {
+      status: 'manual_review_required',
+      qualifying_weeks: 0,
+      longest_qualifying_run_weeks: 0,
+      rounded_hours_total: null,
+      excluded_pay_periods: [7, 8, 9, 13],
+      evidence_mode: 'missing',
+      manual_review_required: true
+    };
+  }
+
+  const sorted = [...entries].sort((a, b) => {
+    const aDate = asIsoDate(a.week_start_date || a.date) || '';
+    const bDate = asIsoDate(b.week_start_date || b.date) || '';
+    if (aDate && bDate && aDate !== bDate) return aDate.localeCompare(bDate);
+    return Number(a._index) - Number(b._index);
+  });
+
+  let currentRun = 0;
+  let longestRun = 0;
+  let previousQualified = null;
+  let roundedHoursTotal = 0;
+
+  for (const entry of sorted) {
+    const qualifies = entry.regular_pattern === true &&
+      entry.rounded_worked_hours !== null &&
+      entry.contract_hours !== null &&
+      entry.rounded_worked_hours > entry.contract_hours;
+
+    if (qualifies) {
+      roundedHoursTotal += entry.rounded_worked_hours;
+      if (!previousQualified || fixedHoursRequestEntriesAreConsecutive(previousQualified, entry)) currentRun++;
+      else currentRun = 1;
+      longestRun = Math.max(longestRun, currentRun);
+      previousQualified = entry;
+    } else {
+      currentRun = 0;
+      previousQualified = null;
+    }
+  }
+
+  return {
+    status: longestRun >= 13 ? 'eligible' : 'not_eligible',
+    qualifying_weeks: sorted.filter(entry =>
+      entry.regular_pattern === true &&
+      entry.rounded_worked_hours !== null &&
+      entry.contract_hours !== null &&
+      entry.rounded_worked_hours > entry.contract_hours
+    ).length,
+    longest_qualifying_run_weeks: longestRun,
+    rounded_hours_total: roundedHoursTotal,
+    excluded_pay_periods: [7, 8, 9, 13],
+    evidence_mode: 'weekly_entries',
+    manual_review_required: false
+  };
+}
+
+function evaluateEmployeeFixedHoursRequest(input, isCallAgreement) {
+  const submittedAt = asIsoDate(input.fixed_hours_request_submitted_at || input.employee_fixed_hours_request_submitted_at);
+  const evidenceInput = normalizeArray(
+    input.fixed_hours_request_worked_weeks ||
+    input.fixed_hours_request_weekly_evidence ||
+    input.worked_weeks_evidence
+  );
+  const hasRequestContext = !!submittedAt ||
+    input.fixed_hours_request_regular_13_weeks_confirmed === true ||
+    evidenceInput.length > 0;
+
+  if (!isCallAgreement && !hasRequestContext) {
+    return {
+      source_rule_ids: [],
+      contract_rule_violations: [],
+      payroll_entitlements: [],
+      warnings: [],
+      manual_review_required: false,
+      employee_fixed_hours_request: null
+    };
+  }
+
+  const sourceRuleIds = ['CAO-PB-2024-R0396', 'CAO-PB-2024-R0397', 'CAO-PB-2024-R0398', 'CAO-PB-2024-R0399'];
+  const warnings = [];
+  const violations = [];
+  const payrollEntitlements = [];
+  const referenceDate = asIsoDate(input.reference_date || new Date().toISOString());
+  const decisionSentAt = asIsoDate(input.fixed_hours_request_decision_sent_at);
+  const decision = input.fixed_hours_request_decision || null;
+  const requestedHours = numberOrNull(input.fixed_hours_request_requested_hours_per_pay_period);
+  const decisionDeadline = submittedAt ? addDays(submittedAt, 7) : null;
+  const evidence = calculateFixedHoursRequestEvidence(input);
+
+  if (!isCallAgreement && hasRequestContext) {
+    warnings.push('Verzoek vaste arbeidsduur is opgegeven buiten een oproepovereenkomstcontext; handmatige CAO-review vereist.');
+  }
+  if (!submittedAt && hasRequestContext) {
+    warnings.push('Datum schriftelijk verzoek vaste arbeidsduur ontbreekt; reactietermijn van 1 week kan niet worden bepaald.');
+  }
+  if (submittedAt && evidence.status === 'manual_review_required') {
+    warnings.push('Bewijs voor 13 weken regelmatig en structureel meer werken ontbreekt; handmatige review vereist.');
+  }
+
+  const eligible = evidence.status === 'eligible';
+  const overdue = eligible && submittedAt && !decisionSentAt && referenceDate && referenceDate > decisionDeadline;
+  const decisionTooLate = eligible && submittedAt && decisionSentAt && decisionSentAt > decisionDeadline;
+
+  if (eligible && submittedAt && !decisionSentAt) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0399',
+      severity: overdue ? 'high' : 'medium',
+      message: overdue
+        ? `Werkgever heeft niet binnen 1 week schriftelijk beslist op verzoek vaste arbeidsduur; deadline was ${decisionDeadline}.`
+        : `Werkgever moet uiterlijk ${decisionDeadline} schriftelijk beslissen op verzoek vaste arbeidsduur.`
+    });
+  }
+
+  if (decisionTooLate) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0399',
+      severity: 'high',
+      message: `Werkgever heeft te laat beslist op verzoek vaste arbeidsduur (${decisionSentAt} na deadline ${decisionDeadline}).`
+    });
+  }
+
+  if ((overdue || decisionTooLate) && requestedHours !== null) {
+    payrollEntitlements.push({
+      rule_id: 'CAO-PB-2024-R0399',
+      type: 'automatic_fixed_hours_adjustment_due_employee_request',
+      requested_hours_per_pay_period: requestedHours,
+      message: 'Niet tijdig schriftelijk beslist: arbeidsduur moet automatisch volgens aanvraag worden aangepast.'
+    });
+  } else if ((overdue || decisionTooLate) && requestedHours === null) {
+    warnings.push('Verzoek vaste arbeidsduur is te laat beantwoord/niet beantwoord, maar aangevraagde uren ontbreken; payrollcorrectie vereist handmatige berekening.');
+  }
+
+  const manualReviewRequired = evidence.manual_review_required ||
+    (!isCallAgreement && hasRequestContext) ||
+    ((overdue || decisionTooLate) && requestedHours === null);
+
+  return {
+    source_rule_ids: sourceRuleIds,
+    contract_rule_violations: violations,
+    payroll_entitlements: payrollEntitlements,
+    warnings,
+    manual_review_required: manualReviewRequired,
+    employee_fixed_hours_request: {
+      status: !hasRequestContext
+        ? 'not_requested'
+        : manualReviewRequired
+        ? 'manual_review_required'
+        : payrollEntitlements.length > 0
+        ? 'automatic_adjustment_due'
+        : decision
+        ? `decision_${decision}`
+        : eligible
+        ? overdue ? 'decision_overdue' : 'decision_due'
+        : 'not_eligible',
+      submitted_at: submittedAt,
+      decision_sent_at: decisionSentAt,
+      decision,
+      decision_deadline_at: decisionDeadline,
+      requested_hours_per_pay_period: requestedHours,
+      evidence
+    }
+  };
+}
+
 function buildFullContractRuleResult(input, caoScope) {
   const probation = calculateProbationPeriod(input, caoScope);
   const callAgreement = evaluateCallAgreementRules(input);
@@ -761,6 +1018,7 @@ function buildFullContractRuleResult(input, caoScope) {
       call_notice_days: callAgreement.call_notice_days,
       employee_notice_days: callAgreement.employee_notice_days,
       fixed_hours_offer: callAgreement.fixed_hours_offer,
+      employee_fixed_hours_request: callAgreement.employee_fixed_hours_request,
       call_notice_validation: callAgreement.call_notice_validation
     },
     source_rule_ids: sourceRuleIds,
@@ -816,6 +1074,16 @@ function buildContractRuleInput(body, personnel, contract) {
     fixed_hours_offer_accepted_at: pickFirst(body.fixed_hours_offer_accepted_at, contract?.fixed_hours_offer_accepted_at, null),
     fixed_hours_offer_acceptance_deadline_date: pickFirst(body.fixed_hours_offer_acceptance_deadline_date, contract?.fixed_hours_offer_acceptance_deadline_date, null),
     average_hours_last_12_months: pickFirst(body.average_hours_last_12_months, contract?.average_hours_last_12_months, null),
+    fixed_hours_request_submitted_at: pickFirst(body.fixed_hours_request_submitted_at, contract?.fixed_hours_request_submitted_at, null),
+    employee_fixed_hours_request_submitted_at: pickFirst(body.employee_fixed_hours_request_submitted_at, null),
+    fixed_hours_request_decision_sent_at: pickFirst(body.fixed_hours_request_decision_sent_at, contract?.fixed_hours_request_decision_sent_at, null),
+    fixed_hours_request_decision: pickFirst(body.fixed_hours_request_decision, contract?.fixed_hours_request_decision, null),
+    fixed_hours_request_requested_hours_per_pay_period: pickFirst(body.fixed_hours_request_requested_hours_per_pay_period, contract?.fixed_hours_request_requested_hours_per_pay_period, null),
+    fixed_hours_request_regular_13_weeks_confirmed: pickFirst(body.fixed_hours_request_regular_13_weeks_confirmed, contract?.fixed_hours_request_regular_13_weeks_confirmed, null),
+    fixed_hours_request_qualifying_weeks: pickFirst(body.fixed_hours_request_qualifying_weeks, contract?.fixed_hours_request_qualifying_weeks, null),
+    fixed_hours_request_worked_weeks: pickFirst(body.fixed_hours_request_worked_weeks, body.fixed_hours_request_weekly_evidence, null),
+    fixed_hours_request_weekly_evidence: pickFirst(body.fixed_hours_request_weekly_evidence, null),
+    worked_weeks_evidence: pickFirst(body.worked_weeks_evidence, null),
     requested_probation_period_months: pickFirst(
       body.requested_probation_period_months,
       body.probation_period_months,
@@ -843,6 +1111,13 @@ function buildContractRulePersistence(result) {
     fixed_hours_offer_status: result.call_agreement?.fixed_hours_offer?.status || null,
     fixed_hours_offer_due_at: result.call_agreement?.fixed_hours_offer?.twelve_month_completed_date || null,
     fixed_hours_offer_deadline_at: result.call_agreement?.fixed_hours_offer?.offer_deadline_date || null,
+    fixed_hours_request_status: result.call_agreement?.employee_fixed_hours_request?.status || null,
+    fixed_hours_request_submitted_at: result.call_agreement?.employee_fixed_hours_request?.submitted_at || null,
+    fixed_hours_request_decision_sent_at: result.call_agreement?.employee_fixed_hours_request?.decision_sent_at || null,
+    fixed_hours_request_decision_deadline_at: result.call_agreement?.employee_fixed_hours_request?.decision_deadline_at || null,
+    fixed_hours_request_requested_hours_per_pay_period: result.call_agreement?.employee_fixed_hours_request?.requested_hours_per_pay_period ?? null,
+    fixed_hours_request_qualifying_weeks: result.call_agreement?.employee_fixed_hours_request?.evidence?.qualifying_weeks ?? null,
+    fixed_hours_request_manual_review_required: result.call_agreement?.employee_fixed_hours_request?.status === 'manual_review_required',
     cao_contract_rule_status: result.contract_rule_status,
     cao_contract_rule_checked_at: new Date().toISOString(),
     cao_contract_rule_source_rule_ids: result.source_rule_ids,
