@@ -533,6 +533,294 @@ function evaluateSuspensionRules(input) {
   };
 }
 
+function resolveContractTransferArticle(input) {
+  const annualHours = numberOrNull(
+    input.contract_transfer_annual_hours ??
+    input.contract_change_annual_hours ??
+    input.object_contract_annual_hours
+  );
+  if (annualHours === null) {
+    return {
+      article: 'unknown',
+      annual_hours: null,
+      source_rule_id: 'CAO-PB-2024-R0473',
+      threshold_hours: 15000
+    };
+  }
+  return {
+    article: annualHours <= 15000 ? 'article_19_15000_or_less' : 'article_20_more_than_15000',
+    annual_hours: annualHours,
+    source_rule_id: annualHours <= 15000 ? 'CAO-PB-2024-R0473' : 'CAO-PB-2024-R0501',
+    threshold_hours: 15000
+  };
+}
+
+function isEmployeeEligibleForLargeContractTransfer(input) {
+  const transferDate = asIsoDate(input.contract_transfer_date || input.event_start_date || input.start_date);
+  const objectStartDate = asIsoDate(input.object_assignment_start_date || input.employee_object_start_date);
+  const continuousDays = numberOrNull(input.uninterrupted_object_work_days) ??
+    (transferDate && objectStartDate ? daysBetween(transferDate, objectStartDate) : null);
+  const totalWorkedHours = numberOrNull(input.total_worked_hours_reference_period);
+  const assignmentHours = numberOrNull(input.assignment_worked_hours_reference_period ?? input.object_worked_hours_reference_period);
+  const disabilityWeeks = numberOrNull(input.disability_weeks_at_transfer);
+  const oneYearSatisfied = continuousDays !== null ? continuousDays >= 365 : null;
+  const assignmentThreshold = totalWorkedHours !== null ? (totalWorkedHours / 2) + 1 : null;
+  const assignmentShareSatisfied = assignmentHours !== null && assignmentThreshold !== null
+    ? assignmentHours >= assignmentThreshold
+    : null;
+  const excludedByDisability = disabilityWeeks !== null ? disabilityWeeks > 26 : null;
+
+  return {
+    transfer_date: transferDate,
+    object_assignment_start_date: objectStartDate,
+    uninterrupted_object_work_days: continuousDays,
+    one_year_uninterrupted_satisfied: oneYearSatisfied,
+    total_worked_hours_reference_period: totalWorkedHours,
+    assignment_worked_hours_reference_period: assignmentHours,
+    assignment_threshold_hours: assignmentThreshold,
+    assignment_share_satisfied: assignmentShareSatisfied,
+    disability_weeks_at_transfer: disabilityWeeks,
+    excluded_by_disability_over_26_weeks: excludedByDisability,
+    eligible: oneYearSatisfied === true &&
+      assignmentShareSatisfied === true &&
+      excludedByDisability !== true
+  };
+}
+
+function evaluateContractTransferRules(input) {
+  const transfer = resolveContractTransferArticle(input);
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0464', 'CAO-PB-2024-R0465', 'CAO-PB-2024-R0466',
+    'CAO-PB-2024-R0467', 'CAO-PB-2024-R0468', 'CAO-PB-2024-R0469',
+    'CAO-PB-2024-R0470', 'CAO-PB-2024-R0471', 'CAO-PB-2024-R0472',
+    'CAO-PB-2024-R0473', 'CAO-PB-2024-R0474', 'CAO-PB-2024-R0475',
+    'CAO-PB-2024-R0476', 'CAO-PB-2024-R0477', 'CAO-PB-2024-R0478',
+    'CAO-PB-2024-R0479', 'CAO-PB-2024-R0480', 'CAO-PB-2024-R0481',
+    'CAO-PB-2024-R0482', 'CAO-PB-2024-R0483', 'CAO-PB-2024-R0484',
+    'CAO-PB-2024-R0485', 'CAO-PB-2024-R0486', 'CAO-PB-2024-R0487',
+    'CAO-PB-2024-R0488', 'CAO-PB-2024-R0489', 'CAO-PB-2024-R0490',
+    'CAO-PB-2024-R0491', 'CAO-PB-2024-R0492', 'CAO-PB-2024-R0493',
+    'CAO-PB-2024-R0494', 'CAO-PB-2024-R0495', 'CAO-PB-2024-R0496',
+    'CAO-PB-2024-R0497', 'CAO-PB-2024-R0498', 'CAO-PB-2024-R0499',
+    'CAO-PB-2024-R0500', 'CAO-PB-2024-R0501', 'CAO-PB-2024-R0502',
+    'CAO-PB-2024-R0503', 'CAO-PB-2024-R0504', 'CAO-PB-2024-R0505',
+    'CAO-PB-2024-R0506', 'CAO-PB-2024-R0507', 'CAO-PB-2024-R0508',
+    'CAO-PB-2024-R0509', 'CAO-PB-2024-R0510', 'CAO-PB-2024-R0511',
+    'CAO-PB-2024-R0512', 'CAO-PB-2024-R0513', 'CAO-PB-2024-R0514',
+    'CAO-PB-2024-R0515', 'CAO-PB-2024-R0516', 'CAO-PB-2024-R0517',
+    'CAO-PB-2024-R0518', 'CAO-PB-2024-R0519', 'CAO-PB-2024-R0520',
+    'CAO-PB-2024-R0521', 'CAO-PB-2024-R0522', 'CAO-PB-2024-R0523',
+    'CAO-PB-2024-R0524', 'CAO-PB-2024-R0525', 'CAO-PB-2024-R0526',
+    'CAO-PB-2024-R0527', 'CAO-PB-2024-R0528', 'CAO-PB-2024-R0529',
+    'CAO-PB-2024-R0530', 'CAO-PB-2024-R0531', 'CAO-PB-2024-R0532',
+    'CAO-PB-2024-R0533', 'CAO-PB-2024-R0534', 'CAO-PB-2024-R0535',
+    'CAO-PB-2024-R0536', 'CAO-PB-2024-R0537', 'CAO-PB-2024-R0538',
+    'CAO-PB-2024-R0539', 'CAO-PB-2024-R0540', 'CAO-PB-2024-R0541',
+    'CAO-PB-2024-R0542', 'CAO-PB-2024-R0543', 'CAO-PB-2024-R0544',
+    'CAO-PB-2024-R0545'
+  ];
+  const missingEvidence = [];
+  const violations = [];
+  const warnings = [];
+  const payrollEntitlements = [];
+  const transferDate = asIsoDate(input.contract_transfer_date || input.event_start_date || input.start_date);
+  const offeredContractForm = input.offered_contract_form || input.new_contract_form || null;
+  const offeredProbationMonths = numberOrNull(input.offered_probation_period_months);
+  const previousHoursPerPeriod = numberOrNull(input.previous_contract_hours_per_pay_period);
+  const offeredHoursPerPeriod = numberOrNull(input.offered_contract_hours_per_pay_period);
+  const previousBaseHourlyRate = numberOrNull(input.previous_base_hourly_rate);
+  const offeredBaseHourlyRate = numberOrNull(input.offered_base_hourly_rate);
+  const employeeStaysWithLosingParty = booleanOrNull(input.employee_stays_with_losing_party);
+
+  addMissingEvidence(missingEvidence, !!transferDate, 'CAO-PB-2024-R0467', 'Leg de feitelijke contractwisseldatum vast.', 'contract_transfer_date');
+  addMissingEvidence(missingEvidence, !!input.losing_employer_id || !!input.losing_employer_name, 'CAO-PB-2024-R0470', 'Leg de latende partij vast.', 'losing_employer_id');
+  addMissingEvidence(missingEvidence, !!input.acquiring_employer_id || !!input.acquiring_employer_name, 'CAO-PB-2024-R0469', 'Leg de verwervende partij vast.', 'acquiring_employer_id');
+  addMissingEvidence(missingEvidence, !!input.object_id || !!input.contract_object_name, 'CAO-PB-2024-R0467', 'Leg het object/de opdracht vast waarop de contractwissel ziet.', 'object_id');
+  addMissingEvidence(missingEvidence, transfer.annual_hours !== null, 'CAO-PB-2024-R0473', 'Leg het aantal contracturen per jaar bij de latende partij vast om artikel 19 of 20 te bepalen.', 'contract_transfer_annual_hours');
+
+  if (transfer.article === 'article_19_15000_or_less') {
+    addConfirmedEvidence(missingEvidence, input, 'employees_informed_confirmed', 'CAO-PB-2024-R0474', 'Bevestig dat betrokken werknemers zijn geinformeerd.');
+    addConfirmedEvidence(missingEvidence, input, 'unions_informed_contract_hours_confirmed', 'CAO-PB-2024-R0474', 'Bevestig dat vakbonden over het aantal contracturen zijn geinformeerd.');
+    addConfirmedEvidence(missingEvidence, input, 'losing_party_replacement_work_searched_confirmed', 'CAO-PB-2024-R0475', 'Bevestig dat latende partij zoveel mogelijk vervangend werk heeft gezocht.');
+    addConfirmedEvidence(missingEvidence, input, 'acquiring_party_consultation_confirmed', 'CAO-PB-2024-R0477', 'Bevestig overleg tussen latende en verwervende partij over werkgelegenheid.');
+    addConfirmedEvidence(missingEvidence, input, 'employee_cooperation_confirmed', 'CAO-PB-2024-R0478', 'Bevestig medewerking van werknemer.');
+    addConfirmedEvidence(missingEvidence, input, 'contract_transfer_information_requested_confirmed', 'CAO-PB-2024-R0479', 'Bevestig dat verwervende partij informatie bij latende partij heeft gevraagd.');
+    addConfirmedEvidence(missingEvidence, input, 'three_month_reference_information_confirmed', 'CAO-PB-2024-R0484', 'Bevestig informatie over 3 maanden voorafgaand aan offerteaanvraag/gunning en latere wijzigingen.');
+    addConfirmedEvidence(missingEvidence, input, 'losing_party_information_complete_confirmed', 'CAO-PB-2024-R0485', 'Bevestig dat latende partij de vereiste informatie heeft gegeven zodra gunning zeker was.');
+
+    const previousInProbation = booleanOrNull(input.employee_still_in_probation_at_losing_party) === true;
+    if (!previousInProbation && offeredProbationMonths !== null && offeredProbationMonths > 0) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0487',
+        severity: 'high',
+        message: 'Bij contractwissel van 15.000 uur of minder mag geen proeftijd worden aangeboden, tenzij werknemer bij latende partij nog in proeftijd zat.',
+        offered_probation_period_months: offeredProbationMonths
+      });
+    }
+    if (previousInProbation && offeredProbationMonths !== null) {
+      warnings.push('Artikel 19: proeftijd is alleen toegestaan omdat werknemer bij latende partij nog in proeftijd zat.');
+    }
+
+    const losingFixedTerm = booleanOrNull(input.losing_party_fixed_term_contract) === true;
+    if (!losingFixedTerm && offeredContractForm && offeredContractForm !== 'onbepaalde_tijd') {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0489',
+        severity: 'high',
+        message: 'Bij contractwissel van 15.000 uur of minder moet een contract voor onbepaalde tijd worden aangeboden, tenzij werknemer bij latende partij nog bepaalde tijd had.',
+        offered_contract_form: offeredContractForm
+      });
+    }
+    addMissingEvidence(missingEvidence, !!offeredContractForm, 'CAO-PB-2024-R0489', 'Leg de aangeboden contractvorm vast.', 'offered_contract_form');
+
+    if (previousHoursPerPeriod !== null && offeredHoursPerPeriod !== null && offeredHoursPerPeriod < previousHoursPerPeriod) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0491',
+        severity: 'high',
+        message: `Aangeboden uren per periode (${offeredHoursPerPeriod}) zijn lager dan vorige contracturen (${previousHoursPerPeriod}).`,
+        previous_contract_hours_per_pay_period: previousHoursPerPeriod,
+        offered_contract_hours_per_pay_period: offeredHoursPerPeriod
+      });
+    }
+    if (previousBaseHourlyRate !== null && offeredBaseHourlyRate !== null && offeredBaseHourlyRate < previousBaseHourlyRate) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0492',
+        severity: 'high',
+        message: `Aangeboden basisuurloon (${offeredBaseHourlyRate}) is lager dan over te nemen cao-loon (${previousBaseHourlyRate}).`,
+        previous_base_hourly_rate: previousBaseHourlyRate,
+        offered_base_hourly_rate: offeredBaseHourlyRate
+      });
+    }
+
+    addConfirmedEvidence(missingEvidence, input, 'cao_wage_taken_over_confirmed', 'CAO-PB-2024-R0492', 'Bevestig dat het cao-loon is overgenomen.');
+    addConfirmedEvidence(missingEvidence, input, 'other_cao_claims_taken_over_confirmed', 'CAO-PB-2024-R0493', 'Bevestig dat overige aanspraken volgens de cao zijn overgenomen.');
+    addConfirmedEvidence(missingEvidence, input, 'seniority_accrual_taken_over_confirmed', 'CAO-PB-2024-R0494', 'Bevestig doorbouw/aanspraken zoals functiejaren en ancienniteit.');
+    addConfirmedEvidence(missingEvidence, input, 'study_agreement_taken_over_confirmed', 'CAO-PB-2024-R0495', 'Bevestig overname van eventuele studieovereenkomst.');
+    addConfirmedEvidence(missingEvidence, input, 'above_cao_reimbursements_taken_over_confirmed', 'CAO-PB-2024-R0496', 'Bevestig overname van vergoedingen boven cao-minimum.');
+    addConfirmedEvidence(missingEvidence, input, 'location_allowances_taken_over_confirmed', 'CAO-PB-2024-R0497', 'Bevestig overname van locatietoeslagen als de grondslag gelijk blijft.');
+    addConfirmedEvidence(missingEvidence, input, 'regeling_80_90_100_taken_over_confirmed', 'CAO-PB-2024-R0498', 'Bevestig overname van 80-90-100-regeling indien van toepassing.');
+  }
+
+  let largeEligibility = null;
+  if (transfer.article === 'article_20_more_than_15000') {
+    largeEligibility = isEmployeeEligibleForLargeContractTransfer(input);
+    addConfirmedEvidence(missingEvidence, input, 'mutation_list_used_confirmed', 'CAO-PB-2024-R0503', 'Bevestig dat mutatielijst contractwissel uit bijlage 9 is gebruikt.');
+    if (largeEligibility.one_year_uninterrupted_satisfied === false) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0506',
+        severity: 'high',
+        message: 'Werknemer voldoet niet aan minimaal 1 jaar onafgebroken werken op het object.',
+        uninterrupted_object_work_days: largeEligibility.uninterrupted_object_work_days
+      });
+    }
+    if (largeEligibility.assignment_share_satisfied === false) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0507',
+        severity: 'high',
+        message: 'Werknemer voldoet niet aan minimaal 50% plus 1 uur voor deze opdracht.',
+        assignment_worked_hours_reference_period: largeEligibility.assignment_worked_hours_reference_period,
+        assignment_threshold_hours: largeEligibility.assignment_threshold_hours
+      });
+    }
+    if (largeEligibility.excluded_by_disability_over_26_weeks === true) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0507',
+        severity: 'high',
+        message: 'Werknemer is langer dan 26 weken arbeidsongeschikt en valt buiten de overnamegroep.',
+        disability_weeks_at_transfer: largeEligibility.disability_weeks_at_transfer
+      });
+    }
+    addMissingEvidence(missingEvidence, largeEligibility.one_year_uninterrupted_satisfied !== null, 'CAO-PB-2024-R0506', 'Leg objectstartdatum of onafgebroken dagen vast.', 'object_assignment_start_date');
+    addMissingEvidence(missingEvidence, largeEligibility.assignment_share_satisfied !== null, 'CAO-PB-2024-R0507', 'Leg totale gewerkte uren en opdrachturen vast voor 50%+1 uur toets.', 'assignment_worked_hours_reference_period');
+    addMissingEvidence(missingEvidence, largeEligibility.excluded_by_disability_over_26_weeks !== null, 'CAO-PB-2024-R0507', 'Leg arbeidsongeschiktheidsduur op peildatum vast.', 'disability_weeks_at_transfer');
+
+    if (employeeStaysWithLosingParty === true) {
+      addConfirmedEvidence(missingEvidence, input, 'employee_stays_agreement_confirmed', 'CAO-PB-2024-R0538', 'Bevestig overeenstemming dat werknemer bij latende partij blijft.');
+      addConfirmedEvidence(missingEvidence, input, 'employee_stays_notified_acquiring_party_confirmed', 'CAO-PB-2024-R0539', 'Bevestig gezamenlijke melding aan verwervende partij.');
+    } else if (largeEligibility.eligible === true) {
+      addConfirmedEvidence(missingEvidence, input, 'employment_offer_made_confirmed', 'CAO-PB-2024-R0504', 'Bevestig aanbod arbeidsovereenkomst door verwervende partij.');
+    }
+
+    addConfirmedEvidence(missingEvidence, input, 'salary_preserved_confirmed', 'CAO-PB-2024-R0509', 'Bevestig behoud van salaris.');
+    addConfirmedEvidence(missingEvidence, input, 'seniority_preserved_confirmed', 'CAO-PB-2024-R0510', 'Bevestig behoud van ancienniteit.');
+    addConfirmedEvidence(missingEvidence, input, 'working_hours_preserved_confirmed', 'CAO-PB-2024-R0511', 'Bevestig behoud van arbeidsduur.');
+    addConfirmedEvidence(missingEvidence, input, 'above_cao_claims_preserved_confirmed', 'CAO-PB-2024-R0512', 'Bevestig behoud van boven-cao aanspraken.');
+    addConfirmedEvidence(missingEvidence, input, 'regeling_80_90_100_preserved_confirmed', 'CAO-PB-2024-R0513', 'Bevestig behoud van 80-90-100-regeling indien van toepassing.');
+    addConfirmedEvidence(missingEvidence, input, 'other_conditions_preserved_confirmed', 'CAO-PB-2024-R0514', 'Bevestig behoud van overige arbeidsvoorwaarden.');
+    addConfirmedEvidence(missingEvidence, input, 'personal_allowances_preserved_confirmed', 'CAO-PB-2024-R0519', 'Bevestig behoud van persoonlijke toeslagen.');
+    if (booleanOrNull(input.object_or_function_allowance_ground_lapses) === true) {
+      addConfirmedEvidence(missingEvidence, input, 'allowance_phase_out_article_46_confirmed', 'CAO-PB-2024-R0518', 'Bevestig afbouw volgens artikel 46 als grondslag voor object-/functietoeslag vervalt.');
+    }
+    addConfirmedEvidence(missingEvidence, input, 'vacation_transfer_choice_requested_confirmed', 'CAO-PB-2024-R0521', 'Bevestig tijdige schriftelijke vraag aan werknemers over meenemen vakantiedagen/vakantiebijslag.');
+    addConfirmedEvidence(missingEvidence, input, 'unused_vacation_days_amount_known_confirmed', 'CAO-PB-2024-R0525', 'Bevestig dat ongebruikte vakantiedagen/aanspraakhoogte bekend zijn.');
+    addConfirmedEvidence(missingEvidence, input, 'unpaid_vacation_allowance_amount_known_confirmed', 'CAO-PB-2024-R0526', 'Bevestig dat nog niet betaalde vakantiebijslag/aanspraakhoogte bekend is.');
+    addConfirmedEvidence(missingEvidence, input, 'vacation_transfer_written_notice_confirmed', 'CAO-PB-2024-R0528', 'Bevestig schriftelijke melding aan verwervende partij over keuzes en hoogte aanspraken.');
+    addConfirmedEvidence(missingEvidence, input, 'vacation_transfer_wishes_respected_confirmed', 'CAO-PB-2024-R0529', 'Bevestig uitvoering van werknemerswensen zonder voorbehoud.');
+    addConfirmedEvidence(missingEvidence, input, 'vacation_transfer_protocol_followed_confirmed', 'CAO-PB-2024-R0530', 'Bevestig toepassing overdrachtsprotocol vakantiedagen/vakantiebijslag.');
+    addConfirmedEvidence(missingEvidence, input, 'study_agreement_taken_over_confirmed', 'CAO-PB-2024-R0531', 'Bevestig overname van eventuele studieovereenkomst.');
+    addConfirmedEvidence(missingEvidence, input, 'total_wage_sum_disclosed_confirmed', 'CAO-PB-2024-R0532', 'Bevestig inzage in totale loonsom tijdens aanbesteding.');
+    addConfirmedEvidence(missingEvidence, input, 'wage_sum_includes_all_money_and_time_obligations_confirmed', 'CAO-PB-2024-R0534', 'Bevestig dat loonsom alle op geld en tijd waardeerbare verplichtingen omvat.');
+    addConfirmedEvidence(missingEvidence, input, 'unions_informed_confirmed', 'CAO-PB-2024-R0541', 'Bevestig informatie aan vakbonden bij meer dan 15.000 uur beveiligingstaken.');
+  }
+
+  if (booleanOrNull(input.contract_transfer_dispute_exists) === true) {
+    addConfirmedEvidence(missingEvidence, input, 'social_fund_dispute_submitted_confirmed', transfer.article === 'article_20_more_than_15000' ? 'CAO-PB-2024-R0545' : 'CAO-PB-2024-R0499', 'Bevestig dat geschil is voorgelegd aan bestuur Sociaal Fonds Particuliere Beveiliging.');
+  }
+
+  if (previousBaseHourlyRate !== null) {
+    payrollEntitlements.push({
+      rule_id: transfer.article === 'article_20_more_than_15000' ? 'CAO-PB-2024-R0509' : 'CAO-PB-2024-R0492',
+      type: 'contract_transfer_cao_wage_preservation',
+      previous_base_hourly_rate: previousBaseHourlyRate,
+      offered_base_hourly_rate: offeredBaseHourlyRate,
+      message: 'Contractwissel: cao-loon/salaris moet behouden of overgenomen worden.'
+    });
+  }
+  if (previousHoursPerPeriod !== null) {
+    payrollEntitlements.push({
+      rule_id: transfer.article === 'article_20_more_than_15000' ? 'CAO-PB-2024-R0511' : 'CAO-PB-2024-R0491',
+      type: 'contract_transfer_working_hours_preservation',
+      previous_contract_hours_per_pay_period: previousHoursPerPeriod,
+      offered_contract_hours_per_pay_period: offeredHoursPerPeriod,
+      message: 'Contractwissel: arbeidsduur/uren per periode mogen niet lager worden dan de over te nemen aanspraak.'
+    });
+  }
+
+  warnings.push('Contractwisselregels vereisen een auditbaar dossier per betrokken werknemer; ontbrekend bewijs blokkeert definitieve payroll.');
+
+  const hasBlockingViolation = violations.some(v => v.severity === 'high' || v.severity === 'critical');
+  const manualReviewRequired = missingEvidence.length > 0;
+
+  return {
+    contract_transfer_rule_status: hasBlockingViolation
+      ? 'blocked'
+      : manualReviewRequired
+      ? 'manual_review_required'
+      : 'compliant',
+    contract_transfer_compliant: !hasBlockingViolation && !manualReviewRequired,
+    contract_transfer_article: transfer.article,
+    annual_contract_hours: transfer.annual_hours,
+    threshold_hours: transfer.threshold_hours,
+    transfer_date: transferDate,
+    large_contract_transfer_eligibility: largeEligibility,
+    source_rule_ids: sourceRuleIds,
+    warnings,
+    missing_evidence: missingEvidence,
+    contract_rule_violations: violations,
+    payroll_entitlements: payrollEntitlements,
+    payroll_final_allowed: !hasBlockingViolation && !manualReviewRequired,
+    manual_review_required: manualReviewRequired,
+    recommended_event_update: {
+      event_type: 'contract_transfer',
+      cao_rule_status: hasBlockingViolation ? 'blocked' : manualReviewRequired ? 'manual_review_required' : 'compliant',
+      source_rule_ids: sourceRuleIds,
+      contract_transfer_article: transfer.article,
+      contract_transfer_date: transferDate,
+      annual_contract_hours: transfer.annual_hours,
+      payroll_final_allowed: !hasBlockingViolation && !manualReviewRequired
+    }
+  };
+}
+
 function dateTimeFromValue(value) {
   if (!value) return null;
   const date = new Date(value);
@@ -562,6 +850,15 @@ function sumScheduledHours(entries) {
     const calculated = hoursBetween(entry.start_datetime || entry.start, entry.end_datetime || entry.end);
     return total + (calculated || 0);
   }, 0);
+}
+
+function addMissingEvidence(target, condition, ruleId, message, field) {
+  if (condition) return;
+  target.push({ rule_id: ruleId, field, message });
+}
+
+function addConfirmedEvidence(target, input, field, ruleId, message) {
+  addMissingEvidence(target, booleanOrNull(input[field]) === true, ruleId, message, field);
 }
 
 function pickFirst(...values) {
@@ -2212,6 +2509,49 @@ Deno.serve(async (req) => {
       }
       return Response.json({
         success: result.suspension_rule_status !== 'blocked',
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: syncWarnings,
+        personnel_id: personnel_id || null,
+        cao_scope_profile: caoScope?.cao_scope_profile || null,
+        manual_review_required: result.manual_review_required || isUnknownOrMixed,
+        persisted_event_id: createdEvent?.id || null,
+        ...result
+      });
+    }
+
+    if (action === 'validate_contract_transfer') {
+      const result = evaluateContractTransferRules(body);
+      let createdEvent = null;
+      if (body.save_event === true && personnel_id) {
+        createdEvent = await base44.asServiceRole.entities.PersonnelCaoEmploymentEvent.create({
+          personnel_id,
+          company_id: body.acquiring_employer_id || body.company_id || contract?.company_id || personnel?.primary_company_id || null,
+          personnel_contract_id: contract_id || contract?.id || null,
+          cao_key: contract?.cao_key || personnel?.cao || 'cao_particuliere_beveiliging',
+          cao_configuration_id: contract?.cao_configuration_id || body.cao_configuration_id || null,
+          event_type: 'contract_transfer',
+          event_start_date: result.transfer_date,
+          event_end_date: result.transfer_date,
+          event_datetime: body.contract_transfer_datetime || null,
+          reason: body.contract_transfer_reason || body.reason || null,
+          employee_notified_at: body.employee_notified_at || null,
+          written_notice_file_url: body.written_notice_file_url || body.mutation_list_file_url || null,
+          base_hourly_rate: body.offered_base_hourly_rate ?? body.previous_base_hourly_rate ?? null,
+          scheduled_hours: result.annual_contract_hours ?? null,
+          cao_rule_status: result.contract_transfer_rule_status,
+          manual_review_required: result.manual_review_required || isUnknownOrMixed || false,
+          payroll_impact: true,
+          payroll_final_allowed: result.payroll_final_allowed === true && !isUnknownOrMixed,
+          source_rule_ids: result.source_rule_ids,
+          rule_result_snapshot: result,
+          payroll_entitlements: result.payroll_entitlements,
+          violations: result.contract_rule_violations,
+          warnings: result.warnings.map(w => ({ message: String(w) })),
+          notes: body.notes || null
+        });
+      }
+      return Response.json({
+        success: result.contract_transfer_rule_status !== 'blocked',
         cao_sync_status: caoSyncStatus,
         calculation_warnings: syncWarnings,
         personnel_id: personnel_id || null,
