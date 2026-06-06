@@ -427,15 +427,13 @@
       "type": [
         "string",
         "null"
-      ],
-      "description": "Bronregel voor de proeftijd, bijv. CAO-PB-2024-R0315"
+      ]
     },
     "probation_override_reason": {
       "type": [
         "string",
         "null"
-      ],
-      "description": "Reden voor handmatige afwijking van de CAO-proeftijdberekening"
+      ]
     },
     "security_role_status": {
       "type": [
@@ -456,44 +454,40 @@
       "type": [
         "number",
         "null"
-      ],
-      "description": "Brancheancienniteit in loonperioden"
+      ]
     },
     "industry_start_date": {
       "type": [
         "string",
         "null"
       ],
-      "format": "date",
-      "description": "Startdatum brancheancienniteit"
+      "format": "date"
     },
     "performs_security_work": {
       "type": [
         "boolean",
         "null"
       ],
-      "description": "Doet medewerker normaal beveiligingswerk conform bijlage 2 CAO PB?"
+      "description": "Doet medewerker normaal beveiligingswerk conform bijlage 2 CAO PB? Null = onbekend."
     },
     "security_work_percentage": {
       "type": [
         "number",
         "null"
       ],
-      "description": "Percentage arbeidsduur dat structureel beveiligingswerk/functiegroepwerk is"
+      "description": "Percentage arbeidsduur dat structureel beveiligingswerk/functiegroepwerk is (0-100)"
     },
     "works_airport_schiphol": {
       "type": [
         "boolean",
         "null"
-      ],
-      "description": "Medewerker werkt structureel op Schiphol (bijzondere CAO-scope)"
+      ]
     },
     "works_cash_value_logistics": {
       "type": [
         "boolean",
         "null"
-      ],
-      "description": "Medewerker werkt in geld- en waardelogistiek"
+      ]
     },
     "cao_scope_profile": {
       "type": [
@@ -506,6 +500,7 @@
         "excluded_event_hospitality_security",
         "cash_value_logistics",
         "airport_schiphol",
+        "mixed_security_work_manual_review",
         "unknown_manual_review",
         null
       ],
@@ -569,6 +564,46 @@
         "null"
       ],
       "additionalProperties": true
+    },
+    "cao_applicability_source_rule_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Bronregel-IDs die de CAO-toepassingsbeslissing onderbouwen"
+    },
+    "cao_applicability_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Waarschuwingen bij de laatste CAO-toepassingsbepaling"
+    },
+    "cao_excluded_articles": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Uitgesloten CAO-artikelen conform artikel 3 lid 2"
+    },
+    "cao_excluded_chapters": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Uitgesloten CAO-hoofdstukken conform artikel 3 lid 2"
+    },
+    "cao_function_classification": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Functieindeling-resultaat van de laatste resolveCaoApplicability aanroep"
     },
     "company_car_license_plate": {
       "type": "string"

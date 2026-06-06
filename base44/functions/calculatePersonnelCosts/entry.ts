@@ -125,9 +125,40 @@ Deno.serve(async (req) => {
       } catch { /* stille fallback */ }
     }
     const scopeWarnings = [];
-    if (caoScope && !caoScope.applies_full_security_rules) {
-      scopeWarnings.push({ message: `CAO-toepassingsprofiel: ${caoScope.cao_scope_profile}. Bijzondere-urensurcharges (art. 40) en dienstruilvergoedingen (art. 43) worden niet toegepast.`, cao_scope_profile: caoScope.cao_scope_profile });
+    const isUnknownOrMixedScope = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
+
+    // Fail-closed bij onbekende scope: waarschuw duidelijk, pas geen security-toeslagen toe
+    if (isUnknownOrMixedScope) {
+      scopeWarnings.push({
+        message: `CAO-toepassingsprofiel onzeker (${caoScope.cao_scope_profile}): beveiligingsspecifieke toeslagen (art. 40/42/43) worden NIET automatisch berekend. Handmatige review vereist.`,
+        cao_scope_profile: caoScope.cao_scope_profile,
+        manual_review_required: true
+      });
+    } else if (caoScope && !caoScope.applies_full_security_rules) {
+      const exclusions = [];
+      if (caoScope.payroll_rule_profile?.apply_article_40_special_hours === false) exclusions.push('avond-/nacht-/weekendtoeslagen (art. 40)');
+      if (caoScope.payroll_rule_profile?.apply_article_42_overtime === false) exclusions.push('overwerktoeslag (art. 42)');
+      if (caoScope.payroll_rule_profile?.apply_article_43_shift_change === false) exclusions.push('dienstruilvergoeding (art. 43)');
+      if (caoScope.payroll_rule_profile?.apply_chapter_5_reimbursements === false) exclusions.push('reiskosten/vergoedingen (hoofdstuk 5)');
+      if (exclusions.length > 0) {
+        scopeWarnings.push({
+          message: `Artikel 3 lid 2 CAO PB (${caoScope.cao_scope_profile}): niet van toepassing: ${exclusions.join(', ')}. Art. 37 (loonsverhoging), art. 38 (eindejaarsuitkering) en art. 41 (feestdagen) gelden wel.`,
+          cao_scope_profile: caoScope.cao_scope_profile,
+          excluded_articles: caoScope.excluded_articles || []
+        });
+      }
     }
+
+    // cao_rule_application metadata voor output
+    const caoRuleApplication = {
+      cao_scope_profile: caoScope?.cao_scope_profile || 'unknown',
+      applied_article_40_special_hours: !isUnknownOrMixedScope && (caoScope?.payroll_rule_profile?.apply_article_40_special_hours !== false),
+      applied_article_41_holidays: caoScope?.payroll_rule_profile?.apply_article_41_holidays !== false,
+      applied_article_42_overtime: !isUnknownOrMixedScope && (caoScope?.payroll_rule_profile?.apply_article_42_overtime !== false),
+      applied_chapter_5_reimbursements: !isUnknownOrMixedScope && (caoScope?.payroll_rule_profile?.apply_chapter_5_reimbursements !== false),
+      manual_review_required: isUnknownOrMixedScope || false,
+      source_rule_ids: caoScope?.source_rule_ids || []
+    };
 
     // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
@@ -333,9 +364,9 @@ Deno.serve(async (req) => {
         });
         
       } else {
-        // CAO-scope gate: bijzondere uren (art. 40) alleen als volledig beveiligingswerk
-        const applySpecialHours = !caoScope || caoScope.payroll_rule_profile?.apply_article_40_special_hours !== false;
-        // Feestdagtoeslag (art. 41) altijd als holidays gelden (ook art. 3 lid 2)
+        // CAO-scope gate: bijzondere uren (art. 40) NIET bij non-security of unknown/mixed
+        const applySpecialHours = !isUnknownOrMixedScope && (!caoScope || caoScope.payroll_rule_profile?.apply_article_40_special_hours !== false);
+        // Feestdagtoeslag (art. 41): aan tenzij expliciet uitgesloten
         const applyHolidays = !caoScope || caoScope.payroll_rule_profile?.apply_article_41_holidays !== false;
 
         // Loondienst berekening - verwerk dienst per uur voor correcte toeslagberekening
@@ -560,6 +591,8 @@ Deno.serve(async (req) => {
       personnel_name: personnel.name,
       cao_scope_profile: caoScope?.cao_scope_profile || null,
       scope_warnings: scopeWarnings,
+      manual_review_required: isUnknownOrMixedScope || false,
+      cao_rule_application: caoRuleApplication,
       employee_type: personnel.employee_type,
       cao_scale: personnel.cao_scale,
       cao_period: personnel.cao_period,

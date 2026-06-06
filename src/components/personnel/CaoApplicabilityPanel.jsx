@@ -3,16 +3,27 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
-import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck, ShieldOff } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck, ShieldOff, XCircle, Info } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 
 const SCOPE_LABELS = {
-  full_security_worker: "Volledig beveiligingswerk",
+  full_security_worker: "Volledig beveiligingswerk (bijlage 2)",
   non_security_work_article_3_exception: "Artikel 3 lid 2 – geen beveiligingswerk",
-  excluded_event_hospitality_security: "Uitgesloten – evenementen/horeca",
+  excluded_event_hospitality_security: "Uitgesloten – evenementen-/horecabeveiliging",
   cash_value_logistics: "Geld- en waardelogistiek",
-  airport_schiphol: "Schiphol",
-  unknown_manual_review: "Onbekend – handmatige review"
+  airport_schiphol: "Schiphol (bijzondere scope)",
+  mixed_security_work_manual_review: "Gemengd – handmatige review vereist",
+  unknown_manual_review: "Onbekend – handmatige review vereist"
+};
+
+const SCOPE_COLORS = {
+  full_security_worker: "border-green-200 bg-green-50 text-green-800",
+  non_security_work_article_3_exception: "border-amber-200 bg-amber-50 text-amber-800",
+  mixed_security_work_manual_review: "border-orange-200 bg-orange-50 text-orange-800",
+  unknown_manual_review: "border-red-200 bg-red-50 text-red-800",
+  excluded_event_hospitality_security: "border-slate-200 bg-slate-50 text-slate-700",
+  cash_value_logistics: "border-blue-200 bg-blue-50 text-blue-800",
+  airport_schiphol: "border-indigo-200 bg-indigo-50 text-indigo-800"
 };
 
 const FUNCTION_GROUP_LABELS = {
@@ -50,10 +61,15 @@ export default function CaoApplicabilityPanel({ form, onChange, personnelId }) {
 
       if (data.success) {
         onChange('cao_scope_profile', data.cao_scope_profile);
-        onChange('cao_applicability_manual_review_required', data.function_classification?.manual_review_required ?? true);
+        onChange('cao_applicability_manual_review_required', data.manual_review_required ?? true);
         onChange('cao_excluded_rule_ids', data.excluded_rule_ids || []);
         onChange('cao_applicable_rule_profile', data.payroll_rule_profile || null);
         onChange('cao_applicability_resolved_at', new Date().toISOString());
+        onChange('cao_applicability_source_rule_ids', data.source_rule_ids || []);
+        onChange('cao_applicability_warnings', data.warnings || []);
+        onChange('cao_excluded_articles', data.excluded_articles || []);
+        onChange('cao_excluded_chapters', data.excluded_chapters || []);
+        onChange('cao_function_classification', data.function_classification || null);
         if (data.function_classification?.cao_function_group && data.function_classification.cao_function_group !== 'unknown') {
           onChange('cao_function_group', data.function_classification.cao_function_group);
         }
@@ -67,6 +83,7 @@ export default function CaoApplicabilityPanel({ form, onChange, personnelId }) {
   const scopeProfile = form.cao_scope_profile;
   const isNonSecurity = scopeProfile === 'non_security_work_article_3_exception';
   const isFullSecurity = scopeProfile === 'full_security_worker';
+  const isManualReview = scopeProfile === 'mixed_security_work_manual_review' || scopeProfile === 'unknown_manual_review';
 
   return (
     <div className="space-y-5">
@@ -83,7 +100,6 @@ export default function CaoApplicabilityPanel({ form, onChange, personnelId }) {
           />
         </div>
 
-        {/* Beveiligingswerk ja/nee/onbekend */}
         <div className="space-y-1">
           <Label>Doet medewerker normaal beveiligingswerk?</Label>
           <Select
@@ -109,13 +125,12 @@ export default function CaoApplicabilityPanel({ form, onChange, personnelId }) {
         <div className="space-y-1">
           <Label>% beveiligingswerk</Label>
           <Input
-            type="number"
-            min={0}
-            max={100}
+            type="number" min={0} max={100}
             value={form.security_work_percentage ?? ""}
             onChange={e => onChange("security_work_percentage", e.target.value === "" ? null : Number(e.target.value))}
             placeholder="0–100"
           />
+          <p className="text-xs text-muted-foreground">0% = geen beveiliging, 100% = volledig beveiligingswerk</p>
         </div>
 
         <div className="space-y-1">
@@ -188,54 +203,118 @@ export default function CaoApplicabilityPanel({ form, onChange, personnelId }) {
         </div>
       </div>
 
-      {/* Artikel 3 lid 2 waarschuwing */}
-      {form.performs_security_work === false && (
-        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 flex gap-2 text-sm text-amber-800">
-          <AlertTriangle className="w-4 h-4 shrink-0 mt-0.5 text-amber-500" />
-          <div>
-            <p className="font-medium">Artikel 3 lid 2 – beperkte CAO-toepassing</p>
-            <p className="text-xs mt-1">Hoofdstuk 4 (behalve art. 37/38/41), hoofdstuk 5 en bijlage 2 zijn <strong>niet</strong> van toepassing. Bijzondere uren- en reistijdtoeslagen vervallen. Feestdagen en vakantiegeld blijven gelden.</p>
-          </div>
-        </div>
-      )}
-
       {/* Huidig toepassingsprofiel */}
       {scopeProfile && (
-        <div className={`rounded-lg border p-3 flex gap-2 text-sm ${
-          isFullSecurity ? 'border-green-200 bg-green-50 text-green-800'
-          : isNonSecurity ? 'border-amber-200 bg-amber-50 text-amber-800'
-          : 'border-slate-200 bg-slate-50 text-slate-700'
-        }`}>
-          {isFullSecurity ? <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" /> : <ShieldOff className="w-4 h-4 shrink-0 mt-0.5" />}
-          <div>
-            <p className="font-medium">Huidig profiel: {SCOPE_LABELS[scopeProfile] || scopeProfile}</p>
-            {form.cao_applicability_resolved_at && (
-              <p className="text-xs mt-0.5 opacity-70">Bepaald op {new Date(form.cao_applicability_resolved_at).toLocaleDateString('nl-NL')}</p>
-            )}
+        <div className={`rounded-lg border p-3 text-sm ${SCOPE_COLORS[scopeProfile] || 'border-slate-200 bg-slate-50 text-slate-700'}`}>
+          <div className="flex items-start gap-2">
+            {isFullSecurity ? <ShieldCheck className="w-4 h-4 shrink-0 mt-0.5" />
+              : isManualReview ? <XCircle className="w-4 h-4 shrink-0 mt-0.5" />
+              : <ShieldOff className="w-4 h-4 shrink-0 mt-0.5" />}
+            <div className="space-y-1 flex-1">
+              <p className="font-medium">{SCOPE_LABELS[scopeProfile] || scopeProfile}</p>
+              {form.cao_applicability_resolved_at && (
+                <p className="text-xs opacity-70">Bepaald op {new Date(form.cao_applicability_resolved_at).toLocaleDateString('nl-NL')}</p>
+              )}
+              {isManualReview && (
+                <p className="text-xs font-medium">Handmatige review vereist voordat toeslagen/vergoedingen worden berekend.</p>
+              )}
+              {isNonSecurity && (
+                <div className="text-xs space-y-0.5 mt-1">
+                  <p className="font-medium">Niet van toepassing (art. 3 lid 2):</p>
+                  <p>Art. 10 definitie fulltimer, art. 9 lid 1 sub c, hoofdstuk 4 (behalve 37/38/41), hoofdstuk 5, bijlage 2.</p>
+                  <p className="font-medium mt-1">Wel van toepassing:</p>
+                  <p>Art. 37 (loonsverhoging), art. 38 (eindejaarsuitkering), art. 41 (feestdagtoeslag), basisloon, vakantiegeld.</p>
+                </div>
+              )}
+              {/* Bronregel-IDs */}
+              {(form.cao_applicability_source_rule_ids || []).length > 0 && (
+                <div className="text-xs opacity-70 mt-1">
+                  Bronregels: {(form.cao_applicability_source_rule_ids || []).join(', ')}
+                </div>
+              )}
+              {/* Conflicten */}
+              {(form.cao_applicability_warnings || []).filter(w => w.startsWith('Conflicterende')).map((w, i) => (
+                <p key={i} className="text-xs font-medium text-orange-700">{w}</p>
+              ))}
+            </div>
           </div>
         </div>
       )}
 
-      {/* Resolve knop */}
+      {/* Bepaal-knop */}
       <Button type="button" variant="outline" onClick={handleResolve} disabled={resolving} className="gap-2">
         {resolving ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
         {resolving ? "Bezig met bepalen..." : "Bepaal CAO-toepassing"}
       </Button>
 
-      {/* Resultaat */}
+      {/* Resultaat na resolve */}
       {resolveResult && (
-        <div className={`rounded-lg border p-3 text-sm ${resolveResult.success ? 'border-green-200 bg-green-50' : 'border-red-200 bg-red-50'}`}>
+        <div className={`rounded-lg border p-3 text-sm ${
+          !resolveResult.success ? 'border-red-200 bg-red-50'
+          : resolveResult.manual_review_required ? 'border-orange-200 bg-orange-50'
+          : 'border-green-200 bg-green-50'
+        }`}>
           {resolveResult.success ? (
-            <div className="space-y-1">
-              <div className="flex items-center gap-2 font-medium text-green-800">
-                <CheckCircle2 className="w-4 h-4" />
+            <div className="space-y-2">
+              <div className={`flex items-center gap-2 font-medium ${resolveResult.manual_review_required ? 'text-orange-800' : 'text-green-800'}`}>
+                {resolveResult.manual_review_required
+                  ? <XCircle className="w-4 h-4" />
+                  : <CheckCircle2 className="w-4 h-4" />}
                 {SCOPE_LABELS[resolveResult.cao_scope_profile] || resolveResult.cao_scope_profile}
               </div>
-              {resolveResult.warnings?.map((w, i) => (
+
+              {resolveResult.manual_review_required && (
+                <p className="text-xs font-semibold text-orange-800">Handmatige review vereist</p>
+              )}
+
+              {/* Conflicten */}
+              {(resolveResult.conflict_details || []).map((c, i) => (
+                <p key={i} className="text-xs text-orange-700">Conflict: {c}</p>
+              ))}
+
+              {/* Warnings (niet conflicten) */}
+              {(resolveResult.warnings || []).filter(w => !w.startsWith('Conflicterende')).map((w, i) => (
                 <p key={i} className="text-xs text-amber-700">{w}</p>
               ))}
-              {resolveResult.function_classification?.manual_review_required && (
-                <p className="text-xs text-amber-700">⚠ Handmatige review vereist voor functieindeling</p>
+
+              {/* Bronregels */}
+              {(resolveResult.source_rule_ids || []).length > 0 && (
+                <p className="text-xs opacity-60">Bronregels: {resolveResult.source_rule_ids.join(', ')}</p>
+              )}
+
+              {/* Wat wel/niet van toepassing */}
+              {resolveResult.payroll_rule_profile && (
+                <div className="mt-2 space-y-1">
+                  <p className="text-xs font-semibold text-slate-700">Toepassingsprofiel:</p>
+                  <div className="grid grid-cols-2 gap-x-4 gap-y-0.5 text-xs">
+                    {[
+                      ['Art. 37 loonsverhoging', resolveResult.payroll_rule_profile.apply_article_37_wage_increase],
+                      ['Art. 38 eindejaarsuitkering', resolveResult.payroll_rule_profile.apply_article_38_year_end_bonus],
+                      ['Art. 40 bijzondere uren', resolveResult.payroll_rule_profile.apply_article_40_special_hours],
+                      ['Art. 41 feestdagen', resolveResult.payroll_rule_profile.apply_article_41_holidays],
+                      ['Art. 42 overwerk', resolveResult.payroll_rule_profile.apply_article_42_overtime],
+                      ['Hfdst. 5 vergoedingen', resolveResult.payroll_rule_profile.apply_chapter_5_reimbursements],
+                      ['Bijlage 2 loontabel', resolveResult.payroll_rule_profile.apply_appendix_2_function_scales],
+                    ].map(([label, applies]) => (
+                      <div key={label} className={`flex items-center gap-1 ${applies ? 'text-green-700' : 'text-red-600'}`}>
+                        {applies ? <CheckCircle2 className="w-3 h-3" /> : <XCircle className="w-3 h-3" />}
+                        {label}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {/* Bijlage 2 schaal suggestie */}
+              {resolveResult.function_classification?.suggested_cao_scale && (
+                <div className="flex items-center gap-1 text-xs text-blue-700 mt-1">
+                  <Info className="w-3 h-3" />
+                  Suggestie bijlage 2 schaal: {resolveResult.function_classification.suggested_cao_scale}
+                  {resolveResult.function_classification.confidence === 'medium' ? ' (indicatief)' : ' (lage zekerheid, controleer handmatig)'}
+                </div>
+              )}
+              {resolveResult.payroll_rule_profile?.apply_appendix_2_function_scales === false && (
+                <p className="text-xs text-amber-700">Bijlage 2 loontabel is niet van toepassing. Stel een eigen tarief of loonniveau in.</p>
               )}
             </div>
           ) : (

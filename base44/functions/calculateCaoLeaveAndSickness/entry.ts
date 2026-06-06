@@ -150,28 +150,53 @@ Deno.serve(async (req) => {
       } catch { /* stille fallback */ }
     }
 
+    const isUnknownOrMixed = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
+
+    // Scope-context: verlof/ziekte is gebaseerd op hoofdstuk 3 (R0999) en specifieke artikelen.
+    // Artikel 3 lid 2 sluit verlof/ziekte-berekeningen NIET generiek uit.
+    // Alleen concrete registry-metadata zou regels kunnen uitsluiten — hier geen automatische uitsluiting.
+    const scopeWarnings = [];
+    if (isUnknownOrMixed) {
+      scopeWarnings.push({
+        message: `CAO-toepassingsprofiel onzeker (${caoScope.cao_scope_profile}): berekeningsresultaten zijn conceptmatig. Handmatige review vereist.`,
+        cao_scope_profile: caoScope.cao_scope_profile,
+        manual_review_required: true
+      });
+    }
+    // ORT-verlofberekening alleen als toeslagen van toepassing zijn
+    const applyOrtVacation = !caoScope || (caoScope.payroll_rule_profile?.apply_article_40_special_hours !== false);
+
     if (action === 'calculate_vacation_accrual') {
       const result = calculateVacationAccrual(body);
-      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
+      return Response.json({
+        success: true,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: syncWarnings,
+        scope_warnings: scopeWarnings,
+        cao_scope_profile: caoScope?.cao_scope_profile || null,
+        manual_review_required: isUnknownOrMixed || false,
+        apply_ort_vacation: applyOrtVacation,
+        ...result
+      });
     }
 
     if (action === 'calculate_sickness_payment') {
       const result = calculateSicknessPayment(body);
       if (result.error) return Response.json({ error: result.error }, { status: 400 });
-      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
+      return Response.json({
+        success: true,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: syncWarnings,
+        scope_warnings: scopeWarnings,
+        cao_scope_profile: caoScope?.cao_scope_profile || null,
+        manual_review_required: isUnknownOrMixed || false,
+        ...result
+      });
     }
 
     // Default: bereken beide
     const vacation = calculateVacationAccrual(body);
     const sickness = body.sickness_start_date ? calculateSicknessPayment(body) : null;
-
-    const scopeWarnings = [];
-    if (caoScope && !caoScope.applies_full_security_rules) {
-      scopeWarnings.push({
-        message: 'Medewerker valt onder artikel 3 lid 2 CAO PB — beveiligingsspecifieke verlof-/ziektieregels zijn mogelijk niet van toepassing.',
-        cao_scope_profile: caoScope.cao_scope_profile
-      });
-    }
 
     return Response.json({
       success: true,
@@ -179,6 +204,8 @@ Deno.serve(async (req) => {
       calculation_warnings: syncWarnings,
       scope_warnings: scopeWarnings,
       cao_scope_profile: caoScope?.cao_scope_profile || null,
+      manual_review_required: isUnknownOrMixed || false,
+      apply_ort_vacation: applyOrtVacation,
       vacation_accrual: vacation,
       sickness_payment: sickness
     });

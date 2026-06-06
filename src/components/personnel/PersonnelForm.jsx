@@ -74,8 +74,9 @@ function CostOwnerToggle({ label, value, onChange }) {
 }
 
 export default function PersonnelForm({ person, onSave, onCancel }) {
-  const getDefaultCao = (functionType) =>
-    functionType === "binnendienst" ? "eigen_tarief" : "cao_particuliere_beveiliging";
+  // Binnendienst valt ook onder CAO PB (artikel 3 lid 2). Alleen eigen_tarief als gebruiker dat expliciet kiest.
+  // Niet automatisch eigen_tarief toewijzen op basis van function_type.
+  const getDefaultCao = (_functionType) => "cao_particuliere_beveiliging";
 
   const [form, setForm] = useState(person || {
     name: "",

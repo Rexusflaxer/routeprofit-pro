@@ -1,6 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
-// ── Revisie-gebaseerde lazy CAO-sync helper ──
 async function lazySyncCao(base44, forceCaoSync = false) {
   try {
     const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
@@ -17,9 +16,12 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 /**
  * CAO PB contractvalidatie en proeftijdberekening
  * Bronregels: CAO-PB-2024-R0315 t/m R0322
+ *
+ * Scope-bewust: aspirant-beveiliger-specifieke proeftijdregel (R0317)
+ * wordt niet toegepast als medewerker onder artikel 3 lid 2 valt.
  */
 
-function calculateProbationPeriod(input) {
+function calculateProbationPeriod(input, caoScope) {
   const {
     contract_form,
     contract_start_date,
@@ -29,43 +31,64 @@ function calculateProbationPeriod(input) {
 
   const warnings = [];
   const source_rule_ids = [];
+  const scope_warnings = [];
+
+  // Bepaal of aspirant-beveiliger-specifieke regel mag worden toegepast
+  const isUnknownOrMixed = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
+  const scopeBlocksAspirant = caoScope && caoScope.applies_full_security_rules === false;
 
   // Bereken contractduur in maanden
   let contractDurationMonths = null;
   if (contract_start_date && contract_end_date) {
     const start = new Date(contract_start_date);
     const end = new Date(contract_end_date);
-    const diffMs = end - start;
-    contractDurationMonths = diffMs / (1000 * 60 * 60 * 24 * 30.44);
+    contractDurationMonths = (end - start) / (1000 * 60 * 60 * 24 * 30.44);
   }
 
-  // Aspirant-beveiliger met contract langer dan 6 maanden -> 2 maanden proeftijd
-  // CAO-PB-2024-R0317
-  if (security_role_status === 'aspirant_beveiliger' &&
-      contractDurationMonths !== null && contractDurationMonths > 6) {
-    source_rule_ids.push('CAO-PB-2024-R0317');
-    return {
-      probation_period_months: 2,
-      source_rule_ids,
-      warnings,
-      contract_duration_months: Math.round(contractDurationMonths * 10) / 10
-    };
+  // Aspirant-beveiliger regel (CAO-PB-2024-R0317): ALLEEN als full-security scope
+  if (security_role_status === 'aspirant_beveiliger') {
+    if (scopeBlocksAspirant) {
+      scope_warnings.push({
+        rule_id: 'CAO-PB-2024-R0317',
+        message: `Aspirant-beveiliger proeftijdregel (R0317) NIET toegepast: medewerker valt onder artikel 3 lid 2 of scope is onbekend (profiel: ${caoScope?.cao_scope_profile}). Reguliere proeftijdregels gelden.`
+      });
+      // Doorgaan met reguliere berekening hieronder
+    } else if (!caoScope) {
+      // Geen scope beschikbaar: conservatief — pas aspirant-regel NIET toe, flag manual review
+      scope_warnings.push({
+        rule_id: 'CAO-PB-2024-R0317',
+        message: 'CAO-toepassingsprofiel onbekend: aspirant-beveiliger proeftijdregel (R0317) niet automatisch toegepast. Handmatige review vereist.'
+      });
+    } else {
+      // Full-security scope: aspirant-regel mag worden toegepast
+      if (contractDurationMonths !== null && contractDurationMonths > 6) {
+        source_rule_ids.push('CAO-PB-2024-R0317');
+        return {
+          probation_period_months: 2,
+          source_rule_ids,
+          warnings,
+          scope_warnings,
+          manual_review_required: isUnknownOrMixed,
+          contract_duration_months: Math.round(contractDurationMonths * 10) / 10
+        };
+      }
+    }
   }
 
-  // Onbepaalde tijd -> 2 maanden proeftijd
-  // CAO-PB-2024-R0316
+  // Onbepaalde tijd → 2 maanden (CAO-PB-2024-R0316)
   if (contract_form === 'onbepaalde_tijd') {
     source_rule_ids.push('CAO-PB-2024-R0316');
     return {
       probation_period_months: 2,
       source_rule_ids,
       warnings,
+      scope_warnings,
+      manual_review_required: isUnknownOrMixed,
       contract_duration_months: null
     };
   }
 
-  // Bepaalde tijd langer dan 6 maanden -> 1 maand proeftijd
-  // CAO-PB-2024-R0315
+  // Bepaalde tijd (CAO-PB-2024-R0315)
   if (contract_form === 'bepaalde_tijd') {
     if (contractDurationMonths === null) {
       warnings.push('Geen einddatum opgegeven; kan proeftijd niet berekenen voor bepaalde tijd.');
@@ -73,6 +96,8 @@ function calculateProbationPeriod(input) {
         probation_period_months: null,
         source_rule_ids: ['CAO-PB-2024-R0315'],
         warnings,
+        scope_warnings,
+        manual_review_required: true,
         contract_duration_months: null
       };
     }
@@ -82,26 +107,31 @@ function calculateProbationPeriod(input) {
         probation_period_months: 1,
         source_rule_ids,
         warnings,
+        scope_warnings,
+        manual_review_required: isUnknownOrMixed,
         contract_duration_months: Math.round(contractDurationMonths * 10) / 10
       };
     } else {
-      // Bepaalde tijd <= 6 maanden: geen proeftijd
       source_rule_ids.push('CAO-PB-2024-R0315');
       return {
         probation_period_months: 0,
         source_rule_ids,
-        warnings: ['Contract korter dan of gelijk aan 6 maanden: geen proeftijd van toepassing.'],
+        warnings: [...warnings, 'Contract korter dan of gelijk aan 6 maanden: geen proeftijd van toepassing.'],
+        scope_warnings,
+        manual_review_required: isUnknownOrMixed,
         contract_duration_months: Math.round(contractDurationMonths * 10) / 10
       };
     }
   }
 
-  // Oproep/0-uren/stage/uitzend: geen CAO-proeftijdregels van toepassing
+  // Oproep/0-uren/stage/uitzend/zzp: geen CAO-proeftijdregels
   if (['oproep', 'stage', 'uitzend', 'zzp'].includes(contract_form)) {
     return {
       probation_period_months: 0,
       source_rule_ids: [],
       warnings: [`Proeftijdregel niet van toepassing op contractvorm: ${contract_form}`],
+      scope_warnings,
+      manual_review_required: false,
       contract_duration_months: contractDurationMonths
     };
   }
@@ -110,6 +140,8 @@ function calculateProbationPeriod(input) {
     probation_period_months: null,
     source_rule_ids: [],
     warnings: ['Contractvorm niet herkend; proeftijd kan niet worden berekend.'],
+    scope_warnings,
+    manual_review_required: true,
     contract_duration_months: contractDurationMonths
   };
 }
@@ -117,23 +149,18 @@ function calculateProbationPeriod(input) {
 function validateProbationDismissal(input) {
   const { probation_dismissal_datetime, next_shift_datetime, base_hourly_rate } = input;
   const violations = [];
-
-  if (!probation_dismissal_datetime || !next_shift_datetime) {
-    return { violations: [], compensation: null };
-  }
+  if (!probation_dismissal_datetime || !next_shift_datetime) return { violations: [], compensation: null };
 
   const dismissalTime = new Date(probation_dismissal_datetime);
   const shiftTime = new Date(next_shift_datetime);
   const hoursNotice = (shiftTime - dismissalTime) / (1000 * 60 * 60);
 
-  // CAO-PB-2024-R0321: minimaal 12 uur voor eerstvolgende dienst
   if (hoursNotice < 12) {
     const compensation = base_hourly_rate ? base_hourly_rate * 8 : null;
     violations.push({
       rule_id: 'CAO-PB-2024-R0321',
       severity: 'high',
       message: `Opzegging in proeftijd te laat: ${Math.round(hoursNotice * 10) / 10} uur voor dienst (minimaal 12 uur vereist).`,
-      // CAO-PB-2024-R0322: vergoeding 8 basisuurlonen
       compensation_rule_id: 'CAO-PB-2024-R0322',
       compensation_description: '8 basisuurlonen vergoeding',
       compensation_amount: compensation ? Math.round(compensation * 100) / 100 : null,
@@ -141,10 +168,7 @@ function validateProbationDismissal(input) {
     });
   }
 
-  return {
-    violations,
-    compensation: violations[0]?.compensation_amount || null
-  };
+  return { violations, compensation: violations[0]?.compensation_amount || null };
 }
 
 Deno.serve(async (req) => {
@@ -156,7 +180,6 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const { action, personnel_id, force_cao_sync } = body;
 
-    // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
     const syncWarnings = [];
     if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
@@ -169,36 +192,45 @@ Deno.serve(async (req) => {
       revision: syncResult?.revision || null
     };
 
-    // ── CAO-toepassingscheck ──
+    // ── CAO-toepassingscheck (scope eerst resolven) ──
     let caoScope = null;
     if (personnel_id) {
       try {
         const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
         caoScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
+    } else if (body.personnel) {
+      // Inline personnel meegegeven (geen opgeslagen ID)
+      try {
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel: body.personnel });
+        caoScope = scopeRes?.data || null;
+      } catch { /* stille fallback */ }
     }
 
-    if (action === 'calculate_probation') {
-      const result = calculateProbationPeriod(body);
+    const isUnknownOrMixed = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
 
-      // Optioneel: sla proeftijdresultaat op bij medewerker
-      if (personnel_id && result.probation_period_months !== null) {
+    if (action === 'calculate_probation') {
+      const result = calculateProbationPeriod(body, caoScope);
+
+      // Sla resultaat op bij medewerker als er een duidelijke uitkomst is
+      if (personnel_id && result.probation_period_months !== null && !result.manual_review_required) {
         await base44.entities.Personnel.update(personnel_id, {
           probation_period_months: result.probation_period_months,
           probation_period_source_rule_id: result.source_rule_ids[0] || null
         });
       }
 
-      // Aspirant-beveiliger specifieke regels alleen als scope dat ondersteunt
-      const scopeWarnings = [];
-      if (caoScope && body.security_role_status === 'aspirant_beveiliger' && !caoScope.applies_full_security_rules) {
-        scopeWarnings.push({ message: 'Aspirant-beveiliger regels niet van toepassing: medewerker valt onder artikel 3 lid 2 (geen beveiligingswerk).', cao_scope_profile: caoScope.cao_scope_profile });
-      }
-      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, scope_warnings: scopeWarnings, cao_scope_profile: caoScope?.cao_scope_profile || null, ...result });
+      return Response.json({
+        success: true,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: syncWarnings,
+        cao_scope_profile: caoScope?.cao_scope_profile || null,
+        manual_review_required: result.manual_review_required || isUnknownOrMixed,
+        ...result
+      });
     }
 
     if (action === 'validate_dismissal') {
-      // Ophalen basis uurloon indien personnel_id opgegeven
       let baseHourlyRate = body.base_hourly_rate || null;
       if (personnel_id && !baseHourlyRate) {
         const personnel = await base44.entities.Personnel.get(personnel_id);
@@ -212,12 +244,26 @@ Deno.serve(async (req) => {
         }
       }
       const result = validateProbationDismissal({ ...body, base_hourly_rate: baseHourlyRate });
-      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, cao_scope_profile: caoScope?.cao_scope_profile || null, ...result });
+      return Response.json({
+        success: true,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: syncWarnings,
+        cao_scope_profile: caoScope?.cao_scope_profile || null,
+        manual_review_required: isUnknownOrMixed,
+        ...result
+      });
     }
 
     // Default: bereken proeftijd
-    const result = calculateProbationPeriod(body);
-    return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, cao_scope_profile: caoScope?.cao_scope_profile || null, ...result });
+    const result = calculateProbationPeriod(body, caoScope);
+    return Response.json({
+      success: true,
+      cao_sync_status: caoSyncStatus,
+      calculation_warnings: syncWarnings,
+      cao_scope_profile: caoScope?.cao_scope_profile || null,
+      manual_review_required: result.manual_review_required || isUnknownOrMixed,
+      ...result
+    });
 
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

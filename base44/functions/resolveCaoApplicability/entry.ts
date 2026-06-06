@@ -2,27 +2,189 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
 /**
  * resolveCaoApplicability
- * Bepaalt per medewerker/werkcontext welke CAO PB-regels van toepassing zijn.
+ * Bepaalt per medewerker welke CAO PB-regels van toepassing zijn.
+ * Juridisch conservatief: bij twijfel altijd manual_review_required=true.
  * Bronregels: CAO-PB-2024-R0227 t/m R0233 (artikel 3 lid 2 uitzonderingen)
  */
 
-// Functiegroepen conform bijlage 2 die als beveiligingswerk gelden
 const SECURITY_FUNCTION_GROUPS = [
-  'objectbeveiliger_receptionist',
-  'mobiel_surveillant',
-  'winkelsurveillant',
-  'brandwacht',
-  'geld_waardetransporteur',
-  'centralist'
+  'objectbeveiliger_receptionist', 'mobiel_surveillant', 'winkelsurveillant',
+  'brandwacht', 'geld_waardetransporteur', 'centralist'
 ];
-
 const SECURITY_FUNCTION_TYPES = ['surveillant', 'centralist', 'verkeersregelaar', 'brandwacht', 'rechercheur'];
 const SECURITY_ROLE_STATUSES = ['aspirant_beveiliger', 'beveiliger', 'leidinggevende'];
+const NON_SECURITY_FUNCTION_TYPES = ['binnendienst', 'planner', 'installateur', 'host', 'other'];
+
+/**
+ * Detecteer conflicten tussen velden.
+ * Retourneert een array van conflictbeschrijvingen.
+ */
+function detectConflicts(p, wc) {
+  const conflicts = [];
+  const psw = wc.performs_security_work !== undefined ? wc.performs_security_work : p.performs_security_work;
+  const role = p.security_role_status;
+  const group = p.cao_function_group;
+  const ftype = p.function_type;
+  const pct = wc.security_work_percentage !== undefined ? wc.security_work_percentage : p.security_work_percentage;
+
+  // performs_security_work=false maar aspirant/beveiliger role
+  if (psw === false && SECURITY_ROLE_STATUSES.includes(role)) {
+    conflicts.push(`performs_security_work=false maar security_role_status=${role}. Tegenstrijdig: beveiligingsstatus impliceert beveiligingswerk.`);
+  }
+  // performs_security_work=false maar security functiegroep
+  if (psw === false && group && SECURITY_FUNCTION_GROUPS.includes(group)) {
+    conflicts.push(`performs_security_work=false maar cao_function_group=${group}. Functiegroep bijlage 2 impliceert beveiligingswerk.`);
+  }
+  // binnendienst/planner function_type maar security_work_percentage >= 50
+  if (NON_SECURITY_FUNCTION_TYPES.includes(ftype) && typeof pct === 'number' && pct >= 50) {
+    conflicts.push(`function_type=${ftype} (niet-beveiliging) maar security_work_percentage=${pct}%. Percentage impliceert beveiligingswerk.`);
+  }
+  // non_security_staff maar security role status
+  if (group === 'non_security_staff' && SECURITY_ROLE_STATUSES.includes(role)) {
+    conflicts.push(`cao_function_group=non_security_staff maar security_role_status=${role}. Niet-beveiligingspersoneel heeft geen beveiligingsstatus.`);
+  }
+  // performs_security_work=true maar non_security_staff group
+  if (psw === true && group === 'non_security_staff') {
+    conflicts.push(`performs_security_work=true maar cao_function_group=non_security_staff. Tegenstrijdig.`);
+  }
+  return conflicts;
+}
+
+/**
+ * Bepaalt of medewerker beveiligingswerk doet.
+ * Retourneert: true (security), false (non-security), 'mixed' (onzeker percentage), null (onvoldoende data)
+ *
+ * Beslisvolgorde (juridisch conservatief):
+ * 1. Expliciete performs_security_work override
+ * 2. security_work_percentage === 0 → non-security
+ * 3. cao_function_group === non_security_staff → non-security
+ * 4. function_type in non-security EN geen security-signalen → non-security
+ * 5. security_work_percentage >= 50 + security signaal → true
+ * 6. security_work_percentage > 0 && < 50 → 'mixed' (manual review)
+ * 7. security role/functiegroep → true
+ * 8. null (onvoldoende data)
+ */
+function determinePerformsSecurityWork(p, wc) {
+  const psw = wc.performs_security_work !== undefined ? wc.performs_security_work : p.performs_security_work;
+  const pct = wc.security_work_percentage !== undefined ? wc.security_work_percentage : p.security_work_percentage;
+  const role = p.security_role_status;
+  const group = p.cao_function_group;
+  const ftype = p.function_type;
+
+  // 1. Expliciete override
+  if (psw === true) return true;
+  if (psw === false) return false;
+
+  // 2. Percentage 0 → non-security
+  if (typeof pct === 'number' && pct === 0) return false;
+
+  // 3. cao_function_group = non_security_staff → non-security
+  if (group === 'non_security_staff') return false;
+
+  // 4. Non-security function_type zonder security-signalen
+  if (NON_SECURITY_FUNCTION_TYPES.includes(ftype)) {
+    const hasSecuritySignal = SECURITY_ROLE_STATUSES.includes(role) ||
+      (group && SECURITY_FUNCTION_GROUPS.includes(group)) ||
+      (typeof pct === 'number' && pct > 0);
+    if (!hasSecuritySignal) return false;
+    // function_type is non-security maar er zijn security-signalen → mixed
+    return 'mixed';
+  }
+
+  // 5. Percentage >= 50 met security signaal → true
+  if (typeof pct === 'number' && pct >= 50) {
+    if (SECURITY_FUNCTION_TYPES.includes(ftype) || (group && SECURITY_FUNCTION_GROUPS.includes(group)) || SECURITY_ROLE_STATUSES.includes(role)) {
+      return true;
+    }
+  }
+
+  // 6. Percentage > 0 && < 50 → mixed (manual review vereist)
+  if (typeof pct === 'number' && pct > 0 && pct < 50) {
+    return 'mixed';
+  }
+
+  // 7. Security role/functiegroep/functietype → true
+  if (SECURITY_ROLE_STATUSES.includes(role)) return true;
+  if (role === 'not_applicable') return false;
+  if (group && SECURITY_FUNCTION_GROUPS.includes(group)) return true;
+  if (SECURITY_FUNCTION_TYPES.includes(ftype)) return true;
+
+  // 8. Onvoldoende data
+  return null;
+}
+
+function buildFunctionClassification(p, manualReview, sourceRuleIds, isNonSecurity) {
+  const group = isNonSecurity ? 'non_security_staff' : (p.cao_function_group || 'unknown');
+  const level = p.cao_function_level || 'unknown';
+
+  // Bijlage 2 schaal-suggestie alleen voor echte beveiligingsfuncties
+  const scaleMap = {
+    'objectbeveiliger_receptionist_aspirant': 2, 'objectbeveiliger_receptionist_a': 3,
+    'objectbeveiliger_receptionist_b': 4, 'objectbeveiliger_receptionist_c': 5,
+    'mobiel_surveillant_a': 3, 'mobiel_surveillant_b': 4, 'mobiel_surveillant_c': 5,
+    'winkelsurveillant_a': 3, 'brandwacht_a': 3,
+    'geld_waardetransporteur_a': 4, 'centralist_a': 4, 'centralist_b': 5
+  };
+
+  const mapKey = `${group}_${level}`;
+  const suggestedScale = (!isNonSecurity && !manualReview) ? (scaleMap[mapKey] || null) : null;
+
+  return {
+    cao_function_group: group,
+    cao_function_level: level,
+    suggested_cao_scale: suggestedScale,
+    confidence: manualReview ? 'low' : (suggestedScale ? 'medium' : 'low'),
+    manual_review_required: manualReview || !suggestedScale,
+    source_rule_ids: [...sourceRuleIds, 'CAO-PB-2024-R1751']
+  };
+}
+
+function buildPayrollProfile(mode) {
+  // mode: 'full' | 'non_security' | 'unknown'
+  if (mode === 'full') {
+    return {
+      apply_chapter_4: true,
+      apply_article_37_wage_increase: true,
+      apply_article_38_year_end_bonus: true,
+      apply_article_40_special_hours: true,
+      apply_article_41_holidays: true,
+      apply_article_42_overtime: true,
+      apply_article_43_shift_change: true,
+      apply_chapter_5_reimbursements: true,
+      apply_appendix_2_function_scales: true
+    };
+  }
+  if (mode === 'non_security') {
+    // Artikel 3 lid 2: hoofdstuk 4 (behalve 37/38/41), hoofdstuk 5, bijlage 2 uitgesloten
+    return {
+      apply_chapter_4: false,
+      apply_article_37_wage_increase: true,
+      apply_article_38_year_end_bonus: true,
+      apply_article_40_special_hours: false,
+      apply_article_41_holidays: true,
+      apply_article_42_overtime: false,
+      apply_article_43_shift_change: false,
+      apply_chapter_5_reimbursements: false,
+      apply_appendix_2_function_scales: false
+    };
+  }
+  // unknown / mixed: conservatief — geen security-toeslagen, manual review
+  return {
+    apply_chapter_4: false,
+    apply_article_37_wage_increase: true,
+    apply_article_38_year_end_bonus: true,
+    apply_article_40_special_hours: false,
+    apply_article_41_holidays: true,
+    apply_article_42_overtime: false,
+    apply_article_43_shift_change: false,
+    apply_chapter_5_reimbursements: false,
+    apply_appendix_2_function_scales: false
+  };
+}
 
 function resolveApplicability(personnel, contract, work_context) {
   const warnings = [];
   const source_rule_ids = [];
-
   const p = personnel || {};
   const wc = work_context || {};
 
@@ -36,34 +198,36 @@ function resolveApplicability(personnel, contract, work_context) {
       excluded_rule_ids: ['CAO-PB-2024-R0227'],
       excluded_articles: [],
       excluded_chapters: [],
+      excluded_rule_ids_reason: { 'CAO-PB-2024-R0227': 'Evenementen-/horecabeveiliging valt onder eigen CAO (art. 3 lid 1 CAO PB).' },
       applicable_exceptions: ['article_3_event_hospitality_exclusion'],
-      function_classification: {
-        cao_function_group: p.cao_function_group || 'unknown',
-        cao_function_level: p.cao_function_level || 'unknown',
-        suggested_cao_scale: null,
-        confidence: 'low',
-        manual_review_required: true,
-        source_rule_ids: ['CAO-PB-2024-R0227']
-      },
-      payroll_rule_profile: buildPayrollProfile(false, false),
+      function_classification: buildFunctionClassification(p, true, ['CAO-PB-2024-R0227'], false),
+      payroll_rule_profile: buildPayrollProfile('unknown'),
+      manual_review_required: true,
+      confidence: 'high',
       warnings: ['CAO PB is niet van toepassing: evenementen-/horecabeveiliging valt onder eigen CAO (art. 3 lid 2 / R0227).'],
       source_rule_ids
     };
   }
 
+  // ── Conflictdetectie (altijd eerst) ──
+  const conflicts = detectConflicts(p, wc);
+  const hasConflicts = conflicts.length > 0;
+
+  if (hasConflicts) {
+    warnings.push(...conflicts.map(c => `Conflicterende gegevens: ${c}`));
+  }
+
   // ── Bepaal of medewerker beveiligingswerk doet ──
-  const performsSecurityWork = determinePerformsSecurityWork(p, wc);
+  const securityWorkResult = determinePerformsSecurityWork(p, wc);
 
-  // ── Schiphol scope ──
+  // ── Schiphol / geld- en waardelogistiek scope ──
   const isSchiphol = wc.works_airport_schiphol === true || p.works_airport_schiphol === true;
-
-  // ── Geld- en waardelogistiek scope ──
   const isCashValueLogistics = wc.works_cash_value_logistics === true || p.works_cash_value_logistics === true;
 
-  if (performsSecurityWork === null) {
-    // Onvoldoende data
+  // ── Onvoldoende data ──
+  if (securityWorkResult === null) {
     source_rule_ids.push('CAO-PB-2024-R0228');
-    warnings.push('Onvoldoende gegevens om CAO-toepassingsprofiel te bepalen. Handmatige review vereist.');
+    warnings.push('Onvoldoende gegevens om CAO-toepassingsprofiel te bepalen. Stel performs_security_work, security_work_percentage of function_type in.');
     return {
       cao_scope_profile: 'unknown_manual_review',
       applies_cao_pb: true,
@@ -71,38 +235,73 @@ function resolveApplicability(personnel, contract, work_context) {
       excluded_rule_ids: [],
       excluded_articles: [],
       excluded_chapters: [],
+      excluded_rule_ids_reason: {},
       applicable_exceptions: [],
-      function_classification: buildFunctionClassification(p, true, ['CAO-PB-2024-R0228']),
-      payroll_rule_profile: buildPayrollProfile(false, false),
+      function_classification: buildFunctionClassification(p, true, ['CAO-PB-2024-R0228'], false),
+      payroll_rule_profile: buildPayrollProfile('unknown'),
+      manual_review_required: true,
+      confidence: 'low',
       warnings,
       source_rule_ids
     };
   }
 
-  if (performsSecurityWork === false) {
-    // Artikel 3 lid 2: normaal geen beveiligingswerk
+  // ── Mixed: onzeker percentage of conflicterende signalen ──
+  if (securityWorkResult === 'mixed' || hasConflicts) {
+    source_rule_ids.push('CAO-PB-2024-R0228');
+    warnings.push('Gemengde signalen voor beveiligingswerk: handmatige review vereist voordat toeslagen/vergoedingen worden berekend.');
+    return {
+      cao_scope_profile: 'mixed_security_work_manual_review',
+      applies_cao_pb: true,
+      applies_full_security_rules: false,
+      excluded_rule_ids: [],
+      excluded_articles: [],
+      excluded_chapters: [],
+      excluded_rule_ids_reason: {},
+      applicable_exceptions: [],
+      function_classification: buildFunctionClassification(p, true, source_rule_ids, false),
+      payroll_rule_profile: buildPayrollProfile('unknown'),
+      manual_review_required: true,
+      confidence: 'low',
+      conflict_details: conflicts,
+      warnings,
+      source_rule_ids
+    };
+  }
+
+  // ── Non-security: artikel 3 lid 2 ──
+  if (securityWorkResult === false) {
     source_rule_ids.push('CAO-PB-2024-R0228', 'CAO-PB-2024-R0229', 'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232', 'CAO-PB-2024-R0233');
-    warnings.push('Artikel 3 lid 2: medewerker doet normaal geen beveiligingswerk. Hoofdstuk 4 (behalve art. 37/38/41), hoofdstuk 5 en bijlage 2 zijn niet van toepassing.');
+    warnings.push('Artikel 3 lid 2 CAO PB van toepassing: medewerker doet normaal geen beveiligingswerk. Hoofdstuk 4 (behalve art. 37/38/41), hoofdstuk 5 en bijlage 2 zijn niet van toepassing. Basisloon, vakantiegeld, eindejaarsuitkering en feestdagtoeslag blijven gelden.');
+    const excludedRuleIds = ['CAO-PB-2024-R0229', 'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232', 'CAO-PB-2024-R0233'];
     return {
       cao_scope_profile: 'non_security_work_article_3_exception',
       applies_cao_pb: true,
       applies_full_security_rules: false,
-      excluded_rule_ids: ['CAO-PB-2024-R0229', 'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232', 'CAO-PB-2024-R0233'],
-      excluded_articles: ['article_10_fulltime_definition', 'article_9_lid1_c'],
-      excluded_chapters: ['chapter_4_except_articles_37_38_41', 'chapter_5', 'appendix_2'],
+      excluded_rule_ids: excludedRuleIds,
+      excluded_articles: ['article_10_fulltime_definition', 'article_9_lid1_c', 'article_40_special_hours', 'article_42_overtime', 'article_43_shift_change'],
+      excluded_chapters: ['chapter_4_except_37_38_41', 'chapter_5', 'appendix_2'],
+      excluded_rule_ids_reason: {
+        'CAO-PB-2024-R0229': 'Art. 3 lid 2: art. 10 definitie fulltimer niet van toepassing.',
+        'CAO-PB-2024-R0230': 'Art. 3 lid 2: art. 9 lid 1 sub c niet van toepassing.',
+        'CAO-PB-2024-R0231': 'Art. 3 lid 2: hoofdstuk 4 (behalve art. 37/38/41) niet van toepassing.',
+        'CAO-PB-2024-R0232': 'Art. 3 lid 2: hoofdstuk 5 vergoedingen niet van toepassing.',
+        'CAO-PB-2024-R0233': 'Art. 3 lid 2: bijlage 2 functiegebouw/loontabel niet van toepassing.'
+      },
       applicable_exceptions: ['article_3_lid2_non_security_work'],
-      function_classification: buildFunctionClassification(p, false, source_rule_ids),
-      payroll_rule_profile: buildPayrollProfile(false, true),
+      function_classification: buildFunctionClassification(p, false, source_rule_ids, true),
+      payroll_rule_profile: buildPayrollProfile('non_security'),
+      manual_review_required: false,
+      confidence: 'high',
       warnings,
       source_rule_ids
     };
   }
 
-  // Volledig beveiligingswerk — bepaal eventuele bijzondere scope
+  // ── Full security ──
   let scopeProfile = 'full_security_worker';
   if (isSchiphol) scopeProfile = 'airport_schiphol';
   else if (isCashValueLogistics) scopeProfile = 'cash_value_logistics';
-
   source_rule_ids.push('CAO-PB-2024-R0728');
 
   return {
@@ -112,104 +311,14 @@ function resolveApplicability(personnel, contract, work_context) {
     excluded_rule_ids: [],
     excluded_articles: [],
     excluded_chapters: [],
+    excluded_rule_ids_reason: {},
     applicable_exceptions: isSchiphol ? ['schiphol_special_rules'] : isCashValueLogistics ? ['cash_value_logistics_rules'] : [],
-    function_classification: buildFunctionClassification(p, false, source_rule_ids),
-    payroll_rule_profile: buildPayrollProfile(true, true),
+    function_classification: buildFunctionClassification(p, false, source_rule_ids, false),
+    payroll_rule_profile: buildPayrollProfile('full'),
+    manual_review_required: false,
+    confidence: 'high',
     warnings,
     source_rule_ids
-  };
-}
-
-function determinePerformsSecurityWork(p, wc) {
-  // Expliciete override in work_context
-  if (wc.performs_security_work === true) return true;
-  if (wc.performs_security_work === false) return false;
-
-  // Expliciete override op personeelsniveau
-  if (p.performs_security_work === true) return true;
-  if (p.performs_security_work === false) return false;
-
-  // Percentage
-  const pct = wc.security_work_percentage ?? p.security_work_percentage;
-  if (typeof pct === 'number') {
-    if (pct >= 50) return true;
-    if (pct < 50) return false;
-  }
-
-  // security_role_status
-  if (SECURITY_ROLE_STATUSES.includes(p.security_role_status)) return true;
-  if (p.security_role_status === 'not_applicable') return false;
-
-  // Functiegroep
-  if (p.cao_function_group && SECURITY_FUNCTION_GROUPS.includes(p.cao_function_group)) return true;
-  if (p.cao_function_group === 'non_security_staff') return false;
-
-  // function_type
-  if (SECURITY_FUNCTION_TYPES.includes(p.function_type)) return true;
-  if (p.function_type === 'binnendienst' || p.function_type === 'planner') return false;
-
-  // Onvoldoende data
-  return null;
-}
-
-function buildFunctionClassification(p, manualReview, sourceRuleIds) {
-  const group = p.cao_function_group || 'unknown';
-  const level = p.cao_function_level || 'unknown';
-
-  // Suggereer CAO-schaal op basis van functiegroep/niveau (bijlage 2 R1751-R1814)
-  const scaleMap = {
-    'objectbeveiliger_receptionist_aspirant': 2,
-    'objectbeveiliger_receptionist_a': 3,
-    'objectbeveiliger_receptionist_b': 4,
-    'objectbeveiliger_receptionist_c': 5,
-    'mobiel_surveillant_a': 3,
-    'mobiel_surveillant_b': 4,
-    'mobiel_surveillant_c': 5,
-    'winkelsurveillant_a': 3,
-    'brandwacht_a': 3,
-    'geld_waardetransporteur_a': 4,
-    'centralist_a': 4,
-    'centralist_b': 5
-  };
-
-  const mapKey = `${group}_${level}`;
-  const suggestedScale = scaleMap[mapKey] || null;
-
-  return {
-    cao_function_group: group,
-    cao_function_level: level,
-    suggested_cao_scale: suggestedScale,
-    confidence: suggestedScale ? 'medium' : 'low',
-    manual_review_required: manualReview || !suggestedScale,
-    source_rule_ids: [...sourceRuleIds, 'CAO-PB-2024-R1751']
-  };
-}
-
-function buildPayrollProfile(fullSecurity, holidaysApply) {
-  if (fullSecurity) {
-    return {
-      apply_chapter_4: true,
-      apply_article_37_wage_increase: true,
-      apply_article_38_year_end_bonus: true,
-      apply_article_40_special_hours: true,
-      apply_article_41_holidays: true,
-      apply_article_42_overtime: true,
-      apply_article_43_shift_change: true,
-      apply_chapter_5_reimbursements: true,
-      apply_appendix_2_function_scales: true
-    };
-  }
-  // non_security_work_article_3_exception
-  return {
-    apply_chapter_4: false,
-    apply_article_37_wage_increase: true,
-    apply_article_38_year_end_bonus: true,
-    apply_article_40_special_hours: false,
-    apply_article_41_holidays: holidaysApply,
-    apply_article_42_overtime: false,
-    apply_article_43_shift_change: false,
-    apply_chapter_5_reimbursements: false,
-    apply_appendix_2_function_scales: false
   };
 }
 
@@ -224,28 +333,27 @@ Deno.serve(async (req) => {
 
     let personnel = personnelInput || null;
 
-    // Haal medewerker op als personnel_id is opgegeven en geen inline personnel
     if (personnel_id && !personnel) {
       personnel = await base44.entities.Personnel.get(personnel_id);
-      if (!personnel) {
-        return Response.json({ error: `Medewerker niet gevonden: ${personnel_id}` }, { status: 404 });
-      }
+      if (!personnel) return Response.json({ error: `Medewerker niet gevonden: ${personnel_id}` }, { status: 404 });
     }
 
-    if (!personnel) {
-      return Response.json({ error: 'personnel of personnel_id is verplicht' }, { status: 400 });
-    }
+    if (!personnel) return Response.json({ error: 'personnel of personnel_id is verplicht' }, { status: 400 });
 
     const result = resolveApplicability(personnel, contract, work_context);
 
-    // Optioneel: sla resultaat op bij medewerker
     if (save && personnel_id) {
       await base44.entities.Personnel.update(personnel_id, {
         cao_scope_profile: result.cao_scope_profile,
-        cao_applicability_manual_review_required: result.function_classification.manual_review_required,
+        cao_applicability_manual_review_required: result.manual_review_required,
         cao_applicability_resolved_at: new Date().toISOString(),
         cao_excluded_rule_ids: result.excluded_rule_ids,
-        cao_applicable_rule_profile: result.payroll_rule_profile
+        cao_applicable_rule_profile: result.payroll_rule_profile,
+        cao_applicability_source_rule_ids: result.source_rule_ids,
+        cao_applicability_warnings: result.warnings,
+        cao_excluded_articles: result.excluded_articles,
+        cao_excluded_chapters: result.excluded_chapters,
+        cao_function_classification: result.function_classification
       });
     }
 

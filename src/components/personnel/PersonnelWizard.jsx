@@ -120,7 +120,7 @@ export default function PersonnelWizard({ person, onClose }) {
       onRemoveAssignment={(i) => setAssignments(a => a.filter((_, idx) => idx !== i))}
     />,
     <WizardStep2NAW form={form} onChange={onChange} />,
-    <WizardStep3Payroll form={form} onChange={onChange} sensitiveData={sensitiveData} onSensitiveChange={onSensitiveChange} />,
+    <WizardStep3Payroll form={form} onChange={onChange} sensitiveData={sensitiveData} onSensitiveChange={onSensitiveChange} personnelId={person?.id || null} />,
     <WizardStep4Identity sensitiveData={sensitiveData} onSensitiveChange={onSensitiveChange}
       idDoc={idDoc} onIdDocChange={(f, v) => setIdDoc(d => ({ ...d, [f]: v }))}
     />,

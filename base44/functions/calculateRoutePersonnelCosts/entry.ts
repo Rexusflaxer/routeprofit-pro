@@ -1,6 +1,5 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
-// ── Revisie-gebaseerde lazy CAO-sync helper ──
 async function lazySyncCao(base44, forceCaoSync = false) {
   try {
     const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
@@ -13,8 +12,6 @@ async function lazySyncCao(base44, forceCaoSync = false) {
     return { cloudflare_unavailable: true };
   }
 }
-
-// Feestdagen komen UITSLUITEND uit CAOConfiguration.holidays — geen hardcoded lijsten
 
 function isHoliday(dateStr, caoConfig) {
   const holidays = (caoConfig && caoConfig.holidays) ? caoConfig.holidays : [];
@@ -41,17 +38,14 @@ function getSurchargeType(datetime, caoConfig) {
 function getCAOHourlyRate(scale, period, caoConfig) {
   const scaleKey = String(scale);
   const periodKey = String(period);
-  // Probeer eerst gedetailleerde loontabel
   if (caoConfig.wage_scales_detailed && caoConfig.wage_scales_detailed[scaleKey]) {
     const entry = caoConfig.wage_scales_detailed[scaleKey][periodKey];
     if (entry && entry.hourly_rate) return entry.hourly_rate;
   }
-  // Legacy wage_scales
   if (caoConfig.wage_scales && caoConfig.wage_scales[scaleKey]) {
     const rate = caoConfig.wage_scales[scaleKey][periodKey];
     if (rate !== undefined && rate !== null) return rate;
   }
-  // Geen fallback — geeft null terug zodat aanroeper een fout kan genereren
   return null;
 }
 
@@ -80,11 +74,46 @@ function getAbsoluteEndMinutes(startMinutes, endTime) {
   return endMinutes;
 }
 
-function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
+/**
+ * Scope-aware shift cost berekening.
+ * @param {object} personnel - Personeelsrecord
+ * @param {string} date - Datum (YYYY-MM-DD)
+ * @param {string} startTime - Starttijd (HH:MM)
+ * @param {string} endTime - Eindtijd (HH:MM)
+ * @param {object} caoConfig - Actieve CAO-configuratie
+ * @param {object|null} caoScope - Resultaat van resolveCaoApplicability (of null als onbekend)
+ */
+function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, caoScope) {
   const startDate = new Date(`${date}T${startTime}:00`);
   let endDate = new Date(`${date}T${endTime}:00`);
   if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
   const totalHours = (endDate - startDate) / (1000 * 60 * 60);
+
+  // Scope gates: bepaal welke regels van toepassing zijn
+  const profile = caoScope?.payroll_rule_profile || null;
+  const applySpecialHours = profile ? (profile.apply_article_40_special_hours === true) : true; // conservatief: alleen als explicit true
+  const applyHolidays = profile ? (profile.apply_article_41_holidays !== false) : true; // holidays standaard aan
+  const applyOvertimeAccrual = profile ? (profile.apply_article_42_overtime !== false) : true;
+  const isScopeUnknown = caoScope && ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
+
+  const scopeWarnings = [];
+  if (!caoScope) {
+    scopeWarnings.push('CAO-toepassingsprofiel niet bepaald; beveiligingstoeslagen worden niet automatisch toegepast.');
+  } else if (isScopeUnknown) {
+    scopeWarnings.push(`CAO-toepassingsprofiel onzeker (${caoScope.cao_scope_profile}): handmatige review vereist. Bijzondere-urentoeslagen niet toegepast.`);
+  } else if (!applySpecialHours) {
+    scopeWarnings.push(`Artikel 3 lid 2 CAO PB (${caoScope.cao_scope_profile}): avond-/nacht-/weekendtoeslagen niet toegepast.`);
+  }
+
+  const caoRuleApplication = {
+    cao_scope_profile: caoScope?.cao_scope_profile || 'unknown',
+    applied_article_40_special_hours: applySpecialHours && !isScopeUnknown,
+    applied_article_41_holidays: applyHolidays,
+    applied_article_42_overtime: applyOvertimeAccrual && !isScopeUnknown,
+    applied_chapter_5_reimbursements: profile ? (profile.apply_chapter_5_reimbursements === true) : true,
+    manual_review_required: isScopeUnknown || caoScope?.manual_review_required || false,
+    source_rule_ids: caoScope?.source_rule_ids || []
+  };
 
   if (personnel.employee_type === 'zzp') {
     let zzpRate = personnel.zzp_hourly_rate_excl_vat || 0;
@@ -105,7 +134,10 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
       total_gross: r2(costExclVat), employer_costs_total: r2(vatAmount),
       employer_costs: { vat_21: r2(vatAmount) },
       accruals_total: 0, accruals: {},
-      total_cost_employer: r2(totalCost), cost_per_hour: r2(totalHours > 0 ? totalCost / totalHours : 0)
+      total_cost_employer: r2(totalCost), cost_per_hour: r2(totalHours > 0 ? totalCost / totalHours : 0),
+      cao_scope_profile: caoScope?.cao_scope_profile || null,
+      scope_warnings: scopeWarnings,
+      cao_rule_application: caoRuleApplication
     };
   }
 
@@ -114,7 +146,7 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
   if (personnel.cao === 'cao_particuliere_beveiliging') {
     const rate = getCAOHourlyRate(personnel.cao_scale || 3, personnel.cao_period || 0, caoConfig);
     if (rate === null) {
-      throw new Error(`Geen uurloon gevonden voor schaal ${personnel.cao_scale}, periodiek ${personnel.cao_period} in CAO "${caoConfig.version_label || caoConfig.name}". Controleer de loontabel.`);
+      throw new Error(`Geen uurloon gevonden voor schaal ${personnel.cao_scale}, periodiek ${personnel.cao_period} in CAO "${caoConfig.version_label || caoConfig.name}".`);
     }
     baseHourlyRate = rate;
   } else {
@@ -132,10 +164,29 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
     const next = new Date(cur);
     next.setHours(next.getHours() + 1);
     const segHours = next <= endDate ? 1 : (endDate - cur) / (1000 * 60 * 60);
-    const surcharge = getSurchargeType(cur, caoConfig);
+    const surchargeInfo = getSurchargeType(cur, caoConfig);
+    let surchargeType = surchargeInfo.type;
+    let surchargePercentage = surchargeInfo.percentage;
+
+    // Scope gate: bijzondere uren (art. 40) alleen bij full-security
+    if (!applySpecialHours && ['evening', 'night', 'weekend'].includes(surchargeType)) {
+      surchargeType = 'day';
+      surchargePercentage = 0;
+    }
+    // Feestdagtoeslag (art. 41): altijd als applyHolidays
+    if (!applyHolidays && ['holiday', 'new_years_eve'].includes(surchargeType)) {
+      surchargeType = 'day';
+      surchargePercentage = 0;
+    }
+    // Scope onbekend: geen bijzondere uren
+    if (isScopeUnknown && surchargeType !== 'day') {
+      surchargeType = 'day';
+      surchargePercentage = 0;
+    }
+
     baseSalary += baseHourlyRate * segHours;
-    if (surcharge.type !== 'day') {
-      surchargeAmounts[surcharge.type] += baseHourlyRate * segHours * (surcharge.percentage / 100);
+    if (surchargeType !== 'day') {
+      surchargeAmounts[surchargeType] += baseHourlyRate * segHours * (surchargePercentage / 100);
     }
     cur = next;
   }
@@ -162,11 +213,13 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
 
   const vacationAllowance = totalGross * ((caoConfig.vacation_allowance || 8) / 100);
   const yearEndBonus = totalGross * ((caoConfig.year_end_bonus || 2.01) / 100);
-  const avgOrtPerHour = totalHours > 0 ? surchargesTotal / totalHours : 0;
+  // ORT-vakantie-reservering: 0 als geen toeslagen toegepast zijn
+  const avgOrtPerHour = (totalHours > 0 && surchargesTotal > 0) ? surchargesTotal / totalHours : 0;
   const estimatedAnnualVacationHours = 200;
-  const ortVacationReservation = (estimatedAnnualVacationHours / 13) * avgOrtPerHour;
+  const ortVacationReservation = applySpecialHours && !isScopeUnknown
+    ? (estimatedAnnualVacationHours / 13) * avgOrtPerHour
+    : 0;
   const accrualsTotal = vacationAllowance + yearEndBonus + ortVacationReservation;
-
   const totalCostEmployer = totalGross + employerCostsTotal + accrualsTotal;
 
   return {
@@ -185,8 +238,19 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig) {
       ort_vacation_reservation: r2(ortVacationReservation)
     },
     total_cost_employer: r2(totalCostEmployer),
-    cost_per_hour: r2(totalHours > 0 ? totalCostEmployer / totalHours : 0)
+    cost_per_hour: r2(totalHours > 0 ? totalCostEmployer / totalHours : 0),
+    cao_scope_profile: caoScope?.cao_scope_profile || null,
+    scope_warnings: scopeWarnings,
+    cao_rule_application: caoRuleApplication
   };
+}
+
+// Cache-key bevat revision, scope_profile en updated_date om stale scope te vermijden
+function buildCacheKey(weekday, caoConfig, personnel) {
+  const revision = caoConfig?.cloudflare_revision || caoConfig?.id || 'unknown';
+  const scope = personnel?.cao_scope_profile || 'unknown';
+  const updated = personnel?.updated_date || personnel?.cao_applicability_resolved_at || '';
+  return `${weekday}_${revision}_${scope}_${updated.slice(0, 10)}`;
 }
 
 Deno.serve(async (req) => {
@@ -197,7 +261,6 @@ Deno.serve(async (req) => {
 
     const { route_id, weekday, force_recalculate, force_cao_sync } = await req.json();
 
-    // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
     const syncWarnings = [];
     if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
@@ -217,49 +280,8 @@ Deno.serve(async (req) => {
     if (!route) return Response.json({ error: 'Route not found' }, { status: 404 });
 
     const targetWeekday = weekday || route.weekdays?.[0] || 1;
-    const cacheKey = String(targetWeekday);
-
-    // Return cached result if available and not force-recalculating
-    if (!force_recalculate && route.cached_personnel_costs?.[cacheKey]) {
-      return Response.json(route.cached_personnel_costs[cacheKey]);
-    }
     const shiftDate = getNextDateForWeekday(targetWeekday);
-    const startTime = route.time_window_start || '08:00';
-    const plannedEndTime = route.time_window_end || '17:00';
 
-    // Als alarmdienst aan staat loopt de dienst altijd door tot time_window_end.
-    // Anders: bereken de werkelijke routeduur via optimizeRoute-logica (via opgeslagen total_route_time).
-    // We benaderen de werkelijke eindtijd op basis van de opgeslagen total_route_minutes of
-    // de optimalisatieberekening. Voor kostenberekening gebruiken we de werkelijke diensttijd.
-    let endTime = plannedEndTime;
-    let actualShiftNote = null;
-
-    if (!route.alarm_standby) {
-      // Dienst eindigt op basis van werkelijke routeduur, met correcte ondersteuning voor routes na middernacht
-      const routeStartMinutes = timeToMinutes(startTime);
-      const plannedEndMinutes = getAbsoluteEndMinutes(routeStartMinutes, plannedEndTime);
-      const plannedWindowMinutes = plannedEndMinutes - routeStartMinutes;
-      const routeDuration = route.total_route_minutes || plannedWindowMinutes;
-      const actualEndMinutes = routeStartMinutes + routeDuration;
-      
-      if (actualEndMinutes < plannedEndMinutes) {
-        endTime = minutesToTime(actualEndMinutes);
-        actualShiftNote = `Route eindigt ${plannedEndMinutes - actualEndMinutes} min eerder dan gepland (${endTime} i.p.v. ${plannedEndTime})`;
-      } else if (actualEndMinutes > plannedEndMinutes) {
-        endTime = minutesToTime(actualEndMinutes);
-        actualShiftNote = `Route loopt ${actualEndMinutes - plannedEndMinutes} min uit (${endTime} i.p.v. ${plannedEndTime})`;
-      }
-    }
-
-    const allPersonnel = await base44.entities.Personnel.list();
-    const surveillants = allPersonnel.filter(p => p.function_type === 'surveillant' && p.is_active !== false);
-    const binnendienst = allPersonnel.filter(p => p.function_type === 'binnendienst' && p.is_active !== false);
-
-    if (surveillants.length === 0) {
-      return Response.json({ error: 'Geen actieve surveillanten gevonden' }, { status: 404 });
-    }
-
-    // Haal ACTIEVE CAO op op basis van datum (identiek aan calculatePersonnelCosts)
     const shiftDateRef = new Date(shiftDate);
     const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({ status: 'active' });
     const eligibleCaos = allCaos.filter(c => {
@@ -279,8 +301,69 @@ Deno.serve(async (req) => {
       }, { status: 400 });
     }
 
+    const allPersonnel = await base44.entities.Personnel.list();
+    const surveillants = allPersonnel.filter(p => p.function_type === 'surveillant' && p.is_active !== false);
+    const binnendienst = allPersonnel.filter(p => p.function_type === 'binnendienst' && p.is_active !== false);
+
+    if (surveillants.length === 0) {
+      return Response.json({ error: 'Geen actieve surveillanten gevonden' }, { status: 404 });
+    }
+
+    // Check cache per surveillant (scope-aware cache key)
+    const cacheKey = `${targetWeekday}`;
+    if (!force_recalculate && route.cached_personnel_costs?.[cacheKey]) {
+      const cached = route.cached_personnel_costs[cacheKey];
+      // Invalideer cache als CAO-revisie of scope gewijzigd is
+      const cacheRevision = cached._cache_revision || null;
+      if (cacheRevision === caoConfig.cloudflare_revision) {
+        return Response.json(cached);
+      }
+    }
+
+    const startTime = route.time_window_start || '08:00';
+    const plannedEndTime = route.time_window_end || '17:00';
+    let endTime = plannedEndTime;
+    let actualShiftNote = null;
+
+    if (!route.alarm_standby) {
+      const routeStartMinutes = timeToMinutes(startTime);
+      const plannedEndMinutes = getAbsoluteEndMinutes(routeStartMinutes, plannedEndTime);
+      const plannedWindowMinutes = plannedEndMinutes - routeStartMinutes;
+      const routeDuration = route.total_route_minutes || plannedWindowMinutes;
+      const actualEndMinutes = routeStartMinutes + routeDuration;
+
+      if (actualEndMinutes < plannedEndMinutes) {
+        endTime = minutesToTime(actualEndMinutes);
+        actualShiftNote = `Route eindigt ${plannedEndMinutes - actualEndMinutes} min eerder dan gepland (${endTime} i.p.v. ${plannedEndTime})`;
+      } else if (actualEndMinutes > plannedEndMinutes) {
+        endTime = minutesToTime(actualEndMinutes);
+        actualShiftNote = `Route loopt ${actualEndMinutes - plannedEndMinutes} min uit (${endTime} i.p.v. ${plannedEndTime})`;
+      }
+    }
+
+    // Resolve CAO-scope per medewerker (parallel voor surveillanten)
+    const scopePromises = surveillants.map(p =>
+      base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id: p.id })
+        .then(r => ({ id: p.id, scope: r?.data || null }))
+        .catch(() => ({ id: p.id, scope: null }))
+    );
+    const binnendienstScopePromises = binnendienst.map(p =>
+      base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id: p.id })
+        .then(r => ({ id: p.id, scope: r?.data || null }))
+        .catch(() => ({ id: p.id, scope: null }))
+    );
+
+    const [scopeResults, binnendienstScopeResults] = await Promise.all([
+      Promise.all(scopePromises),
+      Promise.all(binnendienstScopePromises)
+    ]);
+    const scopeById = {};
+    for (const s of scopeResults) scopeById[s.id] = s.scope;
+    for (const s of binnendienstScopeResults) scopeById[s.id] = s.scope;
+
     const results = surveillants.map(p => {
-      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig);
+      const scope = scopeById[p.id] || null;
+      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, scope);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
@@ -291,10 +374,9 @@ Deno.serve(async (req) => {
 
     results.sort((a, b) => b.total_cost_employer - a.total_cost_employer);
 
+    const count = results.length;
     const mostExpensive = results[0];
     const cheapest = results[results.length - 1];
-    const count = results.length;
-
     const average = {
       total_cost_employer: r2(results.reduce((s, r) => s + r.total_cost_employer, 0) / count),
       cost_per_hour: r2(results.reduce((s, r) => s + r.cost_per_hour, 0) / count),
@@ -307,23 +389,16 @@ Deno.serve(async (req) => {
       count
     };
 
-    // --- Voertuigkosten berekening ---
+    // Voertuigkosten
     let vehicleCosts = null;
     if (route.vehicle_id) {
       const vehicles = await base44.entities.Vehicle.list();
       const vehicle = vehicles.find(v => v.id === route.vehicle_id);
-
       if (vehicle) {
-        // Aantal routes dat dit voertuig gebruikt
         const routesWithVehicle = routes.filter(r => r.vehicle_id === route.vehicle_id);
-
-        // Aantal diensten per week voor dit voertuig (som over alle routes van hun weekdays.length)
         const totalServicesPerWeek = routesWithVehicle.reduce((sum, r) => sum + (r.weekdays?.length || 1), 0);
         const totalServicesPerYear = totalServicesPerWeek * 52;
-
-        // Afschrijving/kapitaalkosten per jaar
-        let depreciationPerYear = 0;
-        let depreciationLabel = '';
+        let depreciationPerYear = 0, depreciationLabel = '';
         if (vehicle.acquisition_type === 'lease' || vehicle.acquisition_type === 'private_lease') {
           depreciationPerYear = (vehicle.monthly_lease_cost || 0) * 12;
           depreciationLabel = `Leasekosten (€${(vehicle.monthly_lease_cost || 0).toFixed(2)}/mnd × 12)`;
@@ -331,61 +406,26 @@ Deno.serve(async (req) => {
           depreciationPerYear = (vehicle.monthly_loan_payment || 0) * 12;
           depreciationLabel = `Aflossing banklening (€${(vehicle.monthly_loan_payment || 0).toFixed(2)}/mnd × 12)`;
         } else {
-          // aankoop: afschrijving = (aankoopprijs - restwaarde) / jaren
-          const purchase = vehicle.purchase_price || 0;
-          const residual = vehicle.residual_value || 0;
-          const years = vehicle.depreciation_years || 5;
+          const purchase = vehicle.purchase_price || 0, residual = vehicle.residual_value || 0, years = vehicle.depreciation_years || 5;
           depreciationPerYear = (purchase - residual) / years;
           depreciationLabel = `Afschrijving ((€${purchase.toFixed(2)} - €${residual.toFixed(2)}) / ${years} jaar)`;
         }
-
-        // Variabele kosten per km
         const kmPerService = route.total_distance_km || 0;
         const fuelCostPerService = kmPerService * (vehicle.fuel_cost_per_km || 0);
-
-        // Onderhoud per dienst
-        let maintenanceCostPerService = 0;
-        let maintenanceCostPerYear = 0;
-        if (vehicle.maintenance_type === 'per_km') {
-          maintenanceCostPerService = kmPerService * (vehicle.maintenance_cost || 0);
-          maintenanceCostPerYear = maintenanceCostPerService * totalServicesPerYear;
-        } else if (vehicle.maintenance_type === 'per_year') {
-          maintenanceCostPerYear = vehicle.maintenance_cost || 0;
-          maintenanceCostPerService = totalServicesPerYear > 0 ? maintenanceCostPerYear / totalServicesPerYear : 0;
-        } else if (vehicle.maintenance_type === 'per_month') {
-          maintenanceCostPerYear = (vehicle.maintenance_cost || 0) * 12;
-          maintenanceCostPerService = totalServicesPerYear > 0 ? maintenanceCostPerYear / totalServicesPerYear : 0;
-        } else if (vehicle.maintenance_type === 'per_quarter') {
-          maintenanceCostPerYear = (vehicle.maintenance_cost || 0) * 4;
-          maintenanceCostPerService = totalServicesPerYear > 0 ? maintenanceCostPerYear / totalServicesPerYear : 0;
-        }
-
-        // Banden per dienst
-        let tireCostPerService = 0;
-        let tireCostPerYear = 0;
-        if (vehicle.tire_type === 'per_km') {
-          tireCostPerService = kmPerService * (vehicle.tire_cost || 0);
-          tireCostPerYear = tireCostPerService * totalServicesPerYear;
-        } else if (vehicle.tire_type === 'per_year') {
-          tireCostPerYear = vehicle.tire_cost || 0;
-          tireCostPerService = totalServicesPerYear > 0 ? tireCostPerYear / totalServicesPerYear : 0;
-        } else if (vehicle.tire_type === 'per_month') {
-          tireCostPerYear = (vehicle.tire_cost || 0) * 12;
-          tireCostPerService = totalServicesPerYear > 0 ? tireCostPerYear / totalServicesPerYear : 0;
-        } else if (vehicle.tire_type === 'per_quarter') {
-          tireCostPerYear = (vehicle.tire_cost || 0) * 4;
-          tireCostPerService = totalServicesPerYear > 0 ? tireCostPerYear / totalServicesPerYear : 0;
-        }
-
-        // Verzekering per dienst
+        let maintenanceCostPerService = 0, maintenanceCostPerYear = 0;
+        if (vehicle.maintenance_type === 'per_km') { maintenanceCostPerService = kmPerService * (vehicle.maintenance_cost || 0); maintenanceCostPerYear = maintenanceCostPerService * totalServicesPerYear; }
+        else if (vehicle.maintenance_type === 'per_year') { maintenanceCostPerYear = vehicle.maintenance_cost || 0; maintenanceCostPerService = totalServicesPerYear > 0 ? maintenanceCostPerYear / totalServicesPerYear : 0; }
+        else if (vehicle.maintenance_type === 'per_month') { maintenanceCostPerYear = (vehicle.maintenance_cost || 0) * 12; maintenanceCostPerService = totalServicesPerYear > 0 ? maintenanceCostPerYear / totalServicesPerYear : 0; }
+        else if (vehicle.maintenance_type === 'per_quarter') { maintenanceCostPerYear = (vehicle.maintenance_cost || 0) * 4; maintenanceCostPerService = totalServicesPerYear > 0 ? maintenanceCostPerYear / totalServicesPerYear : 0; }
+        let tireCostPerService = 0, tireCostPerYear = 0;
+        if (vehicle.tire_type === 'per_km') { tireCostPerService = kmPerService * (vehicle.tire_cost || 0); tireCostPerYear = tireCostPerService * totalServicesPerYear; }
+        else if (vehicle.tire_type === 'per_year') { tireCostPerYear = vehicle.tire_cost || 0; tireCostPerService = totalServicesPerYear > 0 ? tireCostPerYear / totalServicesPerYear : 0; }
+        else if (vehicle.tire_type === 'per_month') { tireCostPerYear = (vehicle.tire_cost || 0) * 12; tireCostPerService = totalServicesPerYear > 0 ? tireCostPerYear / totalServicesPerYear : 0; }
+        else if (vehicle.tire_type === 'per_quarter') { tireCostPerYear = (vehicle.tire_cost || 0) * 4; tireCostPerService = totalServicesPerYear > 0 ? tireCostPerYear / totalServicesPerYear : 0; }
         const insurancePerYear = (vehicle.insurance_per_month || 0) * 12;
         const insuranceCostPerService = totalServicesPerYear > 0 ? insurancePerYear / totalServicesPerYear : 0;
-
-        // Afschrijving per dienst (gedeeld door alle routes + diensten per jaar)
         const depreciationPerService = totalServicesPerYear > 0 ? depreciationPerYear / totalServicesPerYear : 0;
-
         const totalPerService = r2(depreciationPerService + fuelCostPerService + maintenanceCostPerService + tireCostPerService + insuranceCostPerService);
-
         vehicleCosts = {
           vehicle_id: vehicle.id,
           vehicle_label: `${vehicle.brand || ''} ${vehicle.model || ''} (${vehicle.license_plate})`.trim(),
@@ -408,9 +448,9 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Binnendienst kosten berekenen (vaste kosten, per dienst op basis van wekelijkse diensten)
     const binnendienstResults = binnendienst.map(p => {
-      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig);
+      const scope = scopeById[p.id] || null;
+      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, scope);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
@@ -431,10 +471,10 @@ Deno.serve(async (req) => {
       binnendienst: binnendienstResults,
       vehicle_costs: vehicleCosts,
       cao_sync_status: caoSyncStatus,
-      calculation_warnings: syncWarnings
+      calculation_warnings: syncWarnings,
+      _cache_revision: caoConfig.cloudflare_revision || null
     };
 
-    // Sla gecachte resultaten op in de route
     const existingCache = route.cached_personnel_costs || {};
     existingCache[cacheKey] = resultPayload;
     await base44.entities.Route.update(route_id, {
