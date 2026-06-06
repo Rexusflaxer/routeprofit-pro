@@ -221,6 +221,80 @@ function evaluateInternshipServiceConstraints(contract, serviceContext) {
   };
 }
 
+function evaluateHiredWorkerServiceConstraints(contract) {
+  const hiredWorkerType = contract?.hired_worker_type ||
+    (contract?.contract_form === 'uitzend' ? 'agency_worker' : contract?.contract_form === 'payroll' ? 'payroll_worker' : 'not_applicable');
+
+  if (!['agency_worker', 'payroll_worker'].includes(hiredWorkerType)) {
+    return {
+      source_rule_ids: [],
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      warnings: [],
+      payroll_rule_profile: null
+    };
+  }
+
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0424', 'CAO-PB-2024-R0425', 'CAO-PB-2024-R0426',
+    'CAO-PB-2024-R0427', 'CAO-PB-2024-R0428', 'CAO-PB-2024-R0429',
+    'CAO-PB-2024-R0430', 'CAO-PB-2024-R0431', 'CAO-PB-2024-R0432',
+    'CAO-PB-2024-R0433', 'CAO-PB-2024-R0434', 'CAO-PB-2024-R0435',
+    'CAO-PB-2024-R0436', 'CAO-PB-2024-R0437', 'CAO-PB-2024-R0438'
+  ];
+  const blockingReasons = [];
+  const manualReviewReasons = [];
+  const warnings = [];
+
+  if (contract?.hired_worker_rule_status === 'blocked') {
+    blockingReasons.push('CAO artikel 15: ingehuurde-arbeidskrachtprofiel is geblokkeerd op contractniveau.');
+  }
+  if (contract?.hired_worker_rule_status !== 'compliant') {
+    manualReviewReasons.push('CAO artikel 15: inlenersbeloning/equivalente arbeidsvoorwaarden zijn nog niet volledig bewezen op het contract.');
+  }
+
+  if (hiredWorkerType === 'agency_worker' && contract?.hired_worker_inlenersbeloning_confirmed !== true) {
+    manualReviewReasons.push('CAO artikel 15: bevestig inlenersbeloning vanaf eerste werkdag voor uitzendkracht (R0424).');
+  }
+  if (hiredWorkerType === 'payroll_worker' && contract?.hired_worker_equal_conditions_confirmed !== true) {
+    manualReviewReasons.push('CAO artikel 15: bevestig gelijke arbeidsvoorwaarden vanaf eerste werkdag voor payroller (R0435).');
+  }
+  if (contract?.hired_worker_hirer_verification_confirmed !== true) {
+    manualReviewReasons.push('CAO artikel 15: inlener moet bewijzen dat uitzendbureau/payrollonderneming loon, vergoedingen en arbeidstijdregels juist toepast (R0436).');
+  }
+  if (contract?.hired_worker_working_time_rules_confirmed !== true || contract?.hired_worker_roster_rules_confirmed !== true) {
+    manualReviewReasons.push('CAO artikel 15: algemene arbeids-/rusttijden en aanvullende roosterregels moeten bevestigd zijn voor inhuur (R0437/R0438).');
+  }
+
+  warnings.push('CAO artikel 15: planning/payroll mag alleen definitief worden als inlenersbeloning of gelijke arbeidsvoorwaarden vanaf dag één bewezen zijn.');
+
+  return {
+    source_rule_ids: sourceRuleIds,
+    blocking_reasons: blockingReasons,
+    manual_review_reasons: [...new Set(manualReviewReasons)],
+    warnings,
+    payroll_rule_profile: {
+      apply_from_first_workday: true,
+      apply_hirer_reward: hiredWorkerType === 'agency_worker',
+      apply_equal_employment_conditions: hiredWorkerType === 'payroll_worker',
+      apply_cao_scale_period: true,
+      apply_overtime_shift_special_hours_holiday_allowances: true,
+      apply_consignation_allowance: true,
+      apply_initial_wage_increases: true,
+      apply_periodics: true,
+      apply_one_off_wage_increase_payments_if_employed_at_effective_date: true,
+      apply_year_end_bonus_basis_hourly_wage_plus_vacation_allowance: true,
+      apply_reimbursements: true,
+      apply_travel_reimbursement: true,
+      apply_other_function_costs: true,
+      external_employer_pays_wages_and_reimbursements: true,
+      hirer_must_verify_compliance: true,
+      apply_general_working_and_rest_times: true,
+      apply_chapter_3_roster_rules: true
+    }
+  };
+}
+
 async function getCaoConfigForContract(base44, { contract, companyAssignment, company, companyCaoAssignments, serviceDate }) {
   const explicitId = contract?.cao_configuration_id ||
     companyAssignment?.default_cao_configuration_id ||
@@ -404,6 +478,14 @@ Deno.serve(async (req) => {
       manualReviewReasons.push(...internshipServiceCheck.manual_review_reasons);
       warnings.push(...internshipServiceCheck.warnings);
     }
+    const hiredWorkerServiceCheck = selectedContract
+      ? evaluateHiredWorkerServiceConstraints(selectedContract)
+      : null;
+    if (hiredWorkerServiceCheck) {
+      blockingReasons.push(...hiredWorkerServiceCheck.blocking_reasons);
+      manualReviewReasons.push(...hiredWorkerServiceCheck.manual_review_reasons);
+      warnings.push(...hiredWorkerServiceCheck.warnings);
+    }
 
     let company = null;
     let companyCaoAssignments = [];
@@ -479,11 +561,15 @@ Deno.serve(async (req) => {
         max_hours_per_week: selectedContract.max_hours_per_week ?? null,
         internship_type: selectedContract.internship_type || null,
         internship_rule_status: selectedContract.internship_rule_status || null,
-        internship_rule_profile: internshipServiceCheck?.payroll_rule_profile || null
+        internship_rule_profile: internshipServiceCheck?.payroll_rule_profile || null,
+        hired_worker_type: selectedContract.hired_worker_type || null,
+        hired_worker_rule_status: selectedContract.hired_worker_rule_status || null,
+        hired_worker_rule_profile: hiredWorkerServiceCheck?.payroll_rule_profile || null
       } : null,
       contract_source: selectedContract?.company_id ? 'company_contract' : selectedContract ? 'legacy_companyless_contract' : null,
       service_context: serviceContext,
       internship_service_check: internshipServiceCheck,
+      hired_worker_service_check: hiredWorkerServiceCheck,
       function_match: selectedItem?.function_match || null,
       evaluated_contracts: evaluatedContracts.map(item => ({
         contract_id: item.contract.id,

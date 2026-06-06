@@ -53,6 +53,17 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0422'
     ]
   },
+  'applyCaoContractRules.hired_worker_article_15': {
+    functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R0423', 'CAO-PB-2024-R0424', 'CAO-PB-2024-R0425',
+      'CAO-PB-2024-R0426', 'CAO-PB-2024-R0427', 'CAO-PB-2024-R0428',
+      'CAO-PB-2024-R0429', 'CAO-PB-2024-R0430', 'CAO-PB-2024-R0431',
+      'CAO-PB-2024-R0432', 'CAO-PB-2024-R0433', 'CAO-PB-2024-R0434',
+      'CAO-PB-2024-R0435', 'CAO-PB-2024-R0436', 'CAO-PB-2024-R0437',
+      'CAO-PB-2024-R0438'
+    ]
+  },
   'validateCaoScheduleRules.roster_period_constraints': {
     functions: ['validateCaoScheduleRules'],
     rule_ids: [

@@ -355,8 +355,8 @@ function calculateProbationPeriod(input, caoScope) {
     }
   }
 
-  // Oproep/0-uren/stage/uitzend/zzp: geen CAO-proeftijdregels
-  if (['oproep', 'stage', 'uitzend', 'zzp'].includes(contract_form)) {
+  // Oproep/0-uren/stage/uitzend/payroll/zzp: geen directe CAO-proeftijdregels bij de inlener
+  if (['oproep', 'stage', 'uitzend', 'payroll', 'zzp'].includes(contract_form)) {
     return finalizeProbationResult(input, {
       probation_period_months: 0,
       source_rule_ids: [],
@@ -455,6 +455,7 @@ function inferCallAgreementType(input) {
   const explicit = input.call_agreement_type || input.call_contract_type || null;
   if (explicit && explicit !== 'unknown') return explicit;
 
+  const contractForm = input.contract_form || 'unknown';
   const minPayPeriod = numberOrNull(input.min_hours_per_pay_period);
   const maxPayPeriod = numberOrNull(input.max_hours_per_pay_period);
   const minWeek = numberOrNull(input.min_hours_per_week);
@@ -462,8 +463,7 @@ function inferCallAgreementType(input) {
   if ((minPayPeriod !== null && maxPayPeriod !== null) || (minWeek !== null && maxWeek !== null)) return 'min_max';
   if (input.annualized_hours_with_bandwidth === true || numberOrNull(input.annual_contract_hours) !== null) return 'annualized_bandwidth';
   if (input.no_work_no_pay_first_6_months === true) return 'no_work_no_pay_first_6_months';
-  if (input.contract_form === 'oproep') return 'zero_hours';
-  if (!hasFixedPayPeriodHours(input)) return 'zero_hours';
+  if (contractForm === 'oproep') return 'zero_hours';
   return 'not_applicable';
 }
 
@@ -1295,42 +1295,315 @@ function evaluateInternshipContractRules(input) {
   };
 }
 
+function inferHiredWorkerType(input) {
+  const explicit = input.hired_worker_type || input.external_worker_type || null;
+  if (explicit && explicit !== 'unknown') return explicit;
+  if (input.contract_form === 'uitzend') return 'agency_worker';
+  if (input.contract_form === 'payroll') return 'payroll_worker';
+  if (input.is_agency_worker === true) return 'agency_worker';
+  if (input.is_payroll_worker === true) return 'payroll_worker';
+  return 'not_applicable';
+}
+
+function evaluateHiredWorkerContractRules(input) {
+  const hiredWorkerType = inferHiredWorkerType(input);
+  const isHiredWorker = ['agency_worker', 'payroll_worker'].includes(hiredWorkerType);
+
+  if (!isHiredWorker) {
+    return {
+      is_hired_worker: false,
+      hired_worker_type: 'not_applicable',
+      hired_worker_rule_status: 'not_applicable',
+      hired_worker_compliant: true,
+      manual_review_required: false,
+      source_rule_ids: [],
+      warnings: [],
+      missing_evidence: [],
+      contract_rule_violations: [],
+      payroll_entitlements: [],
+      recommended_contract_update: null,
+      hired_worker_rule_profile: null
+    };
+  }
+
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0423', 'CAO-PB-2024-R0424', 'CAO-PB-2024-R0425',
+    'CAO-PB-2024-R0426', 'CAO-PB-2024-R0427', 'CAO-PB-2024-R0428',
+    'CAO-PB-2024-R0429', 'CAO-PB-2024-R0430', 'CAO-PB-2024-R0431',
+    'CAO-PB-2024-R0432', 'CAO-PB-2024-R0433', 'CAO-PB-2024-R0434',
+    'CAO-PB-2024-R0435', 'CAO-PB-2024-R0436', 'CAO-PB-2024-R0437',
+    'CAO-PB-2024-R0438'
+  ];
+  const warnings = [];
+  const missingEvidence = [];
+  const violations = [];
+  const payrollEntitlements = [];
+
+  if (input.contract_form === 'uitzend' && hiredWorkerType !== 'agency_worker') {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0424',
+      severity: 'high',
+      message: `Contractvorm uitzend is gecombineerd met hired_worker_type=${hiredWorkerType}. Dit moet agency_worker zijn.`
+    });
+  }
+  if (input.contract_form === 'payroll' && hiredWorkerType !== 'payroll_worker') {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0435',
+      severity: 'high',
+      message: `Contractvorm payroll is gecombineerd met hired_worker_type=${hiredWorkerType}. Dit moet payroll_worker zijn.`
+    });
+  }
+
+  const equalFunctionEvidence = !!(
+    input.hired_worker_equal_function_reference_contract_id ||
+    input.hired_worker_equal_function_reference_personnel_id ||
+    input.hired_worker_equal_function_description ||
+    input.cao_function_group ||
+    input.cao_function_level ||
+    input.cao_scale ||
+    input.cao_period
+  );
+
+  if (hiredWorkerType === 'agency_worker') {
+    addMissingInternshipEvidence(
+      missingEvidence,
+      booleanOrNull(input.hired_worker_inlenersbeloning_confirmed) === true,
+      'CAO-PB-2024-R0424',
+      'Bevestig dat de uitzendkracht vanaf de eerste werkdag de inlenersbeloning ontvangt.',
+      'hired_worker_inlenersbeloning_confirmed'
+    );
+  }
+
+  if (hiredWorkerType === 'payroll_worker') {
+    addMissingInternshipEvidence(
+      missingEvidence,
+      booleanOrNull(input.hired_worker_equal_conditions_confirmed) === true,
+      'CAO-PB-2024-R0435',
+      'Bevestig dat de payroller vanaf de eerste werkdag dezelfde arbeidsvoorwaarden krijgt als werknemers in gelijke/gelijkwaardige functie.',
+      'hired_worker_equal_conditions_confirmed'
+    );
+  }
+
+  addMissingInternshipEvidence(
+    missingEvidence,
+    equalFunctionEvidence,
+    hiredWorkerType === 'payroll_worker' ? 'CAO-PB-2024-R0435' : 'CAO-PB-2024-R0425',
+    'Leg de gelijke/gelijkwaardige functie of schaal/periodiek vast waarmee inlenersbeloning wordt bepaald.',
+    'hired_worker_equal_function_reference_contract_id'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_salary_scale_period_confirmed) === true,
+    'CAO-PB-2024-R0425',
+    'Bevestig de toepasselijke schaalperiode voor de ingehuurde arbeidskracht.',
+    'hired_worker_salary_scale_period_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_allowances_confirmed) === true,
+    'CAO-PB-2024-R0426',
+    'Bevestig dat overwerk-, verschoven uren-, bijzondere uren- en feestdagentoeslagen worden toegepast.',
+    'hired_worker_allowances_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_consignation_allowance_confirmed) === true,
+    'CAO-PB-2024-R0427',
+    'Bevestig dat consignatietoeslagen worden toegepast als consignatiedienst voorkomt.',
+    'hired_worker_consignation_allowance_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_wage_increases_confirmed) === true,
+    'CAO-PB-2024-R0428',
+    'Bevestig dat cao-loonsverhogingen voor de ingehuurde arbeidskracht worden toegepast.',
+    'hired_worker_wage_increases_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_periodics_confirmed) === true,
+    'CAO-PB-2024-R0429',
+    'Bevestig dat periodieken volgens de cao-salarisschalen worden toegepast.',
+    'hired_worker_periodics_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_one_off_payments_confirmed) === true,
+    'CAO-PB-2024-R0430',
+    'Bevestig dat eenmalige uitkeringen bij overeengekomen loonsverhogingen worden toegepast wanneer de arbeidskracht op ingangsdatum in dienst is bij het uitzendbureau.',
+    'hired_worker_one_off_payments_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_year_end_bonus_confirmed) === true,
+    'CAO-PB-2024-R0431',
+    'Bevestig vaste eenmalige uitkeringen/eindejaarsuitkering met grondslag basisuurloon plus vakantiebijslag.',
+    'hired_worker_year_end_bonus_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_reimbursements_confirmed) === true,
+    'CAO-PB-2024-R0432',
+    'Bevestig kostenvergoedingen die vrij van loonheffing/premies kunnen worden betaald.',
+    'hired_worker_reimbursements_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_travel_reimbursement_confirmed) === true,
+    'CAO-PB-2024-R0433',
+    'Bevestig reiskosten/reisvergoeding voor de ingehuurde arbeidskracht.',
+    'hired_worker_travel_reimbursement_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_function_costs_confirmed) === true,
+    'CAO-PB-2024-R0434',
+    'Bevestig andere noodzakelijke kosten voor goede functie-uitvoering.',
+    'hired_worker_function_costs_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_external_employer_pays_wages_confirmed) === true,
+    'CAO-PB-2024-R0436',
+    'Bevestig dat uitzendbureau/payrollonderneming loon en vergoedingen volgens de cao betaalt.',
+    'hired_worker_external_employer_pays_wages_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_hirer_verification_confirmed) === true,
+    'CAO-PB-2024-R0436',
+    'Bevestig dat de inlenende werkgever zich ervan heeft verzekerd dat loon, vergoedingen en arbeidstijdregels juist worden toegepast.',
+    'hired_worker_hirer_verification_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_working_time_rules_confirmed) === true,
+    'CAO-PB-2024-R0437',
+    'Bevestig toepassing van algemene arbeids- en rusttijden voor uitzendkracht/payroller.',
+    'hired_worker_working_time_rules_confirmed'
+  );
+  addMissingInternshipEvidence(
+    missingEvidence,
+    booleanOrNull(input.hired_worker_roster_rules_confirmed) === true,
+    'CAO-PB-2024-R0438',
+    'Bevestig toepassing van overwerk, rusttijden, nachtdiensten, pauzes, vakantie, feestdagen en aanvullende roosterregels uit hoofdstuk 3.',
+    'hired_worker_roster_rules_confirmed'
+  );
+
+  if (booleanOrNull(input.hired_worker_paid_below_inlenersbeloning) === true) {
+    violations.push({
+      rule_id: hiredWorkerType === 'payroll_worker' ? 'CAO-PB-2024-R0435' : 'CAO-PB-2024-R0424',
+      severity: 'high',
+      message: 'Ingehuurde arbeidskracht is gemarkeerd als betaald onder inlenersbeloning/equivalente arbeidsvoorwaarden.'
+    });
+  }
+
+  payrollEntitlements.push({
+    rule_id: hiredWorkerType === 'payroll_worker' ? 'CAO-PB-2024-R0435' : 'CAO-PB-2024-R0424',
+    type: hiredWorkerType === 'payroll_worker'
+      ? 'payroll_worker_equal_employment_conditions_due_from_day_one'
+      : 'agency_worker_hirer_reward_due_from_day_one',
+    message: hiredWorkerType === 'payroll_worker'
+      ? 'Payroller: vanaf eerste werkdag dezelfde arbeidsvoorwaarden als werknemers in gelijke/gelijkwaardige functie.'
+      : 'Uitzendkracht: vanaf eerste werkdag inlenersbeloning.'
+  });
+
+  warnings.push('Artikel 15: de inlener betaalt niet zelf per se het loon, maar moet wel kunnen bewijzen dat uitzendbureau/payrollonderneming de CAO-beloning, vergoedingen en arbeidstijdregels toepast.');
+
+  const hasBlockingViolation = violations.some(v => v.severity === 'high' || v.severity === 'critical');
+  const manualReviewRequired = missingEvidence.length > 0;
+
+  return {
+    is_hired_worker: true,
+    hired_worker_type: hiredWorkerType,
+    hired_worker_rule_status: hasBlockingViolation
+      ? 'blocked'
+      : manualReviewRequired
+      ? 'manual_review_required'
+      : 'compliant',
+    hired_worker_compliant: !hasBlockingViolation && !manualReviewRequired,
+    manual_review_required: manualReviewRequired,
+    source_rule_ids: sourceRuleIds,
+    warnings,
+    missing_evidence: missingEvidence,
+    contract_rule_violations: violations,
+    payroll_entitlements: payrollEntitlements,
+    recommended_contract_update: {
+      hired_worker_type: hiredWorkerType,
+      hired_worker_inlenersbeloning_required: hiredWorkerType === 'agency_worker',
+      hired_worker_equal_conditions_required: hiredWorkerType === 'payroll_worker',
+      hired_worker_agency_or_payroll_pays_wages: true,
+      hired_worker_hirer_must_verify_payment: true,
+      hired_worker_chapter_3_rules_apply: true
+    },
+    hired_worker_rule_profile: {
+      apply_from_first_workday: true,
+      apply_hirer_reward: hiredWorkerType === 'agency_worker',
+      apply_equal_employment_conditions: hiredWorkerType === 'payroll_worker',
+      apply_cao_scale_period: true,
+      apply_overtime_shift_special_hours_holiday_allowances: true,
+      apply_consignation_allowance: true,
+      apply_initial_wage_increases: true,
+      apply_periodics: true,
+      apply_one_off_wage_increase_payments_if_employed_at_effective_date: true,
+      apply_year_end_bonus_basis_hourly_wage_plus_vacation_allowance: true,
+      apply_reimbursements: true,
+      apply_travel_reimbursement: true,
+      apply_other_function_costs: true,
+      external_employer_pays_wages_and_reimbursements: true,
+      hirer_must_verify_compliance: true,
+      apply_general_working_and_rest_times: true,
+      apply_chapter_3_roster_rules: true
+    }
+  };
+}
+
 function buildFullContractRuleResult(input, caoScope) {
   const probation = calculateProbationPeriod(input, caoScope);
   const callAgreement = evaluateCallAgreementRules(input);
   const internship = evaluateInternshipContractRules(input);
+  const hiredWorker = evaluateHiredWorkerContractRules(input);
   const sourceRuleIds = [...new Set([
     ...(probation.source_rule_ids || []),
     ...(callAgreement.source_rule_ids || []),
-    ...(internship.source_rule_ids || [])
+    ...(internship.source_rule_ids || []),
+    ...(hiredWorker.source_rule_ids || [])
   ])];
   const warnings = [
     ...(probation.warnings || []),
     ...(callAgreement.warnings || []),
-    ...(internship.warnings || [])
+    ...(internship.warnings || []),
+    ...(hiredWorker.warnings || [])
   ];
   const scopeWarnings = probation.scope_warnings || [];
   const contractRuleViolations = [
     ...(probation.contract_rule_violations || []),
     ...(callAgreement.contract_rule_violations || []),
-    ...(internship.contract_rule_violations || [])
+    ...(internship.contract_rule_violations || []),
+    ...(hiredWorker.contract_rule_violations || [])
   ];
   const payrollEntitlements = [
     ...(callAgreement.payroll_entitlements || []),
-    ...(internship.payroll_entitlements || [])
+    ...(internship.payroll_entitlements || []),
+    ...(hiredWorker.payroll_entitlements || [])
   ];
   const hasBlockingViolation = contractRuleViolations.some(v => v.severity === 'high' || v.severity === 'critical');
   const manualReviewRequired = probation.manual_review_required === true ||
     callAgreement.call_agreement_status === 'manual_review_required' ||
-    internship.internship_rule_status === 'manual_review_required';
+    internship.internship_rule_status === 'manual_review_required' ||
+    hiredWorker.hired_worker_rule_status === 'manual_review_required';
   const contractRuleStatus = hasBlockingViolation ||
     probation.contract_rule_status === 'blocked' ||
     callAgreement.call_agreement_status === 'blocked' ||
-    internship.internship_rule_status === 'blocked'
+    internship.internship_rule_status === 'blocked' ||
+    hiredWorker.hired_worker_rule_status === 'blocked'
     ? 'blocked'
     : manualReviewRequired
     ? 'manual_review_required'
-    : probation.probation_compliant === true && callAgreement.call_agreement_compliant === true && internship.internship_compliant === true
+    : probation.probation_compliant === true &&
+      callAgreement.call_agreement_compliant === true &&
+      internship.internship_compliant === true &&
+      hiredWorker.hired_worker_compliant === true
     ? 'compliant'
     : 'calculated';
 
@@ -1353,6 +1626,7 @@ function buildFullContractRuleResult(input, caoScope) {
     },
     call_agreement_rule_result: callAgreement,
     internship_rule_result: internship,
+    hired_worker_rule_result: hiredWorker,
     call_agreement: {
       is_call_agreement: callAgreement.is_call_agreement,
       call_agreement_type: callAgreement.call_agreement_type,
@@ -1373,6 +1647,14 @@ function buildFullContractRuleResult(input, caoScope) {
       duration_check: internship.duration_check || null,
       internship_rule_profile: internship.internship_rule_profile || null
     },
+    hired_worker: {
+      is_hired_worker: hiredWorker.is_hired_worker,
+      hired_worker_type: hiredWorker.hired_worker_type,
+      hired_worker_rule_status: hiredWorker.hired_worker_rule_status,
+      hired_worker_compliant: hiredWorker.hired_worker_compliant,
+      missing_evidence: hiredWorker.missing_evidence || [],
+      hired_worker_rule_profile: hiredWorker.hired_worker_rule_profile || null
+    },
     source_rule_ids: sourceRuleIds,
     warnings,
     scope_warnings: scopeWarnings,
@@ -1383,7 +1665,8 @@ function buildFullContractRuleResult(input, caoScope) {
     recommended_contract_update: {
       ...(probation.recommended_contract_update || {}),
       ...(callAgreement.recommended_contract_update || {}),
-      ...(internship.recommended_contract_update || {})
+      ...(internship.recommended_contract_update || {}),
+      ...(hiredWorker.recommended_contract_update || {})
     }
   };
 }
@@ -1402,6 +1685,11 @@ function buildContractRuleInput(body, personnel, contract) {
     contract_start_date: pickFirst(body.contract_start_date, contract?.contract_start_date, personnel?.contract_start_date),
     contract_end_date: pickFirst(body.contract_end_date, contract?.contract_end_date, personnel?.contract_end_date),
     security_role_status: pickFirst(body.security_role_status, contract?.security_role_status, personnel?.security_role_status, 'unknown'),
+    function_type: pickFirst(body.function_type, contract?.function_type, personnel?.function_type, null),
+    cao_function_group: pickFirst(body.cao_function_group, contract?.cao_function_group, personnel?.cao_function_group, null),
+    cao_function_level: pickFirst(body.cao_function_level, contract?.cao_function_level, personnel?.cao_function_level, null),
+    cao_scale: pickFirst(body.cao_scale, contract?.cao_scale, personnel?.cao_scale, null),
+    cao_period: pickFirst(body.cao_period, contract?.cao_period, personnel?.cao_period, null),
     call_agreement_type: pickFirst(body.call_agreement_type, contract?.call_agreement_type, null),
     contract_hours_per_pay_period: pickFirst(body.contract_hours_per_pay_period, contract?.contract_hours_per_pay_period, null),
     fixed_hours_per_pay_period: pickFirst(body.fixed_hours_per_pay_period, contract?.fixed_hours_per_pay_period, null),
@@ -1465,6 +1753,30 @@ function buildContractRuleInput(body, personnel, contract) {
     internship_compensation_documented: pickFirst(body.internship_compensation_documented, contract?.internship_compensation_documented, null),
     internship_compensation_applies: pickFirst(body.internship_compensation_applies, contract?.internship_compensation_applies, null),
     internship_compensation_amount: pickFirst(body.internship_compensation_amount, contract?.internship_compensation_amount, null),
+    hired_worker_type: pickFirst(body.hired_worker_type, body.external_worker_type, contract?.hired_worker_type, null),
+    external_worker_type: pickFirst(body.external_worker_type, null),
+    is_agency_worker: pickFirst(body.is_agency_worker, contract?.is_agency_worker, null),
+    is_payroll_worker: pickFirst(body.is_payroll_worker, contract?.is_payroll_worker, null),
+    hired_worker_inlenersbeloning_confirmed: pickFirst(body.hired_worker_inlenersbeloning_confirmed, contract?.hired_worker_inlenersbeloning_confirmed, null),
+    hired_worker_equal_conditions_confirmed: pickFirst(body.hired_worker_equal_conditions_confirmed, contract?.hired_worker_equal_conditions_confirmed, null),
+    hired_worker_equal_function_reference_contract_id: pickFirst(body.hired_worker_equal_function_reference_contract_id, contract?.hired_worker_equal_function_reference_contract_id, null),
+    hired_worker_equal_function_reference_personnel_id: pickFirst(body.hired_worker_equal_function_reference_personnel_id, contract?.hired_worker_equal_function_reference_personnel_id, null),
+    hired_worker_equal_function_description: pickFirst(body.hired_worker_equal_function_description, contract?.hired_worker_equal_function_description, null),
+    hired_worker_salary_scale_period_confirmed: pickFirst(body.hired_worker_salary_scale_period_confirmed, contract?.hired_worker_salary_scale_period_confirmed, null),
+    hired_worker_allowances_confirmed: pickFirst(body.hired_worker_allowances_confirmed, contract?.hired_worker_allowances_confirmed, null),
+    hired_worker_consignation_allowance_confirmed: pickFirst(body.hired_worker_consignation_allowance_confirmed, contract?.hired_worker_consignation_allowance_confirmed, null),
+    hired_worker_wage_increases_confirmed: pickFirst(body.hired_worker_wage_increases_confirmed, contract?.hired_worker_wage_increases_confirmed, null),
+    hired_worker_periodics_confirmed: pickFirst(body.hired_worker_periodics_confirmed, contract?.hired_worker_periodics_confirmed, null),
+    hired_worker_one_off_payments_confirmed: pickFirst(body.hired_worker_one_off_payments_confirmed, contract?.hired_worker_one_off_payments_confirmed, null),
+    hired_worker_year_end_bonus_confirmed: pickFirst(body.hired_worker_year_end_bonus_confirmed, contract?.hired_worker_year_end_bonus_confirmed, null),
+    hired_worker_reimbursements_confirmed: pickFirst(body.hired_worker_reimbursements_confirmed, contract?.hired_worker_reimbursements_confirmed, null),
+    hired_worker_travel_reimbursement_confirmed: pickFirst(body.hired_worker_travel_reimbursement_confirmed, contract?.hired_worker_travel_reimbursement_confirmed, null),
+    hired_worker_function_costs_confirmed: pickFirst(body.hired_worker_function_costs_confirmed, contract?.hired_worker_function_costs_confirmed, null),
+    hired_worker_external_employer_pays_wages_confirmed: pickFirst(body.hired_worker_external_employer_pays_wages_confirmed, contract?.hired_worker_external_employer_pays_wages_confirmed, null),
+    hired_worker_hirer_verification_confirmed: pickFirst(body.hired_worker_hirer_verification_confirmed, contract?.hired_worker_hirer_verification_confirmed, null),
+    hired_worker_working_time_rules_confirmed: pickFirst(body.hired_worker_working_time_rules_confirmed, contract?.hired_worker_working_time_rules_confirmed, null),
+    hired_worker_roster_rules_confirmed: pickFirst(body.hired_worker_roster_rules_confirmed, contract?.hired_worker_roster_rules_confirmed, null),
+    hired_worker_paid_below_inlenersbeloning: pickFirst(body.hired_worker_paid_below_inlenersbeloning, null),
     requested_probation_period_months: pickFirst(
       body.requested_probation_period_months,
       body.probation_period_months,
@@ -1508,6 +1820,14 @@ function buildContractRulePersistence(result) {
     internship_max_duration_months: result.internship?.duration_check?.max_duration_months ?? null,
     internship_two_month_boundary_date: result.internship?.duration_check?.two_month_boundary_date || null,
     internship_two_month_exact_last_day: result.internship?.duration_check?.two_month_exact_last_day || null,
+    hired_worker_type: result.hired_worker?.hired_worker_type || null,
+    hired_worker_rule_status: result.hired_worker?.hired_worker_rule_status || null,
+    hired_worker_manual_review_required: result.hired_worker?.hired_worker_rule_status === 'manual_review_required',
+    hired_worker_inlenersbeloning_required: result.hired_worker?.hired_worker_rule_profile?.apply_hirer_reward === true,
+    hired_worker_equal_conditions_required: result.hired_worker?.hired_worker_rule_profile?.apply_equal_employment_conditions === true,
+    hired_worker_chapter_3_rules_apply: result.hired_worker?.hired_worker_rule_profile?.apply_chapter_3_roster_rules === true,
+    hired_worker_agency_or_payroll_pays_wages: result.hired_worker?.hired_worker_rule_profile?.external_employer_pays_wages_and_reimbursements === true,
+    hired_worker_hirer_must_verify_payment: result.hired_worker?.hired_worker_rule_profile?.hirer_must_verify_compliance === true,
     cao_contract_rule_status: result.contract_rule_status,
     cao_contract_rule_checked_at: new Date().toISOString(),
     cao_contract_rule_source_rule_ids: result.source_rule_ids,
@@ -1528,7 +1848,8 @@ function buildContractRulePersistence(result) {
         contract_rule_violations: result.contract_rule_violations
       },
       call_agreement: result.call_agreement_rule_result || null,
-      internship: result.internship_rule_result || null
+      internship: result.internship_rule_result || null,
+      hired_worker: result.hired_worker_rule_result || null
     }
   };
 }

@@ -35,6 +35,7 @@
         "oproep",
         "stage",
         "uitzend",
+        "payroll",
         "zzp",
         "unknown"
       ],
@@ -637,6 +638,150 @@
         "number",
         "null"
       ]
+    },
+    "hired_worker_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "agency_worker",
+        "payroll_worker",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Type ingehuurde arbeidskracht conform CAO PB artikel 15."
+    },
+    "hired_worker_rule_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Status van CAO PB artikel 15 inhuur-/payrollregels."
+    },
+    "hired_worker_manual_review_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_inlenersbeloning_required": {
+      "type": "boolean",
+      "default": false,
+      "description": "True bij uitzendkracht: inlenersbeloning vanaf eerste werkdag vereist."
+    },
+    "hired_worker_equal_conditions_required": {
+      "type": "boolean",
+      "default": false,
+      "description": "True bij payroller: gelijke arbeidsvoorwaarden vanaf eerste werkdag vereist."
+    },
+    "hired_worker_chapter_3_rules_apply": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als algemene arbeids-/rusttijden en roosterregels uit hoofdstuk 3 gelden."
+    },
+    "hired_worker_agency_or_payroll_pays_wages": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als uitzendbureau/payrollonderneming loon en vergoedingen moet betalen."
+    },
+    "hired_worker_hirer_must_verify_payment": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als de inlenende werkgever moet verifiëren dat loon, vergoedingen en arbeidstijdregels correct worden toegepast."
+    },
+    "hired_worker_inlenersbeloning_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Bevestiging dat uitzendkracht vanaf eerste werkdag inlenersbeloning krijgt."
+    },
+    "hired_worker_equal_conditions_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Bevestiging dat payroller dezelfde arbeidsvoorwaarden krijgt als werknemers in gelijke/gelijkwaardige functie."
+    },
+    "hired_worker_equal_function_reference_contract_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Referentiecontract/functie waarmee inlenersbeloning of gelijkwaardige functie wordt bepaald."
+    },
+    "hired_worker_equal_function_reference_personnel_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hired_worker_equal_function_description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "hired_worker_salary_scale_period_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_allowances_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Bevestigt overwerk, verschoven uren, bijzondere uren en feestdagentoeslag."
+    },
+    "hired_worker_consignation_allowance_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_wage_increases_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_periodics_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_one_off_payments_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_year_end_bonus_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_reimbursements_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_travel_reimbursement_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_function_costs_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_external_employer_pays_wages_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_hirer_verification_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_working_time_rules_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "hired_worker_roster_rules_confirmed": {
+      "type": "boolean",
+      "default": false
     },
     "industry_seniority_pay_periods": {
       "type": [
