@@ -2227,6 +2227,377 @@ function evaluateEmploymentContractModelRules(input, callAgreement, internship, 
   };
 }
 
+function evaluateParttimeWorkloadChangeRules(input, employmentContractModel) {
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0349', 'CAO-PB-2024-R0350', 'CAO-PB-2024-R0351',
+    'CAO-PB-2024-R0352', 'CAO-PB-2024-R0353', 'CAO-PB-2024-R0354',
+    'CAO-PB-2024-R0355', 'CAO-PB-2024-R0356', 'CAO-PB-2024-R0357',
+    'CAO-PB-2024-R0358', 'CAO-PB-2024-R0359', 'CAO-PB-2024-R0360',
+    'CAO-PB-2024-R0361', 'CAO-PB-2024-R0362', 'CAO-PB-2024-R0363',
+    'CAO-PB-2024-R0364', 'CAO-PB-2024-R0365', 'CAO-PB-2024-R0367',
+    'CAO-PB-2024-R0368', 'CAO-PB-2024-R0369'
+  ];
+  const warnings = [];
+  const violations = [];
+  const missingEvidence = [];
+  const payrollEntitlements = [];
+  const recommendedContractUpdate = {};
+  const model = employmentContractModel?.employment_contract_model || 'unknown';
+  const parttimeModel = employmentContractModel?.parttime_contract_model || 'unknown';
+  const isParttime = ['parttime_fixed', 'parttime_growth', 'parttime_unknown_model'].includes(model) ||
+    ['fixed', 'growth', 'unknown'].includes(parttimeModel);
+  const isFulltime = model === 'fulltime';
+  const currentHours = employmentContractModel?.contract_hours_per_pay_period_resolved ?? resolveContractHoursPerPayPeriod(input).hours;
+  const referenceDate = asIsoDate(input.reference_date || new Date().toISOString());
+
+  const requestedParttimeModel = normalizeContractModel(
+    input.requested_parttime_contract_model ||
+    input.parttime_model_change_requested_model
+  );
+  const parttimeModelChangeRequestedAt = asIsoDate(input.parttime_model_change_requested_at);
+  const parttimeModelChangeEffectiveDate = asIsoDate(input.parttime_model_change_effective_date);
+  const parttimeModelChangePayPeriod = numberOrNull(input.parttime_model_change_effective_pay_period_number);
+  const hasParttimeModelChangeContext = !!(
+    requestedParttimeModel ||
+    parttimeModelChangeRequestedAt ||
+    parttimeModelChangeEffectiveDate ||
+    parttimeModelChangePayPeriod !== null ||
+    input.parttime_model_change_decision
+  );
+  let parttimeModelChange = null;
+  if (hasParttimeModelChangeContext) {
+    parttimeModelChange = {
+      requested_at: parttimeModelChangeRequestedAt,
+      effective_date: parttimeModelChangeEffectiveDate,
+      effective_pay_period_number: parttimeModelChangePayPeriod,
+      requested_parttime_contract_model: requestedParttimeModel,
+      decision: input.parttime_model_change_decision || null,
+      rejection_reason: input.parttime_model_change_rejection_reason || null,
+      weighty_business_reason_confirmed: booleanOrNull(input.parttime_model_change_weighty_business_reason_confirmed)
+    };
+
+    if (!isParttime) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0349',
+        field: 'employment_contract_model',
+        message: 'Parttime modelwijziging is opgegeven, maar contract is niet aantoonbaar parttime.'
+      });
+    }
+    if (!requestedParttimeModel || !['parttime_fixed', 'parttime_growth'].includes(requestedParttimeModel)) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0349',
+        field: 'requested_parttime_contract_model',
+        message: 'Geef aan of werknemer naar parttime vast model of groeimodel wil wijzigen.'
+      });
+    }
+    if (!parttimeModelChangeRequestedAt || !parttimeModelChangeEffectiveDate) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0351',
+        field: 'parttime_model_change_requested_at/parttime_model_change_effective_date',
+        message: 'Voor parttime modelwijziging zijn aanvraagdatum en gewenste ingangsdatum nodig.'
+      });
+    } else {
+      const earliestEffectiveDate = addCalendarMonths(parttimeModelChangeRequestedAt, 1);
+      parttimeModelChange.earliest_effective_date = earliestEffectiveDate;
+      if (parttimeModelChangeEffectiveDate < earliestEffectiveDate) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0351',
+          severity: 'high',
+          message: `Parttime modelwijziging is minder dan 1 maand vooraf aangekondigd (${parttimeModelChangeRequestedAt} -> ${parttimeModelChangeEffectiveDate}).`,
+          requested_at: parttimeModelChangeRequestedAt,
+          effective_date: parttimeModelChangeEffectiveDate,
+          earliest_effective_date: earliestEffectiveDate
+        });
+      }
+    }
+
+    if (model === 'parttime_growth' && requestedParttimeModel === 'parttime_fixed') {
+      if (parttimeModelChangePayPeriod === null) {
+        missingEvidence.push({
+          rule_id: 'CAO-PB-2024-R0350',
+          field: 'parttime_model_change_effective_pay_period_number',
+          message: 'Wijziging van groeimodel naar vast model mag alleen per loonperiode 1 of 7; loonperiode ontbreekt.'
+        });
+      } else if (![1, 7].includes(parttimeModelChangePayPeriod)) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0350',
+          severity: 'high',
+          message: `Wijziging van groeimodel naar vast model mag alleen per loonperiode 1 of 7; opgegeven loonperiode ${parttimeModelChangePayPeriod}.`,
+          effective_pay_period_number: parttimeModelChangePayPeriod
+        });
+      }
+    }
+
+    if (input.parttime_model_change_decision === 'rejected') {
+      if (!input.parttime_model_change_rejection_reason || booleanOrNull(input.parttime_model_change_weighty_business_reason_confirmed) !== true) {
+        missingEvidence.push({
+          rule_id: 'CAO-PB-2024-R0353',
+          field: 'parttime_model_change_rejection_reason',
+          message: 'Afwijzing van parttime modelkeuze vereist zwaarwegend organisatorisch/bedrijfsbelang en schriftelijke toelichting.'
+        });
+      }
+      warnings.push('Bij afwijzing van parttime modelkeuze moet werkgever het verzoek zo snel mogelijk alsnog accepteren zodra de zwaarwegende reden vervalt.');
+    } else if (input.parttime_model_change_decision === 'approved' && requestedParttimeModel) {
+      recommendedContractUpdate.employment_contract_model = requestedParttimeModel;
+      recommendedContractUpdate.parttime_contract_model = requestedParttimeModel === 'parttime_fixed' ? 'fixed' : 'growth';
+    }
+  }
+
+  const temporaryExtraHoursAgreed = booleanOrNull(input.temporary_extra_hours_agreed);
+  const hasTemporaryExtraHoursContext = temporaryExtraHoursAgreed === true ||
+    !!(input.temporary_extra_hours_start_date || input.temporary_extra_hours_end_date || input.temporary_extra_hours_per_pay_period);
+  let temporaryExtraHours = null;
+  if (hasTemporaryExtraHoursContext) {
+    const start = asIsoDate(input.temporary_extra_hours_start_date);
+    const end = asIsoDate(input.temporary_extra_hours_end_date);
+    const hours = numberOrNull(input.temporary_extra_hours_per_pay_period);
+    temporaryExtraHours = {
+      agreed: temporaryExtraHoursAgreed === true,
+      start_date: start,
+      end_date: end,
+      temporary_extra_hours_per_pay_period: hours
+    };
+    if (!isParttime) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0359',
+        field: 'employment_contract_model',
+        message: 'Tijdelijke extra uren zijn opgegeven, maar contract is niet aantoonbaar parttime.'
+      });
+    }
+    if (temporaryExtraHoursAgreed !== true || !start || !end || hours === null) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0359',
+        field: 'temporary_extra_hours_agreed/start/end/hours',
+        message: 'Leg voor tijdelijke extra parttime uren vast dat dit is afgesproken, voor welke periode en hoeveel uren per loonperiode.'
+      });
+    } else {
+      payrollEntitlements.push({
+        rule_id: 'CAO-PB-2024-R0359',
+        type: 'temporary_extra_parttime_hours_agreed',
+        temporary_extra_hours_per_pay_period: hours,
+        start_date: start,
+        end_date: end,
+        message: 'Parttimer mag tijdelijk meer werken dan vaste contracturen; payroll moet deze extra uren in de afgesproken periode meenemen zonder contracturen structureel te wijzigen.'
+      });
+    }
+  }
+
+  const parttimeHoursRequestSubmittedAt = asIsoDate(
+    input.parttime_contract_hours_adjustment_requested_at ||
+    input.parttime_hours_request_submitted_at
+  );
+  const hasParttimeHoursRequestContext = !!(
+    parttimeHoursRequestSubmittedAt ||
+    input.parttime_hours_request_regular_13_weeks_confirmed === true ||
+    normalizeArray(input.parttime_hours_request_worked_weeks || input.parttime_hours_request_weekly_evidence).length > 0 ||
+    numberOrNull(input.parttime_hours_request_requested_hours_per_pay_period) !== null
+  );
+  let parttimeHoursRequest = null;
+  if (hasParttimeHoursRequestContext) {
+    const regular13WeeksConfirmed = booleanOrNull(input.parttime_hours_request_regular_13_weeks_confirmed) === true;
+    const evidence = calculateFixedHoursRequestEvidence({
+      ...input,
+      fixed_hours_request_regular_13_weeks_confirmed: regular13WeeksConfirmed,
+      fixed_hours_request_qualifying_weeks: input.parttime_hours_request_qualifying_weeks ?? (regular13WeeksConfirmed ? 13 : null),
+      fixed_hours_request_worked_weeks: input.parttime_hours_request_worked_weeks,
+      fixed_hours_request_weekly_evidence: input.parttime_hours_request_weekly_evidence,
+      worked_weeks_evidence: input.parttime_hours_request_weekly_evidence || input.parttime_hours_request_worked_weeks,
+      contract_hours_per_week: input.contract_hours_per_week
+    });
+    const decisionSentAt = asIsoDate(input.parttime_hours_request_decision_sent_at);
+    const decision = input.parttime_hours_request_decision || null;
+    const requestedHours = numberOrNull(input.parttime_hours_request_requested_hours_per_pay_period);
+    const decisionDeadline = parttimeHoursRequestSubmittedAt ? addDays(parttimeHoursRequestSubmittedAt, 7) : null;
+    const eligible = evidence.status === 'eligible';
+    const overdue = eligible && parttimeHoursRequestSubmittedAt && !decisionSentAt && referenceDate && referenceDate > decisionDeadline;
+    const decisionTooLate = eligible && decisionSentAt && decisionDeadline && decisionSentAt > decisionDeadline;
+
+    parttimeHoursRequest = {
+      status: !isParttime
+        ? 'manual_review_required'
+        : evidence.manual_review_required
+        ? 'manual_review_required'
+        : (overdue || decisionTooLate) && requestedHours !== null
+        ? 'automatic_adjustment_due'
+        : decision
+        ? `decision_${decision}`
+        : eligible
+        ? overdue ? 'decision_overdue' : 'decision_due'
+        : 'not_eligible',
+      submitted_at: parttimeHoursRequestSubmittedAt,
+      decision_sent_at: decisionSentAt,
+      decision,
+      decision_deadline_at: decisionDeadline,
+      requested_hours_per_pay_period: requestedHours,
+      current_hours_per_pay_period: currentHours,
+      evidence
+    };
+
+    if (!isParttime) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0361',
+        field: 'employment_contract_model',
+        message: 'Parttime contracturen-aanpassingsverzoek is opgegeven, maar contract is niet aantoonbaar parttime.'
+      });
+    }
+    if (!parttimeHoursRequestSubmittedAt) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0361',
+        field: 'parttime_contract_hours_adjustment_requested_at',
+        message: 'Datum van schriftelijk verzoek om parttime contracturen aan te passen ontbreekt.'
+      });
+    }
+    if (evidence.status === 'manual_review_required') {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0362',
+        field: 'parttime_hours_request_worked_weeks',
+        message: 'Bewijs voor 13 aaneengesloten weken regelmatig meer werken dan contracturen ontbreekt.'
+      });
+    }
+    if (eligible && !decisionSentAt) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0365',
+        severity: overdue ? 'high' : 'medium',
+        message: overdue
+          ? `Werkgever heeft niet binnen 1 week schriftelijk beslist op parttime contracturenverzoek; deadline was ${decisionDeadline}.`
+          : `Werkgever moet uiterlijk ${decisionDeadline} schriftelijk beslissen op parttime contracturenverzoek.`
+      });
+    }
+    if (decisionTooLate) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0365',
+        severity: 'high',
+        message: `Werkgever heeft te laat beslist op parttime contracturenverzoek (${decisionSentAt} na deadline ${decisionDeadline}).`
+      });
+    }
+    if ((overdue || decisionTooLate) && requestedHours !== null) {
+      payrollEntitlements.push({
+        rule_id: 'CAO-PB-2024-R0365',
+        type: 'automatic_parttime_contract_hours_adjustment_due',
+        requested_hours_per_pay_period: requestedHours,
+        message: 'Niet tijdig schriftelijk beslist: arbeidsduur moet automatisch volgens aanvraag worden aangepast.'
+      });
+      recommendedContractUpdate.contract_hours_per_pay_period = requestedHours;
+    } else if ((overdue || decisionTooLate) && requestedHours === null) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0365',
+        field: 'parttime_hours_request_requested_hours_per_pay_period',
+        message: 'Werkgever heeft te laat/niet beslist, maar aangevraagde uren ontbreken; automatische aanpassing kan niet worden geboekt.'
+      });
+    } else if (decision === 'approved' && requestedHours !== null) {
+      recommendedContractUpdate.contract_hours_per_pay_period = requestedHours;
+    }
+  }
+
+  const fulltimeToParttimeSubmittedAt = asIsoDate(input.fulltime_to_parttime_request_submitted_at);
+  const hasFulltimeToParttimeContext = !!(
+    fulltimeToParttimeSubmittedAt ||
+    numberOrNull(input.fulltime_to_parttime_requested_hours_per_pay_period) !== null ||
+    input.fulltime_to_parttime_decision
+  );
+  let fulltimeToParttimeRequest = null;
+  if (hasFulltimeToParttimeContext) {
+    const requestedHours = numberOrNull(input.fulltime_to_parttime_requested_hours_per_pay_period);
+    const decision = input.fulltime_to_parttime_decision || null;
+    fulltimeToParttimeRequest = {
+      submitted_at: fulltimeToParttimeSubmittedAt,
+      requested_hours_per_pay_period: requestedHours,
+      decision,
+      rejection_reason: input.fulltime_to_parttime_rejection_reason || null,
+      requested_parttime_contract_model: normalizeContractModel(input.fulltime_to_parttime_requested_parttime_model) || null,
+      weighty_business_reason_confirmed: booleanOrNull(input.fulltime_to_parttime_weighty_business_reason_confirmed),
+      status: decision ? `decision_${decision}` : 'pending'
+    };
+    if (!isFulltime) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0367',
+        field: 'employment_contract_model',
+        message: 'Fulltime-naar-parttime verzoek is opgegeven, maar contract is niet aantoonbaar fulltime.'
+      });
+    }
+    if (!fulltimeToParttimeSubmittedAt || requestedHours === null || requestedHours >= 144) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0367',
+        field: 'fulltime_to_parttime_request_submitted_at/requested_hours',
+        message: 'Leg schriftelijk fulltime-naar-parttime verzoek en gewenste uren onder 144 uur per loonperiode vast.'
+      });
+    }
+    if (decision === 'rejected' && (!input.fulltime_to_parttime_rejection_reason || booleanOrNull(input.fulltime_to_parttime_weighty_business_reason_confirmed) !== true)) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0367',
+        field: 'fulltime_to_parttime_rejection_reason',
+        message: 'Afwijzing fulltime-naar-parttime vereist schriftelijke toelichting met zwaarwegend bedrijfs- of dienstbelang.'
+      });
+    }
+    if (decision === 'approved' && requestedHours !== null && requestedHours < 144) {
+      recommendedContractUpdate.contract_hours_per_pay_period = requestedHours;
+      recommendedContractUpdate.employment_contract_model = normalizeContractModel(input.fulltime_to_parttime_requested_parttime_model) || 'parttime_fixed';
+      recommendedContractUpdate.parttime_contract_model = recommendedContractUpdate.employment_contract_model === 'parttime_growth' ? 'growth' : 'fixed';
+    }
+  }
+
+  const hasParttimeUpwardWfwContext = !!(
+    input.parttime_upward_wfw_request_submitted_at ||
+    numberOrNull(input.parttime_upward_wfw_requested_hours_per_pay_period) !== null
+  );
+  let parttimeUpwardWfwRequest = null;
+  if (hasParttimeUpwardWfwContext) {
+    parttimeUpwardWfwRequest = {
+      submitted_at: asIsoDate(input.parttime_upward_wfw_request_submitted_at),
+      requested_hours_per_pay_period: numberOrNull(input.parttime_upward_wfw_requested_hours_per_pay_period),
+      decision: input.parttime_upward_wfw_decision || null,
+      external_law_review_required: true
+    };
+    warnings.push('Parttime arbeidsduur naar boven aanpassen valt onder Wet flexibel werken; definitieve beoordeling vereist HR/juridische workflow buiten de CAO-engine.');
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0368',
+      field: 'parttime_upward_wfw_review',
+      message: 'Wet flexibel werken toets moet buiten de CAO-engine worden vastgelegd voordat contracturen definitief wijzigen.'
+    });
+  }
+
+  const hasRejectedRequest = input.parttime_model_change_decision === 'rejected' ||
+    input.parttime_hours_request_decision === 'rejected' ||
+    input.fulltime_to_parttime_decision === 'rejected' ||
+    input.parttime_upward_wfw_decision === 'rejected';
+  let socialCommitteeAdvice = null;
+  if (hasRejectedRequest) {
+    socialCommitteeAdvice = {
+      advice_available: true,
+      advice_requested: booleanOrNull(input.social_committee_advice_requested),
+      advice_reference: input.social_committee_advice_reference || null
+    };
+    warnings.push('Bij afwijzing van arbeidsduur-/parttimeverzoek kan werknemer de Sociale Commissie om advies vragen.');
+  }
+
+  const hasBlockingViolation = violations.some(v => v.severity === 'high' || v.severity === 'critical');
+  const manualReviewRequired = missingEvidence.length > 0 ||
+    parttimeUpwardWfwRequest !== null ||
+    payrollEntitlements.some(e => e.type === 'automatic_parttime_contract_hours_adjustment_due');
+
+  return {
+    parttime_workload_change_status: hasBlockingViolation
+      ? 'blocked'
+      : manualReviewRequired
+      ? 'manual_review_required'
+      : 'compliant',
+    parttime_workload_change_compliant: !hasBlockingViolation && !manualReviewRequired,
+    source_rule_ids: sourceRuleIds,
+    warnings,
+    missing_evidence: missingEvidence,
+    contract_rule_violations: violations,
+    payroll_entitlements: payrollEntitlements,
+    manual_review_required: manualReviewRequired,
+    parttime_model_change: parttimeModelChange,
+    temporary_extra_hours: temporaryExtraHours,
+    parttime_hours_request: parttimeHoursRequest,
+    fulltime_to_parttime_request: fulltimeToParttimeRequest,
+    parttime_upward_wfw_request: parttimeUpwardWfwRequest,
+    social_committee_advice: socialCommitteeAdvice,
+    recommended_contract_update: recommendedContractUpdate
+  };
+}
+
 function evaluateContractClauseRules(input, caoScope) {
   const sourceRuleIds = ['CAO-PB-2024-R0236', 'CAO-PB-2024-R0311'];
   const warnings = [];
@@ -2550,10 +2921,12 @@ function buildFullContractRuleResult(input, caoScope) {
   const internship = evaluateInternshipContractRules(input);
   const hiredWorker = evaluateHiredWorkerContractRules(input);
   const employmentContractModel = evaluateEmploymentContractModelRules(input, callAgreement, internship, hiredWorker);
+  const parttimeWorkloadChange = evaluateParttimeWorkloadChangeRules(input, employmentContractModel);
   const contractClauses = evaluateContractClauseRules(input, caoScope);
   const contractTermination = evaluateContractTerminationRules(input);
   const sourceRuleIds = [...new Set([
     ...(employmentContractModel.source_rule_ids || []),
+    ...(parttimeWorkloadChange.source_rule_ids || []),
     ...(contractClauses.source_rule_ids || []),
     ...(contractTermination.source_rule_ids || []),
     ...(probation.source_rule_ids || []),
@@ -2563,6 +2936,7 @@ function buildFullContractRuleResult(input, caoScope) {
   ])];
   const warnings = [
     ...(employmentContractModel.warnings || []),
+    ...(parttimeWorkloadChange.warnings || []),
     ...(contractClauses.warnings || []),
     ...(contractTermination.warnings || []),
     ...(probation.warnings || []),
@@ -2573,6 +2947,7 @@ function buildFullContractRuleResult(input, caoScope) {
   const scopeWarnings = probation.scope_warnings || [];
   const contractRuleViolations = [
     ...(employmentContractModel.contract_rule_violations || []),
+    ...(parttimeWorkloadChange.contract_rule_violations || []),
     ...(contractClauses.contract_rule_violations || []),
     ...(contractTermination.contract_rule_violations || []),
     ...(probation.contract_rule_violations || []),
@@ -2582,6 +2957,7 @@ function buildFullContractRuleResult(input, caoScope) {
   ];
   const payrollEntitlements = [
     ...(employmentContractModel.payroll_entitlements || []),
+    ...(parttimeWorkloadChange.payroll_entitlements || []),
     ...(contractClauses.payroll_entitlements || []),
     ...(contractTermination.payroll_entitlements || []),
     ...(callAgreement.payroll_entitlements || []),
@@ -2591,6 +2967,7 @@ function buildFullContractRuleResult(input, caoScope) {
   const hasBlockingViolation = contractRuleViolations.some(v => v.severity === 'high' || v.severity === 'critical');
   const manualReviewRequired = probation.manual_review_required === true ||
     employmentContractModel.employment_contract_model_status === 'manual_review_required' ||
+    parttimeWorkloadChange.parttime_workload_change_status === 'manual_review_required' ||
     contractClauses.contract_clause_status === 'manual_review_required' ||
     contractTermination.contract_termination_status === 'manual_review_required' ||
     callAgreement.call_agreement_status === 'manual_review_required' ||
@@ -2598,6 +2975,7 @@ function buildFullContractRuleResult(input, caoScope) {
     hiredWorker.hired_worker_rule_status === 'manual_review_required';
   const contractRuleStatus = hasBlockingViolation ||
     employmentContractModel.employment_contract_model_status === 'blocked' ||
+    parttimeWorkloadChange.parttime_workload_change_status === 'blocked' ||
     contractClauses.contract_clause_status === 'blocked' ||
     contractTermination.contract_termination_status === 'blocked' ||
     probation.contract_rule_status === 'blocked' ||
@@ -2609,6 +2987,7 @@ function buildFullContractRuleResult(input, caoScope) {
     ? 'manual_review_required'
     : probation.probation_compliant === true &&
       employmentContractModel.employment_contract_model_compliant === true &&
+      parttimeWorkloadChange.parttime_workload_change_compliant === true &&
       contractClauses.contract_clause_compliant === true &&
       contractTermination.contract_termination_compliant === true &&
       callAgreement.call_agreement_compliant === true &&
@@ -2620,6 +2999,7 @@ function buildFullContractRuleResult(input, caoScope) {
   return {
     ...probation,
     employment_contract_model_rule_result: employmentContractModel,
+    parttime_workload_change_rule_result: parttimeWorkloadChange,
     contract_clause_rule_result: contractClauses,
     contract_termination_rule_result: contractTermination,
     employment_contract_model: {
@@ -2630,6 +3010,17 @@ function buildFullContractRuleResult(input, caoScope) {
       employment_contract_model_status: employmentContractModel.employment_contract_model_status,
       employment_contract_model_compliant: employmentContractModel.employment_contract_model_compliant,
       missing_evidence: employmentContractModel.missing_evidence || []
+    },
+    parttime_workload_change: {
+      parttime_workload_change_status: parttimeWorkloadChange.parttime_workload_change_status,
+      parttime_workload_change_compliant: parttimeWorkloadChange.parttime_workload_change_compliant,
+      parttime_model_change: parttimeWorkloadChange.parttime_model_change,
+      temporary_extra_hours: parttimeWorkloadChange.temporary_extra_hours,
+      parttime_hours_request: parttimeWorkloadChange.parttime_hours_request,
+      fulltime_to_parttime_request: parttimeWorkloadChange.fulltime_to_parttime_request,
+      parttime_upward_wfw_request: parttimeWorkloadChange.parttime_upward_wfw_request,
+      social_committee_advice: parttimeWorkloadChange.social_committee_advice,
+      missing_evidence: parttimeWorkloadChange.missing_evidence || []
     },
     contract_clauses: {
       contract_clause_status: contractClauses.contract_clause_status,
@@ -2700,6 +3091,7 @@ function buildFullContractRuleResult(input, caoScope) {
     contract_rule_status: contractRuleStatus,
     recommended_contract_update: {
       ...(employmentContractModel.recommended_contract_update || {}),
+      ...(parttimeWorkloadChange.recommended_contract_update || {}),
       ...(contractClauses.recommended_contract_update || {}),
       ...(contractTermination.recommended_contract_update || {}),
       ...(probation.recommended_contract_update || {}),
@@ -2745,6 +3137,38 @@ function buildContractRuleInput(body, personnel, contract) {
     mbo_security_practice_experience: pickFirst(body.mbo_security_practice_experience, contract?.mbo_security_practice_experience, null),
     learning_company_recognition_lost_at: pickFirst(body.learning_company_recognition_lost_at, body.learning_company_recognition_lost_date, null),
     learning_company_recognition_lost_date: pickFirst(body.learning_company_recognition_lost_date, null),
+    requested_parttime_contract_model: pickFirst(body.requested_parttime_contract_model, body.parttime_model_change_requested_model, contract?.parttime_model_change_requested_model, null),
+    parttime_model_change_requested_model: pickFirst(body.parttime_model_change_requested_model, contract?.parttime_model_change_requested_model, null),
+    parttime_model_change_requested_at: pickFirst(body.parttime_model_change_requested_at, contract?.parttime_model_change_requested_at, null),
+    parttime_model_change_effective_date: pickFirst(body.parttime_model_change_effective_date, contract?.parttime_model_change_effective_date, null),
+    parttime_model_change_effective_pay_period_number: pickFirst(body.parttime_model_change_effective_pay_period_number, contract?.parttime_model_change_effective_pay_period_number, null),
+    parttime_model_change_decision: pickFirst(body.parttime_model_change_decision, contract?.parttime_model_change_decision, null),
+    parttime_model_change_rejection_reason: pickFirst(body.parttime_model_change_rejection_reason, contract?.parttime_model_change_rejection_reason, null),
+    parttime_model_change_weighty_business_reason_confirmed: pickFirst(body.parttime_model_change_weighty_business_reason_confirmed, contract?.parttime_model_change_weighty_business_reason_confirmed, null),
+    temporary_extra_hours_agreed: pickFirst(body.temporary_extra_hours_agreed, contract?.temporary_extra_hours_agreed, null),
+    temporary_extra_hours_start_date: pickFirst(body.temporary_extra_hours_start_date, contract?.temporary_extra_hours_start_date, null),
+    temporary_extra_hours_end_date: pickFirst(body.temporary_extra_hours_end_date, contract?.temporary_extra_hours_end_date, null),
+    temporary_extra_hours_per_pay_period: pickFirst(body.temporary_extra_hours_per_pay_period, contract?.temporary_extra_hours_per_pay_period, null),
+    parttime_contract_hours_adjustment_requested_at: pickFirst(body.parttime_contract_hours_adjustment_requested_at, body.parttime_hours_request_submitted_at, contract?.parttime_contract_hours_adjustment_requested_at, null),
+    parttime_hours_request_submitted_at: pickFirst(body.parttime_hours_request_submitted_at, null),
+    parttime_hours_request_decision_sent_at: pickFirst(body.parttime_hours_request_decision_sent_at, contract?.parttime_hours_request_decision_sent_at, null),
+    parttime_hours_request_decision: pickFirst(body.parttime_hours_request_decision, contract?.parttime_hours_request_decision, null),
+    parttime_hours_request_requested_hours_per_pay_period: pickFirst(body.parttime_hours_request_requested_hours_per_pay_period, contract?.parttime_hours_request_requested_hours_per_pay_period, null),
+    parttime_hours_request_regular_13_weeks_confirmed: pickFirst(body.parttime_hours_request_regular_13_weeks_confirmed, contract?.parttime_hours_request_regular_13_weeks_confirmed, null),
+    parttime_hours_request_qualifying_weeks: pickFirst(body.parttime_hours_request_qualifying_weeks, contract?.parttime_hours_request_qualifying_weeks, null),
+    parttime_hours_request_worked_weeks: pickFirst(body.parttime_hours_request_worked_weeks, body.parttime_hours_request_weekly_evidence, null),
+    parttime_hours_request_weekly_evidence: pickFirst(body.parttime_hours_request_weekly_evidence, null),
+    fulltime_to_parttime_request_submitted_at: pickFirst(body.fulltime_to_parttime_request_submitted_at, contract?.fulltime_to_parttime_request_submitted_at, null),
+    fulltime_to_parttime_requested_hours_per_pay_period: pickFirst(body.fulltime_to_parttime_requested_hours_per_pay_period, contract?.fulltime_to_parttime_requested_hours_per_pay_period, null),
+    fulltime_to_parttime_requested_parttime_model: pickFirst(body.fulltime_to_parttime_requested_parttime_model, contract?.fulltime_to_parttime_requested_parttime_model, null),
+    fulltime_to_parttime_decision: pickFirst(body.fulltime_to_parttime_decision, contract?.fulltime_to_parttime_decision, null),
+    fulltime_to_parttime_rejection_reason: pickFirst(body.fulltime_to_parttime_rejection_reason, contract?.fulltime_to_parttime_rejection_reason, null),
+    fulltime_to_parttime_weighty_business_reason_confirmed: pickFirst(body.fulltime_to_parttime_weighty_business_reason_confirmed, contract?.fulltime_to_parttime_weighty_business_reason_confirmed, null),
+    parttime_upward_wfw_request_submitted_at: pickFirst(body.parttime_upward_wfw_request_submitted_at, contract?.parttime_upward_wfw_request_submitted_at, null),
+    parttime_upward_wfw_requested_hours_per_pay_period: pickFirst(body.parttime_upward_wfw_requested_hours_per_pay_period, contract?.parttime_upward_wfw_requested_hours_per_pay_period, null),
+    parttime_upward_wfw_decision: pickFirst(body.parttime_upward_wfw_decision, contract?.parttime_upward_wfw_decision, null),
+    social_committee_advice_requested: pickFirst(body.social_committee_advice_requested, contract?.social_committee_advice_requested, null),
+    social_committee_advice_reference: pickFirst(body.social_committee_advice_reference, contract?.social_committee_advice_reference, null),
     security_role_status: pickFirst(body.security_role_status, contract?.security_role_status, personnel?.security_role_status, 'unknown'),
     function_type: pickFirst(body.function_type, contract?.function_type, personnel?.function_type, null),
     cao_function_group: pickFirst(body.cao_function_group, contract?.cao_function_group, personnel?.cao_function_group, null),
@@ -2853,14 +3277,47 @@ function buildContractRuleInput(body, personnel, contract) {
 }
 
 function buildContractRulePersistence(result) {
+  const recommendedContractUpdate = result.recommended_contract_update || {};
   return {
-    employment_contract_model: result.employment_contract_model?.employment_contract_model ?? undefined,
-    parttime_contract_model: result.employment_contract_model?.parttime_contract_model ?? undefined,
+    employment_contract_model: recommendedContractUpdate.employment_contract_model ?? result.employment_contract_model?.employment_contract_model ?? undefined,
+    parttime_contract_model: recommendedContractUpdate.parttime_contract_model ?? result.employment_contract_model?.parttime_contract_model ?? undefined,
     employment_contract_model_rule_status: result.employment_contract_model?.employment_contract_model_status ?? undefined,
     employment_contract_model_manual_review_required: result.employment_contract_model
       ? result.employment_contract_model.employment_contract_model_status === 'manual_review_required'
       : undefined,
-    contract_hours_per_pay_period: result.employment_contract_model?.contract_hours_per_pay_period_resolved ?? undefined,
+    contract_hours_per_pay_period: recommendedContractUpdate.contract_hours_per_pay_period ?? result.employment_contract_model?.contract_hours_per_pay_period_resolved ?? undefined,
+    parttime_workload_change_rule_status: result.parttime_workload_change?.parttime_workload_change_status ?? undefined,
+    parttime_workload_change_manual_review_required: result.parttime_workload_change
+      ? result.parttime_workload_change.parttime_workload_change_status === 'manual_review_required'
+      : undefined,
+    parttime_model_change_requested_at: result.parttime_workload_change?.parttime_model_change?.requested_at ?? undefined,
+    parttime_model_change_requested_model: result.parttime_workload_change?.parttime_model_change?.requested_parttime_contract_model ?? undefined,
+    parttime_model_change_effective_date: result.parttime_workload_change?.parttime_model_change?.effective_date ?? undefined,
+    parttime_model_change_effective_pay_period_number: result.parttime_workload_change?.parttime_model_change?.effective_pay_period_number ?? undefined,
+    parttime_model_change_decision: result.parttime_workload_change?.parttime_model_change?.decision ?? undefined,
+    parttime_model_change_rejection_reason: result.parttime_workload_change?.parttime_model_change?.rejection_reason ?? undefined,
+    parttime_model_change_weighty_business_reason_confirmed: result.parttime_workload_change?.parttime_model_change?.weighty_business_reason_confirmed ?? undefined,
+    temporary_extra_hours_agreed: result.parttime_workload_change?.temporary_extra_hours?.agreed ?? undefined,
+    temporary_extra_hours_start_date: result.parttime_workload_change?.temporary_extra_hours?.start_date ?? undefined,
+    temporary_extra_hours_end_date: result.parttime_workload_change?.temporary_extra_hours?.end_date ?? undefined,
+    temporary_extra_hours_per_pay_period: result.parttime_workload_change?.temporary_extra_hours?.temporary_extra_hours_per_pay_period ?? undefined,
+    parttime_contract_hours_adjustment_requested_at: result.parttime_workload_change?.parttime_hours_request?.submitted_at ?? undefined,
+    parttime_hours_request_decision_sent_at: result.parttime_workload_change?.parttime_hours_request?.decision_sent_at ?? undefined,
+    parttime_hours_request_decision: result.parttime_workload_change?.parttime_hours_request?.decision ?? undefined,
+    parttime_hours_request_decision_deadline_at: result.parttime_workload_change?.parttime_hours_request?.decision_deadline_at ?? undefined,
+    parttime_hours_request_requested_hours_per_pay_period: result.parttime_workload_change?.parttime_hours_request?.requested_hours_per_pay_period ?? undefined,
+    parttime_hours_request_qualifying_weeks: result.parttime_workload_change?.parttime_hours_request?.evidence?.qualifying_weeks ?? undefined,
+    fulltime_to_parttime_request_submitted_at: result.parttime_workload_change?.fulltime_to_parttime_request?.submitted_at ?? undefined,
+    fulltime_to_parttime_requested_hours_per_pay_period: result.parttime_workload_change?.fulltime_to_parttime_request?.requested_hours_per_pay_period ?? undefined,
+    fulltime_to_parttime_requested_parttime_model: result.parttime_workload_change?.fulltime_to_parttime_request?.requested_parttime_contract_model ?? undefined,
+    fulltime_to_parttime_decision: result.parttime_workload_change?.fulltime_to_parttime_request?.decision ?? undefined,
+    fulltime_to_parttime_rejection_reason: result.parttime_workload_change?.fulltime_to_parttime_request?.rejection_reason ?? undefined,
+    fulltime_to_parttime_weighty_business_reason_confirmed: result.parttime_workload_change?.fulltime_to_parttime_request?.weighty_business_reason_confirmed ?? undefined,
+    parttime_upward_wfw_request_submitted_at: result.parttime_workload_change?.parttime_upward_wfw_request?.submitted_at ?? undefined,
+    parttime_upward_wfw_requested_hours_per_pay_period: result.parttime_workload_change?.parttime_upward_wfw_request?.requested_hours_per_pay_period ?? undefined,
+    parttime_upward_wfw_decision: result.parttime_workload_change?.parttime_upward_wfw_request?.decision ?? undefined,
+    social_committee_advice_requested: result.parttime_workload_change?.social_committee_advice?.advice_requested ?? undefined,
+    social_committee_advice_reference: result.parttime_workload_change?.social_committee_advice?.advice_reference ?? undefined,
     written_contract_model_terms_confirmed: result.contract_clause_rule_result?.recommended_contract_update?.written_contract_model_terms_confirmed ?? undefined,
     non_compete_clause_absent_confirmed: result.contract_clause_rule_result?.recommended_contract_update?.non_compete_clause_absent_confirmed ?? undefined,
     non_compete_clause_present: result.contract_clause_rule_result?.recommended_contract_update?.non_compete_clause_present ?? undefined,
@@ -2934,6 +3391,7 @@ function buildContractRulePersistence(result) {
         contract_rule_violations: result.contract_rule_violations
       },
       employment_contract_model: result.employment_contract_model_rule_result || null,
+      parttime_workload_change: result.parttime_workload_change_rule_result || null,
       contract_clauses: result.contract_clause_rule_result || null,
       contract_termination: result.contract_termination_rule_result || null,
       call_agreement: result.call_agreement_rule_result || null,

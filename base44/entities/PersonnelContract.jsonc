@@ -95,6 +95,247 @@
       "default": true,
       "description": "True als fulltime/parttime/oproep contractmodel niet definitief automatisch kan worden vastgesteld."
     },
+    "parttime_workload_change_rule_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "unknown",
+        null
+      ],
+      "description": "Status van CAO PB artikel 11/12 regels over parttime modelwijziging en structurele arbeidsduurwijziging."
+    },
+    "parttime_workload_change_manual_review_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "parttime_model_change_requested_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum waarop werknemer parttime vast/groeimodel wijziging heeft gevraagd."
+    },
+    "parttime_model_change_requested_model": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "parttime_fixed",
+        "parttime_growth",
+        null
+      ],
+      "description": "Aangevraagd parttime contractmodel: vast model of groeimodel."
+    },
+    "parttime_model_change_effective_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "parttime_model_change_effective_pay_period_number": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Ingangsloonperiode voor wijziging groeimodel naar vast model; CAO staat alleen 1 of 7 toe."
+    },
+    "parttime_model_change_decision": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "approved",
+        "rejected",
+        "pending",
+        null
+      ]
+    },
+    "parttime_model_change_rejection_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Schriftelijke reden bij afwijzing van parttime modelwijziging."
+    },
+    "parttime_model_change_weighty_business_reason_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als afwijzing van parttime modelwijziging is onderbouwd met zwaarwegend organisatorisch/bedrijfsbelang."
+    },
+    "temporary_extra_hours_agreed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als parttimer tijdelijk meer werkt dan vaste contracturen volgens afspraak."
+    },
+    "temporary_extra_hours_start_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "temporary_extra_hours_end_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "temporary_extra_hours_per_pay_period": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Aantal tijdelijke extra parttime uren per loonperiode."
+    },
+    "parttime_contract_hours_adjustment_requested_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum schriftelijk verzoek om parttime contracturen aan te passen na 13 weken structureel meer werken."
+    },
+    "parttime_hours_request_decision_sent_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "parttime_hours_request_decision": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "approved",
+        "rejected",
+        "pending",
+        null
+      ]
+    },
+    "parttime_hours_request_decision_deadline_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Deadline van 1 week na parttime contracturenverzoek."
+    },
+    "parttime_hours_request_requested_hours_per_pay_period": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "parttime_hours_request_regular_13_weeks_confirmed": {
+      "type": "boolean",
+      "default": false
+    },
+    "parttime_hours_request_qualifying_weeks": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "fulltime_to_parttime_request_submitted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "fulltime_to_parttime_requested_hours_per_pay_period": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "fulltime_to_parttime_requested_parttime_model": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "parttime_fixed",
+        "parttime_growth",
+        null
+      ]
+    },
+    "fulltime_to_parttime_decision": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "approved",
+        "rejected",
+        "pending",
+        null
+      ]
+    },
+    "fulltime_to_parttime_rejection_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Schriftelijke reden bij afwijzing van fulltime-naar-parttime verzoek."
+    },
+    "fulltime_to_parttime_weighty_business_reason_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als afwijzing is onderbouwd met zwaarwegend bedrijfs- of dienstbelang."
+    },
+    "parttime_upward_wfw_request_submitted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum verzoek om parttime arbeidsduur naar boven aan te passen; valt onder Wet flexibel werken."
+    },
+    "parttime_upward_wfw_requested_hours_per_pay_period": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "parttime_upward_wfw_decision": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "approved",
+        "rejected",
+        "pending",
+        null
+      ]
+    },
+    "social_committee_advice_requested": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "True als bij afwijzing advies van de Sociale Commissie is gevraagd."
+    },
+    "social_committee_advice_reference": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Referentie naar adviesverzoek of uitspraak van de Sociale Commissie."
+    },
     "written_contract_model_terms_confirmed": {
       "type": "boolean",
       "default": false,
