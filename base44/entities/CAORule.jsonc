@@ -179,6 +179,42 @@
       },
       "description": "Lijst van functies/componenten waar deze regel is ge\u00efmplementeerd"
     },
+    "runtime_binding_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "verified_local_runtime",
+        "missing_local_runtime",
+        "not_required",
+        "unknown",
+        null
+      ],
+      "description": "Lokale Base44 runtime-verificatie. IMPLEMENTED telt pas als payroll-safe als deze verified_local_runtime is."
+    },
+    "runtime_binding_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Lokale runtime binding key, bijv. applyCaoContractRules.probation_and_probation_dismissal."
+    },
+    "runtime_binding_functions": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Base44 functions die deze regel daadwerkelijk toepassen of valideren."
+    },
+    "local_runtime_verified_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datetime waarop de lokale runtime-binding voor deze regel is vastgesteld."
+    },
     "tests": {
       "type": [
         "object",
