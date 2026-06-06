@@ -61,11 +61,44 @@ function isRuleApplicable(ruleId, caoScope) {
 
 function getWeekday(dateStr) { return new Date(dateStr).getDay(); }
 function isWeekend(dateStr) { const dow = getWeekday(dateStr); return dow === 0 || dow === 6; }
+function getIsoWeekKey(dateStr) {
+  const date = new Date(`${dateStr}T00:00:00`);
+  const tmp = new Date(Date.UTC(date.getFullYear(), date.getMonth(), date.getDate()));
+  const dayNum = tmp.getUTCDay() || 7;
+  tmp.setUTCDate(tmp.getUTCDate() + 4 - dayNum);
+  const yearStart = new Date(Date.UTC(tmp.getUTCFullYear(), 0, 1));
+  const weekNo = Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
+  return `${tmp.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
+}
 function isWeekendBlock(day1, day2) {
   const d1 = new Date(day1), d2 = new Date(day2);
   const diffDays = (d2 - d1) / (1000 * 60 * 60 * 24);
   if (diffDays !== 1) return false;
   return (d1.getDay() === 6 && d2.getDay() === 0);
+}
+
+function calculateShiftHours(shift) {
+  const start = new Date(`${shift.date}T${shift.start_time || '00:00'}:00`);
+  let end = new Date(`${shift.date}T${shift.end_time || '00:00'}:00`);
+  if (end <= start) end.setDate(end.getDate() + 1);
+  return (end - start) / (1000 * 60 * 60);
+}
+
+function shiftHasContractContext(shift) {
+  return !!(
+    shift.company_id ||
+    shift.route_id ||
+    shift.task_id ||
+    shift.service_context ||
+    shift.service_function_type ||
+    shift.function_type ||
+    shift.cao_function_group ||
+    shift.required_cao_function_group ||
+    shift.cao_function_level ||
+    shift.required_cao_function_level ||
+    shift.task_type ||
+    shift.contract_assignment_policy
+  );
 }
 
 function validateSchedule(shifts, periodStart, periodEnd, caoScope) {
@@ -89,10 +122,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope) {
   let totalHours = 0, totalShifts = 0;
   const shiftIds = [];
   for (const shift of periodShifts) {
-    const start = new Date(`${shift.date}T${shift.start_time || '00:00'}:00`);
-    let end = new Date(`${shift.date}T${shift.end_time || '00:00'}:00`);
-    if (end <= start) end.setDate(end.getDate() + 1);
-    totalHours += (end - start) / (1000 * 60 * 60);
+    totalHours += calculateShiftHours(shift);
     totalShifts++;
     if (shift.id) shiftIds.push(shift.id);
   }
@@ -193,6 +223,177 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope) {
   };
 }
 
+async function validateShiftContractResolution(base44, { shifts, periodStart, periodEnd, personnel_id, body }) {
+  const periodShifts = shifts.filter(s => s.date >= periodStart && s.date <= periodEnd);
+  const enforceContractResolution = body.enforce_contract_resolution === true ||
+    periodShifts.some(shiftHasContractContext);
+
+  if (!enforceContractResolution) {
+    return {
+      contract_resolution_required: false,
+      contract_resolution_results: [],
+      contract_violations: [],
+      contract_warnings: [],
+      contract_manual_review_required: false,
+      contract_payroll_final_allowed: true,
+      contract_hours_summary: []
+    };
+  }
+
+  if (!personnel_id) {
+    return {
+      contract_resolution_required: true,
+      contract_resolution_results: [],
+      contract_violations: [{
+        rule_id: 'APP-CONTRACT-SERVICE-MATCH',
+        severity: 'high',
+        message: 'personnel_id is verplicht voor contractbewuste roostercontrole.',
+        affected_shift_ids: periodShifts.map(s => s.id).filter(Boolean),
+        payroll_impact: true,
+        manual_review_required: true
+      }],
+      contract_warnings: [],
+      contract_manual_review_required: true,
+      contract_payroll_final_allowed: false,
+      contract_hours_summary: []
+    };
+  }
+
+  const contractResults = await Promise.all(periodShifts.map(async (shift, index) => {
+    const serviceContext = shift.service_context || {};
+    try {
+      const res = await base44.asServiceRole.functions.invoke('resolvePersonnelContractForService', {
+        personnel_id,
+        contract_id: shift.contract_id || body.contract_id || null,
+        company_id: shift.company_id || body.company_id || null,
+        route_id: shift.route_id || body.route_id || null,
+        task_id: shift.task_id || body.task_id || null,
+        service_date: shift.date,
+        service_context: {
+          ...serviceContext,
+          task_type: serviceContext.task_type || shift.task_type || null,
+          function_type: serviceContext.function_type || shift.service_function_type || shift.function_type || null,
+          cao_function_group: serviceContext.cao_function_group || shift.required_cao_function_group || shift.cao_function_group || null,
+          cao_function_level: serviceContext.cao_function_level || shift.required_cao_function_level || shift.cao_function_level || null,
+          security_role_status: serviceContext.security_role_status || shift.required_security_role_status || shift.security_role_status || null,
+          contract_assignment_policy: serviceContext.contract_assignment_policy || shift.contract_assignment_policy || body.contract_assignment_policy || 'strict_contract_match'
+        }
+      });
+      return {
+        shift_index: index,
+        shift_id: shift.id || null,
+        date: shift.date,
+        hours: Math.round(calculateShiftHours(shift) * 100) / 100,
+        ...(res?.data || { status: 'blocked', planning_allowed: false, payroll_final_allowed: false, blocking_reasons: ['Contractresolver gaf geen data terug.'] })
+      };
+    } catch (error) {
+      return {
+        shift_index: index,
+        shift_id: shift.id || null,
+        date: shift.date,
+        hours: Math.round(calculateShiftHours(shift) * 100) / 100,
+        status: 'blocked_contract_resolution_error',
+        planning_allowed: false,
+        payroll_final_allowed: false,
+        manual_review_required: true,
+        blocking_reasons: [`Contractresolver fout: ${error.message}`],
+        manual_review_reasons: []
+      };
+    }
+  }));
+
+  const contractViolations = [];
+  const contractWarnings = [];
+  for (const result of contractResults) {
+    const affected = result.shift_id ? [result.shift_id] : [];
+    if (result.planning_allowed === false || result.status === 'blocked') {
+      contractViolations.push({
+        rule_id: 'APP-CONTRACT-SERVICE-MATCH',
+        severity: 'high',
+        message: `Dienst ${result.date} past niet op een geldig arbeidscontract: ${(result.blocking_reasons || []).join(' ') || result.status}`,
+        affected_shift_ids: affected,
+        shift_index: result.shift_index,
+        payroll_impact: true,
+        manual_review_required: true,
+        contract_resolution: result
+      });
+    } else if (result.manual_review_required === true || result.payroll_final_allowed === false) {
+      contractViolations.push({
+        rule_id: 'APP-CONTRACT-SERVICE-MATCH',
+        severity: 'medium',
+        message: `Dienst ${result.date} vereist handmatige contract/CAO-review: ${(result.manual_review_reasons || []).join(' ') || result.status}`,
+        affected_shift_ids: affected,
+        shift_index: result.shift_index,
+        payroll_impact: true,
+        manual_review_required: true,
+        contract_resolution: result
+      });
+    }
+  }
+
+  const hoursByContractWeek = {};
+  for (const result of contractResults) {
+    const contract = result.selected_contract || null;
+    if (!contract?.id) continue;
+    const weekKey = getIsoWeekKey(result.date);
+    const key = `${contract.id}::${weekKey}`;
+    if (!hoursByContractWeek[key]) {
+      hoursByContractWeek[key] = {
+        contract_id: contract.id,
+        week_key: weekKey,
+        hours: 0,
+        contract_hours_per_week: contract.contract_hours_per_week ?? null,
+        min_hours_per_week: contract.min_hours_per_week ?? null,
+        max_hours_per_week: contract.max_hours_per_week ?? null,
+        shift_ids: []
+      };
+    }
+    hoursByContractWeek[key].hours += Number(result.hours || 0);
+    if (result.shift_id) hoursByContractWeek[key].shift_ids.push(result.shift_id);
+  }
+
+  const contractHoursSummary = Object.values(hoursByContractWeek).map(row => ({
+    ...row,
+    hours: Math.round(row.hours * 100) / 100
+  }));
+
+  for (const row of contractHoursSummary) {
+    if (row.max_hours_per_week != null && row.hours > row.max_hours_per_week) {
+      contractViolations.push({
+        rule_id: 'APP-CONTRACT-WEEKLY-HOURS',
+        severity: 'high',
+        message: `Contract ${row.contract_id} overschrijdt maximum uren per week (${row.hours}u > ${row.max_hours_per_week}u) in ${row.week_key}.`,
+        affected_shift_ids: row.shift_ids,
+        payroll_impact: true,
+        manual_review_required: false
+      });
+    }
+    if (row.min_hours_per_week != null && row.hours < row.min_hours_per_week) {
+      contractWarnings.push({
+        rule_id: 'APP-CONTRACT-WEEKLY-HOURS',
+        severity: 'medium',
+        message: `Contract ${row.contract_id} haalt minimum uren per week nog niet (${row.hours}u < ${row.min_hours_per_week}u) in ${row.week_key}.`,
+        affected_shift_ids: row.shift_ids,
+        payroll_impact: true,
+        manual_review_required: true
+      });
+    }
+  }
+
+  return {
+    contract_resolution_required: true,
+    contract_resolution_results: contractResults,
+    contract_violations: contractViolations,
+    contract_warnings: contractWarnings,
+    contract_manual_review_required: contractResults.some(r => r.manual_review_required === true) ||
+      contractViolations.some(v => v.manual_review_required === true) ||
+      contractWarnings.some(w => w.manual_review_required === true),
+    contract_payroll_final_allowed: contractResults.every(r => r.payroll_final_allowed === true) &&
+      contractViolations.filter(v => v.severity === 'high').length === 0,
+    contract_hours_summary: contractHoursSummary
+  };
+}
+
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
@@ -230,6 +431,23 @@ Deno.serve(async (req) => {
     }
 
     const result = validateSchedule(shifts, pStart, pEnd, caoScope);
+    const contractValidation = await validateShiftContractResolution(base44, {
+      shifts,
+      periodStart: pStart,
+      periodEnd: pEnd,
+      personnel_id,
+      body
+    });
+
+    result.violations = [
+      ...(result.violations || []),
+      ...(contractValidation.contract_violations || [])
+    ];
+    result.warnings = [
+      ...(result.warnings || []),
+      ...(contractValidation.contract_warnings || []).map(w => w.message || String(w))
+    ];
+    result.is_valid = result.violations.filter(v => v.severity === 'high').length === 0;
 
     const caoSyncStatus = {
       changed: syncResult?.changed ?? false,
@@ -279,7 +497,13 @@ Deno.serve(async (req) => {
       scope_warnings: scopeWarnings,
       cao_scope_profile: caoScope?.cao_scope_profile || null,
       applies_full_security_rules: caoScope?.applies_full_security_rules ?? null,
-      manual_review_required: isUnknownOrMixed || false,
+      contract_resolution_required: contractValidation.contract_resolution_required,
+      contract_resolution_results: contractValidation.contract_resolution_results,
+      contract_hours_summary: contractValidation.contract_hours_summary,
+      contract_warning_items: contractValidation.contract_warnings,
+      contract_payroll_final_allowed: contractValidation.contract_payroll_final_allowed,
+      manual_review_required: isUnknownOrMixed || contractValidation.contract_manual_review_required || false,
+      payroll_final_allowed: !isUnknownOrMixed && result.is_valid === true && contractValidation.contract_payroll_final_allowed === true,
       ...result
     });
 
