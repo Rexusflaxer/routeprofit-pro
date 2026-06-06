@@ -15,7 +15,7 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 
 /**
  * CAO PB planning-validator
- * Bronregels: R0547-R0549 en R0560-R0639 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve en maximale arbeidstijd)
+ * Bronregels: R0547-R0549 en R0560-R0646 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd en rusttijd)
  *
  * Scope-bewust:
  * - Artikel 3 lid 2 sluit uit: art. 10, art. 9 lid 1 sub c, hfdst. 4 (behalve 37/38/41), hfdst. 5, bijlage 2.
@@ -136,6 +136,13 @@ function dateFromIso(value) {
   return Number.isNaN(date.getTime()) ? null : date;
 }
 
+function formatIsoDateLocal(date) {
+  const year = date.getFullYear();
+  const month = String(date.getMonth() + 1).padStart(2, '0');
+  const day = String(date.getDate()).padStart(2, '0');
+  return `${year}-${month}-${day}`;
+}
+
 function daysBetween(later, earlier) {
   const laterDate = dateFromIso(later);
   const earlierDate = dateFromIso(earlier);
@@ -147,7 +154,7 @@ function addDays(dateStr, days) {
   const date = dateFromIso(dateStr);
   if (!date) return null;
   date.setDate(date.getDate() + days);
-  return date.toISOString().slice(0, 10);
+  return formatIsoDateLocal(date);
 }
 
 function nextThursdayOnOrAfter(dateStr) {
@@ -156,7 +163,7 @@ function nextThursdayOnOrAfter(dateStr) {
   const day = date.getDay();
   const delta = (4 - day + 7) % 7;
   date.setDate(date.getDate() + delta);
-  return date.toISOString().slice(0, 10);
+  return formatIsoDateLocal(date);
 }
 
 function isThursday(value) {
@@ -255,6 +262,103 @@ function shiftDateTime(shift, fieldPrefix = '') {
   let end = new Date(`${date}T${endTime}:00`);
   if (end <= start) end.setDate(end.getDate() + 1);
   return { start, end };
+}
+
+function serviceIntervalsFromShifts(shifts) {
+  return shifts
+    .map(shift => {
+      const interval = shiftDateTime(shift);
+      if (!interval) return null;
+      return {
+        shift,
+        shift_id: shift.id || null,
+        date: asIsoDate(shift.date || shift.service_date),
+        start: interval.start,
+        end: interval.end,
+        hours: calculateShiftHours({ ...shift, date: asIsoDate(shift.date || shift.service_date) })
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.start - b.start);
+}
+
+function hoursBetweenDates(later, earlier) {
+  return (later - earlier) / 3600000;
+}
+
+function intervalOverlapsWindow(interval, windowStart, windowEnd) {
+  return interval.end > windowStart && interval.start < windowEnd;
+}
+
+function intervalOverlapsIsoDate(interval, isoDate) {
+  const dayStart = dateFromIso(isoDate);
+  if (!dayStart) return false;
+  const dayEnd = new Date(dayStart);
+  dayEnd.setDate(dayEnd.getDate() + 1);
+  return intervalOverlapsWindow(interval, dayStart, dayEnd);
+}
+
+function maxContinuousRestHoursWithinWindow(intervals, windowStart, windowEnd) {
+  const points = [windowStart.getTime(), windowEnd.getTime()];
+  for (const interval of intervals) {
+    if (!intervalOverlapsWindow(interval, windowStart, windowEnd)) continue;
+    points.push(Math.max(interval.start.getTime(), windowStart.getTime()));
+    points.push(Math.min(interval.end.getTime(), windowEnd.getTime()));
+  }
+  const sorted = [...new Set(points)].sort((a, b) => a - b);
+  let maxRestMs = 0;
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const start = sorted[i];
+    const end = sorted[i + 1];
+    if (end <= start) continue;
+    const segmentStart = new Date(start);
+    const segmentEnd = new Date(end);
+    const hasWork = intervals.some(interval => intervalOverlapsWindow(interval, segmentStart, segmentEnd));
+    if (!hasWork) maxRestMs = Math.max(maxRestMs, end - start);
+  }
+  return maxRestMs / 3600000;
+}
+
+function restBlocksWithinWindow(intervals, windowStart, windowEnd) {
+  const points = [windowStart.getTime(), windowEnd.getTime()];
+  for (const interval of intervals) {
+    if (!intervalOverlapsWindow(interval, windowStart, windowEnd)) continue;
+    points.push(Math.max(interval.start.getTime(), windowStart.getTime()));
+    points.push(Math.min(interval.end.getTime(), windowEnd.getTime()));
+  }
+  const sorted = [...new Set(points)].sort((a, b) => a - b);
+  const blocks = [];
+  for (let i = 0; i < sorted.length - 1; i++) {
+    const start = sorted[i];
+    const end = sorted[i + 1];
+    if (end <= start) continue;
+    const segmentStart = new Date(start);
+    const segmentEnd = new Date(end);
+    const hasWork = intervals.some(interval => intervalOverlapsWindow(interval, segmentStart, segmentEnd));
+    if (!hasWork) {
+      const previous = blocks[blocks.length - 1];
+      if (previous && previous.end.getTime() === start) {
+        previous.end = segmentEnd;
+        previous.hours = hoursBetweenDates(previous.end, previous.start);
+      } else {
+        blocks.push({ start: segmentStart, end: segmentEnd, hours: hoursBetweenDates(segmentEnd, segmentStart) });
+      }
+    }
+  }
+  return blocks;
+}
+
+function dateRange(periodStart, periodEnd) {
+  const start = dateFromIso(periodStart);
+  const end = dateFromIso(periodEnd);
+  const dates = [];
+  if (!start || !end) return dates;
+  const cursor = new Date(start);
+  while (cursor <= end) {
+    dates.push(formatIsoDateLocal(cursor));
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return dates;
 }
 
 function overlapsAfterClock(shift, dateStr, clockTime) {
@@ -431,6 +535,8 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const periodShifts = shifts.filter(s => s.date >= periodStart && s.date <= periodEnd);
   const serviceShifts = periodShifts.filter(s => !(s.is_time_window === true || s.roster_block_type === 'time_window' || s.block_type === 'time_window'));
   const referenceServiceShifts = buildReferenceShifts(body, serviceShifts);
+  const serviceIntervals = serviceIntervalsFromShifts(serviceShifts);
+  const referenceServiceIntervals = serviceIntervalsFromShifts(referenceServiceShifts);
   const timeWindows = getRosterTimeWindows(body, periodStart, periodEnd, periodShifts);
   const periodDistance = daysBetween(periodEnd, periodStart);
   const periodDayCount = periodDistance !== null ? periodDistance + 1 : null;
@@ -845,10 +951,153 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     }
   }
 
+  for (let i = 0; i < serviceIntervals.length - 1; i++) {
+    const current = serviceIntervals[i];
+    const next = serviceIntervals[i + 1];
+    const restHours = hoursBetweenDates(next.start, current.end);
+    if (restHours < 11) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0641',
+        severity: 'high',
+        message: `Dagelijkse rust tussen diensten is ${round2(restHours)} uur; minimaal 11 uur onafgebroken rust vereist.`,
+        affected_shift_ids: [current.shift_id, next.shift_id].filter(Boolean),
+        payroll_impact: false,
+        rest_hours: round2(restHours),
+        min_daily_rest_hours: 11,
+        manual_review_required: false
+      });
+    }
+  }
+
+  const referencePeriodStart = asIsoDate(body.rest_reference_period_start || body.working_time_reference_period_start || periodStart);
+  const referencePeriodEnd = asIsoDate(body.rest_reference_period_end || body.working_time_reference_period_end || periodEnd);
+  const restReferenceDates = dateRange(referencePeriodStart, referencePeriodEnd);
+  const sevenDayRestResults = [];
+  const fourteenDayRestResults = [];
+  for (let i = 0; i <= restReferenceDates.length - 7; i++) {
+    const windowStartIso = restReferenceDates[i];
+    const windowEndIso = addDays(windowStartIso, 7);
+    const windowStart = dateFromIso(windowStartIso);
+    const windowEnd = dateFromIso(windowEndIso);
+    const maxRest = maxContinuousRestHoursWithinWindow(referenceServiceIntervals, windowStart, windowEnd);
+    const ok = maxRest >= 36;
+    sevenDayRestResults.push({ window_start: windowStartIso, window_end_exclusive: windowEndIso, max_continuous_rest_hours: round2(maxRest), compliant: ok });
+  }
+  for (let i = 0; i <= restReferenceDates.length - 14; i++) {
+    const windowStartIso = restReferenceDates[i];
+    const windowEndIso = addDays(windowStartIso, 14);
+    const windowStart = dateFromIso(windowStartIso);
+    const windowEnd = dateFromIso(windowEndIso);
+    const blocks = restBlocksWithinWindow(referenceServiceIntervals, windowStart, windowEnd);
+    const totalRest = blocks.reduce((sum, block) => sum + block.hours, 0);
+    const maxRestBlock = blocks.reduce((max, block) => Math.max(max, block.hours), 0);
+    const eligibleSplitRest = blocks
+      .filter(block => block.hours >= 32)
+      .reduce((sum, block) => sum + block.hours, 0);
+    fourteenDayRestResults.push({
+      window_start: windowStartIso,
+      window_end_exclusive: windowEndIso,
+      total_rest_hours: round2(totalRest),
+      max_continuous_rest_hours: round2(maxRestBlock),
+      eligible_split_rest_hours: round2(eligibleSplitRest),
+      rest_block_hours: blocks.map(block => round2(block.hours)),
+      compliant: maxRestBlock >= 72 || eligibleSplitRest >= 72
+    });
+  }
+  const failingSevenDayWindows = sevenDayRestResults.filter(row => !row.compliant);
+  const failingFourteenDayWindows = fourteenDayRestResults.filter(row => !row.compliant);
+  if (restReferenceDates.length < 7) {
+    addManualReview(
+      manualReviewItems,
+      'CAO-PB-2024-R0643',
+      'weekly_rest',
+      'Lever minimaal 7 dagen referentierooster aan om de 36 uur rust per 7 dagen te controleren.',
+      'reference_shifts/rest_reference_period'
+    );
+  } else if (failingSevenDayWindows.length > 0 && restReferenceDates.length < 14) {
+    addManualReview(
+      manualReviewItems,
+      'CAO-PB-2024-R0643',
+      'weekly_rest',
+      'Een 7-daags rustvenster haalt geen 36 uur; lever minimaal 14 dagen referentierooster aan om de 72 uur per 14 dagen-uitwijk te controleren.',
+      'reference_shifts/rest_reference_period'
+    );
+  } else if (failingSevenDayWindows.length > 0 && failingFourteenDayWindows.length > 0) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0643',
+      severity: 'high',
+      message: 'Geen geldige wekelijkse rust gevonden: ten minste 36 uur rust per 7 dagen ontbreekt en de 72 uur per 14 dagen-uitwijk voldoet ook niet.',
+      payroll_impact: false,
+      failing_7_day_windows: failingSevenDayWindows.slice(0, 5),
+      failing_14_day_windows: failingFourteenDayWindows.slice(0, 5),
+      manual_review_required: false
+    });
+  } else if (failingSevenDayWindows.length > 0 && failingFourteenDayWindows.length === 0) {
+    warnings.push('Artikel 27: enkele 7-daagse vensters halen geen 36 uur rust, maar 14-daagse rust van ten minste 72 uur voldoet.');
+  }
+  const fourteenDaySplitViolations = fourteenDayRestResults.filter(row =>
+    row.total_rest_hours >= 72 &&
+    row.max_continuous_rest_hours < 72 &&
+    row.eligible_split_rest_hours < 72
+  );
+  if (fourteenDaySplitViolations.length > 0) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0645',
+      severity: 'high',
+      message: '14-daagse rust is opgesplitst in perioden korter dan 32 uur; dat is niet toegestaan.',
+      payroll_impact: false,
+      failing_14_day_windows: fourteenDaySplitViolations.slice(0, 5),
+      manual_review_required: false
+    });
+  }
+
+  const sundaysInPeriod = dateRange(periodStart, periodEnd).filter(date => dateFromIso(date)?.getDay() === 0);
+  const workedSundaysThisPeriod = sundaysInPeriod.filter(date =>
+    serviceIntervals.some(interval => intervalOverlapsIsoDate(interval, date))
+  );
+  const freeSundaysThisPeriod = sundaysInPeriod.filter(date => !workedSundaysThisPeriod.includes(date));
+  const freeSundaysYtdBefore = numberOrNull(body.free_sundays_year_to_date_before_period ?? body.free_sundays_ytd_before_period);
+  const freeSundaysYtd = numberOrNull(body.free_sundays_year_to_date ?? body.free_sundays_ytd);
+  const freeSundaysAfterPeriod = freeSundaysYtd !== null
+    ? freeSundaysYtd
+    : freeSundaysYtdBefore !== null
+    ? freeSundaysYtdBefore + freeSundaysThisPeriod.length
+    : null;
+  if (sundaysInPeriod.length > 0 && freeSundaysThisPeriod.length < 1) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0646',
+      severity: 'medium',
+      message: 'Deze loonperiode bevat geen vrije zondag; artikel 27 vereist minimaal 1 vrije zondag per loonperiode als onderdeel van het vrije weekend.',
+      payroll_impact: false,
+      sundays_in_period: sundaysInPeriod,
+      worked_sundays_this_period: workedSundaysThisPeriod,
+      manual_review_required: true
+    });
+  }
+  if (freeSundaysAfterPeriod === null) {
+    addManualReview(
+      manualReviewItems,
+      'CAO-PB-2024-R0646',
+      'free_sundays',
+      'Lever vrije-zondagen saldo jaar-tot-datum aan om minimaal 16 vrije zondagen per jaar te bewaken.',
+      'free_sundays_year_to_date'
+    );
+  } else if (freeSundaysAfterPeriod < 16 && booleanOrNull(body.year_end_period) === true) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0646',
+      severity: 'high',
+      message: `Aantal vrije zondagen dit jaar is ${freeSundaysAfterPeriod}; minimaal 16 vereist.`,
+      payroll_impact: false,
+      free_sundays_year_to_date: freeSundaysAfterPeriod,
+      min_free_sundays_per_year: 16,
+      manual_review_required: false
+    });
+  }
+
   const start = new Date(periodStart), end = new Date(periodEnd);
   const allDates = [];
   let cur = new Date(start);
-  while (cur <= end) { allDates.push(cur.toISOString().split('T')[0]); cur.setDate(cur.getDate() + 1); }
+  while (cur <= end) { allDates.push(formatIsoDateLocal(cur)); cur.setDate(cur.getDate() + 1); }
   const occupiedDates = new Set([
     ...serviceShifts.map(s => asIsoDate(s.date || s.service_date)).filter(Boolean),
     ...timeWindows.map(w => asIsoDate(w.date)).filter(Boolean)
@@ -1289,6 +1538,23 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
       night_thirteen_week_average: hasNightWork ? nightAverage13 : null,
       has_night_work: hasNightWork
     },
+    rest_time_summary: {
+      min_daily_rest_hours: 11,
+      seven_day_rest_windows: sevenDayRestResults,
+      fourteen_day_rest_windows: fourteenDayRestResults,
+      sundays_in_period: sundaysInPeriod,
+      worked_sundays_this_period: workedSundaysThisPeriod,
+      free_sundays_this_period: freeSundaysThisPeriod,
+      free_sundays_count_this_period: freeSundaysThisPeriod.length,
+      free_sundays_year_to_date: freeSundaysAfterPeriod,
+      source_rule_ids: [
+        'CAO-PB-2024-R0641',
+        'CAO-PB-2024-R0643',
+        'CAO-PB-2024-R0644',
+        'CAO-PB-2024-R0645',
+        'CAO-PB-2024-R0646'
+      ]
+    },
     minus_hours_summary: {
       agreed_period_hours: agreedPeriodHours === null ? null : round2(agreedPeriodHours),
       worked_period_hours: round2(totalHours),
@@ -1523,10 +1789,10 @@ Deno.serve(async (req) => {
     let pStart = period_start, pEnd = period_end;
     if (!pStart || !pEnd) {
       const now = new Date();
-      pStart = now.toISOString().split('T')[0];
+      pStart = formatIsoDateLocal(now);
       const fourWeeksLater = new Date(now);
       fourWeeksLater.setDate(fourWeeksLater.getDate() + 27);
-      pEnd = fourWeeksLater.toISOString().split('T')[0];
+      pEnd = formatIsoDateLocal(fourWeeksLater);
     }
 
     const result = validateSchedule(shifts, pStart, pEnd, caoScope, body);
