@@ -399,8 +399,7 @@
         "zzp",
         "unknown",
         null
-      ],
-      "description": "Contractvorm conform CAO PB"
+      ]
     },
     "contract_start_date": {
       "type": [
@@ -420,8 +419,7 @@
       "type": [
         "number",
         "null"
-      ],
-      "description": "Proeftijd in maanden conform CAO-berekening"
+      ]
     },
     "probation_period_source_rule_id": {
       "type": [
@@ -447,8 +445,7 @@
         "not_applicable",
         "unknown",
         null
-      ],
-      "description": "Beveiligingsfunctie-status conform CAO PB"
+      ]
     },
     "industry_seniority_pay_periods": {
       "type": [
@@ -467,15 +464,13 @@
       "type": [
         "boolean",
         "null"
-      ],
-      "description": "Doet medewerker normaal beveiligingswerk conform bijlage 2 CAO PB? Null = onbekend."
+      ]
     },
     "security_work_percentage": {
       "type": [
         "number",
         "null"
-      ],
-      "description": "Percentage arbeidsduur dat structureel beveiligingswerk/functiegroepwerk is (0-100)"
+      ]
     },
     "works_airport_schiphol": {
       "type": [
@@ -503,8 +498,7 @@
         "mixed_security_work_manual_review",
         "unknown_manual_review",
         null
-      ],
-      "description": "CAO-toepassingsprofiel op basis van artikel 3 lid 2 en functiegebouw"
+      ]
     },
     "cao_function_group": {
       "type": [
@@ -570,40 +564,82 @@
       "items": {
         "type": "string"
       },
-      "default": [],
-      "description": "Bronregel-IDs die de CAO-toepassingsbeslissing onderbouwen"
+      "default": []
     },
     "cao_applicability_warnings": {
       "type": "array",
       "items": {
         "type": "string"
       },
-      "default": [],
-      "description": "Waarschuwingen bij de laatste CAO-toepassingsbepaling"
+      "default": []
     },
     "cao_excluded_articles": {
       "type": "array",
       "items": {
         "type": "string"
       },
-      "default": [],
-      "description": "Uitgesloten CAO-artikelen conform artikel 3 lid 2"
+      "default": []
     },
     "cao_excluded_chapters": {
       "type": "array",
       "items": {
         "type": "string"
       },
-      "default": [],
-      "description": "Uitgesloten CAO-hoofdstukken conform artikel 3 lid 2"
+      "default": []
     },
     "cao_function_classification": {
       "type": [
         "object",
         "null"
       ],
-      "additionalProperties": true,
-      "description": "Functieindeling-resultaat van de laatste resolveCaoApplicability aanroep"
+      "additionalProperties": true
+    },
+    "cao_function_classification_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "resolved",
+        "manual_review_required",
+        "not_applicable",
+        null
+      ],
+      "description": "Status van de laatste resolveCaoFunctionClassification aanroep"
+    },
+    "cao_function_manual_review_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Redenen waarom handmatige review vereist is voor functie-indeling"
+    },
+    "cao_scale_validation_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "valid",
+        "invalid",
+        "not_applicable",
+        "manual_review_required",
+        null
+      ],
+      "description": "Validatiestatus van cao_scale t.o.v. bijlage 2 classificatie"
+    },
+    "cao_wage_rate_resolved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Tijdstip waarop uurloon succesvol is opgezocht in de loontabel"
+    },
+    "payroll_final_allowed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als loonberekening/payroll-export definitief mag zijn (geen openstaande reviews)"
     },
     "company_car_license_plate": {
       "type": "string"

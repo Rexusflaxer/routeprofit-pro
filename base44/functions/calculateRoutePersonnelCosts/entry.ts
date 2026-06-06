@@ -127,7 +127,11 @@ function buildRouteCostCacheFingerprint({ route, weekday, caoConfig, personnelLi
         scope_resolved_at: p.cao_applicability_resolved_at || null,
         scale: p.cao_scale || null,
         period: p.cao_period || null,
-        custom_rate: p.custom_hourly_rate || null
+        custom_rate: p.custom_hourly_rate || null,
+        function_group: p.cao_function_group || null,
+        function_level: p.cao_function_level || null,
+        classification_status: p.cao_function_classification_status || null,
+        classification_resolved_at: p.cao_wage_rate_resolved_at || null
       }))
       .sort((a, b) => a.id.localeCompare(b.id))
   });
@@ -190,10 +194,13 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
     };
   }
 
-  // Loondienst
+  // Loondienst — geen fallback naar schaal 3/periodiek 0
   let baseHourlyRate;
   if (personnel.cao === 'cao_particuliere_beveiliging') {
-    const rate = getCAOHourlyRate(personnel.cao_scale || 3, personnel.cao_period || 0, caoConfig);
+    if (personnel.cao_scale == null || personnel.cao_period == null) {
+      throw new Error(`CAO-schaal of periodiek niet ingesteld voor ${personnel.name}. Stel cao_scale en cao_period in.`);
+    }
+    const rate = getCAOHourlyRate(personnel.cao_scale, personnel.cao_period, caoConfig);
     if (rate === null) {
       throw new Error(`Geen uurloon gevonden voor schaal ${personnel.cao_scale}, periodiek ${personnel.cao_period} in CAO "${caoConfig.version_label || caoConfig.name}".`);
     }

@@ -274,6 +274,11 @@ function resolveApplicability(personnel, contract, work_context) {
     source_rule_ids.push('CAO-PB-2024-R0228', 'CAO-PB-2024-R0229', 'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232', 'CAO-PB-2024-R0233');
     warnings.push('Artikel 3 lid 2 CAO PB van toepassing: medewerker doet normaal geen beveiligingswerk. Hoofdstuk 4 (behalve art. 37/38/41), hoofdstuk 5 en bijlage 2 zijn niet van toepassing. Basisloon, vakantiegeld, eindejaarsuitkering en feestdagtoeslag blijven gelden.');
     const excludedRuleIds = ['CAO-PB-2024-R0229', 'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232', 'CAO-PB-2024-R0233'];
+    // Non-security functie-indeling: bijlage 2 expliciet uitgesloten → manual_review=false voor classificatie
+    const nonSecurityClassification = buildFunctionClassification(p, false, source_rule_ids, true);
+    // Overschrijf: bijlage 2 is uitgesloten, dus functie-indeling manual review is niet van toepassing
+    nonSecurityClassification.manual_review_required = false;
+
     return {
       cao_scope_profile: 'non_security_work_article_3_exception',
       applies_cao_pb: true,
@@ -289,8 +294,11 @@ function resolveApplicability(personnel, contract, work_context) {
         'CAO-PB-2024-R0233': 'Art. 3 lid 2: bijlage 2 functiegebouw/loontabel niet van toepassing.'
       },
       applicable_exceptions: ['article_3_lid2_non_security_work'],
-      function_classification: buildFunctionClassification(p, false, source_rule_ids, true),
+      function_classification: nonSecurityClassification,
       payroll_rule_profile: buildPayrollProfile('non_security'),
+      scope_manual_review_required: false,
+      function_classification_manual_review_required: false,
+      special_scope_manual_review_required: false,
       manual_review_required: false,
       confidence: 'high',
       warnings,

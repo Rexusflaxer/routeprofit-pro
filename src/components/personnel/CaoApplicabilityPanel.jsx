@@ -5,6 +5,7 @@ import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { AlertTriangle, CheckCircle2, Loader2, ShieldCheck, ShieldOff, XCircle, Info } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import CaoFunctionClassificationPanel from "@/components/personnel/CaoFunctionClassificationPanel";
 
 const SCOPE_LABELS = {
   full_security_worker: "Volledig beveiligingswerk (bijlage 2)",
@@ -246,6 +247,13 @@ export default function CaoApplicabilityPanel({ form, onChange, personnelId }) {
         {resolving ? <Loader2 className="w-4 h-4 animate-spin" /> : <ShieldCheck className="w-4 h-4" />}
         {resolving ? "Bezig met bepalen..." : "Bepaal CAO-toepassing"}
       </Button>
+
+      {/* Functie-indeling sectie — alleen tonen als scope bepaald is */}
+      {(scopeProfile || resolveResult?.success) && (
+        <div className="rounded-xl border border-border p-4 mt-2">
+          <CaoFunctionClassificationPanel form={form} onChange={onChange} personnelId={personnelId} />
+        </div>
+      )}
 
       {/* Resultaat na resolve */}
       {resolveResult && (

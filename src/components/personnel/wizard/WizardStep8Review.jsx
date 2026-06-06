@@ -1,5 +1,5 @@
 import React from "react";
-import { CheckCircle, AlertCircle, Clock } from "lucide-react";
+import { CheckCircle, AlertCircle, Clock, XCircle } from "lucide-react";
 
 function CheckItem({ ok, warn, label }) {
   if (ok) return (
@@ -36,6 +36,20 @@ export default function WizardStep8Review({ form, sensitiveData, idDoc, bankAcco
     if (diff <= 90) return "soon_90";
     return "ok";
   };
+
+  // CAO-checks
+  const scopeProfile = form.cao_scope_profile;
+  const isScopeResolved = !!scopeProfile && !['unknown_manual_review', 'mixed_security_work_manual_review'].includes(scopeProfile);
+  const isNonSecurity = scopeProfile === 'non_security_work_article_3_exception';
+  const classificationStatus = form.cao_function_classification_status;
+  const classificationOk = classificationStatus === 'resolved' || classificationStatus === 'not_applicable';
+  const scaleValidationStatus = form.cao_scale_validation_status;
+  const scaleOk = scaleValidationStatus === 'valid' || scaleValidationStatus === 'not_applicable';
+  const hasBasis = isNonSecurity
+    ? !!(form.custom_hourly_rate || (form.cao_scale != null && form.cao_period != null))
+    : !!(form.cao_scale != null && form.cao_period != null);
+  const payrollFinal = form.payroll_final_allowed === true;
+  const classificationManualReasons = form.cao_function_manual_review_reasons || [];
 
   const checks = [
     { label: "Naam/weergavenaam", ok: !!form.name },
@@ -95,6 +109,54 @@ export default function WizardStep8Review({ form, sensitiveData, idDoc, bankAcco
                 </div>
               );
             })}
+          </div>
+        </div>
+      )}
+
+      {/* CAO-checks */}
+      {isLoondienst && (
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">CAO-toepassingsprofiel & loonschaal</p>
+          <div className={`rounded-xl p-4 border space-y-2 ${payrollFinal ? "border-emerald-200 bg-emerald-50" : "border-amber-200 bg-amber-50"}`}>
+            <CheckItem ok={isScopeResolved} label={
+              isScopeResolved
+                ? `CAO-toepassing bepaald (${scopeProfile})`
+                : scopeProfile
+                  ? `CAO-toepassing vereist review (${scopeProfile})`
+                  : "CAO-toepassing nog niet bepaald"
+            } />
+            <CheckItem ok={classificationOk} warn={!classificationStatus} label={
+              classificationStatus === 'resolved' ? "Functie-indeling bijlage 2 bepaald"
+              : classificationStatus === 'not_applicable' ? "Bijlage 2 niet van toepassing (art. 3 lid 2)"
+              : classificationStatus === 'manual_review_required' ? "Functie-indeling vereist handmatige review"
+              : "Functie-indeling nog niet bepaald"
+            } />
+            <CheckItem ok={scaleOk} warn={!scaleValidationStatus} label={
+              scaleValidationStatus === 'valid' ? `Loonschaal geldig (schaal ${form.cao_scale}, periodiek ${form.cao_period})`
+              : scaleValidationStatus === 'not_applicable' ? "Loonschaal bijlage 2 niet van toepassing"
+              : scaleValidationStatus === 'invalid' ? `Loonschaal ongeldig – schaal ${form.cao_scale} wijkt af van bijlage 2 of periodiek ontbreekt`
+              : scaleValidationStatus === 'manual_review_required' ? "Loonschaal vereist handmatige review"
+              : "Loonschaal/periodiek nog niet gevalideerd"
+            } />
+            <CheckItem ok={hasBasis} label={
+              hasBasis ? "Loonbasis aanwezig" : "Loonbasis ontbreekt – stel schaal/periodiek of eigen tarief in"
+            } />
+            <CheckItem ok={payrollFinal} label={
+              payrollFinal
+                ? "Payroll-export toegestaan"
+                : "Payroll-export geblokkeerd – openstaande reviews"
+            } />
+
+            {classificationManualReasons.length > 0 && (
+              <div className="mt-2 pt-2 border-t border-amber-200 space-y-1">
+                <p className="text-xs font-semibold text-amber-800">Openstaande functiereview-punten:</p>
+                {classificationManualReasons.map((r, i) => (
+                  <div key={i} className="flex items-start gap-1.5 text-xs text-amber-700">
+                    <XCircle className="w-3 h-3 mt-0.5 shrink-0 text-red-500" />{r}
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       )}
