@@ -18,27 +18,188 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 
 // CAO Particuliere Beveiliging - Toeslagberekening
 // Feestdagen komen uit CAOConfiguration.holidays — GEEN hardcoded lijsten.
+const CAO_TIME_ZONE = 'Europe/Amsterdam';
+const AMSTERDAM_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: CAO_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+  hourCycle: 'h23'
+});
 
 function isHoliday(dateStr, caoConfig) {
   const holidays = (caoConfig && caoConfig.holidays) ? caoConfig.holidays : [];
   return holidays.some(h => h.date === dateStr);
 }
 
-function isNewYearsEveAfter16(date) {
-  const month = date.getMonth() + 1;
-  const day = date.getDate();
-  const hours = date.getHours();
-  return month === 12 && day === 31 && hours >= 16;
+function formatterParts(formatter, date) {
+  return Object.fromEntries(formatter.formatToParts(date).map(part => [part.type, part.value]));
+}
+
+function amsterdamInstantParts(date) {
+  const parts = formatterParts(AMSTERDAM_DATE_TIME_FORMATTER, date);
+  const dateStr = `${parts.year}-${parts.month}-${parts.day}`;
+  const hour = Number(parts.hour);
+  return {
+    date: dateStr,
+    hour,
+    minute: Number(parts.minute),
+    day_of_week: new Date(`${dateStr}T00:00:00Z`).getUTCDay()
+  };
+}
+
+function parseIsoDateParts(value) {
+  const match = String(value || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+}
+
+function parseClockParts(value) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours > 24 || minutes > 59 || (hours === 24 && minutes !== 0)) return null;
+  return { hours, minutes, total_minutes: hours * 60 + minutes };
+}
+
+function addDaysIso(dateStr, days) {
+  const parts = parseIsoDateParts(dateStr);
+  if (!parts) return null;
+  const date = new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days));
+  return date.toISOString().slice(0, 10);
+}
+
+function lastSundayOfMonthDay(year, monthNumber) {
+  const date = new Date(Date.UTC(year, monthNumber, 0));
+  date.setUTCDate(date.getUTCDate() - date.getUTCDay());
+  return date.getUTCDate();
+}
+
+function amsterdamDstTransitionDates(year) {
+  return {
+    spring_date: `${year}-03-${String(lastSundayOfMonthDay(year, 3)).padStart(2, '0')}`,
+    fall_date: `${year}-10-${String(lastSundayOfMonthDay(year, 10)).padStart(2, '0')}`
+  };
+}
+
+function amsterdamLocalTimeIssue(dateStr, time) {
+  const parts = parseIsoDateParts(dateStr);
+  const clock = parseClockParts(time);
+  if (!parts || !clock) return null;
+  const transitions = amsterdamDstTransitionDates(parts.year);
+  const iso = String(dateStr).slice(0, 10);
+  if (iso === transitions.spring_date && clock.total_minutes >= 120 && clock.total_minutes < 180) return 'nonexistent_spring_forward_hour';
+  if (iso === transitions.fall_date && clock.total_minutes >= 120 && clock.total_minutes < 180) return 'ambiguous_fall_back_hour';
+  return null;
+}
+
+function amsterdamOffsetMinutesForLocal(dateStr, time, role = 'start') {
+  const parts = parseIsoDateParts(dateStr);
+  const clock = parseClockParts(time);
+  if (!parts || !clock) return null;
+  const iso = String(dateStr).slice(0, 10);
+  const transitions = amsterdamDstTransitionDates(parts.year);
+  if (iso < transitions.spring_date || iso > transitions.fall_date) return 60;
+  if (iso > transitions.spring_date && iso < transitions.fall_date) return 120;
+  if (iso === transitions.spring_date) {
+    if (clock.total_minutes < 120) return 60;
+    if (clock.total_minutes >= 180) return 120;
+    return role === 'end' ? 120 : 60;
+  }
+  if (iso === transitions.fall_date) {
+    if (clock.total_minutes < 120) return 120;
+    if (clock.total_minutes >= 180) return 60;
+    return role === 'end' ? 60 : 120;
+  }
+  return 60;
+}
+
+function amsterdamWallTimeToDate(dateStr, time, role = 'start') {
+  const parts = parseIsoDateParts(dateStr);
+  const clock = parseClockParts(time);
+  const offsetMinutes = amsterdamOffsetMinutesForLocal(dateStr, time, role);
+  if (!parts || !clock || offsetMinutes === null) return null;
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, clock.hours, clock.minutes, 0) - offsetMinutes * 60000);
+}
+
+function buildCaoShiftInterval(dateStr, startTime, endTime, equalEndMeansNextDay = false) {
+  const start = amsterdamWallTimeToDate(dateStr, startTime, 'start');
+  const startClock = parseClockParts(startTime);
+  const endClock = parseClockParts(endTime);
+  if (!start || !startClock || !endClock) return null;
+  const endDate = endClock.total_minutes < startClock.total_minutes || (equalEndMeansNextDay && endClock.total_minutes === startClock.total_minutes)
+    ? addDaysIso(dateStr, 1)
+    : dateStr;
+  const end = amsterdamWallTimeToDate(endDate, endTime, 'end');
+  if (!end) return null;
+  return { start, end, end_date: endDate };
+}
+
+function wallClockHoursForTimes(startTime, endTime, equalEndMeansNextDay = false) {
+  const start = parseClockParts(startTime);
+  const end = parseClockParts(endTime);
+  if (!start || !end) return null;
+  let minutes = end.total_minutes - start.total_minutes;
+  if (minutes < 0 || (equalEndMeansNextDay && minutes === 0)) minutes += 24 * 60;
+  return minutes / 60;
+}
+
+function buildCaoTimeSegments(start, end) {
+  const segments = [];
+  let current = new Date(start);
+  while (current < end) {
+    const next = new Date(current);
+    next.setUTCHours(next.getUTCHours() + 1);
+    const segmentEnd = next <= end ? next : end;
+    segments.push({
+      start: new Date(current),
+      end: segmentEnd,
+      hours: (segmentEnd - current) / (1000 * 60 * 60)
+    });
+    current = segmentEnd;
+  }
+  return segments;
+}
+
+function getDstPayrollInfo(dateStr, startTime, endTime, actualHours, equalEndMeansNextDay = false) {
+  const startClock = parseClockParts(startTime);
+  const endClock = parseClockParts(endTime);
+  const endDate = startClock && endClock && (endClock.total_minutes < startClock.total_minutes || (equalEndMeansNextDay && endClock.total_minutes === startClock.total_minutes))
+    ? addDaysIso(dateStr, 1)
+    : dateStr;
+  const wallClockHours = wallClockHoursForTimes(startTime, endTime, equalEndMeansNextDay);
+  const startIssue = amsterdamLocalTimeIssue(dateStr, startTime);
+  const endIssue = endDate ? amsterdamLocalTimeIssue(endDate, endTime) : null;
+  const delta = wallClockHours === null ? 0 : r2(actualHours - wallClockHours);
+  if (!delta && !startIssue && !endIssue) return null;
+  return {
+    date: dateStr,
+    start_time: startTime,
+    end_time: endTime,
+    end_date: endDate,
+    actual_worked_hours: r2(actualHours),
+    wall_clock_hours: wallClockHours === null ? null : r2(wallClockHours),
+    dst_delta_hours: delta,
+    transition_type: delta > 0 ? 'winter_time_extra_hour' : delta < 0 ? 'summer_time_missing_hour' : 'ambiguous_or_nonexistent_local_time',
+    start_time_issue: startIssue,
+    end_time_issue: endIssue,
+    manual_review_required: !!startIssue || !!endIssue,
+    source_rule_ids: ['CAO-PB-2024-R0712', 'CAO-PB-2024-R0713']
+  };
 }
 
 function getSurchargeType(datetime, caoConfig) {
-  const date = new Date(datetime);
-  const dayOfWeek = date.getDay(); // 0=zondag, 6=zaterdag
-  const hours = date.getHours();
-  const dateStr = date.toISOString().split('T')[0];
+  const parts = amsterdamInstantParts(new Date(datetime));
+  const dayOfWeek = parts.day_of_week; // 0=zondag, 6=zaterdag
+  const hours = parts.hour;
+  const dateStr = parts.date;
 
   // Oudejaarsdag na 16:00 (hoogste toeslag)
-  if (isNewYearsEveAfter16(date)) {
+  if (dateStr.endsWith('-12-31') && hours >= 16) {
     return { type: 'new_years_eve', percentage: caoConfig.surcharge_new_years_eve_after_16 || 100 };
   }
 
@@ -766,7 +927,7 @@ Deno.serve(async (req) => {
     const personnel = await base44.entities.Personnel.get(personnel_id);
     
     // Bepaal referentiedatum op basis van de eerste dienst
-    const firstShiftDate = work_schedule[0]?.date || new Date().toISOString().split('T')[0];
+    const firstShiftDate = work_schedule[0]?.date || amsterdamInstantParts(new Date()).date;
     const refDate = new Date(firstShiftDate);
 
     // Haal ACTIEVE CAO op op basis van datum (niet op created_date)
@@ -958,20 +1119,26 @@ Deno.serve(async (req) => {
         return Response.json({ error: 'Elke dienst moet een datum, starttijd en eindtijd hebben' }, { status: 400 });
       }
 
-      let startDate = new Date(`${date}T${start_time}:00`);
-      let endDate = new Date(`${date}T${end_time}:00`);
+      const shiftInterval = buildCaoShiftInterval(date, start_time, end_time, false);
 
-      if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
+      if (!shiftInterval || Number.isNaN(shiftInterval.start.getTime()) || Number.isNaN(shiftInterval.end.getTime())) {
         return Response.json({ error: 'Ongeldige datum of tijd ingevuld' }, { status: 400 });
       }
       
-      // Bereken uren - corrigeer voor overnight shifts
-      let hoursWorked = (endDate - startDate) / (1000 * 60 * 60);
-      if (hoursWorked < 0) {
-        // Overnight shift - eindtijd is volgende dag
-        endDate = new Date(endDate);
-        endDate.setDate(endDate.getDate() + 1);
-        hoursWorked = (endDate - startDate) / (1000 * 60 * 60);
+      // CAO-tijdzone: betaal werkelijke uren in Europe/Amsterdam, inclusief zomer-/wintertijd.
+      const startDate = shiftInterval.start;
+      const endDate = shiftInterval.end;
+      const hoursWorked = Math.max(0, (endDate - startDate) / (1000 * 60 * 60));
+      const dstPayrollInfo = getDstPayrollInfo(date, start_time, end_time, hoursWorked, false);
+      if (dstPayrollInfo?.manual_review_required) {
+        payrollRuntimeReviewItems.push({
+          rule_id: 'CAO-PB-2024-R0712',
+          domain: 'dst_actual_worked_hours',
+          message: 'Dienst gebruikt een lokaal tijdstip in het ontbrekende of dubbele DST-uur; bevestig de werkelijk gemaakte uren.',
+          field: 'start_time/end_time'
+        });
+        runtimePayrollFinalAllowed = false;
+        runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
       }
       
       totalHours += hoursWorked;
@@ -980,20 +1147,15 @@ Deno.serve(async (req) => {
         // ZZP berekening (vereenvoudigd, zonder alle details)
         let zzpRate = personnel.zzp_hourly_rate_excl_vat || 0;
         
-        const dayOfWeek = startDate.getDay();
-        const isWeekend = dayOfWeek === 0 || dayOfWeek === 6;
-        const isHolidayDay = isHoliday(date, caoConfig);
-        const hours = startDate.getHours();
-        const isNight = hours >= 0 && hours < 7;
-        const isEvening = hours >= 18;
+        const startSurchargeType = getSurchargeType(startDate, caoConfig).type;
         
-        if (isHolidayDay && personnel.zzp_holiday_rate) {
+        if (['holiday', 'new_years_eve'].includes(startSurchargeType) && personnel.zzp_holiday_rate) {
           zzpRate = personnel.zzp_holiday_rate;
-        } else if (isWeekend && personnel.zzp_weekend_rate) {
+        } else if (startSurchargeType === 'weekend' && personnel.zzp_weekend_rate) {
           zzpRate = personnel.zzp_weekend_rate;
-        } else if (isNight && personnel.zzp_night_rate) {
+        } else if (startSurchargeType === 'night' && personnel.zzp_night_rate) {
           zzpRate = personnel.zzp_night_rate;
-        } else if (isEvening && personnel.zzp_evening_rate) {
+        } else if (startSurchargeType === 'evening' && personnel.zzp_evening_rate) {
           zzpRate = personnel.zzp_evening_rate;
         }
         
@@ -1008,7 +1170,8 @@ Deno.serve(async (req) => {
           rate_excl_vat: zzpRate,
           vat: vatAmount,
           type: 'zzp',
-          total: hourCostExclVat + vatAmount
+          total: hourCostExclVat + vatAmount,
+          dst_payroll_info: dstPayrollInfo
         });
         
       } else {
@@ -1018,16 +1181,10 @@ Deno.serve(async (req) => {
         const applyHolidays = caoScope.payroll_rule_profile?.apply_article_41_holidays !== false;
 
         // Loondienst berekening - verwerk dienst per uur voor correcte toeslagberekening
-        let currentTime = new Date(startDate);
-        const endTime = new Date(endDate);
-        
-        while (currentTime < endTime) {
-          const nextHour = new Date(currentTime);
-          nextHour.setHours(nextHour.getHours() + 1);
-          
-          const hoursThisSegment = nextHour <= endTime ? 1 : (endTime - currentTime) / (1000 * 60 * 60);
-          
-          const surchargeInfo = getSurchargeType(currentTime, caoConfig);
+        const timeSegments = buildCaoTimeSegments(startDate, endDate);
+        for (const segment of timeSegments) {
+          const hoursThisSegment = segment.hours;
+          const surchargeInfo = getSurchargeType(segment.start, caoConfig);
           let surchargeType = surchargeInfo.type;
           let surchargePercentage = surchargeInfo.percentage;
 
@@ -1073,8 +1230,6 @@ Deno.serve(async (req) => {
             payslip.surcharges.new_years_eve_100.rate = surchargeRatePerHour;
             payslip.surcharges.new_years_eve_100.amount += surchargeAmount;
           }
-          
-          currentTime = nextHour;
         }
 
         const minimumService = resolveMinimumServiceCompensation(shift, hoursWorked);
@@ -1167,6 +1322,7 @@ Deno.serve(async (req) => {
           start_time,
           end_time,
           hours: hoursWorked,
+          dst_payroll_info: dstPayrollInfo,
           base_rate: baseHourlyRate,
           minimum_service_compensation: {
             applies: minimumService.applies,

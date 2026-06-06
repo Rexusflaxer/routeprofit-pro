@@ -18,16 +18,152 @@ function isHoliday(dateStr, caoConfig) {
   return holidays.some(h => h.date === dateStr);
 }
 
-function isNewYearsEveAfter16(date) {
-  return date.getMonth() === 11 && date.getDate() === 31 && date.getHours() >= 16;
+const CAO_TIME_ZONE = 'Europe/Amsterdam';
+const AMSTERDAM_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: CAO_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+  hourCycle: 'h23'
+});
+
+function formatterParts(formatter, date) {
+  return Object.fromEntries(formatter.formatToParts(date).map(part => [part.type, part.value]));
+}
+
+function amsterdamInstantParts(date) {
+  const parts = formatterParts(AMSTERDAM_DATE_TIME_FORMATTER, date);
+  const dateStr = `${parts.year}-${parts.month}-${parts.day}`;
+  return {
+    date: dateStr,
+    hour: Number(parts.hour),
+    minute: Number(parts.minute),
+    day_of_week: new Date(`${dateStr}T00:00:00Z`).getUTCDay()
+  };
+}
+
+function parseIsoDateParts(value) {
+  const match = String(value || '').slice(0, 10).match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return { year: Number(match[1]), month: Number(match[2]), day: Number(match[3]) };
+}
+
+function parseClockParts(value) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours > 24 || minutes > 59 || (hours === 24 && minutes !== 0)) return null;
+  return { hours, minutes, total_minutes: hours * 60 + minutes };
+}
+
+function addDaysIso(dateStr, days) {
+  const parts = parseIsoDateParts(dateStr);
+  if (!parts) return null;
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day + days)).toISOString().slice(0, 10);
+}
+
+function lastSundayOfMonthDay(year, monthNumber) {
+  const date = new Date(Date.UTC(year, monthNumber, 0));
+  date.setUTCDate(date.getUTCDate() - date.getUTCDay());
+  return date.getUTCDate();
+}
+
+function amsterdamDstTransitionDates(year) {
+  return {
+    spring_date: `${year}-03-${String(lastSundayOfMonthDay(year, 3)).padStart(2, '0')}`,
+    fall_date: `${year}-10-${String(lastSundayOfMonthDay(year, 10)).padStart(2, '0')}`
+  };
+}
+
+function amsterdamLocalTimeIssue(dateStr, time) {
+  const parts = parseIsoDateParts(dateStr);
+  const clock = parseClockParts(time);
+  if (!parts || !clock) return null;
+  const transitions = amsterdamDstTransitionDates(parts.year);
+  const iso = String(dateStr).slice(0, 10);
+  if (iso === transitions.spring_date && clock.total_minutes >= 120 && clock.total_minutes < 180) return 'nonexistent_spring_forward_hour';
+  if (iso === transitions.fall_date && clock.total_minutes >= 120 && clock.total_minutes < 180) return 'ambiguous_fall_back_hour';
+  return null;
+}
+
+function amsterdamOffsetMinutesForLocal(dateStr, time, role = 'start') {
+  const parts = parseIsoDateParts(dateStr);
+  const clock = parseClockParts(time);
+  if (!parts || !clock) return null;
+  const iso = String(dateStr).slice(0, 10);
+  const transitions = amsterdamDstTransitionDates(parts.year);
+  if (iso < transitions.spring_date || iso > transitions.fall_date) return 60;
+  if (iso > transitions.spring_date && iso < transitions.fall_date) return 120;
+  if (iso === transitions.spring_date) {
+    if (clock.total_minutes < 120) return 60;
+    if (clock.total_minutes >= 180) return 120;
+    return role === 'end' ? 120 : 60;
+  }
+  if (iso === transitions.fall_date) {
+    if (clock.total_minutes < 120) return 120;
+    if (clock.total_minutes >= 180) return 60;
+    return role === 'end' ? 60 : 120;
+  }
+  return 60;
+}
+
+function amsterdamWallTimeToDate(dateStr, time, role = 'start') {
+  const parts = parseIsoDateParts(dateStr);
+  const clock = parseClockParts(time);
+  const offsetMinutes = amsterdamOffsetMinutesForLocal(dateStr, time, role);
+  if (!parts || !clock || offsetMinutes === null) return null;
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, clock.hours, clock.minutes, 0) - offsetMinutes * 60000);
+}
+
+function buildCaoShiftInterval(dateStr, startTime, endTime, equalEndMeansNextDay = true) {
+  const start = amsterdamWallTimeToDate(dateStr, startTime, 'start');
+  const startClock = parseClockParts(startTime);
+  const endClock = parseClockParts(endTime);
+  if (!start || !startClock || !endClock) return null;
+  const endDate = endClock.total_minutes < startClock.total_minutes || (equalEndMeansNextDay && endClock.total_minutes === startClock.total_minutes)
+    ? addDaysIso(dateStr, 1)
+    : dateStr;
+  const end = amsterdamWallTimeToDate(endDate, endTime, 'end');
+  if (!end) return null;
+  return { start, end, end_date: endDate };
+}
+
+function wallClockHoursForTimes(startTime, endTime, equalEndMeansNextDay = true) {
+  const start = parseClockParts(startTime);
+  const end = parseClockParts(endTime);
+  if (!start || !end) return null;
+  let minutes = end.total_minutes - start.total_minutes;
+  if (minutes < 0 || (equalEndMeansNextDay && minutes === 0)) minutes += 24 * 60;
+  return minutes / 60;
+}
+
+function buildCaoTimeSegments(start, end) {
+  const segments = [];
+  let current = new Date(start);
+  while (current < end) {
+    const next = new Date(current);
+    next.setUTCHours(next.getUTCHours() + 1);
+    const segmentEnd = next <= end ? next : end;
+    segments.push({
+      start: new Date(current),
+      end: segmentEnd,
+      hours: (segmentEnd - current) / (1000 * 60 * 60)
+    });
+    current = segmentEnd;
+  }
+  return segments;
 }
 
 function getSurchargeType(datetime, caoConfig) {
-  const date = new Date(datetime);
-  const dayOfWeek = date.getDay();
-  const hours = date.getHours();
-  const dateStr = date.toISOString().split('T')[0];
-  if (isNewYearsEveAfter16(date)) return { type: 'new_years_eve', percentage: caoConfig.surcharge_new_years_eve_after_16 || 100 };
+  const parts = amsterdamInstantParts(new Date(datetime));
+  const dayOfWeek = parts.day_of_week;
+  const hours = parts.hour;
+  const dateStr = parts.date;
+  if (dateStr.endsWith('-12-31') && hours >= 16) return { type: 'new_years_eve', percentage: caoConfig.surcharge_new_years_eve_after_16 || 100 };
   if (isHoliday(dateStr, caoConfig)) return { type: 'holiday', percentage: caoConfig.surcharge_holiday || 50 };
   if (dayOfWeek === 0 || dayOfWeek === 6) return { type: 'weekend', percentage: caoConfig.surcharge_weekend || 35 };
   if (hours >= 0 && hours < 7) return { type: 'night', percentage: caoConfig.surcharge_night || 20 };
@@ -37,13 +173,11 @@ function getSurchargeType(datetime, caoConfig) {
 
 function getNextDateForWeekday(routeWeekday) {
   const jsDay = routeWeekday === 7 ? 0 : routeWeekday;
-  const today = new Date();
-  const currentDay = today.getDay();
+  const todayIso = amsterdamInstantParts(new Date()).date;
+  const currentDay = new Date(`${todayIso}T00:00:00Z`).getUTCDay();
   let daysUntil = jsDay - currentDay;
   if (daysUntil <= 0) daysUntil += 7;
-  const targetDate = new Date(today);
-  targetDate.setDate(today.getDate() + daysUntil);
-  return targetDate.toISOString().split('T')[0];
+  return addDaysIso(todayIso, daysUntil);
 }
 
 function r2(n) { return Math.round(n * 100) / 100; }
@@ -220,10 +354,36 @@ function resolveShiftWageBasis(personnel, caoScope, classification) {
 }
 
 function calculateShiftHours(date, startTime, endTime) {
-  const startDate = new Date(`${date}T${startTime}:00`);
-  let endDate = new Date(`${date}T${endTime}:00`);
-  if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
-  return (endDate - startDate) / (1000 * 60 * 60);
+  const interval = buildCaoShiftInterval(date, startTime, endTime, true);
+  if (!interval) return 0;
+  return (interval.end - interval.start) / (1000 * 60 * 60);
+}
+
+function getRouteDstCalculationInfo(dateStr, startTime, endTime, actualHours) {
+  const startClock = parseClockParts(startTime);
+  const endClock = parseClockParts(endTime);
+  const endDate = startClock && endClock && (endClock.total_minutes < startClock.total_minutes || endClock.total_minutes === startClock.total_minutes)
+    ? addDaysIso(dateStr, 1)
+    : dateStr;
+  const wallClockHours = wallClockHoursForTimes(startTime, endTime, true);
+  const startIssue = amsterdamLocalTimeIssue(dateStr, startTime);
+  const endIssue = endDate ? amsterdamLocalTimeIssue(endDate, endTime) : null;
+  const delta = wallClockHours === null ? 0 : r2(actualHours - wallClockHours);
+  if (!delta && !startIssue && !endIssue) return null;
+  return {
+    date: dateStr,
+    start_time: startTime,
+    end_time: endTime,
+    end_date: endDate,
+    actual_hours: r2(actualHours),
+    wall_clock_hours: wallClockHours === null ? null : r2(wallClockHours),
+    dst_delta_hours: delta,
+    transition_type: delta > 0 ? 'winter_time_extra_hour' : delta < 0 ? 'summer_time_missing_hour' : 'ambiguous_or_nonexistent_local_time',
+    manual_review_required: !!startIssue || !!endIssue,
+    start_time_issue: startIssue,
+    end_time_issue: endIssue,
+    source_rule_ids: ['CAO-PB-2024-R0712', 'CAO-PB-2024-R0713']
+  };
 }
 
 async function resolveRouteContractContext(base44, personnel, route, shiftDate, functionType) {
@@ -349,10 +509,39 @@ function buildRouteCostCacheFingerprint({ route, weekday, caoConfig, personnelLi
 function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawScope, rawClassification) {
   const caoScope = normalizeCaoScope(rawScope);
   const classification = rawClassification || null;
-  const startDate = new Date(`${date}T${startTime}:00`);
-  let endDate = new Date(`${date}T${endTime}:00`);
-  if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
+  const shiftInterval = buildCaoShiftInterval(date, startTime, endTime, true);
+  if (!shiftInterval || Number.isNaN(shiftInterval.start.getTime()) || Number.isNaN(shiftInterval.end.getTime())) {
+    return {
+      base_hourly_rate: null,
+      total_hours: 0,
+      base_salary: 0,
+      surcharges_total: 0,
+      surcharge_details: [],
+      total_gross: 0,
+      employer_costs_total: 0,
+      employer_costs: {},
+      accruals_total: 0,
+      accruals: {},
+      total_cost_employer: 0,
+      cost_per_hour: 0,
+      cao_scope_profile: caoScope?.cao_scope_profile || null,
+      scope_warnings: ['Ongeldige datum of tijd in routekostenberekening.'],
+      wage_basis_type: 'invalid_shift_time',
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      calculation_status: 'blocked_invalid_shift_time',
+      cao_function_classification: classification,
+      cao_rule_application: {
+        cao_scope_profile: caoScope.cao_scope_profile,
+        manual_review_required: true,
+        source_rule_ids: caoScope.source_rule_ids || []
+      }
+    };
+  }
+  const startDate = shiftInterval.start;
+  const endDate = shiftInterval.end;
   const totalHours = (endDate - startDate) / (1000 * 60 * 60);
+  const dstCalculationInfo = getRouteDstCalculationInfo(date, startTime, endTime, totalHours);
 
   const profile = caoScope.payroll_rule_profile;
   const isScopeUnknown = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
@@ -367,6 +556,9 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
   } else if (!applySpecialHours) {
     scopeWarnings.push(`Artikel 3 lid 2 CAO PB (${caoScope.cao_scope_profile}): avond-/nacht-/weekendtoeslagen niet toegepast.`);
   }
+  if (dstCalculationInfo?.manual_review_required) {
+    scopeWarnings.push('Dienst gebruikt een lokaal tijdstip in het ontbrekende of dubbele DST-uur; bevestig de werkelijke route-/diensturen.');
+  }
 
   const caoRuleApplication = {
     cao_scope_profile: caoScope.cao_scope_profile,
@@ -374,20 +566,17 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
     applied_article_41_holidays: applyHolidays,
     applied_article_42_overtime: applyOvertimeAccrual,
     applied_chapter_5_reimbursements: !isScopeUnknown && (profile.apply_chapter_5_reimbursements === true),
-    manual_review_required: isScopeUnknown || caoScope.manual_review_required || false,
+    manual_review_required: isScopeUnknown || caoScope.manual_review_required || dstCalculationInfo?.manual_review_required || false,
     source_rule_ids: caoScope.source_rule_ids || []
   };
 
   if (personnel.employee_type === 'zzp') {
     let zzpRate = personnel.zzp_hourly_rate_excl_vat || 0;
-    const dow = startDate.getDay();
-    const isWeekend = dow === 0 || dow === 6;
-    const isHolidayDay = isHoliday(date, caoConfig);
-    const hrs = startDate.getHours();
-    if (isHolidayDay && personnel.zzp_holiday_rate) zzpRate = personnel.zzp_holiday_rate;
-    else if (isWeekend && personnel.zzp_weekend_rate) zzpRate = personnel.zzp_weekend_rate;
-    else if (hrs < 7 && personnel.zzp_night_rate) zzpRate = personnel.zzp_night_rate;
-    else if (hrs >= 18 && personnel.zzp_evening_rate) zzpRate = personnel.zzp_evening_rate;
+    const startSurchargeType = getSurchargeType(startDate, caoConfig).type;
+    if (['holiday', 'new_years_eve'].includes(startSurchargeType) && personnel.zzp_holiday_rate) zzpRate = personnel.zzp_holiday_rate;
+    else if (startSurchargeType === 'weekend' && personnel.zzp_weekend_rate) zzpRate = personnel.zzp_weekend_rate;
+    else if (startSurchargeType === 'night' && personnel.zzp_night_rate) zzpRate = personnel.zzp_night_rate;
+    else if (startSurchargeType === 'evening' && personnel.zzp_evening_rate) zzpRate = personnel.zzp_evening_rate;
     const costExclVat = zzpRate * totalHours;
     const vatAmount = costExclVat * 0.21;
     const totalCost = costExclVat + vatAmount;
@@ -401,11 +590,12 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
       cao_scope_profile: caoScope?.cao_scope_profile || null,
       scope_warnings: scopeWarnings,
       wage_basis_type: 'zzp_rate',
-      payroll_final_allowed: true,
-      manual_review_required: false,
-      calculation_status: 'final',
+      payroll_final_allowed: !dstCalculationInfo?.manual_review_required,
+      manual_review_required: !!dstCalculationInfo?.manual_review_required,
+      calculation_status: dstCalculationInfo?.manual_review_required ? 'concept_manual_review' : 'final',
       cao_function_classification: null,
-      cao_rule_application: caoRuleApplication
+      cao_rule_application: caoRuleApplication,
+      dst_calculation_info: dstCalculationInfo
     };
   }
 
@@ -442,12 +632,9 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
   let baseSalary = 0;
   const surchargeAmounts = { evening: 0, night: 0, weekend: 0, holiday: 0, new_years_eve: 0 };
 
-  let cur = new Date(startDate);
-  while (cur < endDate) {
-    const next = new Date(cur);
-    next.setHours(next.getHours() + 1);
-    const segHours = next <= endDate ? 1 : (endDate - cur) / (1000 * 60 * 60);
-    const surchargeInfo = getSurchargeType(cur, caoConfig);
+  for (const segment of buildCaoTimeSegments(startDate, endDate)) {
+    const segHours = segment.hours;
+    const surchargeInfo = getSurchargeType(segment.start, caoConfig);
     let surchargeType = surchargeInfo.type;
     let surchargePercentage = surchargeInfo.percentage;
 
@@ -471,7 +658,6 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
     if (surchargeType !== 'day') {
       surchargeAmounts[surchargeType] += baseHourlyRate * segHours * (surchargePercentage / 100);
     }
-    cur = next;
   }
 
   const surchargeLabels = {
@@ -525,11 +711,14 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
     cao_scope_profile: caoScope?.cao_scope_profile || null,
     scope_warnings: [...scopeWarnings, ...(wageBasis.warnings || [])],
     wage_basis_type: wageBasis.wage_basis_type,
-    payroll_final_allowed: wageBasis.payroll_final_allowed,
-    manual_review_required: wageBasis.manual_review_required,
-    calculation_status: wageBasis.calculation_status,
+    payroll_final_allowed: wageBasis.payroll_final_allowed && !dstCalculationInfo?.manual_review_required,
+    manual_review_required: wageBasis.manual_review_required || !!dstCalculationInfo?.manual_review_required,
+    calculation_status: dstCalculationInfo?.manual_review_required && wageBasis.calculation_status === 'final'
+      ? 'concept_manual_review'
+      : wageBasis.calculation_status,
     cao_function_classification: classification,
-    cao_rule_application: caoRuleApplication
+    cao_rule_application: caoRuleApplication,
+    dst_calculation_info: dstCalculationInfo
   };
 }
 

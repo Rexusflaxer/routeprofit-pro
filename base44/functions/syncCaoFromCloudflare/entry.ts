@@ -107,7 +107,7 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
     ]
   },
   'validateCaoScheduleRules.roster_period_constraints': {
-    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
     rule_ids: [
       'CAO-PB-2024-R0547', 'CAO-PB-2024-R0548', 'CAO-PB-2024-R0549',
       'CAO-PB-2024-R0560', 'CAO-PB-2024-R0561',
