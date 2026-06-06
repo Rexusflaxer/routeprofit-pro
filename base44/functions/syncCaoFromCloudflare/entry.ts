@@ -11,6 +11,7 @@ const PAYROLL_CRITICAL_DOMAINS = [
   'payroll', 'wage', 'wages', 'salary', 'loon', 'loontabel', 'allowance',
   'allowances', 'reimbursement', 'toeslag', 'surcharge', 'overtime',
   'overwerk', 'planning', 'schedule', 'rooster', 'contract', 'employment',
+  'probation', 'proeftijd', 'dismissal', 'termination', 'opzegging',
   'leave', 'vacation', 'holiday', 'sickness', 'ziekte', 'pension', 'fund',
   'function_classification', 'classification', 'bijlage_2'
 ];
@@ -46,7 +47,7 @@ function isPayrollCriticalRule(rule) {
     automationLevel === 'validation_or_policy' ||
     hasAnyNeedle(rule.domain, PAYROLL_CRITICAL_DOMAINS) ||
     hasAnyNeedle(rule.impact, ['payroll', 'calculation', 'planning', 'validation']) ||
-    hasAnyNeedle(rule.rule_id, ['R031', 'R037', 'R038', 'R039', 'R040', 'R041', 'R042', 'R043', 'R047', 'R048', 'R056', 'R057', 'R058', 'R059', 'R072', 'R073', 'R085', 'R087', 'R088', 'R089', 'R090', 'R099', 'R114', 'R115', 'R116', 'R160', 'R175', 'R181']);
+    hasAnyNeedle(rule.rule_id, ['R031', 'R032', 'R037', 'R038', 'R039', 'R040', 'R041', 'R042', 'R043', 'R047', 'R048', 'R056', 'R057', 'R058', 'R059', 'R072', 'R073', 'R085', 'R087', 'R088', 'R089', 'R090', 'R099', 'R114', 'R115', 'R116', 'R160', 'R175', 'R181']);
 }
 
 function evaluateCaoCoverageGate(candidateCfg, candidateRules) {

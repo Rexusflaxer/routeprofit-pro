@@ -83,6 +83,67 @@
       ],
       "description": "Reden voor afwijking van CAO-standaard proeftijd"
     },
+    "probation_period_manual_review_required": {
+      "type": "boolean",
+      "default": true,
+      "description": "True als proeftijd niet definitief automatisch uit de CAO kan worden vastgesteld."
+    },
+    "probation_period_validation_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "non_compliant",
+        "calculated_not_saved",
+        "manual_review_required",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Validatie van de vastgelegde proeftijd tegen de toepasselijke CAO-regel."
+    },
+    "cao_contract_rule_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "calculated",
+        "blocked",
+        "manual_review_required",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "default": "unknown",
+      "description": "Samenvattende status van de contractregel-runtime voor dit arbeidscontract."
+    },
+    "cao_contract_rule_checked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datetime waarop de CAO-contractregels voor dit contract zijn gecontroleerd."
+    },
+    "cao_contract_rule_source_rule_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "CAO-rule ids waarop de contractregeluitkomst is gebaseerd."
+    },
+    "cao_contract_rule_results": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Snapshot van toegepaste contractregels, o.a. proeftijd, grensdatums, warnings en violations."
+    },
     "security_role_status": {
       "type": "string",
       "enum": [
