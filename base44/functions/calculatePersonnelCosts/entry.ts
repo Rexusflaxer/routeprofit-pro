@@ -800,6 +800,142 @@ function getCaoPayrollReadiness(caoConfig) {
   };
 }
 
+function hasObjectValues(value) {
+  return value && typeof value === 'object' &&
+    Object.values(value).some(v => v !== null && v !== undefined && v !== '');
+}
+
+function shiftHasContractResolutionContext(shift) {
+  if (!shift || typeof shift !== 'object') return false;
+  return !!(
+    shift.contract_id ||
+    shift.company_id ||
+    shift.route_id ||
+    shift.task_id ||
+    shift.object_id ||
+    shift.function_type ||
+    shift.service_function_type ||
+    shift.required_function_type ||
+    shift.cao_function_group ||
+    shift.required_cao_function_group ||
+    shift.cao_function_level ||
+    shift.required_cao_function_level ||
+    shift.security_role_status ||
+    shift.required_security_role_status ||
+    shift.contract_assignment_policy ||
+    hasObjectValues(shift.service_context)
+  );
+}
+
+function shouldEnforceContractResolution({ body, workSchedule }) {
+  if (body.enforce_contract_resolution === true) return true;
+  if (
+    body.contract_id ||
+    body.company_id ||
+    body.route_id ||
+    body.task_id ||
+    body.object_id ||
+    hasObjectValues(body.service_context)
+  ) return true;
+  return (workSchedule || []).some(shiftHasContractResolutionContext);
+}
+
+function buildShiftContractServiceContext({ body, personnel, shift }) {
+  const bodyContext = body.service_context || {};
+  const shiftContext = shift.service_context || {};
+  const companyId = shift.company_id || body.company_id || shiftContext.company_id || bodyContext.company_id || null;
+  const objectId = shift.object_id || body.object_id || shiftContext.object_id || bodyContext.object_id || null;
+  return {
+    ...bodyContext,
+    ...shiftContext,
+    service_date: shift.date || shiftContext.service_date || bodyContext.service_date || null,
+    company_id: companyId,
+    object_id: objectId,
+    function_type: shift.function_type ||
+      shift.service_function_type ||
+      shift.required_function_type ||
+      shiftContext.function_type ||
+      bodyContext.function_type ||
+      personnel.function_type ||
+      null,
+    cao_function_group: shift.cao_function_group ||
+      shift.required_cao_function_group ||
+      shiftContext.cao_function_group ||
+      bodyContext.cao_function_group ||
+      personnel.cao_function_group ||
+      null,
+    cao_function_level: shift.cao_function_level ||
+      shift.required_cao_function_level ||
+      shiftContext.cao_function_level ||
+      bodyContext.cao_function_level ||
+      personnel.cao_function_level ||
+      null,
+    security_role_status: shift.required_security_role_status ||
+      shift.security_role_status ||
+      shiftContext.security_role_status ||
+      bodyContext.security_role_status ||
+      personnel.security_role_status ||
+      null,
+    contract_assignment_policy: shift.contract_assignment_policy ||
+      shiftContext.contract_assignment_policy ||
+      bodyContext.contract_assignment_policy ||
+      'strict_contract_match'
+  };
+}
+
+async function resolvePayrollContractContexts(base44, { body, personnel, personnelId, workSchedule }) {
+  const results = [];
+  const cache = {};
+  for (const [index, shift] of (workSchedule || []).entries()) {
+    const serviceContext = buildShiftContractServiceContext({ body, personnel, shift });
+    const payload = {
+      personnel_id: personnelId,
+      contract_id: shift.contract_id || body.contract_id || null,
+      route_id: shift.route_id || body.route_id || null,
+      task_id: shift.task_id || body.task_id || null,
+      object_id: serviceContext.object_id || null,
+      company_id: serviceContext.company_id || null,
+      service_date: serviceContext.service_date,
+      service_context: serviceContext
+    };
+    const cacheKey = JSON.stringify(payload);
+    if (!cache[cacheKey]) {
+      cache[cacheKey] = base44.asServiceRole.functions.invoke('resolvePersonnelContractForService', payload)
+        .then(res => res?.data || {
+          status: 'blocked_contract_resolution_empty',
+          planning_allowed: false,
+          payroll_final_allowed: false,
+          manual_review_required: true,
+          blocking_reasons: ['Contractresolver gaf geen resultaat terug.']
+        })
+        .catch(error => ({
+          status: 'blocked_contract_resolution_error',
+          planning_allowed: false,
+          payroll_final_allowed: false,
+          manual_review_required: true,
+          blocking_reasons: [`Contractresolver fout: ${error.message}`]
+        }));
+    }
+    const resolution = await cache[cacheKey];
+    results.push({
+      shift_index: index,
+      date: shift.date || null,
+      start_time: shift.start_time || null,
+      end_time: shift.end_time || null,
+      contract_resolution: resolution
+    });
+  }
+  return results;
+}
+
+function contractResolutionBlocksPayroll(result) {
+  const resolution = result?.contract_resolution || result || {};
+  return resolution.planning_allowed === false ||
+    resolution.payroll_final_allowed === false ||
+    resolution.manual_review_required === true ||
+    String(resolution.status || '').startsWith('blocked');
+}
+
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
@@ -809,10 +945,18 @@ Deno.serve(async (req) => {
       return Response.json({ error: 'Unauthorized' }, { status: 401 });
     }
 
+    const body = await req.json();
     const {
       personnel_id,
       work_schedule,
       force_cao_sync,
+      enforce_contract_resolution = false,
+      contract_id = null,
+      company_id = null,
+      route_id = null,
+      task_id = null,
+      object_id = null,
+      service_context = null,
       record_payroll_run = false,
       pay_period_year = null,
       pay_period_number = null,
@@ -827,7 +971,7 @@ Deno.serve(async (req) => {
       empty_run_hours = 0,
       other_paid_work_time_hours = 0,
       paid_absence_hours = 0
-    } = await req.json();
+    } = body;
 
     // ── Normaliseer CAO-scope: null = fail-closed (unknown_manual_review) ──
     function normalizeCaoScope(scope) {
@@ -969,6 +1113,48 @@ Deno.serve(async (req) => {
         payroll_final_allowed: false,
         calculation_status: 'blocked_cao_not_payroll_ready'
       }, { status: 400 });
+    }
+
+    const contractResolutionRequired = shouldEnforceContractResolution({ body, workSchedule: work_schedule });
+    let contractResolutionResults = [];
+    if (contractResolutionRequired) {
+      contractResolutionResults = await resolvePayrollContractContexts(base44, {
+        body: {
+          ...body,
+          enforce_contract_resolution,
+          contract_id,
+          company_id,
+          route_id,
+          task_id,
+          object_id,
+          service_context
+        },
+        personnel,
+        personnelId: personnel_id,
+        workSchedule: work_schedule
+      });
+      const blockedContractResolutions = contractResolutionResults.filter(contractResolutionBlocksPayroll);
+      if (blockedContractResolutions.length > 0) {
+        return Response.json({
+          error: 'Definitieve loonberekening geblokkeerd: niet alle diensten hebben een geldige contract-/bedrijf-/CAO-koppeling.',
+          cao_sync_status: caoSyncStatus,
+          calculation_warnings: [
+            ...calculationWarnings,
+            'Payroll geblokkeerd: contractresolver vereist handmatige review of vond geen passend contract voor een of meer diensten.'
+          ],
+          personnel_id,
+          cao_configuration_id: caoConfig.id,
+          cao_version_label: caoConfig.version_label || caoConfig.name,
+          cao_valid_from: caoConfig.valid_from,
+          cao_payroll_readiness: payrollReadiness,
+          contract_resolution_required: true,
+          contract_resolution_results: contractResolutionResults,
+          blocked_contract_resolution_count: blockedContractResolutions.length,
+          manual_review_required: true,
+          payroll_final_allowed: false,
+          calculation_status: 'blocked_contract_resolution'
+        }, { status: 400 });
+      }
     }
 
     let totalHours = 0;
@@ -1583,6 +1769,8 @@ Deno.serve(async (req) => {
       calculation_status: runtimeCalculationStatus,
       cao_function_classification: functionClassificationResult,
       cao_rule_application: caoRuleApplication,
+      contract_resolution_required: contractResolutionRequired,
+      contract_resolution_results: contractResolutionResults,
       payroll_runtime_review_items: payrollRuntimeReviewItems,
       employee_type: personnel.employee_type,
       cao_scale: personnel.cao_scale,
@@ -1746,6 +1934,14 @@ Deno.serve(async (req) => {
         calculation_input: {
           personnel_id,
           work_schedule,
+          enforce_contract_resolution: contractResolutionRequired,
+          contract_id,
+          company_id,
+          route_id,
+          task_id,
+          object_id,
+          service_context,
+          contract_resolution_results: contractResolutionResults,
           work_schedule_is_full_pay_period,
           paid_absence_hours,
           vacation_hours,
