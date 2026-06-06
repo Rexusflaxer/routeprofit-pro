@@ -6,6 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Upload, Eye, EyeOff, Lock } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import ContractRulesPanel from "@/components/personnel/ContractRulesPanel";
+import CaoApplicabilityPanel from "@/components/personnel/CaoApplicabilityPanel";
 
 export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSensitiveChange, personnelId }) {
   const [showBsn, setShowBsn] = useState(false);
@@ -20,6 +21,11 @@ export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSe
 
   return (
     <div className="space-y-6">
+      {/* CAO PB toepassingsprofiel */}
+      <div className="rounded-xl border border-border p-4">
+        <CaoApplicabilityPanel form={form} onChange={onChange} personnelId={personnelId} />
+      </div>
+
       {/* Contract & CAO-regels */}
       <ContractRulesPanel form={form} onChange={onChange} personnelId={personnelId} />
 

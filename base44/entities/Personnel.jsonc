@@ -314,6 +314,13 @@
       ],
       "default": "surveillant"
     },
+    "job_title_raw": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Vrije functietitel, bijv. Klantrelatie medewerker"
+    },
     "employee_type": {
       "type": "string",
       "enum": [
@@ -459,6 +466,109 @@
       ],
       "format": "date",
       "description": "Startdatum brancheancienniteit"
+    },
+    "performs_security_work": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Doet medewerker normaal beveiligingswerk conform bijlage 2 CAO PB?"
+    },
+    "security_work_percentage": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Percentage arbeidsduur dat structureel beveiligingswerk/functiegroepwerk is"
+    },
+    "works_airport_schiphol": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Medewerker werkt structureel op Schiphol (bijzondere CAO-scope)"
+    },
+    "works_cash_value_logistics": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Medewerker werkt in geld- en waardelogistiek"
+    },
+    "cao_scope_profile": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "full_security_worker",
+        "non_security_work_article_3_exception",
+        "excluded_event_hospitality_security",
+        "cash_value_logistics",
+        "airport_schiphol",
+        "unknown_manual_review",
+        null
+      ],
+      "description": "CAO-toepassingsprofiel op basis van artikel 3 lid 2 en functiegebouw"
+    },
+    "cao_function_group": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "objectbeveiliger_receptionist",
+        "mobiel_surveillant",
+        "winkelsurveillant",
+        "brandwacht",
+        "geld_waardetransporteur",
+        "centralist",
+        "non_security_staff",
+        "unknown",
+        null
+      ]
+    },
+    "cao_function_level": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "aspirant",
+        "a",
+        "b",
+        "c",
+        "d",
+        "e",
+        "leidinggevend",
+        "not_applicable",
+        "unknown",
+        null
+      ]
+    },
+    "cao_applicability_manual_review_required": {
+      "type": "boolean",
+      "default": true
+    },
+    "cao_applicability_resolved_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "cao_excluded_rule_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "cao_applicable_rule_profile": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
     },
     "company_car_license_plate": {
       "type": "string"

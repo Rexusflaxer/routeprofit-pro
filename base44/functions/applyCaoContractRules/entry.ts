@@ -169,6 +169,15 @@ Deno.serve(async (req) => {
       revision: syncResult?.revision || null
     };
 
+    // ── CAO-toepassingscheck ──
+    let caoScope = null;
+    if (personnel_id) {
+      try {
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
+        caoScope = scopeRes?.data || null;
+      } catch { /* stille fallback */ }
+    }
+
     if (action === 'calculate_probation') {
       const result = calculateProbationPeriod(body);
 
@@ -180,7 +189,12 @@ Deno.serve(async (req) => {
         });
       }
 
-      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
+      // Aspirant-beveiliger specifieke regels alleen als scope dat ondersteunt
+      const scopeWarnings = [];
+      if (caoScope && body.security_role_status === 'aspirant_beveiliger' && !caoScope.applies_full_security_rules) {
+        scopeWarnings.push({ message: 'Aspirant-beveiliger regels niet van toepassing: medewerker valt onder artikel 3 lid 2 (geen beveiligingswerk).', cao_scope_profile: caoScope.cao_scope_profile });
+      }
+      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, scope_warnings: scopeWarnings, cao_scope_profile: caoScope?.cao_scope_profile || null, ...result });
     }
 
     if (action === 'validate_dismissal') {
@@ -198,12 +212,12 @@ Deno.serve(async (req) => {
         }
       }
       const result = validateProbationDismissal({ ...body, base_hourly_rate: baseHourlyRate });
-      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
+      return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, cao_scope_profile: caoScope?.cao_scope_profile || null, ...result });
     }
 
     // Default: bereken proeftijd
     const result = calculateProbationPeriod(body);
-    return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
+    return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, cao_scope_profile: caoScope?.cao_scope_profile || null, ...result });
 
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

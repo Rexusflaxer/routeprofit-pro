@@ -117,7 +117,7 @@ Deno.serve(async (req) => {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const { action, km_one_way, km_driven, hours_worked, start_time, shifts, force_cao_sync } = body;
+    const { action, km_one_way, km_driven, hours_worked, start_time, shifts, force_cao_sync, personnel_id } = body;
 
     // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
@@ -131,6 +131,31 @@ Deno.serve(async (req) => {
       reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
       revision: syncResult?.revision || null
     };
+
+    // ── CAO-toepassingscheck (hoofdstuk 5 vergoedingen) ──
+    let caoScope = null;
+    const scopeWarnings = [];
+    if (personnel_id) {
+      try {
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
+        caoScope = scopeRes?.data || null;
+      } catch { /* stille fallback */ }
+    }
+    if (caoScope && !caoScope.payroll_rule_profile?.apply_chapter_5_reimbursements) {
+      scopeWarnings.push({
+        rule_ids: caoScope.excluded_rule_ids || [],
+        message: 'Hoofdstuk 5 vergoedingen zijn niet van toepassing op deze medewerker (artikel 3 lid 2 CAO PB). Reiskosten en maaltijdvergoeding worden niet automatisch berekend.',
+        cao_scope_profile: caoScope.cao_scope_profile
+      });
+      return Response.json({
+        success: true,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [...syncWarnings],
+        scope_warnings: scopeWarnings,
+        chapter_5_skipped: true,
+        cao_scope_profile: caoScope.cao_scope_profile
+      });
+    }
 
     const result = {};
 
@@ -162,7 +187,7 @@ Deno.serve(async (req) => {
       { rule_id: 'CAO-PB-2024-R0905', domain: 'jubileum', message: 'Jubileumvergoeding: handmatige review vereist (CAO art. 54)', manual_review_required: true }
     ];
 
-    return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, ...result });
+    return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, scope_warnings: scopeWarnings, cao_scope_profile: caoScope?.cao_scope_profile || null, ...result });
 
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

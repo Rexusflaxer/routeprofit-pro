@@ -116,6 +116,19 @@ Deno.serve(async (req) => {
 
     const { personnel_id, work_schedule, force_cao_sync } = await req.json();
 
+    // ── CAO-toepassingscheck ──
+    let caoScope = null;
+    if (personnel_id) {
+      try {
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
+        caoScope = scopeRes?.data || null;
+      } catch { /* stille fallback */ }
+    }
+    const scopeWarnings = [];
+    if (caoScope && !caoScope.applies_full_security_rules) {
+      scopeWarnings.push({ message: `CAO-toepassingsprofiel: ${caoScope.cao_scope_profile}. Bijzondere-urensurcharges (art. 40) en dienstruilvergoedingen (art. 43) worden niet toegepast.`, cao_scope_profile: caoScope.cao_scope_profile });
+    }
+
     // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
 
@@ -320,6 +333,11 @@ Deno.serve(async (req) => {
         });
         
       } else {
+        // CAO-scope gate: bijzondere uren (art. 40) alleen als volledig beveiligingswerk
+        const applySpecialHours = !caoScope || caoScope.payroll_rule_profile?.apply_article_40_special_hours !== false;
+        // Feestdagtoeslag (art. 41) altijd als holidays gelden (ook art. 3 lid 2)
+        const applyHolidays = !caoScope || caoScope.payroll_rule_profile?.apply_article_41_holidays !== false;
+
         // Loondienst berekening - verwerk dienst per uur voor correcte toeslagberekening
         let currentTime = new Date(startDate);
         const endTime = new Date(endDate);
@@ -331,8 +349,19 @@ Deno.serve(async (req) => {
           const hoursThisSegment = nextHour <= endTime ? 1 : (endTime - currentTime) / (1000 * 60 * 60);
           
           const surchargeInfo = getSurchargeType(currentTime, caoConfig);
-          const surchargeType = surchargeInfo.type;
-          const surchargePercentage = surchargeInfo.percentage;
+          let surchargeType = surchargeInfo.type;
+          let surchargePercentage = surchargeInfo.percentage;
+
+          // Pas scope-gates toe: bijzondere uren en weekendtoeslagen alleen bij full_security/art.40
+          if (!applySpecialHours && ['evening', 'night', 'weekend'].includes(surchargeType)) {
+            surchargeType = 'day';
+            surchargePercentage = 0;
+          }
+          // Feestdagtoeslag altijd als applyHolidays
+          if (!applyHolidays && surchargeType === 'holiday') {
+            surchargeType = 'day';
+            surchargePercentage = 0;
+          }
           
           hoursByType[surchargeType] += hoursThisSegment;
           
@@ -529,6 +558,8 @@ Deno.serve(async (req) => {
     return Response.json({
       personnel_id,
       personnel_name: personnel.name,
+      cao_scope_profile: caoScope?.cao_scope_profile || null,
+      scope_warnings: scopeWarnings,
       employee_type: personnel.employee_type,
       cao_scale: personnel.cao_scale,
       cao_period: personnel.cao_period,

@@ -198,6 +198,15 @@ Deno.serve(async (req) => {
 
     // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
+
+    // ── CAO-toepassingscheck (beveiligingsspecifieke planningregels) ──
+    let caoScope = null;
+    if (personnel_id) {
+      try {
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
+        caoScope = scopeRes?.data || null;
+      } catch { /* stille fallback */ }
+    }
     const syncWarnings = [];
     if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
     if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
@@ -228,6 +237,20 @@ Deno.serve(async (req) => {
       revision: syncResult?.revision || null
     };
 
+    // Voeg scope-waarschuwingen toe als beveiligingsspecifieke regels niet gelden
+    const scopeWarnings = [];
+    if (caoScope && !caoScope.applies_full_security_rules) {
+      scopeWarnings.push({
+        message: 'Beveiligingsspecifieke planningregels (hoofdstuk 3/4 CAO PB) gelden niet voor deze medewerker. Violaties vereisen handmatige review.',
+        cao_scope_profile: caoScope.cao_scope_profile,
+        rule_ids: caoScope.excluded_rule_ids || []
+      });
+      // Markeer alle high-severity violations als manual_review_required
+      if (result.violations) {
+        result.violations = result.violations.map(v => ({ ...v, manual_review_required: true }));
+      }
+    }
+
     return Response.json({
       success: true,
       period_start: pStart,
@@ -235,6 +258,9 @@ Deno.serve(async (req) => {
       personnel_id: personnel_id || null,
       cao_sync_status: caoSyncStatus,
       calculation_warnings: syncWarnings,
+      scope_warnings: scopeWarnings,
+      cao_scope_profile: caoScope?.cao_scope_profile || null,
+      applies_full_security_rules: caoScope?.applies_full_security_rules ?? null,
       ...result
     });
 

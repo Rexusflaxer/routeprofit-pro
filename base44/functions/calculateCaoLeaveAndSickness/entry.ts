@@ -126,7 +126,7 @@ Deno.serve(async (req) => {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const { action, force_cao_sync } = body;
+    const { action, force_cao_sync, personnel_id } = body;
 
     // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
@@ -140,6 +140,15 @@ Deno.serve(async (req) => {
       reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
       revision: syncResult?.revision || null
     };
+
+    // ── CAO-toepassingscheck ──
+    let caoScope = null;
+    if (personnel_id) {
+      try {
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
+        caoScope = scopeRes?.data || null;
+      } catch { /* stille fallback */ }
+    }
 
     if (action === 'calculate_vacation_accrual') {
       const result = calculateVacationAccrual(body);
@@ -156,10 +165,20 @@ Deno.serve(async (req) => {
     const vacation = calculateVacationAccrual(body);
     const sickness = body.sickness_start_date ? calculateSicknessPayment(body) : null;
 
+    const scopeWarnings = [];
+    if (caoScope && !caoScope.applies_full_security_rules) {
+      scopeWarnings.push({
+        message: 'Medewerker valt onder artikel 3 lid 2 CAO PB — beveiligingsspecifieke verlof-/ziektieregels zijn mogelijk niet van toepassing.',
+        cao_scope_profile: caoScope.cao_scope_profile
+      });
+    }
+
     return Response.json({
       success: true,
       cao_sync_status: caoSyncStatus,
       calculation_warnings: syncWarnings,
+      scope_warnings: scopeWarnings,
+      cao_scope_profile: caoScope?.cao_scope_profile || null,
       vacation_accrual: vacation,
       sickness_payment: sickness
     });
