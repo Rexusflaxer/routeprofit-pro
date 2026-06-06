@@ -386,16 +386,28 @@ function getRouteDstCalculationInfo(dateStr, startTime, endTime, actualHours) {
   };
 }
 
-async function resolveRouteContractContext(base44, personnel, route, shiftDate, functionType) {
+async function resolveRouteContractContext(base44, personnel, route, shiftDate, functionType, options = {}) {
   if (!route.operating_company_id) {
+    if (options.allow_legacy_companyless_route_costing === true) {
+      return {
+        status: 'legacy_companyless_route_concept_only',
+        planning_allowed: true,
+        payroll_final_allowed: false,
+        manual_review_required: true,
+        company_id: null,
+        contract_id: null,
+        note: 'Route heeft geen operating_company_id; legacy routekostenflow is alleen concept en nooit payroll-final.',
+        manual_review_reasons: ['Koppel de route aan een uitvoerend bedrijf voordat planning/payroll definitief mag worden.']
+      };
+    }
     return {
-      status: 'not_required_legacy_route',
-      planning_allowed: true,
-      payroll_final_allowed: true,
-      manual_review_required: false,
+      status: 'blocked_missing_operating_company',
+      planning_allowed: false,
+      payroll_final_allowed: false,
+      manual_review_required: true,
       company_id: null,
       contract_id: null,
-      note: 'Route heeft geen operating_company_id; legacy routekostenflow gebruikt medewerker-CAO velden.'
+      blocking_reasons: ['Route heeft geen operating_company_id; uitvoerend bedrijf is verplicht om contract en CAO-context te bepalen.']
     };
   }
 
@@ -728,7 +740,14 @@ Deno.serve(async (req) => {
     const user = await base44.auth.me();
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
-    const { route_id, weekday, force_recalculate, force_cao_sync } = await req.json();
+    const body = await req.json();
+    const {
+      route_id,
+      weekday,
+      force_recalculate,
+      force_cao_sync,
+      allow_legacy_companyless_route_costing = false
+    } = body;
 
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
     const syncWarnings = [];
@@ -826,7 +845,7 @@ Deno.serve(async (req) => {
       route, weekday: targetWeekday, caoConfig, personnelList: allPersonnelForCache
     });
     const cacheKey = `${targetWeekday}`;
-    const usesContractResolution = !!route.operating_company_id;
+    const usesContractResolution = !!route.operating_company_id || allow_legacy_companyless_route_costing !== true;
     if (!force_recalculate && !usesContractResolution && route.cached_personnel_costs?.[cacheKey]) {
       const cached = route.cached_personnel_costs[cacheKey];
       if (cached._cache_fingerprint === fingerprint) {
@@ -854,7 +873,7 @@ Deno.serve(async (req) => {
         .catch(() => ({ id: p.id, classification: null }));
     });
     const contractPromises = allPersonnelForCache.map(p =>
-      resolveRouteContractContext(base44, p, route, shiftDate, p.function_type)
+      resolveRouteContractContext(base44, p, route, shiftDate, p.function_type, { allow_legacy_companyless_route_costing })
         .then(contractResolution => ({ id: p.id, contract_resolution: contractResolution }))
         .catch(error => ({
           id: p.id,
