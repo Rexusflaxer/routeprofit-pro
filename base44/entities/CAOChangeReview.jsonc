@@ -11,6 +11,13 @@
         "null"
       ]
     },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "CAO sleutel waarop deze wijziging ziet, bijv. cao_particuliere_beveiliging."
+    },
     "rule_key": {
       "type": "string"
     },

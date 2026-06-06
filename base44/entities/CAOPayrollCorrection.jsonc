@@ -46,6 +46,13 @@
         "null"
       ]
     },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "CAO sleutel waarop deze correctie ziet. Voorkomt dat retroactieve wijzigingen van de ene CAO loonruns van een andere CAO raken."
+    },
     "cao_revision": {
       "type": [
         "string",

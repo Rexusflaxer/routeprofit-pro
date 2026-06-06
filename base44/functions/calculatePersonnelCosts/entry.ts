@@ -1129,9 +1129,17 @@ Deno.serve(async (req) => {
     // Bepaal referentiedatum op basis van de eerste dienst
     const firstShiftDate = work_schedule[0]?.date || amsterdamInstantParts(new Date()).date;
     const refDate = new Date(firstShiftDate);
+    const targetCaoKey = body.cao_key ||
+      service_context?.cao_key ||
+      personnel.cao ||
+      'cao_particuliere_beveiliging';
 
-    // Haal ACTIEVE CAO op op basis van datum (niet op created_date)
-    const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({ status: 'active' });
+    // Haal ACTIEVE CAO op basis van cao_key + datum (niet op created_date).
+    // Zonder cao_key-filter kan een PB-loonrun per ongeluk een andere actieve CAO pakken.
+    const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({
+      status: 'active',
+      cao_key: targetCaoKey
+    });
     const eligibleCaos = allCaos.filter(c => {
       if (c.valid_from && new Date(c.valid_from) > refDate) return false;
       if (c.valid_until && new Date(c.valid_until) < refDate) return false;
@@ -1146,9 +1154,9 @@ Deno.serve(async (req) => {
     const caoConfig = eligibleCaos[0];
     if (!caoConfig) {
       return Response.json({
-        error: `Geen actieve CAO-configuratie gevonden voor datum ${firstShiftDate}. Activeer eerst een CAO-configuratie.`,
+        error: `Geen actieve CAO-configuratie gevonden voor ${targetCaoKey} op datum ${firstShiftDate}. Activeer eerst een passende CAO-configuratie.`,
         cao_sync_status: caoSyncStatus,
-        calculation_warnings: [...calculationWarnings, `Geen actieve CAO voor ${firstShiftDate}`]
+        calculation_warnings: [...calculationWarnings, `Geen actieve CAO ${targetCaoKey} voor ${firstShiftDate}`]
       }, { status: 400 });
     }
 
@@ -1891,6 +1899,7 @@ Deno.serve(async (req) => {
       base_hourly_rate: baseHourlyRate,
       // CAO metadata
       cao_configuration_id: caoConfig.id,
+      cao_key: caoConfig.cao_key || targetCaoKey,
       cao_version_label: caoConfig.version_label || caoConfig.name,
       cao_revision: caoConfig.cloudflare_revision || null,
       cao_valid_from: caoConfig.valid_from,
@@ -2031,6 +2040,7 @@ Deno.serve(async (req) => {
         personnel_id,
         route_id: null,
         cao_configuration_id: caoConfig.id,
+        cao_key: caoConfig.cao_key || targetCaoKey,
         cao_version_label: caoConfig.version_label || caoConfig.name,
         cao_revision: caoConfig.cloudflare_revision || null,
         cao_payroll_readiness_status: caoConfig.payroll_readiness_status || null,
@@ -2073,6 +2083,7 @@ Deno.serve(async (req) => {
           pay_period_start: responsePayload.pay_period_start,
           pay_period_end: responsePayload.pay_period_end,
           cao_configuration_id: caoConfig.id,
+          cao_key: caoConfig.cao_key || targetCaoKey,
           cao_revision: caoConfig.cloudflare_revision || null,
           cao_rule_registry_fingerprint: caoRuleRegistrySnapshot.fingerprint,
           cao_rule_registry_verified_at: caoRuleRegistrySnapshot.verified_at

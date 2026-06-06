@@ -1068,6 +1068,7 @@ Deno.serve(async (req) => {
       const review = await base44.asServiceRole.entities.CAOChangeReview.create({
         import_run_id: importRun.id,
         cao_configuration_id: configId,
+        cao_key: candidate_configuration.cao_key || null,
         rule_key: change.rule_key || change.field_path || 'unknown',
         field_path: change.field_path || '',
         old_value: change.old_value ?? null,

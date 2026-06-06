@@ -39,11 +39,35 @@ function isFinalizedPayrollRun(run) {
     !!run.payroll_paid_at;
 }
 
+function indexById(records) {
+  return (records || []).reduce((acc, record) => {
+    if (record?.id) acc[record.id] = record;
+    return acc;
+  }, {});
+}
+
+function resolveReviewCaoKey(review, configById) {
+  return review?.cao_key ||
+    configById[review?.cao_configuration_id]?.cao_key ||
+    null;
+}
+
+function resolveRunCaoKey(run, configById) {
+  return run?.cao_key ||
+    configById[run?.cao_configuration_id]?.cao_key ||
+    null;
+}
+
+function runMatchesReviewCao(run, reviewCaoKey, configById) {
+  const runCaoKey = resolveRunCaoKey(run, configById);
+  return !!reviewCaoKey && !!runCaoKey && runCaoKey === reviewCaoKey;
+}
+
 function buildCorrectionKey(review, run) {
   return `${review.id}::${run?.id || 'unmatched'}`;
 }
 
-function buildCorrectionData(review, run, status, reason) {
+function buildCorrectionData(review, run, status, reason, caoKey = null) {
   return {
     correction_key: buildCorrectionKey(review, run),
     cao_change_review_id: review.id,
@@ -53,6 +77,7 @@ function buildCorrectionData(review, run, status, reason) {
     personnel_id: run?.personnel_id || null,
     route_id: run?.route_id || null,
     cao_configuration_id: review.cao_configuration_id || run?.cao_configuration_id || null,
+    cao_key: caoKey || review.cao_key || run?.cao_key || null,
     cao_revision: run?.cao_revision || null,
     rule_key: review.rule_key || null,
     field_path: review.field_path || null,
@@ -155,21 +180,49 @@ Deno.serve(async (req) => {
       r.status === 'applied'
     );
 
-    const payrollRuns = await base44.asServiceRole.entities.PayrollCalculationRun.list();
+    const [payrollRuns, caoConfigs] = await Promise.all([
+      base44.asServiceRole.entities.PayrollCalculationRun.list(),
+      base44.asServiceRole.entities.CAOConfiguration.list()
+    ]);
+    const configById = indexById(caoConfigs || []);
     const createdCorrectionIds = [];
     const updatedCorrectionIds = [];
     const unmatchedReviewIds = [];
+    const unverifiableReviewIds = [];
     const markedPayrollRunIds = [];
 
     for (const review of correctionReviews) {
-      const affectedRuns = payrollRuns.filter(run => runTouchesReview(run, review));
+      const reviewCaoKey = resolveReviewCaoKey(review, configById);
+      if (!reviewCaoKey) {
+        const data = buildCorrectionData(
+          review,
+          null,
+          'manual_review_required',
+          'CAO-wijziging mist cao_key en gekoppelde CAOConfiguration kon niet worden herleid; automatische correctiematching is geblokkeerd om cross-CAO fouten te voorkomen.'
+        );
+        const saved = await upsertCorrection(base44, data);
+        if (saved.created) createdCorrectionIds.push(saved.id);
+        else updatedCorrectionIds.push(saved.id);
+        unmatchedReviewIds.push(review.id);
+        unverifiableReviewIds.push(review.id);
+        await base44.asServiceRole.entities.CAOChangeReview.update(review.id, {
+          correction_status: 'manual_review_required'
+        });
+        continue;
+      }
+
+      const affectedRuns = payrollRuns.filter(run =>
+        runMatchesReviewCao(run, reviewCaoKey, configById) &&
+        runTouchesReview(run, review)
+      );
 
       if (affectedRuns.length === 0) {
         const data = buildCorrectionData(
           review,
           null,
           'skipped_no_affected_run',
-          'Geen bestaande PayrollCalculationRun gevonden die overlapt met de ingangsdatum van de CAO-wijziging.'
+          `Geen bestaande PayrollCalculationRun voor CAO ${reviewCaoKey} gevonden die overlapt met de ingangsdatum van de CAO-wijziging.`,
+          reviewCaoKey
         );
         const saved = await upsertCorrection(base44, data);
         if (saved.created) createdCorrectionIds.push(saved.id);
@@ -195,7 +248,7 @@ Deno.serve(async (req) => {
           ? 'Payrollrun is al goedgekeurd/geëxporteerd/betaald; correctie moet in een volgende loonrun worden verwerkt.'
           : 'Payrollrun valt binnen retroactieve CAO-periode; herberekening vereist voordat deze definitief wordt.';
 
-        const data = buildCorrectionData(review, run, status, reason);
+        const data = buildCorrectionData(review, run, status, reason, reviewCaoKey);
         const saved = await upsertCorrection(base44, data);
         if (saved.created) createdCorrectionIds.push(saved.id);
         else updatedCorrectionIds.push(saved.id);
@@ -223,7 +276,8 @@ Deno.serve(async (req) => {
       created_correction_ids: createdCorrectionIds,
       updated_correction_ids: updatedCorrectionIds,
       marked_payroll_run_ids: [...new Set(markedPayrollRunIds)],
-      unmatched_review_ids: unmatchedReviewIds
+      unmatched_review_ids: unmatchedReviewIds,
+      unverifiable_review_ids: unverifiableReviewIds
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

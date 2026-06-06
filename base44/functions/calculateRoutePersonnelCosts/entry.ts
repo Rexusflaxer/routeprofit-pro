@@ -811,9 +811,16 @@ Deno.serve(async (req) => {
 
     const targetWeekday = weekday || route.weekdays?.[0] || 1;
     const shiftDate = getNextDateForWeekday(targetWeekday);
+    const targetCaoKey = body.cao_key ||
+      route.cao_key ||
+      route.cao ||
+      'cao_particuliere_beveiliging';
 
     const shiftDateRef = new Date(shiftDate);
-    const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({ status: 'active' });
+    const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({
+      status: 'active',
+      cao_key: targetCaoKey
+    });
     const eligibleCaos = allCaos.filter(c => {
       if (c.valid_from && new Date(c.valid_from) > shiftDateRef) return false;
       if (c.valid_until && new Date(c.valid_until) < shiftDateRef) return false;
@@ -827,7 +834,7 @@ Deno.serve(async (req) => {
     const caoConfig = eligibleCaos[0];
     if (!caoConfig) {
       return Response.json({
-        error: `Geen actieve CAO-configuratie gevonden voor datum ${shiftDate}. Activeer eerst een CAO-configuratie.`
+        error: `Geen actieve CAO-configuratie gevonden voor ${targetCaoKey} op datum ${shiftDate}. Activeer eerst een passende CAO-configuratie.`
       }, { status: 400 });
     }
     const payrollReadiness = getCaoPayrollReadiness(caoConfig);
@@ -841,6 +848,7 @@ Deno.serve(async (req) => {
           'Routekosten geblokkeerd: CAO-regeldekking of payrollparameters zijn niet bewezen compleet.'
         ],
         cao_configuration_id: caoConfig.id,
+        cao_key: caoConfig.cao_key || targetCaoKey,
         cao_version_label: caoConfig.version_label || caoConfig.name,
         cao_revision: caoConfig.cloudflare_revision || null,
         cao_payroll_readiness: payrollReadiness,
@@ -1112,6 +1120,7 @@ Deno.serve(async (req) => {
         ? 'blocked_manual_review'
         : 'concept_manual_review',
       cao_configuration_id: caoConfig.id,
+      cao_key: caoConfig.cao_key || targetCaoKey,
       cao_version_label: caoConfig.version_label || caoConfig.name,
       cao_revision: caoConfig.cloudflare_revision || null,
       cao_payroll_readiness: payrollReadiness,

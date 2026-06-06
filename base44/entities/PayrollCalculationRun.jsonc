@@ -17,6 +17,13 @@
     "cao_configuration_id": {
       "type": "string"
     },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "CAO sleutel waarmee deze loonrun is berekend, bijv. cao_particuliere_beveiliging. Nodig om retroactieve correcties per CAO te isoleren."
+    },
     "cao_version_label": {
       "type": [
         "string",
