@@ -174,6 +174,14 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R1751', 'CAO-PB-2024-R1813'
     ]
   },
+  'calculatePersonnelCosts.article_39_acting_function_allowance': {
+    functions: ['resolveCaoFunctionClassification', 'calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R0775', 'CAO-PB-2024-R0776', 'CAO-PB-2024-R0777',
+      'CAO-PB-2024-R0778', 'CAO-PB-2024-R0779', 'CAO-PB-2024-R0780',
+      'CAO-PB-2024-R0781', 'CAO-PB-2024-R0782', 'CAO-PB-2024-R0783'
+    ]
+  },
   'calculatePersonnelCosts.article_42_overtime_payroll': {
     functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
     rule_ids: ['CAO-PB-2024-R0797']

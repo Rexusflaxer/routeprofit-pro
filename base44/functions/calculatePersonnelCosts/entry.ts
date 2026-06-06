@@ -168,6 +168,114 @@ function resolveMinimumServiceCompensation(shift, hoursWorked) {
   return result;
 }
 
+function getActingFunctionAllowanceRules(caoConfig) {
+  const configured = caoConfig?.allowances?.acting_function_allowance ||
+    caoConfig?.allowances?.function_acting ||
+    caoConfig?.function_acting_allowance_rates ||
+    null;
+  const rates = configured?.rates || configured || {};
+  const hasConfiguredRates = rates.scale_1 != null || rates.one_scale != null || rates['1'] != null;
+  return {
+    rates: {
+      1: Number(rates.scale_1 ?? rates.one_scale ?? rates['1'] ?? 0.21),
+      2: Number(rates.scale_2 ?? rates.two_scales ?? rates['2'] ?? 0.48),
+      3: Number(rates.scale_3_or_more ?? rates.three_or_more_scales ?? rates['3_or_more'] ?? rates['3'] ?? 0.79)
+    },
+    has_configured_rates: hasConfiguredRates,
+    max_months: Number(configured?.max_months ?? 6),
+    source_rule_ids: configured?.source_rule_ids || [
+      'CAO-PB-2024-R0775', 'CAO-PB-2024-R0777', 'CAO-PB-2024-R0778',
+      'CAO-PB-2024-R0779', 'CAO-PB-2024-R0780', 'CAO-PB-2024-R0781',
+      'CAO-PB-2024-R0782', 'CAO-PB-2024-R0783'
+    ]
+  };
+}
+
+function resolveActingFunctionAllowance(shift, personnel, paidHoursForShift, caoConfig) {
+  const currentScale = numberOrZero(shift.current_cao_scale ?? personnel.cao_scale);
+  const actingScale = numberOrZero(
+    shift.acting_cao_scale ??
+    shift.acting_function_scale ??
+    shift.temporary_function_scale ??
+    shift.higher_function_scale
+  );
+  const explicitScaleDifference = Number.isFinite(Number(shift.acting_scale_difference))
+    ? Number(shift.acting_scale_difference)
+    : null;
+  const isActing = shift.acting_function === true ||
+    shift.is_acting_function === true ||
+    shift.acting_function_group != null ||
+    shift.acting_cao_scale != null ||
+    explicitScaleDifference != null;
+
+  const result = {
+    applies: false,
+    paid_hours: 0,
+    scale_difference: explicitScaleDifference,
+    rate: 0,
+    amount: 0,
+    lower_function_keeps_old_scale: false,
+    manual_review_required: false,
+    review_reason: null,
+    source_rule_ids: []
+  };
+
+  if (!isActing) return result;
+
+  const rules = getActingFunctionAllowanceRules(caoConfig);
+  result.source_rule_ids = rules.source_rule_ids;
+
+  const requestedByEmployer = shift.acting_requested_by_employer === true ||
+    shift.employer_requested_acting_function === true ||
+    shift.waarneming_op_verzoek_werkgever === true;
+  if (!requestedByEmployer) {
+    result.manual_review_required = true;
+    result.review_reason = 'Functiewaarneming is gemeld, maar niet bevestigd dat de werkgever deze hogere functie heeft gevraagd.';
+  }
+
+  const scaleDifference = explicitScaleDifference ?? (actingScale && currentScale ? actingScale - currentScale : null);
+  result.scale_difference = scaleDifference;
+
+  if (scaleDifference == null || !Number.isFinite(scaleDifference)) {
+    result.manual_review_required = true;
+    result.review_reason = result.review_reason || 'Schaalverschil voor functiewaarneming ontbreekt.';
+    return result;
+  }
+
+  if (scaleDifference <= 0) {
+    result.lower_function_keeps_old_scale = scaleDifference < 0;
+    result.source_rule_ids.push('CAO-PB-2024-R0783');
+    return result;
+  }
+
+  if (!rules.has_configured_rates && shift.acting_allowance_rate == null) {
+    result.manual_review_required = true;
+    result.review_reason = result.review_reason || 'Actuele geindexeerde functiewaarnemingstarieven ontbreken in CAOConfiguration; 2025-bedragen alleen als concept gebruikt.';
+  }
+
+  const rateFromShift = shift.acting_allowance_rate != null ? Number(shift.acting_allowance_rate) : null;
+  const rate = Number.isFinite(rateFromShift)
+    ? rateFromShift
+    : scaleDifference === 1
+    ? rules.rates[1]
+    : scaleDifference === 2
+    ? rules.rates[2]
+    : rules.rates[3];
+
+  result.applies = true;
+  result.paid_hours = paidHoursForShift;
+  result.rate = rate;
+  result.amount = paidHoursForShift * rate;
+
+  const months = Number(shift.acting_duration_months ?? shift.acting_function_duration_months);
+  if (Number.isFinite(months) && months > rules.max_months) {
+    result.manual_review_required = true;
+    result.review_reason = `Functiewaarneming duurt ${months} maanden; na ${rules.max_months} maanden moet bevordering of terugplaatsing worden beoordeeld.`;
+  }
+
+  return result;
+}
+
 async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, caoScope }) {
   if (personnel.employee_type !== 'loondienst') {
     return {
@@ -561,6 +669,11 @@ Deno.serve(async (req) => {
         travel_reimbursement_required: false,
         source_rule_ids: []
       },
+      acting_function_allowance: {
+        paid_hours: 0,
+        amount: 0,
+        source_rule_ids: []
+      },
       total_gross: 0,
       
       // Werknemersbijdragen (inhoudingen)
@@ -785,6 +898,29 @@ Deno.serve(async (req) => {
           ];
           minimumServiceTopUpHoursForOvertime += minimumService.top_up_hours;
         }
+
+        const paidHoursForActingAllowance = minimumService.applies ? minimumService.paid_hours : hoursWorked;
+        const actingAllowance = resolveActingFunctionAllowance(shift, personnel, paidHoursForActingAllowance, caoConfig);
+        if (actingAllowance.manual_review_required) {
+          payrollRuntimeReviewItems.push({
+            rule_id: actingAllowance.source_rule_ids[0] || 'CAO-PB-2024-R0775',
+            domain: 'acting_function_allowance',
+            message: actingAllowance.review_reason || 'Functiewaarneming vereist handmatige beoordeling.',
+            field: 'acting_function'
+          });
+          runtimePayrollFinalAllowed = false;
+          runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+        }
+        if (actingAllowance.applies && actingAllowance.amount > 0) {
+          payslip.acting_function_allowance.paid_hours += actingAllowance.paid_hours;
+          payslip.acting_function_allowance.amount += actingAllowance.amount;
+          payslip.acting_function_allowance.source_rule_ids = [
+            ...new Set([
+              ...payslip.acting_function_allowance.source_rule_ids,
+              ...actingAllowance.source_rule_ids
+            ])
+          ];
+        }
         
         payslip.shift_details.push({
           date,
@@ -800,6 +936,16 @@ Deno.serve(async (req) => {
             travel_reimbursement_required: minimumService.travel_reimbursement_required,
             manual_review_required: minimumService.manual_review_required,
             source_rule_ids: minimumService.source_rule_ids
+          },
+          acting_function_allowance: {
+            applies: actingAllowance.applies,
+            paid_hours: r2(actingAllowance.paid_hours),
+            scale_difference: actingAllowance.scale_difference,
+            rate: r2(actingAllowance.rate),
+            amount: r2(actingAllowance.amount),
+            lower_function_keeps_old_scale: actingAllowance.lower_function_keeps_old_scale,
+            manual_review_required: actingAllowance.manual_review_required,
+            source_rule_ids: actingAllowance.source_rule_ids
           }
         });
       }
@@ -870,6 +1016,7 @@ Deno.serve(async (req) => {
         payslip.surcharges.new_years_eve_100.amount;
       const overtimeAmount = payslip.overtime_50.amount;
       const minimumServiceAmount = payslip.minimum_service_compensation.amount;
+      const actingFunctionAllowanceAmount = payslip.acting_function_allowance.amount;
       
       // Bereken gemiddelde ORT per uur (voor ORT verlof berekening)
       const avgOrtPerHour = totalHours > 0 ? totalSurcharges / totalHours : 0;
@@ -890,9 +1037,9 @@ Deno.serve(async (req) => {
         payslip.vacation_paid = ortVerlof;
         
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
       } else {
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount;
       }
       
       // Bereken pensioengrondslag (bruto loon - vakantiegeld/eindejaarsuitkering - franchise)
@@ -1076,6 +1223,11 @@ Deno.serve(async (req) => {
           min_hours_as_minus_or_empty_hours: r2(payslip.minimum_service_compensation.min_hours_as_minus_or_empty_hours),
           travel_reimbursement_required: payslip.minimum_service_compensation.travel_reimbursement_required,
           source_rule_ids: payslip.minimum_service_compensation.source_rule_ids
+        },
+        acting_function_allowance: {
+          paid_hours: r2(payslip.acting_function_allowance.paid_hours),
+          amount: r2(payslip.acting_function_allowance.amount),
+          source_rule_ids: payslip.acting_function_allowance.source_rule_ids
         },
         total_gross: Math.round(payslip.total_gross * 100) / 100,
         is_call_worker: payslip.is_call_worker,
