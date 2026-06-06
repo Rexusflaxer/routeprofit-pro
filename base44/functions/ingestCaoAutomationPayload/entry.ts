@@ -299,6 +299,26 @@ function withLocalRuntimeBindingMetadata(rule) {
   };
 }
 
+async function findExistingCaoRule(base44, { ruleId, caoKey, configId }) {
+  if (configId) {
+    const scoped = await base44.asServiceRole.entities.CAORule.filter({
+      rule_id: ruleId,
+      cao_configuration_id: configId
+    });
+    if (scoped.length > 0) return scoped[0];
+  }
+
+  if (!configId) {
+    const candidates = await base44.asServiceRole.entities.CAORule.filter({
+      rule_id: ruleId,
+      cao_key: caoKey
+    });
+    return candidates.find(rule => !rule.cao_configuration_id) || null;
+  }
+
+  return null;
+}
+
 function hasWageScales(candidateCfg) {
   return Object.keys(candidateCfg?.wage_scales || {}).length > 0 ||
     Object.keys(candidateCfg?.wage_scales_detailed || {}).length > 0;
@@ -806,16 +826,23 @@ Deno.serve(async (req) => {
     // Upsert CAO rules
     let rulesUpserted = 0;
     for (const rule of candidate_rules) {
-      if (!rule.rule_id || !rule.cao_key) continue;
-      const existing = await base44.asServiceRole.entities.CAORule.filter({ rule_id: rule.rule_id });
+      if (!rule.rule_id) continue;
+      const targetCaoKey = rule.cao_key || cao_key;
+      const targetConfigId = configId || rule.cao_configuration_id || null;
+      const existing = await findExistingCaoRule(base44, {
+        ruleId: rule.rule_id,
+        caoKey: targetCaoKey,
+        configId: targetConfigId
+      });
       const ruleData = {
         ...withLocalRuntimeBindingMetadata(rule),
-        cao_configuration_id: configId || rule.cao_configuration_id || null,
+        cao_key: targetCaoKey,
+        cao_configuration_id: targetConfigId,
         status: isOwnerApproved ? 'active' : 'draft',
         last_verified_at: isOwnerApproved ? now : (rule.last_verified_at || null)
       };
-      if (existing.length > 0) {
-        await base44.asServiceRole.entities.CAORule.update(existing[0].id, ruleData);
+      if (existing) {
+        await base44.asServiceRole.entities.CAORule.update(existing.id, ruleData);
       } else {
         await base44.asServiceRole.entities.CAORule.create(ruleData);
       }

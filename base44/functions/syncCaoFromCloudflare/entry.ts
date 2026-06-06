@@ -301,6 +301,26 @@ function withLocalRuntimeBindingMetadata(rule) {
   };
 }
 
+async function findExistingCaoRule(base44, { ruleId, caoKey, configId }) {
+  if (configId) {
+    const scoped = await base44.asServiceRole.entities.CAORule.filter({
+      rule_id: ruleId,
+      cao_configuration_id: configId
+    });
+    if (scoped.length > 0) return scoped[0];
+  }
+
+  if (!configId) {
+    const candidates = await base44.asServiceRole.entities.CAORule.filter({
+      rule_id: ruleId,
+      cao_key: caoKey
+    });
+    return candidates.find(rule => !rule.cao_configuration_id) || null;
+  }
+
+  return null;
+}
+
 function hasWageScales(candidateCfg) {
   return Object.keys(candidateCfg?.wage_scales || {}).length > 0 ||
     Object.keys(candidateCfg?.wage_scales_detailed || {}).length > 0;
@@ -951,15 +971,20 @@ Deno.serve(async (req) => {
 
     for (const rule of batchRules) {
       if (!rule.rule_id) continue;
-      const existing = await base44.asServiceRole.entities.CAORule.filter({ rule_id: rule.rule_id });
+      const existing = await findExistingCaoRule(base44, {
+        ruleId: rule.rule_id,
+        caoKey: 'cao_particuliere_beveiliging',
+        configId: newConfig.id
+      });
       const ruleData = {
         ...withLocalRuntimeBindingMetadata(rule),
+        cao_key: rule.cao_key || 'cao_particuliere_beveiliging',
         cao_configuration_id: newConfig.id,
         status: 'active',
         last_verified_at: new Date().toISOString()
       };
-      if (existing.length > 0) {
-        await base44.asServiceRole.entities.CAORule.update(existing[0].id, ruleData);
+      if (existing) {
+        await base44.asServiceRole.entities.CAORule.update(existing.id, ruleData);
       } else {
         await base44.asServiceRole.entities.CAORule.create(ruleData);
       }

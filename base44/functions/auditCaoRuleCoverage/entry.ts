@@ -379,6 +379,26 @@ function chooseActiveConfiguration(configs, referenceDate) {
   return active[0] || null;
 }
 
+async function loadRulesForConfiguration(base44, caoKey, config) {
+  if (!config?.id) {
+    const rules = await base44.asServiceRole.entities.CAORule.filter({ cao_key: caoKey });
+    return {
+      rules: (rules || []).filter(rule => !rule.cao_configuration_id),
+      scope: 'unscoped_legacy_rules'
+    };
+  }
+
+  const scopedRules = await base44.asServiceRole.entities.CAORule.filter({
+    cao_key: caoKey,
+    cao_configuration_id: config.id
+  });
+
+  return {
+    rules: scopedRules || [],
+    scope: 'cao_configuration_id'
+  };
+}
+
 function bearerToken(req) {
   const auth = req.headers.get('Authorization') || req.headers.get('authorization') || '';
   return auth.startsWith('Bearer ') ? auth.slice(7).trim() : '';
@@ -414,12 +434,10 @@ Deno.serve(async (req) => {
     const persistResult = body.persist_result === true;
     const maxOpenRules = Math.min(500, Math.max(25, Number(body.max_open_rules || 100)));
 
-    const [configs, rules] = await Promise.all([
-      base44.asServiceRole.entities.CAOConfiguration.filter({ cao_key: caoKey }),
-      base44.asServiceRole.entities.CAORule.filter({ cao_key: caoKey })
-    ]);
-
+    const configs = await base44.asServiceRole.entities.CAOConfiguration.filter({ cao_key: caoKey });
     const activeConfig = chooseActiveConfiguration(configs || [], referenceDate);
+    const ruleLoad = await loadRulesForConfiguration(base44, caoKey, activeConfig);
+    const rules = ruleLoad.rules;
     const gate = evaluateCoverageGate(activeConfig || {}, rules || [], { max_open_rules: maxOpenRules });
 
     const requestedPayrollReady = activeConfig?.is_payroll_ready === true;
@@ -443,6 +461,8 @@ Deno.serve(async (req) => {
           last_owner_internal_audit: {
             checked_at: gate.checked_at,
             reference_date: referenceDate,
+            rules_scope: ruleLoad.scope,
+            audited_rule_count: rules.length,
             status: payrollReadinessStatus,
             passed: gate.passed,
             counts: gate.counts,
@@ -462,6 +482,8 @@ Deno.serve(async (req) => {
       is_payroll_ready: isPayrollReady,
       payroll_readiness_status: payrollReadinessStatus,
       persisted_to_active_configuration: persistResult && !!activeConfig?.id,
+      rules_scope: ruleLoad.scope,
+      audited_rule_count: rules.length,
       coverage_gate: gate
     });
   } catch (error) {
