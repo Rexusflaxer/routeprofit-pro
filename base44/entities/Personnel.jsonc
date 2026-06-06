@@ -301,6 +301,7 @@
     "function_type": {
       "type": "string",
       "enum": [
+        "unknown",
         "surveillant",
         "binnendienst",
         "planner",
@@ -312,7 +313,7 @@
         "host",
         "other"
       ],
-      "default": "surveillant"
+      "default": "unknown"
     },
     "job_title_raw": {
       "type": [

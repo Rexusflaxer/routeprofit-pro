@@ -2,8 +2,8 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
 /**
  * resolveCaoFunctionClassification
- * Bepaalt CAO PB functie-indeling, loonschaal en periodiek-validatie op basis van bijlage 2.
- * Bronregels: CAO-PB-2024-R0728, R0729, R0734, R1751-R1814
+ * Bepaalt CAO PB functie-indeling, loonschaal en periodiek-validatie op basis van artikel 34/35 en bijlage 2.
+ * Bronregels: CAO-PB-2024-R0714 t/m R0747, R1751-R1814
  *
  * FAIL-CLOSED: geen stille fallback naar schaal 3 of periodiek 0.
  * Als functiegroep of niveau onbekend is → manual_review_required=true, geen schaal.
@@ -62,19 +62,118 @@ const APPENDIX_2_SCALE_MAP = {
   }
 };
 
-// ── Infereer functiegroep op basis van function_type (50%-criterium R0729) ──
-const FUNCTION_TYPE_TO_GROUP = {
-  surveillant: 'mobiel_surveillant',
-  centralist: 'centralist',
-  brandwacht: 'brandwacht'
-  // binnendienst/planner/host/other → non_security_staff (niet bijlage 2)
-};
+// ── Infereer functiegroep op basis van function_type/functietitel (50%-criterium R0729) ──
+const FUNCTION_TYPE_ALIASES = [
+  {
+    group: 'objectbeveiliger_receptionist',
+    aliases: [
+      'objectbeveiliger', 'objectbeveiliging', 'object beveiliging', 'object security',
+      'receptionist', 'receptie', 'receptiedienst', 'front office security', 'security receptionist'
+    ]
+  },
+  {
+    group: 'mobiel_surveillant',
+    aliases: [
+      'surveillant', 'mobiel_surveillant', 'mobiele surveillance', 'mobiele surveillant',
+      'mobile surveillance', 'route surveillant', 'ronde surveillant'
+    ]
+  },
+  {
+    group: 'winkelsurveillant',
+    aliases: ['winkelsurveillant', 'winkel surveillance', 'retail security', 'winkelbeveiliger']
+  },
+  {
+    group: 'brandwacht',
+    aliases: ['brandwacht', 'fire watch', 'mangatwacht', 'veiligheidswacht']
+  },
+  {
+    group: 'geld_waardetransporteur',
+    aliases: [
+      'geld_waardetransporteur', 'geldtransport', 'waardetransport', 'cash transport',
+      'cash value', 'value logistics', 'geld en waardetransport'
+    ]
+  },
+  {
+    group: 'centralist',
+    aliases: ['centralist', 'alarmcentrale', 'meldkamer', 'operator alarmcentrale']
+  }
+];
+
+const NON_SECURITY_FUNCTION_TYPES = ['binnendienst', 'planner', 'installateur', 'host', 'other'];
 
 // ── Infereer niveau op basis van security_role_status (R0728) ──
 const ROLE_STATUS_TO_LEVEL = {
   aspirant_beveiliger: 'aspirant',
   beveiliger: 'a'
 };
+
+function normalizeText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_-]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function booleanOrNull(value) {
+  if (value === true || value === false) return value;
+  if (value === 'true' || value === 'yes' || value === 'ja') return true;
+  if (value === 'false' || value === 'no' || value === 'nee') return false;
+  return null;
+}
+
+function pushUnique(target, ...items) {
+  for (const item of items.flat()) {
+    if (item && !target.includes(item)) target.push(item);
+  }
+}
+
+function addWorkflowReview(items, ruleId, domain, message, field) {
+  items.push({
+    rule_id: ruleId,
+    domain,
+    message,
+    field,
+    blocking: false
+  });
+}
+
+function inferFunctionGroup(p, wc) {
+  const explicit = p.cao_function_group && p.cao_function_group !== 'unknown' ? p.cao_function_group : null;
+  if (explicit) return { group: explicit, source: 'explicit', matched_alias: null };
+
+  const text = normalizeText([
+    wc.function_type,
+    p.function_type,
+    wc.service_function_type,
+    wc.job_title_raw,
+    p.job_title_raw,
+    wc.job_title,
+    p.job_title
+  ].filter(Boolean).join(' '));
+
+  if (!text) return { group: null, source: null, matched_alias: null };
+  if (NON_SECURITY_FUNCTION_TYPES.includes(text)) return { group: null, source: 'non_security_hint', matched_alias: text };
+
+  for (const entry of FUNCTION_TYPE_ALIASES) {
+    for (const alias of entry.aliases) {
+      const normalizedAlias = normalizeText(alias);
+      if (text === normalizedAlias || text.includes(normalizedAlias)) {
+        return { group: entry.group, source: 'inferred', matched_alias: alias };
+      }
+    }
+  }
+
+  return { group: null, source: null, matched_alias: null };
+}
 
 async function lazySyncCao(base44, force = false) {
   try {
@@ -147,6 +246,7 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
   const wc = workContext || {};
   const warnings = [];
   const manual_review_reasons = [];
+  const workflow_review_items = [];
   const source_rule_ids = [];
 
   const scopeProfile = caoScope?.cao_scope_profile || 'unknown_manual_review';
@@ -155,7 +255,7 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
   // ── Bijlage 2 niet van toepassing ──
   if (!applyAppendix2) {
     // Non-security: bijlage 2 uitgesloten conform art. 3 lid 2
-    source_rule_ids.push('CAO-PB-2024-R0228', 'CAO-PB-2024-R0233');
+    pushUnique(source_rule_ids, 'CAO-PB-2024-R0228', 'CAO-PB-2024-R0233');
 
     const customHourlyRate = Number(p.custom_hourly_rate || 0);
     const hasWageBasis = customHourlyRate > 0;
@@ -193,30 +293,88 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
       manual_review_required: !hasWageBasis,
       manual_review_reasons,
       payroll_final_allowed: hasWageBasis && !caoScope?.manual_review_required,
+      workflow_review_items,
+      documentation_review_required: false,
       warnings,
       source_rule_ids
     };
   }
 
   // ── Bijlage 2 van toepassing (full-security) ──
-  source_rule_ids.push('CAO-PB-2024-R0728', 'CAO-PB-2024-R1751');
+  pushUnique(
+    source_rule_ids,
+    'CAO-PB-2024-R0714', 'CAO-PB-2024-R0715', 'CAO-PB-2024-R0716',
+    'CAO-PB-2024-R0728', 'CAO-PB-2024-R0738', 'CAO-PB-2024-R1751'
+  );
 
   // Bepaal functiegroep: expliciete velden eerst (R0728), dan inferentie via function_type (R0729)
-  let functionGroup = p.cao_function_group && p.cao_function_group !== 'unknown' ? p.cao_function_group : null;
-  let groupFromInference = false;
+  const inferredGroup = inferFunctionGroup(p, wc);
+  let functionGroup = inferredGroup.group;
+  let groupFromInference = inferredGroup.source === 'inferred';
+  let groupFromDefault = false;
 
-  if (!functionGroup) {
-    const inferred = wc.duties?.length > 0 ? null : FUNCTION_TYPE_TO_GROUP[p.function_type];
-    if (inferred) {
-      // 50%-criterium: alleen als security_work_percentage >= 50 of expliciet true (R0729)
-      const swPct = wc.security_work_percentage !== undefined ? wc.security_work_percentage : p.security_work_percentage;
-      if (swPct == null || swPct >= 50 || p.performs_security_work === true) {
-        functionGroup = inferred;
-        groupFromInference = true;
-        source_rule_ids.push('CAO-PB-2024-R0729');
-        warnings.push(`Functiegroep "${inferred}" afgeleid op basis van function_type "${p.function_type}" (50%-criterium R0729). Controleer dit handmatig.`);
-      }
+  if (functionGroup && groupFromInference) {
+    // 50%-criterium: alleen als security_work_percentage >= 50 of expliciet true (R0729)
+    const swPct = numberOrNull(wc.security_work_percentage !== undefined ? wc.security_work_percentage : p.security_work_percentage);
+    if (swPct == null || swPct >= 50 || p.performs_security_work === true || wc.performs_security_work === true) {
+      pushUnique(source_rule_ids, 'CAO-PB-2024-R0729');
+      warnings.push(`Functiegroep "${functionGroup}" afgeleid op basis van "${inferredGroup.matched_alias}" (50%-criterium R0729). Controleer dit in de functie-inrichting.`);
+    } else {
+      functionGroup = null;
+      groupFromInference = false;
+      manual_review_reasons.push(`Functie lijkt beveiligingswerk, maar security_work_percentage=${swPct}%. Het 50%-criterium voor indeling vereist handmatige review.`);
+      warnings.push(`50%-criterium: security_work_percentage=${swPct}% is te laag voor automatische bijlage-2 functiegroep.`);
     }
+  }
+
+  if (!functionGroup && inferredGroup.source !== 'non_security_hint') {
+    const hasSecuritySignal =
+      p.security_role_status === 'aspirant_beveiliger' ||
+      p.security_role_status === 'beveiliger' ||
+      p.security_role_status === 'leidinggevende' ||
+      p.performs_security_work === true ||
+      wc.performs_security_work === true;
+
+    if (hasSecuritySignal) {
+      functionGroup = 'objectbeveiliger_receptionist';
+      groupFromDefault = true;
+      pushUnique(source_rule_ids, 'CAO-PB-2024-R0733');
+      warnings.push('Geen specifieke bijlage-2 functiegroep gevonden; conform art. 34 wordt objectbeveiliger/receptionist als uitgangspunt gebruikt zolang geen andere groep bewezen is.');
+    }
+  }
+
+  const writtenClassificationConfirmed = booleanOrNull(
+    wc.written_classification_notice_confirmed ??
+    wc.written_function_classification_notice_confirmed ??
+    p.written_classification_notice_confirmed ??
+    p.written_function_classification_notice_confirmed
+  );
+  if (writtenClassificationConfirmed !== true) {
+    pushUnique(source_rule_ids, 'CAO-PB-2024-R0731');
+    addWorkflowReview(
+      workflow_review_items,
+      'CAO-PB-2024-R0731',
+      'function_classification_notice',
+      'Leg vast dat de werknemer schriftelijk is geinformeerd over functie en functiegroep.',
+      'written_classification_notice_confirmed'
+    );
+  }
+
+  const writtenScalePeriodConfirmed = booleanOrNull(
+    wc.written_scale_period_notice_confirmed ??
+    wc.wage_scale_period_notice_confirmed ??
+    p.written_scale_period_notice_confirmed ??
+    p.wage_scale_period_notice_confirmed
+  );
+  if (writtenScalePeriodConfirmed !== true) {
+    pushUnique(source_rule_ids, 'CAO-PB-2024-R0743');
+    addWorkflowReview(
+      workflow_review_items,
+      'CAO-PB-2024-R0743',
+      'wage_scale_period_notice',
+      'Leg vast dat schaal en periodiek schriftelijk aan de werknemer zijn meegedeeld.',
+      'written_scale_period_notice_confirmed'
+    );
   }
 
   // Bepaal niveau: expliciete velden eerst, dan via security_role_status (R0728)
@@ -225,7 +383,7 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
   let levelFromInference = false;
 
   if (rawFunctionLevel === 'leidinggevend') {
-    source_rule_ids.push('CAO-PB-2024-R1813');
+    pushUnique(source_rule_ids, 'CAO-PB-2024-R1813');
     manual_review_reasons.push('Functieniveau "leidinggevend" is geen exacte bijlage-2 schaal. Kies expliciet niveau C, D of E.');
     warnings.push('Leidinggevende status vereist expliciete functie-indeling C/D/E voordat een salarisschaal kan worden bepaald.');
   }
@@ -235,10 +393,10 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
     if (inferred) {
       functionLevel = inferred;
       levelFromInference = true;
-      source_rule_ids.push('CAO-PB-2024-R0728');
+      pushUnique(source_rule_ids, 'CAO-PB-2024-R0728');
       warnings.push(`Functieniveau "${inferred}" afgeleid op basis van security_role_status "${p.security_role_status}". Controleer dit handmatig.`);
     } else if (p.security_role_status === 'leidinggevende') {
-      source_rule_ids.push('CAO-PB-2024-R1813');
+      pushUnique(source_rule_ids, 'CAO-PB-2024-R1813');
       manual_review_reasons.push('Security role status "leidinggevende" is onvoldoende voor automatische schaalbepaling. Kies expliciet functieniveau C, D of E.');
       warnings.push('Leidinggevende status vereist expliciete functie-indeling C/D/E.');
     }
@@ -248,7 +406,7 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
   const isActing = !!(wc.acting_function_group && wc.acting_function_group !== functionGroup);
   if (isActing) {
     warnings.push(`Waarneming/tijdelijke functie gedetecteerd (acting_function_group="${wc.acting_function_group}"). Conform art. 39 CAO PB: tijdelijke herindeling vereist handmatige review. Bronregel: CAO-PB-2024-R0734.`);
-    source_rule_ids.push('CAO-PB-2024-R0734');
+    pushUnique(source_rule_ids, 'CAO-PB-2024-R0734', 'CAO-PB-2024-R0775');
     manual_review_reasons.push(`Waarneming andere functiegroep (${wc.acting_function_group}): handmatige review vereist conform art. 39 CAO PB (R0734).`);
   }
 
@@ -287,6 +445,8 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
       manual_review_required: true,
       manual_review_reasons,
       payroll_final_allowed: false,
+      workflow_review_items,
+      documentation_review_required: workflow_review_items.length > 0,
       warnings,
       source_rule_ids
     };
@@ -318,13 +478,21 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
       manual_review_required: true,
       manual_review_reasons,
       payroll_final_allowed: false,
+      workflow_review_items,
+      documentation_review_required: workflow_review_items.length > 0,
       warnings,
       source_rule_ids: [...source_rule_ids, 'CAO-PB-2024-R1813']
     };
   }
 
   const suggestedScale = levelMapping.scale;
-  source_rule_ids.push(levelMapping.source_rule);
+  pushUnique(
+    source_rule_ids,
+    'CAO-PB-2024-R0739', 'CAO-PB-2024-R0740', 'CAO-PB-2024-R0741',
+    'CAO-PB-2024-R0743', 'CAO-PB-2024-R0744', 'CAO-PB-2024-R0745',
+    'CAO-PB-2024-R0746', 'CAO-PB-2024-R0747',
+    levelMapping.source_rule
+  );
 
   // ── Vergelijk huidige schaal met voorgestelde schaal ──
   const currentScale = p.cao_scale != null ? p.cao_scale : null;
@@ -357,6 +525,22 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
     warnings.push('CAO-periodiek (cao_period) ontbreekt.');
   }
 
+  const periodicReviewSignals = [
+    wc.periodic_increase_due_confirmed,
+    wc.periodiek_verhoging_bevestigd,
+    p.periodic_increase_due_confirmed,
+    p.periodiek_verhoging_bevestigd
+  ].map(booleanOrNull).filter(v => v !== null);
+  if (periodicReviewSignals.length === 0 && currentPeriod != null) {
+    addWorkflowReview(
+      workflow_review_items,
+      'CAO-PB-2024-R0747',
+      'annual_periodic_increase',
+      'Controleer jaarlijks of de werknemer recht heeft op een periodiekverhoging; de engine valideert de periodiek, maar kent deze niet stilzwijgend toe.',
+      'periodic_increase_due_confirmed'
+    );
+  }
+
   // ── Haal uurloon op ──
   const wageScaleToUse = currentScale != null ? currentScale : suggestedScale;
   const wagePeriodToUse = currentPeriod != null ? currentPeriod : 0;
@@ -375,7 +559,7 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
   }
 
   // ── Bepaal confidence ──
-  const hasInference = groupFromInference || levelFromInference;
+  const hasInference = groupFromInference || groupFromDefault || levelFromInference;
   const allValid = scaleMatches === true && periodValid === true && wageRateFound;
   const confidence = allValid && !hasInference ? 'high' : (allValid || wageRateFound) ? 'medium' : 'low';
 
@@ -402,6 +586,8 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
     manual_review_required: hasManualReview,
     manual_review_reasons,
     payroll_final_allowed: payrollFinalAllowed,
+    workflow_review_items,
+    documentation_review_required: workflow_review_items.length > 0,
     warnings,
     source_rule_ids
   };

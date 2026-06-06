@@ -167,7 +167,12 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'resolveCaoFunctionClassification.appendix_2_wage_scales': {
     functions: ['resolveCaoApplicability', 'resolveCaoFunctionClassification', 'calculatePersonnelCosts'],
     rule_ids: [
-      'CAO-PB-2024-R0728', 'CAO-PB-2024-R0729', 'CAO-PB-2024-R0734',
+      'CAO-PB-2024-R0714', 'CAO-PB-2024-R0715', 'CAO-PB-2024-R0716',
+      'CAO-PB-2024-R0728', 'CAO-PB-2024-R0729', 'CAO-PB-2024-R0731',
+      'CAO-PB-2024-R0733', 'CAO-PB-2024-R0734', 'CAO-PB-2024-R0738',
+      'CAO-PB-2024-R0739', 'CAO-PB-2024-R0740', 'CAO-PB-2024-R0741',
+      'CAO-PB-2024-R0742', 'CAO-PB-2024-R0743', 'CAO-PB-2024-R0744',
+      'CAO-PB-2024-R0745', 'CAO-PB-2024-R0746', 'CAO-PB-2024-R0747',
       'CAO-PB-2024-R1751', 'CAO-PB-2024-R1813'
     ]
   },
