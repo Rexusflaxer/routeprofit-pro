@@ -15,7 +15,7 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 
 /**
  * CAO PB planning-validator
- * Bronregels: R0547-R0549 en R0560-R0707 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd, rusttijd, nachtdienst, pauze, jeugdige werknemer en consignatie)
+ * Bronregels: R0547-R0549 en R0560-R0713 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd, rusttijd, nachtdienst, pauze, jeugdige werknemer, consignatie, dienstruil en zomer-/wintertijd)
  *
  * Scope-bewust:
  * - Artikel 3 lid 2 sluit uit: art. 10, art. 9 lid 1 sub c, hfdst. 4 (behalve 37/38/41), hfdst. 5, bijlage 2.
@@ -33,6 +33,23 @@ const ARTICLE_30_EXCLUDED_RULE_IDS = new Set([
   ...Array.from({ length: 21 }, (_, i) => `CAO-PB-2024-R${String(647 + i).padStart(4, '0')}`),
   ...Array.from({ length: 10 }, (_, i) => `CAO-PB-2024-R${String(668 + i).padStart(4, '0')}`)
 ]);
+const CAO_TIME_ZONE = 'Europe/Amsterdam';
+const AMSTERDAM_DATE_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: CAO_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit'
+});
+const AMSTERDAM_DATE_TIME_FORMATTER = new Intl.DateTimeFormat('en-CA', {
+  timeZone: CAO_TIME_ZONE,
+  year: 'numeric',
+  month: '2-digit',
+  day: '2-digit',
+  hour: '2-digit',
+  minute: '2-digit',
+  hour12: false,
+  hourCycle: 'h23'
+});
 
 // Normaliseer scope: null = fail-closed (unknown → conservatief, maar planning hoofdstuk 3 geldt altijd)
 function normalizeCaoScope(scope) {
@@ -86,6 +103,135 @@ function startOfIsoWeekDate(date) {
   return d;
 }
 
+function formatterParts(formatter, date) {
+  return Object.fromEntries(formatter.formatToParts(date).map(part => [part.type, part.value]));
+}
+
+function parseIsoDateParts(value) {
+  const iso = asIsoDate(value);
+  const match = iso?.match(/^(\d{4})-(\d{2})-(\d{2})$/);
+  if (!match) return null;
+  return {
+    year: Number(match[1]),
+    month: Number(match[2]),
+    day: Number(match[3])
+  };
+}
+
+function parseClockParts(value) {
+  const match = String(value || '').match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours > 24 || minutes > 59 || (hours === 24 && minutes !== 0)) return null;
+  return { hours, minutes, total_minutes: hours * 60 + minutes };
+}
+
+function lastSundayOfMonthDay(year, monthNumber) {
+  const date = new Date(Date.UTC(year, monthNumber, 0));
+  date.setUTCDate(date.getUTCDate() - date.getUTCDay());
+  return date.getUTCDate();
+}
+
+function amsterdamDstTransitionDates(year) {
+  return {
+    spring_date: `${year}-03-${String(lastSundayOfMonthDay(year, 3)).padStart(2, '0')}`,
+    fall_date: `${year}-10-${String(lastSundayOfMonthDay(year, 10)).padStart(2, '0')}`
+  };
+}
+
+function amsterdamLocalTimeIssue(dateStr, time) {
+  const parts = parseIsoDateParts(dateStr);
+  const clock = parseClockParts(time);
+  if (!parts || !clock) return null;
+  const transitions = amsterdamDstTransitionDates(parts.year);
+  const iso = asIsoDate(dateStr);
+  if (iso === transitions.spring_date && clock.total_minutes >= 120 && clock.total_minutes < 180) {
+    return 'nonexistent_spring_forward_hour';
+  }
+  if (iso === transitions.fall_date && clock.total_minutes >= 120 && clock.total_minutes < 180) {
+    return 'ambiguous_fall_back_hour';
+  }
+  return null;
+}
+
+function amsterdamOffsetMinutesForLocal(dateStr, time, role = 'start') {
+  const parts = parseIsoDateParts(dateStr);
+  const clock = parseClockParts(time);
+  if (!parts || !clock) return null;
+  const iso = asIsoDate(dateStr);
+  const transitions = amsterdamDstTransitionDates(parts.year);
+  if (iso < transitions.spring_date || iso > transitions.fall_date) return 60;
+  if (iso > transitions.spring_date && iso < transitions.fall_date) return 120;
+  if (iso === transitions.spring_date) {
+    if (clock.total_minutes < 120) return 60;
+    if (clock.total_minutes >= 180) return 120;
+    return role === 'end' ? 120 : 60;
+  }
+  if (iso === transitions.fall_date) {
+    if (clock.total_minutes < 120) return 120;
+    if (clock.total_minutes >= 180) return 60;
+    return role === 'end' ? 60 : 120;
+  }
+  return 60;
+}
+
+function amsterdamWallTimeToDate(dateStr, time, role = 'start') {
+  const parts = parseIsoDateParts(dateStr);
+  const clock = parseClockParts(time);
+  const offsetMinutes = amsterdamOffsetMinutesForLocal(dateStr, time, role);
+  if (!parts || !clock || offsetMinutes === null) return null;
+  return new Date(Date.UTC(parts.year, parts.month - 1, parts.day, clock.hours, clock.minutes, 0) - offsetMinutes * 60000);
+}
+
+function parseDateTimeInCaoZone(value, role = 'start') {
+  if (!value) return null;
+  const text = String(value);
+  if (/[zZ]|[+-]\d{2}:?\d{2}$/.test(text)) {
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  const match = text.match(/^(\d{4}-\d{2}-\d{2})[T\s](\d{1,2}:\d{2})/);
+  if (!match) {
+    const date = new Date(text);
+    return Number.isNaN(date.getTime()) ? null : date;
+  }
+  return amsterdamWallTimeToDate(match[1], match[2], role);
+}
+
+function wallClockShiftHours(shift) {
+  return durationHoursForTimes(shift.start_time, shift.end_time);
+}
+
+function dstInfoForShift(shift) {
+  const date = asIsoDate(shift.date || shift.service_date);
+  const startTime = shift.start_time;
+  const endTime = shift.end_time;
+  if (!date || !startTime || !endTime) return null;
+  const actualHours = round2(calculateShiftHours(shift));
+  const nominalHours = round2(wallClockShiftHours(shift) ?? actualHours);
+  const startIssue = amsterdamLocalTimeIssue(date, startTime);
+  const startMinutes = parseClockMinutes(startTime);
+  const endMinutes = parseClockMinutes(endTime);
+  const endDate = startMinutes !== null && endMinutes !== null && endMinutes <= startMinutes ? addDays(date, 1) : date;
+  const endIssue = amsterdamLocalTimeIssue(endDate, endTime);
+  const delta = round2(actualHours - nominalHours);
+  if (delta === 0 && !startIssue && !endIssue) return null;
+  return {
+    shift_id: shift.id || null,
+    date,
+    start_time: startTime,
+    end_time: endTime,
+    actual_worked_hours: actualHours,
+    wall_clock_hours: nominalHours,
+    dst_delta_hours: delta,
+    transition_type: delta > 0 ? 'winter_time_extra_hour' : delta < 0 ? 'summer_time_missing_hour' : 'ambiguous_or_nonexistent_local_time',
+    start_time_issue: startIssue,
+    end_time_issue: endIssue,
+    manual_review_required: !!startIssue || !!endIssue
+  };
+}
+
 function isWeekendBlock(day1, day2) {
   const d1 = new Date(day1), d2 = new Date(day2);
   const diffDays = (d2 - d1) / (1000 * 60 * 60 * 24);
@@ -94,10 +240,8 @@ function isWeekendBlock(day1, day2) {
 }
 
 function calculateShiftHours(shift) {
-  const start = new Date(`${shift.date}T${shift.start_time || '00:00'}:00`);
-  let end = new Date(`${shift.date}T${shift.end_time || '00:00'}:00`);
-  if (end <= start) end.setDate(end.getDate() + 1);
-  return (end - start) / (1000 * 60 * 60);
+  const interval = shiftDateTime(shift);
+  return interval ? (interval.end - interval.start) / (1000 * 60 * 60) : 0;
 }
 
 function asIsoDate(value) {
@@ -123,13 +267,8 @@ function round2(value) {
 }
 
 function parseClockMinutes(value) {
-  if (!value) return null;
-  const match = String(value).match(/^(\d{1,2}):(\d{2})/);
-  if (!match) return null;
-  const hours = Number(match[1]);
-  const minutes = Number(match[2]);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || minutes > 59) return null;
-  return hours * 60 + minutes;
+  const parts = parseClockParts(value);
+  return parts ? parts.total_minutes : null;
 }
 
 function durationHoursForTimes(startTime, endTime) {
@@ -153,16 +292,14 @@ function dateFromIso(value) {
 }
 
 function formatIsoDateLocal(date) {
-  const year = date.getFullYear();
-  const month = String(date.getMonth() + 1).padStart(2, '0');
-  const day = String(date.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
+  const parts = formatterParts(AMSTERDAM_DATE_FORMATTER, date);
+  return `${parts.year}-${parts.month}-${parts.day}`;
 }
 
 function formatLocalDateTime(date) {
-  const hours = String(date.getHours()).padStart(2, '0');
-  const minutes = String(date.getMinutes()).padStart(2, '0');
-  return `${formatIsoDateLocal(date)}T${hours}:${minutes}:00`;
+  const parts = formatterParts(AMSTERDAM_DATE_TIME_FORMATTER, date);
+  const hour = String(Number(parts.hour) % 24).padStart(2, '0');
+  return `${parts.year}-${parts.month}-${parts.day}T${hour}:${parts.minute}:00`;
 }
 
 function calculateAgeAt(dateOfBirth, referenceDate) {
@@ -359,8 +496,9 @@ function breakIntervalWithinShift(shift, breakItem) {
   const startTime = breakItem.start_time;
   const endTime = breakItem.end_time;
   if (!shiftInterval || !date || !startTime || !endTime) return null;
-  let start = new Date(`${date}T${startTime}:00`);
-  let end = new Date(`${date}T${endTime}:00`);
+  let start = amsterdamWallTimeToDate(date, startTime, 'start');
+  let end = amsterdamWallTimeToDate(date, endTime, 'end');
+  if (!start || !end) return null;
   if (start < shiftInterval.start) start.setDate(start.getDate() + 1);
   if (end <= start) end.setDate(end.getDate() + 1);
   return { start, end };
@@ -450,9 +588,14 @@ function shiftDateTime(shift, fieldPrefix = '') {
   const startTime = shift[`${fieldPrefix}start_time`] || shift.start_time;
   const endTime = shift[`${fieldPrefix}end_time`] || shift.end_time;
   if (!date || !startTime || !endTime) return null;
-  const start = new Date(`${date}T${startTime}:00`);
-  let end = new Date(`${date}T${endTime}:00`);
-  if (end <= start) end.setDate(end.getDate() + 1);
+  const start = amsterdamWallTimeToDate(date, startTime, 'start');
+  const startMinutes = parseClockMinutes(startTime);
+  const endMinutes = parseClockMinutes(endTime);
+  const explicitEndDate = asIsoDate(shift[`${fieldPrefix}end_date`] || shift.end_date || shift.service_end_date);
+  const endDate = explicitEndDate || (endMinutes !== null && startMinutes !== null && endMinutes <= startMinutes ? addDays(date, 1) : date);
+  let end = amsterdamWallTimeToDate(endDate, endTime, 'end');
+  if (!start || !end) return null;
+  if (end <= start) end = amsterdamWallTimeToDate(addDays(endDate, 1), endTime, 'end');
   return { start, end };
 }
 
@@ -531,9 +674,9 @@ function itemDateTimeInterval(item) {
   const startDateTime = item.start_datetime || item.starts_at || item.start_at || item.from_datetime || null;
   const endDateTime = item.end_datetime || item.ends_at || item.end_at || item.to_datetime || null;
   if (startDateTime && endDateTime) {
-    const start = new Date(startDateTime);
-    let end = new Date(endDateTime);
-    if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+    const start = parseDateTimeInCaoZone(startDateTime, 'start');
+    let end = parseDateTimeInCaoZone(endDateTime, 'end');
+    if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
     if (end <= start) end.setDate(end.getDate() + 1);
     return { start, end };
   }
@@ -544,16 +687,16 @@ function itemDateTimeInterval(item) {
   const endDate = asIsoDate(item.end_date || item.to_date);
   const endTime = item.end_time || item.to_time || item.duty_end_time || (endDate ? '00:00' : null);
   if (!endTime) return null;
-  const start = new Date(`${date}T${startTime}:00`);
-  let end = new Date(`${endDate || date}T${endTime}:00`);
-  if (Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
+  const start = amsterdamWallTimeToDate(date, startTime, 'start');
+  let end = amsterdamWallTimeToDate(endDate || date, endTime, 'end');
+  if (!start || !end || Number.isNaN(start.getTime()) || Number.isNaN(end.getTime())) return null;
   if (end <= start) end.setDate(end.getDate() + 1);
   return { start, end };
 }
 
 function periodBounds(periodStart, periodEnd) {
-  const start = dateFromIso(periodStart);
-  const end = dateFromIso(addDays(periodEnd, 1));
+  const start = amsterdamWallTimeToDate(periodStart, '00:00', 'start');
+  const end = amsterdamWallTimeToDate(addDays(periodEnd, 1), '00:00', 'end');
   return { start, end };
 }
 
@@ -622,10 +765,10 @@ function intervalOverlapsWindow(interval, windowStart, windowEnd) {
 }
 
 function intervalOverlapsIsoDate(interval, isoDate) {
-  const dayStart = dateFromIso(isoDate);
+  const dayStart = amsterdamWallTimeToDate(isoDate, '00:00', 'start');
   if (!dayStart) return false;
-  const dayEnd = new Date(dayStart);
-  dayEnd.setDate(dayEnd.getDate() + 1);
+  const dayEnd = amsterdamWallTimeToDate(addDays(isoDate, 1), '00:00', 'end');
+  if (!dayEnd) return false;
   return intervalOverlapsWindow(interval, dayStart, dayEnd);
 }
 
@@ -638,15 +781,15 @@ function nightHoursBetweenDates(interval, windowStart, windowEnd) {
   const overlapEnd = new Date(Math.min(interval.end.getTime(), windowEnd.getTime()));
   if (overlapEnd <= overlapStart) return 0;
   let totalMs = 0;
-  const cursor = dateFromIso(formatIsoDateLocal(overlapStart));
-  while (cursor < overlapEnd) {
-    const nightStart = new Date(cursor);
-    const nightEnd = new Date(cursor);
-    nightEnd.setHours(6, 0, 0, 0);
+  const startDate = formatIsoDateLocal(overlapStart);
+  const endDate = formatIsoDateLocal(overlapEnd);
+  for (const date of dateRange(startDate, endDate)) {
+    const nightStart = amsterdamWallTimeToDate(date, '00:00', 'start');
+    const nightEnd = amsterdamWallTimeToDate(date, '06:00', 'end');
+    if (!nightStart || !nightEnd) continue;
     const start = Math.max(overlapStart.getTime(), nightStart.getTime());
     const end = Math.min(overlapEnd.getTime(), nightEnd.getTime());
     if (end > start) totalMs += end - start;
-    cursor.setDate(cursor.getDate() + 1);
   }
   return totalMs / 3600000;
 }
@@ -671,8 +814,9 @@ function dutyHoursWithinWindow(dutyPeriods, windowStart, windowEnd) {
 function datesWithNightDuty(dutyPeriods, periodStart, periodEnd) {
   const dates = [];
   for (const date of dateRange(periodStart, periodEnd)) {
-    const dayStart = new Date(`${date}T00:00:00`);
-    const dayNightEnd = new Date(`${date}T06:00:00`);
+    const dayStart = amsterdamWallTimeToDate(date, '00:00', 'start');
+    const dayNightEnd = amsterdamWallTimeToDate(date, '06:00', 'end');
+    if (!dayStart || !dayNightEnd) continue;
     if (dutyPeriods.some(period => period.start && period.end && intervalOverlapHours(period, dayStart, dayNightEnd) > 0)) {
       dates.push(date);
     }
@@ -907,7 +1051,8 @@ function overlapsAfterClock(shift, dateStr, clockTime) {
   if (date !== dateStr) return false;
   const interval = shiftDateTime(shift);
   if (!interval) return false;
-  const boundary = new Date(`${dateStr}T${clockTime}:00`);
+  const boundary = amsterdamWallTimeToDate(dateStr, clockTime, 'start');
+  if (!boundary) return false;
   return interval.end > boundary;
 }
 
@@ -922,6 +1067,36 @@ function shiftWithinWindow(shift, windowStartTime, windowEndTime) {
   if (shiftEnd <= shiftStart) shiftEnd += 24 * 60;
   if (windowEnd <= windowStart) windowEnd += 24 * 60;
   return shiftStart >= windowStart && shiftEnd <= windowEnd;
+}
+
+function isShiftExchange(shift = {}) {
+  const explicit = booleanOrNull(
+    shift.is_shift_exchange ??
+    shift.shift_exchange ??
+    shift.is_shift_swap ??
+    shift.shift_swap ??
+    shift.service_swap ??
+    shift.dienst_ruil ??
+    shift.is_dienstruil
+  );
+  if (explicit !== null) return explicit;
+  const text = textFromDutyItem(shift);
+  return text.includes('dienstruil') ||
+    text.includes('dienst ruil') ||
+    text.includes('shift swap') ||
+    text.includes('shift exchange') ||
+    text.includes('service swap');
+}
+
+function isShiftExchangeApproved(shift = {}) {
+  return booleanOrNull(
+    shift.shift_exchange_approved ??
+    shift.shift_swap_approved ??
+    shift.service_swap_approved ??
+    shift.dienst_ruil_goedgekeurd ??
+    shift.employer_approved_shift_exchange ??
+    shift.employer_shift_swap_approval_confirmed
+  ) === true;
 }
 
 function hasContractModel(body, shift, names) {
@@ -1191,6 +1366,19 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const referenceNightShiftDetails = nightShiftDetailsFromIntervals(article27To29ReferenceServiceIntervals, body);
   const workingTimeNightShiftDetails = nightShiftDetailsFromIntervals(referenceServiceIntervals, body);
   const timeWindows = getRosterTimeWindows(body, periodStart, periodEnd, periodShifts);
+  const shiftExchangeRows = serviceShifts
+    .filter(isShiftExchange)
+    .map(shift => ({
+      shift_id: shift.id || null,
+      date: asIsoDate(shift.date || shift.service_date),
+      start_time: shift.start_time || null,
+      end_time: shift.end_time || null,
+      employer_approved: isShiftExchangeApproved(shift),
+      special_hours_allowance_preserved: true
+    }));
+  const dstTransitionRows = serviceShifts
+    .map(dstInfoForShift)
+    .filter(Boolean);
   const periodDistance = daysBetween(periodEnd, periodStart);
   const periodDayCount = periodDistance !== null ? periodDistance + 1 : null;
   const schedulePublishedAt = body.schedule_published_at || body.roster_published_at || body.roster_publication_datetime || null;
@@ -1252,6 +1440,51 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   } else if (!isGeneralReserve && !weeklySchedulePublishedAt) {
     addManualReview(manualReviewItems, 'CAO-PB-2024-R0568', 'weekly_roster_publication', 'Leg vast wanneer de weekindeling met diensten is gepubliceerd.', 'weekly_schedule_published_at');
     missingEvidence.push({ rule_id: 'CAO-PB-2024-R0568', field: 'weekly_schedule_published_at' });
+  }
+
+  for (const exchange of shiftExchangeRows) {
+    if (!exchange.employer_approved) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0709',
+        severity: 'medium',
+        message: `Dienstruil${exchange.date ? ` op ${exchange.date}` : ''} mist werkgeverstoestemming.`,
+        affected_shift_ids: exchange.shift_id ? [exchange.shift_id] : [],
+        payroll_impact: false,
+        manual_review_required: true,
+        required_approval_field: 'shift_exchange_approved'
+      });
+    } else {
+      skippedRules.push({
+        rule_id: 'CAO-PB-2024-R0710',
+        reason: 'Goedgekeurde dienstruil geeft geen recht op een vergoeding die zonder dienstruil niet zou bestaan; bijzondere-urenvergoeding blijft wel van toepassing.',
+        affected_shift_ids: exchange.shift_id ? [exchange.shift_id] : []
+      });
+    }
+  }
+
+  for (const dstRow of dstTransitionRows) {
+    payrollEntitlements.push({
+      rule_id: 'CAO-PB-2024-R0712',
+      type: 'dst_actual_worked_hours_required',
+      affected_shift_ids: dstRow.shift_id ? [dstRow.shift_id] : [],
+      date: dstRow.date,
+      start_time: dstRow.start_time,
+      end_time: dstRow.end_time,
+      wall_clock_hours: dstRow.wall_clock_hours,
+      actual_worked_hours: dstRow.actual_worked_hours,
+      dst_delta_hours: dstRow.dst_delta_hours,
+      transition_type: dstRow.transition_type,
+      message: 'Dienst valt door wisseling zomer-/wintertijd: betaling moet plaatsvinden over de werkelijk gemaakte uren.'
+    });
+    if (dstRow.manual_review_required) {
+      addManualReview(
+        manualReviewItems,
+        'CAO-PB-2024-R0712',
+        'dst_local_time_ambiguity',
+        'Dienst gebruikt een lokaal tijdstip in het ontbrekende of dubbele DST-uur; bevestig de werkelijk gemaakte uren.',
+        'actual_worked_hours'
+      );
+    }
   }
 
   let totalHours = 0, totalShifts = 0;
@@ -2781,6 +3014,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
       }
       continue;
     }
+    if (isShiftExchange(shift)) continue;
     const changedAfterRoster = booleanOrNull(shift.changed_after_roster_published) === true ||
       !!shift.roster_change_datetime ||
       !!shift.original_start_time ||
@@ -2921,6 +3155,17 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
       shift_change_allowance_excluded: isGeneralReserve
     },
     youth_worker_summary: youthWorkerSummary,
+    shift_exchange_summary: {
+      has_shift_exchanges: shiftExchangeRows.length > 0,
+      source_rule_ids: ['CAO-PB-2024-R0708', 'CAO-PB-2024-R0709', 'CAO-PB-2024-R0710'],
+      exchanges: shiftExchangeRows
+    },
+    dst_transition_summary: {
+      has_dst_transition_shifts: dstTransitionRows.length > 0,
+      time_zone: CAO_TIME_ZONE,
+      source_rule_ids: ['CAO-PB-2024-R0711', 'CAO-PB-2024-R0712', 'CAO-PB-2024-R0713'],
+      shifts: dstTransitionRows
+    },
     consignment_summary: {
       has_consignment_duty: hasConsignmentDuty,
       has_availability_duty: hasAvailabilityDuty,
@@ -2977,8 +3222,8 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
       four_week_average: rollingAverage4,
       sixteen_week_average: rollingAverage16,
       thirteen_week_average: rollingAverage13,
-      night_thirteen_week_average: hasNightWork ? nightAverage13 : null,
-      has_night_work: hasNightWork
+      night_thirteen_week_average: hasNightWorkForArticle26 ? nightAverage13 : null,
+      has_night_work: hasNightWorkForArticle26
     },
     night_shift_summary: {
       has_night_shifts: hasNightWork,
