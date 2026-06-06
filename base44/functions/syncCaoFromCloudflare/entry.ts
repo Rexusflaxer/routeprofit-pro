@@ -337,10 +337,14 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
     payroll_critical_open: 0,
     runtime_bound: 0,
     runtime_missing: 0,
-    implemented_without_runtime_binding: 0
+    implemented_without_runtime_binding: 0,
+    implemented_without_test_evidence: 0,
+    partial_without_manual_review: 0
   };
   const openCriticalRules = [];
   const implementedWithoutRuntimeBinding = [];
+  const implementedWithoutTestEvidence = [];
+  const partialWithoutManualReview = [];
   const missingTextRules = [];
 
   for (const rule of rules) {
@@ -361,6 +365,10 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
       else counts.runtime_missing++;
 
       const lacksRuntimeBinding = status === 'IMPLEMENTED' && !runtimeBinding;
+      const lacksTestEvidence = status === 'IMPLEMENTED' &&
+        (!rule.tests || (Array.isArray(rule.tests) && rule.tests.length === 0) ||
+          (typeof rule.tests === 'object' && !Array.isArray(rule.tests) && Object.keys(rule.tests).length === 0));
+      const partialWithoutReview = status === 'PARTIAL' && rule.manual_review_required !== true;
       if (lacksRuntimeBinding) {
         counts.implemented_without_runtime_binding++;
         implementedWithoutRuntimeBinding.push({
@@ -371,8 +379,27 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
           message: 'Regel claimt IMPLEMENTED, maar heeft geen lokale runtime-binding in Base44.'
         });
       }
+      if (lacksTestEvidence) {
+        counts.implemented_without_test_evidence++;
+        implementedWithoutTestEvidence.push({
+          rule_id: rule.rule_id || 'unknown',
+          domain: rule.domain || null,
+          implementation_status: rule.implementation_status || 'IMPLEMENTED',
+          implemented_in: rule.implemented_in || [],
+          message: 'Regel claimt IMPLEMENTED, maar CAORule.tests bevat geen testbewijs.'
+        });
+      }
+      if (partialWithoutReview) {
+        counts.partial_without_manual_review++;
+        partialWithoutManualReview.push({
+          rule_id: rule.rule_id || 'unknown',
+          domain: rule.domain || null,
+          implementation_status: rule.implementation_status || 'PARTIAL',
+          message: 'Regel is PARTIAL, maar manual_review_required is niet true.'
+        });
+      }
 
-      if (status !== 'IMPLEMENTED' || rule.manual_review_required === true || lacksRuntimeBinding) {
+      if (status !== 'IMPLEMENTED' || rule.manual_review_required === true || lacksRuntimeBinding || lacksTestEvidence || partialWithoutReview) {
         counts.payroll_critical_open++;
         openCriticalRules.push({
           rule_id: rule.rule_id || 'unknown',
@@ -432,6 +459,20 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
       message: `${implementedWithoutRuntimeBinding.length} payrollkritische CAO-regels claimen IMPLEMENTED, maar missen een lokale runtime-binding.`
     });
   }
+  if (implementedWithoutTestEvidence.length > 0) {
+    blockingFindings.push({
+      code: 'implemented_rules_without_test_evidence',
+      severity: 'high',
+      message: `${implementedWithoutTestEvidence.length} payrollkritische CAO-regels claimen IMPLEMENTED, maar missen testbewijs.`
+    });
+  }
+  if (partialWithoutManualReview.length > 0) {
+    blockingFindings.push({
+      code: 'partial_rules_without_manual_review',
+      severity: 'high',
+      message: `${partialWithoutManualReview.length} payrollkritische PARTIAL-regels missen manual_review_required=true.`
+    });
+  }
 
   let status = 'ready';
   if (blockingFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
@@ -450,6 +491,10 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
     open_payroll_critical_rules_truncated: openCriticalRules.length > 100,
     implemented_without_runtime_binding_rules: implementedWithoutRuntimeBinding.slice(0, 100),
     implemented_without_runtime_binding_truncated: implementedWithoutRuntimeBinding.length > 100,
+    implemented_without_test_evidence_rules: implementedWithoutTestEvidence.slice(0, 100),
+    implemented_without_test_evidence_truncated: implementedWithoutTestEvidence.length > 100,
+    partial_without_manual_review_rules: partialWithoutManualReview.slice(0, 100),
+    partial_without_manual_review_truncated: partialWithoutManualReview.length > 100,
     local_runtime_binding_keys: Object.keys(LOCAL_RUNTIME_RULE_BINDINGS),
     missing_rule_text_rule_ids: missingTextRules.slice(0, 100),
     missing_rule_text_truncated: missingTextRules.length > 100
