@@ -195,6 +195,16 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
     functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
     rule_ids: ['CAO-PB-2024-R0797']
   },
+  'calculatePersonnelCosts.article_43_44_shift_change_allowance': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R0576', 'CAO-PB-2024-R0580', 'CAO-PB-2024-R0585',
+      'CAO-PB-2024-R0586', 'CAO-PB-2024-R0606',
+      'CAO-PB-2024-R0799', 'CAO-PB-2024-R0800', 'CAO-PB-2024-R0801',
+      'CAO-PB-2024-R0802', 'CAO-PB-2024-R0803', 'CAO-PB-2024-R0804',
+      'CAO-PB-2024-R0805', 'CAO-PB-2024-R0806', 'CAO-PB-2024-R0807'
+    ]
+  },
   'calculatePersonnelCosts.article_45_minimum_service_compensation': {
     functions: ['calculatePersonnelCosts', 'validateCaoScheduleRules', 'calculateCaoReimbursements'],
     rule_ids: [

@@ -70,9 +70,20 @@ function r2(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
+function isoDate(value) {
+  if (!value) return null;
+  return String(value).slice(0, 10);
+}
+
 function numberOrZero(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : 0;
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
 }
 
 function getOvertimeRules(caoConfig) {
@@ -273,6 +284,146 @@ function resolveActingFunctionAllowance(shift, personnel, paidHoursForShift, cao
     result.review_reason = `Functiewaarneming duurt ${months} maanden; na ${rules.max_months} maanden moet bevordering of terugplaatsing worden beoordeeld.`;
   }
 
+  return result;
+}
+
+function timeToMinutes(value) {
+  if (!value || typeof value !== 'string') return null;
+  const [h, m] = value.split(':').map(Number);
+  if (!Number.isFinite(h) || !Number.isFinite(m)) return null;
+  return h * 60 + m;
+}
+
+function absoluteEndMinutes(startMinutes, endTime) {
+  const end = timeToMinutes(endTime);
+  if (end === null || startMinutes === null) return null;
+  return end <= startMinutes ? end + 24 * 60 : end;
+}
+
+function hoursOutsideWindow(startTime, endTime, windowStart, windowEnd) {
+  const start = timeToMinutes(startTime);
+  const end = absoluteEndMinutes(start, endTime);
+  const wStartRaw = timeToMinutes(windowStart);
+  const wEnd = absoluteEndMinutes(wStartRaw, windowEnd);
+  if (start === null || end === null || wStartRaw === null || wEnd === null) return null;
+  let wStart = wStartRaw;
+  if (wEnd > 24 * 60 && start < wStart) {
+    wStart -= 24 * 60;
+  }
+  const overlap = Math.max(0, Math.min(end, wEnd) - Math.max(start, wStart));
+  return Math.max(0, (end - start - overlap) / 60);
+}
+
+function daysBetweenIso(laterDate, earlierDate) {
+  const later = new Date(`${isoDate(laterDate)}T00:00:00`);
+  const earlier = new Date(`${isoDate(earlierDate)}T00:00:00`);
+  if (Number.isNaN(later.getTime()) || Number.isNaN(earlier.getTime())) return null;
+  return Math.floor((later - earlier) / (24 * 60 * 60 * 1000));
+}
+
+function resolveShiftChangePercentage(shift) {
+  const explicit = numberOrNull(shift.shift_change_allowance_percentage ?? shift.roster_change_allowance_percentage);
+  if (explicit !== null) return { percentage: explicit, notice_days: numberOrNull(shift.shift_change_notice_days), source_rule_id: 'CAO-PB-2024-R0800' };
+
+  let noticeDays = numberOrNull(shift.shift_change_notice_days ?? shift.roster_change_notice_days ?? shift.notice_days_before_shift);
+  if (noticeDays === null && shift.roster_change_datetime && shift.date) {
+    noticeDays = daysBetweenIso(shift.date, shift.roster_change_datetime);
+  }
+  if (noticeDays === null && shift.shift_change_notified_date && shift.date) {
+    noticeDays = daysBetweenIso(shift.date, shift.shift_change_notified_date);
+  }
+  if (noticeDays === null) return { percentage: null, notice_days: null, source_rule_id: null };
+  if (noticeDays >= 8 && noticeDays <= 28) return { percentage: 5, notice_days: noticeDays, source_rule_id: 'CAO-PB-2024-R0801' };
+  if (noticeDays >= 2 && noticeDays <= 7) return { percentage: 10, notice_days: noticeDays, source_rule_id: 'CAO-PB-2024-R0802' };
+  if (noticeDays >= 0 && noticeDays <= 1) return { percentage: 20, notice_days: noticeDays, source_rule_id: 'CAO-PB-2024-R0803' };
+  return { percentage: null, notice_days: noticeDays, source_rule_id: null };
+}
+
+function resolveShiftChangeAllowance(shift, personnel, hoursWorked, baseHourlyRate) {
+  const result = {
+    applies: false,
+    hours: 0,
+    percentage: 0,
+    rate: 0,
+    amount: 0,
+    notice_days: null,
+    manual_review_required: false,
+    review_reason: null,
+    source_rule_ids: []
+  };
+
+  const isOnCall = ['0_uren', 'oproep', 'min_max'].includes(personnel.contract_type) ||
+    ['oproep', 'zero_hours', 'min_max', 'call'].includes(shift.contract_model);
+  if (isOnCall || shift.shift_change_allowance_excluded === true) {
+    result.source_rule_ids.push(isOnCall ? 'CAO-PB-2024-R0586' : 'CAO-PB-2024-R0806');
+    return result;
+  }
+
+  if (shift.shift_exchange === true || shift.exchanged_with_colleague === true || shift.employee_initiated_shift_exchange === true) {
+    result.source_rule_ids.push('CAO-PB-2024-R0710');
+    return result;
+  }
+
+  if (shift.general_reserve === true || shift.is_general_reserve === true) {
+    result.source_rule_ids.push('CAO-PB-2024-R0606');
+    return result;
+  }
+
+  const changed = shift.shift_change_allowance_required === true ||
+    shift.changed_after_roster_published === true ||
+    !!shift.roster_change_datetime ||
+    !!shift.original_time_window_start ||
+    !!shift.notified_time_window_start ||
+    !!shift.original_start_time;
+
+  if (!changed) {
+    const extensionHours = shift.extended_after_roster_published === true || shift.longer_than_10_hours_shift_change === true
+      ? Math.max(0, hoursWorked - 10)
+      : 0;
+    if (extensionHours <= 0) return result;
+  }
+
+  const originalWindowStart = shift.original_time_window_start || shift.notified_time_window_start || shift.original_start_time || null;
+  const originalWindowEnd = shift.original_time_window_end || shift.notified_time_window_end || shift.original_end_time || null;
+  let eligibleHours = numberOrNull(
+    shift.shift_change_allowance_hours ??
+    shift.shift_change_hours ??
+    shift.hours_outside_original_time_window ??
+    shift.hours_outside_notified_time_window
+  );
+  if (eligibleHours === null && originalWindowStart && originalWindowEnd) {
+    eligibleHours = hoursOutsideWindow(shift.start_time, shift.end_time, originalWindowStart, originalWindowEnd);
+  }
+
+  if ((shift.extended_after_roster_published === true || shift.longer_than_10_hours_shift_change === true) && hoursWorked > 10) {
+    eligibleHours = Math.max(numberOrZero(eligibleHours), hoursWorked - 10);
+    result.source_rule_ids.push('CAO-PB-2024-R0804');
+  }
+
+  if (eligibleHours === null || eligibleHours <= 0) {
+    result.manual_review_required = true;
+    result.review_reason = 'Verschuiving gemeld, maar uren buiten gepubliceerde tijdvak/dienst ontbreken.';
+    result.source_rule_ids.push('CAO-PB-2024-R0799');
+    return result;
+  }
+
+  const pct = resolveShiftChangePercentage(shift);
+  result.notice_days = pct.notice_days;
+  if (pct.percentage === null) {
+    result.manual_review_required = true;
+    result.review_reason = 'Moment waarop werknemer de verschuiving hoorde ontbreekt; percentage 5/10/20% kan niet worden vastgesteld.';
+    result.hours = eligibleHours;
+    result.source_rule_ids.push('CAO-PB-2024-R0800');
+    return result;
+  }
+
+  result.applies = true;
+  result.hours = eligibleHours;
+  result.percentage = pct.percentage;
+  result.rate = baseHourlyRate * (pct.percentage / 100);
+  result.amount = eligibleHours * result.rate;
+  result.source_rule_ids.push('CAO-PB-2024-R0799', 'CAO-PB-2024-R0800', pct.source_rule_id, 'CAO-PB-2024-R0806', 'CAO-PB-2024-R0807');
+  result.source_rule_ids = [...new Set(result.source_rule_ids.filter(Boolean))];
   return result;
 }
 
@@ -674,6 +825,11 @@ Deno.serve(async (req) => {
         amount: 0,
         source_rule_ids: []
       },
+      shift_change_allowance: {
+        hours: 0,
+        amount: 0,
+        source_rule_ids: []
+      },
       total_gross: 0,
       
       // Werknemersbijdragen (inhoudingen)
@@ -701,6 +857,7 @@ Deno.serve(async (req) => {
         excluded_overtime_amount: 0,
         excluded_special_hours_allowances: 0,
         excluded_acting_function_allowance: 0,
+        excluded_shift_change_allowance: 0,
         source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
       },
       
@@ -930,6 +1087,28 @@ Deno.serve(async (req) => {
             ])
           ];
         }
+
+        const shiftChangeAllowance = resolveShiftChangeAllowance(shift, personnel, hoursWorked, baseHourlyRate);
+        if (shiftChangeAllowance.manual_review_required) {
+          payrollRuntimeReviewItems.push({
+            rule_id: shiftChangeAllowance.source_rule_ids[0] || 'CAO-PB-2024-R0799',
+            domain: 'shift_change_allowance',
+            message: shiftChangeAllowance.review_reason || 'Verschuivingstoeslag vereist handmatige beoordeling.',
+            field: 'shift_change_allowance_hours/shift_change_notice_days'
+          });
+          runtimePayrollFinalAllowed = false;
+          runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+        }
+        if (shiftChangeAllowance.applies && shiftChangeAllowance.amount > 0) {
+          payslip.shift_change_allowance.hours += shiftChangeAllowance.hours;
+          payslip.shift_change_allowance.amount += shiftChangeAllowance.amount;
+          payslip.shift_change_allowance.source_rule_ids = [
+            ...new Set([
+              ...payslip.shift_change_allowance.source_rule_ids,
+              ...shiftChangeAllowance.source_rule_ids
+            ])
+          ];
+        }
         
         payslip.shift_details.push({
           date,
@@ -955,6 +1134,16 @@ Deno.serve(async (req) => {
             lower_function_keeps_old_scale: actingAllowance.lower_function_keeps_old_scale,
             manual_review_required: actingAllowance.manual_review_required,
             source_rule_ids: actingAllowance.source_rule_ids
+          },
+          shift_change_allowance: {
+            applies: shiftChangeAllowance.applies,
+            hours: r2(shiftChangeAllowance.hours),
+            percentage: shiftChangeAllowance.percentage,
+            rate: r2(shiftChangeAllowance.rate),
+            amount: r2(shiftChangeAllowance.amount),
+            notice_days: shiftChangeAllowance.notice_days,
+            manual_review_required: shiftChangeAllowance.manual_review_required,
+            source_rule_ids: shiftChangeAllowance.source_rule_ids
           }
         });
       }
@@ -1026,6 +1215,7 @@ Deno.serve(async (req) => {
       const overtimeAmount = payslip.overtime_50.amount;
       const minimumServiceAmount = payslip.minimum_service_compensation.amount;
       const actingFunctionAllowanceAmount = payslip.acting_function_allowance.amount;
+      const shiftChangeAllowanceAmount = payslip.shift_change_allowance.amount;
       const yearEndBonusEligibleBaseWage = payslip.base_salary + minimumServiceAmount;
       const yearEndBonusEligibleVacationAllowance = yearEndBonusEligibleBaseWage * ((caoConfig.vacation_allowance || 8) / 100);
       const yearEndBonusBasisAmount = yearEndBonusEligibleBaseWage + yearEndBonusEligibleVacationAllowance;
@@ -1036,6 +1226,7 @@ Deno.serve(async (req) => {
         excluded_overtime_amount: overtimeAmount,
         excluded_special_hours_allowances: totalSurcharges,
         excluded_acting_function_allowance: actingFunctionAllowanceAmount,
+        excluded_shift_change_allowance: shiftChangeAllowanceAmount,
         source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
       };
       
@@ -1058,9 +1249,9 @@ Deno.serve(async (req) => {
         payslip.vacation_paid = ortVerlof;
         
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
       } else {
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount;
       }
       
       // Bereken pensioengrondslag (bruto loon - vakantiegeld/eindejaarsuitkering - franchise)
@@ -1248,6 +1439,11 @@ Deno.serve(async (req) => {
           amount: r2(payslip.acting_function_allowance.amount),
           source_rule_ids: payslip.acting_function_allowance.source_rule_ids
         },
+        shift_change_allowance: {
+          hours: r2(payslip.shift_change_allowance.hours),
+          amount: r2(payslip.shift_change_allowance.amount),
+          source_rule_ids: payslip.shift_change_allowance.source_rule_ids
+        },
         total_gross: Math.round(payslip.total_gross * 100) / 100,
         is_call_worker: payslip.is_call_worker,
         
@@ -1275,6 +1471,7 @@ Deno.serve(async (req) => {
           excluded_overtime_amount: r2(payslip.year_end_bonus_basis.excluded_overtime_amount),
           excluded_special_hours_allowances: r2(payslip.year_end_bonus_basis.excluded_special_hours_allowances),
           excluded_acting_function_allowance: r2(payslip.year_end_bonus_basis.excluded_acting_function_allowance),
+          excluded_shift_change_allowance: r2(payslip.year_end_bonus_basis.excluded_shift_change_allowance),
           source_rule_ids: payslip.year_end_bonus_basis.source_rule_ids
         },
         
