@@ -84,6 +84,90 @@ function getOvertimeRules(caoConfig) {
   };
 }
 
+function resolveMinimumServiceCompensation(shift, hoursWorked) {
+  const rules = {
+    minimum_hours: Number(shift.minimum_service_hours ?? 3),
+    source_rule_ids: []
+  };
+  const result = {
+    applies: false,
+    paid_hours: hoursWorked,
+    top_up_hours: 0,
+    amount: 0,
+    min_hours_as_worked_hours: 0,
+    min_hours_as_minus_or_empty_hours: 0,
+    travel_reimbursement_required: false,
+    manual_review_required: false,
+    review_reason: null,
+    source_rule_ids: []
+  };
+
+  if (shift.work_meeting === true || shift.is_work_meeting === true || shift.service_type === 'work_meeting') {
+    result.source_rule_ids.push('CAO-PB-2024-R0818');
+    return result;
+  }
+
+  if (shift.mandatory_training_article_55_3 === true || shift.article_55_3_applies === true) {
+    result.source_rule_ids.push('CAO-PB-2024-R0817');
+    return result;
+  }
+
+  if (shift.no_work_on_arrival === true || shift.arrived_but_not_used === true || shift.opgekomen_niet_ingezet === true) {
+    result.applies = true;
+    result.paid_hours = Math.max(hoursWorked, rules.minimum_hours);
+    result.top_up_hours = Math.max(0, result.paid_hours - hoursWorked);
+    result.min_hours_as_worked_hours = Math.min(rules.minimum_hours, result.paid_hours);
+    result.travel_reimbursement_required = true;
+    result.source_rule_ids.push('CAO-PB-2024-R0813');
+    return result;
+  }
+
+  if (shift.is_broken_shift === true || shift.broken_shift === true || Array.isArray(shift.service_parts)) {
+    const parts = Array.isArray(shift.service_parts)
+      ? shift.service_parts.map(part => numberOrZero(part.hours ?? part.duration_hours)).filter(hours => hours > 0)
+      : [];
+    if (parts.length >= 2) {
+      const longestPart = Math.max(...parts);
+      if (longestPart < rules.minimum_hours) {
+        result.applies = true;
+        result.top_up_hours = rules.minimum_hours - longestPart;
+        result.paid_hours = hoursWorked + result.top_up_hours;
+        result.min_hours_as_worked_hours = rules.minimum_hours;
+        result.source_rule_ids.push('CAO-PB-2024-R0814', 'CAO-PB-2024-R0816');
+      }
+      return result;
+    }
+    result.manual_review_required = true;
+    result.review_reason = 'Gebroken dienst zonder service_parts; art. 45 lid 3b kan niet automatisch worden vastgesteld.';
+    result.source_rule_ids.push('CAO-PB-2024-R0814', 'CAO-PB-2024-R0816');
+    return result;
+  }
+
+  const cancelledByEmployer = shift.cancelled_by_employer === true || shift.withdrawn_by_employer === true || shift.cancelled_after_week_schedule === true;
+  const cancelledByEmployeeRequest = shift.cancelled_at_employee_request === true || shift.cancelled_by_employee_request === true;
+  const scheduledHours = numberOrZero(shift.scheduled_hours ?? shift.planned_hours);
+  if (cancelledByEmployer && !cancelledByEmployeeRequest && scheduledHours > 0) {
+    result.applies = true;
+    result.paid_hours = Math.max(hoursWorked, scheduledHours);
+    result.top_up_hours = Math.max(0, result.paid_hours - hoursWorked);
+    result.min_hours_as_worked_hours = Math.min(rules.minimum_hours, result.paid_hours);
+    result.min_hours_as_minus_or_empty_hours = Math.max(0, result.paid_hours - result.min_hours_as_worked_hours);
+    result.source_rule_ids.push('CAO-PB-2024-R0810', 'CAO-PB-2024-R0811');
+    return result;
+  }
+
+  if (hoursWorked > 0 && hoursWorked < rules.minimum_hours) {
+    result.applies = true;
+    result.paid_hours = rules.minimum_hours;
+    result.top_up_hours = rules.minimum_hours - hoursWorked;
+    result.min_hours_as_worked_hours = rules.minimum_hours;
+    result.source_rule_ids.push('CAO-PB-2024-R0814', 'CAO-PB-2024-R0815');
+    return result;
+  }
+
+  return result;
+}
+
 async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, caoScope }) {
   if (personnel.employee_type !== 'loondienst') {
     return {
@@ -468,6 +552,15 @@ Deno.serve(async (req) => {
         applied: false,
         source_rule_ids: ['CAO-PB-2024-R0797']
       },
+      minimum_service_compensation: {
+        paid_hours: 0,
+        top_up_hours: 0,
+        amount: 0,
+        min_hours_as_worked_hours: 0,
+        min_hours_as_minus_or_empty_hours: 0,
+        travel_reimbursement_required: false,
+        source_rule_ids: []
+      },
       total_gross: 0,
       
       // Werknemersbijdragen (inhoudingen)
@@ -536,6 +629,7 @@ Deno.serve(async (req) => {
     let runtimePayrollFinalAllowed = payrollFinalAllowed;
     let runtimeCalculationStatus = calculationStatus;
     const payrollRuntimeReviewItems = [];
+    let minimumServiceTopUpHoursForOvertime = 0;
 
     // Bereken per werkdag
     for (const shift of work_schedule) {
@@ -663,13 +757,50 @@ Deno.serve(async (req) => {
           
           currentTime = nextHour;
         }
+
+        const minimumService = resolveMinimumServiceCompensation(shift, hoursWorked);
+        if (minimumService.manual_review_required) {
+          payrollRuntimeReviewItems.push({
+            rule_id: minimumService.source_rule_ids[0] || 'CAO-PB-2024-R0816',
+            domain: 'minimum_service_compensation',
+            message: minimumService.review_reason || 'Minimumvergoeding per dienst vereist handmatige beoordeling.',
+            field: 'service_parts'
+          });
+          runtimePayrollFinalAllowed = false;
+          runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+        }
+        if (minimumService.applies && minimumService.top_up_hours > 0) {
+          minimumService.amount = minimumService.top_up_hours * baseHourlyRate;
+          payslip.minimum_service_compensation.paid_hours += minimumService.paid_hours;
+          payslip.minimum_service_compensation.top_up_hours += minimumService.top_up_hours;
+          payslip.minimum_service_compensation.amount += minimumService.amount;
+          payslip.minimum_service_compensation.min_hours_as_worked_hours += minimumService.min_hours_as_worked_hours;
+          payslip.minimum_service_compensation.min_hours_as_minus_or_empty_hours += minimumService.min_hours_as_minus_or_empty_hours;
+          payslip.minimum_service_compensation.travel_reimbursement_required ||= minimumService.travel_reimbursement_required;
+          payslip.minimum_service_compensation.source_rule_ids = [
+            ...new Set([
+              ...payslip.minimum_service_compensation.source_rule_ids,
+              ...minimumService.source_rule_ids
+            ])
+          ];
+          minimumServiceTopUpHoursForOvertime += minimumService.top_up_hours;
+        }
         
         payslip.shift_details.push({
           date,
           start_time,
           end_time,
           hours: hoursWorked,
-          base_rate: baseHourlyRate
+          base_rate: baseHourlyRate,
+          minimum_service_compensation: {
+            applies: minimumService.applies,
+            paid_hours: r2(minimumService.paid_hours),
+            top_up_hours: r2(minimumService.top_up_hours),
+            amount: r2(minimumService.amount),
+            travel_reimbursement_required: minimumService.travel_reimbursement_required,
+            manual_review_required: minimumService.manual_review_required,
+            source_rule_ids: minimumService.source_rule_ids
+          }
         });
       }
     }
@@ -693,7 +824,7 @@ Deno.serve(async (req) => {
         numberOrZero(minus_hours) +
         numberOrZero(empty_run_hours) +
         numberOrZero(other_paid_work_time_hours);
-      const arbeidstijdHoursForOvertime = totalHours + explicitPaidAbsenceHours;
+      const arbeidstijdHoursForOvertime = totalHours + minimumServiceTopUpHoursForOvertime + explicitPaidAbsenceHours;
       const representsFullPayPeriod = work_schedule_is_full_pay_period === true ||
         record_payroll_run === true ||
         (!!pay_period_number && !!pay_period_start && !!pay_period_end);
@@ -738,6 +869,7 @@ Deno.serve(async (req) => {
         payslip.surcharges.holiday_50.amount +
         payslip.surcharges.new_years_eve_100.amount;
       const overtimeAmount = payslip.overtime_50.amount;
+      const minimumServiceAmount = payslip.minimum_service_compensation.amount;
       
       // Bereken gemiddelde ORT per uur (voor ORT verlof berekening)
       const avgOrtPerHour = totalHours > 0 ? totalSurcharges / totalHours : 0;
@@ -745,7 +877,7 @@ Deno.serve(async (req) => {
       // Voor oproepkrachten: vakantiegeld en eindejaarsuitkering direct uitbetaald
       if (isCallWorker) {
         // Bereken vakantiegeld en eindejaarsuitkering als percentage van basis + toeslagen
-        const baseForAllowances = payslip.base_salary + totalSurcharges;
+        const baseForAllowances = payslip.base_salary + minimumServiceAmount + totalSurcharges;
         
         // Bereken ORT verlof: vakantie-uren * gemiddelde ORT per uur
         const vacationHours = totalHours * 0.08;
@@ -758,9 +890,9 @@ Deno.serve(async (req) => {
         payslip.vacation_paid = ortVerlof;
         
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
-        payslip.total_gross = payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
       } else {
-        payslip.total_gross = payslip.base_salary + totalSurcharges + overtimeAmount;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount;
       }
       
       // Bereken pensioengrondslag (bruto loon - vakantiegeld/eindejaarsuitkering - franchise)
@@ -823,7 +955,7 @@ Deno.serve(async (req) => {
         const ortVerlofReservation = (estimatedAnnualVacationHours / 13) * avgOrtPerHour; // per 4 weken
         
         payslip.accruals.vacation_allowance = payslip.total_gross * ((caoConfig.vacation_allowance || 8) / 100);
-        const yearEndBonusEligibleWage = payslip.base_salary + totalSurcharges;
+        const yearEndBonusEligibleWage = payslip.base_salary + minimumServiceAmount + totalSurcharges;
         const yearEndBonusEligibleVacationAllowance = yearEndBonusEligibleWage * ((caoConfig.vacation_allowance || 8) / 100);
         payslip.accruals.year_end_bonus = (yearEndBonusEligibleWage + yearEndBonusEligibleVacationAllowance) * ((caoConfig.year_end_bonus || 2.01) / 100);
         
@@ -935,6 +1067,15 @@ Deno.serve(async (req) => {
           arbeidstijd_hours_for_overtime: r2(payslip.overtime_50.arbeidstijd_hours_for_overtime),
           applied: payslip.overtime_50.applied,
           source_rule_ids: payslip.overtime_50.source_rule_ids
+        },
+        minimum_service_compensation: {
+          paid_hours: r2(payslip.minimum_service_compensation.paid_hours),
+          top_up_hours: r2(payslip.minimum_service_compensation.top_up_hours),
+          amount: r2(payslip.minimum_service_compensation.amount),
+          min_hours_as_worked_hours: r2(payslip.minimum_service_compensation.min_hours_as_worked_hours),
+          min_hours_as_minus_or_empty_hours: r2(payslip.minimum_service_compensation.min_hours_as_minus_or_empty_hours),
+          travel_reimbursement_required: payslip.minimum_service_compensation.travel_reimbursement_required,
+          source_rule_ids: payslip.minimum_service_compensation.source_rule_ids
         },
         total_gross: Math.round(payslip.total_gross * 100) / 100,
         is_call_worker: payslip.is_call_worker,

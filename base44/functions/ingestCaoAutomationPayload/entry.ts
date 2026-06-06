@@ -178,6 +178,14 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
     functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
     rule_ids: ['CAO-PB-2024-R0797']
   },
+  'calculatePersonnelCosts.article_45_minimum_service_compensation': {
+    functions: ['calculatePersonnelCosts', 'validateCaoScheduleRules', 'calculateCaoReimbursements'],
+    rule_ids: [
+      'CAO-PB-2024-R0810', 'CAO-PB-2024-R0811', 'CAO-PB-2024-R0812',
+      'CAO-PB-2024-R0813', 'CAO-PB-2024-R0814', 'CAO-PB-2024-R0815',
+      'CAO-PB-2024-R0816', 'CAO-PB-2024-R0817', 'CAO-PB-2024-R0818'
+    ]
+  },
   'calculateCaoReimbursements.article_47_48_49_50': {
     functions: ['calculateCaoReimbursements'],
     rule_ids: [
