@@ -15,7 +15,7 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 
 /**
  * CAO PB planning-validator
- * Bronregels: R0547-R0549 en R0560-R0646 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd en rusttijd)
+ * Bronregels: R0547-R0549 en R0560-R0667 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd, rusttijd en nachtdienst)
  *
  * Scope-bewust:
  * - Artikel 3 lid 2 sluit uit: art. 10, art. 9 lid 1 sub c, hfdst. 4 (behalve 37/38/41), hfdst. 5, bijlage 2.
@@ -70,6 +70,15 @@ function getIsoWeekKey(dateStr) {
   const weekNo = Math.ceil((((tmp - yearStart) / 86400000) + 1) / 7);
   return `${tmp.getUTCFullYear()}-W${String(weekNo).padStart(2, '0')}`;
 }
+
+function startOfIsoWeekDate(date) {
+  const d = new Date(date);
+  const day = d.getDay() || 7;
+  d.setDate(d.getDate() - day + 1);
+  d.setHours(0, 0, 0, 0);
+  return d;
+}
+
 function isWeekendBlock(day1, day2) {
   const d1 = new Date(day1), d2 = new Date(day2);
   const diffDays = (d2 - d1) / (1000 * 60 * 60 * 24);
@@ -298,6 +307,32 @@ function intervalOverlapsIsoDate(interval, isoDate) {
   return intervalOverlapsWindow(interval, dayStart, dayEnd);
 }
 
+function intervalWithinWindowByStart(interval, windowStart, windowEnd) {
+  return interval.start >= windowStart && interval.start < windowEnd;
+}
+
+function nightHoursBetweenDates(interval, windowStart, windowEnd) {
+  const overlapStart = new Date(Math.max(interval.start.getTime(), windowStart.getTime()));
+  const overlapEnd = new Date(Math.min(interval.end.getTime(), windowEnd.getTime()));
+  if (overlapEnd <= overlapStart) return 0;
+  let totalMs = 0;
+  const cursor = dateFromIso(formatIsoDateLocal(overlapStart));
+  while (cursor < overlapEnd) {
+    const nightStart = new Date(cursor);
+    const nightEnd = new Date(cursor);
+    nightEnd.setHours(6, 0, 0, 0);
+    const start = Math.max(overlapStart.getTime(), nightStart.getTime());
+    const end = Math.min(overlapEnd.getTime(), nightEnd.getTime());
+    if (end > start) totalMs += end - start;
+    cursor.setDate(cursor.getDate() + 1);
+  }
+  return totalMs / 3600000;
+}
+
+function nightHoursWithinWindow(intervals, windowStart, windowEnd) {
+  return intervals.reduce((sum, interval) => sum + nightHoursBetweenDates(interval, windowStart, windowEnd), 0);
+}
+
 function maxContinuousRestHoursWithinWindow(intervals, windowStart, windowEnd) {
   const points = [windowStart.getTime(), windowEnd.getTime()];
   for (const interval of intervals) {
@@ -359,6 +394,121 @@ function dateRange(periodStart, periodEnd) {
     cursor.setDate(cursor.getDate() + 1);
   }
   return dates;
+}
+
+function dateBoundsFromIntervals(intervals, fallbackStart, fallbackEnd) {
+  const starts = intervals.map(interval => interval.start).filter(Boolean).sort((a, b) => a - b);
+  const ends = intervals.map(interval => interval.end).filter(Boolean).sort((a, b) => a - b);
+  return {
+    start: asIsoDate(fallbackStart) || (starts[0] ? formatIsoDateLocal(starts[0]) : null),
+    end: asIsoDate(fallbackEnd) || (ends.length ? formatIsoDateLocal(ends[ends.length - 1]) : null)
+  };
+}
+
+function isoWeekRowsBetween(periodStart, periodEnd) {
+  const start = dateFromIso(periodStart);
+  const end = dateFromIso(periodEnd);
+  if (!start || !end) return [];
+  const cursor = startOfIsoWeekDate(start);
+  const last = startOfIsoWeekDate(end);
+  const rows = [];
+  while (cursor <= last) {
+    const weekStart = new Date(cursor);
+    const weekEnd = new Date(cursor);
+    weekEnd.setDate(weekEnd.getDate() + 7);
+    rows.push({
+      week_key: getIsoWeekKey(formatIsoDateLocal(weekStart)),
+      start: weekStart,
+      end_exclusive: weekEnd
+    });
+    cursor.setDate(cursor.getDate() + 7);
+  }
+  return rows;
+}
+
+function rollingWeekWindows(weekRows, windowSize) {
+  const windows = [];
+  if (weekRows.length < windowSize) return windows;
+  for (let i = 0; i <= weekRows.length - windowSize; i++) {
+    const rows = weekRows.slice(i, i + windowSize);
+    windows.push({
+      week_keys: rows.map(row => row.week_key),
+      start: rows[0].start,
+      end_exclusive: rows[rows.length - 1].end_exclusive
+    });
+  }
+  return windows;
+}
+
+function shiftStartsBetween00And06(shift) {
+  const start = parseClockMinutes(shift.start_time);
+  return start !== null && start >= 0 && start < 360;
+}
+
+function shiftEndsOnOrBefore0200(shift) {
+  const end = parseClockMinutes(shift.end_time);
+  return end !== null && end <= 120;
+}
+
+function shiftLooksMobileSurveillance(shift, body = {}) {
+  const explicit = booleanOrNull(
+    shift.mobile_surveillance_night_work ??
+    shift.is_mobile_surveillance ??
+    shift.mobile_surveillance ??
+    body.mobile_surveillance_night_work ??
+    body.night_shift_mainly_mobile_surveillance
+  );
+  if (explicit !== null) return explicit;
+  const text = [
+    shift.service_type,
+    shift.service_function_type,
+    shift.function_type,
+    shift.cao_function_name,
+    shift.required_function_name,
+    shift.task_type,
+    body.service_type,
+    body.function_type
+  ].filter(Boolean).join(' ').toLowerCase();
+  return text.includes('mobiele surveillance') || text.includes('mobile surveillance') || text.includes('mobile_surveillance');
+}
+
+function nightShiftDetailsFromIntervals(intervals, body = {}) {
+  return intervals
+    .map(interval => {
+      const shift = interval.shift || {};
+      const nightHours = nightWorkHoursBetween00And06({ ...shift, date: asIsoDate(shift.date || shift.service_date) });
+      const explicitNightShift = booleanOrNull(shift.is_night_shift ?? shift.night_shift);
+      const isNightShift = nightHours > 1 || explicitNightShift === true;
+      if (!isNightShift) return null;
+      return {
+        ...interval,
+        night_hours_00_06: round2(nightHours),
+        starts_between_00_06: shiftStartsBetween00And06(shift),
+        ends_on_or_before_0200: shiftEndsOnOrBefore0200(shift),
+        mobile_surveillance: shiftLooksMobileSurveillance(shift, body),
+        week_key: getIsoWeekKey(interval.date)
+      };
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.start - b.start);
+}
+
+function shiftsWithinWindowByStart(details, windowStart, windowEnd) {
+  return details.filter(detail => intervalWithinWindowByStart(detail, windowStart, windowEnd));
+}
+
+function nightShiftSequenceGroups(details) {
+  const groups = [];
+  for (const detail of details) {
+    const previousGroup = groups[groups.length - 1];
+    const previous = previousGroup?.[previousGroup.length - 1];
+    if (previous && daysBetween(detail.date, previous.date) <= 1) {
+      previousGroup.push(detail);
+    } else {
+      groups.push([detail]);
+    }
+  }
+  return groups;
 }
 
 function overlapsAfterClock(shift, dateStr, clockTime) {
@@ -537,6 +687,8 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const referenceServiceShifts = buildReferenceShifts(body, serviceShifts);
   const serviceIntervals = serviceIntervalsFromShifts(serviceShifts);
   const referenceServiceIntervals = serviceIntervalsFromShifts(referenceServiceShifts);
+  const serviceNightShiftDetails = nightShiftDetailsFromIntervals(serviceIntervals, body);
+  const referenceNightShiftDetails = nightShiftDetailsFromIntervals(referenceServiceIntervals, body);
   const timeWindows = getRosterTimeWindows(body, periodStart, periodEnd, periodShifts);
   const periodDistance = daysBetween(periodEnd, periodStart);
   const periodDayCount = periodDistance !== null ? periodDistance + 1 : null;
@@ -929,7 +1081,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     }
   }
 
-  const hasNightWork = referenceServiceShifts.some(shift => nightWorkHoursBetween00And06({ ...shift, date: asIsoDate(shift.date || shift.service_date) }) > 0 || booleanOrNull(shift.is_night_shift) === true);
+  const hasNightWork = referenceNightShiftDetails.length > 0;
   const explicitNightAverage13 = numberOrNull(body.night_average_hours_13_week_reference ?? body.average_hours_13_week_night_reference);
   const nightAverage13 = explicitNightAverage13 !== null
     ? { average_hours_per_week: explicitNightAverage13, week_keys: [] }
@@ -948,6 +1100,203 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
         week_keys: nightAverage13.week_keys,
         manual_review_required: false
       });
+    }
+  }
+
+  for (const detail of serviceNightShiftDetails) {
+    const nightShiftMaxHours = specialWorkingTimeException ? 10 : 9;
+    const employeeConsentForLongNightShift = booleanOrNull(
+      detail.shift.night_shift_over_9_hours_employee_consent_confirmed ??
+      detail.shift.employee_long_night_shift_consent_confirmed ??
+      body.night_shift_over_9_hours_employee_consent_confirmed ??
+      body.employee_long_night_shift_consent_confirmed
+    ) === true;
+    const mayExceedNineByConsent = !specialWorkingTimeException &&
+      detail.starts_between_00_06 &&
+      employeeConsentForLongNightShift;
+
+    if (detail.hours > nightShiftMaxHours && !mayExceedNineByConsent) {
+      violations.push({
+        rule_id: specialWorkingTimeException ? 'CAO-PB-2024-R0666' : 'CAO-PB-2024-R0649',
+        severity: 'high',
+        message: specialWorkingTimeException
+          ? `Nachtdienst ${detail.date} duurt ${round2(detail.hours)} uur; bij bijzondere omstandigheden is maximaal 10 uur per nachtdienst toegestaan.`
+          : `Nachtdienst ${detail.date} duurt ${round2(detail.hours)} uur; maximaal 9 uur toegestaan, tenzij een nachtdienst die tussen 00.00 en 06.00 begint vrijwillig langer wordt gewerkt.`,
+        affected_shift_ids: detail.shift_id ? [detail.shift_id] : [],
+        payroll_impact: true,
+        shift_hours: round2(detail.hours),
+        night_hours_00_06: round2(detail.night_hours_00_06),
+        max_night_shift_hours: nightShiftMaxHours,
+        starts_between_00_06: detail.starts_between_00_06,
+        employee_consent_confirmed: employeeConsentForLongNightShift,
+        manual_review_required: detail.starts_between_00_06 && !employeeConsentForLongNightShift
+      });
+    }
+  }
+
+  const inferredNightBounds = dateBoundsFromIntervals(
+    referenceServiceIntervals,
+    body.night_reference_period_start || body.working_time_reference_period_start || body.rolling_reference_period_start,
+    body.night_reference_period_end || body.working_time_reference_period_end || body.rolling_reference_period_end
+  );
+  const nightBounds = {
+    start: inferredNightBounds.start || periodStart,
+    end: inferredNightBounds.end || periodEnd
+  };
+  const nightWeekRows = isoWeekRowsBetween(nightBounds.start, nightBounds.end);
+  const nightSixteenWeekWindows = rollingWeekWindows(nightWeekRows, 16).map(window => {
+    const details = shiftsWithinWindowByStart(referenceNightShiftDetails, window.start, window.end_exclusive);
+    const hours = weeklyHourRows
+      .filter(row => window.week_keys.includes(row.week_key))
+      .reduce((sum, row) => sum + row.hours, 0);
+    return {
+      week_keys: window.week_keys,
+      night_shift_count: details.length,
+      average_hours_per_week: round2(hours / 16),
+      compliant: details.length < 16 || hours / 16 <= 38
+    };
+  });
+  const failingNightSixteenWeekWindows = nightSixteenWeekWindows.filter(row => !row.compliant);
+  if (hasNightWork && nightSixteenWeekWindows.length === 0) {
+    addManualReview(
+      manualReviewItems,
+      'CAO-PB-2024-R0650',
+      'night_shift_average_16_weeks',
+      'Lever 16 aaneengesloten weken referentieuren aan om de 38 uur/week grens bij 16 of meer nachtdiensten te controleren.',
+      'night_reference_period/reference_shifts'
+    );
+  } else if (failingNightSixteenWeekWindows.length > 0) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0650',
+      severity: 'high',
+      message: 'Bij minimaal 16 nachtdiensten in 16 weken is de gemiddelde arbeidstijd hoger dan 38 uur per week.',
+      payroll_impact: true,
+      failing_16_week_windows: failingNightSixteenWeekWindows.slice(0, 5),
+      manual_review_required: false
+    });
+  }
+
+  const nightTwoWeekWindows = rollingWeekWindows(nightWeekRows, 2).map(window => ({
+    week_keys: window.week_keys,
+    start: formatIsoDateLocal(window.start),
+    end_exclusive: formatIsoDateLocal(window.end_exclusive),
+    night_hours_00_06: round2(nightHoursWithinWindow(referenceServiceIntervals, window.start, window.end_exclusive))
+  }));
+  const nightThirteenWeekWindows = rollingWeekWindows(nightWeekRows, 13).map(window => {
+    const details = shiftsWithinWindowByStart(referenceNightShiftDetails, window.start, window.end_exclusive);
+    const relevantTwoWeekWindows = nightTwoWeekWindows.filter(row => window.week_keys.some(key => row.week_keys.includes(key)));
+    const maxTwoWeekNightHours = relevantTwoWeekWindows.reduce((max, row) => Math.max(max, row.night_hours_00_06), 0);
+    const allEndOnOrBefore0200 = details.length > 0 && details.every(detail => detail.ends_on_or_before_0200);
+    const mobileNightCount = details.filter(detail => detail.mobile_surveillance).length;
+    const mobileDominant = booleanOrNull(body.night_shift_mainly_mobile_surveillance ?? body.mobile_surveillance_night_work) === true ||
+      (details.length > 0 && mobileNightCount / details.length >= 0.5);
+    return {
+      week_keys: window.week_keys,
+      night_shift_count: details.length,
+      all_night_shifts_end_on_or_before_0200: allEndOnOrBefore0200,
+      mobile_surveillance_dominant: mobileDominant,
+      max_two_week_night_hours_00_06: round2(maxTwoWeekNightHours),
+      compliant_regular: details.length <= 32 || (allEndOnOrBefore0200 && details.length <= 52) || maxTwoWeekNightHours <= 20,
+      compliant_mobile_surveillance: details.length <= 35 || maxTwoWeekNightHours <= 38
+    };
+  });
+
+  if (hasNightWork && nightThirteenWeekWindows.length === 0) {
+    addManualReview(
+      manualReviewItems,
+      'CAO-PB-2024-R0652',
+      'night_shift_count_13_weeks',
+      'Lever 13 aaneengesloten weken referentiegegevens aan om nachtdienstenaantallen en 2-weken-nachturen te controleren.',
+      'night_reference_period/reference_shifts'
+    );
+  }
+  const failingRegularNightWindows = nightThirteenWeekWindows
+    .filter(row => !row.mobile_surveillance_dominant && !row.compliant_regular);
+  if (failingRegularNightWindows.length > 0) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0652',
+      severity: 'high',
+      message: 'Nachtdiensten overschrijden de artikel 28-limieten: meer dan 32 nachtdiensten per 13 weken, geen geldige 02.00 uur-uitwijk en meer dan 20 nachturen per 2 weken.',
+      payroll_impact: true,
+      related_rule_ids: ['CAO-PB-2024-R0653', 'CAO-PB-2024-R0654'],
+      failing_13_week_windows: failingRegularNightWindows.slice(0, 5),
+      manual_review_required: false
+    });
+  }
+  const failingMobileNightWindows = nightThirteenWeekWindows
+    .filter(row => row.mobile_surveillance_dominant && !row.compliant_mobile_surveillance);
+  if (failingMobileNightWindows.length > 0) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0656',
+      severity: 'high',
+      message: 'Mobiele-surveillance nachtdiensten overschrijden de artikel 28-limieten: meer dan 35 nachtdiensten per 13 weken en meer dan 38 nachturen per 2 weken.',
+      payroll_impact: true,
+      related_rule_ids: ['CAO-PB-2024-R0655', 'CAO-PB-2024-R0657'],
+      failing_13_week_windows: failingMobileNightWindows.slice(0, 5),
+      manual_review_required: false
+    });
+  }
+
+  for (const detail of serviceNightShiftDetails) {
+    const currentIndex = referenceServiceIntervals.findIndex(interval =>
+      interval.shift_id === detail.shift_id ||
+      (interval.date === detail.date && interval.start.getTime() === detail.start.getTime() && interval.end.getTime() === detail.end.getTime())
+    );
+    const next = referenceServiceIntervals
+      .slice(Math.max(0, currentIndex + 1))
+      .find(interval => interval.start >= detail.end);
+    if (!next) continue;
+    const restHours = hoursBetweenDates(next.start, detail.end);
+    const minRestHours = detail.ends_on_or_before_0200 ? 11 : 14;
+    if (restHours < minRestHours) {
+      violations.push({
+        rule_id: detail.ends_on_or_before_0200 ? 'CAO-PB-2024-R0659' : 'CAO-PB-2024-R0660',
+        severity: 'high',
+        message: `Rust na nachtdienst ${detail.date} is ${round2(restHours)} uur; minimaal ${minRestHours} uur onafgebroken rust vereist en inkorten is niet toegestaan.`,
+        affected_shift_ids: [detail.shift_id, next.shift_id].filter(Boolean),
+        payroll_impact: false,
+        rest_hours: round2(restHours),
+        min_rest_after_night_shift_hours: minRestHours,
+        related_rule_ids: ['CAO-PB-2024-R0661'],
+        manual_review_required: false
+      });
+    }
+  }
+
+  const nightSequences = nightShiftSequenceGroups(referenceNightShiftDetails);
+  for (const sequence of nightSequences) {
+    const intersectsPeriod = sequence.some(detail => detail.date >= periodStart && detail.date <= periodEnd);
+    if (!intersectsPeriod) continue;
+    if (sequence.length > 7) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0663',
+        severity: 'high',
+        message: `${sequence.length} nachtdiensten aaneengesloten ingepland; maximaal 7 toegestaan.`,
+        affected_shift_ids: sequence.map(detail => detail.shift_id).filter(Boolean),
+        payroll_impact: false,
+        consecutive_night_shift_count: sequence.length,
+        manual_review_required: false
+      });
+      continue;
+    }
+    if (sequence.length >= 3) {
+      const last = sequence[sequence.length - 1];
+      const next = referenceServiceIntervals.find(interval => interval.start >= last.end);
+      if (!next) continue;
+      const restHours = hoursBetweenDates(next.start, last.end);
+      if (restHours < 48) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R0662',
+          severity: 'high',
+          message: `Na ${sequence.length} aaneengesloten nachtdiensten is ${round2(restHours)} uur rust gepland; minimaal 48 uur vereist.`,
+          affected_shift_ids: [...sequence.map(detail => detail.shift_id), next.shift_id].filter(Boolean),
+          payroll_impact: false,
+          consecutive_night_shift_count: sequence.length,
+          rest_hours: round2(restHours),
+          min_rest_after_consecutive_night_shifts_hours: 48,
+          manual_review_required: false
+        });
+      }
     }
   }
 
@@ -1537,6 +1886,36 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
       thirteen_week_average: rollingAverage13,
       night_thirteen_week_average: hasNightWork ? nightAverage13 : null,
       has_night_work: hasNightWork
+    },
+    night_shift_summary: {
+      has_night_shifts: hasNightWork,
+      night_shift_count_this_period: serviceNightShiftDetails.length,
+      night_shift_count_reference: referenceNightShiftDetails.length,
+      night_reference_period_start: nightBounds.start,
+      night_reference_period_end: nightBounds.end,
+      sixteen_week_windows: nightSixteenWeekWindows,
+      thirteen_week_windows: nightThirteenWeekWindows,
+      two_week_night_hour_windows: nightTwoWeekWindows,
+      source_rule_ids: [
+        'CAO-PB-2024-R0648',
+        'CAO-PB-2024-R0649',
+        'CAO-PB-2024-R0650',
+        'CAO-PB-2024-R0652',
+        'CAO-PB-2024-R0653',
+        'CAO-PB-2024-R0654',
+        'CAO-PB-2024-R0655',
+        'CAO-PB-2024-R0656',
+        'CAO-PB-2024-R0657',
+        'CAO-PB-2024-R0659',
+        'CAO-PB-2024-R0660',
+        'CAO-PB-2024-R0661',
+        'CAO-PB-2024-R0662',
+        'CAO-PB-2024-R0663',
+        'CAO-PB-2024-R0664',
+        'CAO-PB-2024-R0665',
+        'CAO-PB-2024-R0666',
+        'CAO-PB-2024-R0667'
+      ]
     },
     rest_time_summary: {
       min_daily_rest_hours: 11,

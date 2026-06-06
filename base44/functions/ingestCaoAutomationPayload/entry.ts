@@ -137,7 +137,14 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0637', 'CAO-PB-2024-R0638', 'CAO-PB-2024-R0639',
       'CAO-PB-2024-R0640', 'CAO-PB-2024-R0641', 'CAO-PB-2024-R0642',
       'CAO-PB-2024-R0643', 'CAO-PB-2024-R0644', 'CAO-PB-2024-R0645',
-      'CAO-PB-2024-R0646'
+      'CAO-PB-2024-R0646', 'CAO-PB-2024-R0647', 'CAO-PB-2024-R0648',
+      'CAO-PB-2024-R0649', 'CAO-PB-2024-R0650', 'CAO-PB-2024-R0651',
+      'CAO-PB-2024-R0652', 'CAO-PB-2024-R0653', 'CAO-PB-2024-R0654',
+      'CAO-PB-2024-R0655', 'CAO-PB-2024-R0656', 'CAO-PB-2024-R0657',
+      'CAO-PB-2024-R0658', 'CAO-PB-2024-R0659', 'CAO-PB-2024-R0660',
+      'CAO-PB-2024-R0661', 'CAO-PB-2024-R0662', 'CAO-PB-2024-R0663',
+      'CAO-PB-2024-R0664', 'CAO-PB-2024-R0665', 'CAO-PB-2024-R0666',
+      'CAO-PB-2024-R0667'
     ]
   },
   'resolveCaoFunctionClassification.appendix_2_wage_scales': {
@@ -217,7 +224,7 @@ function isPayrollCriticalRule(rule) {
     automationLevel === 'validation_or_policy' ||
     hasAnyNeedle(rule.domain, PAYROLL_CRITICAL_DOMAINS) ||
     hasAnyNeedle(rule.impact, ['payroll', 'calculation', 'planning', 'validation']) ||
-    hasAnyNeedle(rule.rule_id, ['R031', 'R032', 'R037', 'R038', 'R039', 'R040', 'R041', 'R042', 'R043', 'R047', 'R048', 'R056', 'R057', 'R058', 'R059', 'R072', 'R073', 'R085', 'R087', 'R088', 'R089', 'R090', 'R099', 'R114', 'R115', 'R116', 'R160', 'R175', 'R181']);
+    hasAnyNeedle(rule.rule_id, ['R031', 'R032', 'R037', 'R038', 'R039', 'R040', 'R041', 'R042', 'R043', 'R047', 'R048', 'R056', 'R057', 'R058', 'R059', 'R064', 'R065', 'R066', 'R072', 'R073', 'R085', 'R087', 'R088', 'R089', 'R090', 'R099', 'R114', 'R115', 'R116', 'R160', 'R175', 'R181']);
 }
 
 function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
