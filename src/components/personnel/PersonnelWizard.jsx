@@ -84,6 +84,7 @@ export default function PersonnelWizard({ person, onClose }) {
           const functionType = data.personnel.function_type || null;
           const caoFunctionGroup = data.personnel.cao_function_group || null;
           const caoFunctionLevel = data.personnel.cao_function_level || null;
+          const securityRoleStatus = data.personnel.security_role_status || "unknown";
           await base44.entities.PersonnelContract.create({
             personnel_id: personnelId,
             company_id: companyId,
@@ -95,7 +96,8 @@ export default function PersonnelWizard({ person, onClose }) {
             probation_period_months: data.personnel.probation_period_months ?? null,
             probation_period_source_rule_id: data.personnel.probation_period_source_rule_id || null,
             probation_override_reason: data.personnel.probation_override_reason || null,
-            security_role_status: data.personnel.security_role_status || "unknown",
+            security_role_status: securityRoleStatus,
+            allowed_security_role_statuses: securityRoleStatus && securityRoleStatus !== "unknown" ? [securityRoleStatus] : [],
             function_type: functionType,
             allowed_function_types: functionType ? [functionType] : [],
             cao_function_group: caoFunctionGroup,

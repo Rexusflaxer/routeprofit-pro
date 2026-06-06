@@ -574,6 +574,22 @@
       "default": "unknown",
       "description": "Beveiligingsfunctie-status conform CAO"
     },
+    "allowed_security_role_statuses": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "aspirant_beveiliger",
+          "beveiliger",
+          "leidinggevende",
+          "not_applicable",
+          "unknown",
+          "all"
+        ]
+      },
+      "default": [],
+      "description": "Beveiligingsstatussen waarvoor dit contract in planning/payroll inzetbaar is. Leeg betekent niet bewezen als de dienst een specifieke beveiligingsstatus vereist."
+    },
     "function_type": {
       "type": [
         "string",

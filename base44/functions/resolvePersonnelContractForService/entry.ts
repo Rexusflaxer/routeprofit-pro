@@ -89,6 +89,7 @@ function evaluateFunctionMatch(contract, serviceContext) {
   const requestedGroup = serviceContext.cao_function_group || null;
   const requestedLevel = serviceContext.cao_function_level || null;
   const requestedTaskType = serviceContext.task_type || null;
+  const requestedSecurityRoleStatus = serviceContext.security_role_status || null;
 
   const functionTypes = uniq([
     ...normalizeArray(contract.allowed_function_types),
@@ -103,6 +104,10 @@ function evaluateFunctionMatch(contract, serviceContext) {
     contract.cao_function_level
   ]);
   const taskTypes = normalizeArray(contract.allowed_task_types);
+  const securityRoleStatuses = uniq([
+    ...normalizeArray(contract.allowed_security_role_statuses),
+    contract.security_role_status
+  ]);
 
   const functionTypeCheck = listAllowsValue(functionTypes, requestedFunctionType);
   checks.push({ field: 'function_type', requested: requestedFunctionType, allowed: functionTypes, ...functionTypeCheck });
@@ -115,6 +120,9 @@ function evaluateFunctionMatch(contract, serviceContext) {
 
   const taskTypeCheck = listAllowsValue(taskTypes, requestedTaskType);
   checks.push({ field: 'task_type', requested: requestedTaskType, allowed: taskTypes, ...taskTypeCheck });
+
+  const securityRoleCheck = listAllowsValue(securityRoleStatuses, requestedSecurityRoleStatus);
+  checks.push({ field: 'security_role_status', requested: requestedSecurityRoleStatus, allowed: securityRoleStatuses, ...securityRoleCheck });
 
   const blocking = checks.filter(check => check.reason === 'not_allowed');
   const missingProof = checks.filter(check =>
@@ -450,7 +458,7 @@ Deno.serve(async (req) => {
     }
 
     const selected = matchingContracts.length === 1 ? matchingContracts[0] : null;
-    if (matchingContracts.length > 1) {
+    if (matchingContracts.length > 1 && !body.contract_id) {
       manualReviewReasons.push('Meerdere actieve contracten matchen deze dienst. Kies expliciet contract_id in planning/payroll.');
     }
 
@@ -463,6 +471,9 @@ Deno.serve(async (req) => {
       } else {
         selectedItem = explicit;
         selectedContract = explicit.contract;
+        if (!explicit.function_match.matched) {
+          blockingReasons.push(`Opgegeven contract_id ${body.contract_id} staat de gevraagde dienstfunctie of beveiligingsstatus niet toe.`);
+        }
       }
     }
 
@@ -550,6 +561,8 @@ Deno.serve(async (req) => {
         cao_configuration_id: selectedContract.cao_configuration_id || null,
         function_type: selectedContract.function_type || null,
         allowed_function_types: selectedContract.allowed_function_types || [],
+        security_role_status: selectedContract.security_role_status || null,
+        allowed_security_role_statuses: selectedContract.allowed_security_role_statuses || [],
         cao_function_group: selectedContract.cao_function_group || null,
         allowed_cao_function_groups: selectedContract.allowed_cao_function_groups || [],
         cao_function_level: selectedContract.cao_function_level || null,
@@ -577,6 +590,8 @@ Deno.serve(async (req) => {
         contract_start_date: item.contract.contract_start_date || null,
         contract_end_date: item.contract.contract_end_date || null,
         contract_form: item.contract.contract_form || null,
+        security_role_status: item.contract.security_role_status || null,
+        allowed_security_role_statuses: item.contract.allowed_security_role_statuses || [],
         function_match: item.function_match
       })),
       cao_configuration_id: caoResolution.config?.id || null,
