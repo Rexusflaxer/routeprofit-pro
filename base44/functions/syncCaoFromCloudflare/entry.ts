@@ -176,6 +176,10 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R1751', 'CAO-PB-2024-R1813'
     ]
   },
+  'calculatePersonnelCosts.article_42_overtime_payroll': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: ['CAO-PB-2024-R0797']
+  },
   'calculateCaoReimbursements.article_47_48_49_50': {
     functions: ['calculateCaoReimbursements'],
     rule_ids: [

@@ -66,6 +66,24 @@ function getSurchargeType(datetime, caoConfig) {
   return { type: 'day', percentage: 0 };
 }
 
+function r2(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function numberOrZero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+
+function getOvertimeRules(caoConfig) {
+  const rules = caoConfig?.overtime_rules || {};
+  return {
+    threshold_hours_per_pay_period: Number(rules.threshold_hours_per_pay_period ?? rules.threshold_hours ?? caoConfig?.overtime_threshold_hours ?? 152),
+    surcharge_percentage: Number(rules.surcharge_percentage ?? rules.overtime_surcharge_percentage ?? caoConfig?.overtime_surcharge_percentage ?? 50),
+    source_rule_ids: rules.source_rule_ids || ['CAO-PB-2024-R0797']
+  };
+}
+
 async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, caoScope }) {
   if (personnel.employee_type !== 'loondienst') {
     return {
@@ -262,7 +280,15 @@ Deno.serve(async (req) => {
       pay_period_number = null,
       pay_period_start = null,
       pay_period_end = null,
-      payroll_run_status = 'calculated'
+      payroll_run_status = 'calculated',
+      work_schedule_is_full_pay_period = false,
+      vacation_hours = 0,
+      extraordinary_leave_hours = 0,
+      sickness_hours = 0,
+      minus_hours = 0,
+      empty_run_hours = 0,
+      other_paid_work_time_hours = 0,
+      paid_absence_hours = 0
     } = await req.json();
 
     // ── Normaliseer CAO-scope: null = fail-closed (unknown_manual_review) ──
@@ -433,6 +459,15 @@ Deno.serve(async (req) => {
         holiday_50: { hours: 0, rate: 0, amount: 0 },
         new_years_eve_100: { hours: 0, rate: 0, amount: 0 }
       },
+      overtime_50: {
+        hours: 0,
+        rate: 0,
+        amount: 0,
+        threshold_hours_per_pay_period: null,
+        arbeidstijd_hours_for_overtime: 0,
+        applied: false,
+        source_rule_ids: ['CAO-PB-2024-R0797']
+      },
       total_gross: 0,
       
       // Werknemersbijdragen (inhoudingen)
@@ -498,6 +533,9 @@ Deno.serve(async (req) => {
     }
 
     const baseHourlyRate = wageBasis.base_hourly_rate || 0;
+    let runtimePayrollFinalAllowed = payrollFinalAllowed;
+    let runtimeCalculationStatus = calculationStatus;
+    const payrollRuntimeReviewItems = [];
 
     // Bereken per werkdag
     for (const shift of work_schedule) {
@@ -644,6 +682,47 @@ Deno.serve(async (req) => {
       
     } else {
       // Loondienst: Bereken alle componenten
+      const profile = caoScope?.payroll_rule_profile || {};
+      const applyOvertime = !isUnknownOrMixedScope && profile.apply_article_42_overtime === true;
+      const overtimeRules = getOvertimeRules(caoConfig);
+      const explicitPaidAbsenceHours =
+        numberOrZero(paid_absence_hours) +
+        numberOrZero(vacation_hours) +
+        numberOrZero(extraordinary_leave_hours) +
+        numberOrZero(sickness_hours) +
+        numberOrZero(minus_hours) +
+        numberOrZero(empty_run_hours) +
+        numberOrZero(other_paid_work_time_hours);
+      const arbeidstijdHoursForOvertime = totalHours + explicitPaidAbsenceHours;
+      const representsFullPayPeriod = work_schedule_is_full_pay_period === true ||
+        record_payroll_run === true ||
+        (!!pay_period_number && !!pay_period_start && !!pay_period_end);
+
+      payslip.overtime_50.threshold_hours_per_pay_period = overtimeRules.threshold_hours_per_pay_period;
+      payslip.overtime_50.arbeidstijd_hours_for_overtime = arbeidstijdHoursForOvertime;
+      payslip.overtime_50.source_rule_ids = overtimeRules.source_rule_ids;
+
+      if (applyOvertime) {
+        if (!representsFullPayPeriod && arbeidstijdHoursForOvertime <= overtimeRules.threshold_hours_per_pay_period) {
+          payrollRuntimeReviewItems.push({
+            rule_id: 'CAO-PB-2024-R0797',
+            domain: 'overtime',
+            message: 'Overwerktoeslag kan alleen definitief worden vastgesteld op basis van de volledige loonperiode. Geef work_schedule_is_full_pay_period=true of loonperiodegegevens mee.',
+            field: 'work_schedule_is_full_pay_period'
+          });
+          calculationWarnings.push('Overwerk niet definitief vastgesteld: work_schedule lijkt geen volledige loonperiode te bevatten.');
+          runtimePayrollFinalAllowed = false;
+          runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+        } else {
+          const overtimeHours = Math.max(0, arbeidstijdHoursForOvertime - overtimeRules.threshold_hours_per_pay_period);
+          payslip.overtime_50.hours = overtimeHours;
+          payslip.overtime_50.rate = baseHourlyRate * (overtimeRules.surcharge_percentage / 100);
+          payslip.overtime_50.amount = overtimeHours * baseHourlyRate * (overtimeRules.surcharge_percentage / 100);
+          payslip.overtime_50.applied = overtimeHours > 0;
+        }
+      } else if (arbeidstijdHoursForOvertime > overtimeRules.threshold_hours_per_pay_period) {
+        calculationWarnings.push(`Meer dan ${overtimeRules.threshold_hours_per_pay_period} uur arbeidstijd gesignaleerd, maar art. 42 overwerktoeslag is niet van toepassing op dit CAO-profiel.`);
+      }
       
       // Voor oproepkrachten: bereken vakantie-uren (8% extra uren die uitbetaald worden)
       if (isCallWorker) {
@@ -658,6 +737,7 @@ Deno.serve(async (req) => {
         payslip.surcharges.weekend_35.amount +
         payslip.surcharges.holiday_50.amount +
         payslip.surcharges.new_years_eve_100.amount;
+      const overtimeAmount = payslip.overtime_50.amount;
       
       // Bereken gemiddelde ORT per uur (voor ORT verlof berekening)
       const avgOrtPerHour = totalHours > 0 ? totalSurcharges / totalHours : 0;
@@ -672,15 +752,15 @@ Deno.serve(async (req) => {
         const ortVerlof = vacationHours * avgOrtPerHour;
         
         payslip.accruals.vacation_allowance = baseForAllowances * ((caoConfig.vacation_allowance || 8) / 100);
-        payslip.accruals.year_end_bonus = baseForAllowances * ((caoConfig.year_end_bonus || 2.01) / 100);
+        payslip.accruals.year_end_bonus = (baseForAllowances + payslip.accruals.vacation_allowance) * ((caoConfig.year_end_bonus || 2.01) / 100);
         
         // Voeg ORT verlof toe aan doorbetaling verlof
         payslip.vacation_paid = ortVerlof;
         
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
-        payslip.total_gross = payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
+        payslip.total_gross = payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
       } else {
-        payslip.total_gross = payslip.base_salary + totalSurcharges;
+        payslip.total_gross = payslip.base_salary + totalSurcharges + overtimeAmount;
       }
       
       // Bereken pensioengrondslag (bruto loon - vakantiegeld/eindejaarsuitkering - franchise)
@@ -743,7 +823,9 @@ Deno.serve(async (req) => {
         const ortVerlofReservation = (estimatedAnnualVacationHours / 13) * avgOrtPerHour; // per 4 weken
         
         payslip.accruals.vacation_allowance = payslip.total_gross * ((caoConfig.vacation_allowance || 8) / 100);
-        payslip.accruals.year_end_bonus = payslip.total_gross * ((caoConfig.year_end_bonus || 2.01) / 100);
+        const yearEndBonusEligibleWage = payslip.base_salary + totalSurcharges;
+        const yearEndBonusEligibleVacationAllowance = yearEndBonusEligibleWage * ((caoConfig.vacation_allowance || 8) / 100);
+        payslip.accruals.year_end_bonus = (yearEndBonusEligibleWage + yearEndBonusEligibleVacationAllowance) * ((caoConfig.year_end_bonus || 2.01) / 100);
         
         // Voeg ORT verlof reservering toe
         payslip.vacation_paid = ortVerlofReservation;
@@ -788,12 +870,13 @@ Deno.serve(async (req) => {
       personnel_name: personnel.name,
       cao_scope_profile: caoScope?.cao_scope_profile || null,
       scope_warnings: scopeWarnings,
-      manual_review_required: isUnknownOrMixedScope || !payrollFinalAllowed,
-      payroll_final_allowed: payrollFinalAllowed,
+      manual_review_required: isUnknownOrMixedScope || !runtimePayrollFinalAllowed,
+      payroll_final_allowed: runtimePayrollFinalAllowed,
       wage_basis_type: wageBasisType,
-      calculation_status: calculationStatus,
+      calculation_status: runtimeCalculationStatus,
       cao_function_classification: functionClassificationResult,
       cao_rule_application: caoRuleApplication,
+      payroll_runtime_review_items: payrollRuntimeReviewItems,
       employee_type: personnel.employee_type,
       cao_scale: personnel.cao_scale,
       cao_period: personnel.cao_period,
@@ -843,6 +926,15 @@ Deno.serve(async (req) => {
             rate: Math.round(payslip.surcharges.new_years_eve_100.rate * 100) / 100,
             amount: Math.round(payslip.surcharges.new_years_eve_100.amount * 100) / 100
           }
+        },
+        overtime_50: {
+          hours: r2(payslip.overtime_50.hours),
+          rate: r2(payslip.overtime_50.rate),
+          amount: r2(payslip.overtime_50.amount),
+          threshold_hours_per_pay_period: payslip.overtime_50.threshold_hours_per_pay_period,
+          arbeidstijd_hours_for_overtime: r2(payslip.overtime_50.arbeidstijd_hours_for_overtime),
+          applied: payslip.overtime_50.applied,
+          source_rule_ids: payslip.overtime_50.source_rule_ids
         },
         total_gross: Math.round(payslip.total_gross * 100) / 100,
         is_call_worker: payslip.is_call_worker,
@@ -912,6 +1004,14 @@ Deno.serve(async (req) => {
         calculation_input: {
           personnel_id,
           work_schedule,
+          work_schedule_is_full_pay_period,
+          paid_absence_hours,
+          vacation_hours,
+          extraordinary_leave_hours,
+          sickness_hours,
+          minus_hours,
+          empty_run_hours,
+          other_paid_work_time_hours,
           pay_period_year: responsePayload.pay_period_year,
           pay_period_number: responsePayload.pay_period_number,
           pay_period_start: responsePayload.pay_period_start,
