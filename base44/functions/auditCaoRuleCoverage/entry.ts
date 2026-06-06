@@ -92,17 +92,32 @@ function countRulesByAutomationLevel(rules) {
   }, {});
 }
 
+function uniqueRuleIds(rules) {
+  return new Set((Array.isArray(rules) ? rules : []).map(rule => rule.rule_id).filter(Boolean));
+}
+
+function duplicateRuleIds(rules) {
+  const seen = new Set();
+  const duplicates = new Set();
+  for (const rule of Array.isArray(rules) ? rules : []) {
+    if (!rule.rule_id) continue;
+    if (seen.has(rule.rule_id)) duplicates.add(rule.rule_id);
+    seen.add(rule.rule_id);
+  }
+  return [...duplicates].sort();
+}
+
 function evaluateSourceCoverageCompleteness(config, rules) {
   const minimums = getSourceCoverageMinimums(config);
-  const uniqueRuleIds = new Set(rules.map(rule => rule.rule_id).filter(Boolean));
+  const ruleIds = uniqueRuleIds(rules);
   const byAutomationLevel = countRulesByAutomationLevel(rules);
   const blockingFindings = [];
 
-  if (uniqueRuleIds.size < minimums.total) {
+  if (ruleIds.size < minimums.total) {
     blockingFindings.push({
       code: 'incomplete_source_rule_coverage',
       severity: 'critical',
-      message: `CAO-broncoverage is incompleet: ${uniqueRuleIds.size} unieke regels aanwezig, minimaal ${minimums.total} verwacht voor CAO PB 2024-2026.`
+      message: `CAO-broncoverage is incompleet: ${ruleIds.size} unieke regels aanwezig, minimaal ${minimums.total} verwacht voor CAO PB 2024-2026.`
     });
   }
 
@@ -120,10 +135,123 @@ function evaluateSourceCoverageCompleteness(config, rules) {
 
   return {
     passed: blockingFindings.length === 0,
-    unique_rule_ids: uniqueRuleIds.size,
+    unique_rule_ids: ruleIds.size,
     by_automation_level: byAutomationLevel,
     minimums,
     blocking_findings: blockingFindings
+  };
+}
+
+function stableForHash(value) {
+  if (Array.isArray(value)) return value.map(stableForHash);
+  if (!value || typeof value !== 'object') return value ?? null;
+  return Object.keys(value)
+    .sort()
+    .reduce((acc, key) => {
+      acc[key] = stableForHash(value[key]);
+      return acc;
+    }, {});
+}
+
+async function sha256Hex(value) {
+  const encoded = new TextEncoder().encode(value);
+  const digest = await crypto.subtle.digest('SHA-256', encoded);
+  return [...new Uint8Array(digest)]
+    .map(byte => byte.toString(16).padStart(2, '0'))
+    .join('');
+}
+
+async function buildRuleRegistrySnapshot(config, rules) {
+  const sourceCoverage = evaluateSourceCoverageCompleteness(config, rules || []);
+  const duplicates = duplicateRuleIds(rules || []);
+  const normalizedRules = (Array.isArray(rules) ? rules : [])
+    .filter(rule => rule.rule_id)
+    .map(rule => ({
+      rule_id: rule.rule_id,
+      cao_key: rule.cao_key || null,
+      version_label: rule.version_label || null,
+      source_document_id: rule.source_document_id || null,
+      sha1: rule.sha1 || null,
+      domain: rule.domain || null,
+      impact: rule.impact || null,
+      automation_level: rule.automation_level || null,
+      implementation_status: rule.implementation_status || null,
+      manual_review_required: rule.manual_review_required === true,
+      calculation_policy: rule.calculation_policy || null,
+      runtime_binding_status: rule.runtime_binding_status || null,
+      runtime_binding_key: rule.runtime_binding_key || null,
+      runtime_binding_functions: Array.isArray(rule.runtime_binding_functions)
+        ? [...rule.runtime_binding_functions].sort()
+        : [],
+      implemented_in: Array.isArray(rule.implemented_in)
+        ? [...rule.implemented_in].sort()
+        : [],
+      tests: stableForHash(rule.tests || null),
+      rule_text: rule.rule_text || null,
+      rule_text_summary: rule.rule_text_summary || null
+    }))
+    .sort((a, b) => a.rule_id.localeCompare(b.rule_id));
+
+  const duplicateFindings = duplicates.length > 0
+    ? [{
+      code: 'duplicate_rule_ids_in_registry',
+      severity: 'critical',
+      message: `${duplicates.length} CAORule rule_id's komen dubbel voor binnen dezelfde configuratie.`
+    }]
+    : [];
+  const canonicalJson = JSON.stringify(stableForHash(normalizedRules));
+  const verifiedAt = new Date().toISOString();
+
+  return {
+    passed: sourceCoverage.passed && duplicateFindings.length === 0,
+    fingerprint: await sha256Hex(canonicalJson),
+    fingerprint_algorithm: 'sha256',
+    fingerprint_rule_count: normalizedRules.length,
+    expected_unique_rule_count: sourceCoverage.minimums.total,
+    persisted_unique_rule_count: sourceCoverage.unique_rule_ids,
+    verified_at: verifiedAt,
+    source_coverage: sourceCoverage,
+    duplicate_rule_ids: duplicates.slice(0, 100),
+    duplicate_rule_ids_truncated: duplicates.length > 100,
+    blocking_findings: [
+      ...duplicateFindings,
+      ...sourceCoverage.blocking_findings
+    ]
+  };
+}
+
+function mergeRegistrySnapshotIntoGate(gate, registrySnapshot) {
+  const registryBlocking = registrySnapshot.blocking_findings || [];
+  const mergedFindings = [
+    ...registryBlocking,
+    ...(gate.blocking_findings || [])
+  ];
+  const dedupedFindings = [];
+  const seenFindingKeys = new Set();
+  for (const finding of mergedFindings) {
+    const key = `${finding.code || 'unknown'}:${finding.message || ''}`;
+    if (seenFindingKeys.has(key)) continue;
+    seenFindingKeys.add(key);
+    dedupedFindings.push(finding);
+  }
+  const passed = gate.passed === true && registrySnapshot.passed === true;
+  let status = gate.status;
+  if (!passed) {
+    if (dedupedFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
+    else if (dedupedFindings.some(f => f.code === 'missing_rules')) status = 'blocked_missing_rules';
+    else if (
+      dedupedFindings.some(f => String(f.code || '').startsWith('incomplete_')) ||
+      dedupedFindings.some(f => f.code === 'duplicate_rule_ids_in_registry')
+    ) status = 'blocked_incomplete_source_coverage';
+    else if (dedupedFindings.some(f => f.code === 'missing_wage_scales' || f.code === 'missing_pay_periods')) status = 'blocked_missing_payroll_parameters';
+    else if (gate.status === 'ready') status = 'blocked_incomplete_runtime_rules';
+  }
+  return {
+    ...gate,
+    passed,
+    status,
+    persisted_rule_registry: registrySnapshot,
+    blocking_findings: dedupedFindings
   };
 }
 
@@ -438,7 +566,9 @@ Deno.serve(async (req) => {
     const activeConfig = chooseActiveConfiguration(configs || [], referenceDate);
     const ruleLoad = await loadRulesForConfiguration(base44, caoKey, activeConfig);
     const rules = ruleLoad.rules;
-    const gate = evaluateCoverageGate(activeConfig || {}, rules || [], { max_open_rules: maxOpenRules });
+    const runtimeGate = evaluateCoverageGate(activeConfig || {}, rules || [], { max_open_rules: maxOpenRules });
+    const registrySnapshot = await buildRuleRegistrySnapshot(activeConfig || {}, rules || []);
+    const gate = mergeRegistrySnapshotIntoGate(runtimeGate, registrySnapshot);
 
     const requestedPayrollReady = activeConfig?.is_payroll_ready === true;
     const isPayrollReady = requestedPayrollReady && gate.passed;
@@ -456,6 +586,10 @@ Deno.serve(async (req) => {
         payroll_readiness_status: payrollReadinessStatus,
         payroll_readiness_checked_at: gate.checked_at,
         payroll_readiness_gate: gate,
+        rule_registry_fingerprint: registrySnapshot.fingerprint,
+        rule_registry_rule_count: registrySnapshot.persisted_unique_rule_count,
+        rule_registry_verified_at: registrySnapshot.verified_at,
+        rule_registry_snapshot: registrySnapshot,
         coverage_summary: {
           ...(activeConfig.coverage_summary || {}),
           last_owner_internal_audit: {
@@ -466,7 +600,16 @@ Deno.serve(async (req) => {
             status: payrollReadinessStatus,
             passed: gate.passed,
             counts: gate.counts,
-            blocking_findings: gate.blocking_findings
+            blocking_findings: gate.blocking_findings,
+            persisted_rule_registry: {
+              fingerprint: registrySnapshot.fingerprint,
+              fingerprint_algorithm: registrySnapshot.fingerprint_algorithm,
+              fingerprint_rule_count: registrySnapshot.fingerprint_rule_count,
+              persisted_unique_rule_count: registrySnapshot.persisted_unique_rule_count,
+              expected_unique_rule_count: registrySnapshot.expected_unique_rule_count,
+              verified_at: registrySnapshot.verified_at,
+              passed: registrySnapshot.passed
+            }
           }
         }
       });
@@ -484,6 +627,9 @@ Deno.serve(async (req) => {
       persisted_to_active_configuration: persistResult && !!activeConfig?.id,
       rules_scope: ruleLoad.scope,
       audited_rule_count: rules.length,
+      rule_registry_fingerprint: registrySnapshot.fingerprint,
+      rule_registry_rule_count: registrySnapshot.persisted_unique_rule_count,
+      rule_registry_verified_at: registrySnapshot.verified_at,
       coverage_gate: gate
     });
   } catch (error) {
