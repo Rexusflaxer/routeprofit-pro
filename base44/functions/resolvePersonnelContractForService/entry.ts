@@ -33,6 +33,23 @@ function booleanOrNull(value) {
   return null;
 }
 
+const SECURITY_FUNCTION_GROUPS = [
+  'objectbeveiliger_receptionist', 'mobiel_surveillant', 'winkelsurveillant',
+  'brandwacht', 'geld_waardetransporteur', 'centralist'
+];
+const SECURITY_FUNCTION_TYPES = ['surveillant', 'centralist', 'verkeersregelaar', 'brandwacht', 'rechercheur'];
+const SECURITY_ROLE_STATUSES = ['aspirant_beveiliger', 'beveiliger', 'leidinggevende'];
+
+function unwrapFunctionData(response) {
+  return response?.data || response || null;
+}
+
+function serviceRequiresSecurityScope(serviceContext) {
+  return SECURITY_ROLE_STATUSES.includes(serviceContext.security_role_status) ||
+    SECURITY_FUNCTION_GROUPS.includes(serviceContext.cao_function_group) ||
+    SECURITY_FUNCTION_TYPES.includes(serviceContext.function_type);
+}
+
 function listAllowsValue(list, value) {
   if (!value) return { matched: true, reason: 'no_requested_value' };
   const values = normalizeArray(list);
@@ -569,6 +586,33 @@ Deno.serve(async (req) => {
       manualReviewReasons.push(`CAO-configuratie is niet payroll-ready (${caoPayrollReadiness.status}).`);
     }
 
+    let caoApplicability = null;
+    if (selectedContract && (caoResolution.config?.cao_key || selectedContract?.cao_key || 'cao_particuliere_beveiliging') === 'cao_particuliere_beveiliging') {
+      try {
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
+          personnel_id,
+          contract: selectedContract,
+          work_context: serviceContext
+        });
+        caoApplicability = unwrapFunctionData(scopeRes);
+      } catch (error) {
+        manualReviewReasons.push(`CAO-toepassingsscope kon niet worden bepaald: ${error.message || String(error)}.`);
+      }
+
+      if (caoApplicability) {
+        warnings.push(...(caoApplicability.warnings || []));
+        if (caoApplicability.applies_cao_pb === false) {
+          blockingReasons.push('Geselecteerd contract/dienstcontext valt niet onder CAO PB; kies de juiste CAO of contractscope voordat planning/payroll definitief mag zijn.');
+        }
+        if (caoApplicability.manual_review_required === true) {
+          manualReviewReasons.push(`CAO-toepassingsscope vereist handmatige review (${caoApplicability.cao_scope_profile || 'unknown'}).`);
+        }
+        if (serviceRequiresSecurityScope(serviceContext) && caoApplicability.applies_full_security_rules !== true) {
+          blockingReasons.push(`Dienst vraagt beveiligingsfunctie/-status, maar geselecteerd contract heeft CAO-scope ${caoApplicability.cao_scope_profile || 'unknown'} en past de volledige beveiligingsregels niet toe.`);
+        }
+      }
+    }
+
     const hasBlocking = blockingReasons.length > 0;
     const manualReviewRequired = manualReviewReasons.length > 0;
     const planningAllowed = !hasBlocking && !manualReviewRequired;
@@ -626,6 +670,7 @@ Deno.serve(async (req) => {
       service_context: serviceContext,
       internship_service_check: internshipServiceCheck,
       hired_worker_service_check: hiredWorkerServiceCheck,
+      cao_applicability: caoApplicability,
       function_match: selectedItem?.function_match || null,
       evaluated_contracts: evaluatedContracts.map(item => ({
         contract_id: item.contract.id,

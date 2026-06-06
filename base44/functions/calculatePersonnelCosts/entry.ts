@@ -978,6 +978,12 @@ function contractResolutionBlocksPayroll(result) {
     String(resolution.status || '').startsWith('blocked');
 }
 
+function collectContractResolutionScopeProfiles(results) {
+  return [...new Set((results || [])
+    .map(item => item?.contract_resolution?.cao_applicability?.cao_scope_profile)
+    .filter(Boolean))];
+}
+
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
@@ -1039,6 +1045,48 @@ Deno.serve(async (req) => {
       return scope;
     }
 
+    function buildCaoScopeRuntime(scope) {
+      const normalizedScope = normalizeCaoScope(scope);
+      const warnings = [];
+      const unknownOrMixed = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(normalizedScope.cao_scope_profile);
+
+      if (unknownOrMixed) {
+        warnings.push({
+          message: `CAO-toepassingsprofiel onzeker (${normalizedScope.cao_scope_profile}): beveiligingsspecifieke toeslagen (art. 40/42/43) worden NIET automatisch berekend. Handmatige review vereist.`,
+          cao_scope_profile: normalizedScope.cao_scope_profile,
+          manual_review_required: true
+        });
+      } else if (!normalizedScope.applies_full_security_rules) {
+        const exclusions = [];
+        if (normalizedScope.payroll_rule_profile?.apply_article_40_special_hours === false) exclusions.push('avond-/nacht-/weekendtoeslagen (art. 40)');
+        if (normalizedScope.payroll_rule_profile?.apply_article_42_overtime === false) exclusions.push('overwerktoeslag (art. 42)');
+        if (normalizedScope.payroll_rule_profile?.apply_article_43_shift_change === false) exclusions.push('dienstruilvergoeding (art. 43)');
+        if (normalizedScope.payroll_rule_profile?.apply_chapter_5_reimbursements === false) exclusions.push('reiskosten/vergoedingen (hoofdstuk 5)');
+        if (exclusions.length > 0) {
+          warnings.push({
+            message: `Artikel 3 lid 2 CAO PB (${normalizedScope.cao_scope_profile}): niet van toepassing: ${exclusions.join(', ')}. Art. 37/38/41 gelden wel.`,
+            cao_scope_profile: normalizedScope.cao_scope_profile,
+            excluded_articles: normalizedScope.excluded_articles || []
+          });
+        }
+      }
+
+      return {
+        caoScope: normalizedScope,
+        scopeWarnings: warnings,
+        isUnknownOrMixedScope: unknownOrMixed,
+        caoRuleApplication: {
+          cao_scope_profile: normalizedScope.cao_scope_profile,
+          applied_article_40_special_hours: !unknownOrMixed && (normalizedScope.payroll_rule_profile?.apply_article_40_special_hours === true),
+          applied_article_41_holidays: normalizedScope.payroll_rule_profile?.apply_article_41_holidays !== false,
+          applied_article_42_overtime: !unknownOrMixed && (normalizedScope.payroll_rule_profile?.apply_article_42_overtime === true),
+          applied_chapter_5_reimbursements: !unknownOrMixed && (normalizedScope.payroll_rule_profile?.apply_chapter_5_reimbursements === true),
+          manual_review_required: unknownOrMixed || normalizedScope.manual_review_required || false,
+          source_rule_ids: normalizedScope.source_rule_ids || []
+        }
+      };
+    }
+
     // ── CAO-toepassingscheck ──
     let rawScope = null;
     if (personnel_id) {
@@ -1047,41 +1095,7 @@ Deno.serve(async (req) => {
         rawScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
     }
-    const caoScope = normalizeCaoScope(rawScope);
-    const scopeWarnings = [];
-    const isUnknownOrMixedScope = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
-
-    if (isUnknownOrMixedScope) {
-      scopeWarnings.push({
-        message: `CAO-toepassingsprofiel onzeker (${caoScope.cao_scope_profile}): beveiligingsspecifieke toeslagen (art. 40/42/43) worden NIET automatisch berekend. Handmatige review vereist.`,
-        cao_scope_profile: caoScope.cao_scope_profile,
-        manual_review_required: true
-      });
-    } else if (!caoScope.applies_full_security_rules) {
-      const exclusions = [];
-      if (caoScope.payroll_rule_profile?.apply_article_40_special_hours === false) exclusions.push('avond-/nacht-/weekendtoeslagen (art. 40)');
-      if (caoScope.payroll_rule_profile?.apply_article_42_overtime === false) exclusions.push('overwerktoeslag (art. 42)');
-      if (caoScope.payroll_rule_profile?.apply_article_43_shift_change === false) exclusions.push('dienstruilvergoeding (art. 43)');
-      if (caoScope.payroll_rule_profile?.apply_chapter_5_reimbursements === false) exclusions.push('reiskosten/vergoedingen (hoofdstuk 5)');
-      if (exclusions.length > 0) {
-        scopeWarnings.push({
-          message: `Artikel 3 lid 2 CAO PB (${caoScope.cao_scope_profile}): niet van toepassing: ${exclusions.join(', ')}. Art. 37/38/41 gelden wel.`,
-          cao_scope_profile: caoScope.cao_scope_profile,
-          excluded_articles: caoScope.excluded_articles || []
-        });
-      }
-    }
-
-    // cao_rule_application metadata voor output
-    const caoRuleApplication = {
-      cao_scope_profile: caoScope.cao_scope_profile,
-      applied_article_40_special_hours: !isUnknownOrMixedScope && (caoScope.payroll_rule_profile?.apply_article_40_special_hours === true),
-      applied_article_41_holidays: caoScope.payroll_rule_profile?.apply_article_41_holidays !== false,
-      applied_article_42_overtime: !isUnknownOrMixedScope && (caoScope.payroll_rule_profile?.apply_article_42_overtime === true),
-      applied_chapter_5_reimbursements: !isUnknownOrMixedScope && (caoScope.payroll_rule_profile?.apply_chapter_5_reimbursements === true),
-      manual_review_required: isUnknownOrMixedScope || caoScope.manual_review_required || false,
-      source_rule_ids: caoScope.source_rule_ids || []
-    };
+    let { caoScope, scopeWarnings, isUnknownOrMixedScope, caoRuleApplication } = buildCaoScopeRuntime(rawScope);
 
     // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
     const syncResult = await lazySyncCao(base44, !!force_cao_sync);
@@ -1198,6 +1212,61 @@ Deno.serve(async (req) => {
           payroll_final_allowed: false,
           calculation_status: 'blocked_contract_resolution'
         }, { status: 400 });
+      }
+
+      const resolvedScopeProfiles = collectContractResolutionScopeProfiles(contractResolutionResults);
+      const globalScopeProfile = caoScope?.cao_scope_profile || null;
+      if (resolvedScopeProfiles.length > 1) {
+        return Response.json({
+          error: 'Definitieve loonberekening geblokkeerd: deze payrollrun bevat meerdere CAO-toepassingsscopes.',
+          cao_sync_status: caoSyncStatus,
+          calculation_warnings: [
+            ...calculationWarnings,
+            'Payroll geblokkeerd: deze runtime berekent toeslagen nog met één CAO-scope per loonrun. Splits de run of implementeer per-dienst CAO-scope voordat definitief mag worden uitbetaald.'
+          ],
+          personnel_id,
+          cao_configuration_id: caoConfig.id,
+          cao_version_label: caoConfig.version_label || caoConfig.name,
+          cao_valid_from: caoConfig.valid_from,
+          cao_payroll_readiness: payrollReadiness,
+          contract_resolution_required: true,
+          contract_resolution_results: contractResolutionResults,
+          global_cao_scope_profile: globalScopeProfile,
+          resolved_contract_cao_scope_profiles: resolvedScopeProfiles,
+          manual_review_required: true,
+          payroll_final_allowed: false,
+          calculation_status: 'blocked_contract_scope_mismatch'
+        }, { status: 400 });
+      }
+      if (resolvedScopeProfiles.length === 1 && globalScopeProfile && resolvedScopeProfiles[0] !== globalScopeProfile) {
+        const resolvedScope = contractResolutionResults
+          .map(item => item?.contract_resolution?.cao_applicability)
+          .find(scope => scope?.cao_scope_profile === resolvedScopeProfiles[0]) || null;
+        if (resolvedScope) {
+          ({ caoScope, scopeWarnings, isUnknownOrMixedScope, caoRuleApplication } = buildCaoScopeRuntime(resolvedScope));
+          calculationWarnings.push(`Payroll gebruikt contractspecifieke CAO-scope ${resolvedScope.cao_scope_profile} in plaats van medewerkerstamdata-scope ${globalScopeProfile}.`);
+        } else {
+          return Response.json({
+            error: 'Definitieve loonberekening geblokkeerd: contractscope kon niet betrouwbaar worden toegepast op de payrollruntime.',
+            cao_sync_status: caoSyncStatus,
+            calculation_warnings: [
+              ...calculationWarnings,
+              'Payroll geblokkeerd: contractresolver gaf een scope-profiel terug zonder volledige scope-payload.'
+            ],
+            personnel_id,
+            cao_configuration_id: caoConfig.id,
+            cao_version_label: caoConfig.version_label || caoConfig.name,
+            cao_valid_from: caoConfig.valid_from,
+            cao_payroll_readiness: payrollReadiness,
+            contract_resolution_required: true,
+            contract_resolution_results: contractResolutionResults,
+            global_cao_scope_profile: globalScopeProfile,
+            resolved_contract_cao_scope_profiles: resolvedScopeProfiles,
+            manual_review_required: true,
+            payroll_final_allowed: false,
+            calculation_status: 'blocked_contract_scope_mismatch'
+          }, { status: 400 });
+        }
       }
     }
 

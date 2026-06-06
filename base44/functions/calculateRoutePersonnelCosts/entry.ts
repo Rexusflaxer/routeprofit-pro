@@ -949,8 +949,9 @@ Deno.serve(async (req) => {
       const scope = scopeById[p.id] || null;
       const classification = classificationById[p.id] || null;
       const contractResolution = contractById[p.id] || null;
+      const effectiveScope = contractResolution?.cao_applicability || scope;
       if (contractResolution?.planning_allowed === false || contractResolution?.payroll_final_allowed === false) {
-        const blockedCost = buildBlockedContractCost(p, shiftDate, startTime, endTime, scope, contractResolution);
+        const blockedCost = buildBlockedContractCost(p, shiftDate, startTime, endTime, effectiveScope, contractResolution);
         return {
           personnel_id: p.id, name: p.name,
           employee_type: p.employee_type, contract_type: p.contract_type,
@@ -958,7 +959,7 @@ Deno.serve(async (req) => {
           ...blockedCost
         };
       }
-      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, scope, classification);
+      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
@@ -1066,8 +1067,9 @@ Deno.serve(async (req) => {
       const scope = scopeById[p.id] || null;
       const classification = classificationById[p.id] || null;
       const contractResolution = contractById[p.id] || null;
+      const effectiveScope = contractResolution?.cao_applicability || scope;
       if (contractResolution?.planning_allowed === false || contractResolution?.payroll_final_allowed === false) {
-        const blockedCost = buildBlockedContractCost(p, shiftDate, startTime, endTime, scope, contractResolution);
+        const blockedCost = buildBlockedContractCost(p, shiftDate, startTime, endTime, effectiveScope, contractResolution);
         return {
           personnel_id: p.id, name: p.name,
           employee_type: p.employee_type, contract_type: p.contract_type,
@@ -1075,7 +1077,7 @@ Deno.serve(async (req) => {
           ...blockedCost
         };
       }
-      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, scope, classification);
+      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,

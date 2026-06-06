@@ -14,6 +14,80 @@ const SECURITY_FUNCTION_GROUPS = [
 const SECURITY_FUNCTION_TYPES = ['surveillant', 'centralist', 'verkeersregelaar', 'brandwacht', 'rechercheur'];
 const SECURITY_ROLE_STATUSES = ['aspirant_beveiliger', 'beveiliger', 'leidinggevende'];
 const NON_SECURITY_FUNCTION_TYPES = ['binnendienst', 'planner', 'installateur', 'host', 'other'];
+const CONTRACT_SCOPE_FIELDS = [
+  'performs_security_work',
+  'security_work_percentage',
+  'security_role_status',
+  'cao_function_group',
+  'cao_function_level',
+  'function_type',
+  'works_airport_schiphol',
+  'works_cash_value_logistics',
+  'works_event_or_hospitality_security',
+  'event_hospitality_cao_applies'
+];
+
+function hasValue(value) {
+  return value !== undefined && value !== null && value !== '';
+}
+
+function pickScopedValue(field, personnel, contract, workContext) {
+  const candidates = [
+    { source: 'contract', value: contract?.[field] },
+    { source: 'work_context', value: workContext?.[field] },
+    { source: 'personnel', value: personnel?.[field] }
+  ];
+  for (const candidate of candidates) {
+    if (hasValue(candidate.value)) return candidate;
+  }
+  return { source: null, value: undefined };
+}
+
+function buildRuleSubject(personnel, contract, workContext) {
+  const subject = { ...(personnel || {}) };
+  const fieldSources = {};
+  const overrides = [];
+  const crossSourceWarnings = [];
+
+  for (const field of CONTRACT_SCOPE_FIELDS) {
+    const picked = pickScopedValue(field, personnel, contract, workContext);
+    if (hasValue(picked.value)) {
+      subject[field] = picked.value;
+      fieldSources[field] = picked.source;
+    }
+
+    const personnelValue = personnel?.[field];
+    const contractValue = contract?.[field];
+    const workValue = workContext?.[field];
+    if (hasValue(contractValue) && hasValue(personnelValue) && String(contractValue) !== String(personnelValue)) {
+      overrides.push({
+        field,
+        chosen_source: picked.source,
+        contract_value: contractValue,
+        personnel_value: personnelValue,
+        reason: 'contract_scope_overrides_personnel_default'
+      });
+    }
+    if (hasValue(workValue) && hasValue(contractValue) && String(workValue) !== String(contractValue)) {
+      crossSourceWarnings.push({
+        field,
+        chosen_source: picked.source,
+        work_context_value: workValue,
+        contract_value: contractValue,
+        reason: 'work_context_differs_from_contract_scope'
+      });
+    }
+  }
+
+  return {
+    subject,
+    field_sources: fieldSources,
+    overrides,
+    cross_source_warnings: crossSourceWarnings,
+    contract_scope_used: !!contract?.id || CONTRACT_SCOPE_FIELDS.some(field => hasValue(contract?.[field])),
+    work_context_scope_used: CONTRACT_SCOPE_FIELDS.some(field => hasValue(workContext?.[field]))
+  };
+}
 
 /**
  * Detecteer conflicten tussen velden.
@@ -187,11 +261,26 @@ function buildPayrollProfile(mode) {
 function resolveApplicability(personnel, contract, work_context) {
   const warnings = [];
   const source_rule_ids = [];
-  const p = personnel || {};
+  const scopeSubject = buildRuleSubject(personnel || {}, contract || {}, work_context || {});
+  const p = scopeSubject.subject;
   const wc = work_context || {};
+  const scope_resolution = {
+    contract_scope_used: scopeSubject.contract_scope_used,
+    work_context_scope_used: scopeSubject.work_context_scope_used,
+    field_sources: scopeSubject.field_sources,
+    contract_overrides_personnel_defaults: scopeSubject.overrides,
+    work_context_contract_differences: scopeSubject.cross_source_warnings
+  };
+
+  if (scopeSubject.overrides.length > 0) {
+    warnings.push('Contractspecifieke CAO-scopevelden overschrijven medewerkerstamdata voor deze beoordeling.');
+  }
+  if (scopeSubject.cross_source_warnings.length > 0) {
+    warnings.push('Dienstcontext wijkt af van contractscope; controleer contract-/dienstkoppeling als dit niet bewust is.');
+  }
 
   // ── Evenementen-/horecabeveiliging exclusie ──
-  if (wc.works_event_or_hospitality_security === true && wc.event_hospitality_cao_applies === true) {
+  if (p.works_event_or_hospitality_security === true && p.event_hospitality_cao_applies === true) {
     source_rule_ids.push('CAO-PB-2024-R0227');
     return {
       cao_scope_profile: 'excluded_event_hospitality_security',
@@ -206,13 +295,14 @@ function resolveApplicability(personnel, contract, work_context) {
       payroll_rule_profile: buildPayrollProfile('unknown'),
       manual_review_required: true,
       confidence: 'high',
-      warnings: ['CAO PB is niet van toepassing: evenementen-/horecabeveiliging valt onder eigen CAO (art. 3 lid 2 / R0227).'],
+      warnings: [...warnings, 'CAO PB is niet van toepassing: evenementen-/horecabeveiliging valt onder eigen CAO (art. 3 lid 2 / R0227).'],
+      scope_resolution,
       source_rule_ids
     };
   }
 
   // ── Conflictdetectie (altijd eerst) ──
-  const conflicts = detectConflicts(p, wc);
+  const conflicts = detectConflicts(p, {});
   const hasConflicts = conflicts.length > 0;
 
   if (hasConflicts) {
@@ -220,7 +310,7 @@ function resolveApplicability(personnel, contract, work_context) {
   }
 
   // ── Bepaal of medewerker beveiligingswerk doet ──
-  const securityWorkResult = determinePerformsSecurityWork(p, wc);
+  const securityWorkResult = determinePerformsSecurityWork(p, {});
 
   // ── Schiphol / geld- en waardelogistiek scope ──
   const isSchiphol = wc.works_airport_schiphol === true || p.works_airport_schiphol === true;
@@ -243,6 +333,7 @@ function resolveApplicability(personnel, contract, work_context) {
       payroll_rule_profile: buildPayrollProfile('unknown'),
       manual_review_required: true,
       confidence: 'low',
+      scope_resolution,
       warnings,
       source_rule_ids
     };
@@ -265,6 +356,7 @@ function resolveApplicability(personnel, contract, work_context) {
       payroll_rule_profile: buildPayrollProfile('unknown'),
       manual_review_required: true,
       confidence: 'low',
+      scope_resolution,
       conflict_details: conflicts,
       warnings,
       source_rule_ids
@@ -303,6 +395,7 @@ function resolveApplicability(personnel, contract, work_context) {
       special_scope_manual_review_required: false,
       manual_review_required: false,
       confidence: 'high',
+      scope_resolution,
       warnings,
       source_rule_ids
     };
@@ -351,6 +444,7 @@ function resolveApplicability(personnel, contract, work_context) {
     special_scope_manual_review_required: specialScopeManualReview,
     manual_review_required: functionReviewRequired || specialScopeManualReview,
     confidence: functionReviewRequired ? 'medium' : 'high',
+    scope_resolution,
     warnings,
     source_rule_ids
   };
