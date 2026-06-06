@@ -219,6 +219,99 @@ function resolveShiftWageBasis(personnel, caoScope, classification) {
   };
 }
 
+function calculateShiftHours(date, startTime, endTime) {
+  const startDate = new Date(`${date}T${startTime}:00`);
+  let endDate = new Date(`${date}T${endTime}:00`);
+  if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
+  return (endDate - startDate) / (1000 * 60 * 60);
+}
+
+async function resolveRouteContractContext(base44, personnel, route, shiftDate, functionType) {
+  if (!route.operating_company_id) {
+    return {
+      status: 'not_required_legacy_route',
+      planning_allowed: true,
+      payroll_final_allowed: true,
+      manual_review_required: false,
+      company_id: null,
+      contract_id: null,
+      note: 'Route heeft geen operating_company_id; legacy routekostenflow gebruikt medewerker-CAO velden.'
+    };
+  }
+
+  try {
+    const res = await base44.asServiceRole.functions.invoke('resolvePersonnelContractForService', {
+      personnel_id: personnel.id,
+      route_id: route.id,
+      company_id: route.operating_company_id,
+      service_date: shiftDate,
+      service_context: {
+        function_type: functionType || personnel.function_type || null,
+        cao_function_group: personnel.cao_function_group || null,
+        cao_function_level: personnel.cao_function_level || null,
+        security_role_status: personnel.security_role_status || null,
+        contract_assignment_policy: 'strict_contract_match'
+      }
+    });
+    return res?.data || {
+      status: 'blocked_contract_resolution_empty',
+      planning_allowed: false,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      blocking_reasons: ['Contractresolver gaf geen resultaat terug.']
+    };
+  } catch (error) {
+    return {
+      status: 'blocked_contract_resolution_error',
+      planning_allowed: false,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      blocking_reasons: [`Contractresolver fout: ${error.message}`]
+    };
+  }
+}
+
+function buildBlockedContractCost(personnel, date, startTime, endTime, rawScope, contractResolution) {
+  const caoScope = normalizeCaoScope(rawScope);
+  const totalHours = calculateShiftHours(date, startTime, endTime);
+  const reasons = [
+    ...(contractResolution?.blocking_reasons || []),
+    ...(contractResolution?.manual_review_reasons || [])
+  ];
+
+  return {
+    base_hourly_rate: null,
+    total_hours: totalHours,
+    base_salary: 0,
+    surcharges_total: 0,
+    surcharge_details: [],
+    total_gross: 0,
+    employer_costs_total: 0,
+    employer_costs: {},
+    accruals_total: 0,
+    accruals: {},
+    total_cost_employer: 0,
+    cost_per_hour: 0,
+    cao_scope_profile: caoScope?.cao_scope_profile || null,
+    scope_warnings: [
+      ...(caoScope?.warnings || []),
+      ...reasons,
+      'Route is gekoppeld aan een uitvoerend bedrijf; geldig contract is verplicht voor definitieve routekosten.'
+    ],
+    wage_basis_type: 'blocked_contract_resolution',
+    payroll_final_allowed: false,
+    manual_review_required: true,
+    calculation_status: 'blocked_contract_resolution',
+    cao_function_classification: null,
+    contract_resolution: contractResolution || null,
+    cao_rule_application: {
+      cao_scope_profile: caoScope.cao_scope_profile,
+      manual_review_required: true,
+      source_rule_ids: caoScope.source_rule_ids || []
+    }
+  };
+}
+
 // Composite cache fingerprint
 function buildRouteCostCacheFingerprint({ route, weekday, caoConfig, personnelList }) {
   return JSON.stringify({
@@ -230,6 +323,7 @@ function buildRouteCostCacheFingerprint({ route, weekday, caoConfig, personnelLi
       end: route.time_window_end,
       minutes: route.total_route_minutes,
       alarm: !!route.alarm_standby,
+      operating_company_id: route.operating_company_id || null,
       vehicle_id: route.vehicle_id || null
     },
     personnel: personnelList
@@ -543,7 +637,8 @@ Deno.serve(async (req) => {
       route, weekday: targetWeekday, caoConfig, personnelList: allPersonnelForCache
     });
     const cacheKey = `${targetWeekday}`;
-    if (!force_recalculate && route.cached_personnel_costs?.[cacheKey]) {
+    const usesContractResolution = !!route.operating_company_id;
+    if (!force_recalculate && !usesContractResolution && route.cached_personnel_costs?.[cacheKey]) {
       const cached = route.cached_personnel_costs[cacheKey];
       if (cached._cache_fingerprint === fingerprint) {
         return Response.json(cached);
@@ -569,26 +664,54 @@ Deno.serve(async (req) => {
         .then(r => ({ id: p.id, classification: r?.data || null }))
         .catch(() => ({ id: p.id, classification: null }));
     });
+    const contractPromises = allPersonnelForCache.map(p =>
+      resolveRouteContractContext(base44, p, route, shiftDate, p.function_type)
+        .then(contractResolution => ({ id: p.id, contract_resolution: contractResolution }))
+        .catch(error => ({
+          id: p.id,
+          contract_resolution: {
+            status: 'blocked_contract_resolution_error',
+            planning_allowed: false,
+            payroll_final_allowed: false,
+            manual_review_required: true,
+            blocking_reasons: [`Contractresolver fout: ${error.message}`]
+          }
+        }))
+    );
 
-    const [scopeResults, binnendienstScopeResults, classificationResults] = await Promise.all([
+    const [scopeResults, binnendienstScopeResults, classificationResults, contractResults] = await Promise.all([
       Promise.all(scopePromises),
       Promise.all(binnendienstScopePromises),
-      Promise.all(classificationPromises)
+      Promise.all(classificationPromises),
+      Promise.all(contractPromises)
     ]);
     const scopeById = {};
     for (const s of scopeResults) scopeById[s.id] = s.scope;
     for (const s of binnendienstScopeResults) scopeById[s.id] = s.scope;
     const classificationById = {};
     for (const c of classificationResults) classificationById[c.id] = c.classification;
+    const contractById = {};
+    for (const c of contractResults) contractById[c.id] = c.contract_resolution;
 
     const results = surveillants.map(p => {
       const scope = scopeById[p.id] || null;
       const classification = classificationById[p.id] || null;
+      const contractResolution = contractById[p.id] || null;
+      if (contractResolution?.planning_allowed === false || contractResolution?.payroll_final_allowed === false) {
+        const blockedCost = buildBlockedContractCost(p, shiftDate, startTime, endTime, scope, contractResolution);
+        return {
+          personnel_id: p.id, name: p.name,
+          employee_type: p.employee_type, contract_type: p.contract_type,
+          cao: p.cao, cao_scale: p.cao_scale, cao_period: p.cao_period,
+          ...blockedCost
+        };
+      }
       const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, scope, classification);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
         cao: p.cao, cao_scale: p.cao_scale, cao_period: p.cao_period,
+        contract_resolution: contractResolution,
         ...cost
       };
     });
@@ -690,11 +813,22 @@ Deno.serve(async (req) => {
     const binnendienstResults = binnendienst.map(p => {
       const scope = scopeById[p.id] || null;
       const classification = classificationById[p.id] || null;
+      const contractResolution = contractById[p.id] || null;
+      if (contractResolution?.planning_allowed === false || contractResolution?.payroll_final_allowed === false) {
+        const blockedCost = buildBlockedContractCost(p, shiftDate, startTime, endTime, scope, contractResolution);
+        return {
+          personnel_id: p.id, name: p.name,
+          employee_type: p.employee_type, contract_type: p.contract_type,
+          cao: p.cao, cao_scale: p.cao_scale, cao_period: p.cao_period,
+          ...blockedCost
+        };
+      }
       const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, scope, classification);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
         cao: p.cao, cao_scale: p.cao_scale, cao_period: p.cao_period,
+        contract_resolution: contractResolution,
         ...cost
       };
     });
@@ -708,6 +842,8 @@ Deno.serve(async (req) => {
       start_time: startTime, end_time: endTime,
       planned_end_time: plannedEndTime,
       alarm_standby: !!route.alarm_standby,
+      operating_company_id: route.operating_company_id || null,
+      contract_resolution_required: usesContractResolution,
       actual_shift_note: actualShiftNote,
       total_surveillants: results.length,
       most_expensive: mostExpensive, cheapest, average,
@@ -735,10 +871,11 @@ Deno.serve(async (req) => {
       ],
       _cache_revision: caoConfig.cloudflare_revision || null,
       _cache_fingerprint: fingerprint,
-      _cache_is_final_payroll_basis: routePayrollFinalAllowed
+      _cache_is_final_payroll_basis: routePayrollFinalAllowed,
+      _cache_skipped_reason: usesContractResolution ? 'contract_resolution_depends_on_separate_contract_records' : null
     };
 
-    if (routePayrollFinalAllowed) {
+    if (routePayrollFinalAllowed && !usesContractResolution) {
       const existingCache = route.cached_personnel_costs || {};
       existingCache[cacheKey] = resultPayload;
       await base44.entities.Route.update(route_id, {
