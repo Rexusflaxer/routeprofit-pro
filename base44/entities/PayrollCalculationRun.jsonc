@@ -23,6 +23,34 @@
         "null"
       ]
     },
+    "cao_revision": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Cloudflare/Codex CAO revision waarmee deze run is berekend."
+    },
+    "cao_payroll_readiness_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Payroll-readiness status van de gebruikte CAO tijdens deze run."
+    },
+    "correction_run_for_review_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "CAOChangeReview IDs waarvoor deze loonrun een correctie verwerkt."
+    },
+    "supersedes_payroll_run_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Eerdere payroll runs die door deze correctierun worden gecorrigeerd."
+    },
     "pay_period_year": {
       "type": "number"
     },

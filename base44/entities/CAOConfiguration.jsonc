@@ -61,6 +61,40 @@
       "type": "boolean",
       "default": false
     },
+    "payroll_readiness_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "ready",
+        "owner_not_marked_ready",
+        "blocked_missing_effective_date",
+        "blocked_missing_rules",
+        "blocked_missing_payroll_parameters",
+        "blocked_incomplete_runtime_rules",
+        "manual_review_required",
+        "unknown",
+        null
+      ],
+      "default": "unknown",
+      "description": "Resultaat van de owner-only CAO payroll-readiness gate. Payroll mag alleen definitief zijn bij ready + is_payroll_ready=true."
+    },
+    "payroll_readiness_checked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datetime waarop payroll_readiness_gate is berekend."
+    },
+    "payroll_readiness_gate": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Coverage-gate met tellingen, open payrollkritische regels en blokkades."
+    },
     "notes": {
       "type": [
         "string",

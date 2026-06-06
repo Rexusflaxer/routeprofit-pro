@@ -60,6 +60,24 @@ function getAbsoluteEndMinutes(startMinutes, endTime) {
   return endMinutes;
 }
 
+function getCaoPayrollReadiness(caoConfig) {
+  const gate = caoConfig?.payroll_readiness_gate || null;
+  const status = caoConfig?.payroll_readiness_status || null;
+  const ready = caoConfig?.is_payroll_ready === true &&
+    status === 'ready' &&
+    gate?.passed === true;
+
+  return {
+    ready,
+    status: status || 'unknown',
+    is_payroll_ready: caoConfig?.is_payroll_ready === true,
+    gate_present: !!gate,
+    blocking_findings: gate?.blocking_findings || [],
+    open_payroll_critical_rules: gate?.open_payroll_critical_rules || [],
+    counts: gate?.counts || null
+  };
+}
+
 /**
  * Scope-aware shift cost berekening.
  * @param {object} personnel - Personeelsrecord
@@ -468,6 +486,24 @@ Deno.serve(async (req) => {
         error: `Geen actieve CAO-configuratie gevonden voor datum ${shiftDate}. Activeer eerst een CAO-configuratie.`
       }, { status: 400 });
     }
+    const payrollReadiness = getCaoPayrollReadiness(caoConfig);
+    if (!payrollReadiness.ready) {
+      return Response.json({
+        error: `Actieve CAO-configuratie is niet payroll-ready (${payrollReadiness.status}). Route-loonkosten voor payrollbasis zijn geblokkeerd totdat de CAO coverage-gate slaagt.`,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          'Routekosten geblokkeerd: CAO-regeldekking of payrollparameters zijn niet bewezen compleet.'
+        ],
+        cao_configuration_id: caoConfig.id,
+        cao_version_label: caoConfig.version_label || caoConfig.name,
+        cao_revision: caoConfig.cloudflare_revision || null,
+        cao_payroll_readiness: payrollReadiness,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_cao_not_payroll_ready'
+      }, { status: 400 });
+    }
 
     const allPersonnel = await base44.entities.Personnel.list();
     const surveillants = allPersonnel.filter(p => p.function_type === 'surveillant' && p.is_active !== false);
@@ -685,6 +721,10 @@ Deno.serve(async (req) => {
         : blockedResults.length > 0
         ? 'blocked_manual_review'
         : 'concept_manual_review',
+      cao_configuration_id: caoConfig.id,
+      cao_version_label: caoConfig.version_label || caoConfig.name,
+      cao_revision: caoConfig.cloudflare_revision || null,
+      cao_payroll_readiness: payrollReadiness,
       cao_sync_status: caoSyncStatus,
       calculation_warnings: [
         ...syncWarnings,

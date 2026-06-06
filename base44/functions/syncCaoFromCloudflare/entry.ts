@@ -7,6 +7,188 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
  * Hervatbaar: een half-afgemaakte import met dezelfde idempotency_key wordt voortgezet.
  */
 
+const PAYROLL_CRITICAL_DOMAINS = [
+  'payroll', 'wage', 'wages', 'salary', 'loon', 'loontabel', 'allowance',
+  'allowances', 'reimbursement', 'toeslag', 'surcharge', 'overtime',
+  'overwerk', 'planning', 'schedule', 'rooster', 'contract', 'employment',
+  'leave', 'vacation', 'holiday', 'sickness', 'ziekte', 'pension', 'fund',
+  'function_classification', 'classification', 'bijlage_2'
+];
+
+function hasAnyNeedle(value, needles) {
+  const text = String(value || '').toLowerCase();
+  return needles.some(needle => text.includes(needle));
+}
+
+function hasWageScales(candidateCfg) {
+  return Object.keys(candidateCfg?.wage_scales || {}).length > 0 ||
+    Object.keys(candidateCfg?.wage_scales_detailed || {}).length > 0;
+}
+
+function hasPayPeriods(candidateCfg) {
+  const payPeriods = candidateCfg?.pay_periods;
+  if (!payPeriods) return false;
+  if (Array.isArray(payPeriods)) return payPeriods.length > 0;
+  if (typeof payPeriods === 'object') return Object.keys(payPeriods).length > 0;
+  return false;
+}
+
+function isPayrollCriticalRule(rule) {
+  const automationLevel = String(rule.automation_level || '').toLowerCase();
+  const calculationPolicy = String(rule.calculation_policy || '').toLowerCase();
+  const implementationStatus = String(rule.implementation_status || '').toUpperCase();
+
+  if (calculationPolicy === 'not_payroll') return false;
+  if (automationLevel === 'reference' && implementationStatus === 'REFERENCE') return false;
+
+  return calculationPolicy === 'automatic' ||
+    automationLevel === 'automatic_or_calculation' ||
+    automationLevel === 'validation_or_policy' ||
+    hasAnyNeedle(rule.domain, PAYROLL_CRITICAL_DOMAINS) ||
+    hasAnyNeedle(rule.impact, ['payroll', 'calculation', 'planning', 'validation']) ||
+    hasAnyNeedle(rule.rule_id, ['R031', 'R037', 'R038', 'R039', 'R040', 'R041', 'R042', 'R043', 'R047', 'R048', 'R056', 'R057', 'R058', 'R059', 'R072', 'R073', 'R085', 'R087', 'R088', 'R089', 'R090', 'R099', 'R114', 'R115', 'R116', 'R160', 'R175', 'R181']);
+}
+
+function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
+  const rules = Array.isArray(candidateRules) ? candidateRules : [];
+  const counts = {
+    total: rules.length,
+    implemented: 0,
+    partial: 0,
+    missing: 0,
+    reference: 0,
+    unknown: 0,
+    manual_review_required: 0,
+    payroll_critical: 0,
+    payroll_critical_open: 0
+  };
+  const openCriticalRules = [];
+  const missingTextRules = [];
+
+  for (const rule of rules) {
+    const status = String(rule.implementation_status || 'MISSING').toUpperCase();
+    if (status === 'IMPLEMENTED') counts.implemented++;
+    else if (status === 'PARTIAL') counts.partial++;
+    else if (status === 'MISSING') counts.missing++;
+    else if (status === 'REFERENCE') counts.reference++;
+    else counts.unknown++;
+
+    if (rule.manual_review_required === true) counts.manual_review_required++;
+    if (!rule.rule_text && !rule.rule_text_summary) missingTextRules.push(rule.rule_id || 'unknown');
+
+    if (isPayrollCriticalRule(rule)) {
+      counts.payroll_critical++;
+      if (status !== 'IMPLEMENTED' || rule.manual_review_required === true) {
+        counts.payroll_critical_open++;
+        openCriticalRules.push({
+          rule_id: rule.rule_id || 'unknown',
+          domain: rule.domain || null,
+          implementation_status: rule.implementation_status || 'MISSING',
+          manual_review_required: rule.manual_review_required === true,
+          automation_level: rule.automation_level || null,
+          calculation_policy: rule.calculation_policy || null
+        });
+      }
+    }
+  }
+
+  const blockingFindings = [];
+  if (!candidateCfg?.valid_from) {
+    blockingFindings.push({
+      code: 'missing_effective_date',
+      severity: 'critical',
+      message: 'candidate_configuration.valid_from ontbreekt; payroll kan zonder ingangsdatum niet veilig historisch rekenen.'
+    });
+  }
+  if (rules.length === 0) {
+    blockingFindings.push({
+      code: 'missing_rules',
+      severity: 'critical',
+      message: 'candidate_rules is leeg; CAO-regeldekking kan niet worden bewezen.'
+    });
+  }
+  if (!hasWageScales(candidateCfg)) {
+    blockingFindings.push({
+      code: 'missing_wage_scales',
+      severity: 'critical',
+      message: 'Loontabellen ontbreken; loonberekening mag niet payroll-ready zijn.'
+    });
+  }
+  if (!hasPayPeriods(candidateCfg)) {
+    blockingFindings.push({
+      code: 'missing_pay_periods',
+      severity: 'high',
+      message: 'Loonperiodetabel ontbreekt; payrollcorrecties en historische runs kunnen niet betrouwbaar worden afgebakend.'
+    });
+  }
+  if (openCriticalRules.length > 0) {
+    blockingFindings.push({
+      code: 'open_payroll_critical_rules',
+      severity: 'critical',
+      message: `${openCriticalRules.length} payrollkritische CAO-regels zijn niet volledig geïmplementeerd of vereisen handmatige review.`
+    });
+  }
+
+  let status = 'ready';
+  if (blockingFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
+  else if (blockingFindings.some(f => f.code === 'missing_rules')) status = 'blocked_missing_rules';
+  else if (blockingFindings.some(f => f.code === 'missing_wage_scales' || f.code === 'missing_pay_periods')) status = 'blocked_missing_payroll_parameters';
+  else if (openCriticalRules.length > 0) status = 'blocked_incomplete_runtime_rules';
+  else if (counts.manual_review_required > 0) status = 'manual_review_required';
+
+  return {
+    passed: blockingFindings.length === 0,
+    status,
+    checked_at: new Date().toISOString(),
+    counts,
+    blocking_findings: blockingFindings,
+    open_payroll_critical_rules: openCriticalRules.slice(0, 100),
+    open_payroll_critical_rules_truncated: openCriticalRules.length > 100,
+    missing_rule_text_rule_ids: missingTextRules.slice(0, 100),
+    missing_rule_text_truncated: missingTextRules.length > 100
+  };
+}
+
+function resolvePayrollReadiness(candidateCfg, candidateRules) {
+  const gate = evaluateCaoCoverageGate(candidateCfg, candidateRules);
+  const requestedPayrollReady = candidateCfg?.is_payroll_ready === true;
+  const isPayrollReady = requestedPayrollReady && gate.passed;
+  return {
+    gate,
+    requested_payroll_ready: requestedPayrollReady,
+    is_payroll_ready: isPayrollReady,
+    status: isPayrollReady ? 'ready' : (requestedPayrollReady ? gate.status : (gate.passed ? 'owner_not_marked_ready' : gate.status))
+  };
+}
+
+function isPayrollImpactChange(change) {
+  if (change.payroll_impact === true) return true;
+  return hasAnyNeedle(
+    `${change.rule_key || ''} ${change.field_path || ''} ${change.domain || ''} ${change.change_type || ''}`,
+    PAYROLL_CRITICAL_DOMAINS
+  );
+}
+
+function buildChangeEffectiveMetadata(change, fallbackValidFrom, approvedAt) {
+  const effectiveFrom = change.effective_from || change.valid_from || change.applies_from || fallbackValidFrom || null;
+  const effectiveUntil = change.effective_until || change.valid_until || null;
+  const payrollImpact = isPayrollImpactChange(change);
+  const approvedDate = approvedAt ? new Date(approvedAt) : new Date();
+  const approvedDay = approvedDate.toISOString().slice(0, 10);
+  const retroactive = change.retroactive === true ||
+    (!!effectiveFrom && effectiveFrom < approvedDay);
+  const correctionRequired = payrollImpact && retroactive;
+
+  return {
+    effective_from: effectiveFrom,
+    effective_until: effectiveUntil,
+    payroll_impact: payrollImpact,
+    retroactive,
+    correction_required: correctionRequired,
+    correction_status: correctionRequired ? 'candidate' : 'not_required'
+  };
+}
+
 Deno.serve(async (req) => {
   let importRun = null;
   const base44 = createClientFromRequest(req);
@@ -116,6 +298,9 @@ Deno.serve(async (req) => {
     if (!payload.revision || !payload.idempotency_key) {
       return Response.json({ success: false, error: 'Payload mist revision of idempotency_key.' }, { status: 422 });
     }
+    const candidateCfgForGate = payload.candidate_configuration || {};
+    const candidateRulesForGate = payload.candidate_rules || [];
+    const initialPayrollReadiness = resolvePayrollReadiness(candidateCfgForGate, candidateRulesForGate);
 
     // ── Stap 5: Idempotency check met herstelpad ──
     const existingRuns = await base44.asServiceRole.entities.CAOImportRun.filter({
@@ -153,11 +338,17 @@ Deno.serve(async (req) => {
         source_document_ids: [],
         detected_changes: [],
         created_review_ids: [],
+        payroll_readiness_status: initialPayrollReadiness.status,
+        coverage_gate: initialPayrollReadiness.gate,
         summary: `Cloudflare sync gestart - revision ${payload.revision}`
       });
     } else {
       // Reset naar running bij herstel
-      await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, { status: 'running' });
+      await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, {
+        status: 'running',
+        payroll_readiness_status: initialPayrollReadiness.status,
+        coverage_gate: initialPayrollReadiness.gate
+      });
     }
 
     // ── Stap 6: Upsert CAOSourceDocuments (alleen bij eerste batch of herstel) ──
@@ -219,6 +410,8 @@ Deno.serve(async (req) => {
 
     // ── Stap 9: Upsert CAOConfiguration ──
     const candidateCfg = payload.candidate_configuration || {};
+    const candidateRules = payload.candidate_rules || [];
+    const payrollReadiness = resolvePayrollReadiness(candidateCfg, candidateRules);
     const configData = {
       name: candidateCfg.name || `CAO PB - ${payload.revision}`,
       cao_key: 'cao_particuliere_beveiliging',
@@ -228,7 +421,10 @@ Deno.serve(async (req) => {
       valid_from: candidateCfg.valid_from || null,
       valid_until: candidateCfg.valid_until || null,
       is_active: true,
-      is_payroll_ready: candidateCfg.is_payroll_ready !== undefined ? candidateCfg.is_payroll_ready : false,
+      is_payroll_ready: payrollReadiness.is_payroll_ready,
+      payroll_readiness_status: payrollReadiness.status,
+      payroll_readiness_checked_at: payrollReadiness.gate.checked_at,
+      payroll_readiness_gate: payrollReadiness.gate,
       status: 'active',
       wage_scales: candidateCfg.wage_scales || {},
       wage_scales_detailed: candidateCfg.wage_scales_detailed || null,
@@ -249,7 +445,17 @@ Deno.serve(async (req) => {
       function_classification_rules: candidateCfg.function_classification_rules || null,
       rule_engine_metadata: candidateCfg.rule_engine_metadata || payload.rule_engine_metadata || null,
       source_documents_snapshot: sourceDocs.length > 0 ? sourceDocs : null,
-      coverage_summary: candidateCfg.coverage_summary || payload.coverage_summary || null,
+      coverage_summary: {
+        ...(payload.coverage_summary || {}),
+        ...(candidateCfg.coverage_summary || {}),
+        payroll_readiness: {
+          status: payrollReadiness.status,
+          requested_payroll_ready: payrollReadiness.requested_payroll_ready,
+          passed: payrollReadiness.gate.passed,
+          counts: payrollReadiness.gate.counts,
+          blocking_findings: payrollReadiness.gate.blocking_findings
+        }
+      },
       surcharge_weekend: candidateCfg.surcharge_weekend ?? 35,
       surcharge_night: candidateCfg.surcharge_night ?? 20,
       surcharge_evening: candidateCfg.surcharge_evening ?? 10,
@@ -296,7 +502,6 @@ Deno.serve(async (req) => {
     }
 
     // ── Stap 10: Verwerk één batch CAORules ──
-    const candidateRules = payload.candidate_rules || [];
     const batchRules = candidateRules.slice(ruleBatchOffset, ruleBatchOffset + ruleBatchSize);
     let rulesUpserted = 0;
 
@@ -324,6 +529,8 @@ Deno.serve(async (req) => {
     if (!rulesComplete) {
       await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, {
         status: 'running',
+        payroll_readiness_status: payrollReadiness.status,
+        coverage_gate: payrollReadiness.gate,
         summary: `Cloudflare sync batch: regels ${ruleBatchOffset}-${nextRuleBatchOffset - 1} van ${candidateRules.length} verwerkt. Volgende offset: ${nextRuleBatchOffset}`
       });
 
@@ -341,7 +548,10 @@ Deno.serve(async (req) => {
         rule_batch_offset: ruleBatchOffset,
         next_rule_batch_offset: nextRuleBatchOffset,
         rule_batch_size: ruleBatchSize,
-        rules_complete: false
+        rules_complete: false,
+        is_payroll_ready: newConfig.is_payroll_ready,
+        payroll_readiness_status: payrollReadiness.status,
+        coverage_gate: payrollReadiness.gate
       });
     }
 
@@ -349,6 +559,11 @@ Deno.serve(async (req) => {
     const reviewIds = [];
     const detectedChanges = payload.detected_changes || [];
     for (const change of detectedChanges) {
+      const effectiveMeta = buildChangeEffectiveMetadata(
+        change,
+        newConfig.valid_from || candidateCfg.valid_from || null,
+        payload.approval?.approved_at || null
+      );
       const review = await base44.asServiceRole.entities.CAOChangeReview.create({
         import_run_id: importRun.id,
         cao_configuration_id: newConfig.id,
@@ -358,6 +573,7 @@ Deno.serve(async (req) => {
         new_value: change.new_value ?? null,
         change_type: change.change_type || 'changed',
         risk_level: change.risk_level || 'medium',
+        ...effectiveMeta,
         status: 'applied',
         approval_source: payload.approval?.approval_source || 'cloudflare_relay',
         approved_by_owner_name: payload.approval?.approved_by_owner_name || null,
@@ -376,7 +592,9 @@ Deno.serve(async (req) => {
       created_review_ids: reviewIds,
       source_document_ids: sourceDocIds,
       detected_changes: detectedChanges,
-      summary: `Cloudflare sync voltooid: ${candidateRules.length} regels, ${sourceDocs.length} brondocumenten, ${reviewIds.length} wijzigingen. Revision: ${payload.revision}`
+      payroll_readiness_status: payrollReadiness.status,
+      coverage_gate: payrollReadiness.gate,
+      summary: `Cloudflare sync voltooid: ${candidateRules.length} regels, ${sourceDocs.length} brondocumenten, ${reviewIds.length} wijzigingen. Payroll-ready: ${newConfig.is_payroll_ready ? 'ja' : 'nee'} (${payrollReadiness.status}). Revision: ${payload.revision}`
     });
 
     return Response.json({
@@ -396,6 +614,8 @@ Deno.serve(async (req) => {
       source_docs_upserted: sourceDocIds.length,
       change_reviews_created: reviewIds.length,
       is_payroll_ready: newConfig.is_payroll_ready,
+      payroll_readiness_status: payrollReadiness.status,
+      coverage_gate: payrollReadiness.gate,
       coverage_summary: newConfig.coverage_summary || null
     });
 

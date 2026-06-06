@@ -92,6 +92,21 @@
         "type": "string"
       }
     },
+    "payroll_readiness_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Payroll-readiness status van de geïmporteerde CAO-configuratie."
+    },
+    "coverage_gate": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Snapshot van de coverage-gate die tijdens import/sync is berekend."
+    },
     "summary": {
       "type": [
         "string",

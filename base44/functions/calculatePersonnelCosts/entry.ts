@@ -226,6 +226,24 @@ function calculateTaxAmount(taxableAmount, caoConfig, annualSalaryEstimate) {
   return taxableAmount * (taxRate / 100);
 }
 
+function getCaoPayrollReadiness(caoConfig) {
+  const gate = caoConfig?.payroll_readiness_gate || null;
+  const status = caoConfig?.payroll_readiness_status || null;
+  const ready = caoConfig?.is_payroll_ready === true &&
+    status === 'ready' &&
+    gate?.passed === true;
+
+  return {
+    ready,
+    status: status || 'unknown',
+    is_payroll_ready: caoConfig?.is_payroll_ready === true,
+    gate_present: !!gate,
+    blocking_findings: gate?.blocking_findings || [],
+    open_payroll_critical_rules: gate?.open_payroll_critical_rules || [],
+    counts: gate?.counts || null
+  };
+}
+
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
@@ -357,6 +375,25 @@ Deno.serve(async (req) => {
         error: `Geen actieve CAO-configuratie gevonden voor datum ${firstShiftDate}. Activeer eerst een CAO-configuratie.`,
         cao_sync_status: caoSyncStatus,
         calculation_warnings: [...calculationWarnings, `Geen actieve CAO voor ${firstShiftDate}`]
+      }, { status: 400 });
+    }
+
+    const payrollReadiness = getCaoPayrollReadiness(caoConfig);
+    if (!payrollReadiness.ready) {
+      return Response.json({
+        error: `Actieve CAO-configuratie is niet payroll-ready (${payrollReadiness.status}). Definitieve loonberekening is geblokkeerd totdat de CAO coverage-gate slaagt.`,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...calculationWarnings,
+          'Payroll geblokkeerd: CAO-regeldekking of payrollparameters zijn niet bewezen compleet.'
+        ],
+        cao_configuration_id: caoConfig.id,
+        cao_version_label: caoConfig.version_label || caoConfig.name,
+        cao_valid_from: caoConfig.valid_from,
+        cao_payroll_readiness: payrollReadiness,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_cao_not_payroll_ready'
       }, { status: 400 });
     }
 
@@ -754,7 +791,9 @@ Deno.serve(async (req) => {
       // CAO metadata
       cao_configuration_id: caoConfig.id,
       cao_version_label: caoConfig.version_label || caoConfig.name,
+      cao_revision: caoConfig.cloudflare_revision || null,
       cao_valid_from: caoConfig.valid_from,
+      cao_payroll_readiness: payrollReadiness,
       pay_period_year: refDate.getFullYear(),
       cao_sync_status: caoSyncStatus,
       calculation_warnings: calculationWarnings,

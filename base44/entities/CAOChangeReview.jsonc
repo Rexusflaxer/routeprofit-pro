@@ -65,9 +65,55 @@
       "enum": [
         "low",
         "medium",
-        "high"
+        "high",
+        "critical"
       ],
       "default": "medium"
+    },
+    "effective_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum vanaf wanneer deze wijziging inhoudelijk geldt."
+    },
+    "effective_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "payroll_impact": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als wijziging loon, planning, contractregels of payrollcorrecties kan raken."
+    },
+    "retroactive": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als effective_from vóór de eigenaar-goedkeuring ligt."
+    },
+    "correction_required": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als een retroactieve payroll-impact wijziging correctie in een toekomstige loonrun vereist."
+    },
+    "correction_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "not_required",
+        "candidate",
+        "queued",
+        "applied",
+        "manual_review_required",
+        null
+      ],
+      "default": "not_required"
     },
     "status": {
       "type": "string",
