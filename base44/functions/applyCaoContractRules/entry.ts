@@ -400,6 +400,139 @@ function validateProbationDismissal(input) {
   return { violations, compensation: violations[0]?.compensation_amount || null };
 }
 
+function evaluateSuspensionRules(input) {
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0445', 'CAO-PB-2024-R0446',
+    'CAO-PB-2024-R0447', 'CAO-PB-2024-R0448', 'CAO-PB-2024-R0451'
+  ];
+  const warnings = [];
+  const missingEvidence = [];
+  const violations = [];
+  const payrollEntitlements = [];
+  const startDate = asIsoDate(input.suspension_start_date || input.event_start_date || input.start_date);
+  const endDate = asIsoDate(input.suspension_end_date || input.event_end_date || input.end_date);
+  const baseHourlyRate = numberOrNull(input.base_hourly_rate);
+  const scheduledHours = numberOrNull(input.suspension_scheduled_hours) ??
+    numberOrNull(input.suspended_scheduled_hours) ??
+    sumScheduledHours(input.suspension_scheduled_shifts || input.suspended_scheduled_shifts);
+  const reason = input.suspension_reason || input.reason || null;
+  const notifiedAt = input.suspension_notified_at || input.employee_notified_at || null;
+  const suspicionConfirmed = booleanOrNull(input.suspension_suspicion_confirmed);
+  const rehabilitationWrittenAt = input.rehabilitation_written_at || input.suspension_rehabilitation_written_at || null;
+
+  if (!startDate) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0448',
+      field: 'suspension_start_date',
+      message: 'Startdatum van schorsing ontbreekt; maximale duur van 7 dagen kan niet worden beoordeeld.'
+    });
+  }
+  if (!endDate) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0448',
+      field: 'suspension_end_date',
+      message: 'Einddatum van schorsing ontbreekt; maximale duur van 7 dagen kan niet worden beoordeeld.'
+    });
+  }
+
+  const suspensionDays = startDate && endDate ? daysBetween(endDate, startDate) + 1 : null;
+  if (suspensionDays !== null && suspensionDays < 1) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0448',
+      severity: 'high',
+      message: 'Schorsingsdatums zijn ongeldig: einddatum ligt voor startdatum.',
+      suspension_days: suspensionDays
+    });
+  } else if (suspensionDays !== null && suspensionDays > 7) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0448',
+      severity: 'high',
+      message: `Schorsing duurt ${suspensionDays} dagen; CAO staat maximaal 7 dagen toe.`,
+      suspension_days: suspensionDays,
+      max_suspension_days: 7
+    });
+  }
+
+  if (!notifiedAt) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0445',
+      field: 'suspension_notified_at',
+      message: 'Leg vast dat werknemer direct is geinformeerd over de schorsing.'
+    });
+  }
+  if (!reason) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0445',
+      field: 'suspension_reason',
+      message: 'Leg de reden van de schorsing vast.'
+    });
+  }
+
+  if (suspicionConfirmed === false && !rehabilitationWrittenAt) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0451',
+      field: 'rehabilitation_written_at',
+      message: 'Als het vermoeden niet juist blijkt, moet schriftelijke rehabilitatie worden vastgelegd.'
+    });
+  }
+
+  if (scheduledHours > 0 && baseHourlyRate !== null) {
+    payrollEntitlements.push({
+      rule_id: 'CAO-PB-2024-R0447',
+      type: 'suspension_base_hourly_wage_continuation',
+      suspended_scheduled_hours: round1(scheduledHours),
+      base_hourly_rate: baseHourlyRate,
+      amount: Math.round(scheduledHours * baseHourlyRate * 100) / 100,
+      message: 'Tijdens schorsing moet het basisuurloon worden doorbetaald over de geraakte geplande uren.'
+    });
+  } else if (scheduledHours > 0 && baseHourlyRate === null) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0447',
+      field: 'base_hourly_rate',
+      message: 'Basisuurloon ontbreekt; doorbetaling tijdens schorsing kan niet definitief worden berekend.'
+    });
+  } else {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0447',
+      field: 'suspension_scheduled_hours',
+      message: 'Geplande uren tijdens schorsing ontbreken; doorbetaling basisuurloon moet handmatig worden vastgesteld.'
+    });
+  }
+
+  warnings.push('Artikel 16: schorsing stopt de loonbetaling niet; basisuurloon blijft verschuldigd tijdens de schorsing.');
+
+  const hasBlockingViolation = violations.some(v => v.severity === 'high' || v.severity === 'critical');
+  const manualReviewRequired = missingEvidence.length > 0;
+
+  return {
+    suspension_rule_status: hasBlockingViolation
+      ? 'blocked'
+      : manualReviewRequired
+      ? 'manual_review_required'
+      : 'compliant',
+    suspension_compliant: !hasBlockingViolation && !manualReviewRequired,
+    source_rule_ids: sourceRuleIds,
+    warnings,
+    missing_evidence: missingEvidence,
+    contract_rule_violations: violations,
+    payroll_entitlements: payrollEntitlements,
+    suspension_days: suspensionDays,
+    max_suspension_days: 7,
+    payroll_final_allowed: !hasBlockingViolation && !manualReviewRequired,
+    manual_review_required: manualReviewRequired,
+    recommended_event_update: {
+      event_type: 'suspension',
+      cao_rule_status: hasBlockingViolation ? 'blocked' : manualReviewRequired ? 'manual_review_required' : 'compliant',
+      source_rule_ids: sourceRuleIds,
+      suspension_start_date: startDate,
+      suspension_end_date: endDate,
+      suspension_days: suspensionDays,
+      suspension_base_hourly_wage_due: true,
+      suspension_max_days: 7
+    }
+  };
+}
+
 function dateTimeFromValue(value) {
   if (!value) return null;
   const date = new Date(value);
@@ -420,6 +553,15 @@ function round1(value) {
 function hoursBetween(start, end) {
   const hours = diffHours(end, start);
   return hours === null ? null : Math.max(0, round1(hours));
+}
+
+function sumScheduledHours(entries) {
+  return normalizeArray(entries).reduce((total, entry) => {
+    const explicit = numberOrNull(entry.hours ?? entry.scheduled_hours ?? entry.duration_hours);
+    if (explicit !== null) return total + explicit;
+    const calculated = hoursBetween(entry.start_datetime || entry.start, entry.end_datetime || entry.end);
+    return total + (calculated || 0);
+  }, 0);
 }
 
 function pickFirst(...values) {
@@ -2006,6 +2148,76 @@ Deno.serve(async (req) => {
         calculation_warnings: syncWarnings,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
         manual_review_required: isUnknownOrMixed,
+        ...result
+      });
+    }
+
+    if (action === 'validate_suspension') {
+      let baseHourlyRate = body.base_hourly_rate || null;
+      if (personnel_id && !baseHourlyRate) {
+        const personnel = await base44.entities.Personnel.get(personnel_id);
+        if (personnel?.employee_type === 'loondienst' && personnel?.cao === 'cao_particuliere_beveiliging') {
+          try {
+            const classRes = await base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', { personnel_id });
+            const classification = classRes?.data || null;
+            if (classification?.appendix_2_applies === false && Number(personnel.custom_hourly_rate || 0) > 0) {
+              baseHourlyRate = Number(personnel.custom_hourly_rate);
+            } else if (
+              classification?.appendix_2_applies === true &&
+              classification?.payroll_final_allowed === true &&
+              classification?.wage_rate_found === true &&
+              Number(classification?.hourly_rate || 0) > 0
+            ) {
+              baseHourlyRate = Number(classification.hourly_rate);
+            } else {
+              syncWarnings.push('Basisuurloon voor schorsingsdoorbetaling kon niet definitief worden bepaald; geen fallback naar schaal/periodiek toegepast.');
+            }
+          } catch {
+            syncWarnings.push('Functie-indeling voor schorsingsbasisuurloon kon niet worden bepaald; geen fallback naar schaal/periodiek toegepast.');
+          }
+        } else if (Number(personnel?.custom_hourly_rate || 0) > 0) {
+          baseHourlyRate = Number(personnel.custom_hourly_rate);
+        }
+      }
+
+      const result = evaluateSuspensionRules({ ...body, base_hourly_rate: baseHourlyRate });
+      let createdEvent = null;
+      if (body.save_event === true && personnel_id) {
+        createdEvent = await base44.asServiceRole.entities.PersonnelCaoEmploymentEvent.create({
+          personnel_id,
+          company_id: body.company_id || contract?.company_id || personnel?.primary_company_id || null,
+          personnel_contract_id: contract_id || contract?.id || null,
+          cao_key: contract?.cao_key || personnel?.cao || 'cao_particuliere_beveiliging',
+          cao_configuration_id: contract?.cao_configuration_id || body.cao_configuration_id || null,
+          event_type: 'suspension',
+          event_start_date: result.recommended_event_update.suspension_start_date,
+          event_end_date: result.recommended_event_update.suspension_end_date,
+          event_datetime: body.suspension_notified_at || body.employee_notified_at || null,
+          reason: body.suspension_reason || body.reason || null,
+          employee_notified_at: body.suspension_notified_at || body.employee_notified_at || null,
+          written_notice_file_url: body.written_notice_file_url || null,
+          base_hourly_rate: baseHourlyRate ?? null,
+          scheduled_hours: result.payroll_entitlements?.[0]?.suspended_scheduled_hours ?? body.suspension_scheduled_hours ?? null,
+          cao_rule_status: result.suspension_rule_status,
+          manual_review_required: result.manual_review_required || isUnknownOrMixed || false,
+          payroll_impact: true,
+          payroll_final_allowed: result.payroll_final_allowed === true && !isUnknownOrMixed,
+          source_rule_ids: result.source_rule_ids,
+          rule_result_snapshot: result,
+          payroll_entitlements: result.payroll_entitlements,
+          violations: result.contract_rule_violations,
+          warnings: result.warnings.map(w => ({ message: String(w) })),
+          notes: body.notes || null
+        });
+      }
+      return Response.json({
+        success: result.suspension_rule_status !== 'blocked',
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: syncWarnings,
+        personnel_id: personnel_id || null,
+        cao_scope_profile: caoScope?.cao_scope_profile || null,
+        manual_review_required: result.manual_review_required || isUnknownOrMixed,
+        persisted_event_id: createdEvent?.id || null,
         ...result
       });
     }

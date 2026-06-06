@@ -1,0 +1,177 @@
+{
+  "name": "PersonnelCaoEmploymentEvent",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string",
+      "description": "Medewerker waarop deze CAO-arbeidsgebeurtenis ziet."
+    },
+    "company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Werkgever/bedrijf waarbij de gebeurtenis hoort."
+    },
+    "personnel_contract_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Arbeidscontract waarop de gebeurtenis ziet."
+    },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": "cao_particuliere_beveiliging"
+    },
+    "cao_configuration_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "event_type": {
+      "type": "string",
+      "enum": [
+        "suspension",
+        "probation_dismissal",
+        "summary_dismissal",
+        "contract_transfer",
+        "rehabilitation",
+        "other"
+      ],
+      "description": "Type CAO-arbeidsgebeurtenis."
+    },
+    "event_start_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "event_end_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "event_datetime": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datetime als de gebeurtenis een specifiek moment heeft."
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "employee_notified_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datetime waarop werknemer is geinformeerd."
+    },
+    "written_notice_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "base_hourly_rate": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "scheduled_hours": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Geplande uren die door deze gebeurtenis worden geraakt."
+    },
+    "cao_rule_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "default": "unknown"
+    },
+    "manual_review_required": {
+      "type": "boolean",
+      "default": true
+    },
+    "payroll_impact": {
+      "type": "boolean",
+      "default": true
+    },
+    "payroll_final_allowed": {
+      "type": "boolean",
+      "default": false
+    },
+    "source_rule_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "rule_result_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "payroll_entitlements": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "default": []
+    },
+    "violations": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "default": []
+    },
+    "warnings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": true
+      },
+      "default": []
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "personnel_id",
+    "event_type"
+  ]
+}

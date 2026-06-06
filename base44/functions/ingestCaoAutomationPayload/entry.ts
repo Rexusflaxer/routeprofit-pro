@@ -64,6 +64,13 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0438'
     ]
   },
+  'applyCaoContractRules.suspension_article_16': {
+    functions: ['applyCaoContractRules', 'calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R0445', 'CAO-PB-2024-R0446',
+      'CAO-PB-2024-R0447', 'CAO-PB-2024-R0448', 'CAO-PB-2024-R0451'
+    ]
+  },
   'validateCaoScheduleRules.roster_period_constraints': {
     functions: ['validateCaoScheduleRules'],
     rule_ids: [
