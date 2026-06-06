@@ -10,6 +10,13 @@
       "type": "string",
       "description": "ID van de uitschuifmap"
     },
+    "operating_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Werkgever/bedrijf dat deze route/dienst uitvoert. Nodig om personeelscontracten en CAO toe te passen."
+    },
     "assigned_tasks": {
       "type": "array",
       "description": "Taken met hun toegewezen dagen en optionele route-pinning",

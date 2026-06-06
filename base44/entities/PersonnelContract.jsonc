@@ -6,6 +6,27 @@
       "type": "string",
       "description": "ID van de medewerker"
     },
+    "company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Werkgever/bedrijf waar dit arbeidscontract juridisch bij hoort."
+    },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "CAO sleutel die op dit contract van toepassing is, bijv. cao_particuliere_beveiliging."
+    },
+    "cao_configuration_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Specifieke CAO-configuratie voor dit contract. Als leeg: resolve via CompanyCaoAssignment/company default op referentiedatum."
+    },
     "contract_form": {
       "type": "string",
       "enum": [
@@ -73,6 +94,81 @@
       ],
       "default": "unknown",
       "description": "Beveiligingsfunctie-status conform CAO"
+    },
+    "function_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Primaire interne functiesoort binnen dit contract, bijv. surveillant, centralist, binnendienst."
+    },
+    "allowed_function_types": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Functiesoorten/dienstsoorten die onder dit contract gepland mogen worden. Leeg betekent niet bewezen en dus manual review."
+    },
+    "cao_function_group": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bijlage-2 functiegroep of non_security_staff voor dit contract."
+    },
+    "allowed_cao_function_groups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "CAO-functiegroepen waarvoor dit contract inzetbaar is."
+    },
+    "cao_function_level": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bijlage-2 functieniveau voor dit contract."
+    },
+    "allowed_cao_function_levels": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "CAO-functieniveaus waarvoor dit contract inzetbaar is."
+    },
+    "allowed_task_types": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Optionele taaktypes/dienstlabels die onder dit contract gepland mogen worden."
+    },
+    "contract_hours_per_week": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Contracturen per week voor toekomstige planning/min-max controle."
+    },
+    "contract_hours_per_pay_period": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Contracturen per loonperiode voor toekomstige CAO/payroll controles."
+    },
+    "min_hours_per_week": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "max_hours_per_week": {
+      "type": [
+        "number",
+        "null"
+      ]
     },
     "industry_seniority_pay_periods": {
       "type": [

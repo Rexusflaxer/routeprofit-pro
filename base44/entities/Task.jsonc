@@ -23,6 +23,52 @@
       ],
       "description": "Type taak"
     },
+    "service_function_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Functiesoort die nodig is voor deze dienst, bijv. surveillant, centralist, objectbeveiliger, receptie, binnendienst."
+    },
+    "required_cao_function_group": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "CAO-functiegroep die nodig is voor deze dienst, bijv. objectbeveiliger_receptionist."
+    },
+    "required_cao_function_level": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Minimaal/vereist CAO-functieniveau voor deze dienst als dit vooraf bekend is."
+    },
+    "required_security_role_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "aspirant_beveiliger",
+        "beveiliger",
+        "leidinggevende",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Benodigde beveiligingsstatus voor deze dienst."
+    },
+    "contract_assignment_policy": {
+      "type": "string",
+      "enum": [
+        "strict_contract_match",
+        "allow_manual_review",
+        "not_required"
+      ],
+      "default": "strict_contract_match",
+      "description": "Bepaalt hoe streng de planning deze taak aan een arbeidscontract moet koppelen."
+    },
     "duration_minutes": {
       "type": "number",
       "description": "Totale taakduur in minuten (bij collectief: totaal voor alle items)"
@@ -167,6 +213,14 @@
       "items": {
         "type": "string"
       }
+    },
+    "planning_contract_context": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Snapshot/context voor toekomstige planner: benodigde functie, CAO-scope en contractmatch-regels."
     }
   },
   "required": [

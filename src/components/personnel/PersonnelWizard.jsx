@@ -53,6 +53,7 @@ export default function PersonnelWizard({ person, onClose }) {
   const saveMutation = useMutation({
     mutationFn: async (data) => {
       let personnelId = person?.id;
+      const isNewPersonnel = !personnelId;
       if (personnelId) {
         await base44.entities.Personnel.update(personnelId, data.personnel);
       } else {
@@ -71,6 +72,47 @@ export default function PersonnelWizard({ person, onClose }) {
       // Save company assignments
       for (const a of data.assignments) {
         await base44.entities.PersonnelCompanyAssignment.create({ ...a, personnel_id: personnelId });
+      }
+
+      // Initial legal contract snapshot for future planning/payroll resolution.
+      // Avoid duplicates on edit; dedicated contract management can update this later.
+      if (isNewPersonnel && data.personnel.employee_type === "loondienst") {
+        const existingContracts = await base44.entities.PersonnelContract.filter({ personnel_id: personnelId });
+        if (existingContracts.length === 0) {
+          const primaryAssignment = data.assignments.find(a => a.is_primary) || data.assignments[0] || null;
+          const companyId = data.personnel.primary_company_id || primaryAssignment?.company_id || null;
+          const functionType = data.personnel.function_type || null;
+          const caoFunctionGroup = data.personnel.cao_function_group || null;
+          const caoFunctionLevel = data.personnel.cao_function_level || null;
+          await base44.entities.PersonnelContract.create({
+            personnel_id: personnelId,
+            company_id: companyId,
+            cao_key: data.personnel.cao || "cao_particuliere_beveiliging",
+            cao_configuration_id: data.personnel.cao_configuration_id || null,
+            contract_form: data.personnel.contract_form || "unknown",
+            contract_start_date: data.personnel.contract_start_date || null,
+            contract_end_date: data.personnel.contract_end_date || null,
+            probation_period_months: data.personnel.probation_period_months ?? null,
+            probation_period_source_rule_id: data.personnel.probation_period_source_rule_id || null,
+            probation_override_reason: data.personnel.probation_override_reason || null,
+            security_role_status: data.personnel.security_role_status || "unknown",
+            function_type: functionType,
+            allowed_function_types: functionType ? [functionType] : [],
+            cao_function_group: caoFunctionGroup,
+            allowed_cao_function_groups: caoFunctionGroup ? [caoFunctionGroup] : [],
+            cao_function_level: caoFunctionLevel,
+            allowed_cao_function_levels: caoFunctionLevel ? [caoFunctionLevel] : [],
+            allowed_task_types: [],
+            contract_hours_per_week: data.personnel.parttime_hours || null,
+            contract_hours_per_pay_period: null,
+            min_hours_per_week: data.personnel.min_hours || null,
+            max_hours_per_week: data.personnel.max_hours || null,
+            industry_seniority_pay_periods: data.personnel.industry_seniority_pay_periods ?? null,
+            industry_start_date: data.personnel.industry_start_date || null,
+            is_current: true,
+            notes: "Automatisch aangemaakt vanuit personeelswizard als initiële contractfundering."
+          });
+        }
       }
 
       // Save documents
