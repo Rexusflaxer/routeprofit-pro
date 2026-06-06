@@ -1,0 +1,341 @@
+import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
+
+const ARTICLE_38_RULE_IDS = [
+  'CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773'
+];
+
+function r2(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function isoDate(value) {
+  if (!value) return null;
+  return String(value).slice(0, 10);
+}
+
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function rangesOverlap(startA, endA, startB, endB) {
+  if (!startA || !endA || !startB || !endB) return false;
+  return isoDate(startA) <= isoDate(endB) && isoDate(startB) <= isoDate(endA);
+}
+
+function flattenPayPeriods(payPeriods) {
+  if (!payPeriods) return [];
+  const rows = Array.isArray(payPeriods)
+    ? payPeriods
+    : Object.entries(payPeriods).flatMap(([year, periods]) =>
+        Array.isArray(periods) ? periods.map(p => ({ ...p, year: Number(p.year ?? year) })) : []
+      );
+
+  return rows
+    .map(p => ({
+      year: Number(p.year ?? p.pay_period_year ?? String(p.start_date || '').slice(0, 4)),
+      period_number: Number(p.period_number ?? p.pay_period_number),
+      start_date: isoDate(p.start_date ?? p.pay_period_start),
+      end_date: isoDate(p.end_date ?? p.pay_period_end),
+      is_extra_period: p.is_extra_period === true
+    }))
+    .filter(p => Number.isFinite(p.year) && Number.isFinite(p.period_number) && p.start_date && p.end_date)
+    .sort((a, b) => a.start_date.localeCompare(b.start_date));
+}
+
+function findPeriod(periods, year, periodNumber) {
+  return periods.find(p => Number(p.year) === Number(year) && Number(p.period_number) === Number(periodNumber)) || null;
+}
+
+function buildLookbackPeriods(periods, payoutYear, payoutPeriodNumber, lookbackPeriods, basisPeriodEndNumber) {
+  const basisEnd = findPeriod(periods, payoutYear, basisPeriodEndNumber);
+  const payoutPeriod = findPeriod(periods, payoutYear, payoutPeriodNumber);
+  if (!basisEnd || !payoutPeriod) {
+    return { payout_period: payoutPeriod, basis_end_period: basisEnd, lookback_periods: [], missing_period_table: true };
+  }
+  const idx = periods.findIndex(p =>
+    p.year === basisEnd.year &&
+    p.period_number === basisEnd.period_number &&
+    p.start_date === basisEnd.start_date
+  );
+  if (idx < 0) return { payout_period: payoutPeriod, basis_end_period: basisEnd, lookback_periods: [], missing_period_table: true };
+  return {
+    payout_period: payoutPeriod,
+    basis_end_period: basisEnd,
+    lookback_periods: periods.slice(Math.max(0, idx - lookbackPeriods + 1), idx + 1),
+    missing_period_table: false
+  };
+}
+
+function isInServiceDuringPeriod(personnel, contracts, period) {
+  if (!period) return { in_service: false, evidence: 'missing_payout_period', manual_review_required: true };
+
+  const relevantContracts = (contracts || []).filter(c =>
+    rangesOverlap(c.contract_start_date, c.contract_end_date || '9999-12-31', period.start_date, period.end_date)
+  );
+  if (relevantContracts.length > 0) {
+    return { in_service: true, evidence: 'personnel_contract', manual_review_required: false };
+  }
+
+  const start = isoDate(personnel.contract_start_date || personnel.employment_start_date || personnel.industry_start_date);
+  const end = isoDate(personnel.contract_end_date || personnel.employment_end_date);
+  if (start) {
+    return {
+      in_service: rangesOverlap(start, end || '9999-12-31', period.start_date, period.end_date),
+      evidence: 'personnel_dates',
+      manual_review_required: false
+    };
+  }
+
+  return {
+    in_service: personnel.status === 'active',
+    evidence: 'personnel_status_only',
+    manual_review_required: true
+  };
+}
+
+function wasInServiceDuringLookback(personnel, contracts, period) {
+  const result = isInServiceDuringPeriod(personnel, contracts, period);
+  return result.in_service || result.manual_review_required;
+}
+
+function extractYearEndBonusBasisFromRun(run, vacationAllowancePercent) {
+  const output = run.calculation_output || {};
+  const payslip = output.payslip || {};
+  const stored = payslip.year_end_bonus_basis || output.year_end_bonus_basis || null;
+  if (stored && numberOrNull(stored.eligible_amount_including_vacation_allowance) !== null) {
+    return {
+      run_id: run.id || null,
+      pay_period_year: run.pay_period_year,
+      pay_period_number: run.pay_period_number,
+      basis_source: 'stored_year_end_bonus_basis',
+      eligible_base_wage: r2(stored.eligible_base_wage),
+      vacation_allowance_on_eligible_base_wage: r2(stored.vacation_allowance_on_eligible_base_wage),
+      eligible_amount_including_vacation_allowance: r2(stored.eligible_amount_including_vacation_allowance),
+      excluded_overtime_amount: r2(stored.excluded_overtime_amount),
+      source_rule_ids: stored.source_rule_ids || ARTICLE_38_RULE_IDS,
+      fallback_used: false
+    };
+  }
+
+  const baseSalary = numberOrNull(payslip.base_salary) ?? 0;
+  const minimumServiceAmount = numberOrNull(payslip.minimum_service_compensation?.amount) ?? 0;
+  const overtimeAmount = numberOrNull(payslip.overtime_50?.amount) ?? 0;
+  const eligibleBaseWage = baseSalary + minimumServiceAmount;
+  const vacationAllowance = eligibleBaseWage * (vacationAllowancePercent / 100);
+  return {
+    run_id: run.id || null,
+    pay_period_year: run.pay_period_year,
+    pay_period_number: run.pay_period_number,
+    basis_source: 'fallback_base_salary_plus_minimum_service',
+    eligible_base_wage: r2(eligibleBaseWage),
+    vacation_allowance_on_eligible_base_wage: r2(vacationAllowance),
+    eligible_amount_including_vacation_allowance: r2(eligibleBaseWage + vacationAllowance),
+    excluded_overtime_amount: r2(overtimeAmount),
+    source_rule_ids: ARTICLE_38_RULE_IDS,
+    fallback_used: true
+  };
+}
+
+function calculateYearEndBonus({ personnel, contracts, caoConfig, payrollRuns, payoutYear, payoutPeriodNumber = 12, basisPeriodEndNumber = 11, lookbackPeriods = 13 }) {
+  const warnings = [];
+  const manualReviewItems = [];
+  const periods = flattenPayPeriods(caoConfig?.pay_periods);
+  const periodWindow = buildLookbackPeriods(periods, payoutYear, payoutPeriodNumber, lookbackPeriods, basisPeriodEndNumber);
+  const payoutPeriod = periodWindow.payout_period;
+  const vacationAllowancePercent = Number(caoConfig?.vacation_allowance || 8);
+  const bonusPercent = Number(caoConfig?.year_end_bonus || 2.01);
+
+  if (!payoutPeriod) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R0771',
+      domain: 'year_end_bonus_payout_period',
+      message: `Loonperiode ${payoutPeriodNumber} ${payoutYear} ontbreekt in CAOConfiguration.pay_periods.`,
+      field: 'pay_periods'
+    });
+  }
+
+  const service = isInServiceDuringPeriod(personnel, contracts, payoutPeriod);
+  if (service.manual_review_required) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R0770',
+      domain: 'year_end_bonus_employment',
+      message: 'Niet definitief bewezen of werknemer in loonperiode 12 in dienst is.',
+      field: 'contract_start_date/contract_end_date'
+    });
+  }
+
+  if (!service.in_service && !service.manual_review_required) {
+    return {
+      success: true,
+      applies: false,
+      payout_due: false,
+      payout_amount: 0,
+      reason: 'Werknemer is niet in dienst in loonperiode 12.',
+      payout_year: payoutYear,
+      payout_period_number: payoutPeriodNumber,
+      manual_review_required: false,
+      payroll_final_allowed: true,
+      source_rule_ids: ARTICLE_38_RULE_IDS
+    };
+  }
+
+  if (periodWindow.missing_period_table || periodWindow.lookback_periods.length === 0) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R0772',
+      domain: 'year_end_bonus_lookback',
+      message: 'De 13-loonperiodenbasis kan niet worden opgebouwd omdat de loonperiodetabel ontbreekt of onvolledig is.',
+      field: 'pay_periods'
+    });
+  }
+
+  const runsByPeriod = new Map();
+  for (const run of payrollRuns || []) {
+    if (run.payroll_run_status === 'voided' || run.payroll_run_status === 'draft') continue;
+    const key = `${Number(run.pay_period_year)}:${Number(run.pay_period_number)}`;
+    const existing = runsByPeriod.get(key);
+    if (!existing || String(run.created_at || '').localeCompare(String(existing.created_at || '')) > 0) {
+      runsByPeriod.set(key, run);
+    }
+  }
+
+  const periodRows = [];
+  for (const period of periodWindow.lookback_periods) {
+    const inService = wasInServiceDuringLookback(personnel, contracts, period);
+    const run = runsByPeriod.get(`${period.year}:${period.period_number}`) || null;
+    if (!run) {
+      periodRows.push({
+        ...period,
+        in_service_or_unknown: inService,
+        run_found: false,
+        eligible_amount_including_vacation_allowance: 0
+      });
+      if (inService) {
+        manualReviewItems.push({
+          rule_id: 'CAO-PB-2024-R0772',
+          domain: 'year_end_bonus_history',
+          message: `Payrollrun ontbreekt voor loonperiode ${period.period_number} ${period.year}.`,
+          field: 'PayrollCalculationRun'
+        });
+      }
+      continue;
+    }
+    const basis = extractYearEndBonusBasisFromRun(run, vacationAllowancePercent);
+    periodRows.push({
+      ...period,
+      in_service_or_unknown: inService,
+      run_found: true,
+      payroll_run_id: run.id || null,
+      payroll_run_status: run.payroll_run_status || null,
+      ...basis
+    });
+    if (basis.fallback_used) {
+      warnings.push(`Fallback eindejaarsgrondslag gebruikt voor loonperiode ${period.period_number} ${period.year}; nieuwe runs slaan year_end_bonus_basis expliciet op.`);
+    }
+  }
+
+  const basisTotal = periodRows.reduce((sum, row) => sum + Number(row.eligible_amount_including_vacation_allowance || 0), 0);
+  const payoutAmount = basisTotal * (bonusPercent / 100);
+  const manualReviewRequired = manualReviewItems.length > 0;
+
+  return {
+    success: true,
+    applies: true,
+    payout_due: Number(payoutPeriodNumber) === 12,
+    payout_year: Number(payoutYear),
+    payout_period_number: Number(payoutPeriodNumber),
+    basis_period_end_number: Number(basisPeriodEndNumber),
+    lookback_periods: Number(lookbackPeriods),
+    payout_period: payoutPeriod,
+    basis_end_period: periodWindow.basis_end_period,
+    year_end_bonus_percentage: bonusPercent,
+    vacation_allowance_percentage: vacationAllowancePercent,
+    eligible_basis_total: r2(basisTotal),
+    payout_amount: r2(payoutAmount),
+    period_basis_rows: periodRows,
+    warnings,
+    manual_review_required: manualReviewRequired,
+    manual_review_items: manualReviewItems,
+    payroll_final_allowed: !manualReviewRequired,
+    source_rule_ids: ARTICLE_38_RULE_IDS
+  };
+}
+
+async function getActiveCaoConfig(base44, referenceDate) {
+  const refDate = referenceDate ? new Date(referenceDate) : new Date();
+  const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({ status: 'active' });
+  const eligible = allCaos.filter(c => {
+    if (c.valid_from && new Date(c.valid_from) > refDate) return false;
+    if (c.valid_until && new Date(c.valid_until) < refDate) return false;
+    return true;
+  });
+  eligible.sort((a, b) => {
+    const da = a.valid_from ? new Date(a.valid_from) : new Date(0);
+    const db = b.valid_from ? new Date(b.valid_from) : new Date(0);
+    return db - da;
+  });
+  return eligible[0] || null;
+}
+
+Deno.serve(async (req) => {
+  try {
+    const base44 = createClientFromRequest(req);
+    const user = await base44.auth.me();
+    if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
+
+    const body = await req.json().catch(() => ({}));
+    const personnelId = body.personnel_id;
+    if (!personnelId) return Response.json({ error: 'personnel_id is verplicht' }, { status: 400 });
+
+    const payoutYear = Number(body.payout_year || body.pay_period_year || new Date().getFullYear());
+    const payoutPeriodNumber = Number(body.payout_period_number || body.pay_period_number || 12);
+    const basisPeriodEndNumber = Number(body.basis_period_end_number || 11);
+    const lookbackPeriods = Number(body.lookback_periods || 13);
+
+    const [personnel, contracts, payrollRuns] = await Promise.all([
+      base44.entities.Personnel.get(personnelId),
+      base44.asServiceRole.entities.PersonnelContract.filter({ personnel_id: personnelId }).catch(() => []),
+      base44.asServiceRole.entities.PayrollCalculationRun.filter({ personnel_id: personnelId }).catch(() => [])
+    ]);
+    if (!personnel) return Response.json({ error: `Medewerker niet gevonden: ${personnelId}` }, { status: 404 });
+
+    if (personnel.employee_type !== 'loondienst' || personnel.cao !== 'cao_particuliere_beveiliging') {
+      return Response.json({
+        success: true,
+        applies: false,
+        reason: 'Artikel 38 CAO PB is alleen automatisch ingericht voor loondienst onder cao_particuliere_beveiliging.',
+        payroll_final_allowed: true,
+        manual_review_required: false,
+        source_rule_ids: ARTICLE_38_RULE_IDS
+      });
+    }
+
+    const referenceDate = body.reference_date || findPeriod(flattenPayPeriods(body.pay_periods), payoutYear, payoutPeriodNumber)?.end_date || `${payoutYear}-12-01`;
+    const caoConfig = body.cao_config || await getActiveCaoConfig(base44, referenceDate);
+    if (!caoConfig) {
+      return Response.json({ error: `Geen actieve CAO-configuratie gevonden voor ${referenceDate}.` }, { status: 400 });
+    }
+
+    const result = calculateYearEndBonus({
+      personnel,
+      contracts,
+      caoConfig,
+      payrollRuns,
+      payoutYear,
+      payoutPeriodNumber,
+      basisPeriodEndNumber,
+      lookbackPeriods
+    });
+
+    return Response.json({
+      personnel_id: personnelId,
+      personnel_name: personnel.name || null,
+      cao_configuration_id: caoConfig.id || null,
+      cao_version_label: caoConfig.version_label || caoConfig.name || null,
+      ...result
+    });
+  } catch (error) {
+    return Response.json({ error: error.message }, { status: 500 });
+  }
+});

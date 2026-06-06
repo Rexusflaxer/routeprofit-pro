@@ -694,6 +694,15 @@ Deno.serve(async (req) => {
         vacation_allowance: 0,
         year_end_bonus: 0
       },
+      year_end_bonus_basis: {
+        eligible_base_wage: 0,
+        vacation_allowance_on_eligible_base_wage: 0,
+        eligible_amount_including_vacation_allowance: 0,
+        excluded_overtime_amount: 0,
+        excluded_special_hours_allowances: 0,
+        excluded_acting_function_allowance: 0,
+        source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
+      },
       
       // Werkgeverslasten (niet zichtbaar voor werknemer, maar wel kosten)
       employer_costs: {
@@ -1017,6 +1026,18 @@ Deno.serve(async (req) => {
       const overtimeAmount = payslip.overtime_50.amount;
       const minimumServiceAmount = payslip.minimum_service_compensation.amount;
       const actingFunctionAllowanceAmount = payslip.acting_function_allowance.amount;
+      const yearEndBonusEligibleBaseWage = payslip.base_salary + minimumServiceAmount;
+      const yearEndBonusEligibleVacationAllowance = yearEndBonusEligibleBaseWage * ((caoConfig.vacation_allowance || 8) / 100);
+      const yearEndBonusBasisAmount = yearEndBonusEligibleBaseWage + yearEndBonusEligibleVacationAllowance;
+      payslip.year_end_bonus_basis = {
+        eligible_base_wage: yearEndBonusEligibleBaseWage,
+        vacation_allowance_on_eligible_base_wage: yearEndBonusEligibleVacationAllowance,
+        eligible_amount_including_vacation_allowance: yearEndBonusBasisAmount,
+        excluded_overtime_amount: overtimeAmount,
+        excluded_special_hours_allowances: totalSurcharges,
+        excluded_acting_function_allowance: actingFunctionAllowanceAmount,
+        source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
+      };
       
       // Bereken gemiddelde ORT per uur (voor ORT verlof berekening)
       const avgOrtPerHour = totalHours > 0 ? totalSurcharges / totalHours : 0;
@@ -1031,7 +1052,7 @@ Deno.serve(async (req) => {
         const ortVerlof = vacationHours * avgOrtPerHour;
         
         payslip.accruals.vacation_allowance = baseForAllowances * ((caoConfig.vacation_allowance || 8) / 100);
-        payslip.accruals.year_end_bonus = (baseForAllowances + payslip.accruals.vacation_allowance) * ((caoConfig.year_end_bonus || 2.01) / 100);
+        payslip.accruals.year_end_bonus = yearEndBonusBasisAmount * ((caoConfig.year_end_bonus || 2.01) / 100);
         
         // Voeg ORT verlof toe aan doorbetaling verlof
         payslip.vacation_paid = ortVerlof;
@@ -1102,9 +1123,7 @@ Deno.serve(async (req) => {
         const ortVerlofReservation = (estimatedAnnualVacationHours / 13) * avgOrtPerHour; // per 4 weken
         
         payslip.accruals.vacation_allowance = payslip.total_gross * ((caoConfig.vacation_allowance || 8) / 100);
-        const yearEndBonusEligibleWage = payslip.base_salary + minimumServiceAmount + totalSurcharges;
-        const yearEndBonusEligibleVacationAllowance = yearEndBonusEligibleWage * ((caoConfig.vacation_allowance || 8) / 100);
-        payslip.accruals.year_end_bonus = (yearEndBonusEligibleWage + yearEndBonusEligibleVacationAllowance) * ((caoConfig.year_end_bonus || 2.01) / 100);
+        payslip.accruals.year_end_bonus = yearEndBonusBasisAmount * ((caoConfig.year_end_bonus || 2.01) / 100);
         
         // Voeg ORT verlof reservering toe
         payslip.vacation_paid = ortVerlofReservation;
@@ -1248,6 +1267,15 @@ Deno.serve(async (req) => {
         accruals: {
           vacation_allowance: Math.round(payslip.accruals.vacation_allowance * 100) / 100,
           year_end_bonus: Math.round(payslip.accruals.year_end_bonus * 100) / 100
+        },
+        year_end_bonus_basis: {
+          eligible_base_wage: r2(payslip.year_end_bonus_basis.eligible_base_wage),
+          vacation_allowance_on_eligible_base_wage: r2(payslip.year_end_bonus_basis.vacation_allowance_on_eligible_base_wage),
+          eligible_amount_including_vacation_allowance: r2(payslip.year_end_bonus_basis.eligible_amount_including_vacation_allowance),
+          excluded_overtime_amount: r2(payslip.year_end_bonus_basis.excluded_overtime_amount),
+          excluded_special_hours_allowances: r2(payslip.year_end_bonus_basis.excluded_special_hours_allowances),
+          excluded_acting_function_allowance: r2(payslip.year_end_bonus_basis.excluded_acting_function_allowance),
+          source_rule_ids: payslip.year_end_bonus_basis.source_rule_ids
         },
         
         // Werkgeverslasten

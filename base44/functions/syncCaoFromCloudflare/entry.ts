@@ -184,6 +184,13 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0781', 'CAO-PB-2024-R0782', 'CAO-PB-2024-R0783'
     ]
   },
+  'calculateCaoYearEndBonus.article_38_year_end_bonus': {
+    functions: ['calculatePersonnelCosts', 'calculateCaoYearEndBonus', 'queueCaoPayrollCorrections'],
+    rule_ids: [
+      'CAO-PB-2024-R0770', 'CAO-PB-2024-R0771',
+      'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773'
+    ]
+  },
   'calculatePersonnelCosts.article_42_overtime_payroll': {
     functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
     rule_ids: ['CAO-PB-2024-R0797']
