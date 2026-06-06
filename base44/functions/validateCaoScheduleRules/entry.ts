@@ -15,7 +15,7 @@ async function lazySyncCao(base44, forceCaoSync = false) {
 
 /**
  * CAO PB planning-validator
- * Bronregels: R0547-R0549 en R0560-R0667 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd, rusttijd en nachtdienst)
+ * Bronregels: R0547-R0549 en R0560-R0677 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd, rusttijd, nachtdienst en pauze)
  *
  * Scope-bewust:
  * - Artikel 3 lid 2 sluit uit: art. 10, art. 9 lid 1 sub c, hfdst. 4 (behalve 37/38/41), hfdst. 5, bijlage 2.
@@ -152,6 +152,12 @@ function formatIsoDateLocal(date) {
   return `${year}-${month}-${day}`;
 }
 
+function formatLocalDateTime(date) {
+  const hours = String(date.getHours()).padStart(2, '0');
+  const minutes = String(date.getMinutes()).padStart(2, '0');
+  return `${formatIsoDateLocal(date)}T${hours}:${minutes}:00`;
+}
+
 function daysBetween(later, earlier) {
   const laterDate = dateFromIso(later);
   const earlierDate = dateFromIso(earlier);
@@ -246,20 +252,136 @@ function getBreakDurationHours(breakItem) {
   );
 }
 
+function getBreakStartTime(breakItem) {
+  return breakItem.start_time || breakItem.start || breakItem.break_start_time || breakItem.from || null;
+}
+
+function getBreakEndTime(breakItem) {
+  return breakItem.end_time || breakItem.end || breakItem.break_end_time || breakItem.to || null;
+}
+
+function normalizeShiftBreaks(shift) {
+  const breaks = normalizeArray(shift.breaks || shift.unpaid_breaks || shift.pause_blocks || shift.break_items);
+  return breaks.map((item, index) => {
+    const durationHours = getBreakDurationHours(item);
+    return {
+      raw: item,
+      index,
+      id: item.id || item.break_id || item.pause_id || null,
+      paid: booleanOrNull(item.paid ?? item.is_paid),
+      duration_hours: durationHours,
+      start_time: getBreakStartTime(item),
+      end_time: getBreakEndTime(item),
+      counts_for_cao_break: durationHours !== null && durationHours >= 0.25 && durationHours <= 1
+    };
+  });
+}
+
 function getUnpaidBreakHours(shift) {
-  const breaks = normalizeArray(shift.breaks || shift.unpaid_breaks || shift.pause_blocks);
+  const breaks = normalizeShiftBreaks(shift);
   let total = 0;
   let found = false;
   for (const item of breaks) {
-    const paid = booleanOrNull(item.paid);
-    if (paid === true) continue;
-    const hours = getBreakDurationHours(item);
+    if (item.paid === true) continue;
+    const hours = item.duration_hours;
     if (hours !== null) {
       total += hours;
       found = true;
     }
   }
   return found ? total : 0;
+}
+
+function breakIntervalWithinShift(shift, breakItem) {
+  const shiftInterval = shiftDateTime(shift);
+  const date = asIsoDate(shift.date || shift.service_date);
+  const startTime = breakItem.start_time;
+  const endTime = breakItem.end_time;
+  if (!shiftInterval || !date || !startTime || !endTime) return null;
+  let start = new Date(`${date}T${startTime}:00`);
+  let end = new Date(`${date}T${endTime}:00`);
+  if (start < shiftInterval.start) start.setDate(start.getDate() + 1);
+  if (end <= start) end.setDate(end.getDate() + 1);
+  return { start, end };
+}
+
+function breakPlacementViolation(shift, breakItem) {
+  const shiftInterval = shiftDateTime(shift);
+  const breakInterval = breakIntervalWithinShift(shift, breakItem);
+  if (!shiftInterval || !breakInterval) return null;
+  const shiftHours = hoursBetweenDates(shiftInterval.end, shiftInterval.start);
+  const edgeHours = shiftHours >= 8 ? 3 : 2;
+  const earliestAllowed = new Date(shiftInterval.start);
+  earliestAllowed.setTime(earliestAllowed.getTime() + edgeHours * 3600000);
+  const latestAllowedEnd = new Date(shiftInterval.end);
+  latestAllowedEnd.setTime(latestAllowedEnd.getTime() - edgeHours * 3600000);
+  return breakInterval.start < earliestAllowed || breakInterval.end > latestAllowedEnd
+    ? {
+      edge_hours: edgeHours,
+      break_start: formatLocalDateTime(breakInterval.start),
+      break_end: formatLocalDateTime(breakInterval.end),
+      earliest_allowed_start: formatLocalDateTime(earliestAllowed),
+      latest_allowed_end: formatLocalDateTime(latestAllowedEnd)
+    }
+    : null;
+}
+
+function textLooksLikeAny(text, needles) {
+  return needles.some(needle => text.includes(needle));
+}
+
+function shiftFunctionText(shift, body = {}) {
+  return [
+    shift.service_type,
+    shift.service_function_type,
+    shift.function_type,
+    shift.cao_function_name,
+    shift.required_function_name,
+    shift.cao_function_group,
+    shift.required_cao_function_group,
+    shift.task_type,
+    shift.role,
+    body.service_type,
+    body.function_type,
+    body.cao_function_name,
+    body.required_function_name
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function shiftLooksObjectGuardOrReceptionist(shift, body = {}) {
+  const text = shiftFunctionText(shift, body);
+  return textLooksLikeAny(text, [
+    'objectbeveiliger',
+    'objectbeveilig',
+    'receptionist',
+    'receptie',
+    'reception'
+  ]);
+}
+
+function shiftLooksSecurityGuard(shift, body = {}) {
+  const explicit = booleanOrNull(
+    shift.is_security_guard ??
+    shift.security_guard ??
+    body.is_security_guard ??
+    body.security_guard
+  );
+  if (explicit !== null) return explicit;
+  const text = shiftFunctionText(shift, body);
+  return textLooksLikeAny(text, ['beveiliger', 'beveilig', 'security', 'surveillance']);
+}
+
+function shiftHasNoBreakException(shift, body = {}) {
+  return booleanOrNull(
+    shift.no_break_due_no_reliever ??
+    shift.no_break_no_reliever ??
+    shift.cannot_be_relieved_for_break ??
+    shift.no_reliever_available_for_break ??
+    body.no_break_due_no_reliever ??
+    body.no_break_no_reliever ??
+    body.cannot_be_relieved_for_break ??
+    body.no_reliever_available_for_break
+  ) === true;
 }
 
 function shiftDateTime(shift, fieldPrefix = '') {
@@ -695,6 +817,9 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const schedulePublishedAt = body.schedule_published_at || body.roster_published_at || body.roster_publication_datetime || null;
   const weeklySchedulePublishedAt = body.weekly_schedule_published_at || body.weekly_roster_published_at || null;
   const isGeneralReserve = isGeneralReserveEmployee(body);
+  const breakSummaryRows = [];
+  let noBreakExceptionApplied = false;
+  let noBreakSixteenWeekAverage = null;
 
   if (isGeneralReserve) {
     skippedRules.push({
@@ -1670,18 +1795,196 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
 
   if (!isGeneralReserve) {
     for (const shift of serviceShifts) {
+      const shiftHours = calculateShiftHours(shift);
+      const shiftBreaks = normalizeShiftBreaks(shift);
+      const qualifyingBreaks = shiftBreaks.filter(item => item.counts_for_cao_break);
+      const qualifyingBreakHours = qualifyingBreaks.reduce((sum, item) => sum + item.duration_hours, 0);
+      const longestQualifyingBreakHours = qualifyingBreaks.reduce((max, item) => Math.max(max, item.duration_hours), 0);
       const unpaidBreakHours = getUnpaidBreakHours(shift);
+      const objectGuardOrReceptionist = shiftLooksObjectGuardOrReceptionist(shift, body);
+      const noBreakException = shiftHasNoBreakException(shift, body);
+      noBreakExceptionApplied = noBreakExceptionApplied || noBreakException;
+
+      const row = {
+        shift_id: shift.id || null,
+        date: asIsoDate(shift.date || shift.service_date),
+        shift_hours: round2(shiftHours),
+        break_count: shiftBreaks.length,
+        qualifying_break_count: qualifyingBreaks.length,
+        qualifying_break_hours: round2(qualifyingBreakHours),
+        longest_qualifying_break_hours: round2(longestQualifyingBreakHours),
+        unpaid_break_hours: round2(unpaidBreakHours),
+        paid_work_hours_after_unpaid_breaks: round2(Math.max(0, shiftHours - unpaidBreakHours)),
+        object_guard_or_receptionist: objectGuardOrReceptionist,
+        no_break_exception: noBreakException
+      };
+      breakSummaryRows.push(row);
+
+      if (unpaidBreakHours > 0) {
+        payrollAdjustments.push({
+          rule_id: 'CAO-PB-2024-R0669',
+          type: 'unpaid_break_excluded_from_paid_work_time',
+          shift_id: shift.id || null,
+          date: row.date,
+          gross_shift_hours: round2(shiftHours),
+          unpaid_break_hours: round2(unpaidBreakHours),
+          paid_work_hours_after_unpaid_breaks: row.paid_work_hours_after_unpaid_breaks,
+          message: 'Onbetaalde pauze telt niet als arbeidstijd en hoort niet als salarisdragende werktijd te worden meegenomen.'
+        });
+      }
+
+      for (const breakItem of shiftBreaks) {
+        if (breakItem.duration_hours === null) {
+          addManualReview(
+            manualReviewItems,
+            'CAO-PB-2024-R0669',
+            'break_duration',
+            'Pauzeduur ontbreekt; artikel 29 vereist een pauze van minimaal 15 minuten en maximaal 1 uur.',
+            'breaks.duration_minutes'
+          );
+          continue;
+        }
+        if (breakItem.duration_hours < 0.25 || breakItem.duration_hours > 1) {
+          violations.push({
+            rule_id: 'CAO-PB-2024-R0669',
+            severity: 'medium',
+            message: `Pauze in dienst ${row.date} duurt ${round2(breakItem.duration_hours)} uur; een pauze moet minimaal 15 minuten en maximaal 1 uur duren.`,
+            affected_shift_ids: shift.id ? [shift.id] : [],
+            payroll_impact: breakItem.paid !== true,
+            break_hours: round2(breakItem.duration_hours),
+            min_break_hours: 0.25,
+            max_break_hours: 1,
+            manual_review_required: false
+          });
+        }
+
+        const placement = breakPlacementViolation(shift, breakItem);
+        if (placement) {
+          violations.push({
+            rule_id: 'CAO-PB-2024-R0674',
+            severity: 'medium',
+            message: `Pauze in dienst ${row.date} valt in de eerste of laatste ${placement.edge_hours} uur van de dienst; dat is volgens artikel 29 niet toegestaan.`,
+            affected_shift_ids: shift.id ? [shift.id] : [],
+            payroll_impact: false,
+            ...placement,
+            manual_review_required: false
+          });
+        } else if (shiftHours > 5.5 && breakItem.duration_hours !== null && (!breakItem.start_time || !breakItem.end_time)) {
+          addManualReview(
+            manualReviewItems,
+            'CAO-PB-2024-R0674',
+            'break_placement',
+            'Pauze heeft wel duur maar geen begin/eindtijd; ligging buiten eerste/laatste 2 of 3 uur kan niet worden gecontroleerd.',
+            'breaks.start_time/end_time'
+          );
+        }
+      }
+
       if (unpaidBreakHours > 1) {
         violations.push({
           rule_id: 'CAO-PB-2024-R0569',
           severity: 'high',
-          message: `Dienst ${shift.date} heeft ${round2(unpaidBreakHours)} uur onbetaalde pauze/onderbreking; maximaal 1 uur binnen een dienst.`,
+          message: `Dienst ${row.date} heeft ${round2(unpaidBreakHours)} uur onbetaalde pauze/onderbreking; maximaal 1 uur binnen een dienst.`,
           affected_shift_ids: shift.id ? [shift.id] : [],
           payroll_impact: true,
           unpaid_break_hours: round2(unpaidBreakHours),
           manual_review_required: false
         });
       }
+
+      if (noBreakException) {
+        if (!shiftLooksSecurityGuard(shift, body)) {
+          addManualReview(
+            manualReviewItems,
+            'CAO-PB-2024-R0676',
+            'break_exception',
+            'Geen-pauze uitzondering is gebruikt, maar de functie is niet duidelijk als beveiliger herkend.',
+            'function_type/is_security_guard'
+          );
+        }
+        continue;
+      }
+
+      if (shiftHours > 5.5 && shiftHours <= 8) {
+        if (objectGuardOrReceptionist) {
+          if (qualifyingBreaks.length < 2 || qualifyingBreaks.reduce((sum, item) => sum + item.duration_hours, 0) < 0.5) {
+            violations.push({
+              rule_id: 'CAO-PB-2024-R0671',
+              severity: 'medium',
+              message: `Objectbeveiliger/receptionist in dienst ${row.date} heeft recht op minimaal 2 pauzes van minimaal 15 minuten bij een dienst langer dan 5,5 uur en maximaal 8 uur.`,
+              affected_shift_ids: shift.id ? [shift.id] : [],
+              payroll_impact: false,
+              break_summary: row,
+              manual_review_required: false
+            });
+          }
+        } else if (longestQualifyingBreakHours < 0.5) {
+          violations.push({
+            rule_id: 'CAO-PB-2024-R0671',
+            severity: 'medium',
+            message: `Dienst ${row.date} duurt ${round2(shiftHours)} uur; vereist is een pauze van een half uur achter elkaar.`,
+            affected_shift_ids: shift.id ? [shift.id] : [],
+            payroll_impact: false,
+            break_summary: row,
+            manual_review_required: false
+          });
+        }
+      } else if (shiftHours > 8 && shiftHours <= 10) {
+        if (qualifyingBreakHours < 0.75 || longestQualifyingBreakHours < 0.5) {
+          violations.push({
+            rule_id: 'CAO-PB-2024-R0672',
+            severity: 'medium',
+            message: `Dienst ${row.date} duurt ${round2(shiftHours)} uur; vereist is 45 minuten pauze totaal, waarvan 1 pauze minimaal 30 minuten.`,
+            affected_shift_ids: shift.id ? [shift.id] : [],
+            payroll_impact: false,
+            break_summary: row,
+            manual_review_required: false
+          });
+        }
+      } else if (shiftHours > 10) {
+        if (qualifyingBreakHours < 1 || longestQualifyingBreakHours < 0.5) {
+          violations.push({
+            rule_id: 'CAO-PB-2024-R0673',
+            severity: 'medium',
+            message: `Dienst ${row.date} duurt ${round2(shiftHours)} uur; vereist is 1 uur pauze totaal, waarvan 1 pauze minimaal 30 minuten.`,
+            affected_shift_ids: shift.id ? [shift.id] : [],
+            payroll_impact: false,
+            break_summary: row,
+            manual_review_required: false
+          });
+        }
+      }
+    }
+  }
+
+  if (noBreakExceptionApplied) {
+    const explicitNoBreakAverage16 = numberOrNull(
+      body.no_break_average_hours_16_week_reference ??
+      body.break_exception_average_hours_16_week_reference ??
+      body.average_hours_16_week_no_break_reference
+    );
+    noBreakSixteenWeekAverage = explicitNoBreakAverage16 !== null
+      ? { average_hours_per_week: explicitNoBreakAverage16, week_keys: [] }
+      : rollingAverage16;
+    if (noBreakSixteenWeekAverage === null) {
+      addManualReview(
+        manualReviewItems,
+        'CAO-PB-2024-R0677',
+        'break_exception_average',
+        'Geen-pauze uitzondering toegepast; lever 16 weken referentieuren aan om gemiddeld maximaal 38 uur per week te controleren.',
+        'no_break_average_hours_16_week_reference/reference_shifts'
+      );
+    } else if (noBreakSixteenWeekAverage.average_hours_per_week > 38) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0677',
+        severity: 'high',
+        message: `Bij geen-pauze uitzondering is het gemiddelde ${round2(noBreakSixteenWeekAverage.average_hours_per_week)} uur per week in 16 weken; maximaal 38 uur toegestaan.`,
+        payroll_impact: true,
+        average_hours_per_week: round2(noBreakSixteenWeekAverage.average_hours_per_week),
+        max_average_hours_per_week: 38,
+        week_keys: noBreakSixteenWeekAverage.week_keys || [],
+        manual_review_required: false
+      });
     }
   }
 
@@ -1915,6 +2218,20 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
         'CAO-PB-2024-R0665',
         'CAO-PB-2024-R0666',
         'CAO-PB-2024-R0667'
+      ]
+    },
+    break_summary: {
+      shift_breaks: breakSummaryRows,
+      no_break_exception_applied: noBreakExceptionApplied,
+      no_break_sixteen_week_average: noBreakSixteenWeekAverage,
+      source_rule_ids: [
+        'CAO-PB-2024-R0669',
+        'CAO-PB-2024-R0671',
+        'CAO-PB-2024-R0672',
+        'CAO-PB-2024-R0673',
+        'CAO-PB-2024-R0674',
+        'CAO-PB-2024-R0676',
+        'CAO-PB-2024-R0677'
       ]
     },
     rest_time_summary: {
