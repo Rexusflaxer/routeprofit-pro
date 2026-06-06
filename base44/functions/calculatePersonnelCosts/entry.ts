@@ -364,7 +364,7 @@ function resolveShiftChangeAllowance(shift, personnel, hoursWorked, baseHourlyRa
     return result;
   }
 
-  if (shift.general_reserve === true || shift.is_general_reserve === true) {
+  if (isGeneralReserveAssignment(shift, personnel)) {
     result.source_rule_ids.push('CAO-PB-2024-R0606');
     return result;
   }
@@ -425,6 +425,40 @@ function resolveShiftChangeAllowance(shift, personnel, hoursWorked, baseHourlyRa
   result.source_rule_ids.push('CAO-PB-2024-R0799', 'CAO-PB-2024-R0800', pct.source_rule_id, 'CAO-PB-2024-R0806', 'CAO-PB-2024-R0807');
   result.source_rule_ids = [...new Set(result.source_rule_ids.filter(Boolean))];
   return result;
+}
+
+function isGeneralReserveAssignment(shift, personnel) {
+  return shift.general_reserve === true ||
+    shift.is_general_reserve === true ||
+    shift.general_reserve_assignment === true ||
+    personnel.general_reserve === true ||
+    personnel.is_general_reserve === true ||
+    personnel.cao_general_reserve === true ||
+    personnel.employee_subtype === 'general_reserve';
+}
+
+function resolveGeneralReserveAllowance(shift, personnel, paidHoursForShift, baseHourlyRate) {
+  if (!isGeneralReserveAssignment(shift, personnel)) {
+    return {
+      applies: false,
+      hours: 0,
+      percentage: 0,
+      rate: 0,
+      amount: 0,
+      source_rule_ids: []
+    };
+  }
+  const percentage = Number(shift.general_reserve_allowance_percentage ?? 10);
+  const hours = Math.max(0, paidHoursForShift);
+  const rate = baseHourlyRate * (percentage / 100);
+  return {
+    applies: true,
+    hours,
+    percentage,
+    rate,
+    amount: hours * rate,
+    source_rule_ids: ['CAO-PB-2024-R0606']
+  };
 }
 
 async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, caoScope }) {
@@ -830,6 +864,11 @@ Deno.serve(async (req) => {
         amount: 0,
         source_rule_ids: []
       },
+      general_reserve_allowance: {
+        hours: 0,
+        amount: 0,
+        source_rule_ids: []
+      },
       total_gross: 0,
       
       // Werknemersbijdragen (inhoudingen)
@@ -858,6 +897,7 @@ Deno.serve(async (req) => {
         excluded_special_hours_allowances: 0,
         excluded_acting_function_allowance: 0,
         excluded_shift_change_allowance: 0,
+        excluded_general_reserve_allowance: 0,
         source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
       },
       
@@ -1066,6 +1106,18 @@ Deno.serve(async (req) => {
         }
 
         const paidHoursForActingAllowance = minimumService.applies ? minimumService.paid_hours : hoursWorked;
+        const generalReserveAllowance = resolveGeneralReserveAllowance(shift, personnel, paidHoursForActingAllowance, baseHourlyRate);
+        if (generalReserveAllowance.applies && generalReserveAllowance.amount > 0) {
+          payslip.general_reserve_allowance.hours += generalReserveAllowance.hours;
+          payslip.general_reserve_allowance.amount += generalReserveAllowance.amount;
+          payslip.general_reserve_allowance.source_rule_ids = [
+            ...new Set([
+              ...payslip.general_reserve_allowance.source_rule_ids,
+              ...generalReserveAllowance.source_rule_ids
+            ])
+          ];
+        }
+
         const actingAllowance = resolveActingFunctionAllowance(shift, personnel, paidHoursForActingAllowance, caoConfig);
         if (actingAllowance.manual_review_required) {
           payrollRuntimeReviewItems.push({
@@ -1124,6 +1176,14 @@ Deno.serve(async (req) => {
             travel_reimbursement_required: minimumService.travel_reimbursement_required,
             manual_review_required: minimumService.manual_review_required,
             source_rule_ids: minimumService.source_rule_ids
+          },
+          general_reserve_allowance: {
+            applies: generalReserveAllowance.applies,
+            hours: r2(generalReserveAllowance.hours),
+            percentage: generalReserveAllowance.percentage,
+            rate: r2(generalReserveAllowance.rate),
+            amount: r2(generalReserveAllowance.amount),
+            source_rule_ids: generalReserveAllowance.source_rule_ids
           },
           acting_function_allowance: {
             applies: actingAllowance.applies,
@@ -1216,6 +1276,7 @@ Deno.serve(async (req) => {
       const minimumServiceAmount = payslip.minimum_service_compensation.amount;
       const actingFunctionAllowanceAmount = payslip.acting_function_allowance.amount;
       const shiftChangeAllowanceAmount = payslip.shift_change_allowance.amount;
+      const generalReserveAllowanceAmount = payslip.general_reserve_allowance.amount;
       const yearEndBonusEligibleBaseWage = payslip.base_salary + minimumServiceAmount;
       const yearEndBonusEligibleVacationAllowance = yearEndBonusEligibleBaseWage * ((caoConfig.vacation_allowance || 8) / 100);
       const yearEndBonusBasisAmount = yearEndBonusEligibleBaseWage + yearEndBonusEligibleVacationAllowance;
@@ -1227,6 +1288,7 @@ Deno.serve(async (req) => {
         excluded_special_hours_allowances: totalSurcharges,
         excluded_acting_function_allowance: actingFunctionAllowanceAmount,
         excluded_shift_change_allowance: shiftChangeAllowanceAmount,
+        excluded_general_reserve_allowance: generalReserveAllowanceAmount,
         source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
       };
       
@@ -1249,9 +1311,9 @@ Deno.serve(async (req) => {
         payslip.vacation_paid = ortVerlof;
         
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
       } else {
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount;
       }
       
       // Bereken pensioengrondslag (bruto loon - vakantiegeld/eindejaarsuitkering - franchise)
@@ -1444,6 +1506,11 @@ Deno.serve(async (req) => {
           amount: r2(payslip.shift_change_allowance.amount),
           source_rule_ids: payslip.shift_change_allowance.source_rule_ids
         },
+        general_reserve_allowance: {
+          hours: r2(payslip.general_reserve_allowance.hours),
+          amount: r2(payslip.general_reserve_allowance.amount),
+          source_rule_ids: payslip.general_reserve_allowance.source_rule_ids
+        },
         total_gross: Math.round(payslip.total_gross * 100) / 100,
         is_call_worker: payslip.is_call_worker,
         
@@ -1472,6 +1539,7 @@ Deno.serve(async (req) => {
           excluded_special_hours_allowances: r2(payslip.year_end_bonus_basis.excluded_special_hours_allowances),
           excluded_acting_function_allowance: r2(payslip.year_end_bonus_basis.excluded_acting_function_allowance),
           excluded_shift_change_allowance: r2(payslip.year_end_bonus_basis.excluded_shift_change_allowance),
+          excluded_general_reserve_allowance: r2(payslip.year_end_bonus_basis.excluded_general_reserve_allowance),
           source_rule_ids: payslip.year_end_bonus_basis.source_rule_ids
         },
         

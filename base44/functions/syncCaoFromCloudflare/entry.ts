@@ -191,6 +191,10 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773'
     ]
   },
+  'calculatePersonnelCosts.article_25_general_reserve_allowance': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: ['CAO-PB-2024-R0605', 'CAO-PB-2024-R0606']
+  },
   'calculatePersonnelCosts.article_42_overtime_payroll': {
     functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
     rule_ids: ['CAO-PB-2024-R0797']
