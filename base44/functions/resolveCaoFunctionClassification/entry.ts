@@ -9,46 +9,56 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
  * Als functiegroep of niveau onbekend is → manual_review_required=true, geen schaal.
  */
 
-// ── Bijlage 2 volledige mapping: functiegroep → niveau → CAO-schaal ──
-// Bronregel: CAO-PB-2024-R1751 t/m R1814
+// ── Bijlage 2 matrix: functiegroep → functieniveau → salarisschaal ──
+// Bronregel CAO-PB-2024-R1813: alle functiegroepen volgen schaal 2 t/m 7.
 const APPENDIX_2_SCALE_MAP = {
   objectbeveiliger_receptionist: {
-    aspirant: { scale: 2, source_rule: 'CAO-PB-2024-R1751' },
-    a:        { scale: 3, source_rule: 'CAO-PB-2024-R1752' },
-    b:        { scale: 4, source_rule: 'CAO-PB-2024-R1753' },
-    c:        { scale: 5, source_rule: 'CAO-PB-2024-R1754' },
-    leidinggevend: { scale: 6, source_rule: 'CAO-PB-2024-R1755' }
+    aspirant: { scale: 2, source_rule: 'CAO-PB-2024-R1813' },
+    a: { scale: 3, source_rule: 'CAO-PB-2024-R1813' },
+    b: { scale: 4, source_rule: 'CAO-PB-2024-R1813' },
+    c: { scale: 5, source_rule: 'CAO-PB-2024-R1813' },
+    d: { scale: 6, source_rule: 'CAO-PB-2024-R1813' },
+    e: { scale: 7, source_rule: 'CAO-PB-2024-R1813' }
   },
   mobiel_surveillant: {
-    aspirant: { scale: 2, source_rule: 'CAO-PB-2024-R1761' },
-    a:        { scale: 3, source_rule: 'CAO-PB-2024-R1762' },
-    b:        { scale: 4, source_rule: 'CAO-PB-2024-R1763' },
-    c:        { scale: 5, source_rule: 'CAO-PB-2024-R1764' },
-    leidinggevend: { scale: 6, source_rule: 'CAO-PB-2024-R1765' }
+    aspirant: { scale: 2, source_rule: 'CAO-PB-2024-R1813' },
+    a: { scale: 3, source_rule: 'CAO-PB-2024-R1813' },
+    b: { scale: 4, source_rule: 'CAO-PB-2024-R1813' },
+    c: { scale: 5, source_rule: 'CAO-PB-2024-R1813' },
+    d: { scale: 6, source_rule: 'CAO-PB-2024-R1813' },
+    e: { scale: 7, source_rule: 'CAO-PB-2024-R1813' }
   },
   winkelsurveillant: {
-    aspirant: { scale: 2, source_rule: 'CAO-PB-2024-R1771' },
-    a:        { scale: 3, source_rule: 'CAO-PB-2024-R1772' },
-    b:        { scale: 4, source_rule: 'CAO-PB-2024-R1773' },
-    leidinggevend: { scale: 5, source_rule: 'CAO-PB-2024-R1774' }
+    aspirant: { scale: 2, source_rule: 'CAO-PB-2024-R1813' },
+    a: { scale: 3, source_rule: 'CAO-PB-2024-R1813' },
+    b: { scale: 4, source_rule: 'CAO-PB-2024-R1813' },
+    c: { scale: 5, source_rule: 'CAO-PB-2024-R1813' },
+    d: { scale: 6, source_rule: 'CAO-PB-2024-R1813' },
+    e: { scale: 7, source_rule: 'CAO-PB-2024-R1813' }
   },
   brandwacht: {
-    aspirant: { scale: 2, source_rule: 'CAO-PB-2024-R1781' },
-    a:        { scale: 3, source_rule: 'CAO-PB-2024-R1782' },
-    b:        { scale: 4, source_rule: 'CAO-PB-2024-R1783' },
-    leidinggevend: { scale: 5, source_rule: 'CAO-PB-2024-R1784' }
+    aspirant: { scale: 2, source_rule: 'CAO-PB-2024-R1813' },
+    a: { scale: 3, source_rule: 'CAO-PB-2024-R1813' },
+    b: { scale: 4, source_rule: 'CAO-PB-2024-R1813' },
+    c: { scale: 5, source_rule: 'CAO-PB-2024-R1813' },
+    d: { scale: 6, source_rule: 'CAO-PB-2024-R1813' },
+    e: { scale: 7, source_rule: 'CAO-PB-2024-R1813' }
   },
   geld_waardetransporteur: {
-    aspirant: { scale: 3, source_rule: 'CAO-PB-2024-R1791' },
-    a:        { scale: 4, source_rule: 'CAO-PB-2024-R1792' },
-    b:        { scale: 5, source_rule: 'CAO-PB-2024-R1793' },
-    leidinggevend: { scale: 6, source_rule: 'CAO-PB-2024-R1794' }
+    aspirant: { scale: 2, source_rule: 'CAO-PB-2024-R1813' },
+    a: { scale: 3, source_rule: 'CAO-PB-2024-R1813' },
+    b: { scale: 4, source_rule: 'CAO-PB-2024-R1813' },
+    c: { scale: 5, source_rule: 'CAO-PB-2024-R1813' },
+    d: { scale: 6, source_rule: 'CAO-PB-2024-R1813' },
+    e: { scale: 7, source_rule: 'CAO-PB-2024-R1813' }
   },
   centralist: {
-    aspirant: { scale: 3, source_rule: 'CAO-PB-2024-R1801' },
-    a:        { scale: 4, source_rule: 'CAO-PB-2024-R1802' },
-    b:        { scale: 5, source_rule: 'CAO-PB-2024-R1803' },
-    leidinggevend: { scale: 6, source_rule: 'CAO-PB-2024-R1804' }
+    aspirant: { scale: 2, source_rule: 'CAO-PB-2024-R1813' },
+    a: { scale: 3, source_rule: 'CAO-PB-2024-R1813' },
+    b: { scale: 4, source_rule: 'CAO-PB-2024-R1813' },
+    c: { scale: 5, source_rule: 'CAO-PB-2024-R1813' },
+    d: { scale: 6, source_rule: 'CAO-PB-2024-R1813' },
+    e: { scale: 7, source_rule: 'CAO-PB-2024-R1813' }
   }
 };
 
@@ -63,8 +73,7 @@ const FUNCTION_TYPE_TO_GROUP = {
 // ── Infereer niveau op basis van security_role_status (R0728) ──
 const ROLE_STATUS_TO_LEVEL = {
   aspirant_beveiliger: 'aspirant',
-  beveiliger: 'a',
-  leidinggevende: 'leidinggevend'
+  beveiliger: 'a'
 };
 
 async function lazySyncCao(base44, force = false) {
@@ -148,22 +157,21 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
     // Non-security: bijlage 2 uitgesloten conform art. 3 lid 2
     source_rule_ids.push('CAO-PB-2024-R0228', 'CAO-PB-2024-R0233');
 
-    const hasWageBasis = !!(p.custom_hourly_rate) ||
-      (p.cao === 'cao_particuliere_beveiliging' && p.cao_scale && p.cao_period != null);
+    const customHourlyRate = Number(p.custom_hourly_rate || 0);
+    const hasWageBasis = customHourlyRate > 0;
 
     if (!hasWageBasis) {
-      manual_review_reasons.push('Loonbasis ontbreekt: geen custom_hourly_rate en geen CAO-schaal/periodiek ingesteld. Stel een tarief of loonniveau in.');
-      warnings.push('Loonbasis ontbreekt voor niet-beveiligingspersoneel. Payroll-berekening niet mogelijk.');
+      manual_review_reasons.push('Loonbasis ontbreekt voor niet-beveiligingspersoneel: custom_hourly_rate ontbreekt. Bijlage 2 loonschaal is niet van toepassing.');
+      warnings.push('Loonbasis ontbreekt voor niet-beveiligingspersoneel. CAO-schaal/periodiek wordt niet gebruikt omdat bijlage 2 is uitgesloten.');
+    }
+    if (p.cao_scale != null || p.cao_period != null) {
+      warnings.push('CAO-schaal/periodiek genegeerd: bijlage 2 is niet van toepassing op dit toepassingsprofiel.');
     }
 
     let hourlyRate = null;
-    let wageRateFound = false;
-    if (p.custom_hourly_rate) {
-      hourlyRate = p.custom_hourly_rate;
-      wageRateFound = true;
-    } else if (p.cao_scale && p.cao_period != null && caoConfig) {
-      const r = getHourlyRate(p.cao_scale, p.cao_period, caoConfig);
-      if (r.found) { hourlyRate = r.hourly_rate; wageRateFound = true; }
+    let wageRateFound = hasWageBasis;
+    if (hasWageBasis) {
+      hourlyRate = customHourlyRate;
     }
 
     return {
@@ -212,8 +220,15 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
   }
 
   // Bepaal niveau: expliciete velden eerst, dan via security_role_status (R0728)
-  let functionLevel = p.cao_function_level && p.cao_function_level !== 'unknown' ? p.cao_function_level : null;
+  const rawFunctionLevel = p.cao_function_level && p.cao_function_level !== 'unknown' ? p.cao_function_level : null;
+  let functionLevel = rawFunctionLevel === 'leidinggevend' ? null : rawFunctionLevel;
   let levelFromInference = false;
+
+  if (rawFunctionLevel === 'leidinggevend') {
+    source_rule_ids.push('CAO-PB-2024-R1813');
+    manual_review_reasons.push('Functieniveau "leidinggevend" is geen exacte bijlage-2 schaal. Kies expliciet niveau C, D of E.');
+    warnings.push('Leidinggevende status vereist expliciete functie-indeling C/D/E voordat een salarisschaal kan worden bepaald.');
+  }
 
   if (!functionLevel && p.security_role_status) {
     const inferred = ROLE_STATUS_TO_LEVEL[p.security_role_status];
@@ -222,6 +237,10 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
       levelFromInference = true;
       source_rule_ids.push('CAO-PB-2024-R0728');
       warnings.push(`Functieniveau "${inferred}" afgeleid op basis van security_role_status "${p.security_role_status}". Controleer dit handmatig.`);
+    } else if (p.security_role_status === 'leidinggevende') {
+      source_rule_ids.push('CAO-PB-2024-R1813');
+      manual_review_reasons.push('Security role status "leidinggevende" is onvoldoende voor automatische schaalbepaling. Kies expliciet functieniveau C, D of E.');
+      warnings.push('Leidinggevende status vereist expliciete functie-indeling C/D/E.');
     }
   }
 
@@ -300,7 +319,7 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
       manual_review_reasons,
       payroll_final_allowed: false,
       warnings,
-      source_rule_ids: [...source_rule_ids, 'CAO-PB-2024-R1751']
+      source_rule_ids: [...source_rule_ids, 'CAO-PB-2024-R1813']
     };
   }
 
@@ -312,7 +331,6 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
   const currentPeriod = p.cao_period != null ? p.cao_period : null;
   const scaleMatches = currentScale != null ? (Number(currentScale) === Number(suggestedScale)) : null;
 
-  let scaleValidForClassification = scaleMatches;
   if (scaleMatches === false) {
     manual_review_reasons.push(
       `Huidige schaal (${currentScale}) wijkt af van bijlage 2 suggestie (${suggestedScale}) voor ${functionGroup}/${functionLevel}. ` +

@@ -34,10 +34,14 @@ function PersonnelCostCard({ title, icon: Icon, iconColor, bgColor, borderColor,
 
   const isZzp = data.employee_type === 'zzp';
   const isAverage = data.count !== undefined;
+  const isBlocked = String(data.calculation_status || '').startsWith('blocked');
+  const isConcept = data.payroll_final_allowed === false || data.manual_review_required === true;
 
   const contractLabel = data.employee_type === 'zzp' ? 'ZZP' : 'Loondienst';
   const caoLabel = data.cao === 'cao_particuliere_beveiliging' && !isZzp
-    ? `CAO schaal ${data.cao_scale ?? '-'}, periode ${data.cao_period ?? '0'}`
+    ? data.wage_basis_type === 'custom_hourly_rate'
+      ? 'Eigen uurloon (bijlage 2 n.v.t.)'
+      : `CAO schaal ${data.cao_scale ?? '-'}, periode ${data.cao_period ?? '-'}`
     : null;
 
   return (
@@ -51,13 +55,22 @@ function PersonnelCostCard({ title, icon: Icon, iconColor, bgColor, borderColor,
           {badge && (
             <Badge className={badgeColor}>{badge}</Badge>
           )}
+          {!isAverage && isConcept && (
+            <Badge className={isBlocked ? "bg-red-100 text-red-800" : "bg-amber-100 text-amber-800"}>
+              {isBlocked ? "Geblokkeerd" : "Concept"}
+            </Badge>
+          )}
         </div>
         {!isAverage && (
           <div className="mt-1 space-y-0.5">
             <p className="text-sm font-semibold text-slate-900">{data.name}</p>
             <p className="text-xs text-slate-500">
               {contractLabel}{caoLabel ? ` · ${caoLabel}` : ''}
-              {data.employee_type === 'zzp' ? ` · €${data.base_hourly_rate?.toFixed(2)}/u excl. BTW` : ` · €${data.base_hourly_rate?.toFixed(2)}/u basis`}
+              {data.employee_type === 'zzp'
+                ? ` · €${data.base_hourly_rate?.toFixed(2)}/u excl. BTW`
+                : data.base_hourly_rate != null
+                ? ` · €${data.base_hourly_rate.toFixed(2)}/u basis`
+                : ''}
             </p>
           </div>
         )}
@@ -69,13 +82,23 @@ function PersonnelCostCard({ title, icon: Icon, iconColor, bgColor, borderColor,
         <div className="flex justify-between items-center mb-3">
           <div>
             <p className="text-xs text-slate-500">Totale loonkosten voor deze route</p>
-            <p className="text-2xl font-bold text-slate-900">€{data.total_cost_employer?.toFixed(2)}</p>
+            <p className="text-2xl font-bold text-slate-900">
+              {isBlocked ? "Niet berekend" : `€${data.total_cost_employer?.toFixed(2) ?? "0.00"}`}
+            </p>
           </div>
           <div className="text-right">
             <p className="text-xs text-slate-500">Kosten per uur</p>
-            <p className="text-lg font-semibold text-slate-700">€{data.cost_per_hour?.toFixed(2)}</p>
+            <p className="text-lg font-semibold text-slate-700">
+              {isBlocked ? "-" : `€${data.cost_per_hour?.toFixed(2) ?? "0.00"}`}
+            </p>
           </div>
         </div>
+
+        {!isAverage && isConcept && (
+          <div className={`mb-3 rounded-lg border p-2 text-xs ${isBlocked ? "border-red-200 bg-red-50 text-red-700" : "border-amber-200 bg-amber-50 text-amber-700"}`}>
+            {(data.scope_warnings || [isBlocked ? "Loonbasis of functie-indeling ontbreekt." : "Handmatige review vereist voor definitieve payroll."])[0]}
+          </div>
+        )}
 
         <Button
           variant="ghost"
@@ -87,7 +110,13 @@ function PersonnelCostCard({ title, icon: Icon, iconColor, bgColor, borderColor,
           {expanded ? "Verberg berekening" : "Toon berekening & details"}
         </Button>
 
-        {expanded && (
+        {expanded && isBlocked && (
+          <div className="mt-3 pt-3 border-t border-slate-100 text-xs text-red-700">
+            Geen kostenopbouw beschikbaar zolang loonbasis of functie-indeling niet definitief is.
+          </div>
+        )}
+
+        {expanded && !isBlocked && (
           <div className="mt-3 pt-3 border-t border-slate-100 space-y-1">
             <p className="text-xs font-semibold text-slate-500 uppercase tracking-wide mb-2">Opbouw loonkosten</p>
 

@@ -46,7 +46,7 @@ export default function WizardStep8Review({ form, sensitiveData, idDoc, bankAcco
   const scaleValidationStatus = form.cao_scale_validation_status;
   const scaleOk = scaleValidationStatus === 'valid' || scaleValidationStatus === 'not_applicable';
   const hasBasis = isNonSecurity
-    ? !!(form.custom_hourly_rate || (form.cao_scale != null && form.cao_period != null))
+    ? Number(form.custom_hourly_rate || 0) > 0
     : !!(form.cao_scale != null && form.cao_period != null);
   const payrollFinal = form.payroll_final_allowed === true;
   const classificationManualReasons = form.cao_function_manual_review_reasons || [];
@@ -139,7 +139,11 @@ export default function WizardStep8Review({ form, sensitiveData, idDoc, bankAcco
               : "Loonschaal/periodiek nog niet gevalideerd"
             } />
             <CheckItem ok={hasBasis} label={
-              hasBasis ? "Loonbasis aanwezig" : "Loonbasis ontbreekt – stel schaal/periodiek of eigen tarief in"
+              hasBasis
+                ? (isNonSecurity ? "Eigen uurloon aanwezig" : "Loonbasis aanwezig")
+                : (isNonSecurity
+                  ? "Loonbasis ontbreekt – eigen uurloon verplicht omdat bijlage 2 niet van toepassing is"
+                  : "Loonbasis ontbreekt – stel schaal/periodiek in")
             } />
             <CheckItem ok={payrollFinal} label={
               payrollFinal

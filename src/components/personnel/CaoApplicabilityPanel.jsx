@@ -163,7 +163,6 @@ export default function CaoApplicabilityPanel({ form, onChange, personnelId }) {
               <SelectItem value="c">C</SelectItem>
               <SelectItem value="d">D</SelectItem>
               <SelectItem value="e">E</SelectItem>
-              <SelectItem value="leidinggevend">Leidinggevend</SelectItem>
               <SelectItem value="not_applicable">N.v.t.</SelectItem>
               <SelectItem value="unknown">Onbekend</SelectItem>
             </SelectContent>
@@ -322,7 +321,7 @@ export default function CaoApplicabilityPanel({ form, onChange, personnelId }) {
                 </div>
               )}
               {resolveResult.payroll_rule_profile?.apply_appendix_2_function_scales === false && (
-                <p className="text-xs text-amber-700">Bijlage 2 loontabel is niet van toepassing. Stel een eigen tarief of loonniveau in.</p>
+                <p className="text-xs text-amber-700">Bijlage 2 loontabel is niet van toepassing. Stel een eigen uurloon in.</p>
               )}
             </div>
           ) : (

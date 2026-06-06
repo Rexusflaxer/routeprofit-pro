@@ -22,7 +22,7 @@ const LEVEL_LABELS = {
   c: "Niveau C",
   d: "Niveau D",
   e: "Niveau E",
-  leidinggevend: "Leidinggevend",
+  leidinggevend: "Leidinggevend (review)",
   not_applicable: "N.v.t.",
   unknown: "Onbekend"
 };

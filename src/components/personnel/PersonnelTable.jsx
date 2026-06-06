@@ -20,8 +20,10 @@ export default function PersonnelTable({ personnel, onEdit, onDelete, onCalculat
       else if (p.contract_type === "0_uren") contractLabel = "0-uren";
       else if (p.contract_type === "min_max") contractLabel = `Min-max (${p.min_hours || 0}-${p.max_hours || 0}u)`;
 
-      const caoLabel = p.cao === "cao_particuliere_beveiliging" 
-        ? `CAO Schaal ${p.cao_scale || 3}, Periode ${p.cao_period || 0}`
+      const caoLabel = p.cao === "cao_particuliere_beveiliging"
+        ? p.cao_scope_profile === "non_security_work_article_3_exception"
+          ? `Eigen uurloon €${(p.custom_hourly_rate || 0).toFixed(2)} (bijlage 2 n.v.t.)`
+          : `CAO schaal ${p.cao_scale ?? "-"}, periode ${p.cao_period ?? "-"}`
         : `Eigen tarief €${(p.custom_hourly_rate || 0).toFixed(2)}`;
 
       return {

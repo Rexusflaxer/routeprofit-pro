@@ -356,12 +356,18 @@
       "default": "cao_particuliere_beveiliging"
     },
     "cao_scale": {
-      "type": "number",
-      "default": 3
+      "type": [
+        "number",
+        "null"
+      ],
+      "default": null
     },
     "cao_period": {
-      "type": "number",
-      "default": 0
+      "type": [
+        "number",
+        "null"
+      ],
+      "default": null
     },
     "custom_hourly_rate": {
       "type": "number"

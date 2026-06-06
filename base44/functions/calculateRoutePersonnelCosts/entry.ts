@@ -35,20 +35,6 @@ function getSurchargeType(datetime, caoConfig) {
   return { type: 'day', percentage: 0 };
 }
 
-function getCAOHourlyRate(scale, period, caoConfig) {
-  const scaleKey = String(scale);
-  const periodKey = String(period);
-  if (caoConfig.wage_scales_detailed && caoConfig.wage_scales_detailed[scaleKey]) {
-    const entry = caoConfig.wage_scales_detailed[scaleKey][periodKey];
-    if (entry && entry.hourly_rate) return entry.hourly_rate;
-  }
-  if (caoConfig.wage_scales && caoConfig.wage_scales[scaleKey]) {
-    const rate = caoConfig.wage_scales[scaleKey][periodKey];
-    if (rate !== undefined && rate !== null) return rate;
-  }
-  return null;
-}
-
 function getNextDateForWeekday(routeWeekday) {
   const jsDay = routeWeekday === 7 ? 0 : routeWeekday;
   const today = new Date();
@@ -107,9 +93,118 @@ function normalizeCaoScope(scope) {
   return scope;
 }
 
+function resolveShiftWageBasis(personnel, caoScope, classification) {
+  if (personnel.employee_type === 'zzp') {
+    return {
+      base_hourly_rate: null,
+      wage_basis_type: 'zzp_rate',
+      appendix_2_applies: null,
+      payroll_final_allowed: true,
+      manual_review_required: false,
+      calculation_status: 'final',
+      warnings: []
+    };
+  }
+
+  if (personnel.cao !== 'cao_particuliere_beveiliging') {
+    const customRate = Number(personnel.custom_hourly_rate || 0);
+    if (customRate <= 0) {
+      return {
+        base_hourly_rate: null,
+        wage_basis_type: 'missing',
+        appendix_2_applies: null,
+        payroll_final_allowed: false,
+        manual_review_required: true,
+        calculation_status: 'blocked_missing_wage_basis',
+        warnings: [],
+        error: `Geen uurloon gevonden voor medewerker ${personnel.name} (geen CAO en geen custom_hourly_rate).`
+      };
+    }
+    return {
+      base_hourly_rate: customRate,
+      wage_basis_type: 'custom_hourly_rate',
+      appendix_2_applies: null,
+      payroll_final_allowed: true,
+      manual_review_required: false,
+      calculation_status: 'final',
+      warnings: []
+    };
+  }
+
+  const profileAppendixApplies = caoScope?.payroll_rule_profile?.apply_appendix_2_function_scales === true;
+  const appendixApplies = classification?.appendix_2_applies ?? profileAppendixApplies;
+  const isScopeManual = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope?.cao_scope_profile) ||
+    caoScope?.manual_review_required === true;
+
+  if (appendixApplies === false) {
+    const customRate = Number(personnel.custom_hourly_rate || 0);
+    if (customRate <= 0) {
+      return {
+        base_hourly_rate: null,
+        wage_basis_type: 'missing',
+        appendix_2_applies: false,
+        payroll_final_allowed: false,
+        manual_review_required: true,
+        calculation_status: 'blocked_missing_wage_basis',
+        warnings: [
+          ...(classification?.warnings || []),
+          'CAO-schaal/periodiek wordt niet gebruikt omdat bijlage 2 niet van toepassing is.'
+        ],
+        error: 'Loonbasis ontbreekt voor niet-beveiligingspersoneel: custom_hourly_rate ontbreekt. Bijlage 2 loonschaal is niet van toepassing.'
+      };
+    }
+    const manualReview = isScopeManual || classification?.manual_review_required === true;
+    return {
+      base_hourly_rate: customRate,
+      wage_basis_type: 'custom_hourly_rate',
+      appendix_2_applies: false,
+      payroll_final_allowed: !manualReview && classification?.payroll_final_allowed !== false,
+      manual_review_required: manualReview,
+      calculation_status: manualReview ? 'concept_manual_review' : 'final',
+      warnings: [
+        ...(classification?.warnings || []),
+        ...(personnel.cao_scale != null || personnel.cao_period != null
+          ? ['CAO-schaal/periodiek genegeerd: bijlage 2 is niet van toepassing op dit toepassingsprofiel.']
+          : [])
+      ]
+    };
+  }
+
+  const classificationOk = classification?.classification_status === 'resolved' &&
+    classification?.payroll_final_allowed === true &&
+    classification?.scale_valid_for_classification === true &&
+    classification?.period_valid_for_scale === true &&
+    classification?.wage_rate_found === true &&
+    Number(classification?.hourly_rate || 0) > 0;
+
+  if (!classificationOk) {
+    return {
+      base_hourly_rate: null,
+      wage_basis_type: 'manual_review',
+      appendix_2_applies: true,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      calculation_status: 'blocked_manual_review',
+      warnings: classification?.warnings || [],
+      error: `Functie-indeling/loonschaal niet definitief gevalideerd voor ${personnel.name}.`
+    };
+  }
+
+  return {
+    base_hourly_rate: Number(classification.hourly_rate),
+    wage_basis_type: 'cao_appendix_2_scale',
+    appendix_2_applies: true,
+    payroll_final_allowed: true,
+    manual_review_required: false,
+    calculation_status: 'final',
+    warnings: classification.warnings || []
+  };
+}
+
 // Composite cache fingerprint
 function buildRouteCostCacheFingerprint({ route, weekday, caoConfig, personnelList }) {
   return JSON.stringify({
+    engine_version: 'cao-wage-basis-v2',
     weekday,
     cao: caoConfig.cloudflare_revision || caoConfig.id,
     route: {
@@ -131,14 +226,17 @@ function buildRouteCostCacheFingerprint({ route, weekday, caoConfig, personnelLi
         function_group: p.cao_function_group || null,
         function_level: p.cao_function_level || null,
         classification_status: p.cao_function_classification_status || null,
+        scale_validation_status: p.cao_scale_validation_status || null,
+        payroll_final_allowed: p.payroll_final_allowed === true,
         classification_resolved_at: p.cao_wage_rate_resolved_at || null
       }))
       .sort((a, b) => a.id.localeCompare(b.id))
   });
 }
 
-function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawScope) {
+function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawScope, rawClassification) {
   const caoScope = normalizeCaoScope(rawScope);
+  const classification = rawClassification || null;
   const startDate = new Date(`${date}T${startTime}:00`);
   let endDate = new Date(`${date}T${endTime}:00`);
   if (endDate <= startDate) endDate.setDate(endDate.getDate() + 1);
@@ -190,26 +288,43 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
       total_cost_employer: r2(totalCost), cost_per_hour: r2(totalHours > 0 ? totalCost / totalHours : 0),
       cao_scope_profile: caoScope?.cao_scope_profile || null,
       scope_warnings: scopeWarnings,
+      wage_basis_type: 'zzp_rate',
+      payroll_final_allowed: true,
+      manual_review_required: false,
+      calculation_status: 'final',
+      cao_function_classification: null,
       cao_rule_application: caoRuleApplication
     };
   }
 
-  // Loondienst — geen fallback naar schaal 3/periodiek 0
-  let baseHourlyRate;
-  if (personnel.cao === 'cao_particuliere_beveiliging') {
-    if (personnel.cao_scale == null || personnel.cao_period == null) {
-      throw new Error(`CAO-schaal of periodiek niet ingesteld voor ${personnel.name}. Stel cao_scale en cao_period in.`);
-    }
-    const rate = getCAOHourlyRate(personnel.cao_scale, personnel.cao_period, caoConfig);
-    if (rate === null) {
-      throw new Error(`Geen uurloon gevonden voor schaal ${personnel.cao_scale}, periodiek ${personnel.cao_period} in CAO "${caoConfig.version_label || caoConfig.name}".`);
-    }
-    baseHourlyRate = rate;
-  } else {
-    baseHourlyRate = personnel.custom_hourly_rate || null;
-    if (!baseHourlyRate) {
-      throw new Error(`Geen uurloon gevonden voor medewerker ${personnel.name} (geen CAO en geen custom_hourly_rate).`);
-    }
+  const wageBasis = resolveShiftWageBasis(personnel, caoScope, classification);
+  const baseHourlyRate = wageBasis.base_hourly_rate;
+  if (wageBasis.error) {
+    return {
+      base_hourly_rate: null,
+      total_hours: totalHours,
+      base_salary: 0,
+      surcharges_total: 0,
+      surcharge_details: [],
+      total_gross: 0,
+      employer_costs_total: 0,
+      employer_costs: {},
+      accruals_total: 0,
+      accruals: {},
+      total_cost_employer: 0,
+      cost_per_hour: 0,
+      cao_scope_profile: caoScope?.cao_scope_profile || null,
+      scope_warnings: [...scopeWarnings, ...(wageBasis.warnings || []), wageBasis.error],
+      wage_basis_type: wageBasis.wage_basis_type,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      calculation_status: wageBasis.calculation_status,
+      cao_function_classification: classification,
+      cao_rule_application: {
+        ...caoRuleApplication,
+        manual_review_required: true
+      }
+    };
   }
 
   let baseSalary = 0;
@@ -296,17 +411,14 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
     total_cost_employer: r2(totalCostEmployer),
     cost_per_hour: r2(totalHours > 0 ? totalCostEmployer / totalHours : 0),
     cao_scope_profile: caoScope?.cao_scope_profile || null,
-    scope_warnings: scopeWarnings,
+    scope_warnings: [...scopeWarnings, ...(wageBasis.warnings || [])],
+    wage_basis_type: wageBasis.wage_basis_type,
+    payroll_final_allowed: wageBasis.payroll_final_allowed,
+    manual_review_required: wageBasis.manual_review_required,
+    calculation_status: wageBasis.calculation_status,
+    cao_function_classification: classification,
     cao_rule_application: caoRuleApplication
   };
-}
-
-// Cache-key bevat revision, scope_profile en updated_date om stale scope te vermijden
-function buildCacheKey(weekday, caoConfig, personnel) {
-  const revision = caoConfig?.cloudflare_revision || caoConfig?.id || 'unknown';
-  const scope = personnel?.cao_scope_profile || 'unknown';
-  const updated = personnel?.updated_date || personnel?.cao_applicability_resolved_at || '';
-  return `${weekday}_${revision}_${scope}_${updated.slice(0, 10)}`;
 }
 
 Deno.serve(async (req) => {
@@ -413,18 +525,30 @@ Deno.serve(async (req) => {
         .then(r => ({ id: p.id, scope: r?.data || null }))
         .catch(() => ({ id: p.id, scope: null }))
     );
+    const classificationPromises = allPersonnelForCache.map(p => {
+      if (p.employee_type !== 'loondienst' || p.cao !== 'cao_particuliere_beveiliging') {
+        return Promise.resolve({ id: p.id, classification: null });
+      }
+      return base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', { personnel_id: p.id })
+        .then(r => ({ id: p.id, classification: r?.data || null }))
+        .catch(() => ({ id: p.id, classification: null }));
+    });
 
-    const [scopeResults, binnendienstScopeResults] = await Promise.all([
+    const [scopeResults, binnendienstScopeResults, classificationResults] = await Promise.all([
       Promise.all(scopePromises),
-      Promise.all(binnendienstScopePromises)
+      Promise.all(binnendienstScopePromises),
+      Promise.all(classificationPromises)
     ]);
     const scopeById = {};
     for (const s of scopeResults) scopeById[s.id] = s.scope;
     for (const s of binnendienstScopeResults) scopeById[s.id] = s.scope;
+    const classificationById = {};
+    for (const c of classificationResults) classificationById[c.id] = c.classification;
 
     const results = surveillants.map(p => {
       const scope = scopeById[p.id] || null;
-      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, scope);
+      const classification = classificationById[p.id] || null;
+      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, scope, classification);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
@@ -433,21 +557,39 @@ Deno.serve(async (req) => {
       };
     });
 
-    results.sort((a, b) => b.total_cost_employer - a.total_cost_employer);
+    const isCosted = r => !String(r.calculation_status || '').startsWith('blocked');
+    const costedResults = results.filter(isCosted);
+    costedResults.sort((a, b) => b.total_cost_employer - a.total_cost_employer);
+    results.sort((a, b) => {
+      if (isCosted(a) && !isCosted(b)) return -1;
+      if (!isCosted(a) && isCosted(b)) return 1;
+      return (b.total_cost_employer || 0) - (a.total_cost_employer || 0);
+    });
 
-    const count = results.length;
-    const mostExpensive = results[0];
-    const cheapest = results[results.length - 1];
-    const average = {
-      total_cost_employer: r2(results.reduce((s, r) => s + r.total_cost_employer, 0) / count),
-      cost_per_hour: r2(results.reduce((s, r) => s + r.cost_per_hour, 0) / count),
-      total_hours: results[0]?.total_hours || 0,
-      base_salary: r2(results.reduce((s, r) => s + r.base_salary, 0) / count),
-      surcharges_total: r2(results.reduce((s, r) => s + r.surcharges_total, 0) / count),
-      total_gross: r2(results.reduce((s, r) => s + r.total_gross, 0) / count),
-      employer_costs_total: r2(results.reduce((s, r) => s + r.employer_costs_total, 0) / count),
-      accruals_total: r2(results.reduce((s, r) => s + r.accruals_total, 0) / count),
+    const count = costedResults.length;
+    const mostExpensive = costedResults[0] || null;
+    const cheapest = costedResults[costedResults.length - 1] || null;
+    const average = count > 0 ? {
+      total_cost_employer: r2(costedResults.reduce((s, r) => s + r.total_cost_employer, 0) / count),
+      cost_per_hour: r2(costedResults.reduce((s, r) => s + r.cost_per_hour, 0) / count),
+      total_hours: costedResults[0]?.total_hours || 0,
+      base_salary: r2(costedResults.reduce((s, r) => s + r.base_salary, 0) / count),
+      surcharges_total: r2(costedResults.reduce((s, r) => s + r.surcharges_total, 0) / count),
+      total_gross: r2(costedResults.reduce((s, r) => s + r.total_gross, 0) / count),
+      employer_costs_total: r2(costedResults.reduce((s, r) => s + r.employer_costs_total, 0) / count),
+      accruals_total: r2(costedResults.reduce((s, r) => s + r.accruals_total, 0) / count),
       count
+    } : {
+      total_cost_employer: 0,
+      cost_per_hour: 0,
+      total_hours: 0,
+      base_salary: 0,
+      surcharges_total: 0,
+      total_gross: 0,
+      employer_costs_total: 0,
+      accruals_total: 0,
+      count: 0,
+      calculation_status: 'blocked_no_costed_personnel'
     };
 
     // Voertuigkosten
@@ -511,7 +653,8 @@ Deno.serve(async (req) => {
 
     const binnendienstResults = binnendienst.map(p => {
       const scope = scopeById[p.id] || null;
-      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, scope);
+      const classification = classificationById[p.id] || null;
+      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, scope, classification);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
@@ -519,6 +662,10 @@ Deno.serve(async (req) => {
         ...cost
       };
     });
+    const allCostResults = [...results, ...binnendienstResults];
+    const blockedResults = allCostResults.filter(r => String(r.calculation_status || '').startsWith('blocked'));
+    const manualReviewResults = allCostResults.filter(r => r.manual_review_required === true || r.payroll_final_allowed === false);
+    const routePayrollFinalAllowed = blockedResults.length === 0 && manualReviewResults.length === 0;
 
     const resultPayload = {
       shift_date: shiftDate, weekday: targetWeekday,
@@ -526,23 +673,39 @@ Deno.serve(async (req) => {
       planned_end_time: plannedEndTime,
       alarm_standby: !!route.alarm_standby,
       actual_shift_note: actualShiftNote,
-      total_surveillants: count,
+      total_surveillants: results.length,
       most_expensive: mostExpensive, cheapest, average,
       all_personnel: results,
       binnendienst: binnendienstResults,
       vehicle_costs: vehicleCosts,
+      payroll_final_allowed: routePayrollFinalAllowed,
+      manual_review_required: manualReviewResults.length > 0,
+      calculation_status: routePayrollFinalAllowed
+        ? 'final'
+        : blockedResults.length > 0
+        ? 'blocked_manual_review'
+        : 'concept_manual_review',
       cao_sync_status: caoSyncStatus,
-      calculation_warnings: syncWarnings,
+      calculation_warnings: [
+        ...syncWarnings,
+        ...blockedResults.map(r => `${r.name}: ${r.scope_warnings?.slice(-1)?.[0] || 'loonbasis/functie-indeling geblokkeerd'}`),
+        ...manualReviewResults
+          .filter(r => !blockedResults.includes(r))
+          .map(r => `${r.name}: handmatige review vereist voor definitieve payroll.`)
+      ],
       _cache_revision: caoConfig.cloudflare_revision || null,
-      _cache_fingerprint: fingerprint
+      _cache_fingerprint: fingerprint,
+      _cache_is_final_payroll_basis: routePayrollFinalAllowed
     };
 
-    const existingCache = route.cached_personnel_costs || {};
-    existingCache[cacheKey] = resultPayload;
-    await base44.entities.Route.update(route_id, {
-      cached_personnel_costs: existingCache,
-      personnel_costs_calculated_at: new Date().toISOString()
-    });
+    if (routePayrollFinalAllowed) {
+      const existingCache = route.cached_personnel_costs || {};
+      existingCache[cacheKey] = resultPayload;
+      await base44.entities.Route.update(route_id, {
+        cached_personnel_costs: existingCache,
+        personnel_costs_calculated_at: new Date().toISOString()
+      });
+    }
 
     return Response.json(resultPayload);
 

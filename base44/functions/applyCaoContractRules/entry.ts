@@ -235,13 +235,27 @@ Deno.serve(async (req) => {
       let baseHourlyRate = body.base_hourly_rate || null;
       if (personnel_id && !baseHourlyRate) {
         const personnel = await base44.entities.Personnel.get(personnel_id);
-        if (personnel?.cao === 'cao_particuliere_beveiliging') {
-          const caos = await base44.asServiceRole.entities.CAOConfiguration.filter({ status: 'active' });
-          if (caos[0]?.wage_scales_detailed) {
-            const scaleKey = String(personnel.cao_scale || 3);
-            const periodKey = String(personnel.cao_period || 1);
-            baseHourlyRate = caos[0].wage_scales_detailed[scaleKey]?.[periodKey]?.hourly_rate || null;
+        if (personnel?.employee_type === 'loondienst' && personnel?.cao === 'cao_particuliere_beveiliging') {
+          try {
+            const classRes = await base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', { personnel_id });
+            const classification = classRes?.data || null;
+            if (classification?.appendix_2_applies === false && Number(personnel.custom_hourly_rate || 0) > 0) {
+              baseHourlyRate = Number(personnel.custom_hourly_rate);
+            } else if (
+              classification?.appendix_2_applies === true &&
+              classification?.payroll_final_allowed === true &&
+              classification?.wage_rate_found === true &&
+              Number(classification?.hourly_rate || 0) > 0
+            ) {
+              baseHourlyRate = Number(classification.hourly_rate);
+            } else {
+              syncWarnings.push('Basisuurloon voor proeftijdvergoeding kon niet definitief worden bepaald; geen fallback naar schaal/periodiek toegepast.');
+            }
+          } catch {
+            syncWarnings.push('Functie-indeling voor basisuurloon kon niet worden bepaald; geen fallback naar schaal/periodiek toegepast.');
           }
+        } else if (Number(personnel?.custom_hourly_rate || 0) > 0) {
+          baseHourlyRate = Number(personnel.custom_hourly_rate);
         }
       }
       const result = validateProbationDismissal({ ...body, base_hourly_rate: baseHourlyRate });

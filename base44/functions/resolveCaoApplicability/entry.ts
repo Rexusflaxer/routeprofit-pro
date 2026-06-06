@@ -117,13 +117,15 @@ function buildFunctionClassification(p, manualReview, sourceRuleIds, isNonSecuri
   const group = isNonSecurity ? 'non_security_staff' : (p.cao_function_group || 'unknown');
   const level = p.cao_function_level || 'unknown';
 
-  // Bijlage 2 schaal-suggestie alleen voor echte beveiligingsfuncties
+  // Bijlage 2 schaal-suggestie alleen voor echte beveiligingsfuncties.
+  // CAO-PB-2024-R1813: alle zes functiegroepen volgen dezelfde schaalrij 2 t/m 7.
   const scaleMap = {
-    'objectbeveiliger_receptionist_aspirant': 2, 'objectbeveiliger_receptionist_a': 3,
-    'objectbeveiliger_receptionist_b': 4, 'objectbeveiliger_receptionist_c': 5,
-    'mobiel_surveillant_a': 3, 'mobiel_surveillant_b': 4, 'mobiel_surveillant_c': 5,
-    'winkelsurveillant_a': 3, 'brandwacht_a': 3,
-    'geld_waardetransporteur_a': 4, 'centralist_a': 4, 'centralist_b': 5
+    'objectbeveiliger_receptionist_aspirant': 2, 'objectbeveiliger_receptionist_a': 3, 'objectbeveiliger_receptionist_b': 4, 'objectbeveiliger_receptionist_c': 5, 'objectbeveiliger_receptionist_d': 6, 'objectbeveiliger_receptionist_e': 7,
+    'mobiel_surveillant_aspirant': 2, 'mobiel_surveillant_a': 3, 'mobiel_surveillant_b': 4, 'mobiel_surveillant_c': 5, 'mobiel_surveillant_d': 6, 'mobiel_surveillant_e': 7,
+    'winkelsurveillant_aspirant': 2, 'winkelsurveillant_a': 3, 'winkelsurveillant_b': 4, 'winkelsurveillant_c': 5, 'winkelsurveillant_d': 6, 'winkelsurveillant_e': 7,
+    'brandwacht_aspirant': 2, 'brandwacht_a': 3, 'brandwacht_b': 4, 'brandwacht_c': 5, 'brandwacht_d': 6, 'brandwacht_e': 7,
+    'geld_waardetransporteur_aspirant': 2, 'geld_waardetransporteur_a': 3, 'geld_waardetransporteur_b': 4, 'geld_waardetransporteur_c': 5, 'geld_waardetransporteur_d': 6, 'geld_waardetransporteur_e': 7,
+    'centralist_aspirant': 2, 'centralist_a': 3, 'centralist_b': 4, 'centralist_c': 5, 'centralist_d': 6, 'centralist_e': 7
   };
 
   const mapKey = `${group}_${level}`;
@@ -135,7 +137,7 @@ function buildFunctionClassification(p, manualReview, sourceRuleIds, isNonSecuri
     suggested_cao_scale: suggestedScale,
     confidence: manualReview ? 'low' : (suggestedScale ? 'medium' : 'low'),
     manual_review_required: manualReview || !suggestedScale,
-    source_rule_ids: [...sourceRuleIds, 'CAO-PB-2024-R1751']
+    source_rule_ids: [...sourceRuleIds, 'CAO-PB-2024-R1813']
   };
 }
 

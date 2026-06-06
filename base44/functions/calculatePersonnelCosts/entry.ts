@@ -66,24 +66,145 @@ function getSurchargeType(datetime, caoConfig) {
   return { type: 'day', percentage: 0 };
 }
 
-function getCAOHourlyRate(scale, period, caoConfig) {
-  const scaleKey = String(scale);
-  const periodKey = String(period);
-
-  // Probeer eerst gedetailleerde loontabel
-  if (caoConfig.wage_scales_detailed && caoConfig.wage_scales_detailed[scaleKey]) {
-    const entry = caoConfig.wage_scales_detailed[scaleKey][periodKey];
-    if (entry && entry.hourly_rate) return entry.hourly_rate;
+async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, caoScope }) {
+  if (personnel.employee_type !== 'loondienst') {
+    return {
+      base_hourly_rate: null,
+      wage_basis_type: personnel.employee_type === 'zzp' ? 'zzp_rate' : 'missing',
+      appendix_2_applies: null,
+      payroll_final_allowed: true,
+      manual_review_required: false,
+      calculation_status: personnel.employee_type === 'zzp' ? 'final' : 'not_applicable',
+      warnings: [],
+      cao_function_classification: null
+    };
   }
 
-  // Legacy wage_scales
-  if (caoConfig.wage_scales && caoConfig.wage_scales[scaleKey]) {
-    const rate = caoConfig.wage_scales[scaleKey][periodKey];
-    if (rate !== undefined && rate !== null) return rate;
+  if (personnel.cao !== 'cao_particuliere_beveiliging') {
+    const customRate = Number(personnel.custom_hourly_rate || 0);
+    if (customRate <= 0) {
+      return {
+        base_hourly_rate: null,
+        wage_basis_type: 'missing',
+        appendix_2_applies: null,
+        payroll_final_allowed: false,
+        manual_review_required: true,
+        calculation_status: 'blocked_missing_wage_basis',
+        warnings: [],
+        error: `Geen uurloon gevonden voor medewerker ${personnel.name} (eigen tarief): custom_hourly_rate ontbreekt.`,
+        cao_function_classification: null
+      };
+    }
+    return {
+      base_hourly_rate: customRate,
+      wage_basis_type: 'custom_hourly_rate',
+      appendix_2_applies: null,
+      payroll_final_allowed: true,
+      manual_review_required: false,
+      calculation_status: 'final',
+      warnings: [],
+      cao_function_classification: null
+    };
   }
 
-  // Geen fallback — geeft null terug zodat aanroeper een fout kan genereren
-  return null;
+  let classification = null;
+  try {
+    const classRes = await base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', {
+      personnel_id,
+      work_context: {}
+    });
+    classification = classRes?.data || null;
+  } catch {
+    classification = null;
+  }
+
+  const profileAppendixApplies = caoScope?.payroll_rule_profile?.apply_appendix_2_function_scales === true;
+  const appendixApplies = classification?.appendix_2_applies ?? profileAppendixApplies;
+  const isScopeManual = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope?.cao_scope_profile) ||
+    caoScope?.manual_review_required === true;
+
+  if (appendixApplies === false) {
+    const customRate = Number(personnel.custom_hourly_rate || 0);
+    if (customRate <= 0) {
+      return {
+        base_hourly_rate: null,
+        wage_basis_type: 'missing',
+        appendix_2_applies: false,
+        payroll_final_allowed: false,
+        manual_review_required: true,
+        calculation_status: 'blocked_missing_wage_basis',
+        warnings: [
+          ...(classification?.warnings || []),
+          'CAO-schaal/periodiek wordt niet gebruikt omdat bijlage 2 niet van toepassing is.'
+        ],
+        error: 'Loonbasis ontbreekt voor niet-beveiligingspersoneel: custom_hourly_rate ontbreekt. Bijlage 2 loonschaal is niet van toepassing.',
+        cao_function_classification: classification
+      };
+    }
+
+    const manualReview = isScopeManual || classification?.manual_review_required === true;
+    return {
+      base_hourly_rate: customRate,
+      wage_basis_type: 'custom_hourly_rate',
+      appendix_2_applies: false,
+      payroll_final_allowed: !manualReview && classification?.payroll_final_allowed !== false,
+      manual_review_required: manualReview,
+      calculation_status: manualReview ? 'concept_manual_review' : 'final',
+      warnings: [
+        ...(classification?.warnings || []),
+        ...(personnel.cao_scale != null || personnel.cao_period != null
+          ? ['CAO-schaal/periodiek genegeerd: bijlage 2 is niet van toepassing op dit toepassingsprofiel.']
+          : [])
+      ],
+      cao_function_classification: classification
+    };
+  }
+
+  if (!classification) {
+    return {
+      base_hourly_rate: null,
+      wage_basis_type: 'manual_review',
+      appendix_2_applies: true,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      calculation_status: 'blocked_manual_review',
+      warnings: [],
+      error: 'Functie-indeling kon niet worden bepaald. Loonberekening is geblokkeerd totdat bijlage-2 schaal en periodiek zijn gevalideerd.',
+      cao_function_classification: null
+    };
+  }
+
+  const classificationOk = classification.classification_status === 'resolved' &&
+    classification.payroll_final_allowed === true &&
+    classification.scale_valid_for_classification === true &&
+    classification.period_valid_for_scale === true &&
+    classification.wage_rate_found === true &&
+    Number(classification.hourly_rate || 0) > 0;
+
+  if (!classificationOk) {
+    return {
+      base_hourly_rate: null,
+      wage_basis_type: 'manual_review',
+      appendix_2_applies: true,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      calculation_status: 'blocked_manual_review',
+      warnings: classification.warnings || [],
+      error: `Functie-indeling/loonschaal niet definitief gevalideerd voor ${personnel.name}. Loonberekening is geblokkeerd totdat bijlage-2 schaal en periodiek kloppen.`,
+      cao_function_classification: classification
+    };
+  }
+
+  return {
+    base_hourly_rate: Number(classification.hourly_rate),
+    wage_basis_type: 'cao_appendix_2_scale',
+    appendix_2_applies: true,
+    payroll_final_allowed: true,
+    manual_review_required: false,
+    calculation_status: 'final',
+    warnings: classification.warnings || [],
+    cao_function_classification: classification
+  };
 }
 
 // Bereken loonheffing op basis van bruto loon
@@ -308,74 +429,28 @@ Deno.serve(async (req) => {
       is_call_worker: isCallWorker
     };
 
-    // ── Functie-indeling en loonschaal-validatie (loondienst + cao_particuliere_beveiliging) ──
-    let functionClassificationResult = null;
-    let payrollFinalAllowed = true;
-    if (personnel.employee_type === 'loondienst' && personnel.cao === 'cao_particuliere_beveiliging') {
-      try {
-        const classRes = await base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', {
-          personnel_id,
-          work_context: {}
-        });
-        functionClassificationResult = classRes?.data || null;
-      } catch { /* stille fallback */ }
+    // ── Bepaal loonbasis via CAO-scope + functieclassificatie ──
+    const wageBasis = await resolveLoondienstWageBasis({ base44, personnel_id, personnel, caoScope });
+    const functionClassificationResult = wageBasis.cao_function_classification;
+    const payrollFinalAllowed = wageBasis.payroll_final_allowed;
+    const wageBasisType = wageBasis.wage_basis_type;
+    const calculationStatus = wageBasis.calculation_status;
+    calculationWarnings.push(...(wageBasis.warnings || []));
 
-      if (functionClassificationResult) {
-        if (functionClassificationResult.appendix_2_applies === true && functionClassificationResult.manual_review_required === true) {
-          payrollFinalAllowed = false;
-          calculationWarnings.push(`Functie-indeling vereist handmatige review (${(functionClassificationResult.manual_review_reasons || []).join('; ')}). Loonberekening is concept.`);
-        } else if (functionClassificationResult.payroll_final_allowed === false) {
-          payrollFinalAllowed = false;
-          calculationWarnings.push('Loonschaal/periodiek niet gevalideerd. Loonberekening is concept.');
-        }
-        // Non-security zonder loonbasis: harde fout
-        if (functionClassificationResult.appendix_2_applies === false && !functionClassificationResult.wage_rate_found && !personnel.custom_hourly_rate) {
-          return Response.json({
-            error: 'Loonbasis ontbreekt voor niet-beveiligingspersoneel: geen custom_hourly_rate en geen geldige CAO-schaal/periodiek. Stel een tarief in.',
-            cao_sync_status: caoSyncStatus,
-            calculation_warnings: calculationWarnings,
-            payroll_final_allowed: false
-          }, { status: 400 });
-        }
-      }
+    if (wageBasis.error) {
+      return Response.json({
+        error: wageBasis.error,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: calculationWarnings,
+        cao_function_classification: functionClassificationResult,
+        wage_basis_type: wageBasisType,
+        calculation_status: calculationStatus,
+        manual_review_required: wageBasis.manual_review_required,
+        payroll_final_allowed: false
+      }, { status: 400 });
     }
 
-    // Bepaal basis uurloon
-    let baseHourlyRate = 0;
-    if (personnel.employee_type === 'loondienst') {
-      if (personnel.cao === 'cao_particuliere_beveiliging') {
-        // Geen fallback naar schaal 3/periodiek 0 — fail als schaal/periodiek ontbreekt of niet in loontabel
-        if (personnel.cao_scale == null || personnel.cao_period == null) {
-          return Response.json({
-            error: `CAO-schaal of periodiek niet ingesteld voor medewerker ${personnel.name}. Stel cao_scale en cao_period in.`,
-            cao_sync_status: caoSyncStatus,
-            calculation_warnings: calculationWarnings,
-            payroll_final_allowed: false
-          }, { status: 400 });
-        }
-        const rate = getCAOHourlyRate(personnel.cao_scale, personnel.cao_period, caoConfig);
-        if (rate === null) {
-          return Response.json({
-            error: `Geen uurloon gevonden voor schaal ${personnel.cao_scale}, periodiek ${personnel.cao_period} in CAO-versie "${caoConfig.version_label || caoConfig.name}". Controleer de loontabel.`,
-            cao_sync_status: caoSyncStatus,
-            calculation_warnings: [...calculationWarnings, `Ontbrekende schaal/periodiek combinatie: ${personnel.cao_scale}/${personnel.cao_period}`],
-            payroll_final_allowed: false
-          }, { status: 400 });
-        }
-        baseHourlyRate = rate;
-      } else {
-        // Eigen tarief: moet expliciet ingesteld zijn
-        if (!personnel.custom_hourly_rate) {
-          return Response.json({
-            error: `Geen uurloon gevonden voor medewerker ${personnel.name} (eigen tarief): custom_hourly_rate ontbreekt.`,
-            cao_sync_status: caoSyncStatus,
-            calculation_warnings: calculationWarnings,
-            payroll_final_allowed: false
-          }, { status: 400 });
-        }
-        baseHourlyRate = personnel.custom_hourly_rate;
-      }
-    }
+    const baseHourlyRate = wageBasis.base_hourly_rate || 0;
 
     // Bereken per werkdag
     for (const shift of work_schedule) {
@@ -668,6 +743,8 @@ Deno.serve(async (req) => {
       scope_warnings: scopeWarnings,
       manual_review_required: isUnknownOrMixedScope || !payrollFinalAllowed,
       payroll_final_allowed: payrollFinalAllowed,
+      wage_basis_type: wageBasisType,
+      calculation_status: calculationStatus,
       cao_function_classification: functionClassificationResult,
       cao_rule_application: caoRuleApplication,
       employee_type: personnel.employee_type,

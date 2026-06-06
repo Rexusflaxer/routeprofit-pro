@@ -34,7 +34,7 @@ export default function PersonnelWizard({ person, onClose }) {
 
   const [form, setForm] = useState(person || {
     name: "", status: "draft", function_type: "surveillant", employee_type: "loondienst",
-    cao: "cao_particuliere_beveiliging", cao_scale: 3, cao_period: 0, is_active: true,
+    cao: "cao_particuliere_beveiliging", cao_scale: null, cao_period: null, payroll_final_allowed: false, is_active: true,
     country: "Nederland", wpbr_required: false,
   });
   const [sensitiveData, setSensitiveData] = useState({ bsn: "", identity_verified_at_hire: false, payroll_notes: "" });
