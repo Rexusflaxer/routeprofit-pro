@@ -42,6 +42,59 @@
       "default": "unknown",
       "description": "Contractvorm conform CAO"
     },
+    "employment_contract_model": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "fulltime",
+        "parttime_fixed",
+        "parttime_growth",
+        "parttime_unknown_model",
+        "call_agreement",
+        "internship",
+        "hired_worker",
+        "zzp",
+        "unknown",
+        null
+      ],
+      "description": "CAO PB contractmodel: fulltime 144u/loonperiode, parttime vast/groeimodel, oproep, stage, inhuur/payroll, zzp of onbekend."
+    },
+    "parttime_contract_model": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "fixed",
+        "growth",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Voor parttime arbeidsovereenkomsten: vast model of groeimodel conform CAO PB artikel 11."
+    },
+    "employment_contract_model_rule_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Validatiestatus van fulltime/parttime/oproep contractmodel volgens CAO PB artikelen 10 en 11."
+    },
+    "employment_contract_model_manual_review_required": {
+      "type": "boolean",
+      "default": true,
+      "description": "True als fulltime/parttime/oproep contractmodel niet definitief automatisch kan worden vastgesteld."
+    },
     "contract_start_date": {
       "type": [
         "string",

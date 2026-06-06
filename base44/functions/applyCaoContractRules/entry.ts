@@ -1997,18 +1997,251 @@ function evaluateHiredWorkerContractRules(input) {
   };
 }
 
+function normalizeContractModel(value) {
+  const normalized = String(value || '').toLowerCase();
+  const aliases = {
+    fulltime: 'fulltime',
+    full_time: 'fulltime',
+    voltijd: 'fulltime',
+    parttime_fixed: 'parttime_fixed',
+    parttime_vast: 'parttime_fixed',
+    vast_model: 'parttime_fixed',
+    fixed: 'parttime_fixed',
+    parttime_growth: 'parttime_growth',
+    parttime_groei: 'parttime_growth',
+    groeimodel: 'parttime_growth',
+    growth: 'parttime_growth',
+    oproep: 'call_agreement',
+    call: 'call_agreement',
+    zero_hours: 'call_agreement',
+    min_max: 'call_agreement',
+    stage: 'internship',
+    internship: 'internship',
+    uitzend: 'hired_worker',
+    payroll: 'hired_worker',
+    zzp: 'zzp'
+  };
+  return aliases[normalized] || null;
+}
+
+function resolveContractHoursPerPayPeriod(input) {
+  const periodHours = numberOrNull(input.contract_hours_per_pay_period) ??
+    numberOrNull(input.fixed_hours_per_pay_period);
+  if (periodHours !== null) {
+    return { hours: periodHours, source: 'contract_hours_per_pay_period' };
+  }
+
+  const weeklyHours = numberOrNull(input.contract_hours_per_week);
+  if (weeklyHours !== null) {
+    return {
+      hours: Math.round(weeklyHours * 4 * 100) / 100,
+      source: 'contract_hours_per_week_x4',
+      contract_hours_per_week: weeklyHours
+    };
+  }
+
+  return { hours: null, source: 'missing' };
+}
+
+function evaluateEmploymentContractModelRules(input, callAgreement, internship, hiredWorker) {
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0309', 'CAO-PB-2024-R0310',
+    'CAO-PB-2024-R0337', 'CAO-PB-2024-R0339',
+    'CAO-PB-2024-R0342', 'CAO-PB-2024-R0343',
+    'CAO-PB-2024-R0345', 'CAO-PB-2024-R0347',
+    'CAO-PB-2024-R0358', 'CAO-PB-2024-R0359'
+  ];
+  const warnings = [];
+  const violations = [];
+  const missingEvidence = [];
+  const recommendedContractUpdate = {};
+  const contractForm = input.contract_form || 'unknown';
+  const explicitModel = normalizeContractModel(
+    input.employment_contract_model ||
+    input.contract_model ||
+    input.parttime_contract_model ||
+    input.contract_type
+  );
+  const hoursInfo = resolveContractHoursPerPayPeriod(input);
+  const hours = hoursInfo.hours;
+  const isCall = callAgreement?.is_call_agreement === true || contractForm === 'oproep';
+  const isInternship = internship?.is_internship === true || contractForm === 'stage';
+  const isHiredWorker = hiredWorker?.is_hired_worker === true || ['uitzend', 'payroll'].includes(contractForm);
+
+  let model = explicitModel;
+  if (!model) {
+    if (isCall) model = 'call_agreement';
+    else if (isInternship) model = 'internship';
+    else if (isHiredWorker) model = 'hired_worker';
+    else if (contractForm === 'zzp') model = 'zzp';
+    else if (hours === 144) model = 'fulltime';
+    else if (hours !== null && hours < 144) model = null;
+    else model = 'unknown';
+  }
+
+  if (!['bepaalde_tijd', 'onbepaalde_tijd', 'oproep', 'stage', 'uitzend', 'payroll', 'zzp'].includes(contractForm)) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0310',
+      field: 'contract_form',
+      message: 'Contractvorm ontbreekt of is onbekend; arbeidsovereenkomst voor bepaalde/onbepaalde tijd of bijzondere contractvorm moet expliciet zijn.'
+    });
+  }
+
+  if (model === 'call_agreement' || model === 'internship' || model === 'hired_worker' || model === 'zzp') {
+    recommendedContractUpdate.employment_contract_model = model;
+    return {
+      employment_contract_model: model,
+      parttime_contract_model: 'not_applicable',
+      contract_hours_per_pay_period_resolved: hours,
+      contract_hours_source: hoursInfo.source,
+      employment_contract_model_status: missingEvidence.length > 0 ? 'manual_review_required' : 'not_applicable',
+      employment_contract_model_compliant: missingEvidence.length === 0,
+      source_rule_ids: [...new Set(sourceRuleIds)],
+      warnings,
+      missing_evidence: missingEvidence,
+      contract_rule_violations: violations,
+      payroll_entitlements: [],
+      manual_review_required: missingEvidence.length > 0,
+      recommended_contract_update: recommendedContractUpdate
+    };
+  }
+
+  if (hours === null) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0337',
+      field: 'contract_hours_per_pay_period',
+      message: 'Contractuele arbeidsduur per loonperiode ontbreekt; fulltime/parttime-model kan niet definitief worden bepaald.'
+    });
+  } else {
+    recommendedContractUpdate.contract_hours_per_pay_period = hours;
+  }
+
+  if (hours !== null && hours > 144) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0337',
+      severity: 'high',
+      message: `Contractuele arbeidsduur is ${hours} uur per loonperiode; fulltime is 144 uur. Hogere uren moeten via meeruren/overuren of aparte CAO-review lopen.`,
+      contract_hours_per_pay_period: hours,
+      fulltime_hours_per_pay_period: 144
+    });
+  }
+
+  if (model === 'fulltime') {
+    if (hours !== null && hours !== 144) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0337',
+        severity: 'high',
+        message: `Contract is als fulltime gemarkeerd, maar arbeidsduur is ${hours} uur per loonperiode in plaats van 144.`,
+        contract_hours_per_pay_period: hours,
+        required_hours_per_pay_period: 144
+      });
+    }
+    recommendedContractUpdate.employment_contract_model = 'fulltime';
+  } else if (model === 'parttime_fixed' || model === 'parttime_growth' || (hours !== null && hours < 144)) {
+    if (hours !== null && hours >= 144) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0342',
+        severity: 'high',
+        message: `Parttime arbeidsovereenkomst moet minder dan 144 uur per loonperiode zijn; opgegeven: ${hours}.`,
+        contract_hours_per_pay_period: hours
+      });
+    }
+
+    const parttimeModel = model === 'parttime_fixed' || model === 'parttime_growth' ? model : null;
+    if (!parttimeModel) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0347',
+        field: 'employment_contract_model',
+        message: 'Parttime arbeidsovereenkomst moet bij sluiten expliciet vast model of groeimodel zijn.'
+      });
+    } else {
+      recommendedContractUpdate.employment_contract_model = parttimeModel;
+      recommendedContractUpdate.parttime_contract_model = parttimeModel === 'parttime_fixed' ? 'fixed' : 'growth';
+    }
+
+    if (parttimeModel === 'parttime_fixed' && hours === null) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0358',
+        field: 'fixed_hours_per_pay_period',
+        message: 'Parttime vast model vereist een vast aantal uren per loonperiode in de arbeidsovereenkomst.'
+      });
+    }
+
+    const maxHours = numberOrNull(input.max_hours_per_pay_period);
+    if (parttimeModel === 'parttime_growth' && maxHours !== null && maxHours > 144) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0345',
+        severity: 'high',
+        message: `Groeimodel mag werknemer niet verplichten boven fulltime arbeidsduur te werken (${maxHours} > 144 uur per loonperiode).`,
+        max_hours_per_pay_period: maxHours,
+        fulltime_hours_per_pay_period: 144
+      });
+    }
+  } else if (model === 'unknown') {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0337',
+      field: 'employment_contract_model',
+      message: 'Arbeidsovereenkomstmodel onbekend; kies fulltime, parttime vast, parttime groeimodel of oproep.'
+    });
+  } else if (model) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R0347',
+      field: 'employment_contract_model',
+      message: `Arbeidsovereenkomstmodel "${model}" wordt niet herkend voor reguliere CAO PB contractvalidatie.`
+    });
+  }
+
+  if (hoursInfo.source === 'contract_hours_per_week_x4') {
+    warnings.push('Arbeidsduur per loonperiode is afgeleid uit contract_hours_per_week x 4; leg bij voorkeur contract_hours_per_pay_period expliciet vast.');
+  }
+
+  const hasBlockingViolation = violations.some(v => v.severity === 'high' || v.severity === 'critical');
+  const manualReviewRequired = missingEvidence.length > 0;
+
+  return {
+    employment_contract_model: model || (hours !== null && hours < 144 ? 'parttime_unknown_model' : 'unknown'),
+    parttime_contract_model: model === 'parttime_fixed'
+      ? 'fixed'
+      : model === 'parttime_growth'
+      ? 'growth'
+      : hours !== null && hours < 144
+      ? 'unknown'
+      : 'not_applicable',
+    contract_hours_per_pay_period_resolved: hours,
+    contract_hours_source: hoursInfo.source,
+    fulltime_hours_per_pay_period: 144,
+    fulltime_hours_per_week: 36,
+    employment_contract_model_status: hasBlockingViolation
+      ? 'blocked'
+      : manualReviewRequired
+      ? 'manual_review_required'
+      : 'compliant',
+    employment_contract_model_compliant: !hasBlockingViolation && !manualReviewRequired,
+    source_rule_ids: [...new Set(sourceRuleIds)],
+    warnings,
+    missing_evidence: missingEvidence,
+    contract_rule_violations: violations,
+    payroll_entitlements: [],
+    manual_review_required: manualReviewRequired,
+    recommended_contract_update: recommendedContractUpdate
+  };
+}
+
 function buildFullContractRuleResult(input, caoScope) {
   const probation = calculateProbationPeriod(input, caoScope);
   const callAgreement = evaluateCallAgreementRules(input);
   const internship = evaluateInternshipContractRules(input);
   const hiredWorker = evaluateHiredWorkerContractRules(input);
+  const employmentContractModel = evaluateEmploymentContractModelRules(input, callAgreement, internship, hiredWorker);
   const sourceRuleIds = [...new Set([
+    ...(employmentContractModel.source_rule_ids || []),
     ...(probation.source_rule_ids || []),
     ...(callAgreement.source_rule_ids || []),
     ...(internship.source_rule_ids || []),
     ...(hiredWorker.source_rule_ids || [])
   ])];
   const warnings = [
+    ...(employmentContractModel.warnings || []),
     ...(probation.warnings || []),
     ...(callAgreement.warnings || []),
     ...(internship.warnings || []),
@@ -2016,22 +2249,26 @@ function buildFullContractRuleResult(input, caoScope) {
   ];
   const scopeWarnings = probation.scope_warnings || [];
   const contractRuleViolations = [
+    ...(employmentContractModel.contract_rule_violations || []),
     ...(probation.contract_rule_violations || []),
     ...(callAgreement.contract_rule_violations || []),
     ...(internship.contract_rule_violations || []),
     ...(hiredWorker.contract_rule_violations || [])
   ];
   const payrollEntitlements = [
+    ...(employmentContractModel.payroll_entitlements || []),
     ...(callAgreement.payroll_entitlements || []),
     ...(internship.payroll_entitlements || []),
     ...(hiredWorker.payroll_entitlements || [])
   ];
   const hasBlockingViolation = contractRuleViolations.some(v => v.severity === 'high' || v.severity === 'critical');
   const manualReviewRequired = probation.manual_review_required === true ||
+    employmentContractModel.employment_contract_model_status === 'manual_review_required' ||
     callAgreement.call_agreement_status === 'manual_review_required' ||
     internship.internship_rule_status === 'manual_review_required' ||
     hiredWorker.hired_worker_rule_status === 'manual_review_required';
   const contractRuleStatus = hasBlockingViolation ||
+    employmentContractModel.employment_contract_model_status === 'blocked' ||
     probation.contract_rule_status === 'blocked' ||
     callAgreement.call_agreement_status === 'blocked' ||
     internship.internship_rule_status === 'blocked' ||
@@ -2040,6 +2277,7 @@ function buildFullContractRuleResult(input, caoScope) {
     : manualReviewRequired
     ? 'manual_review_required'
     : probation.probation_compliant === true &&
+      employmentContractModel.employment_contract_model_compliant === true &&
       callAgreement.call_agreement_compliant === true &&
       internship.internship_compliant === true &&
       hiredWorker.hired_worker_compliant === true
@@ -2048,6 +2286,16 @@ function buildFullContractRuleResult(input, caoScope) {
 
   return {
     ...probation,
+    employment_contract_model_rule_result: employmentContractModel,
+    employment_contract_model: {
+      employment_contract_model: employmentContractModel.employment_contract_model,
+      parttime_contract_model: employmentContractModel.parttime_contract_model,
+      contract_hours_per_pay_period_resolved: employmentContractModel.contract_hours_per_pay_period_resolved,
+      contract_hours_source: employmentContractModel.contract_hours_source,
+      employment_contract_model_status: employmentContractModel.employment_contract_model_status,
+      employment_contract_model_compliant: employmentContractModel.employment_contract_model_compliant,
+      missing_evidence: employmentContractModel.missing_evidence || []
+    },
     probation_rule_result: {
       probation_period_months: probation.probation_period_months,
       requested_probation_period_months: probation.requested_probation_period_months,
@@ -2102,6 +2350,7 @@ function buildFullContractRuleResult(input, caoScope) {
     manual_review_required: manualReviewRequired,
     contract_rule_status: contractRuleStatus,
     recommended_contract_update: {
+      ...(employmentContractModel.recommended_contract_update || {}),
       ...(probation.recommended_contract_update || {}),
       ...(callAgreement.recommended_contract_update || {}),
       ...(internship.recommended_contract_update || {}),
@@ -2129,7 +2378,12 @@ function buildContractRuleInput(body, personnel, contract) {
     cao_function_level: pickFirst(body.cao_function_level, contract?.cao_function_level, personnel?.cao_function_level, null),
     cao_scale: pickFirst(body.cao_scale, contract?.cao_scale, personnel?.cao_scale, null),
     cao_period: pickFirst(body.cao_period, contract?.cao_period, personnel?.cao_period, null),
+    employment_contract_model: pickFirst(body.employment_contract_model, contract?.employment_contract_model, null),
+    contract_model: pickFirst(body.contract_model, body.employment_contract_model, contract?.contract_model, contract?.employment_contract_model, null),
+    parttime_contract_model: pickFirst(body.parttime_contract_model, contract?.parttime_contract_model, null),
+    contract_type: pickFirst(body.contract_type, contract?.contract_type, personnel?.contract_type, null),
     call_agreement_type: pickFirst(body.call_agreement_type, contract?.call_agreement_type, null),
+    contract_hours_per_week: pickFirst(body.contract_hours_per_week, contract?.contract_hours_per_week, null),
     contract_hours_per_pay_period: pickFirst(body.contract_hours_per_pay_period, contract?.contract_hours_per_pay_period, null),
     fixed_hours_per_pay_period: pickFirst(body.fixed_hours_per_pay_period, contract?.fixed_hours_per_pay_period, null),
     min_hours_per_pay_period: pickFirst(body.min_hours_per_pay_period, contract?.min_hours_per_pay_period, null),
@@ -2228,6 +2482,13 @@ function buildContractRuleInput(body, personnel, contract) {
 
 function buildContractRulePersistence(result) {
   return {
+    employment_contract_model: result.employment_contract_model?.employment_contract_model ?? undefined,
+    parttime_contract_model: result.employment_contract_model?.parttime_contract_model ?? undefined,
+    employment_contract_model_rule_status: result.employment_contract_model?.employment_contract_model_status ?? undefined,
+    employment_contract_model_manual_review_required: result.employment_contract_model
+      ? result.employment_contract_model.employment_contract_model_status === 'manual_review_required'
+      : undefined,
+    contract_hours_per_pay_period: result.employment_contract_model?.contract_hours_per_pay_period_resolved ?? undefined,
     contract_duration_months: result.contract_duration_months,
     probation_period_months: result.probation_period_months,
     probation_period_source_rule_id: getProbationSourceRuleId(result),
@@ -2286,6 +2547,7 @@ function buildContractRulePersistence(result) {
         scope_warnings: result.scope_warnings,
         contract_rule_violations: result.contract_rule_violations
       },
+      employment_contract_model: result.employment_contract_model_rule_result || null,
       call_agreement: result.call_agreement_rule_result || null,
       internship: result.internship_rule_result || null,
       hired_worker: result.hired_worker_rule_result || null

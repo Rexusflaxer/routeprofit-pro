@@ -32,6 +32,16 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0321', 'CAO-PB-2024-R0322'
     ]
   },
+  'applyCaoContractRules.fulltime_parttime_contract_model_articles_10_11': {
+    functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R0309', 'CAO-PB-2024-R0310',
+      'CAO-PB-2024-R0337', 'CAO-PB-2024-R0339',
+      'CAO-PB-2024-R0342', 'CAO-PB-2024-R0343',
+      'CAO-PB-2024-R0345', 'CAO-PB-2024-R0347',
+      'CAO-PB-2024-R0358', 'CAO-PB-2024-R0359'
+    ]
+  },
   'applyCaoContractRules.call_agreement_article_13': {
     functions: ['applyCaoContractRules'],
     rule_ids: [
