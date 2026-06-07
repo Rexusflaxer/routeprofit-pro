@@ -993,6 +993,77 @@ function isOpenCaoPayrollCorrection(correction) {
     !correction?.applied_payroll_run_id;
 }
 
+function firstNumber(...values) {
+  for (const value of values) {
+    const n = numberOrNull(value);
+    if (n !== null) return n;
+  }
+  return 0;
+}
+
+function extractCaoCorrectionDeltaAmounts(delta = {}) {
+  const grossDelta = firstNumber(
+    delta.total_gross_delta,
+    delta.gross_delta,
+    delta.gross_pay_delta,
+    delta.bruto_delta,
+    delta.bruto_loon_delta
+  );
+  const employeeDeductionsDelta = firstNumber(
+    delta.employee_deductions_delta,
+    delta.employee_deductions_total_delta,
+    delta.inhoudingen_delta
+  );
+  const employerCostsDelta = firstNumber(
+    delta.employer_costs_delta,
+    delta.employer_costs_total_delta,
+    delta.werkgeverslasten_delta
+  );
+  const vacationAllowanceDelta = firstNumber(
+    delta.vacation_allowance_delta,
+    delta.vakantiegeld_delta
+  );
+  const yearEndBonusDelta = firstNumber(
+    delta.year_end_bonus_delta,
+    delta.eindejaarsuitkering_delta
+  );
+  const netSalaryDelta = firstNumber(
+    delta.net_salary_delta,
+    delta.net_delta,
+    delta.netto_delta,
+    delta.netto_loon_delta
+  );
+  const totalCostEmployerDelta = firstNumber(
+    delta.total_cost_employer_delta,
+    delta.employer_total_delta,
+    delta.totale_werkgeverskosten_delta
+  );
+  const knownAmountFields = [
+    'total_gross_delta', 'gross_delta', 'gross_pay_delta', 'bruto_delta', 'bruto_loon_delta',
+    'employee_deductions_delta', 'employee_deductions_total_delta', 'inhoudingen_delta',
+    'employer_costs_delta', 'employer_costs_total_delta', 'werkgeverslasten_delta',
+    'vacation_allowance_delta', 'vakantiegeld_delta',
+    'year_end_bonus_delta', 'eindejaarsuitkering_delta',
+    'net_salary_delta', 'net_delta', 'netto_delta', 'netto_loon_delta',
+    'total_cost_employer_delta', 'employer_total_delta', 'totale_werkgeverskosten_delta'
+  ];
+  const hasKnownAmount = knownAmountFields.some(field => numberOrNull(delta[field]) !== null);
+  return {
+    total_gross_delta: r2(grossDelta),
+    employee_deductions_delta: r2(employeeDeductionsDelta),
+    employer_costs_delta: r2(employerCostsDelta),
+    vacation_allowance_delta: r2(vacationAllowanceDelta),
+    year_end_bonus_delta: r2(yearEndBonusDelta),
+    net_salary_delta: r2(hasKnownAmount && netSalaryDelta === 0
+      ? grossDelta - employeeDeductionsDelta
+      : netSalaryDelta),
+    total_cost_employer_delta: r2(hasKnownAmount && totalCostEmployerDelta === 0
+      ? grossDelta + employerCostsDelta + vacationAllowanceDelta + yearEndBonusDelta
+      : totalCostEmployerDelta),
+    has_known_payroll_amount: hasKnownAmount
+  };
+}
+
 async function loadOpenCaoPayrollCorrections(base44, { personnelId, caoKey }) {
   if (!personnelId || !caoKey) return [];
   const corrections = await base44.asServiceRole.entities.CAOPayrollCorrection.filter({
@@ -1012,12 +1083,22 @@ function buildCaoCorrectionApplication(corrections, adjustments, shouldApply) {
       .filter(correction => !adjustments[correction.id]?.delta_snapshot)
       .map(correction => correction.id)
     : [];
+  const missingPayrollAmountIds = shouldApply
+    ? openCorrections
+      .filter(correction => {
+        const delta = adjustments[correction.id]?.delta_snapshot;
+        return delta && !extractCaoCorrectionDeltaAmounts(delta).has_known_payroll_amount;
+      })
+      .map(correction => correction.id)
+    : [];
   return {
     open_correction_count: openCorrections.length,
     has_open_corrections: openCorrections.length > 0,
     apply_requested: shouldApply === true,
-    ready_to_apply: openCorrections.length === 0 || (shouldApply === true && missingAdjustmentIds.length === 0),
+    ready_to_apply: openCorrections.length === 0 ||
+      (shouldApply === true && missingAdjustmentIds.length === 0 && missingPayrollAmountIds.length === 0),
     missing_adjustment_ids: missingAdjustmentIds,
+    missing_payroll_amount_ids: missingPayrollAmountIds,
     correction_ids: openCorrections.map(correction => correction.id),
     review_ids: [...new Set(openCorrections.map(correction => correction.cao_change_review_id).filter(Boolean))],
     affected_payroll_run_ids: [...new Set(openCorrections.map(correction => correction.affected_payroll_run_id).filter(Boolean))],
@@ -1034,6 +1115,50 @@ function buildCaoCorrectionApplication(corrections, adjustments, shouldApply) {
       pay_period_year: correction.pay_period_year ?? null,
       pay_period_number: correction.pay_period_number ?? null
     }))
+  };
+}
+
+function buildCaoCorrectionPayrollComponent(corrections, adjustments) {
+  const items = [];
+  const totals = {
+    total_gross_delta: 0,
+    employee_deductions_delta: 0,
+    employer_costs_delta: 0,
+    vacation_allowance_delta: 0,
+    year_end_bonus_delta: 0,
+    net_salary_delta: 0,
+    total_cost_employer_delta: 0
+  };
+
+  for (const correction of corrections || []) {
+    const adjustment = adjustments[correction.id] || {};
+    const amounts = extractCaoCorrectionDeltaAmounts(adjustment.delta_snapshot || {});
+    for (const key of Object.keys(totals)) {
+      totals[key] += amounts[key] || 0;
+    }
+    items.push({
+      correction_id: correction.id,
+      cao_change_review_id: correction.cao_change_review_id || null,
+      affected_payroll_run_id: correction.affected_payroll_run_id || null,
+      rule_key: correction.rule_key || null,
+      field_path: correction.field_path || null,
+      effective_from: correction.effective_from || null,
+      effective_until: correction.effective_until || null,
+      ...amounts
+    });
+  }
+
+  return {
+    applied: items.length > 0,
+    correction_count: items.length,
+    items,
+    total_gross_delta: r2(totals.total_gross_delta),
+    employee_deductions_delta: r2(totals.employee_deductions_delta),
+    employer_costs_delta: r2(totals.employer_costs_delta),
+    vacation_allowance_delta: r2(totals.vacation_allowance_delta),
+    year_end_bonus_delta: r2(totals.year_end_bonus_delta),
+    net_salary_delta: r2(totals.net_salary_delta),
+    total_cost_employer_delta: r2(totals.total_cost_employer_delta)
   };
 }
 
@@ -1290,11 +1415,11 @@ Deno.serve(async (req) => {
       }
       if (!caoCorrectionApplication.ready_to_apply) {
         return Response.json({
-          error: 'Definitieve loonrun geblokkeerd: niet alle open CAO-correcties hebben een delta_snapshot.',
+          error: 'Definitieve loonrun geblokkeerd: niet alle open CAO-correcties hebben een bruikbare financiële delta.',
           cao_sync_status: caoSyncStatus,
           calculation_warnings: [
             ...calculationWarnings,
-            'CAO-correcties mogen niet zonder financiële delta/auditbewijs als toegepast worden gemarkeerd.'
+            'CAO-correcties mogen niet zonder delta_snapshot én herkenbare bedragvelden als toegepast worden gemarkeerd.'
           ],
           personnel_id,
           cao_configuration_id: caoConfig.id,
@@ -1465,6 +1590,18 @@ Deno.serve(async (req) => {
         hours: 0,
         amount: 0,
         source_rule_ids: []
+      },
+      cao_retroactive_corrections: {
+        applied: false,
+        correction_count: 0,
+        items: [],
+        total_gross_delta: 0,
+        employee_deductions_delta: 0,
+        employer_costs_delta: 0,
+        vacation_allowance_delta: 0,
+        year_end_bonus_delta: 0,
+        net_salary_delta: 0,
+        total_cost_employer_delta: 0
       },
       total_gross: 0,
       
@@ -2019,6 +2156,18 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (applyQueuedCaoCorrections && caoCorrectionApplication.has_open_corrections) {
+      const correctionComponent = buildCaoCorrectionPayrollComponent(openCaoPayrollCorrections, caoCorrectionAdjustments);
+      payslip.cao_retroactive_corrections = correctionComponent;
+      payslip.total_gross += correctionComponent.total_gross_delta;
+      payslip.employee_deductions.total += correctionComponent.employee_deductions_delta;
+      payslip.net_salary += correctionComponent.net_salary_delta;
+      payslip.employer_costs.total += correctionComponent.employer_costs_delta;
+      payslip.accruals.vacation_allowance += correctionComponent.vacation_allowance_delta;
+      payslip.accruals.year_end_bonus += correctionComponent.year_end_bonus_delta;
+      payslip.total_cost_employer += correctionComponent.total_cost_employer_delta;
+    }
+
     const responsePayload = {
       personnel_id,
       personnel_name: personnel.name,
@@ -2119,6 +2268,7 @@ Deno.serve(async (req) => {
           amount: r2(payslip.general_reserve_allowance.amount),
           source_rule_ids: payslip.general_reserve_allowance.source_rule_ids
         },
+        cao_retroactive_corrections: payslip.cao_retroactive_corrections,
         total_gross: Math.round(payslip.total_gross * 100) / 100,
         is_call_worker: payslip.is_call_worker,
         
