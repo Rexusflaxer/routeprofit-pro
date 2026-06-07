@@ -374,7 +374,9 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
               <SelectContent>
                 <SelectItem value="none">— Geen standaard —</SelectItem>
                 {caoConfigurations.map(c => (
-                  <SelectItem key={c.id} value={c.id}>{c.display_name || c.name}</SelectItem>
+                  <SelectItem key={c.id} value={c.id} disabled={c.selectable === false}>
+                    {c.label || c.display_name || c.name}{c.selectable === false ? " (niet actief)" : ""}
+                  </SelectItem>
                 ))}
               </SelectContent>
             </Select>

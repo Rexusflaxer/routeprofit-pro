@@ -43,9 +43,18 @@ export default function Companies() {
     queryFn: () => base44.entities.Company.list(),
   });
 
+  const selectedCaoConfigurationIds = [...new Set(companies
+    .map(company => company.default_cao_configuration_id)
+    .filter(Boolean))];
+
   const { data: caoConfigurations = [] } = useQuery({
-    queryKey: ["cao-configurations"],
-    queryFn: () => base44.entities.CAOConfiguration.list(),
+    queryKey: ["cao-configuration-options", selectedCaoConfigurationIds],
+    queryFn: async () => {
+      const { data } = await base44.functions.invoke("listCaoConfigurationOptions", {
+        include_ids: selectedCaoConfigurationIds,
+      });
+      return data?.options || [];
+    },
   });
 
   const { data: companySettings = [] } = useQuery({
@@ -96,7 +105,7 @@ export default function Companies() {
 
   const getCaoName = (id) => {
     const cao = caoConfigurations.find(c => c.id === id);
-    return cao ? (cao.display_name || cao.name) : null;
+    return cao ? (cao.label || cao.display_name || cao.name) : null;
   };
 
   return (

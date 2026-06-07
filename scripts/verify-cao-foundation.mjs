@@ -33,6 +33,7 @@ const caoApplicability = loadFunctionModule('base44/functions/resolveCaoApplicab
 const policyReferenceContext = loadFunctionModule('base44/functions/resolveCaoPolicyReferenceContext/entry.ts');
 const caoRuntimeReadiness = loadFunctionModule('base44/functions/resolveCaoRuntimeReadiness/entry.ts');
 const planningAssignment = loadFunctionModule('base44/functions/resolveCaoPlanningAssignmentDecision/entry.ts');
+const caoConfigurationOptions = loadFunctionModule('base44/functions/listCaoConfigurationOptions/entry.ts');
 
 function assertIncludes(values, expected, message) {
   assert.ok(values.includes(expected), `${message}: expected ${expected} in ${JSON.stringify(values)}`);
@@ -1156,6 +1157,52 @@ function runFunctionClassificationScenarios() {
   assertIncludes(security.source_rule_ids, 'CAO-PB-2024-R1755', 'Winkelsurveillant function description source missing');
 }
 
+function runCaoGovernanceUiOptionScenarios() {
+  const activeConfig = {
+    id: 'cao-config-active',
+    cao_key: 'cao_particuliere_beveiliging',
+    name: 'CAO PB 2024-2026',
+    display_name: 'CAO Particuliere Beveiliging',
+    sector: 'Particuliere beveiliging',
+    version_label: '2024-2026',
+    valid_from: '2024-12-18',
+    valid_until: '2026-12-27',
+    status: 'active',
+    is_active: true,
+    is_payroll_ready: true,
+    payroll_readiness_status: 'ready',
+    wage_scales: { 3: { 0: 16.02 } },
+    surcharges: { weekend: 35 },
+    pension_rules: { franchiseAnnual: 16164 },
+    rule_engine_metadata: { internal: true },
+    payroll_readiness_gate: { passed: true },
+    source_documents_snapshot: [{ url: 'https://www.beveiligingsbranche.nl/cao/' }],
+    codex_approval_message: 'Owner approved in Codex'
+  };
+
+  const option = caoConfigurationOptions.buildCaoConfigurationOption(activeConfig, []);
+  assert.equal(option.id, 'cao-config-active');
+  assert.equal(option.label, 'CAO Particuliere Beveiliging');
+  assert.equal(option.selectable, true);
+  assert.equal(option.is_payroll_ready, true);
+  assert.equal(caoConfigurationOptions.assertNoSensitiveCaoConfigurationFields(option).passed, true);
+  assert.equal(option.wage_scales, undefined, 'Company CAO dropdown options must not expose wage scales');
+  assert.equal(option.surcharges, undefined, 'Company CAO dropdown options must not expose surcharge parameters');
+  assert.equal(option.pension_rules, undefined, 'Company CAO dropdown options must not expose pension parameters');
+  assert.equal(option.rule_engine_metadata, undefined, 'Company CAO dropdown options must not expose rule-engine metadata');
+
+  const inactiveConfig = {
+    ...activeConfig,
+    id: 'cao-config-archived',
+    status: 'archived',
+    is_active: false
+  };
+  const includedInactive = caoConfigurationOptions.buildCaoConfigurationOption(inactiveConfig, ['cao-config-archived']);
+  assert.equal(includedInactive.selectable, false, 'Inactive selected CAO configs may be shown for existing companies but must not be selectable');
+  assert.equal(includedInactive.included_for_existing_company, true);
+  assert.ok(includedInactive.warning.includes('niet actief'));
+}
+
 async function main() {
   const scenarios = [
     ['external CAO gates', () => runExternalCaoGateScenarios()],
@@ -1171,7 +1218,8 @@ async function main() {
     ['leave and sickness', () => runLeaveSicknessScenarios()],
     ['payroll policy and corrections', () => runPayrollPolicyScenarios()],
     ['route cost schedule gate', () => runRouteCostScheduleGateScenarios()],
-    ['function classification and wage scales', () => runFunctionClassificationScenarios()]
+    ['function classification and wage scales', () => runFunctionClassificationScenarios()],
+    ['CAO governance UI options', () => runCaoGovernanceUiOptionScenarios()]
   ];
 
   for (const [name, fn] of scenarios) {
