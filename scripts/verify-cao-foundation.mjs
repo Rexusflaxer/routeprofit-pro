@@ -841,6 +841,21 @@ function runProbationScenarios() {
   assert.equal(sevenMonthFixedTerm.probation_compliant, true);
   assertIncludes(sevenMonthFixedTerm.source_rule_ids, 'CAO-PB-2024-R0315', 'Fixed-term probation source rule missing');
 
+  const sevenMonthTooLow = contractRules.calculateProbationPeriod({
+    contract_form: 'bepaalde_tijd',
+    contract_start_date: '2026-01-01',
+    contract_end_date: '2026-08-01',
+    requested_probation_period_months: 0,
+    security_role_status: 'beveiliger',
+    cao_function_group: 'objectbeveiliger_receptionist',
+    cao_function_level: 'a'
+  }, fullSecurityScope);
+  assert.equal(sevenMonthTooLow.probation_period_months, 1, 'Fixed-term contract longer than 6 months must not accept a shorter probation');
+  assert.equal(sevenMonthTooLow.probation_compliant, false);
+  assert.equal(sevenMonthTooLow.probation_validation_status, 'non_compliant');
+  assert.equal(sevenMonthTooLow.contract_rule_status, 'blocked');
+  assertIncludes(sevenMonthTooLow.source_rule_ids, 'CAO-PB-2024-R0315', 'Too-low probation must cite the fixed-term probation source rule');
+
   const aspirantSevenMonth = contractRules.calculateProbationPeriod({
     contract_form: 'bepaalde_tijd',
     contract_start_date: '2026-01-01',
@@ -853,6 +868,38 @@ function runProbationScenarios() {
   assert.equal(aspirantSevenMonth.probation_period_months, 2, 'Aspirant security worker longer than 6 months should get 2 months probation');
   assert.equal(aspirantSevenMonth.probation_compliant, true);
   assertIncludes(aspirantSevenMonth.source_rule_ids, 'CAO-PB-2024-R0317', 'Aspirant probation source rule missing');
+
+  const nonSecurityScaleTwo = contractRules.calculateProbationPeriod({
+    contract_form: 'bepaalde_tijd',
+    contract_start_date: '2026-01-01',
+    contract_end_date: '2026-08-01',
+    requested_probation_period_months: 1,
+    security_role_status: 'aspirant_beveiliger',
+    cao_function_group: 'non_security_staff',
+    cao_function_level: 'aspirant',
+    cao_scale: 2
+  }, {
+    cao_scope_profile: 'non_security_work_article_3_exception',
+    applies_full_security_rules: false,
+    manual_review_required: false,
+    payroll_rule_profile: {
+      apply_article_40_special_hours: false,
+      apply_article_41_holidays: true,
+      apply_article_42_overtime: false
+    }
+  });
+  assert.equal(nonSecurityScaleTwo.probation_period_months, 1, 'Article 3 non-security work must use regular fixed-term probation, not aspirant security probation');
+  assert.equal(nonSecurityScaleTwo.probation_compliant, true);
+  assertIncludes(nonSecurityScaleTwo.source_rule_ids, 'CAO-PB-2024-R0315', 'Non-security fixed-term probation source rule missing');
+  assert.equal(
+    nonSecurityScaleTwo.source_rule_ids.includes('CAO-PB-2024-R0317'),
+    false,
+    'Aspirant security probation rule must not apply to article 3 non-security work'
+  );
+  assert.ok(
+    nonSecurityScaleTwo.scope_warnings.some(warning => warning.rule_id === 'CAO-PB-2024-R0317'),
+    'Blocked aspirant security probation rule should be traceable in scope warnings'
+  );
 
   const indefinite = contractRules.calculateProbationPeriod({
     contract_form: 'onbepaalde_tijd',
