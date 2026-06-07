@@ -379,6 +379,10 @@ function booleanOrNull(value) {
   return null;
 }
 
+function pickFirstNonEmpty(...values) {
+  return values.find(value => value !== null && value !== undefined && value !== '') ?? null;
+}
+
 function round2(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
@@ -657,6 +661,99 @@ function resolveCashValuePaidRest(shift, caoScope, shiftHours, shiftBreaks) {
     manual_review_required: applies && atwReferenceHours > 0 && plannedPaidRestHours === null,
     exceeds_atw_reference: applies && plannedPaidRestHours !== null && plannedPaidRestHours > atwReferenceHours,
     source_rule_ids: ['CAO-PB-2024-R1635', 'CAO-PB-2024-R1636', 'CAO-PB-2024-R1637', 'CAO-PB-2024-R1638', 'CAO-PB-2024-R1639', 'CAO-PB-2024-R1640', 'CAO-PB-2024-R1641', 'CAO-PB-2024-R1642']
+  };
+}
+
+function resolveCashValueLongShiftContext(shift, caoScope, shiftHours, body = {}) {
+  const applies = isCashValueLogisticsShift(shift, caoScope);
+  const hours = Math.max(0, numberOrNull(shiftHours) ?? 0);
+  const exceedsTenHours = applies && hours > 10;
+  const cause = String(pickFirstNonEmpty(
+    shift.cash_value_long_shift_cause,
+    shift.long_shift_cause,
+    shift.route_overrun_cause,
+    body.cash_value_long_shift_cause,
+    body.long_shift_cause
+  ) || '').toLowerCase();
+  const plannedKnownLong = booleanOrNull(
+    shift.cash_value_longer_than_10_planned ??
+    shift.longer_than_10_known_at_planning ??
+    shift.long_shift_known_at_planning ??
+    body.cash_value_longer_than_10_planned ??
+    body.longer_than_10_known_at_planning
+  ) === true || ['planned', 'known_at_planning', 'vooraf_gepland'].includes(cause);
+  const voluntaryConfirmed = booleanOrNull(
+    shift.cash_value_long_shift_voluntary_confirmed ??
+    shift.voluntary_long_shift_confirmed ??
+    body.cash_value_long_shift_voluntary_confirmed ??
+    body.voluntary_long_shift_confirmed
+  ) === true;
+  const calamity = booleanOrNull(
+    shift.cash_value_long_shift_due_to_calamity ??
+    shift.long_shift_due_to_calamity ??
+    shift.service_extended_due_to_calamity ??
+    body.cash_value_long_shift_due_to_calamity
+  ) === true || ['calamity', 'calamiteit'].includes(cause);
+  const unforeseenEvent = booleanOrNull(
+    shift.cash_value_long_shift_unforeseen_event ??
+    shift.long_shift_unforeseen_event ??
+    shift.unforeseen_event_extension ??
+    body.cash_value_long_shift_unforeseen_event
+  ) === true || ['unforeseen', 'unforeseen_event', 'onvoorzien', 'onvoorziene_gebeurtenis'].includes(cause);
+  const employerCaused = booleanOrNull(
+    shift.cash_value_long_shift_employer_caused ??
+    shift.long_shift_employer_caused ??
+    shift.employer_caused_extension ??
+    body.cash_value_long_shift_employer_caused
+  ) === true || ['employer_caused', 'werkgever', 'werkgever_veroorzaakt'].includes(cause);
+  const customerExtraAssignment = booleanOrNull(
+    shift.cash_value_customer_extra_assignment ??
+    shift.customer_extra_assignment ??
+    shift.client_extra_assignment ??
+    shift.extra_assignment_by_client ??
+    body.cash_value_customer_extra_assignment
+  ) === true || ['customer_extra_assignment', 'client_extra_assignment', 'opdrachtgever_extra_opdracht', 'extra_opdracht_opdrachtgever'].includes(cause);
+  const routeStarted = booleanOrNull(
+    shift.route_started ??
+    shift.cash_value_route_started ??
+    shift.route_already_started ??
+    body.route_started ??
+    body.cash_value_route_started
+  ) === true;
+  const routeCompletionRequired = booleanOrNull(
+    shift.cash_value_route_completion_required ??
+    shift.route_completion_required ??
+    shift.finish_route_required ??
+    shift.route_must_be_completed ??
+    body.cash_value_route_completion_required ??
+    body.route_completion_required
+  ) === true || ['route_completion', 'route_afmaken', 'route_started'].includes(cause);
+
+  const article106AllowedRunout = exceedsTenHours &&
+    (calamity || unforeseenEvent || routeCompletionRequired) &&
+    !employerCaused &&
+    !customerExtraAssignment &&
+    !plannedKnownLong;
+  const mustBeVoluntary = exceedsTenHours &&
+    (plannedKnownLong || employerCaused || customerExtraAssignment || (!article106AllowedRunout && !calamity && !unforeseenEvent));
+
+  return {
+    applies,
+    exceeds_ten_hours: exceedsTenHours,
+    hours,
+    cause: cause || null,
+    planned_known_long: plannedKnownLong,
+    voluntary_confirmed: voluntaryConfirmed,
+    calamity,
+    unforeseen_event: unforeseenEvent,
+    employer_caused: employerCaused,
+    customer_extra_assignment: customerExtraAssignment,
+    route_started: routeStarted,
+    route_completion_required: routeCompletionRequired,
+    article106_allowed_runout: article106AllowedRunout,
+    must_be_voluntary: mustBeVoluntary,
+    manual_review_required: exceedsTenHours && !voluntaryConfirmed && !article106AllowedRunout,
+    source_rule_ids: ['CAO-PB-2024-R1619', 'CAO-PB-2024-R1620', 'CAO-PB-2024-R1626', 'CAO-PB-2024-R1627', 'CAO-PB-2024-R1628', 'CAO-PB-2024-R1629', 'CAO-PB-2024-R1630', 'CAO-PB-2024-R1631', 'CAO-PB-2024-R1632', 'CAO-PB-2024-R1633']
   };
 }
 
@@ -1561,6 +1658,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const isGeneralReserve = isGeneralReserveEmployee(body);
   const youthWorkerSummary = resolveYouthWorkerArticle30(body, periodStart);
   const breakSummaryRows = [];
+  const cashValueLongShiftRows = [];
   let noBreakExceptionApplied = false;
   let noBreakSixteenWeekAverage = null;
   let cashValuePaidRestApplied = false;
@@ -1906,16 +2004,43 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   for (const shift of serviceShifts) {
     const hours = calculateShiftHours(shift);
     const maxShiftHours = specialWorkingTimeException ? 12 : 10;
+    const cashValueLongShift = resolveCashValueLongShiftContext(shift, caoScope, hours, body);
     if (hours > maxShiftHours) {
-      violations.push({
-        rule_id: specialWorkingTimeException ? 'CAO-PB-2024-R0634' : 'CAO-PB-2024-R0625',
-        severity: 'high',
-        message: `Dienst ${shift.date} duurt ${round2(hours)} uur; maximaal ${maxShiftHours} uur toegestaan${specialWorkingTimeException ? ' bij bijzondere omstandigheden' : ''}.`,
-        affected_shift_ids: shift.id ? [shift.id] : [],
-        payroll_impact: true,
+      if (cashValueLongShift.exceeds_ten_hours && maxShiftHours === 10) {
+        if (cashValueLongShift.article106_allowed_runout) {
+          warnings.push(`Geld- en waardelogistiek dienst ${shift.date} duurt ${round2(hours)} uur door route-uitloop/calamiteit/onvoorziene gebeurtenis; artikel 106 is toegepast en vereist auditbaar bewijs.`);
+        }
+      } else {
+        violations.push({
+          rule_id: specialWorkingTimeException ? 'CAO-PB-2024-R0634' : 'CAO-PB-2024-R0625',
+          severity: 'high',
+          message: `Dienst ${shift.date} duurt ${round2(hours)} uur; maximaal ${maxShiftHours} uur toegestaan${specialWorkingTimeException ? ' bij bijzondere omstandigheden' : ''}.`,
+          affected_shift_ids: shift.id ? [shift.id] : [],
+          payroll_impact: true,
+          shift_hours: round2(hours),
+          max_shift_hours: maxShiftHours,
+          manual_review_required: false
+        });
+      }
+    }
+    if (cashValueLongShift.exceeds_ten_hours) {
+      cashValueLongShiftRows.push({
+        shift_id: shift.id || null,
+        date: asIsoDate(shift.date || shift.service_date),
         shift_hours: round2(hours),
-        max_shift_hours: maxShiftHours,
-        manual_review_required: false
+        cause: cashValueLongShift.cause,
+        planned_known_long: cashValueLongShift.planned_known_long,
+        voluntary_confirmed: cashValueLongShift.voluntary_confirmed,
+        calamity: cashValueLongShift.calamity,
+        unforeseen_event: cashValueLongShift.unforeseen_event,
+        employer_caused: cashValueLongShift.employer_caused,
+        customer_extra_assignment: cashValueLongShift.customer_extra_assignment,
+        route_started: cashValueLongShift.route_started,
+        route_completion_required: cashValueLongShift.route_completion_required,
+        article106_allowed_runout: cashValueLongShift.article106_allowed_runout,
+        must_be_voluntary: cashValueLongShift.must_be_voluntary,
+        manual_review_required: cashValueLongShift.manual_review_required,
+        source_rule_ids: cashValueLongShift.source_rule_ids
       });
     }
     const nightHours = nightWorkHoursBetween00And06(shift);
@@ -3152,6 +3277,41 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   if (!isGeneralReserve) {
     for (const shift of serviceShifts) {
       const hours = calculateShiftHours(shift);
+      const cashValueLongShift = resolveCashValueLongShiftContext(shift, caoScope, hours, body);
+      if (cashValueLongShift.exceeds_ten_hours) {
+        if (cashValueLongShift.article106_allowed_runout) {
+          skippedRules.push({
+            rule_id: 'CAO-PB-2024-R1626',
+            reason: `Geld- en waardelogistiek: route-uitloop/calamiteit/onvoorziene gebeurtenis voor dienst ${shift.date}; route afmaken is als artikel 106-context verwerkt.`,
+            related_rule_ids: ['CAO-PB-2024-R1627', 'CAO-PB-2024-R1628', 'CAO-PB-2024-R1629', 'CAO-PB-2024-R1633']
+          });
+          continue;
+        }
+        if (!cashValueLongShift.voluntary_confirmed) {
+          const employerOrCustomer = cashValueLongShift.employer_caused || cashValueLongShift.customer_extra_assignment;
+          violations.push({
+            rule_id: employerOrCustomer ? 'CAO-PB-2024-R1631' : 'CAO-PB-2024-R1620',
+            severity: 'high',
+            message: employerOrCustomer
+              ? `Geld- en waardelogistiek dienst ${shift.date} duurt ${round2(hours)} uur; langer dan 10 uur door werkgever/vervolgopdracht mag niet verplicht worden zonder vrijwillige instemming.`
+              : `Geld- en waardelogistiek dienst ${shift.date} duurt ${round2(hours)} uur; als dit bij planning bekend is, mag de werknemer zelf kiezen of hij deze dienst doet.`,
+            affected_shift_ids: shift.id ? [shift.id] : [],
+            payroll_impact: true,
+            shift_hours: round2(hours),
+            cash_value_long_shift_context: {
+              cause: cashValueLongShift.cause,
+              planned_known_long: cashValueLongShift.planned_known_long,
+              employer_caused: cashValueLongShift.employer_caused,
+              customer_extra_assignment: cashValueLongShift.customer_extra_assignment,
+              route_completion_required: cashValueLongShift.route_completion_required,
+              article106_allowed_runout: cashValueLongShift.article106_allowed_runout
+            },
+            manual_review_required: true,
+            related_rule_ids: cashValueLongShift.source_rule_ids
+          });
+        }
+        continue;
+      }
       if (hours > 10 && booleanOrNull(shift.voluntary_long_shift_confirmed ?? body.voluntary_long_shift_confirmed) !== true) {
         violations.push({
           rule_id: 'CAO-PB-2024-R0571',
@@ -3449,7 +3609,11 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
       sixteen_week_average: rollingAverage16,
       thirteen_week_average: rollingAverage13,
       night_thirteen_week_average: hasNightWorkForArticle26 ? nightAverage13 : null,
-      has_night_work: hasNightWorkForArticle26
+      has_night_work: hasNightWorkForArticle26,
+      cash_value_long_shifts: cashValueLongShiftRows,
+      cash_value_long_shift_source_rule_ids: cashValueLongShiftRows.length
+        ? ['CAO-PB-2024-R1619', 'CAO-PB-2024-R1620', 'CAO-PB-2024-R1626', 'CAO-PB-2024-R1627', 'CAO-PB-2024-R1628', 'CAO-PB-2024-R1629', 'CAO-PB-2024-R1630', 'CAO-PB-2024-R1631', 'CAO-PB-2024-R1632', 'CAO-PB-2024-R1633']
+        : []
     },
     night_shift_summary: {
       has_night_shifts: hasNightWork,
