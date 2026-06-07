@@ -8,6 +8,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { X, Save } from "lucide-react";
 import ExecutionBlocksEditor, { createSmartBlocks, validateExecutionBlocks } from "./ExecutionBlocksEditor";
 import TaskSpacingRulesEditor from "./TaskSpacingRulesEditor";
+import CaoServiceContextFields from "../cao/CaoServiceContextFields";
 
 const TASK_TYPES = [
   "Mobiele Controleronde",
@@ -51,6 +52,20 @@ function createInitialForm(task) {
     pricing_type: "per_taak",
     price_amount: 0,
     is_free: false,
+    cao_key: null,
+    service_function_type: null,
+    required_cao_function_group: null,
+    required_cao_function_level: null,
+    required_security_role_status: null,
+    contract_assignment_policy: "strict_contract_match",
+    performs_security_work: null,
+    security_work_percentage: null,
+    works_event_or_hospitality_security: null,
+    event_hospitality_cao_applies: null,
+    works_airport_schiphol: null,
+    works_cash_value_logistics: null,
+    customer_billable: null,
+    counts_toward_required_staffing: null,
   };
 }
 
@@ -127,10 +142,11 @@ export default function TaskForm({ task, onSave, onCancel }) {
     <div className="bg-white border border-slate-200 rounded-xl p-4 mb-4 shadow-sm">
       <form onSubmit={handleSubmit} className="space-y-4">
         <Tabs defaultValue="basic" className="w-full">
-          <TabsList className="grid w-full grid-cols-4">
+          <TabsList className="grid h-auto w-full grid-cols-2 md:grid-cols-5">
             <TabsTrigger value="basic">Basis</TabsTrigger>
             <TabsTrigger value="repeat">Herhaling</TabsTrigger>
             <TabsTrigger value="advanced">Geavanceerd</TabsTrigger>
+            <TabsTrigger value="cao">CAO</TabsTrigger>
             <TabsTrigger value="costs">Kosten</TabsTrigger>
           </TabsList>
 
@@ -276,6 +292,10 @@ export default function TaskForm({ task, onSave, onCancel }) {
               title="Minimale tijd tussen soorten taken"
               description="Gebruik dit alleen voor uitzonderingen; meestal stel je dit in bij het object."
             />
+          </TabsContent>
+
+          <TabsContent value="cao" className="space-y-5 mt-5">
+            <CaoServiceContextFields value={form} onChange={handleChange} mode="task" />
           </TabsContent>
 
           <TabsContent value="costs" className="space-y-5 mt-5">

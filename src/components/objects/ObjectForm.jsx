@@ -9,6 +9,7 @@ import { useQuery } from "@tanstack/react-query";
 import TaskList from "./TaskList";
 import CustomerSelect from "../ui-custom/CustomerSelect";
 import TaskSpacingGroupsEditor, { expandTaskSpacingGroups, normalizeTaskSpacingGroups, validateTaskSpacingGroups } from "./TaskSpacingGroupsEditor";
+import CaoServiceContextFields from "../cao/CaoServiceContextFields";
 
 export default function ObjectForm({ object, onSave, onCancel }) {
   const [form, setForm] = useState(object || {
@@ -36,6 +37,20 @@ export default function ObjectForm({ object, onSave, onCancel }) {
     show_on_mobile_map: true,
     is_active_customer_object: true,
     mobile_map_priority: 0,
+    cao_key: null,
+    default_service_function_type: null,
+    default_cao_function_group: null,
+    default_cao_function_level: null,
+    default_security_role_status: null,
+    contract_assignment_policy: "strict_contract_match",
+    default_performs_security_work: null,
+    default_security_work_percentage: null,
+    default_works_event_or_hospitality_security: null,
+    default_event_hospitality_cao_applies: null,
+    default_works_airport_schiphol: null,
+    default_works_cash_value_logistics: null,
+    default_customer_billable: null,
+    default_counts_toward_required_staffing: null,
   });
 
   const { data: customers = [] } = useQuery({
@@ -181,6 +196,8 @@ export default function ObjectForm({ object, onSave, onCancel }) {
               <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Opmerkingen</Label>
               <Textarea value={form.notes} onChange={(e) => handleChange("notes", e.target.value)} rows={2} placeholder="Extra informatie..." />
             </div>
+
+            <CaoServiceContextFields value={form} onChange={handleChange} mode="object" />
 
             <TaskSpacingGroupsEditor
               groups={form.task_spacing_groups || []}
