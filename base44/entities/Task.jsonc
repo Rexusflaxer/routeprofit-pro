@@ -132,6 +132,34 @@
       ],
       "description": "True als deze dienst meetelt voor vereiste bezetting; relevant voor stage- en dienstcontextregels."
     },
+    "internship_practice_trainer_personnel_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Praktijkopleider die aan deze stagedienst is gekoppeld. Nodig voor CAO PB artikel 14 toetsing."
+    },
+    "internship_mentor_personnel_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Mentor/begeleider voor deze stagedienst wanneer afwijkend van de praktijkopleider."
+    },
+    "internship_one_to_one_guidance_confirmed": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Bevestigt dat per dag evenveel stagiairs als praktijkopleiders worden ingezet voor deze dienst."
+    },
+    "internship_uniform_label_confirmed": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Bevestigt dat de stagiair bij deze dienst herkenbaar als stagiair op het uniform staat."
+    },
     "duration_minutes": {
       "type": "number",
       "description": "Totale taakduur in minuten (bij collectief: totaal voor alle items)"

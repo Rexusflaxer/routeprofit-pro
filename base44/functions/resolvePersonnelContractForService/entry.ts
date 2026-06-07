@@ -921,24 +921,35 @@ Deno.serve(async (req) => {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
+    const input = body.service_context || {};
     const { personnel_id } = body;
     if (!personnel_id) {
       return Response.json({ error: 'personnel_id is verplicht.' }, { status: 400 });
     }
+    const requestedTaskId = body.task_id || input.task_id || null;
+    const requestedRouteId = body.route_id || input.route_id || null;
 
     const [personnel, task, route] = await Promise.all([
       base44.entities.Personnel.get(personnel_id),
-      body.task_id ? base44.entities.Task.get(body.task_id).catch(() => null) : Promise.resolve(null),
-      body.route_id ? base44.entities.Route.get(body.route_id).catch(() => null) : Promise.resolve(null)
+      requestedTaskId ? base44.entities.Task.get(requestedTaskId).catch(() => null) : Promise.resolve(null),
+      requestedRouteId ? base44.entities.Route.get(requestedRouteId).catch(() => null) : Promise.resolve(null)
     ]);
 
     if (!personnel) return Response.json({ error: 'Medewerker niet gevonden.' }, { status: 404 });
 
-    const input = body.service_context || {};
     const objectId = body.object_id || input.object_id || task?.object_id || null;
     const object = objectId ? await base44.entities.SurveillanceObject.get(objectId).catch(() => null) : null;
 
-    const serviceContext = inferServiceContext({ body, task, route, object });
+    const serviceContext = inferServiceContext({
+      body: {
+        ...body,
+        task_id: requestedTaskId,
+        route_id: requestedRouteId
+      },
+      task,
+      route,
+      object
+    });
     const warnings = [];
     const manualReviewReasons = [];
     const blockingReasons = [];

@@ -1469,6 +1469,7 @@ function shiftHasContractResolutionContext(shift) {
     shift.contract_id ||
     shift.company_id ||
     shift.route_id ||
+    shift.task_type ||
     shift.task_id ||
     shift.object_id ||
     shift.function_type ||
@@ -1489,6 +1490,12 @@ function shiftHasContractResolutionContext(shift) {
     shift.event_hospitality_cao_applies !== undefined ||
     shift.works_airport_schiphol !== undefined ||
     shift.works_cash_value_logistics !== undefined ||
+    shift.customer_billable !== undefined ||
+    shift.counts_toward_required_staffing !== undefined ||
+    shift.internship_practice_trainer_personnel_id ||
+    shift.internship_mentor_personnel_id ||
+    shift.internship_one_to_one_guidance_confirmed !== undefined ||
+    shift.internship_uniform_label_confirmed !== undefined ||
     hasObjectValues(shift.service_context)
   );
 }
@@ -1687,6 +1694,8 @@ function buildShiftContractServiceContext({ body, shift }) {
   const bodyContext = body.service_context || {};
   const shiftContext = shift.service_context || {};
   const companyId = shift.company_id || body.company_id || shiftContext.company_id || bodyContext.company_id || null;
+  const routeId = shift.route_id || shiftContext.route_id || body.route_id || bodyContext.route_id || null;
+  const taskId = shift.task_id || shiftContext.task_id || body.task_id || bodyContext.task_id || null;
   const objectId = shift.object_id || body.object_id || shiftContext.object_id || bodyContext.object_id || null;
   return {
     ...bodyContext,
@@ -1703,7 +1712,13 @@ function buildShiftContractServiceContext({ body, shift }) {
       body.cao ||
       null,
     company_id: companyId,
+    route_id: routeId,
+    task_id: taskId,
     object_id: objectId,
+    task_type: shift.task_type ||
+      shiftContext.task_type ||
+      bodyContext.task_type ||
+      null,
     function_type: shift.function_type ||
       shift.service_function_type ||
       shift.required_function_type ||
@@ -1749,6 +1764,30 @@ function buildShiftContractServiceContext({ body, shift }) {
       shiftContext.event_hospitality_cao_applies ??
       bodyContext.event_hospitality_cao_applies ??
       null,
+    customer_billable: shift.customer_billable ??
+      shiftContext.customer_billable ??
+      bodyContext.customer_billable ??
+      null,
+    counts_toward_required_staffing: shift.counts_toward_required_staffing ??
+      shiftContext.counts_toward_required_staffing ??
+      bodyContext.counts_toward_required_staffing ??
+      null,
+    internship_practice_trainer_personnel_id: shift.internship_practice_trainer_personnel_id ||
+      shiftContext.internship_practice_trainer_personnel_id ||
+      bodyContext.internship_practice_trainer_personnel_id ||
+      null,
+    internship_mentor_personnel_id: shift.internship_mentor_personnel_id ||
+      shiftContext.internship_mentor_personnel_id ||
+      bodyContext.internship_mentor_personnel_id ||
+      null,
+    internship_one_to_one_guidance_confirmed: shift.internship_one_to_one_guidance_confirmed ??
+      shiftContext.internship_one_to_one_guidance_confirmed ??
+      bodyContext.internship_one_to_one_guidance_confirmed ??
+      null,
+    internship_uniform_label_confirmed: shift.internship_uniform_label_confirmed ??
+      shiftContext.internship_uniform_label_confirmed ??
+      bodyContext.internship_uniform_label_confirmed ??
+      null,
     contract_assignment_policy: shift.contract_assignment_policy ||
       shiftContext.contract_assignment_policy ||
       bodyContext.contract_assignment_policy ||
@@ -1764,8 +1803,8 @@ async function resolvePayrollContractContexts(base44, { body, personnel, personn
     const payload = {
       personnel_id: personnelId,
       contract_id: shift.contract_id || body.contract_id || null,
-      route_id: shift.route_id || body.route_id || null,
-      task_id: shift.task_id || body.task_id || null,
+      route_id: serviceContext.route_id || null,
+      task_id: serviceContext.task_id || null,
       object_id: serviceContext.object_id || null,
       company_id: serviceContext.company_id || null,
       service_date: serviceContext.service_date,
