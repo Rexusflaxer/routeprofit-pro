@@ -199,6 +199,16 @@ function normalizeText(value) {
     .trim();
 }
 
+function normalizeToken(value) {
+  return normalizeText(value).replace(/\s+/g, '_');
+}
+
+function asIsoDate(value) {
+  if (!value) return null;
+  const text = String(value).slice(0, 10);
+  return /^\d{4}-\d{2}-\d{2}$/.test(text) ? text : null;
+}
+
 function numberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const n = Number(value);
@@ -388,10 +398,183 @@ function isPeriodValidForScale(scale, period, caoConfig) {
   return null; // loontabel onbekend
 }
 
+const SCALE_ENTITLING_QUALIFICATION_TYPES = [
+  'mbo_beveiliger',
+  'beveiliger_2',
+  'beveiliger_3',
+  'coordinator_beveiliging',
+  'svpb_basisdiploma_beveiliging',
+  'svpb_vakdiploma_beveiliging',
+  'svpb_kaderdiploma_beveiliging',
+  'permanente_ontheffing_minister',
+  'detailhandel',
+  'certificaat_winkelsurveillance',
+  'certificaat_beveiliging_b',
+  'certificaat_beveiliging_c',
+  'centralist_boca',
+  'centralist_voca',
+  'leidinggeven_pb',
+  'branchediploma_coordinator_beveiliging',
+  'rijksdiploma_brandwacht',
+  'rijksdiploma_brandwacht_1e_klas',
+  'rijksdiploma_hoofdbrandwacht',
+  'rijbewijs_c'
+];
+
+function qualificationTypeTokens(qualification) {
+  const tokens = [
+    normalizeToken(qualification?.qualification_type),
+    normalizeToken(qualification?.name),
+    normalizeToken(qualification?.notes)
+  ];
+  return [...new Set(tokens.filter(Boolean))];
+}
+
+function qualificationProvidedToEmployerDate(qualification) {
+  return asIsoDate(
+    qualification?.provided_to_employer_date ||
+    qualification?.delivered_to_employer_date ||
+    qualification?.submitted_to_employer_date ||
+    qualification?.metadata?.provided_to_employer_date ||
+    qualification?.metadata?.delivered_to_employer_date ||
+    null
+  );
+}
+
+function isScaleEntitlingQualification(qualification) {
+  if (!qualification || qualification.verification_status !== 'verified') return false;
+  const tokens = qualificationTypeTokens(qualification);
+  return tokens.some(token => SCALE_ENTITLING_QUALIFICATION_TYPES.includes(token));
+}
+
+function flattenPayPeriods(caoConfig) {
+  const payPeriods = caoConfig?.pay_periods || null;
+  if (!payPeriods || typeof payPeriods !== 'object') return [];
+  return Object.entries(payPeriods)
+    .flatMap(([year, periods]) => Array.isArray(periods)
+      ? periods.map(period => ({
+        ...period,
+        pay_period_year: Number(period.year ?? period.pay_period_year ?? year),
+        pay_period_number: Number(period.period_number ?? period.pay_period_number ?? period.number),
+        start_date: asIsoDate(period.start_date || period.period_start || period.pay_period_start),
+        end_date: asIsoDate(period.end_date || period.period_end || period.pay_period_end),
+        is_extra_period: period.is_extra_period === true
+      }))
+      : []
+    )
+    .filter(period => period.start_date && period.end_date && Number.isFinite(period.pay_period_number))
+    .sort((a, b) => a.start_date.localeCompare(b.start_date));
+}
+
+function findPayPeriodForDate(payPeriods, date) {
+  const iso = asIsoDate(date);
+  if (!iso) return null;
+  return payPeriods.find(period => period.start_date <= iso && period.end_date >= iso) || null;
+}
+
+function findNextPayPeriod(payPeriods, period) {
+  if (!period) return null;
+  return payPeriods.find(candidate =>
+    candidate.start_date > period.end_date &&
+    candidate.is_extra_period !== true
+  ) || null;
+}
+
+function evaluateDiplomaScaleEntitlement({ currentScale, suggestedScale, referenceDate, caoConfig, qualifications }) {
+  const sourceRuleIds = ['CAO-PB-2024-R0750'];
+  const refDate = asIsoDate(referenceDate) || new Date().toISOString().slice(0, 10);
+  const current = numberOrNull(currentScale);
+  const suggested = numberOrNull(suggestedScale);
+  if (current === null || suggested === null || current >= suggested) {
+    return {
+      status: 'not_applicable',
+      applies: false,
+      source_rule_ids: sourceRuleIds,
+      manual_review_required: false,
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      warnings: []
+    };
+  }
+
+  const candidates = (qualifications || [])
+    .filter(isScaleEntitlingQualification)
+    .map(qualification => ({
+      qualification,
+      provided_to_employer_date: qualificationProvidedToEmployerDate(qualification)
+    }))
+    .filter(item => item.provided_to_employer_date)
+    .sort((a, b) => a.provided_to_employer_date.localeCompare(b.provided_to_employer_date));
+
+  if (candidates.length === 0) {
+    return {
+      status: 'manual_review_required',
+      applies: true,
+      source_rule_ids: sourceRuleIds,
+      current_scale: current,
+      suggested_scale: suggested,
+      manual_review_required: true,
+      blocking_reasons: [],
+      manual_review_reasons: [
+        'CAO artikel 36 lid 2: huidige schaal is lager dan de bijlage-2 schaal, maar datum waarop het vereiste diploma aan werkgever is gegeven ontbreekt.'
+      ],
+      warnings: []
+    };
+  }
+
+  const selected = candidates[0];
+  const payPeriods = flattenPayPeriods(caoConfig);
+  const diplomaPeriod = findPayPeriodForDate(payPeriods, selected.provided_to_employer_date);
+  const effectivePeriod = findNextPayPeriod(payPeriods, diplomaPeriod);
+  if (!diplomaPeriod || !effectivePeriod) {
+    return {
+      status: 'manual_review_required',
+      applies: true,
+      source_rule_ids: sourceRuleIds,
+      current_scale: current,
+      suggested_scale: suggested,
+      qualification_id: selected.qualification.id || null,
+      provided_to_employer_date: selected.provided_to_employer_date,
+      manual_review_required: true,
+      blocking_reasons: [],
+      manual_review_reasons: [
+        'CAO artikel 36 lid 2: loonperiode van diplomaverstrekking of opvolgende loonperiode kon niet uit CAOConfiguration.pay_periods worden bepaald.'
+      ],
+      warnings: []
+    };
+  }
+
+  const effectiveFrom = effectivePeriod.start_date;
+  const effective = effectiveFrom <= refDate;
+  return {
+    status: effective ? 'scale_increase_due' : 'future_scale_increase',
+    applies: true,
+    source_rule_ids: sourceRuleIds,
+    current_scale: current,
+    suggested_scale: suggested,
+    qualification_id: selected.qualification.id || null,
+    qualification_type: selected.qualification.qualification_type || null,
+    provided_to_employer_date: selected.provided_to_employer_date,
+    provided_pay_period_year: diplomaPeriod.pay_period_year,
+    provided_pay_period_number: diplomaPeriod.pay_period_number,
+    effective_from: effectiveFrom,
+    effective_pay_period_year: effectivePeriod.pay_period_year,
+    effective_pay_period_number: effectivePeriod.pay_period_number,
+    manual_review_required: false,
+    blocking_reasons: effective
+      ? [`CAO artikel 36 lid 2: schaal ${suggested} geldt vanaf loonperiode ${effectivePeriod.pay_period_year}-${effectivePeriod.pay_period_number} (${effectiveFrom}); huidige schaal is ${current}.`]
+      : [],
+    manual_review_reasons: [],
+    warnings: effective
+      ? []
+      : [`CAO artikel 36 lid 2: schaalverhoging naar schaal ${suggested} gaat in vanaf ${effectiveFrom}; vóór die datum blijft lagere schaal ${current} mogelijk.`]
+  };
+}
+
 /**
  * Kern classificatie-engine.
  */
-function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
+function classify(personnel, workContext, caoScope, caoConfig, referenceDate, personnelQualifications = []) {
   const p = personnel || {};
   const wc = workContext || {};
   const warnings = [];
@@ -648,13 +831,33 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
   const currentScale = p.cao_scale != null ? p.cao_scale : null;
   const currentPeriod = p.cao_period != null ? p.cao_period : null;
   const scaleMatches = currentScale != null ? (Number(currentScale) === Number(suggestedScale)) : null;
+  const diplomaScaleEntitlement = evaluateDiplomaScaleEntitlement({
+    currentScale,
+    suggestedScale,
+    referenceDate,
+    caoConfig,
+    qualifications: personnelQualifications
+  });
+  const scaleMismatchExplainedByFutureDiploma = scaleMatches === false &&
+    Number(currentScale) < Number(suggestedScale) &&
+    diplomaScaleEntitlement.status === 'future_scale_increase';
+  pushUnique(source_rule_ids, diplomaScaleEntitlement.source_rule_ids || []);
+  warnings.push(...(diplomaScaleEntitlement.warnings || []));
+  if (diplomaScaleEntitlement.manual_review_required === true) {
+    manual_review_reasons.push(...(diplomaScaleEntitlement.manual_review_reasons || []));
+  }
+  const payroll_blocking_reasons = [...(diplomaScaleEntitlement.blocking_reasons || [])];
 
   if (scaleMatches === false) {
-    manual_review_reasons.push(
-      `Huidige schaal (${currentScale}) wijkt af van bijlage 2 suggestie (${suggestedScale}) voor ${functionGroup}/${functionLevel}. ` +
-      `Bronregel: ${levelMapping.source_rule}. Handmatige bevestiging vereist.`
-    );
-    warnings.push(`Schaalafwijking: cao_scale=${currentScale} maar bijlage 2 suggereert schaal ${suggestedScale} voor ${functionGroup}/${functionLevel}.`);
+    if (scaleMismatchExplainedByFutureDiploma) {
+      warnings.push(`Schaal ${currentScale} is lager dan bijlage-2 schaal ${suggestedScale}, maar CAO artikel 36 lid 2 maakt de verhoging pas effectief vanaf ${diplomaScaleEntitlement.effective_from}.`);
+    } else {
+      manual_review_reasons.push(
+        `Huidige schaal (${currentScale}) wijkt af van bijlage 2 suggestie (${suggestedScale}) voor ${functionGroup}/${functionLevel}. ` +
+        `Bronregel: ${levelMapping.source_rule}. Handmatige bevestiging vereist.`
+      );
+      warnings.push(`Schaalafwijking: cao_scale=${currentScale} maar bijlage 2 suggereert schaal ${suggestedScale} voor ${functionGroup}/${functionLevel}.`);
+    }
   }
   if (currentScale == null) {
     manual_review_reasons.push('Geen CAO-schaal ingesteld op medewerker. Stel cao_scale in.');
@@ -719,7 +922,8 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
 
   // ── Payroll final allowed ──
   const hasManualReview = manual_review_reasons.length > 0 || caoScope?.manual_review_required === true;
-  const payrollFinalAllowed = !hasManualReview && wageRateFound && scaleMatches !== false && periodValid !== false;
+  const scaleAcceptableForReferenceDate = scaleMatches !== false || scaleMismatchExplainedByFutureDiploma;
+  const payrollFinalAllowed = !hasManualReview && payroll_blocking_reasons.length === 0 && wageRateFound && scaleAcceptableForReferenceDate && periodValid !== false;
 
   return {
     cao_scope_profile: scopeProfile,
@@ -731,7 +935,7 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
     suggested_cao_period: null, // periodiek wordt bepaald door dienstjaren, niet automatisch
     current_cao_scale: currentScale,
     current_cao_period: currentPeriod,
-    scale_valid_for_classification: scaleMatches !== false && currentScale != null,
+    scale_valid_for_classification: scaleAcceptableForReferenceDate && currentScale != null,
     period_valid_for_scale: periodValid,
     wage_rate_found: wageRateFound,
     hourly_rate: hourlyRate,
@@ -739,7 +943,9 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
     confidence,
     manual_review_required: hasManualReview,
     manual_review_reasons,
+    payroll_blocking_reasons,
     payroll_final_allowed: payrollFinalAllowed,
+    diploma_scale_entitlement: diplomaScaleEntitlement,
     workflow_review_items,
     documentation_review_required: workflow_review_items.length > 0,
     warnings,
@@ -784,6 +990,23 @@ Deno.serve(async (req) => {
 
     const classificationSubject = buildClassificationSubject(personnel, contract);
     const effectivePersonnel = classificationSubject.subject;
+    let personnelQualifications = Array.isArray(body.personnel_qualifications)
+      ? body.personnel_qualifications
+      : Array.isArray(body.qualifications)
+      ? body.qualifications
+      : [];
+    let qualificationFetchWarning = null;
+    const qualificationPersonnelId = personnel_id || personnel?.id || contract?.personnel_id || null;
+    if (qualificationPersonnelId) {
+      try {
+        const fetchedQualifications = await base44.asServiceRole.entities.PersonnelQualification.filter({
+          personnel_id: qualificationPersonnelId
+        });
+        personnelQualifications = [...personnelQualifications, ...(fetchedQualifications || [])];
+      } catch (error) {
+        qualificationFetchWarning = `Personeelskwalificaties konden niet worden opgehaald: ${error.message || String(error)}.`;
+      }
+    }
 
     const targetCaoKey = scopedCaoResolution.cao_key;
     const functionClassificationRuntimeSupport = getCaoRuntimeSupport(targetCaoKey, 'resolveCaoFunctionClassification');
@@ -829,7 +1052,34 @@ Deno.serve(async (req) => {
       };
     }
 
-    const result = classify(effectivePersonnel, work_context, caoScope, caoConfig, reference_date);
+    const result = classify(effectivePersonnel, work_context, caoScope, caoConfig, reference_date, personnelQualifications);
+    if (qualificationFetchWarning) {
+      result.warnings = [...(result.warnings || []), qualificationFetchWarning];
+      result.manual_review_reasons = [...(result.manual_review_reasons || []), qualificationFetchWarning];
+      result.manual_review_required = true;
+      result.payroll_final_allowed = false;
+    }
+    const diplomaScaleEntitlement = result.diploma_scale_entitlement || null;
+    if (save && diplomaScaleEntitlement?.qualification_id && diplomaScaleEntitlement?.effective_from) {
+      try {
+        await base44.asServiceRole.entities.PersonnelQualification.update(diplomaScaleEntitlement.qualification_id, {
+          cao_scale_effective_from: diplomaScaleEntitlement.effective_from,
+          cao_scale_effective_pay_period_year: diplomaScaleEntitlement.effective_pay_period_year ?? null,
+          cao_scale_effective_pay_period_number: diplomaScaleEntitlement.effective_pay_period_number ?? null
+        });
+      } catch (error) {
+        result.warnings = [
+          ...(result.warnings || []),
+          `Schaal-effect op kwalificatie kon niet worden opgeslagen: ${error.message || String(error)}.`
+        ];
+        result.manual_review_reasons = [
+          ...(result.manual_review_reasons || []),
+          'Schaal-effect op kwalificatie kon niet audit-proof worden opgeslagen.'
+        ];
+        result.manual_review_required = true;
+        result.payroll_final_allowed = false;
+      }
+    }
 
     // Sla alleen globale personeelsclassificatie op als er geen contractscope is gebruikt.
     if (save && personnel_id && classificationSubject.classification_scope.contract_scope_used) {

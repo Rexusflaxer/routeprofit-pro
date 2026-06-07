@@ -62,6 +62,44 @@
         "null"
       ]
     },
+    "awarded_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum waarop het diploma/certificaat is behaald."
+    },
+    "provided_to_employer_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum waarop werknemer het vereiste diploma/certificaat aan werkgever heeft gegeven. Nodig voor CAO PB artikel 36 lid 2 schaalverhoging vanaf volgende loonperiode."
+    },
+    "cao_scale_effective_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Berekende ingangsdatum voor schaalgevolg van dit diploma/certificaat."
+    },
+    "cao_scale_effective_pay_period_year": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Jaar van de loonperiode waarin het schaalgevolg ingaat."
+    },
+    "cao_scale_effective_pay_period_number": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Loonperiodenummer waarin het schaalgevolg ingaat."
+    },
     "valid_from": {
       "type": [
         "string",
