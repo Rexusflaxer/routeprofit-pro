@@ -2199,7 +2199,8 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const payrollAdjustments = [];
   const manualReviewItems = [];
   const missingEvidence = [];
-  const caoEvidenceMode = body.cao_evidence_mode || (body.enforce_cao_evidence === true ? 'strict' : 'advisory');
+  const caoEvidenceMode = body.cao_evidence_mode ||
+    (isFinalScheduleValidation(body) || body.enforce_cao_evidence === true ? 'strict' : 'advisory');
 
   const periodShifts = shifts.filter(s => s.date >= periodStart && s.date <= periodEnd);
   const serviceShifts = periodShifts.filter(s =>
