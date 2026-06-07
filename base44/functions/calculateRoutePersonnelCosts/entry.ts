@@ -830,6 +830,74 @@ async function resolveRouteContractContext(base44, personnel, route, shiftDate, 
   }
 }
 
+function routeContractCaoMismatch(contractResolution, caoConfig, targetCaoKey) {
+  if (!contractResolution || !caoConfig) return null;
+  const expectedConfigId = caoConfig.id || null;
+  const expectedCaoKey = caoConfig.cao_key || targetCaoKey || null;
+  const resolvedConfigId = contractResolution.cao_configuration_id || null;
+  const resolvedCaoKey = contractResolution.cao_key || null;
+
+  if (resolvedConfigId && expectedConfigId && resolvedConfigId !== expectedConfigId) {
+    return {
+      status: 'blocked_route_contract_cao_configuration_mismatch',
+      message: `Routekosten selecteerden CAO-configuratie ${expectedConfigId}, maar contractresolutie selecteerde ${resolvedConfigId}.`,
+      expected_cao_configuration_id: expectedConfigId,
+      resolved_cao_configuration_id: resolvedConfigId
+    };
+  }
+
+  if (resolvedCaoKey && expectedCaoKey && resolvedCaoKey !== expectedCaoKey) {
+    return {
+      status: 'blocked_route_contract_cao_key_mismatch',
+      message: `Routekosten gebruiken cao_key ${expectedCaoKey}, maar contractresolutie gebruikt ${resolvedCaoKey}.`,
+      expected_cao_key: expectedCaoKey,
+      resolved_cao_key: resolvedCaoKey
+    };
+  }
+
+  return null;
+}
+
+function enforceRouteContractCaoMatch(contractResolution, caoConfig, targetCaoKey) {
+  const mismatch = routeContractCaoMismatch(contractResolution, caoConfig, targetCaoKey);
+  if (!mismatch) return contractResolution;
+  return {
+    ...(contractResolution || {}),
+    status: mismatch.status,
+    planning_allowed: false,
+    payroll_final_allowed: false,
+    manual_review_required: true,
+    blocking_reasons: [
+      ...((contractResolution && contractResolution.blocking_reasons) || []),
+      mismatch.message
+    ],
+    cao_configuration_mismatch: mismatch
+  };
+}
+
+function collectRouteContractResolutionCaoReferences(contractResults) {
+  return (contractResults || []).map(item => {
+    const resolution = item?.contract_resolution || {};
+    return {
+      personnel_id: item?.id || null,
+      contract_id: resolution.contract_id || resolution.selected_contract?.id || null,
+      cao_configuration_id: resolution.cao_configuration_id || null,
+      cao_key: resolution.cao_key || null,
+      cao_resolution_source: resolution.cao_resolution_source || null,
+      candidate_configuration_ids: resolution.cao_resolution_candidate_configuration_ids || [],
+      candidate_company_cao_assignment_ids: resolution.cao_resolution_candidate_company_cao_assignment_ids || [],
+      status: resolution.status || null
+    };
+  }).filter(ref =>
+    ref.cao_configuration_id ||
+    ref.cao_key ||
+    ref.cao_resolution_source ||
+    ref.candidate_configuration_ids.length > 0 ||
+    ref.candidate_company_cao_assignment_ids.length > 0 ||
+    ref.status
+  );
+}
+
 function buildBlockedContractCost(personnel, date, startTime, endTime, rawScope, contractResolution) {
   const caoScope = normalizeCaoScope(rawScope);
   const totalHours = calculateShiftHours(date, startTime, endTime);
@@ -1280,6 +1348,27 @@ Deno.serve(async (req) => {
       const db = b.valid_from ? new Date(b.valid_from) : new Date(0);
       return db - da;
     });
+    if (eligibleCaos.length > 1) {
+      return Response.json({
+        error: `Meerdere actieve CAO-configuraties gevonden voor ${targetCaoKey} op datum ${shiftDate}; routekosten voor payrollbasis zijn geblokkeerd om historische CAO-keuze niet te gokken.`,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          `Ambigue actieve CAO-configuraties voor ${targetCaoKey} op ${shiftDate}: ${eligibleCaos.map(c => c.id).join(', ')}`
+        ],
+        cao_key: targetCaoKey,
+        active_cao_configuration_candidates: eligibleCaos.map(c => ({
+          id: c.id,
+          name: c.name || c.version_label || null,
+          cloudflare_revision: c.cloudflare_revision || null,
+          valid_from: c.valid_from || null,
+          valid_until: c.valid_until || null
+        })),
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_ambiguous_active_cao_config'
+      }, { status: 400 });
+    }
     const caoConfig = eligibleCaos[0];
     if (!caoConfig) {
       return Response.json({
@@ -1429,7 +1518,11 @@ Deno.serve(async (req) => {
     const classificationById = {};
     for (const c of classificationResults) classificationById[c.id] = c.classification;
     const contractById = {};
-    for (const c of contractResults) contractById[c.id] = c.contract_resolution;
+    for (const c of contractResults) {
+      contractById[c.id] = enforceRouteContractCaoMatch(c.contract_resolution, caoConfig, targetCaoKey);
+      c.contract_resolution = contractById[c.id];
+    }
+    const contractResolutionCaoReferences = collectRouteContractResolutionCaoReferences(contractResults);
 
     const results = surveillants.map(p => {
       const scope = scopeById[p.id] || null;
@@ -1584,6 +1677,7 @@ Deno.serve(async (req) => {
       alarm_standby: !!route.alarm_standby,
       operating_company_id: route.operating_company_id || null,
       contract_resolution_required: usesContractResolution,
+      contract_resolution_cao_references: contractResolutionCaoReferences,
       actual_shift_note: actualShiftNote,
       total_surveillants: results.length,
       most_expensive: mostExpensive, cheapest, average,
