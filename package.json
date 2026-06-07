@@ -9,6 +9,7 @@
     "lint": "eslint . --quiet",
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",
+    "verify:cao-all": "node scripts/verify-cao-all.mjs",
     "verify:cao-foundation": "node scripts/verify-cao-foundation.mjs",
     "audit:cao-coverage": "node scripts/audit-cao-coverage.mjs",
     "audit:cao-runtime": "node scripts/audit-cao-runtime-readiness.mjs",
