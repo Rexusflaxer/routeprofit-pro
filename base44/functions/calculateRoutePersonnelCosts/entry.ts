@@ -359,6 +359,16 @@ function numberOrNull(value) {
 function uniqueNonEmpty(values) {
   return [...new Set((values || []).filter(value => value !== null && value !== undefined && value !== ''))];
 }
+function normalizeArray(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (value === null || value === undefined || value === '') return [];
+  return [value].filter(Boolean);
+}
+function appendUnique(target, values) {
+  for (const value of normalizeArray(values)) {
+    if (value && !target.includes(value)) target.push(value);
+  }
+}
 function uniqueBooleanValues(values) {
   return [...new Set((values || []).filter(value => value === true || value === false))];
 }
@@ -1236,6 +1246,240 @@ function collectRouteContractResolutionCaoReferences(contractResults) {
   );
 }
 
+function shouldRequireRouteScheduleValidation(body = {}) {
+  return body.require_route_schedule_validation === true ||
+    body.require_schedule_validation === true ||
+    body.require_payroll_final === true ||
+    body.payroll_final === true ||
+    body.final_validation === true ||
+    body.final_planning === true ||
+    body.finalize_planning === true ||
+    body.approve_planning === true ||
+    body.approve_schedule === true ||
+    body.record_payroll_run === true;
+}
+
+function buildRouteScheduleValidationGate(scheduleValidation, { required = false, personnelId = null } = {}) {
+  if (!required) {
+    return {
+      required: false,
+      status: 'not_required_for_route_cost_concept',
+      planning_allowed: null,
+      payroll_final_allowed: false,
+      manual_review_required: false,
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      warnings: [],
+      personnel_id: personnelId || null
+    };
+  }
+
+  if (!personnelId) {
+    return {
+      required: true,
+      status: 'blocked_missing_personnel_for_final_route_schedule',
+      planning_allowed: false,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      blocking_reasons: ['Definitieve route-/payrollvalidatie vereist een gekozen personnel_id. Routekosten voor alle kandidaten blijven concept.'],
+      manual_review_reasons: [],
+      warnings: [],
+      personnel_id: null
+    };
+  }
+
+  if (!scheduleValidation) {
+    return {
+      required: true,
+      status: 'blocked_missing_route_schedule_validation',
+      planning_allowed: false,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      blocking_reasons: ['Definitieve route-/payrollvalidatie mist validateCaoScheduleRules-resultaat.'],
+      manual_review_reasons: [],
+      warnings: [],
+      personnel_id: personnelId
+    };
+  }
+
+  const blockingReasons = [];
+  const manualReviewReasons = [];
+  const warnings = [];
+  const highSeverityViolations = normalizeArray(scheduleValidation.violations)
+    .filter(item => item?.severity === 'high')
+    .map(item => item.message || String(item));
+  const contractViolations = normalizeArray(scheduleValidation.contract_violations)
+    .map(item => item.message || String(item));
+
+  if (scheduleValidation.planning_allowed !== true || scheduleValidation.payroll_final_allowed !== true) {
+    blockingReasons.push('Roosterregelvalidatie staat route/payroll-final niet toe.');
+  }
+  appendUnique(blockingReasons, highSeverityViolations);
+  appendUnique(blockingReasons, contractViolations);
+  appendUnique(blockingReasons, scheduleValidation.blocking_reasons);
+  appendUnique(manualReviewReasons, scheduleValidation.manual_review_reasons);
+  appendUnique(warnings, scheduleValidation.warnings);
+  appendUnique(warnings, scheduleValidation.calculation_warnings);
+  appendUnique(warnings, normalizeArray(scheduleValidation.contract_warnings).map(item => item.message || String(item)));
+
+  return {
+    required: true,
+    status: blockingReasons.length > 0
+      ? 'blocked'
+      : manualReviewReasons.length > 0 || scheduleValidation.manual_review_required === true
+      ? 'manual_review_required'
+      : 'validated',
+    planning_allowed: scheduleValidation.planning_allowed === true,
+    payroll_final_allowed: scheduleValidation.payroll_final_allowed === true &&
+      blockingReasons.length === 0 &&
+      manualReviewReasons.length === 0 &&
+      scheduleValidation.manual_review_required !== true,
+    manual_review_required: blockingReasons.length > 0 ||
+      manualReviewReasons.length > 0 ||
+      scheduleValidation.manual_review_required === true,
+    blocking_reasons: [...new Set(blockingReasons)],
+    manual_review_reasons: [...new Set(manualReviewReasons)],
+    warnings: [...new Set(warnings)],
+    calculation_status: scheduleValidation.calculation_status || scheduleValidation.status || null,
+    period_start: scheduleValidation.period_start || null,
+    period_end: scheduleValidation.period_end || null,
+    cao_key: scheduleValidation.cao_key || null,
+    cao_configuration_id: scheduleValidation.cao_configuration_id || null,
+    personnel_id: personnelId
+  };
+}
+
+function buildRouteScheduleValidationShift({ route, shiftDate, startTime, endTime, targetCaoKey, routeServiceRequirement }) {
+  const serviceContext = routeServiceRequirement?.service_context || {};
+  return {
+    id: `${route.id || 'route'}:${shiftDate}`,
+    route_id: route.id || null,
+    date: shiftDate,
+    service_date: shiftDate,
+    start_time: startTime,
+    end_time: endTime,
+    company_id: serviceContext.company_id || serviceContext.operating_company_id || route.operating_company_id || null,
+    operating_company_id: serviceContext.operating_company_id || serviceContext.company_id || route.operating_company_id || null,
+    cao_key: serviceContext.cao_key || route.cao_key || route.cao || targetCaoKey || null,
+    cao: serviceContext.cao || route.cao || null,
+    function_type: serviceContext.function_type || null,
+    service_function_type: serviceContext.function_type || null,
+    cao_function_group: serviceContext.cao_function_group || null,
+    required_cao_function_group: serviceContext.cao_function_group || null,
+    cao_function_level: serviceContext.cao_function_level || null,
+    required_cao_function_level: serviceContext.cao_function_level || null,
+    security_role_status: serviceContext.security_role_status || null,
+    required_security_role_status: serviceContext.security_role_status || null,
+    performs_security_work: serviceContext.performs_security_work ?? null,
+    security_work_percentage: serviceContext.security_work_percentage ?? null,
+    works_airport_schiphol: serviceContext.works_airport_schiphol ?? null,
+    works_cash_value_logistics: serviceContext.works_cash_value_logistics ?? null,
+    works_event_or_hospitality_security: serviceContext.works_event_or_hospitality_security ?? null,
+    event_hospitality_cao_applies: serviceContext.event_hospitality_cao_applies ?? null,
+    required_qualification_types: serviceContext.required_qualification_types || [],
+    required_qualification_groups: serviceContext.required_qualification_groups || [],
+    contract_assignment_policy: serviceContext.contract_assignment_policy || 'strict_contract_match',
+    service_context: {
+      ...serviceContext,
+      route_id: route.id || serviceContext.route_id || null,
+      service_date: shiftDate,
+      cao_key: serviceContext.cao_key || route.cao_key || route.cao || targetCaoKey || null
+    }
+  };
+}
+
+async function validateRouteScheduleGate(base44, {
+  body,
+  route,
+  shiftDate,
+  startTime,
+  endTime,
+  targetCaoKey,
+  routeServiceRequirement
+}) {
+  const required = shouldRequireRouteScheduleValidation(body);
+  const personnelId = body.personnel_id || body.assigned_personnel_id || body.selected_personnel_id || null;
+  if (!required || !personnelId) {
+    return {
+      gate: buildRouteScheduleValidationGate(null, { required, personnelId }),
+      schedule_validation: null
+    };
+  }
+
+  try {
+    const shift = buildRouteScheduleValidationShift({
+      route,
+      shiftDate,
+      startTime,
+      endTime,
+      targetCaoKey,
+      routeServiceRequirement
+    });
+    const res = await base44.asServiceRole.functions.invoke('validateCaoScheduleRules', {
+      ...body,
+      personnel_id: personnelId,
+      cao_key: targetCaoKey,
+      shifts: [shift],
+      period_start: shiftDate,
+      period_end: shiftDate,
+      enforce_contract_resolution: true,
+      enforce_task_planning_context: true,
+      require_payroll_final: true,
+      payroll_final: true,
+      final_planning: true
+    });
+    const scheduleValidation = res?.data || res || null;
+    return {
+      gate: buildRouteScheduleValidationGate(scheduleValidation, { required: true, personnelId }),
+      schedule_validation: scheduleValidation
+    };
+  } catch (error) {
+    const scheduleValidation = {
+      planning_allowed: false,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      calculation_status: 'blocked_route_schedule_validation_error',
+      blocking_reasons: [`Route-roosterregelvalidatie fout: ${error.message || String(error)}`]
+    };
+    return {
+      gate: buildRouteScheduleValidationGate(scheduleValidation, { required: true, personnelId }),
+      schedule_validation: scheduleValidation
+    };
+  }
+}
+
+function applyRouteScheduleGateToCostResult(result, routeScheduleValidationGate) {
+  const payrollFinalGatePassed = routeScheduleValidationGate?.required === true &&
+    routeScheduleValidationGate?.payroll_final_allowed === true &&
+    (!routeScheduleValidationGate?.personnel_id || routeScheduleValidationGate.personnel_id === result?.personnel_id);
+  const blocked = String(result?.calculation_status || '').startsWith('blocked');
+  const planningCostAllowed = !blocked && result?.manual_review_required !== true;
+
+  if (payrollFinalGatePassed) {
+    return {
+      ...result,
+      planning_cost_allowed: planningCostAllowed,
+      route_schedule_validation_required: true,
+      route_schedule_validation_status: routeScheduleValidationGate.status,
+      payroll_final_allowed: result?.payroll_final_allowed === true && !blocked
+    };
+  }
+
+  return {
+    ...result,
+    planning_cost_allowed: planningCostAllowed,
+    route_schedule_validation_required: routeScheduleValidationGate?.required === true,
+    route_schedule_validation_status: routeScheduleValidationGate?.status || null,
+    payroll_final_allowed: false,
+    payroll_final_blocking_reasons: routeScheduleValidationGate?.required === true
+      ? routeScheduleValidationGate.blocking_reasons || []
+      : ['Routekosten zijn concept; roosterregelvalidatie is niet uitgevoerd voor payroll-final.'],
+    calculation_status: result?.calculation_status === 'final'
+      ? 'concept_route_cost'
+      : result?.calculation_status
+  };
+}
+
 function buildBlockedContractCost(personnel, date, startTime, endTime, rawScope, contractResolution) {
   const caoScope = normalizeCaoScope(rawScope);
   const totalHours = calculateShiftHours(date, startTime, endTime);
@@ -1280,7 +1524,7 @@ function buildBlockedContractCost(personnel, date, startTime, endTime, rawScope,
 // Composite cache fingerprint
 function buildRouteCostCacheFingerprint({ route, weekday, caoConfig, personnelList }) {
   return JSON.stringify({
-    engine_version: 'cao-wage-basis-v2',
+    engine_version: 'cao-wage-basis-v3-route-schedule-gate',
     weekday,
     cao: caoConfig.cloudflare_revision || caoConfig.id,
     route: {
@@ -1876,6 +2120,43 @@ Deno.serve(async (req) => {
       routeServiceRequirement.service_context?.company_id ||
       route.operating_company_id ||
       null;
+    const routeScheduleValidationResult = await validateRouteScheduleGate(base44, {
+      body,
+      route,
+      shiftDate,
+      startTime,
+      endTime,
+      targetCaoKey: caoConfig.cao_key || targetCaoKey,
+      routeServiceRequirement
+    });
+    const routeScheduleValidationGate = routeScheduleValidationResult.gate;
+    const routeScheduleValidation = routeScheduleValidationResult.schedule_validation;
+    if (routeScheduleValidationGate.required && routeScheduleValidationGate.payroll_final_allowed !== true) {
+      return Response.json({
+        error: 'Definitieve route-/payrollvalidatie geblokkeerd: roosterregelvalidatie is niet payroll-final toegestaan.',
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          'Routekosten kunnen als concept worden berekend, maar payroll-final vereist een gekozen medewerker en geslaagde validateCaoScheduleRules-controle.'
+        ],
+        route_id,
+        shift_date: shiftDate,
+        weekday: targetWeekday,
+        cao_configuration_id: caoConfig.id,
+        cao_key: caoConfig.cao_key || targetCaoKey,
+        cao_version_label: caoConfig.version_label || caoConfig.name,
+        cao_revision: caoConfig.cloudflare_revision || null,
+        cao_payroll_readiness: payrollReadiness,
+        cao_runtime_support: routeRuntimeSupport,
+        route_schedule_validation_gate: routeScheduleValidationGate,
+        route_schedule_validation: routeScheduleValidation,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: routeScheduleValidationGate.status === 'manual_review_required'
+          ? 'blocked_route_schedule_manual_review'
+          : 'blocked_route_schedule_validation'
+      }, { status: 400 });
+    }
 
     // ── Fingerprint-gebaseerde cache check (na laden personeel) ──
     const allPersonnelForCache = [...surveillants, ...binnendienst];
@@ -1962,21 +2243,21 @@ Deno.serve(async (req) => {
       const effectiveScope = contractResolution?.cao_applicability || scope;
       if (contractResolution?.planning_allowed === false || contractResolution?.payroll_final_allowed === false) {
         const blockedCost = buildBlockedContractCost(p, shiftDate, startTime, endTime, effectiveScope, contractResolution);
-        return {
+        return applyRouteScheduleGateToCostResult({
           personnel_id: p.id, name: p.name,
           employee_type: p.employee_type, contract_type: p.contract_type,
           cao: p.cao, cao_scale: p.cao_scale, cao_period: p.cao_period,
           ...blockedCost
-        };
+        }, routeScheduleValidationGate);
       }
       const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification, contractResolution, route);
-      return {
+      return applyRouteScheduleGateToCostResult({
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
         cao: p.cao, cao_scale: p.cao_scale, cao_period: p.cao_period,
         contract_resolution: contractResolution,
         ...cost
-      };
+      }, routeScheduleValidationGate);
     });
 
     const isCosted = r => !String(r.calculation_status || '').startsWith('blocked');
@@ -2080,26 +2361,44 @@ Deno.serve(async (req) => {
       const effectiveScope = contractResolution?.cao_applicability || scope;
       if (contractResolution?.planning_allowed === false || contractResolution?.payroll_final_allowed === false) {
         const blockedCost = buildBlockedContractCost(p, shiftDate, startTime, endTime, effectiveScope, contractResolution);
-        return {
+        return applyRouteScheduleGateToCostResult({
           personnel_id: p.id, name: p.name,
           employee_type: p.employee_type, contract_type: p.contract_type,
           cao: p.cao, cao_scale: p.cao_scale, cao_period: p.cao_period,
           ...blockedCost
-        };
+        }, routeScheduleValidationGate);
       }
       const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification, contractResolution, route);
-      return {
+      return applyRouteScheduleGateToCostResult({
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
         cao: p.cao, cao_scale: p.cao_scale, cao_period: p.cao_period,
         contract_resolution: contractResolution,
         ...cost
-      };
+      }, routeScheduleValidationGate);
     });
     const allCostResults = [...results, ...binnendienstResults];
     const blockedResults = allCostResults.filter(r => String(r.calculation_status || '').startsWith('blocked'));
-    const manualReviewResults = allCostResults.filter(r => r.manual_review_required === true || r.payroll_final_allowed === false);
-    const routePayrollFinalAllowed = blockedResults.length === 0 && manualReviewResults.length === 0;
+    const scheduleValidationRequired = routeScheduleValidationGate.required === true;
+    const payrollRelevantResults = scheduleValidationRequired && routeScheduleValidationGate.personnel_id
+      ? allCostResults.filter(r => r.personnel_id === routeScheduleValidationGate.personnel_id)
+      : allCostResults;
+    const payrollRelevantBlockedResults = payrollRelevantResults.filter(r => String(r.calculation_status || '').startsWith('blocked'));
+    const manualReviewResults = payrollRelevantResults.filter(r =>
+      r.manual_review_required === true ||
+      (scheduleValidationRequired && r.payroll_final_allowed === false)
+    );
+    const routePayrollFinalSelectionMissing = scheduleValidationRequired &&
+      routeScheduleValidationGate.payroll_final_allowed === true &&
+      !!routeScheduleValidationGate.personnel_id &&
+      payrollRelevantResults.length !== 1;
+    const routeManualReviewRequired = manualReviewResults.length > 0 || routePayrollFinalSelectionMissing;
+    const routePlanningCostAllowed = blockedResults.length === 0 && costedResults.length > 0;
+    const routePayrollFinalAllowed = scheduleValidationRequired &&
+      routeScheduleValidationGate.payroll_final_allowed === true &&
+      payrollRelevantResults.length === 1 &&
+      payrollRelevantBlockedResults.length === 0 &&
+      manualReviewResults.length === 0;
 
     const resultPayload = {
       shift_date: shiftDate, weekday: targetWeekday,
@@ -2110,19 +2409,23 @@ Deno.serve(async (req) => {
       contract_resolution_required: usesContractResolution,
       route_service_requirement: routeServiceRequirement,
       contract_resolution_cao_references: contractResolutionCaoReferences,
+      payroll_final_personnel_id: routeScheduleValidationGate.personnel_id || null,
       actual_shift_note: actualShiftNote,
       total_surveillants: results.length,
       most_expensive: mostExpensive, cheapest, average,
       all_personnel: results,
       binnendienst: binnendienstResults,
       vehicle_costs: vehicleCosts,
+      planning_cost_allowed: routePlanningCostAllowed,
       payroll_final_allowed: routePayrollFinalAllowed,
-      manual_review_required: manualReviewResults.length > 0,
+      manual_review_required: routeManualReviewRequired,
       calculation_status: routePayrollFinalAllowed
         ? 'final'
         : blockedResults.length > 0
         ? 'blocked_manual_review'
-        : 'concept_manual_review',
+        : routeManualReviewRequired
+        ? 'concept_manual_review'
+        : 'concept_route_cost',
       cao_configuration_id: caoConfig.id,
       cao_key: caoConfig.cao_key || targetCaoKey,
       cao_version_label: caoConfig.version_label || caoConfig.name,
@@ -2130,6 +2433,9 @@ Deno.serve(async (req) => {
       cao_payroll_readiness: payrollReadiness,
       cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
       cao_runtime_support: routeRuntimeSupport,
+      route_schedule_validation_gate: routeScheduleValidationGate,
+      route_schedule_validation: routeScheduleValidation,
+      payroll_final_selection_missing: routePayrollFinalSelectionMissing,
       cao_sync_status: caoSyncStatus,
       calculation_warnings: [
         ...syncWarnings,

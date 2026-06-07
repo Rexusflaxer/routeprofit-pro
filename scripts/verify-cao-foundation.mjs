@@ -27,6 +27,7 @@ const reimbursements = loadFunctionModule('base44/functions/calculateCaoReimburs
 const leaveSickness = loadFunctionModule('base44/functions/calculateCaoLeaveAndSickness/entry.ts');
 const yearEndBonus = loadFunctionModule('base44/functions/calculateCaoYearEndBonus/entry.ts');
 const personnelCosts = loadFunctionModule('base44/functions/calculatePersonnelCosts/entry.ts');
+const routePersonnelCosts = loadFunctionModule('base44/functions/calculateRoutePersonnelCosts/entry.ts');
 const functionClassification = loadFunctionModule('base44/functions/resolveCaoFunctionClassification/entry.ts');
 const caoApplicability = loadFunctionModule('base44/functions/resolveCaoApplicability/entry.ts');
 const policyReferenceContext = loadFunctionModule('base44/functions/resolveCaoPolicyReferenceContext/entry.ts');
@@ -1013,6 +1014,89 @@ function runPayrollPolicyScenarios() {
   assert.equal(validScheduleGate.cao_key, 'cao_particuliere_beveiliging');
 }
 
+function runRouteCostScheduleGateScenarios() {
+  assert.equal(
+    routePersonnelCosts.shouldRequireRouteScheduleValidation({}),
+    false,
+    'Route cost concept calculation should not require schedule validation'
+  );
+  assert.equal(
+    routePersonnelCosts.shouldRequireRouteScheduleValidation({ require_payroll_final: true }),
+    true,
+    'Route payroll-final request must require schedule validation'
+  );
+
+  const conceptGate = routePersonnelCosts.buildRouteScheduleValidationGate(null, { required: false });
+  assert.equal(conceptGate.status, 'not_required_for_route_cost_concept');
+  assert.equal(conceptGate.payroll_final_allowed, false);
+  assert.equal(conceptGate.manual_review_required, false);
+
+  const missingPersonnelGate = routePersonnelCosts.buildRouteScheduleValidationGate(null, {
+    required: true,
+    personnelId: null
+  });
+  assert.equal(missingPersonnelGate.status, 'blocked_missing_personnel_for_final_route_schedule');
+  assert.equal(missingPersonnelGate.payroll_final_allowed, false);
+  assert.ok(
+    missingPersonnelGate.blocking_reasons.some(reason => reason.includes('personnel_id')),
+    'Final route validation must block without selected personnel_id'
+  );
+
+  const validGate = routePersonnelCosts.buildRouteScheduleValidationGate({
+    planning_allowed: true,
+    payroll_final_allowed: true,
+    manual_review_required: false,
+    calculation_status: 'final',
+    period_start: '2026-01-15',
+    period_end: '2026-01-15',
+    cao_key: 'cao_particuliere_beveiliging',
+    cao_configuration_id: 'cao-config-1'
+  }, {
+    required: true,
+    personnelId: 'person-1'
+  });
+  assert.equal(validGate.status, 'validated');
+  assert.equal(validGate.payroll_final_allowed, true);
+  assert.equal(validGate.personnel_id, 'person-1');
+
+  const conceptCost = routePersonnelCosts.applyRouteScheduleGateToCostResult({
+    calculation_status: 'final',
+    manual_review_required: false,
+    payroll_final_allowed: true,
+    total_cost_employer: 100
+  }, conceptGate);
+  assert.equal(conceptCost.calculation_status, 'concept_route_cost');
+  assert.equal(conceptCost.planning_cost_allowed, true);
+  assert.equal(conceptCost.payroll_final_allowed, false);
+  assert.ok(
+    conceptCost.payroll_final_blocking_reasons.some(reason => reason.includes('concept')),
+    'Concept route costs must explain why payroll-final is false'
+  );
+
+  const finalCost = routePersonnelCosts.applyRouteScheduleGateToCostResult({
+    personnel_id: 'person-1',
+    calculation_status: 'final',
+    manual_review_required: false,
+    payroll_final_allowed: true,
+    total_cost_employer: 100
+  }, validGate);
+  assert.equal(finalCost.calculation_status, 'final');
+  assert.equal(finalCost.planning_cost_allowed, true);
+  assert.equal(finalCost.payroll_final_allowed, true);
+  assert.equal(finalCost.route_schedule_validation_status, 'validated');
+
+  const otherCandidateCost = routePersonnelCosts.applyRouteScheduleGateToCostResult({
+    personnel_id: 'person-2',
+    calculation_status: 'final',
+    manual_review_required: false,
+    payroll_final_allowed: true,
+    total_cost_employer: 100
+  }, validGate);
+  assert.equal(otherCandidateCost.calculation_status, 'concept_route_cost');
+  assert.equal(otherCandidateCost.planning_cost_allowed, true);
+  assert.equal(otherCandidateCost.payroll_final_allowed, false);
+}
+
 function runFunctionClassificationScenarios() {
   const nonSecurity = functionClassification.classify({
     function_type: 'klantrelatie',
@@ -1086,6 +1170,7 @@ async function main() {
     ['reimbursements', () => runReimbursementScenarios()],
     ['leave and sickness', () => runLeaveSicknessScenarios()],
     ['payroll policy and corrections', () => runPayrollPolicyScenarios()],
+    ['route cost schedule gate', () => runRouteCostScheduleGateScenarios()],
     ['function classification and wage scales', () => runFunctionClassificationScenarios()]
   ];
 
