@@ -2223,13 +2223,100 @@ Deno.serve(async (req) => {
     ];
     const inferredExternalCaoKeys = [...new Set(externalCaoSignals.map(signal => signal.cao_key).filter(Boolean))];
     const inferredExternalCaoKey = inferredExternalCaoKeys.length === 1 ? inferredExternalCaoKeys[0] : null;
-    const targetCaoKey = body.cao_key ||
+    const contractResolutionRequired = shouldEnforceContractResolution({ body, workSchedule: work_schedule });
+    let contractResolutionResults = [];
+    const calculationWarnings = [];
+    let targetCaoKey = body.cao_key ||
       service_context?.cao_key ||
       firstScheduleCaoKey(work_schedule) ||
       objectCaoKey ||
       inferredExternalCaoKey ||
-      personnel.cao ||
-      CAO_PB_KEY;
+      null;
+
+    if (!targetCaoKey && contractResolutionRequired) {
+      contractResolutionResults = await resolvePayrollContractContexts(base44, {
+        body: {
+          ...body,
+          enforce_contract_resolution,
+          contract_id,
+          company_id,
+          route_id,
+          task_id,
+          object_id,
+          service_context
+        },
+        personnel,
+        personnelId: personnel_id,
+        workSchedule: work_schedule
+      });
+
+      const blockedContractResolutions = contractResolutionResults.filter(contractResolutionBlocksPayroll);
+      if (blockedContractResolutions.length > 0) {
+        return Response.json({
+          error: 'Definitieve loonberekening geblokkeerd: cao_key kan niet uit contracten worden afgeleid omdat niet alle diensten een geldige contract-/bedrijf-/CAO-koppeling hebben.',
+          calculation_warnings: [
+            'Payroll geblokkeerd: geef expliciet cao_key mee of herstel contract/bedrijf/functie-koppelingen voordat deze loonrun definitief mag zijn.'
+          ],
+          personnel_id,
+          pay_period_start: payrollPeriod.period_start,
+          pay_period_end: payrollPeriod.period_end,
+          contract_resolution_required: true,
+          contract_resolution_results: contractResolutionResults,
+          blocked_contract_resolution_count: blockedContractResolutions.length,
+          manual_review_required: true,
+          payroll_final_allowed: false,
+          calculation_status: 'blocked_contract_resolution_before_cao_selection'
+        }, { status: 400 });
+      }
+
+      const contractResolutionCaoReferences = collectContractResolutionCaoReferences(contractResolutionResults);
+      const resolvedCaoKeys = [...new Set(contractResolutionCaoReferences
+        .map(ref => ref.cao_key)
+        .filter(Boolean))];
+
+      if (resolvedCaoKeys.length !== 1) {
+        return Response.json({
+          error: 'Definitieve loonberekening geblokkeerd: cao_key kan niet eenduidig uit contractresolutie worden afgeleid.',
+          calculation_warnings: [
+            'Payroll mag niet standaard naar CAO PB vallen. Geef cao_key expliciet mee of splits/herstel de contracten zodat elke dienst dezelfde cao_key bewijst.'
+          ],
+          personnel_id,
+          pay_period_start: payrollPeriod.period_start,
+          pay_period_end: payrollPeriod.period_end,
+          contract_resolution_required: true,
+          contract_resolution_results: contractResolutionResults,
+          contract_resolution_cao_references: contractResolutionCaoReferences,
+          resolved_cao_keys: resolvedCaoKeys,
+          manual_review_required: true,
+          payroll_final_allowed: false,
+          calculation_status: resolvedCaoKeys.length > 1
+            ? 'blocked_mixed_contract_cao_keys_before_cao_selection'
+            : 'blocked_missing_contract_cao_key_before_cao_selection'
+        }, { status: 400 });
+      }
+
+      targetCaoKey = resolvedCaoKeys[0];
+      calculationWarnings.push(`Payroll cao_key ${targetCaoKey} is afgeleid uit contractresolutie; geen PB-default toegepast.`);
+    }
+
+    if (!targetCaoKey) {
+      return Response.json({
+        error: 'Definitieve loonberekening geblokkeerd: cao_key ontbreekt.',
+        calculation_warnings: [
+          'Geef cao_key mee op loonrun/dienst/object of zorg dat contractresolutie verplicht is en exact één cao_key oplevert.'
+        ],
+        personnel_id,
+        pay_period_start: payrollPeriod.period_start,
+        pay_period_end: payrollPeriod.period_end,
+        schedule_cao_keys: collectScheduleCaoKeys(work_schedule),
+        object_cao_keys: objectCaoKeys,
+        external_cao_signals: externalCaoSignals,
+        contract_resolution_required: contractResolutionRequired,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_missing_cao_key'
+      }, { status: 400 });
+    }
 
     const externalCaoScopeGate = buildExternalCaoScopeGate({
       targetCaoKey,
@@ -2252,7 +2339,6 @@ Deno.serve(async (req) => {
       }, { status: 400 });
     }
 
-    const calculationWarnings = [];
     const explicitScheduleCaoKeys = collectScheduleCaoKeys(work_schedule);
     for (const key of objectCaoKeys) addUnique(explicitScheduleCaoKeys, key);
     const conflictingScheduleCaoKeys = explicitScheduleCaoKeys.filter(key => key !== targetCaoKey);
@@ -2461,25 +2547,25 @@ Deno.serve(async (req) => {
       }
     }
 
-    const contractResolutionRequired = shouldEnforceContractResolution({ body, workSchedule: work_schedule });
-    let contractResolutionResults = [];
     let callAgreementContractMix = buildCallAgreementContractMix(contractResolutionResults);
     if (contractResolutionRequired) {
-      contractResolutionResults = await resolvePayrollContractContexts(base44, {
-        body: {
-          ...body,
-          enforce_contract_resolution,
-          contract_id,
-          company_id,
-          route_id,
-          task_id,
-          object_id,
-          service_context
-        },
-        personnel,
-        personnelId: personnel_id,
-        workSchedule: work_schedule
-      });
+      if (contractResolutionResults.length === 0) {
+        contractResolutionResults = await resolvePayrollContractContexts(base44, {
+          body: {
+            ...body,
+            enforce_contract_resolution,
+            contract_id,
+            company_id,
+            route_id,
+            task_id,
+            object_id,
+            service_context
+          },
+          personnel,
+          personnelId: personnel_id,
+          workSchedule: work_schedule
+        });
+      }
       const blockedContractResolutions = contractResolutionResults.filter(contractResolutionBlocksPayroll);
       if (blockedContractResolutions.length > 0) {
         return Response.json({
