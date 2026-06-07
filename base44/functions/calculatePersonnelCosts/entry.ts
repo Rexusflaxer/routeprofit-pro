@@ -370,6 +370,113 @@ function buildCallAgreementContractMix(contractResolutionResults) {
   };
 }
 
+function pickFirstNonEmpty(...values) {
+  return values.find(value => value !== null && value !== undefined && value !== '') ?? null;
+}
+
+function yearsAtReferenceDate(startDate, referenceDate) {
+  const startIso = isoDate(startDate);
+  const refIso = isoDate(referenceDate);
+  if (!startIso || !refIso) return null;
+  const start = new Date(`${startIso}T00:00:00`);
+  const reference = new Date(`${refIso.slice(0, 4)}-01-01T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(reference.getTime()) || start > reference) return 0;
+  let years = reference.getFullYear() - start.getFullYear();
+  const anniversary = new Date(reference.getFullYear(), start.getMonth(), start.getDate());
+  if (anniversary > reference) years -= 1;
+  return Math.max(0, years);
+}
+
+function extraVacationDaysForServiceYears(years) {
+  const serviceYears = numberOrNull(years);
+  if (serviceYears === null || serviceYears < 5) return 0;
+  if (serviceYears >= 40) return 8;
+  return Math.floor(serviceYears / 5);
+}
+
+function buildVacationServiceContext({ personnel, body, contractResolutionResults, referenceDate }) {
+  const selectedContract = selectedContractsFromResolutionResults(contractResolutionResults)[0] || {};
+  const explicitYears = pickFirstNonEmpty(
+    body.vacation_service_years,
+    body.continuous_service_years,
+    body.security_industry_service_years_for_vacation,
+    selectedContract.vacation_service_years,
+    selectedContract.continuous_service_years,
+    selectedContract.security_industry_service_years_for_vacation,
+    personnel.vacation_service_years,
+    personnel.continuous_service_years,
+    personnel.security_industry_service_years_for_vacation
+  );
+  const startDate = pickFirstNonEmpty(
+    body.vacation_service_start_date,
+    body.continuous_service_start_date,
+    selectedContract.vacation_service_start_date,
+    selectedContract.continuous_service_start_date,
+    selectedContract.contract_start_date,
+    personnel.vacation_service_start_date,
+    personnel.continuous_service_start_date,
+    personnel.contract_start_date
+  );
+  const explicitNumber = numberOrNull(explicitYears);
+  if (explicitNumber !== null) {
+    return {
+      service_years: explicitNumber,
+      source: 'explicit_vacation_service_years',
+      reference_date: isoDate(referenceDate),
+      manual_review_required: false,
+      source_rule_ids: ['CAO-PB-2024-R1019', 'CAO-PB-2024-R1021', 'CAO-PB-2024-R1022']
+    };
+  }
+  const calculatedYears = yearsAtReferenceDate(startDate, referenceDate);
+  if (calculatedYears !== null) {
+    return {
+      service_years: calculatedYears,
+      source: 'calculated_from_service_start_date',
+      service_start_date: isoDate(startDate),
+      reference_date: isoDate(referenceDate),
+      manual_review_required: false,
+      source_rule_ids: ['CAO-PB-2024-R1019', 'CAO-PB-2024-R1021', 'CAO-PB-2024-R1022']
+    };
+  }
+  return {
+    service_years: null,
+    source: 'missing_service_years',
+    reference_date: isoDate(referenceDate),
+    manual_review_required: true,
+    source_rule_ids: ['CAO-PB-2024-R1019', 'CAO-PB-2024-R1021', 'CAO-PB-2024-R1022']
+  };
+}
+
+function calculateVacationEntitlementForPayPeriod({ paidHoursPerPayPeriod, vacationServiceContext }) {
+  const fulltimePeriodHours = 144;
+  const fulltimeVacationHoursPerPeriod = 13.3;
+  const vacationDayHours = 7.2;
+  const paidHours = Math.max(0, numberOrZero(paidHoursPerPayPeriod));
+  const cappedPaidHours = Math.min(paidHours, fulltimePeriodHours);
+  const parttimeRatio = cappedPaidHours / fulltimePeriodHours;
+  const extraDays = extraVacationDaysForServiceYears(vacationServiceContext?.service_years);
+  const extraHoursPerPeriod = (extraDays * vacationDayHours * parttimeRatio) / 13;
+
+  return {
+    paid_hours_per_pay_period: r2(paidHours),
+    capped_paid_hours_per_pay_period: r2(cappedPaidHours),
+    fulltime_reference_hours_per_pay_period: fulltimePeriodHours,
+    parttime_ratio: r2(parttimeRatio),
+    vacation_hours_base_per_pay_period: r2(fulltimeVacationHoursPerPeriod * parttimeRatio),
+    extra_vacation_days_annual_fulltime_basis: extraDays,
+    extra_vacation_hours_per_pay_period: r2(extraHoursPerPeriod),
+    vacation_hours_accrued_per_pay_period: r2((fulltimeVacationHoursPerPeriod * parttimeRatio) + extraHoursPerPeriod),
+    service_years_context: vacationServiceContext,
+    capped_at_144_hours_per_pay_period: paidHours > fulltimePeriodHours,
+    manual_review_required: vacationServiceContext?.manual_review_required === true,
+    source_rule_ids: [
+      'CAO-PB-2024-R0999', 'CAO-PB-2024-R1002', 'CAO-PB-2024-R1003', 'CAO-PB-2024-R1004',
+      'CAO-PB-2024-R1008', 'CAO-PB-2024-R1009', 'CAO-PB-2024-R1010',
+      ...(vacationServiceContext?.source_rule_ids || [])
+    ]
+  };
+}
+
 function isCallWorkerForPayroll({ personnel, body, workSchedule, contractResolutionResults }) {
   if (isCallAgreementContext(personnel) || isCallAgreementContext(body)) return true;
   if (selectedContractsFromResolutionResults(contractResolutionResults).some(isCallAgreementContext)) return true;
@@ -1943,6 +2050,7 @@ Deno.serve(async (req) => {
         vacation_allowance: 0,
         year_end_bonus: 0
       },
+      vacation_entitlement: null,
       year_end_bonus_basis: {
         eligible_base_wage: 0,
         vacation_allowance_on_eligible_base_wage: 0,
@@ -2438,10 +2546,48 @@ Deno.serve(async (req) => {
       if (!isCallWorker) {
         // Bereken gemiddelde ORT per uur (voor ORT verlof berekening)
         const avgOrtPerHour = totalHours > 0 ? totalSurcharges / totalHours : 0;
-        
-        // Schat jaarlijkse vakantie-uren (bijv. 25 dagen * 8 uur = 200 uur)
-        const estimatedAnnualVacationHours = 200;
-        const ortVerlofReservation = (estimatedAnnualVacationHours / 13) * avgOrtPerHour; // per 4 weken
+        const paidHoursForVacationAccrual =
+          totalHours +
+          payslip.minimum_service_compensation.top_up_hours +
+          numberOrZero(vacation_hours) +
+          numberOrZero(extraordinary_leave_hours) +
+          numberOrZero(sickness_hours) +
+          numberOrZero(other_paid_work_time_hours) +
+          numberOrZero(paid_absence_hours);
+        const vacationServiceContext = buildVacationServiceContext({
+          personnel,
+          body,
+          contractResolutionResults,
+          referenceDate: pay_period_start || firstShiftDate
+        });
+        const vacationEntitlement = calculateVacationEntitlementForPayPeriod({
+          paidHoursPerPayPeriod: paidHoursForVacationAccrual,
+          vacationServiceContext
+        });
+        payslip.vacation_entitlement = vacationEntitlement;
+
+        if (vacationEntitlement.manual_review_required) {
+          payrollRuntimeReviewItems.push({
+            rule_id: 'CAO-PB-2024-R1019',
+            domain: 'vacation_entitlement',
+            message: 'Dienstjarencontext voor extra vakantiedagen ontbreekt; vakantie-/ORT-verlofbasis kan niet definitief worden vastgesteld.',
+            field: 'vacation_service_years/vacation_service_start_date'
+          });
+          runtimePayrollFinalAllowed = false;
+          runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+        }
+        if (work_schedule_is_full_pay_period !== true) {
+          payrollRuntimeReviewItems.push({
+            rule_id: 'CAO-PB-2024-R1010',
+            domain: 'vacation_entitlement',
+            message: 'Werkrooster is niet bevestigd als volledige loonperiode; vakantieopbouw over alle betaalde uren tot maximaal 144 uur kan alleen als concept worden berekend.',
+            field: 'work_schedule_is_full_pay_period'
+          });
+          runtimePayrollFinalAllowed = false;
+          runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+        }
+
+        const ortVerlofReservation = vacationEntitlement.vacation_hours_accrued_per_pay_period * avgOrtPerHour;
         
         payslip.accruals.vacation_allowance = payslip.total_gross * ((caoConfig.vacation_allowance || 8) / 100);
         payslip.accruals.year_end_bonus = yearEndBonusBasisAmount * ((caoConfig.year_end_bonus || 2.01) / 100);
@@ -2631,6 +2777,7 @@ Deno.serve(async (req) => {
           vacation_allowance: Math.round(payslip.accruals.vacation_allowance * 100) / 100,
           year_end_bonus: Math.round(payslip.accruals.year_end_bonus * 100) / 100
         },
+        vacation_entitlement: payslip.vacation_entitlement,
         year_end_bonus_basis: {
           eligible_base_wage: r2(payslip.year_end_bonus_basis.eligible_base_wage),
           vacation_allowance_on_eligible_base_wage: r2(payslip.year_end_bonus_basis.vacation_allowance_on_eligible_base_wage),

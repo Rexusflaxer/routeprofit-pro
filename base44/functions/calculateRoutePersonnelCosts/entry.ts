@@ -269,6 +269,107 @@ function calculateCallWorkerVacationPayoutArticle59({ baseWageAmount, minimumSer
     source_rule_ids: ['CAO-PB-2024-R1014', 'CAO-PB-2024-R1015', 'CAO-PB-2024-R1016', 'CAO-PB-2024-R1017']
   };
 }
+function isoDate(value) {
+  if (!value) return null;
+  return String(value).slice(0, 10);
+}
+function pickFirstNonEmpty(...values) {
+  return values.find(value => value !== null && value !== undefined && value !== '') ?? null;
+}
+function yearsAtReferenceDate(startDate, referenceDate) {
+  const startIso = isoDate(startDate);
+  const refIso = isoDate(referenceDate);
+  if (!startIso || !refIso) return null;
+  const start = new Date(`${startIso}T00:00:00`);
+  const reference = new Date(`${refIso.slice(0, 4)}-01-01T00:00:00`);
+  if (Number.isNaN(start.getTime()) || Number.isNaN(reference.getTime()) || start > reference) return 0;
+  let years = reference.getFullYear() - start.getFullYear();
+  const anniversary = new Date(reference.getFullYear(), start.getMonth(), start.getDate());
+  if (anniversary > reference) years -= 1;
+  return Math.max(0, years);
+}
+function extraVacationDaysForServiceYears(years) {
+  const serviceYears = numberOrNull(years);
+  if (serviceYears === null || serviceYears < 5) return 0;
+  if (serviceYears >= 40) return 8;
+  return Math.floor(serviceYears / 5);
+}
+function buildVacationServiceContext(personnel, contractResolution, referenceDate) {
+  const selectedContract = contractResolution?.selected_contract || {};
+  const explicitYears = pickFirstNonEmpty(
+    selectedContract.vacation_service_years,
+    selectedContract.continuous_service_years,
+    selectedContract.security_industry_service_years_for_vacation,
+    personnel.vacation_service_years,
+    personnel.continuous_service_years,
+    personnel.security_industry_service_years_for_vacation
+  );
+  const startDate = pickFirstNonEmpty(
+    selectedContract.vacation_service_start_date,
+    selectedContract.continuous_service_start_date,
+    selectedContract.contract_start_date,
+    personnel.vacation_service_start_date,
+    personnel.continuous_service_start_date,
+    personnel.contract_start_date
+  );
+  const explicitNumber = numberOrNull(explicitYears);
+  if (explicitNumber !== null) {
+    return {
+      service_years: explicitNumber,
+      source: 'explicit_vacation_service_years',
+      reference_date: isoDate(referenceDate),
+      manual_review_required: false,
+      source_rule_ids: ['CAO-PB-2024-R1019', 'CAO-PB-2024-R1021', 'CAO-PB-2024-R1022']
+    };
+  }
+  const calculatedYears = yearsAtReferenceDate(startDate, referenceDate);
+  if (calculatedYears !== null) {
+    return {
+      service_years: calculatedYears,
+      source: 'calculated_from_service_start_date',
+      service_start_date: isoDate(startDate),
+      reference_date: isoDate(referenceDate),
+      manual_review_required: false,
+      source_rule_ids: ['CAO-PB-2024-R1019', 'CAO-PB-2024-R1021', 'CAO-PB-2024-R1022']
+    };
+  }
+  return {
+    service_years: null,
+    source: 'missing_service_years',
+    reference_date: isoDate(referenceDate),
+    manual_review_required: true,
+    source_rule_ids: ['CAO-PB-2024-R1019', 'CAO-PB-2024-R1021', 'CAO-PB-2024-R1022']
+  };
+}
+function calculateVacationEntitlementForPayPeriod({ paidHoursPerPayPeriod, vacationServiceContext }) {
+  const fulltimePeriodHours = 144;
+  const fulltimeVacationHoursPerPeriod = 13.3;
+  const vacationDayHours = 7.2;
+  const paidHours = Math.max(0, numberOrZero(paidHoursPerPayPeriod));
+  const cappedPaidHours = Math.min(paidHours, fulltimePeriodHours);
+  const parttimeRatio = cappedPaidHours / fulltimePeriodHours;
+  const extraDays = extraVacationDaysForServiceYears(vacationServiceContext?.service_years);
+  const extraHoursPerPeriod = (extraDays * vacationDayHours * parttimeRatio) / 13;
+
+  return {
+    paid_hours_per_pay_period: r2(paidHours),
+    capped_paid_hours_per_pay_period: r2(cappedPaidHours),
+    fulltime_reference_hours_per_pay_period: fulltimePeriodHours,
+    parttime_ratio: r2(parttimeRatio),
+    vacation_hours_base_per_pay_period: r2(fulltimeVacationHoursPerPeriod * parttimeRatio),
+    extra_vacation_days_annual_fulltime_basis: extraDays,
+    extra_vacation_hours_per_pay_period: r2(extraHoursPerPeriod),
+    vacation_hours_accrued_per_pay_period: r2((fulltimeVacationHoursPerPeriod * parttimeRatio) + extraHoursPerPeriod),
+    service_years_context: vacationServiceContext,
+    capped_at_144_hours_per_pay_period: paidHours > fulltimePeriodHours,
+    manual_review_required: vacationServiceContext?.manual_review_required === true,
+    source_rule_ids: [
+      'CAO-PB-2024-R0999', 'CAO-PB-2024-R1002', 'CAO-PB-2024-R1003', 'CAO-PB-2024-R1004',
+      'CAO-PB-2024-R1008', 'CAO-PB-2024-R1009', 'CAO-PB-2024-R1010',
+      ...(vacationServiceContext?.source_rule_ids || [])
+    ]
+  };
+}
 function timeToMinutes(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
 function minutesToTime(m) {
   const total = ((m % (24 * 60)) + (24 * 60)) % (24 * 60);
@@ -865,9 +966,13 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
 
   // ORT-vakantie-reservering: 0 als geen toeslagen toegepast zijn
   const avgOrtPerHour = (totalHours > 0 && surchargesTotal > 0) ? surchargesTotal / totalHours : 0;
-  const estimatedAnnualVacationHours = 200;
+  const vacationServiceContext = buildVacationServiceContext(personnel, contractResolution, date);
+  const vacationEntitlement = calculateVacationEntitlementForPayPeriod({
+    paidHoursPerPayPeriod: totalHours,
+    vacationServiceContext
+  });
   const ortVacationReservation = !isCallWorker && applySpecialHours
-    ? (estimatedAnnualVacationHours / 13) * avgOrtPerHour
+    ? vacationEntitlement.vacation_hours_accrued_per_pay_period * avgOrtPerHour
     : 0;
   const accrualsTotal = isCallWorker ? 0 : vacationAllowance + yearEndBonus + ortVacationReservation;
   const totalCostEmployer = totalGross + employerCostsTotal + accrualsTotal;
@@ -875,6 +980,10 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
   if (callWorkerManualReview) {
     scopeWarnings.push('Oproepkracht-vakantiedagenuitbetaling art. 59 vereist handmatige review: 144-uurscap kon niet definitief worden berekend.');
   }
+  if (!isCallWorker && vacationEntitlement.manual_review_required) {
+    scopeWarnings.push('Vakantie-/ORT-verlofbasis vereist handmatige review: dienstjarencontext voor extra vakantiedagen ontbreekt.');
+  }
+  const vacationEntitlementManualReview = !isCallWorker && vacationEntitlement.manual_review_required === true;
 
   return {
     base_hourly_rate: baseHourlyRate, total_hours: totalHours,
@@ -897,6 +1006,7 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
         source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
       },
       ort_vacation_reservation: r2(ortVacationReservation),
+      vacation_entitlement: vacationEntitlement,
       direct_payout_total: r2(isCallWorker ? directCallWorkerAllowancePayouts : 0),
       reserved_total: r2(accrualsTotal)
     },
@@ -907,9 +1017,9 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
     cao_scope_profile: caoScope?.cao_scope_profile || null,
     scope_warnings: [...scopeWarnings, ...(wageBasis.warnings || [])],
     wage_basis_type: wageBasis.wage_basis_type,
-    payroll_final_allowed: wageBasis.payroll_final_allowed && !dstCalculationInfo?.manual_review_required && !callWorkerManualReview,
-    manual_review_required: wageBasis.manual_review_required || !!dstCalculationInfo?.manual_review_required || callWorkerManualReview,
-    calculation_status: (dstCalculationInfo?.manual_review_required || callWorkerManualReview) && wageBasis.calculation_status === 'final'
+    payroll_final_allowed: wageBasis.payroll_final_allowed && !dstCalculationInfo?.manual_review_required && !callWorkerManualReview && !vacationEntitlementManualReview,
+    manual_review_required: wageBasis.manual_review_required || !!dstCalculationInfo?.manual_review_required || callWorkerManualReview || vacationEntitlementManualReview,
+    calculation_status: (dstCalculationInfo?.manual_review_required || callWorkerManualReview || vacationEntitlementManualReview) && wageBasis.calculation_status === 'final'
       ? 'concept_manual_review'
       : wageBasis.calculation_status,
     cao_function_classification: classification,
