@@ -352,6 +352,9 @@
       "type": "string",
       "enum": [
         "cao_particuliere_beveiliging",
+        "cao_evenementen_horecabeveiliging",
+        "cao_verkeersregelaars",
+        "cao_veiligheidsdomein",
         "eigen_tarief"
       ],
       "default": "cao_particuliere_beveiliging"
@@ -491,6 +494,20 @@
         "boolean",
         "null"
       ]
+    },
+    "works_event_or_hospitality_security": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "True als de medewerker normaal evenementen-/horecabeveiliging uitvoert."
+    },
+    "event_hospitality_cao_applies": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "True als voor deze medewerker de evenementen-/horecabeveiligings-CAO geldt in plaats van CAO PB."
     },
     "cao_scope_profile": {
       "type": [

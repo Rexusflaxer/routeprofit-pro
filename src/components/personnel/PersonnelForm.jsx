@@ -14,6 +14,14 @@ const CONTRACT_TYPES = [
   { value: "min_max", label: "Min-max contract" },
 ];
 
+const CAO_OPTIONS = [
+  { value: "cao_particuliere_beveiliging", label: "CAO Particuliere Beveiliging", payrollRuntimeReady: true },
+  { value: "cao_evenementen_horecabeveiliging", label: "CAO Evenementen- en Horecabeveiliging", payrollRuntimeReady: false },
+  { value: "cao_verkeersregelaars", label: "CAO Verkeersregelaars", payrollRuntimeReady: false },
+  { value: "cao_veiligheidsdomein", label: "CAO Veiligheidsdomein", payrollRuntimeReady: false },
+  { value: "eigen_tarief", label: "Eigen uurtarief", payrollRuntimeReady: true },
+];
+
 const VALID_PERIODS_PER_SCALE = {
   2: { min: 0, max: 1 },
   3: { min: 1, max: 10 },
@@ -138,7 +146,9 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
 
   const isZZP = form.employee_type === "zzp";
   const isLoondienst = form.employee_type === "loondienst";
-  const usesCAO = form.cao === "cao_particuliere_beveiliging";
+  const usesPbCao = form.cao === "cao_particuliere_beveiliging";
+  const usesCustomRate = form.cao === "eigen_tarief";
+  const selectedCaoOption = CAO_OPTIONS.find(option => option.value === form.cao);
   const selectedScaleForRange = form.cao_scale ?? 2;
   const selectedPeriodRange = VALID_PERIODS_PER_SCALE[selectedScaleForRange] || VALID_PERIODS_PER_SCALE[2];
   const hasCar = !!form.company_car_license_plate || !!form._showCarSection;
@@ -276,12 +286,13 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
                   <Select value={form.cao} onValueChange={(v) => handleChange("cao", v)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
-                      <SelectItem value="cao_particuliere_beveiliging">CAO Particuliere Beveiliging</SelectItem>
-                      <SelectItem value="eigen_tarief">Eigen uurtarief</SelectItem>
+                      {CAO_OPTIONS.map(option => (
+                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                      ))}
                     </SelectContent>
                   </Select>
                 </div>
-                {usesCAO && (
+                {usesPbCao && (
                   <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                     <div className="space-y-2">
                       <Label className="text-xs text-slate-600">Loonschaal (2-7)</Label>
@@ -313,10 +324,15 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
                     </div>
                   </div>
                 )}
-                {!usesCAO && (
+                {usesCustomRate && (
                   <div className="space-y-2">
                     <Label className="text-xs text-slate-600">Uurtarief (€)</Label>
                     <Input type="number" step="0.01" value={form.custom_hourly_rate || ""} onChange={(e) => handleChange("custom_hourly_rate", parseFloat(e.target.value) || 0)} required />
+                  </div>
+                )}
+                {isLoondienst && selectedCaoOption && !selectedCaoOption.payrollRuntimeReady && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-xs text-amber-800">
+                    Deze CAO kan worden vastgelegd, maar payroll-final blijft geblokkeerd totdat de bijbehorende CAO-runtime is geimplementeerd en geverifieerd.
                   </div>
                 )}
               </div>

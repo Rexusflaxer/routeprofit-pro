@@ -4,6 +4,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Pencil, Trash2, User, Briefcase, Calculator } from "lucide-react";
 
+const CAO_LABELS = {
+  cao_particuliere_beveiliging: "CAO Particuliere Beveiliging",
+  cao_evenementen_horecabeveiliging: "CAO Evenementen- en Horecabeveiliging",
+  cao_verkeersregelaars: "CAO Verkeersregelaars",
+  cao_veiligheidsdomein: "CAO Veiligheidsdomein",
+  eigen_tarief: "Eigen tarief"
+};
+
 export default function PersonnelTable({ personnel, onEdit, onDelete, onCalculate }) {
   const getDisplayInfo = (p) => {
     if (p.employee_type === "zzp") {
@@ -20,11 +28,14 @@ export default function PersonnelTable({ personnel, onEdit, onDelete, onCalculat
       else if (p.contract_type === "0_uren") contractLabel = "0-uren";
       else if (p.contract_type === "min_max") contractLabel = `Min-max (${p.min_hours || 0}-${p.max_hours || 0}u)`;
 
-      const caoLabel = p.cao === "cao_particuliere_beveiliging"
-        ? p.cao_scope_profile === "non_security_work_article_3_exception"
+      let caoLabel = CAO_LABELS[p.cao] || p.cao || "CAO onbekend";
+      if (p.cao === "cao_particuliere_beveiliging") {
+        caoLabel = p.cao_scope_profile === "non_security_work_article_3_exception"
           ? `Eigen uurloon €${(p.custom_hourly_rate || 0).toFixed(2)} (bijlage 2 n.v.t.)`
-          : `CAO schaal ${p.cao_scale ?? "-"}, periode ${p.cao_period ?? "-"}`
-        : `Eigen tarief €${(p.custom_hourly_rate || 0).toFixed(2)}`;
+          : `CAO schaal ${p.cao_scale ?? "-"}, periode ${p.cao_period ?? "-"}`;
+      } else if (p.cao === "eigen_tarief") {
+        caoLabel = `Eigen tarief €${(p.custom_hourly_rate || 0).toFixed(2)}`;
+      }
 
       return {
         type: "Loondienst",

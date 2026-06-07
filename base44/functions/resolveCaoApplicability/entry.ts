@@ -389,6 +389,30 @@ function resolveApplicability(personnel, contract, work_context) {
       source_rule_ids
     };
   }
+  if (p.works_event_or_hospitality_security === true && p.event_hospitality_cao_applies !== false) {
+    source_rule_ids.push('CAO-PB-2024-R0227');
+    warnings.push('Evenementen-/horecabeveiliging is aangevinkt, maar niet expliciet bevestigd of de eigen evenementen-/horecabeveiligings-CAO geldt. CAO PB-scope blijft geblokkeerd tot handmatige review.');
+    return {
+      cao_scope_profile: 'unknown_manual_review',
+      applies_cao_pb: true,
+      applies_full_security_rules: false,
+      excluded_rule_ids: [],
+      excluded_articles: [],
+      excluded_chapters: [],
+      excluded_rule_ids_reason: {},
+      applicable_exceptions: ['article_3_event_hospitality_scope_requires_confirmation'],
+      function_classification: buildFunctionClassification(p, true, ['CAO-PB-2024-R0227'], false),
+      payroll_rule_profile: buildPayrollProfile('unknown'),
+      scope_manual_review_required: true,
+      function_classification_manual_review_required: true,
+      special_scope_manual_review_required: true,
+      manual_review_required: true,
+      confidence: 'low',
+      scope_resolution,
+      warnings,
+      source_rule_ids
+    };
+  }
 
   // ── Conflictdetectie (altijd eerst) ──
   const conflicts = detectConflicts(p, {});

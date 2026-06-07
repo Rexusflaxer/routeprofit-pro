@@ -53,7 +53,9 @@ export default function CaoApplicabilityPanel({ form, onChange, personnelId }) {
           performs_security_work: form.performs_security_work,
           security_work_percentage: form.security_work_percentage,
           works_airport_schiphol: form.works_airport_schiphol,
-          works_cash_value_logistics: form.works_cash_value_logistics
+          works_cash_value_logistics: form.works_cash_value_logistics,
+          works_event_or_hospitality_security: form.works_event_or_hospitality_security,
+          event_hospitality_cao_applies: form.event_hospitality_cao_applies
         },
         save: !!personnelId
       });
@@ -192,6 +194,36 @@ export default function CaoApplicabilityPanel({ form, onChange, personnelId }) {
           <Select
             value={form.works_cash_value_logistics === true ? "yes" : form.works_cash_value_logistics === false ? "no" : "unknown"}
             onValueChange={v => onChange("works_cash_value_logistics", v === "yes" ? true : v === "no" ? false : null)}
+          >
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="yes">Ja</SelectItem>
+              <SelectItem value="no">Nee</SelectItem>
+              <SelectItem value="unknown">Onbekend</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label>Evenementen-/horecabeveiliging?</Label>
+          <Select
+            value={form.works_event_or_hospitality_security === true ? "yes" : form.works_event_or_hospitality_security === false ? "no" : "unknown"}
+            onValueChange={v => onChange("works_event_or_hospitality_security", v === "yes" ? true : v === "no" ? false : null)}
+          >
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="yes">Ja</SelectItem>
+              <SelectItem value="no">Nee</SelectItem>
+              <SelectItem value="unknown">Onbekend</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-1">
+          <Label>Eigen event/horeca-CAO geldt?</Label>
+          <Select
+            value={form.event_hospitality_cao_applies === true ? "yes" : form.event_hospitality_cao_applies === false ? "no" : "unknown"}
+            onValueChange={v => onChange("event_hospitality_cao_applies", v === "yes" ? true : v === "no" ? false : null)}
           >
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
