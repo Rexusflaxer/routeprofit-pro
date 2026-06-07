@@ -534,6 +534,53 @@ function getLocalRuntimeBinding(rule) {
   return LOCAL_RUNTIME_RULE_ID_INDEX[rule?.rule_id] || null;
 }
 
+function nonEmptyString(...values) {
+  for (const value of values) {
+    const normalized = String(value ?? '').trim();
+    if (normalized) return normalized;
+  }
+  return null;
+}
+
+function normalizeCaoRuleInput(rule, fallbackCaoKey) {
+  const ruleText = nonEmptyString(
+    rule?.rule_text,
+    rule?.text,
+    rule?.source_text,
+    rule?.source_line,
+    rule?.line_text
+  );
+  const sourceReference = nonEmptyString(
+    rule?.source_reference,
+    rule?.article,
+    rule?.appendix,
+    rule?.protocol,
+    rule?.source_anchor
+  );
+  const hashAlgorithm = nonEmptyString(
+    rule?.hash_algorithm,
+    rule?.sha256 ? 'sha256' : null,
+    rule?.sha1 ? 'sha1' : null,
+    rule?.source_hash || rule?.rule_hash || rule?.rule_text_hash ? 'unknown' : null
+  );
+
+  return {
+    ...rule,
+    cao_key: normalizeCaoKey(rule?.cao_key) || fallbackCaoKey,
+    rule_text: ruleText,
+    rule_text_summary: nonEmptyString(rule?.rule_text_summary, rule?.summary, rule?.text_summary),
+    source_reference: sourceReference,
+    source_url: nonEmptyString(rule?.source_url, rule?.url),
+    document_url: nonEmptyString(rule?.document_url, rule?.file_url),
+    hash_algorithm: hashAlgorithm,
+    source_evidence_confidence: nonEmptyString(rule?.source_evidence_confidence) || (hasRuleSourceLocator(rule) && hasRuleSourceHash(rule) ? 'high' : null)
+  };
+}
+
+function normalizeCaoRulesInput(rules, fallbackCaoKey) {
+  return (Array.isArray(rules) ? rules : []).map(rule => normalizeCaoRuleInput(rule || {}, fallbackCaoKey));
+}
+
 function withLocalRuntimeBindingMetadata(rule) {
   const binding = getLocalRuntimeBinding(rule);
   const critical = isPayrollCriticalRule(rule);
@@ -1365,7 +1412,7 @@ Deno.serve(async (req) => {
       ...(payload.candidate_configuration || {}),
       cao_key: payloadCaoKey
     };
-    const candidateRulesForGate = payload.candidate_rules || [];
+    const candidateRulesForGate = normalizeCaoRulesInput(payload.candidate_rules || [], payloadCaoKey);
     const mismatchingRuleCaoKeysForGate = [...new Set(candidateRulesForGate
       .map(rule => normalizeCaoKey(rule?.cao_key))
       .filter(key => key && key !== payloadCaoKey))];
@@ -1487,7 +1534,7 @@ Deno.serve(async (req) => {
       ...(payload.candidate_configuration || {}),
       cao_key: payloadCaoKey
     };
-    const candidateRules = payload.candidate_rules || [];
+    const candidateRules = normalizeCaoRulesInput(payload.candidate_rules || [], payloadCaoKey);
     const payrollReadiness = resolvePayrollReadiness(candidateCfg, candidateRules);
     const caoDefaults = getCaoDisplayDefaults(payloadCaoKey);
     const initialProcessedRuleCount = Math.min(ruleBatchOffset, candidateRules.length);
