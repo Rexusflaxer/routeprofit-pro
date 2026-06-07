@@ -273,6 +273,25 @@ function isoDate(value) {
   if (!value) return null;
   return String(value).slice(0, 10);
 }
+function addDaysIsoForNoticeDeadline(dateValue, days) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate(dateValue) || '');
+  if (!match) return null;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+function localDateTimeParts(value) {
+  if (!value) return null;
+  const str = String(value);
+  const date = isoDate(str);
+  const match = str.match(/(?:T|\s)(\d{1,2}):(\d{2})/) || str.match(/^(\d{1,2}):(\d{2})$/);
+  if (!date || !match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours > 24 || minutes > 59 || (hours === 24 && minutes !== 0)) return null;
+  return { date, minutes_after_midnight: hours * 60 + minutes };
+}
 function pickFirstNonEmpty(...values) {
   return values.find(value => value !== null && value !== undefined && value !== '') ?? null;
 }
@@ -416,6 +435,93 @@ function resolveValueServicesEarlyShiftAllowance({ date, startTime, shift = null
     source_rule_ids: applies ? ['CAO-PB-2024-R1609'] : [],
     note: applies ? 'Geld- en waardelogistiek vroege dienst 02:00-04:00: EUR 7,50 bruto per dienst.' : null
   };
+}
+
+function resolveCashValueLateNextDayNoticeAllowance({ date, shift = null, caoScope, hoursWorked, baseHourlyRate }) {
+  const serviceContext = shift?.service_context || {};
+  const appliesScope = caoScope?.cao_scope_profile === 'cash_value_logistics' ||
+    shift?.works_cash_value_logistics === true ||
+    serviceContext.works_cash_value_logistics === true;
+  const result = {
+    applies: false,
+    hours: 0,
+    percentage: 20,
+    amount: 0,
+    notice_at: null,
+    deadline_at: null,
+    manual_review_required: false,
+    review_reason: null,
+    source_rule_ids: []
+  };
+  if (!appliesScope) return result;
+
+  if (
+    shift?.cash_value_next_day_force_majeure_ict_failure === true ||
+    shift?.next_day_service_force_majeure_ict_failure === true ||
+    shift?.force_majeure_ict_failure === true ||
+    shift?.ict_failure_force_majeure === true
+  ) {
+    result.source_rule_ids.push('CAO-PB-2024-R1618');
+    return result;
+  }
+
+  const serviceDate = isoDate(shift?.date || shift?.service_date || shift?.shift_date || date);
+  const explicitNextDayService = shift?.cash_value_next_day_service === true ||
+    shift?.value_services_next_day_service === true ||
+    shift?.next_day_service === true ||
+    shift?.next_day_service_notice_required === true;
+  const noticeAt = pickFirstNonEmpty(
+    shift?.cash_value_next_day_service_notice_at,
+    shift?.value_services_next_day_notice_at,
+    shift?.next_day_service_notice_at,
+    shift?.cash_value_service_communicated_at,
+    shift?.service_communicated_at,
+    shift?.communicated_at,
+    shift?.planned_service_notified_at,
+    shift?.shift_notified_at,
+    shift?.notified_at
+  );
+  const noticeParts = localDateTimeParts(noticeAt);
+  const inferredNextDayService = !!noticeParts && !!serviceDate && addDaysIsoForNoticeDeadline(noticeParts.date, 1) === serviceDate;
+  if (!explicitNextDayService && !inferredNextDayService) return result;
+
+  if (!serviceDate || !noticeParts) {
+    result.manual_review_required = true;
+    result.review_reason = 'Geld- en waardelogistiek volgende-dagdienst mist dienstdatum of communicatiemoment; 20%-toeslag vóór/na 19:00 kan niet definitief worden vastgesteld.';
+    result.source_rule_ids.push('CAO-PB-2024-R1613', 'CAO-PB-2024-R1617');
+    return result;
+  }
+
+  const deadlineDate = addDaysIsoForNoticeDeadline(serviceDate, -1);
+  if (!deadlineDate) {
+    result.manual_review_required = true;
+    result.review_reason = 'Dienstdatum voor geld- en waardelogistiek volgende-dagdienst is ongeldig; 20%-toeslag kan niet definitief worden vastgesteld.';
+    result.source_rule_ids.push('CAO-PB-2024-R1613', 'CAO-PB-2024-R1617');
+    return result;
+  }
+  result.notice_at = noticeAt;
+  result.deadline_at = `${deadlineDate}T19:00`;
+  const isLate = noticeParts.date > deadlineDate ||
+    (noticeParts.date === deadlineDate && noticeParts.minutes_after_midnight >= 19 * 60);
+  if (!isLate) {
+    result.source_rule_ids.push('CAO-PB-2024-R1613');
+    return result;
+  }
+
+  const hours = Math.max(0, numberOrZero(hoursWorked));
+  const rate = numberOrNull(baseHourlyRate);
+  if (rate === null) {
+    result.manual_review_required = true;
+    result.review_reason = 'Basisuurloon ontbreekt; 20%-toeslag voor te laat gecommuniceerde cash-value volgende-dagdienst kan niet worden berekend.';
+    result.source_rule_ids.push('CAO-PB-2024-R1617');
+    return result;
+  }
+
+  result.applies = true;
+  result.hours = hours;
+  result.amount = hours * rate * 0.20;
+  result.source_rule_ids.push('CAO-PB-2024-R1613', 'CAO-PB-2024-R1617');
+  return result;
 }
 
 function timeToMinutes(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
@@ -807,7 +913,7 @@ function buildRouteCostCacheFingerprint({ route, weekday, caoConfig, personnelLi
   });
 }
 
-function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawScope, rawClassification, contractResolution = null) {
+function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawScope, rawClassification, contractResolution = null, shiftContext = null) {
   const caoScope = normalizeCaoScope(rawScope);
   const classification = rawClassification || null;
   const shiftInterval = buildCaoShiftInterval(date, startTime, endTime, true);
@@ -973,7 +1079,15 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
   const valueServicesEarlyShiftAllowance = resolveValueServicesEarlyShiftAllowance({
     date,
     startTime,
+    shift: shiftContext,
     caoScope
+  });
+  const cashValueLateNextDayNoticeAllowance = resolveCashValueLateNextDayNoticeAllowance({
+    date,
+    shift: shiftContext,
+    caoScope,
+    hoursWorked: totalHours,
+    baseHourlyRate
   });
   const grossBeforeDirectPayouts = baseSalary + surchargesTotal;
   const callWorkerVacationPayout = isCallWorker
@@ -1002,13 +1116,14 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
   const yearEndBonus = yearEndBonusBasisAmount * ((caoConfig.year_end_bonus || 2.01) / 100);
   const directCallWorkerAllowancePayouts = isCallWorker ? vacationAllowance + yearEndBonus : 0;
   const valueServicesEarlyShiftAllowanceAmount = valueServicesEarlyShiftAllowance.amount;
-  const totalGross = grossBeforeDirectPayouts + callWorkerVacationPayout.amount + directCallWorkerAllowancePayouts + valueServicesEarlyShiftAllowanceAmount;
+  const cashValueLateNextDayNoticeAllowanceAmount = cashValueLateNextDayNoticeAllowance.amount;
+  const totalGross = grossBeforeDirectPayouts + callWorkerVacationPayout.amount + directCallWorkerAllowancePayouts + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount;
   const premiumBasis = isCallWorker
-    ? grossBeforeDirectPayouts + callWorkerVacationPayout.amount + valueServicesEarlyShiftAllowanceAmount
+    ? grossBeforeDirectPayouts + callWorkerVacationPayout.amount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount
     : totalGross;
 
   const franchisePerPeriod = (caoConfig.pension_base_salary_threshold || 16164) / 13;
-  const pensionBaseAmount = isCallWorker ? grossBeforeDirectPayouts + valueServicesEarlyShiftAllowanceAmount : totalGross;
+  const pensionBaseAmount = isCallWorker ? grossBeforeDirectPayouts + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount : totalGross;
   const pensionBase = Math.max(0, pensionBaseAmount - franchisePerPeriod);
   const totalPensionPremium = pensionBase * ((caoConfig.pension_premium_rate_total || 24.1) / 100);
   const employerPension = totalPensionPremium * ((caoConfig.pension_premium_employer || 60) / 100);
@@ -1041,7 +1156,11 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
   if (!isCallWorker && vacationEntitlement.extra_vacation_days_manual_review_required) {
     scopeWarnings.push('Geld- en waardelogistiek gebruikt afwijkende vakantie-opbouw art. 100; eventuele extra vakantiedagen uit art. 59 blijven handmatige review.');
   }
+  if (cashValueLateNextDayNoticeAllowance.manual_review_required) {
+    scopeWarnings.push(cashValueLateNextDayNoticeAllowance.review_reason || 'Geld- en waardelogistiek volgende-dagdienst vereist handmatige review.');
+  }
   const vacationEntitlementManualReview = !isCallWorker && vacationEntitlement.manual_review_required === true;
+  const cashValueLateNextDayNoticeManualReview = cashValueLateNextDayNoticeAllowance.manual_review_required === true;
 
   return {
     base_hourly_rate: baseHourlyRate, total_hours: totalHours,
@@ -1052,6 +1171,16 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
       rate_per_shift: valueServicesEarlyShiftAllowance.rate_per_shift,
       tax_treatment: valueServicesEarlyShiftAllowance.tax_treatment,
       source_rule_ids: valueServicesEarlyShiftAllowance.source_rule_ids
+    },
+    cash_value_late_next_day_notice_allowance: {
+      applies: cashValueLateNextDayNoticeAllowance.applies,
+      hours: r2(cashValueLateNextDayNoticeAllowance.hours),
+      percentage: cashValueLateNextDayNoticeAllowance.percentage,
+      amount: r2(cashValueLateNextDayNoticeAllowance.amount),
+      notice_at: cashValueLateNextDayNoticeAllowance.notice_at,
+      deadline_at: cashValueLateNextDayNoticeAllowance.deadline_at,
+      manual_review_required: cashValueLateNextDayNoticeAllowance.manual_review_required,
+      source_rule_ids: cashValueLateNextDayNoticeAllowance.source_rule_ids
     },
     total_gross: r2(totalGross),
     employer_costs_total: r2(employerCostsTotal),
@@ -1069,6 +1198,7 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
         eligible_amount_including_vacation_allowance: r2(yearEndBonusBasisAmount),
         excluded_special_hours_allowances: r2(surchargesTotal),
         excluded_value_services_early_shift_allowance: r2(valueServicesEarlyShiftAllowanceAmount),
+        excluded_cash_value_late_next_day_notice_allowance: r2(cashValueLateNextDayNoticeAllowanceAmount),
         source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
       },
       ort_vacation_reservation: r2(ortVacationReservation),
@@ -1083,9 +1213,9 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
     cao_scope_profile: caoScope?.cao_scope_profile || null,
     scope_warnings: [...scopeWarnings, ...(wageBasis.warnings || [])],
     wage_basis_type: wageBasis.wage_basis_type,
-    payroll_final_allowed: wageBasis.payroll_final_allowed && !dstCalculationInfo?.manual_review_required && !callWorkerManualReview && !vacationEntitlementManualReview,
-    manual_review_required: wageBasis.manual_review_required || !!dstCalculationInfo?.manual_review_required || callWorkerManualReview || vacationEntitlementManualReview,
-    calculation_status: (dstCalculationInfo?.manual_review_required || callWorkerManualReview || vacationEntitlementManualReview) && wageBasis.calculation_status === 'final'
+    payroll_final_allowed: wageBasis.payroll_final_allowed && !dstCalculationInfo?.manual_review_required && !callWorkerManualReview && !vacationEntitlementManualReview && !cashValueLateNextDayNoticeManualReview,
+    manual_review_required: wageBasis.manual_review_required || !!dstCalculationInfo?.manual_review_required || callWorkerManualReview || vacationEntitlementManualReview || cashValueLateNextDayNoticeManualReview,
+    calculation_status: (dstCalculationInfo?.manual_review_required || callWorkerManualReview || vacationEntitlementManualReview || cashValueLateNextDayNoticeManualReview) && wageBasis.calculation_status === 'final'
       ? 'concept_manual_review'
       : wageBasis.calculation_status,
     cao_function_classification: classification,
@@ -1315,7 +1445,7 @@ Deno.serve(async (req) => {
           ...blockedCost
         };
       }
-      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification, contractResolution);
+      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification, contractResolution, route);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
@@ -1433,7 +1563,7 @@ Deno.serve(async (req) => {
           ...blockedCost
         };
       }
-      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification, contractResolution);
+      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification, contractResolution, route);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,

@@ -647,6 +647,93 @@ function resolveValueServicesEarlyShiftAllowance(shift, caoScope) {
   };
 }
 
+function resolveCashValueLateNextDayNoticeAllowance(shift, caoScope, hoursWorked, baseHourlyRate) {
+  const serviceContext = shift?.service_context || {};
+  const appliesScope = caoScope?.cao_scope_profile === 'cash_value_logistics' ||
+    shift?.works_cash_value_logistics === true ||
+    serviceContext.works_cash_value_logistics === true;
+  const result = {
+    applies: false,
+    hours: 0,
+    percentage: 20,
+    amount: 0,
+    notice_at: null,
+    deadline_at: null,
+    manual_review_required: false,
+    review_reason: null,
+    source_rule_ids: []
+  };
+  if (!appliesScope) return result;
+
+  if (
+    shift.cash_value_next_day_force_majeure_ict_failure === true ||
+    shift.next_day_service_force_majeure_ict_failure === true ||
+    shift.force_majeure_ict_failure === true ||
+    shift.ict_failure_force_majeure === true
+  ) {
+    result.source_rule_ids.push('CAO-PB-2024-R1618');
+    return result;
+  }
+
+  const serviceDate = isoDate(shift.date || shift.service_date || shift.shift_date);
+  const explicitNextDayService = shift.cash_value_next_day_service === true ||
+    shift.value_services_next_day_service === true ||
+    shift.next_day_service === true ||
+    shift.next_day_service_notice_required === true;
+  const noticeAt = pickFirstNonEmpty(
+    shift.cash_value_next_day_service_notice_at,
+    shift.value_services_next_day_notice_at,
+    shift.next_day_service_notice_at,
+    shift.cash_value_service_communicated_at,
+    shift.service_communicated_at,
+    shift.communicated_at,
+    shift.planned_service_notified_at,
+    shift.shift_notified_at,
+    shift.notified_at
+  );
+  const noticeParts = localDateTimeParts(noticeAt);
+  const inferredNextDayService = !!noticeParts && !!serviceDate && addDaysIsoForNoticeDeadline(noticeParts.date, 1) === serviceDate;
+  if (!explicitNextDayService && !inferredNextDayService) return result;
+
+  if (!serviceDate || !noticeParts) {
+    result.manual_review_required = true;
+    result.review_reason = 'Geld- en waardelogistiek volgende-dagdienst mist dienstdatum of communicatiemoment; 20%-toeslag vóór/na 19:00 kan niet definitief worden vastgesteld.';
+    result.source_rule_ids.push('CAO-PB-2024-R1613', 'CAO-PB-2024-R1617');
+    return result;
+  }
+
+  const deadlineDate = addDaysIsoForNoticeDeadline(serviceDate, -1);
+  if (!deadlineDate) {
+    result.manual_review_required = true;
+    result.review_reason = 'Dienstdatum voor geld- en waardelogistiek volgende-dagdienst is ongeldig; 20%-toeslag kan niet definitief worden vastgesteld.';
+    result.source_rule_ids.push('CAO-PB-2024-R1613', 'CAO-PB-2024-R1617');
+    return result;
+  }
+  result.notice_at = noticeAt;
+  result.deadline_at = `${deadlineDate}T19:00`;
+  const isLate = noticeParts.date > deadlineDate ||
+    (noticeParts.date === deadlineDate && noticeParts.minutes_after_midnight >= 19 * 60);
+  if (!isLate) {
+    result.source_rule_ids.push('CAO-PB-2024-R1613');
+    return result;
+  }
+
+  const hours = Math.max(0, numberOrZero(hoursWorked));
+  const rate = numberOrNull(baseHourlyRate);
+  if (rate === null) {
+    result.manual_review_required = true;
+    result.review_reason = 'Basisuurloon ontbreekt; 20%-toeslag voor te laat gecommuniceerde cash-value volgende-dagdienst kan niet worden berekend.';
+    result.source_rule_ids.push('CAO-PB-2024-R1617');
+    return result;
+  }
+
+  result.applies = true;
+  result.hours = hours;
+  result.amount = hours * rate * 0.20;
+  result.source_rule_ids.push('CAO-PB-2024-R1613', 'CAO-PB-2024-R1617');
+  return result;
+}
+
 function resolveActingFunctionAllowance(shift, personnel, paidHoursForShift, caoConfig) {
   const currentScale = numberOrZero(shift.current_cao_scale ?? personnel.cao_scale);
   const actingScale = numberOrZero(
@@ -764,6 +851,27 @@ function daysBetweenIso(laterDate, earlierDate) {
   const earlier = new Date(`${isoDate(earlierDate)}T00:00:00`);
   if (Number.isNaN(later.getTime()) || Number.isNaN(earlier.getTime())) return null;
   return Math.floor((later - earlier) / (24 * 60 * 60 * 1000));
+}
+
+function addDaysIsoForNoticeDeadline(dateValue, days) {
+  const match = /^(\d{4})-(\d{2})-(\d{2})$/.exec(isoDate(dateValue) || '');
+  if (!match) return null;
+  const date = new Date(Date.UTC(Number(match[1]), Number(match[2]) - 1, Number(match[3])));
+  if (Number.isNaN(date.getTime())) return null;
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function localDateTimeParts(value) {
+  if (!value) return null;
+  const str = String(value);
+  const date = isoDate(str);
+  const match = str.match(/(?:T|\s)(\d{1,2}):(\d{2})/) || str.match(/^(\d{1,2}):(\d{2})$/);
+  if (!date || !match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes) || hours > 24 || minutes > 59 || (hours === 24 && minutes !== 0)) return null;
+  return { date, minutes_after_midnight: hours * 60 + minutes };
 }
 
 function resolveShiftChangePercentage(shift) {
@@ -2071,6 +2179,14 @@ Deno.serve(async (req) => {
         details: [],
         source_rule_ids: []
       },
+      cash_value_late_next_day_notice_allowance: {
+        shift_count: 0,
+        hours: 0,
+        percentage: 20,
+        amount: 0,
+        details: [],
+        source_rule_ids: []
+      },
       cao_retroactive_corrections: {
         applied: false,
         correction_count: 0,
@@ -2400,6 +2516,40 @@ Deno.serve(async (req) => {
             ])
           ];
         }
+
+        const cashValueLateNextDayNoticeAllowance = resolveCashValueLateNextDayNoticeAllowance(shift, caoScope, hoursWorked, baseHourlyRate);
+        if (cashValueLateNextDayNoticeAllowance.manual_review_required) {
+          payrollRuntimeReviewItems.push({
+            rule_id: cashValueLateNextDayNoticeAllowance.source_rule_ids[0] || 'CAO-PB-2024-R1617',
+            domain: 'cash_value_late_next_day_notice_allowance',
+            message: cashValueLateNextDayNoticeAllowance.review_reason || 'Geld- en waardelogistiek volgende-dagdienst vereist handmatige beoordeling.',
+            field: 'cash_value_next_day_service_notice_at/service_communicated_at'
+          });
+          runtimePayrollFinalAllowed = false;
+          runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+        }
+        if (cashValueLateNextDayNoticeAllowance.applies) {
+          payslip.cash_value_late_next_day_notice_allowance.shift_count += 1;
+          payslip.cash_value_late_next_day_notice_allowance.hours += cashValueLateNextDayNoticeAllowance.hours;
+          payslip.cash_value_late_next_day_notice_allowance.amount += cashValueLateNextDayNoticeAllowance.amount;
+          payslip.cash_value_late_next_day_notice_allowance.details.push({
+            date,
+            start_time,
+            end_time,
+            hours: cashValueLateNextDayNoticeAllowance.hours,
+            percentage: cashValueLateNextDayNoticeAllowance.percentage,
+            amount: cashValueLateNextDayNoticeAllowance.amount,
+            notice_at: cashValueLateNextDayNoticeAllowance.notice_at,
+            deadline_at: cashValueLateNextDayNoticeAllowance.deadline_at,
+            source_rule_ids: cashValueLateNextDayNoticeAllowance.source_rule_ids
+          });
+          payslip.cash_value_late_next_day_notice_allowance.source_rule_ids = [
+            ...new Set([
+              ...payslip.cash_value_late_next_day_notice_allowance.source_rule_ids,
+              ...cashValueLateNextDayNoticeAllowance.source_rule_ids
+            ])
+          ];
+        }
         
         payslip.shift_details.push({
           date,
@@ -2451,6 +2601,16 @@ Deno.serve(async (req) => {
             rate_per_shift: valueServicesEarlyShiftAllowance.rate_per_shift,
             tax_treatment: valueServicesEarlyShiftAllowance.tax_treatment,
             source_rule_ids: valueServicesEarlyShiftAllowance.source_rule_ids
+          },
+          cash_value_late_next_day_notice_allowance: {
+            applies: cashValueLateNextDayNoticeAllowance.applies,
+            hours: r2(cashValueLateNextDayNoticeAllowance.hours),
+            percentage: cashValueLateNextDayNoticeAllowance.percentage,
+            amount: r2(cashValueLateNextDayNoticeAllowance.amount),
+            notice_at: cashValueLateNextDayNoticeAllowance.notice_at,
+            deadline_at: cashValueLateNextDayNoticeAllowance.deadline_at,
+            manual_review_required: cashValueLateNextDayNoticeAllowance.manual_review_required,
+            source_rule_ids: cashValueLateNextDayNoticeAllowance.source_rule_ids
           }
         });
       }
@@ -2519,6 +2679,7 @@ Deno.serve(async (req) => {
       const shiftChangeAllowanceAmount = payslip.shift_change_allowance.amount;
       const generalReserveAllowanceAmount = payslip.general_reserve_allowance.amount;
       const valueServicesEarlyShiftAllowanceAmount = payslip.value_services_early_shift_allowance.amount;
+      const cashValueLateNextDayNoticeAllowanceAmount = payslip.cash_value_late_next_day_notice_allowance.amount;
       if (isCallWorker) {
         const callWorkerVacationPayout = calculateCallWorkerVacationPayoutArticle59({
           baseWageAmount: payslip.base_salary,
@@ -2552,6 +2713,7 @@ Deno.serve(async (req) => {
         excluded_shift_change_allowance: shiftChangeAllowanceAmount,
         excluded_general_reserve_allowance: generalReserveAllowanceAmount,
         excluded_value_services_early_shift_allowance: valueServicesEarlyShiftAllowanceAmount,
+        excluded_cash_value_late_next_day_notice_allowance: cashValueLateNextDayNoticeAllowanceAmount,
         source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
       };
       
@@ -2568,15 +2730,15 @@ Deno.serve(async (req) => {
         payslip.vacation_paid = 0;
         
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
       } else {
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount;
       }
       
       // Bereken pensioengrondslag (bruto loon - vakantiegeld/eindejaarsuitkering - franchise)
       // Voor oproepkrachten: basis + toeslagen (zonder vakantiegeld/eindejaarsuitkering)
       const pensionBaseAmount = isCallWorker 
-        ? (payslip.base_salary + totalSurcharges + valueServicesEarlyShiftAllowanceAmount)
+        ? (payslip.base_salary + totalSurcharges + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount)
         : payslip.total_gross;
       
       // Franchise op jaarbasis, hier naar periode omrekenen (4-wekelijks = 13 periodes)
@@ -2592,7 +2754,7 @@ Deno.serve(async (req) => {
       payslip.pension_base = pensionBase;
       
       // Werknemersbijdragen - basis is altijd bruto loon exclusief vakantiegeld/eindejaarsuitkering voor oproepkrachten
-      const basisForPremiums = isCallWorker ? (payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + valueServicesEarlyShiftAllowanceAmount) : payslip.total_gross;
+      const basisForPremiums = isCallWorker ? (payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount) : payslip.total_gross;
       
       payslip.employee_deductions.premium_sfpb = basisForPremiums * ((caoConfig.premium_sfpb || 0.061) / 100);
       payslip.employee_deductions.premium_paww = basisForPremiums * ((caoConfig.premium_paww_employee || 0.1) / 100);
@@ -2859,6 +3021,18 @@ Deno.serve(async (req) => {
           })),
           source_rule_ids: payslip.value_services_early_shift_allowance.source_rule_ids
         },
+        cash_value_late_next_day_notice_allowance: {
+          shift_count: payslip.cash_value_late_next_day_notice_allowance.shift_count,
+          hours: r2(payslip.cash_value_late_next_day_notice_allowance.hours),
+          percentage: payslip.cash_value_late_next_day_notice_allowance.percentage,
+          amount: r2(payslip.cash_value_late_next_day_notice_allowance.amount),
+          details: payslip.cash_value_late_next_day_notice_allowance.details.map(item => ({
+            ...item,
+            hours: r2(item.hours),
+            amount: r2(item.amount)
+          })),
+          source_rule_ids: payslip.cash_value_late_next_day_notice_allowance.source_rule_ids
+        },
         cao_retroactive_corrections: payslip.cao_retroactive_corrections,
         total_gross: Math.round(payslip.total_gross * 100) / 100,
         is_call_worker: payslip.is_call_worker,
@@ -2891,6 +3065,7 @@ Deno.serve(async (req) => {
           excluded_shift_change_allowance: r2(payslip.year_end_bonus_basis.excluded_shift_change_allowance),
           excluded_general_reserve_allowance: r2(payslip.year_end_bonus_basis.excluded_general_reserve_allowance),
           excluded_value_services_early_shift_allowance: r2(payslip.year_end_bonus_basis.excluded_value_services_early_shift_allowance || 0),
+          excluded_cash_value_late_next_day_notice_allowance: r2(payslip.year_end_bonus_basis.excluded_cash_value_late_next_day_notice_allowance || 0),
           source_rule_ids: payslip.year_end_bonus_basis.source_rule_ids
         },
         
