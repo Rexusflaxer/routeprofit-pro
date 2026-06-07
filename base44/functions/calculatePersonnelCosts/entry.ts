@@ -447,30 +447,58 @@ function buildVacationServiceContext({ personnel, body, contractResolutionResult
   };
 }
 
-function calculateVacationEntitlementForPayPeriod({ paidHoursPerPayPeriod, vacationServiceContext }) {
+function getVacationEntitlementProfile(caoScopeProfile) {
+  if (caoScopeProfile === 'cash_value_logistics') {
+    return {
+      profile: 'cash_value_logistics',
+      fulltimeAnnualHours: 180,
+      fulltimeAnnualDays: 25,
+      fulltimeVacationHoursPerPeriod: 13.85,
+      vacationDayHours: 7.2,
+      source_rule_ids: ['CAO-PB-2024-R1601', 'CAO-PB-2024-R1602'],
+      extra_vacation_days_policy: 'manual_review_article_100_deviates_from_article_59'
+    };
+  }
+  return {
+    profile: 'standard_article_59',
+    fulltimeAnnualHours: 172.8,
+    fulltimeAnnualDays: 24,
+    fulltimeVacationHoursPerPeriod: 13.3,
+    vacationDayHours: 7.2,
+    source_rule_ids: ['CAO-PB-2024-R0999'],
+    extra_vacation_days_policy: 'article_59_lid_4'
+  };
+}
+
+function calculateVacationEntitlementForPayPeriod({ paidHoursPerPayPeriod, vacationServiceContext, caoScopeProfile = null }) {
+  const profile = getVacationEntitlementProfile(caoScopeProfile);
   const fulltimePeriodHours = 144;
-  const fulltimeVacationHoursPerPeriod = 13.3;
-  const vacationDayHours = 7.2;
   const paidHours = Math.max(0, numberOrZero(paidHoursPerPayPeriod));
   const cappedPaidHours = Math.min(paidHours, fulltimePeriodHours);
   const parttimeRatio = cappedPaidHours / fulltimePeriodHours;
-  const extraDays = extraVacationDaysForServiceYears(vacationServiceContext?.service_years);
-  const extraHoursPerPeriod = (extraDays * vacationDayHours * parttimeRatio) / 13;
+  const usesCashValueProfile = profile.profile === 'cash_value_logistics';
+  const extraDays = usesCashValueProfile ? 0 : extraVacationDaysForServiceYears(vacationServiceContext?.service_years);
+  const extraHoursPerPeriod = (extraDays * profile.vacationDayHours * parttimeRatio) / 13;
 
   return {
+    vacation_entitlement_profile: profile.profile,
+    statutory_and_above_statutory_vacation_hours_annual_fulltime_basis: profile.fulltimeAnnualHours,
+    statutory_and_above_statutory_vacation_days_annual_fulltime_basis: profile.fulltimeAnnualDays,
     paid_hours_per_pay_period: r2(paidHours),
     capped_paid_hours_per_pay_period: r2(cappedPaidHours),
     fulltime_reference_hours_per_pay_period: fulltimePeriodHours,
     parttime_ratio: r2(parttimeRatio),
-    vacation_hours_base_per_pay_period: r2(fulltimeVacationHoursPerPeriod * parttimeRatio),
+    vacation_hours_base_per_pay_period: r2(profile.fulltimeVacationHoursPerPeriod * parttimeRatio),
     extra_vacation_days_annual_fulltime_basis: extraDays,
+    extra_vacation_days_policy: profile.extra_vacation_days_policy,
+    extra_vacation_days_manual_review_required: usesCashValueProfile,
     extra_vacation_hours_per_pay_period: r2(extraHoursPerPeriod),
-    vacation_hours_accrued_per_pay_period: r2((fulltimeVacationHoursPerPeriod * parttimeRatio) + extraHoursPerPeriod),
+    vacation_hours_accrued_per_pay_period: r2((profile.fulltimeVacationHoursPerPeriod * parttimeRatio) + extraHoursPerPeriod),
     service_years_context: vacationServiceContext,
     capped_at_144_hours_per_pay_period: paidHours > fulltimePeriodHours,
-    manual_review_required: vacationServiceContext?.manual_review_required === true,
+    manual_review_required: vacationServiceContext?.manual_review_required === true || usesCashValueProfile,
     source_rule_ids: [
-      'CAO-PB-2024-R0999', 'CAO-PB-2024-R1002', 'CAO-PB-2024-R1003', 'CAO-PB-2024-R1004',
+      ...profile.source_rule_ids, 'CAO-PB-2024-R1002', 'CAO-PB-2024-R1003', 'CAO-PB-2024-R1004',
       'CAO-PB-2024-R1008', 'CAO-PB-2024-R1009', 'CAO-PB-2024-R1010',
       ...(vacationServiceContext?.source_rule_ids || [])
     ]
@@ -2562,16 +2590,27 @@ Deno.serve(async (req) => {
         });
         const vacationEntitlement = calculateVacationEntitlementForPayPeriod({
           paidHoursPerPayPeriod: paidHoursForVacationAccrual,
-          vacationServiceContext
+          vacationServiceContext,
+          caoScopeProfile: caoScope?.cao_scope_profile || null
         });
         payslip.vacation_entitlement = vacationEntitlement;
 
-        if (vacationEntitlement.manual_review_required) {
+        if (vacationServiceContext.manual_review_required) {
           payrollRuntimeReviewItems.push({
             rule_id: 'CAO-PB-2024-R1019',
             domain: 'vacation_entitlement',
             message: 'Dienstjarencontext voor extra vakantiedagen ontbreekt; vakantie-/ORT-verlofbasis kan niet definitief worden vastgesteld.',
             field: 'vacation_service_years/vacation_service_start_date'
+          });
+          runtimePayrollFinalAllowed = false;
+          runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+        }
+        if (vacationEntitlement.extra_vacation_days_manual_review_required) {
+          payrollRuntimeReviewItems.push({
+            rule_id: 'CAO-PB-2024-R1602',
+            domain: 'vacation_entitlement',
+            message: 'Geld- en waardelogistiek gebruikt de afwijkende vakantie-opbouw van art. 100 (180 uur/25 dagen, 13,85 uur per loonperiode); eventuele extra vakantiedagen uit art. 59 blijven handmatige review.',
+            field: 'cao_scope_profile'
           });
           runtimePayrollFinalAllowed = false;
           runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;

@@ -100,13 +100,43 @@ function extraVacationDaysForServiceYears(years) {
   return Math.floor(serviceYears / 5);
 }
 
+function getVacationAccrualProfile(input) {
+  if (input?.cao_scope_profile === 'cash_value_logistics' || input?.works_cash_value_logistics === true) {
+    return {
+      profile: 'cash_value_logistics',
+      fulltimeAnnualHours: 180,
+      fulltimeAnnualDays: 25,
+      fulltimePerPeriodHours: 13.85,
+      fulltimePeriodHours: 144,
+      fulltimeWeeklyHours: 36,
+      vacationDayHours: 7.2,
+      ruleIds: ['CAO-PB-2024-R1601', 'CAO-PB-2024-R1602'],
+      extraVacationDaysPolicy: 'manual_review_article_100_deviates_from_article_59',
+      extraVacationDaysManualReviewRequired: true
+    };
+  }
+  return {
+    profile: 'standard_article_59',
+    fulltimeAnnualHours: 172.8, // 24 dagen * 7,2 uur
+    fulltimeAnnualDays: 24,
+    fulltimePerPeriodHours: 13.3,
+    fulltimePeriodHours: 144,
+    fulltimeWeeklyHours: 36,
+    vacationDayHours: 7.2,
+    ruleIds: ['CAO-PB-2024-R0999'],
+    extraVacationDaysPolicy: 'article_59_lid_4',
+    extraVacationDaysManualReviewRequired: false
+  };
+}
+
 function calculateVacationAccrual(input) {
-  const fulltimeAnnualHours = 172.8; // 24 dagen * 7,2 uur
-  const fulltimeAnnualDays = 24;
-  const fulltimePerPeriodHours = 13.3;
-  const fulltimePeriodHours = 144;
-  const fulltimeWeeklyHours = 36;
-  const ruleIds = ['CAO-PB-2024-R0999'];
+  const profile = getVacationAccrualProfile(input);
+  const fulltimeAnnualHours = profile.fulltimeAnnualHours;
+  const fulltimeAnnualDays = profile.fulltimeAnnualDays;
+  const fulltimePerPeriodHours = profile.fulltimePerPeriodHours;
+  const fulltimePeriodHours = profile.fulltimePeriodHours;
+  const fulltimeWeeklyHours = profile.fulltimeWeeklyHours;
+  const ruleIds = [...profile.ruleIds];
   const warnings = [];
   const missingEvidence = [];
   let manualReviewRequired = false;
@@ -165,8 +195,8 @@ function calculateVacationAccrual(input) {
   const serviceYears = numberOrNull(input.continuous_service_years) ??
     numberOrNull(input.security_industry_service_years) ??
     null;
-  const extraVacationDays = extraVacationDaysForServiceYears(serviceYears);
-  const extraVacationHoursAnnual = extraVacationDays * 7.2 * parttimeRatio;
+  const extraVacationDays = profile.extraVacationDaysManualReviewRequired ? 0 : extraVacationDaysForServiceYears(serviceYears);
+  const extraVacationHoursAnnual = extraVacationDays * profile.vacationDayHours * parttimeRatio;
 
   if (serviceYears === null) {
     manualReviewRequired = true;
@@ -179,13 +209,25 @@ function calculateVacationAccrual(input) {
     ruleIds.push('CAO-PB-2024-R1019', 'CAO-PB-2024-R1022');
   }
 
+  if (profile.extraVacationDaysManualReviewRequired) {
+    manualReviewRequired = true;
+    missingEvidence.push({
+      field: 'cao_scope_profile',
+      rule_id: 'CAO-PB-2024-R1602',
+      message: 'Geld- en waardelogistiek gebruikt de afwijkende vakantie-opbouw van art. 100 (180 uur/25 dagen, 13,85 uur per loonperiode); eventuele extra vakantiedagen uit art. 59 blijven handmatige review.'
+    });
+  }
+
   if (paidHoursPerPeriod > fulltimePeriodHours) {
     warnings.push('Vakantieopbouw is afgetopt op 144 betaalde uren per loonperiode.');
   }
 
   return {
     rule_ids: ruleIds,
-    vacation_accrual_type: parttimeRatio < 1 ? 'parttime_time_off_accrual' : 'fulltime_time_off_accrual',
+    vacation_accrual_type: profile.profile === 'cash_value_logistics'
+      ? 'cash_value_logistics_time_off_accrual'
+      : parttimeRatio < 1 ? 'parttime_time_off_accrual' : 'fulltime_time_off_accrual',
+    vacation_entitlement_profile: profile.profile,
     fulltime_reference_hours_per_pay_period: fulltimePeriodHours,
     fulltime_reference_weekly_hours: fulltimeWeeklyHours,
     paid_hours_per_pay_period: paidHoursPerPeriod,
@@ -195,6 +237,8 @@ function calculateVacationAccrual(input) {
     statutory_and_above_statutory_vacation_hours_annual: round2(fulltimeAnnualHours * parttimeRatio),
     statutory_and_above_statutory_vacation_days_annual_fulltime_basis: fulltimeAnnualDays,
     extra_vacation_days_annual_fulltime_basis: extraVacationDays,
+    extra_vacation_days_policy: profile.extraVacationDaysPolicy,
+    extra_vacation_days_manual_review_required: profile.extraVacationDaysManualReviewRequired,
     extra_vacation_hours_annual: round2(extraVacationHoursAnnual),
     vacation_hours_annual_total: round2((fulltimeAnnualHours * parttimeRatio) + extraVacationHoursAnnual),
     manual_review_required: manualReviewRequired,
@@ -549,9 +593,13 @@ Deno.serve(async (req) => {
     }
     // ORT-verlofberekening alleen als toeslagen van toepassing zijn (fail-closed: false als scope unknown)
     const applyOrtVacation = caoScope.payroll_rule_profile?.apply_article_40_special_hours === true;
+    const vacationInput = {
+      ...body,
+      cao_scope_profile: caoScope?.cao_scope_profile || body.cao_scope_profile || null
+    };
 
     if (action === 'calculate_vacation_accrual') {
-      const result = calculateVacationAccrual(body);
+      const result = calculateVacationAccrual(vacationInput);
       const manualReviewRequired = isUnknownOrMixed || result.manual_review_required === true;
       return Response.json({
         success: true,
@@ -587,7 +635,7 @@ Deno.serve(async (req) => {
     }
 
     // Default: bereken beide
-    const vacation = calculateVacationAccrual(body);
+    const vacation = calculateVacationAccrual(vacationInput);
     const sickness = body.sickness_start_date ? calculateSicknessPayment(body) : null;
     const manualReviewRequired = isUnknownOrMixed ||
       vacation.manual_review_required === true ||
