@@ -1473,6 +1473,32 @@ function collectContractResolutionScopeProfiles(results) {
     .filter(Boolean))];
 }
 
+function collectContractResolutionCaoReferences(results) {
+  return (results || [])
+    .map(item => {
+      const resolution = item?.contract_resolution || {};
+      return {
+        shift_index: item?.shift_index ?? null,
+        date: item?.date || null,
+        start_time: item?.start_time || null,
+        end_time: item?.end_time || null,
+        contract_id: resolution.contract_id || resolution.selected_contract?.id || null,
+        cao_configuration_id: resolution.cao_configuration_id || null,
+        cao_key: resolution.cao_key || null,
+        cao_resolution_source: resolution.cao_resolution_source || null,
+        candidate_configuration_ids: resolution.cao_resolution_candidate_configuration_ids || [],
+        candidate_company_cao_assignment_ids: resolution.cao_resolution_candidate_company_cao_assignment_ids || []
+      };
+    })
+    .filter(ref =>
+      ref.cao_configuration_id ||
+      ref.cao_key ||
+      ref.cao_resolution_source ||
+      ref.candidate_configuration_ids.length > 0 ||
+      ref.candidate_company_cao_assignment_ids.length > 0
+    );
+}
+
 function normalizeCorrectionAdjustments(value) {
   return value && typeof value === 'object' && !Array.isArray(value) ? value : {};
 }
@@ -2042,6 +2068,87 @@ Deno.serve(async (req) => {
           manual_review_required: true,
           payroll_final_allowed: false,
           calculation_status: 'blocked_contract_resolution'
+        }, { status: 400 });
+      }
+
+      const contractResolutionCaoReferences = collectContractResolutionCaoReferences(contractResolutionResults);
+      const resolvedCaoConfigurationIds = [...new Set(contractResolutionCaoReferences
+        .map(ref => ref.cao_configuration_id)
+        .filter(Boolean))];
+      const resolvedCaoKeys = [...new Set(contractResolutionCaoReferences
+        .map(ref => ref.cao_key)
+        .filter(Boolean))];
+      const expectedCaoKey = caoConfig.cao_key || targetCaoKey;
+
+      if (resolvedCaoConfigurationIds.length > 1) {
+        return Response.json({
+          error: 'Definitieve loonberekening geblokkeerd: diensten binnen deze loonrun resolven naar meerdere CAO-configuraties.',
+          cao_sync_status: caoSyncStatus,
+          calculation_warnings: [
+            ...calculationWarnings,
+            'Splits de loonrun per CAO-configuratie. Een loonrun mag geen verschillende CAO-revisies of geldigheidsperioden mengen.'
+          ],
+          personnel_id,
+          cao_configuration_id: caoConfig.id,
+          cao_key: expectedCaoKey,
+          cao_version_label: caoConfig.version_label || caoConfig.name,
+          cao_valid_from: caoConfig.valid_from,
+          cao_payroll_readiness: payrollReadiness,
+          contract_resolution_required: true,
+          contract_resolution_results: contractResolutionResults,
+          contract_resolution_cao_references: contractResolutionCaoReferences,
+          resolved_cao_configuration_ids: resolvedCaoConfigurationIds,
+          manual_review_required: true,
+          payroll_final_allowed: false,
+          calculation_status: 'blocked_mixed_contract_cao_configurations'
+        }, { status: 400 });
+      }
+
+      if (resolvedCaoConfigurationIds.length === 1 && caoConfig.id && resolvedCaoConfigurationIds[0] !== caoConfig.id) {
+        return Response.json({
+          error: 'Definitieve loonberekening geblokkeerd: contractresolver en loonrun gebruiken niet dezelfde CAO-configuratie.',
+          cao_sync_status: caoSyncStatus,
+          calculation_warnings: [
+            ...calculationWarnings,
+            `Payroll selecteerde ${caoConfig.id}, maar contractresolutie selecteerde ${resolvedCaoConfigurationIds[0]}.`
+          ],
+          personnel_id,
+          cao_configuration_id: caoConfig.id,
+          cao_key: expectedCaoKey,
+          cao_version_label: caoConfig.version_label || caoConfig.name,
+          cao_valid_from: caoConfig.valid_from,
+          cao_payroll_readiness: payrollReadiness,
+          contract_resolution_required: true,
+          contract_resolution_results: contractResolutionResults,
+          contract_resolution_cao_references: contractResolutionCaoReferences,
+          resolved_cao_configuration_ids: resolvedCaoConfigurationIds,
+          manual_review_required: true,
+          payroll_final_allowed: false,
+          calculation_status: 'blocked_contract_cao_configuration_mismatch'
+        }, { status: 400 });
+      }
+
+      if (resolvedCaoKeys.length > 1 || (resolvedCaoKeys.length === 1 && expectedCaoKey && resolvedCaoKeys[0] !== expectedCaoKey)) {
+        return Response.json({
+          error: 'Definitieve loonberekening geblokkeerd: contractresolver en loonrun gebruiken niet dezelfde cao_key.',
+          cao_sync_status: caoSyncStatus,
+          calculation_warnings: [
+            ...calculationWarnings,
+            'Splits de loonrun per cao_key of herstel de contract-/dienstcontext voordat definitieve payroll wordt vastgelegd.'
+          ],
+          personnel_id,
+          cao_configuration_id: caoConfig.id,
+          cao_key: expectedCaoKey,
+          cao_version_label: caoConfig.version_label || caoConfig.name,
+          cao_valid_from: caoConfig.valid_from,
+          cao_payroll_readiness: payrollReadiness,
+          contract_resolution_required: true,
+          contract_resolution_results: contractResolutionResults,
+          contract_resolution_cao_references: contractResolutionCaoReferences,
+          resolved_cao_keys: resolvedCaoKeys,
+          manual_review_required: true,
+          payroll_final_allowed: false,
+          calculation_status: 'blocked_contract_cao_key_mismatch'
         }, { status: 400 });
       }
 
