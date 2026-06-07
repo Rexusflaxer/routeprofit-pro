@@ -342,23 +342,118 @@ function calculateYearEndBonus({ personnel, contracts, caoConfig, payrollRuns, p
   };
 }
 
-async function getActiveCaoConfig(base44, referenceDate, caoKey = CAO_PB_KEY) {
-  const refDate = referenceDate ? new Date(referenceDate) : new Date();
+function activeCaoConfigurationCandidates(configs, referenceDate) {
+  const ref = isoDate(referenceDate || new Date().toISOString());
+  return (configs || [])
+    .filter(config => config.status === 'active' || config.is_active === true)
+    .filter(config => !config.valid_from || config.valid_from <= ref)
+    .filter(config => !config.valid_until || config.valid_until >= ref)
+    .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')));
+}
+
+async function resolveActiveCaoConfig(base44, referenceDate, caoKey = CAO_PB_KEY) {
   const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({
     status: 'active',
     cao_key: caoKey
   });
-  const eligible = allCaos.filter(c => {
-    if (c.valid_from && new Date(c.valid_from) > refDate) return false;
-    if (c.valid_until && new Date(c.valid_until) < refDate) return false;
-    return true;
-  });
-  eligible.sort((a, b) => {
-    const da = a.valid_from ? new Date(a.valid_from) : new Date(0);
-    const db = b.valid_from ? new Date(b.valid_from) : new Date(0);
-    return db - da;
-  });
-  return eligible[0] || null;
+  const candidates = activeCaoConfigurationCandidates(allCaos, referenceDate);
+  const summarizedCandidates = candidates.map(config => ({
+    id: config.id,
+    name: config.name || config.version_label || null,
+    cloudflare_revision: config.cloudflare_revision || null,
+    valid_from: config.valid_from || null,
+    valid_until: config.valid_until || null
+  }));
+
+  if (candidates.length > 1) {
+    return {
+      config: null,
+      candidates: summarizedCandidates,
+      status: 'blocked_ambiguous_active_cao_config',
+      message: `Meerdere actieve CAO-configuraties gevonden voor ${caoKey} op ${isoDate(referenceDate)}; eindejaarsuitkering is geblokkeerd om historische CAO-keuze niet te gokken.`
+    };
+  }
+  if (candidates.length === 0) {
+    return {
+      config: null,
+      candidates: [],
+      status: 'blocked_missing_active_cao_config',
+      message: `Geen actieve CAO-configuratie gevonden voor ${caoKey} op ${isoDate(referenceDate)}.`
+    };
+  }
+  return {
+    config: candidates[0],
+    candidates: summarizedCandidates,
+    status: 'resolved',
+    message: null
+  };
+}
+
+function caoConfigCoversReferenceDate(caoConfig, referenceDate) {
+  const ref = isoDate(referenceDate || new Date().toISOString());
+  if (!caoConfig || !ref) return false;
+  if (caoConfig.valid_from && caoConfig.valid_from > ref) return false;
+  if (caoConfig.valid_until && caoConfig.valid_until < ref) return false;
+  return true;
+}
+
+function getCaoRuleRegistrySnapshot(caoConfig) {
+  const gateSnapshot = caoConfig?.payroll_readiness_gate?.persisted_rule_registry || null;
+  const configuredSnapshot = caoConfig?.rule_registry_snapshot || null;
+  const snapshot = configuredSnapshot || gateSnapshot || null;
+  const fingerprint = caoConfig?.rule_registry_fingerprint ||
+    snapshot?.fingerprint ||
+    null;
+  const ruleCount = caoConfig?.rule_registry_rule_count ??
+    snapshot?.persisted_unique_rule_count ??
+    snapshot?.fingerprint_rule_count ??
+    null;
+  const verifiedAt = caoConfig?.rule_registry_verified_at ||
+    snapshot?.verified_at ||
+    null;
+
+  return {
+    fingerprint,
+    fingerprint_algorithm: snapshot?.fingerprint_algorithm || (fingerprint ? 'sha256' : null),
+    rule_count: ruleCount,
+    verified_at: verifiedAt,
+    expected_unique_rule_count: snapshot?.expected_unique_rule_count ?? null,
+    persisted_unique_rule_count: snapshot?.persisted_unique_rule_count ?? ruleCount,
+    source_coverage_passed: snapshot?.source_coverage?.passed ?? null
+  };
+}
+
+function getCaoPayrollReadiness(caoConfig) {
+  const gate = caoConfig?.payroll_readiness_gate || null;
+  const status = caoConfig?.payroll_readiness_status || null;
+  const registrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
+  const registryReady = !!registrySnapshot.fingerprint && Number(registrySnapshot.rule_count || 0) > 0;
+  const ready = caoConfig?.is_payroll_ready === true &&
+    status === 'ready' &&
+    gate?.passed === true &&
+    registryReady;
+  const blockingFindings = gate?.blocking_findings || [];
+
+  return {
+    ready,
+    status: ready ? 'ready' : !registryReady ? 'blocked_missing_rule_registry_fingerprint' : (status || 'unknown'),
+    is_payroll_ready: caoConfig?.is_payroll_ready === true,
+    gate_present: !!gate,
+    rule_registry_fingerprint_present: !!registrySnapshot.fingerprint,
+    rule_registry_rule_count: registrySnapshot.rule_count,
+    blocking_findings: registryReady
+      ? blockingFindings
+      : [
+        {
+          code: 'missing_rule_registry_fingerprint',
+          severity: 'critical',
+          message: 'CAOConfiguration mist rule_registry_fingerprint; definitieve eindejaarsuitkering is niet audit-proof.'
+        },
+        ...blockingFindings
+      ],
+    open_payroll_critical_rules: gate?.open_payroll_critical_rules || [],
+    counts: gate?.counts || null
+  };
 }
 
 Deno.serve(async (req) => {
@@ -427,28 +522,15 @@ Deno.serve(async (req) => {
       }, { status: 422 });
     }
 
-    if (personnel.employee_type !== 'loondienst') {
-      return Response.json({
-        success: true,
-        applies: false,
-        reason: 'Artikel 38 CAO PB is alleen automatisch ingericht voor werknemers in loondienst.',
-        personnel_id: personnelId,
-        cao_key: targetCaoKey,
-        contract_cao_resolution: {
-          ...contractCaoResolution,
-          selected_contract: undefined
-        },
-        cao_runtime_support: yearEndBonusRuntimeSupport,
-        payroll_final_allowed: true,
-        manual_review_required: false,
-        source_rule_ids: ARTICLE_38_RULE_IDS
-      });
+    let caoConfig = body.cao_config || null;
+    let caoConfigResolution = null;
+    if (!caoConfig) {
+      caoConfigResolution = await resolveActiveCaoConfig(base44, referenceDate, targetCaoKey);
+      caoConfig = caoConfigResolution.config;
     }
-
-    const caoConfig = body.cao_config || await getActiveCaoConfig(base44, referenceDate, targetCaoKey);
     if (!caoConfig) {
       return Response.json({
-        error: `Geen actieve CAO-configuratie gevonden voor ${targetCaoKey} op ${referenceDate}.`,
+        error: caoConfigResolution?.message || `Geen actieve CAO-configuratie gevonden voor ${targetCaoKey} op ${referenceDate}.`,
         personnel_id: personnelId,
         cao_key: targetCaoKey,
         contract_cao_resolution: {
@@ -456,9 +538,10 @@ Deno.serve(async (req) => {
           selected_contract: undefined
         },
         cao_runtime_support: yearEndBonusRuntimeSupport,
+        active_cao_configuration_candidates: caoConfigResolution?.candidates || [],
         manual_review_required: true,
         payroll_final_allowed: false,
-        calculation_status: 'blocked_missing_active_cao_config'
+        calculation_status: caoConfigResolution?.status || 'blocked_missing_active_cao_config'
       }, { status: 400 });
     }
     if ((caoConfig.cao_key || targetCaoKey) !== targetCaoKey) {
@@ -476,6 +559,75 @@ Deno.serve(async (req) => {
         payroll_final_allowed: false,
         calculation_status: 'blocked_cao_config_key_mismatch'
       }, { status: 400 });
+    }
+    if (!caoConfigCoversReferenceDate(caoConfig, referenceDate)) {
+      return Response.json({
+        error: `Meegegeven CAO-configuratie (${caoConfig.id || caoConfig.version_label || 'id onbekend'}) is niet geldig op referentiedatum ${referenceDate}.`,
+        personnel_id: personnelId,
+        cao_configuration_id: caoConfig.id || null,
+        cao_key: targetCaoKey,
+        reference_date: referenceDate,
+        cao_valid_from: caoConfig.valid_from || null,
+        cao_valid_until: caoConfig.valid_until || null,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
+        cao_runtime_support: yearEndBonusRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_cao_config_not_valid_on_reference_date'
+      }, { status: 400 });
+    }
+
+    const caoPayrollReadiness = getCaoPayrollReadiness(caoConfig);
+    const caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
+    if (!caoPayrollReadiness.ready) {
+      return Response.json({
+        error: `Actieve CAO-configuratie is niet payroll-ready (${caoPayrollReadiness.status}). Definitieve eindejaarsuitkering is geblokkeerd totdat de CAO coverage-gate slaagt.`,
+        personnel_id: personnelId,
+        cao_configuration_id: caoConfig.id || null,
+        cao_key: caoConfig.cao_key || targetCaoKey,
+        cao_version_label: caoConfig.version_label || caoConfig.name || null,
+        cao_revision: caoConfig.cloudflare_revision || null,
+        cao_valid_from: caoConfig.valid_from || null,
+        cao_valid_until: caoConfig.valid_until || null,
+        reference_date: referenceDate,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
+        cao_payroll_readiness: caoPayrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_runtime_support: yearEndBonusRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_cao_not_payroll_ready'
+      }, { status: 400 });
+    }
+
+    if (personnel.employee_type !== 'loondienst') {
+      return Response.json({
+        success: true,
+        applies: false,
+        reason: 'Artikel 38 CAO PB is alleen automatisch ingericht voor werknemers in loondienst.',
+        personnel_id: personnelId,
+        cao_configuration_id: caoConfig.id || null,
+        cao_key: caoConfig.cao_key || targetCaoKey,
+        cao_version_label: caoConfig.version_label || caoConfig.name || null,
+        cao_valid_from: caoConfig.valid_from || null,
+        cao_valid_until: caoConfig.valid_until || null,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
+        cao_runtime_support: yearEndBonusRuntimeSupport,
+        cao_payroll_readiness: caoPayrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        payroll_final_allowed: true,
+        manual_review_required: false,
+        source_rule_ids: ARTICLE_38_RULE_IDS
+      });
     }
 
     const result = calculateYearEndBonus({
@@ -499,7 +651,11 @@ Deno.serve(async (req) => {
         selected_contract: undefined
       },
       cao_runtime_support: yearEndBonusRuntimeSupport,
+      cao_payroll_readiness: caoPayrollReadiness,
+      cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
       cao_version_label: caoConfig.version_label || caoConfig.name || null,
+      cao_valid_from: caoConfig.valid_from || null,
+      cao_valid_until: caoConfig.valid_until || null,
       ...result,
       manual_review_required: result.manual_review_required === true || contractCaoResolution.manual_review_required === true,
       payroll_final_allowed: result.payroll_final_allowed !== false && contractCaoResolution.manual_review_required !== true

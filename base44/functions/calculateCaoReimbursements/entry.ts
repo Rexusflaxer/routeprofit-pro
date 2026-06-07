@@ -140,6 +140,112 @@ function resolveContractCaoForDate({ explicitCaoKey, contract, contracts = [], r
   return resolution;
 }
 
+function activeCaoConfigurationCandidates(configs, referenceDate) {
+  const ref = isoDate(referenceDate || new Date().toISOString());
+  return (configs || [])
+    .filter(config => config.status === 'active' || config.is_active === true)
+    .filter(config => !config.valid_from || config.valid_from <= ref)
+    .filter(config => !config.valid_until || config.valid_until >= ref)
+    .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')));
+}
+
+async function resolveActiveCaoConfig(base44, referenceDate, caoKey) {
+  const configs = await base44.asServiceRole.entities.CAOConfiguration.filter({
+    status: 'active',
+    cao_key: caoKey
+  });
+  const candidates = activeCaoConfigurationCandidates(configs, referenceDate);
+  const summarizedCandidates = candidates.map(config => ({
+    id: config.id,
+    name: config.name || config.version_label || null,
+    cloudflare_revision: config.cloudflare_revision || null,
+    valid_from: config.valid_from || null,
+    valid_until: config.valid_until || null
+  }));
+
+  if (candidates.length > 1) {
+    return {
+      config: null,
+      candidates: summarizedCandidates,
+      status: 'blocked_ambiguous_active_cao_config',
+      message: `Meerdere actieve CAO-configuraties gevonden voor ${caoKey} op ${isoDate(referenceDate)}; vergoedingencalculatie is geblokkeerd om historische CAO-keuze niet te gokken.`
+    };
+  }
+  if (candidates.length === 0) {
+    return {
+      config: null,
+      candidates: [],
+      status: 'blocked_missing_active_cao_config',
+      message: `Geen actieve CAO-configuratie gevonden voor ${caoKey} op ${isoDate(referenceDate)}.`
+    };
+  }
+  return {
+    config: candidates[0],
+    candidates: summarizedCandidates,
+    status: 'resolved',
+    message: null
+  };
+}
+
+function getCaoRuleRegistrySnapshot(caoConfig) {
+  const gateSnapshot = caoConfig?.payroll_readiness_gate?.persisted_rule_registry || null;
+  const configuredSnapshot = caoConfig?.rule_registry_snapshot || null;
+  const snapshot = configuredSnapshot || gateSnapshot || null;
+  const fingerprint = caoConfig?.rule_registry_fingerprint ||
+    snapshot?.fingerprint ||
+    null;
+  const ruleCount = caoConfig?.rule_registry_rule_count ??
+    snapshot?.persisted_unique_rule_count ??
+    snapshot?.fingerprint_rule_count ??
+    null;
+  const verifiedAt = caoConfig?.rule_registry_verified_at ||
+    snapshot?.verified_at ||
+    null;
+
+  return {
+    fingerprint,
+    fingerprint_algorithm: snapshot?.fingerprint_algorithm || (fingerprint ? 'sha256' : null),
+    rule_count: ruleCount,
+    verified_at: verifiedAt,
+    expected_unique_rule_count: snapshot?.expected_unique_rule_count ?? null,
+    persisted_unique_rule_count: snapshot?.persisted_unique_rule_count ?? ruleCount,
+    source_coverage_passed: snapshot?.source_coverage?.passed ?? null
+  };
+}
+
+function getCaoPayrollReadiness(caoConfig) {
+  const gate = caoConfig?.payroll_readiness_gate || null;
+  const status = caoConfig?.payroll_readiness_status || null;
+  const registrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
+  const registryReady = !!registrySnapshot.fingerprint && Number(registrySnapshot.rule_count || 0) > 0;
+  const ready = caoConfig?.is_payroll_ready === true &&
+    status === 'ready' &&
+    gate?.passed === true &&
+    registryReady;
+  const blockingFindings = gate?.blocking_findings || [];
+
+  return {
+    ready,
+    status: ready ? 'ready' : !registryReady ? 'blocked_missing_rule_registry_fingerprint' : (status || 'unknown'),
+    is_payroll_ready: caoConfig?.is_payroll_ready === true,
+    gate_present: !!gate,
+    rule_registry_fingerprint_present: !!registrySnapshot.fingerprint,
+    rule_registry_rule_count: registrySnapshot.rule_count,
+    blocking_findings: registryReady
+      ? blockingFindings
+      : [
+        {
+          code: 'missing_rule_registry_fingerprint',
+          severity: 'critical',
+          message: 'CAOConfiguration mist rule_registry_fingerprint; definitieve vergoedingencalculatie is niet audit-proof.'
+        },
+        ...blockingFindings
+      ],
+    open_payroll_critical_rules: gate?.open_payroll_critical_rules || [],
+    counts: gate?.counts || null
+  };
+}
+
 function calculateTravelCost(km_one_way, km_driven = null) {
   // R0855: eigen vervoer v.a. 9 km, EUR 0,23/km over alle kilometers
   if (km_one_way < REIMBURSEMENT_RATES.travel_min_km) {
@@ -308,6 +414,66 @@ Deno.serve(async (req) => {
       }, { status: 422 });
     }
 
+    const caoConfigResolution = await resolveActiveCaoConfig(base44, referenceDate, targetCaoKey);
+    if (!caoConfigResolution.config) {
+      return Response.json({
+        error: caoConfigResolution.message,
+        action: action || 'calculate_reimbursements',
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          caoConfigResolution.message
+        ],
+        personnel_id: personnel_id || null,
+        contract_id: contract_id || contract?.id || null,
+        reference_date: referenceDate,
+        cao_key: targetCaoKey,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
+        cao_runtime_support: reimbursementRuntimeSupport,
+        active_cao_configuration_candidates: caoConfigResolution.candidates,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: caoConfigResolution.status
+      }, { status: 400 });
+    }
+
+    const caoConfig = caoConfigResolution.config;
+    const caoPayrollReadiness = getCaoPayrollReadiness(caoConfig);
+    const caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
+    if (!caoPayrollReadiness.ready) {
+      return Response.json({
+        error: `Actieve CAO-configuratie is niet payroll-ready (${caoPayrollReadiness.status}). Definitieve vergoedingencalculatie is geblokkeerd totdat de CAO coverage-gate slaagt.`,
+        action: action || 'calculate_reimbursements',
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          'Vergoedingencalculatie geblokkeerd: CAO-regeldekking of payrollparameters zijn niet bewezen compleet.'
+        ],
+        personnel_id: personnel_id || null,
+        contract_id: contract_id || contract?.id || null,
+        reference_date: referenceDate,
+        cao_configuration_id: caoConfig.id,
+        cao_key: caoConfig.cao_key || targetCaoKey,
+        cao_version_label: caoConfig.version_label || caoConfig.name || null,
+        cao_revision: caoConfig.cloudflare_revision || null,
+        cao_valid_from: caoConfig.valid_from || null,
+        cao_valid_until: caoConfig.valid_until || null,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
+        cao_payroll_readiness: caoPayrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_runtime_support: reimbursementRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_cao_not_payroll_ready'
+      }, { status: 400 });
+    }
+
     // ── Normaliseer CAO-scope: null = fail-closed ──
     function normalizeCaoScope(scope) {
       if (!scope) {
@@ -367,6 +533,12 @@ Deno.serve(async (req) => {
         chapter_5_skipped: true,
         cao_sync_status: caoSyncStatus,
         cao_key: targetCaoKey,
+        cao_configuration_id: caoConfig.id || null,
+        cao_version_label: caoConfig.version_label || caoConfig.name || null,
+        cao_valid_from: caoConfig.valid_from || null,
+        cao_valid_until: caoConfig.valid_until || null,
+        cao_payroll_readiness: caoPayrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
         contract_id: contract_id || contract?.id || null,
         contract_cao_resolution: {
           ...contractCaoResolution,
@@ -414,6 +586,12 @@ Deno.serve(async (req) => {
       success: true,
       cao_sync_status: caoSyncStatus,
       cao_key: targetCaoKey,
+      cao_configuration_id: caoConfig.id || null,
+      cao_version_label: caoConfig.version_label || caoConfig.name || null,
+      cao_valid_from: caoConfig.valid_from || null,
+      cao_valid_until: caoConfig.valid_until || null,
+      cao_payroll_readiness: caoPayrollReadiness,
+      cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
       contract_id: contract_id || contract?.id || null,
       contract_cao_resolution: {
         ...contractCaoResolution,
