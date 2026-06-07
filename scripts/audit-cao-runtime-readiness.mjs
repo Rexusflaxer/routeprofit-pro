@@ -19,6 +19,7 @@ function loadFunctionModule(relativePath) {
 }
 
 const runtimeReadiness = loadFunctionModule('base44/functions/resolveCaoRuntimeReadiness/entry.ts');
+const ingestCaoAutomation = loadFunctionModule('base44/functions/ingestCaoAutomationPayload/entry.ts');
 
 const expectedKnownKeys = [
   'cao_particuliere_beveiliging',
@@ -30,7 +31,7 @@ const expectedKnownKeys = [
 const matrix = runtimeReadiness.resolveCaoRuntimeReadiness();
 
 function assertSameValues(actual, expected, message) {
-  assert.deepEqual([...actual], expected, message);
+  assert.deepEqual(Array.from(actual), Array.from(expected), message);
 }
 
 assert.deepEqual(
@@ -73,6 +74,33 @@ for (const key of matrix.known_source_monitoring_only_cao_keys) {
     readiness.runtime_surfaces.some(surface => surface.required_for_payroll_final && !surface.supported),
     `${key} must have at least one unsupported payroll-final surface`
   );
+}
+
+for (const key of expectedKnownKeys) {
+  const readiness = runtimeReadiness.buildCaoRuntimeReadinessForKey(key);
+  const ingestFamilies = ingestCaoAutomation.getRequiredSourceFamiliesForCao(key).map(family => family.key).sort();
+  const readinessFamilies = [...readiness.source_families].sort();
+  const contractFamilies = readiness.source_monitoring_contract.map(family => family.family_key).sort();
+
+  assertSameValues(readinessFamilies, ingestFamilies, `${key} readiness source families must match ingest gate families`);
+  assertSameValues(contractFamilies, ingestFamilies, `${key} source monitoring contract must cover every ingest gate family`);
+  assert.equal(
+    readiness.source_monitoring_summary.family_count,
+    ingestFamilies.length,
+    `${key} source monitoring summary family_count mismatch`
+  );
+  assert.equal(readiness.source_monitoring_summary.all_families_have_primary_url, true, `${key} source families must have primary URLs`);
+  assert.equal(readiness.source_monitoring_summary.all_families_have_change_detection, true, `${key} source families must declare change detection`);
+  assert.equal(readiness.source_monitoring_summary.all_families_have_effective_date_fields, true, `${key} source families must declare effective date fields`);
+
+  for (const family of readiness.source_monitoring_contract) {
+    assert.ok(family.label, `${key}/${family.family_key} missing label`);
+    assert.ok(family.primary_urls.length > 0, `${key}/${family.family_key} missing primary_urls`);
+    assert.ok(family.required_source_types.length > 0, `${key}/${family.family_key} missing required_source_types`);
+    assert.ok(family.official_hosts.length > 0, `${key}/${family.family_key} missing official_hosts`);
+    assert.ok(family.change_detection.includes('content_hash'), `${key}/${family.family_key} must include content_hash detection`);
+    assert.ok(family.effective_date_fields.length > 0, `${key}/${family.family_key} missing effective_date_fields`);
+  }
 }
 
 const unknown = runtimeReadiness.buildCaoRuntimeReadinessForKey('cao_onbekend');

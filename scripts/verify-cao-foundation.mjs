@@ -82,6 +82,21 @@ function runExternalCaoGateScenarios() {
   assertIncludes(readinessMatrix.known_source_monitoring_only_cao_keys, 'cao_veiligheidsdomein', 'Safety-domain must stay source-monitored but blocked until runtime exists');
   assertIncludes(readinessMatrix.known_source_monitoring_only_cao_keys, 'cao_verkeersregelaars', 'Traffic-controller must stay source-monitored but blocked until runtime exists');
 
+  const pbReadiness = caoRuntimeReadiness.buildCaoRuntimeReadinessForKey('cao_particuliere_beveiliging');
+  assert.equal(pbReadiness.source_monitoring_summary.all_families_have_primary_url, true);
+  assertIncludes(
+    pbReadiness.source_monitoring_summary.primary_urls,
+    'https://www.beveiligingsbranche.nl/cao/',
+    'PB source monitoring must include the official CAO landing page'
+  );
+  const ehbReadiness = caoRuntimeReadiness.buildCaoRuntimeReadinessForKey('cao_evenementen_horecabeveiliging');
+  assertIncludes(
+    ehbReadiness.source_monitoring_summary.primary_urls,
+    'https://www.veiligheidsbranche.nl/cao/cao-ehb/',
+    'EHB source monitoring must include the official CAO landing page'
+  );
+  assert.equal(ehbReadiness.payroll_final_allowed_by_static_runtime, false);
+
   const unknownReadiness = caoRuntimeReadiness.buildCaoRuntimeReadinessForKey('cao_onbekend');
   assert.equal(unknownReadiness.status, 'blocked_unknown_cao_key');
   assert.equal(unknownReadiness.payroll_final_allowed_by_static_runtime, false);

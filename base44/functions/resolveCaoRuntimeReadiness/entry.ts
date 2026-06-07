@@ -59,6 +59,280 @@ const KNOWN_SECURITY_CAO_CATALOG = [
   }
 ];
 
+const SOURCE_MONITORING_CONTRACT_BY_CAO_KEY = {
+  [CAO_PB_KEY]: [
+    {
+      family_key: 'cao_landing_page',
+      label: 'CAO PB overzicht, vraagbaak en losse updates',
+      primary_urls: [
+        'https://www.beveiligingsbranche.nl/cao/',
+        'https://www.beveiligingsbranche.nl/actueel/cao/'
+      ],
+      required_source_types: ['cao_page', 'official_webpage'],
+      official_hosts: ['beveiligingsbranche.nl', 'www.beveiligingsbranche.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'linked_document_hashes', 'question_answer_section_hash'],
+      watch_for_keywords: ['cao', 'vraagbaak', 'loontabel', 'loonperiodes', 'sociale commissie', 'premie', '2026'],
+      effective_date_fields: ['effective_from', 'valid_from', 'applies_from', 'pay_period_effective_from']
+    },
+    {
+      family_key: 'main_cao_pdf',
+      label: 'Hoofd-CAO Particuliere Beveiliging PDF',
+      primary_urls: [
+        'https://www.beveiligingsbranche.nl/wp-content/uploads/CAO-PB-18-dec-2024-27-dec-2026_met-omslag.pdf'
+      ],
+      required_source_types: ['cao_pdf'],
+      official_hosts: ['beveiligingsbranche.nl', 'www.beveiligingsbranche.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'pdf_text_hash', 'linked_from_landing_page_hash'],
+      watch_for_keywords: ['particuliere beveiliging', '18 december 2024', '27 december 2026'],
+      effective_date_fields: ['valid_from', 'valid_until', 'effective_from']
+    },
+    {
+      family_key: 'wage_tables',
+      label: 'CAO PB loontabellen en loonstijgingen',
+      primary_urls: [
+        'https://www.beveiligingsbranche.nl/wp-content/uploads/Salarisschaal-per-loonperiode-1-2026-per-uur-en-per-4-weken.pdf',
+        'https://www.beveiligingsbranche.nl/loonstijging-per-loonperiode-1-2026-bekend/'
+      ],
+      required_source_types: ['wage_table_pdf', 'wage_table_xlsx', 'news_update'],
+      official_hosts: ['beveiligingsbranche.nl', 'www.beveiligingsbranche.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'pdf_table_hash', 'numeric_parameter_hash'],
+      watch_for_keywords: ['loontabel', 'salarisschaal', 'loonperiode 1 2026', '3,8%', 'indexatie'],
+      effective_date_fields: ['effective_from', 'pay_period_effective_from', 'wage_period']
+    },
+    {
+      family_key: 'pay_periods',
+      label: 'CAO PB loonperiodetabellen',
+      primary_urls: [
+        'https://www.beveiligingsbranche.nl/wp-content/uploads/Loonperiodes-2026.pdf',
+        'https://www.beveiligingsbranche.nl/cao/'
+      ],
+      required_source_types: ['pay_periods_pdf', 'pay_periods_xlsx', 'cao_page'],
+      official_hosts: ['beveiligingsbranche.nl', 'www.beveiligingsbranche.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'pay_period_table_hash'],
+      watch_for_keywords: ['loonperiodes', 'loonperioden', '2026', '14e loonperiode'],
+      effective_date_fields: ['period_start', 'period_end', 'pay_period_year']
+    },
+    {
+      family_key: 'fonds_cao',
+      label: 'Fonds-CAO en SFPB-premiebronnen',
+      primary_urls: [
+        'https://www.beveiligingsbranche.nl/wp-content/uploads/Fonds-cao-1-juli-2021-1-juli-2026-versie-5-december-2025.pdf',
+        'https://www.beveiligingsbranche.nl/premie-inning-2026/'
+      ],
+      required_source_types: ['fonds_cao_pdf', 'official_webpage', 'news_update'],
+      official_hosts: ['beveiligingsbranche.nl', 'www.beveiligingsbranche.nl', 'sociaalfondsbeveiliging.nl', 'www.sociaalfondsbeveiliging.nl', 'sfpb.nl', 'www.sfpb.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'pdf_text_hash', 'numeric_parameter_hash'],
+      watch_for_keywords: ['sociaal fonds', 'sfpb', 'premie', '0,245%', '0,06125%', '0,18375%'],
+      effective_date_fields: ['effective_from', 'valid_from', 'premium_year']
+    },
+    {
+      family_key: 'question_answer',
+      label: 'CAO PB vraagbaak/FAQ payroll interpretaties',
+      primary_urls: [
+        'https://www.beveiligingsbranche.nl/cao/'
+      ],
+      required_source_types: ['faq_page', 'question_answer_page', 'cao_page'],
+      official_hosts: ['beveiligingsbranche.nl', 'www.beveiligingsbranche.nl'],
+      payroll_relevance: 'supporting',
+      change_detection: ['content_hash', 'question_answer_section_hash'],
+      watch_for_keywords: ['cao-vraagbaak', 'ziekte', 'vakantie', 'overwerk', 'minuren', 'feestdagen', 'pauze'],
+      effective_date_fields: ['effective_from', 'interprets_article', 'published_at']
+    },
+    {
+      family_key: 'social_committee',
+      label: 'Sociale Commissie uitspraken',
+      primary_urls: [
+        'https://www.beveiligingsbranche.nl/wp-content/uploads/Artikel_61_en_62_Feestdag_Vergoeding_Vakantietegoed_II.pdf',
+        'https://www.beveiligingsbranche.nl/wp-content/uploads/Artikel_23_aantal_tijdvakken_parttimer_vast_model.pdf',
+        'https://www.beveiligingsbranche.nl/cao/'
+      ],
+      required_source_types: ['sociale_commissie_page', 'sociale_commissie_pdf', 'sociale_commissie_decision_pdf'],
+      official_hosts: ['beveiligingsbranche.nl', 'www.beveiligingsbranche.nl'],
+      payroll_relevance: 'supporting',
+      change_detection: ['content_hash', 'pdf_text_hash', 'decision_reference_hash'],
+      watch_for_keywords: ['sociale commissie', 'uitspraak', 'feestdag', 'parttimer', 'tijdvakken'],
+      effective_date_fields: ['decision_date', 'effective_from', 'interprets_article']
+    },
+    {
+      family_key: 'news_updates',
+      label: 'CAO PB nieuws, AVV en losse payroll updates',
+      primary_urls: [
+        'https://www.beveiligingsbranche.nl/loonstijging-per-loonperiode-1-2026-bekend/',
+        'https://www.beveiligingsbranche.nl/cao-particuliere-beveiliging-algemeen-verbindend-verklaard/',
+        'https://www.beveiligingsbranche.nl/actueel/cao/'
+      ],
+      required_source_types: ['news_page', 'news_update', 'ministerial_registration'],
+      official_hosts: ['beveiligingsbranche.nl', 'www.beveiligingsbranche.nl', 'cao.minszw.nl', 'www.uitvoeringarbeidsvoorwaardenwetgeving.nl'],
+      payroll_relevance: 'supporting',
+      change_detection: ['content_hash', 'article_text_hash', 'linked_document_hashes'],
+      watch_for_keywords: ['loonstijging', 'algemeen verbindend', 'staatscourant', 'vanaf', 'ingang van'],
+      effective_date_fields: ['published_at', 'effective_from', 'valid_from', 'avv_effective_from']
+    }
+  ],
+  [CAO_EVENT_HOSPITALITY_SECURITY_KEY]: [
+    {
+      family_key: 'cao_landing_page',
+      label: 'CAO EHB overzichtspagina Nederlandse Veiligheidsbranche',
+      primary_urls: [
+        'https://www.veiligheidsbranche.nl/cao/cao-ehb/'
+      ],
+      required_source_types: ['cao_page', 'official_webpage'],
+      official_hosts: ['veiligheidsbranche.nl', 'www.veiligheidsbranche.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'linked_document_hashes'],
+      watch_for_keywords: ['cao ehb', 'evenementen', 'horecabeveiliging', 'versie januari 2026', '4,62%'],
+      effective_date_fields: ['effective_from', 'valid_from', 'applies_from']
+    },
+    {
+      family_key: 'main_cao_pdf',
+      label: 'Hoofd-CAO Evenementen- en Horecabeveiliging PDF',
+      primary_urls: [
+        'https://d1p3jfjj2ztqji.cloudfront.net/wp-content/uploads/2025/12/16121903/CAO-EHB-2024-2027-januari-2026-.pdf',
+        'https://d1p3jfjj2ztqji.cloudfront.net/wp-content/uploads/2025/07/07151312/CAO-EHB-2024-2027-juli-2025-schone-versie.pdf'
+      ],
+      required_source_types: ['cao_pdf'],
+      official_hosts: ['veiligheidsbranche.nl', 'www.veiligheidsbranche.nl', 'd1p3jfjj2ztqji.cloudfront.net'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'pdf_text_hash', 'linked_from_landing_page_hash'],
+      watch_for_keywords: ['2024', '2027', 'loonschalen', 'oproepkracht', 'vakantiebijslag'],
+      effective_date_fields: ['valid_from', 'valid_until', 'effective_from']
+    },
+    {
+      family_key: 'wage_and_version_updates',
+      label: 'CAO EHB loon- en versie-updates',
+      primary_urls: [
+        'https://www.veiligheidsbranche.nl/cao/cao-ehb/',
+        'https://www.veiligheidsbranche.nl/nieuws/'
+      ],
+      required_source_types: ['cao_pdf', 'wage_table_pdf', 'wage_table_xlsx', 'official_webpage', 'news_update'],
+      official_hosts: ['veiligheidsbranche.nl', 'www.veiligheidsbranche.nl', 'd1p3jfjj2ztqji.cloudfront.net'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'numeric_parameter_hash', 'linked_document_hashes'],
+      watch_for_keywords: ['4,62%', 'wml', 'minimumloon', 'loontreden', 'tredeverhoging', 'januari 2026'],
+      effective_date_fields: ['effective_from', 'pay_period_effective_from', 'published_at']
+    },
+    {
+      family_key: 'scope_membership_rule',
+      label: 'CAO EHB werkingssfeer en lidmaatschapsvoorwaarde',
+      primary_urls: [
+        'https://www.veiligheidsbranche.nl/cao/cao-ehb/',
+        'https://www.veiligheidsbranche.nl/ehb/'
+      ],
+      required_source_types: ['cao_page', 'official_webpage', 'cao_pdf'],
+      official_hosts: ['veiligheidsbranche.nl', 'www.veiligheidsbranche.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'scope_text_hash'],
+      watch_for_keywords: ['sectie ehb', 'aangesloten', 'evenementen', 'horeca', 'werkingssfeer'],
+      effective_date_fields: ['effective_from', 'valid_from', 'membership_required_from']
+    }
+  ],
+  [CAO_SAFETY_DOMAIN_KEY]: [
+    {
+      family_key: 'cao_landing_page',
+      label: 'CAO Veiligheidsdomein overzichtspagina VVNL',
+      primary_urls: [
+        'https://veiligheidsdomein.nl/caoveiligheidsdomein/'
+      ],
+      required_source_types: ['cao_page', 'official_webpage'],
+      official_hosts: ['veiligheidsdomein.nl', 'www.veiligheidsdomein.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'linked_document_hashes'],
+      watch_for_keywords: ['cao veiligheidsdomein', '28 december 2025', '28 december 2027', '1 januari 2026', '4%'],
+      effective_date_fields: ['effective_from', 'valid_from', 'applies_from']
+    },
+    {
+      family_key: 'main_cao_pdf',
+      label: 'Hoofd-CAO Veiligheidsdomein PDF',
+      primary_urls: [
+        'https://veiligheidsdomein.nl/wp-content/uploads/2026/01/Cao-Veiligheidsdomein-2025-2027-28-12.pdf',
+        'https://veiligheidsdomein.nl/wp-content/uploads/2025/10/Principeakkoord-VVNL-en-vakbond-AVV_2025.pdf'
+      ],
+      required_source_types: ['cao_pdf'],
+      official_hosts: ['veiligheidsdomein.nl', 'www.veiligheidsdomein.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'pdf_text_hash', 'linked_from_landing_page_hash'],
+      watch_for_keywords: ['veiligheidsdomein', '2025', '2027', 'loontabel', 'reiskosten'],
+      effective_date_fields: ['valid_from', 'valid_until', 'effective_from']
+    },
+    {
+      family_key: 'wage_and_reimbursement_updates',
+      label: 'CAO Veiligheidsdomein loon- en reiskostenupdates',
+      primary_urls: [
+        'https://veiligheidsdomein.nl/2025/10/29/akkoord-vvnl-en-vakbond-avv-over-nieuwe-cao-veiligheidsdomein-2025-2027/',
+        'https://veiligheidsdomein.nl/caoveiligheidsdomein/'
+      ],
+      required_source_types: ['cao_pdf', 'wage_table_pdf', 'wage_table_xlsx', 'official_webpage', 'news_update'],
+      official_hosts: ['veiligheidsdomein.nl', 'www.veiligheidsdomein.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'numeric_parameter_hash', 'linked_document_hashes'],
+      watch_for_keywords: ['2,5%', '4%', 'reiskosten', '0,23', '1 januari 2026', 'loonstijging'],
+      effective_date_fields: ['effective_from', 'published_at', 'pay_period_effective_from']
+    },
+    {
+      family_key: 'social_fund_sources',
+      label: 'Sociaal Fonds Veiligheidsdomein bronnen',
+      primary_urls: [
+        'https://veiligheidsdomein.nl/caoveiligheidsdomein/',
+        'https://veiligheidsdomein.nl/2025/10/29/akkoord-vvnl-en-vakbond-avv-over-nieuwe-cao-veiligheidsdomein-2025-2027/'
+      ],
+      required_source_types: ['fonds_cao_pdf', 'official_webpage', 'news_update'],
+      official_hosts: ['veiligheidsdomein.nl', 'www.veiligheidsdomein.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'numeric_parameter_hash'],
+      watch_for_keywords: ['sociaal fonds veiligheidsdomein', 'premie sociaal fonds', 'sociaalfonds'],
+      effective_date_fields: ['effective_from', 'premium_year', 'valid_from']
+    }
+  ],
+  [CAO_TRAFFIC_CONTROLLERS_KEY]: [
+    {
+      family_key: 'main_cao_pdf',
+      label: 'Hoofd-CAO Verkeersregelaars PDF',
+      primary_urls: [
+        'https://veiligheidsdomein.nl/wp-content/uploads/2026/03/Cao-Veiligheidsdomein-voor-verkeersregelaars-2025-2027-versie-maart-2026.pdf'
+      ],
+      required_source_types: ['cao_pdf'],
+      official_hosts: ['veiligheidsdomein.nl', 'www.veiligheidsdomein.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'pdf_text_hash', 'linked_from_landing_page_hash'],
+      watch_for_keywords: ['verkeersregelaars', '2025', '2027', 'loontabel', 'nacht', 'weekend'],
+      effective_date_fields: ['valid_from', 'valid_until', 'effective_from']
+    },
+    {
+      family_key: 'current_version_or_landing_page',
+      label: 'Actuele verkeersregelaars-CAO pagina of versiebron',
+      primary_urls: [
+        'https://veiligheidsdomein.nl/caoveiligheidsdomein/',
+        'https://veiligheidsdomein.nl/2025/10/29/akkoord-vvnl-en-vakbond-avv-over-nieuwe-cao-veiligheidsdomein-2025-2027/'
+      ],
+      required_source_types: ['cao_page', 'official_webpage', 'cao_pdf'],
+      official_hosts: ['veiligheidsdomein.nl', 'www.veiligheidsdomein.nl', 'jouwveiligheidsdomein.nl', 'www.jouwveiligheidsdomein.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'linked_document_hashes'],
+      watch_for_keywords: ['verkeersregelaars', '28 december 2025', '2025-2027', 'versie maart 2026'],
+      effective_date_fields: ['effective_from', 'valid_from', 'published_at']
+    },
+    {
+      family_key: 'wage_and_scope_sources',
+      label: 'Verkeersregelaars loon- en werkingssfeerbronnen',
+      primary_urls: [
+        'https://veiligheidsdomein.nl/wp-content/uploads/2026/03/Cao-Veiligheidsdomein-voor-verkeersregelaars-2025-2027-versie-maart-2026.pdf',
+        'https://veiligheidsdomein.nl/2025/10/29/akkoord-vvnl-en-vakbond-avv-over-nieuwe-cao-veiligheidsdomein-2025-2027/'
+      ],
+      required_source_types: ['cao_pdf', 'wage_table_pdf', 'wage_table_xlsx', 'official_webpage', 'news_update'],
+      official_hosts: ['veiligheidsdomein.nl', 'www.veiligheidsdomein.nl'],
+      payroll_relevance: 'critical',
+      change_detection: ['content_hash', 'numeric_parameter_hash', 'scope_text_hash'],
+      watch_for_keywords: ['wml', '2,5%', 'nacht', '5%', 'weekend', '10%', 'werkingssfeer'],
+      effective_date_fields: ['effective_from', 'pay_period_effective_from', 'published_at']
+    }
+  ]
+};
+
 const PAYROLL_FINAL_RUNTIME_SURFACES = [
   {
     surface_key: 'contract_rules',
@@ -171,6 +445,26 @@ function getKnownCaoCatalogEntry(caoKey) {
   return KNOWN_SECURITY_CAO_CATALOG.find(item => item.cao_key === key) || null;
 }
 
+function sourceMonitoringContractForCao(caoKey) {
+  return SOURCE_MONITORING_CONTRACT_BY_CAO_KEY[normalizeCaoKey(caoKey)] || [];
+}
+
+function sourceMonitoringSummary(caoKey) {
+  const contract = sourceMonitoringContractForCao(caoKey);
+  const primaryUrls = unique(contract.flatMap(item => item.primary_urls || []));
+  const officialHosts = unique(contract.flatMap(item => item.official_hosts || []));
+  return {
+    family_count: contract.length,
+    family_keys: contract.map(item => item.family_key),
+    primary_url_count: primaryUrls.length,
+    primary_urls: primaryUrls,
+    official_hosts: officialHosts,
+    all_families_have_primary_url: contract.every(item => Array.isArray(item.primary_urls) && item.primary_urls.length > 0),
+    all_families_have_change_detection: contract.every(item => Array.isArray(item.change_detection) && item.change_detection.length > 0),
+    all_families_have_effective_date_fields: contract.every(item => Array.isArray(item.effective_date_fields) && item.effective_date_fields.length > 0)
+  };
+}
+
 function runtimeSurfaceStatus(surface, caoKey) {
   const key = normalizeCaoKey(caoKey);
   const supported = surface.supported_cao_keys.includes(key);
@@ -199,6 +493,8 @@ function buildCaoRuntimeReadinessForKey(caoKey) {
       local_runtime_stage: 'unknown',
       source_monitoring_status: 'unknown',
       source_families: [],
+      source_monitoring_contract: [],
+      source_monitoring_summary: sourceMonitoringSummary(key),
       payroll_final_allowed_by_static_runtime: false,
       planning_final_allowed_by_static_runtime: false,
       manual_review_required: true,
@@ -227,6 +523,8 @@ function buildCaoRuntimeReadinessForKey(caoKey) {
     local_runtime_stage: catalogEntry.local_runtime_stage,
     source_monitoring_status: catalogEntry.source_monitoring_status,
     source_families: catalogEntry.source_families,
+    source_monitoring_contract: sourceMonitoringContractForCao(key),
+    source_monitoring_summary: sourceMonitoringSummary(key),
     payroll_final_allowed_by_static_runtime: payrollFinalAllowed,
     planning_final_allowed_by_static_runtime: payrollFinalAllowed,
     manual_review_required: !payrollFinalAllowed,
