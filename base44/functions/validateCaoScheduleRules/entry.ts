@@ -4993,6 +4993,7 @@ Deno.serve(async (req) => {
     result.is_valid = result.violations.filter(v => v.severity === 'high').length === 0;
     const strictScheduleManualReviewRequired = result.schedule_manual_review_required === true &&
       result.cao_evidence_mode === 'strict';
+    const contractManualReviewRequired = contractValidation.contract_manual_review_required === true;
     const contractProofAvailable = contractValidation.contract_resolution_required === true &&
       contractValidation.contract_payroll_final_allowed === true;
 
@@ -5057,9 +5058,9 @@ Deno.serve(async (req) => {
       contract_warning_items: contractValidation.contract_warnings,
       contract_resolution_note: contractValidation.contract_resolution_note || null,
       contract_payroll_final_allowed: contractValidation.contract_payroll_final_allowed,
-      manual_review_required: isUnknownOrMixed || contractValidation.contract_manual_review_required || strictScheduleManualReviewRequired || false,
-      planning_allowed: !isUnknownOrMixed && result.is_valid === true && contractProofAvailable && !strictScheduleManualReviewRequired,
-      payroll_final_allowed: !isUnknownOrMixed && result.is_valid === true && contractProofAvailable && !strictScheduleManualReviewRequired,
+      manual_review_required: isUnknownOrMixed || contractManualReviewRequired || strictScheduleManualReviewRequired || false,
+      planning_allowed: !isUnknownOrMixed && result.is_valid === true && contractProofAvailable && !contractManualReviewRequired && !strictScheduleManualReviewRequired,
+      payroll_final_allowed: !isUnknownOrMixed && result.is_valid === true && contractProofAvailable && !contractManualReviewRequired && !strictScheduleManualReviewRequired,
       schedule_final_requested: isFinalScheduleValidation(scheduleBody),
       ...result
     });
