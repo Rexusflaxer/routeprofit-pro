@@ -1311,6 +1311,25 @@ function runCaoStaticGovernanceScenarios() {
     false,
     'Personnel contract UI must not label CAO configuration selection as raw id input'
   );
+
+  const legacyPersonnelFormPath = path.join(repoRoot, 'src/components/personnel/PersonnelForm.jsx');
+  assert.equal(
+    fs.existsSync(legacyPersonnelFormPath),
+    false,
+    'Legacy PersonnelForm must stay removed; personnel onboarding must use PersonnelWizard + PersonnelContractsTab for CAO context'
+  );
+  const personnelPageSource = fs.readFileSync(path.join(repoRoot, 'src/pages/Personnel.jsx'), 'utf8');
+  assert.equal(
+    personnelPageSource.includes('PersonnelForm'),
+    false,
+    'Personnel page must not import the legacy PersonnelForm CAO shortcut'
+  );
+  const personnelWizardSource = fs.readFileSync(path.join(repoRoot, 'src/components/personnel/PersonnelWizard.jsx'), 'utf8');
+  assert.equal(
+    personnelWizardSource.includes('cao_configuration_id: data.personnel.cao_configuration_id || null'),
+    false,
+    'Initial contract snapshot must not copy cao_configuration_id from personnel master data'
+  );
 }
 
 async function main() {

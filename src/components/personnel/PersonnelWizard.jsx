@@ -138,7 +138,7 @@ export default function PersonnelWizard({ person, onClose }) {
             personnel_id: personnelId,
             company_id: companyId,
             cao_key: caoKey,
-            cao_configuration_id: data.personnel.cao_configuration_id || null,
+            cao_configuration_id: null,
             contract_form: contractForm,
             underlying_contract_form: contractForm === "oproep" ? underlyingContractForm : null,
             contract_start_date: contractStartDate,
