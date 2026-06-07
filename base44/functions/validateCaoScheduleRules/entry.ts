@@ -2,6 +2,8 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
 const CAO_PB_KEY = 'cao_particuliere_beveiliging';
 const CAO_EVENT_HOSPITALITY_SECURITY_KEY = 'cao_evenementen_horecabeveiliging';
+const CAO_TRAFFIC_CONTROLLERS_KEY = 'cao_verkeersregelaars';
+const CAO_SAFETY_DOMAIN_KEY = 'cao_veiligheidsdomein';
 const SUPPORTED_SCHEDULE_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
 
 function getCaoRuntimeSupport(caoKey, functionName) {
@@ -34,8 +36,28 @@ function normalizeCaoSignalText(value) {
     .trim();
 }
 
+function externalCaoSignalText(context = {}) {
+  return [
+    context.cao,
+    context.cao_key,
+    context.default_cao_key,
+    context.task_type,
+    context.service_type,
+    context.service_function_type,
+    context.default_service_function_type,
+    context.function_type,
+    context.default_function_type,
+    context.required_function_type,
+    context.cao_function_group,
+    context.default_cao_function_group,
+    context.required_cao_function_group,
+    context.security_role_status,
+    context.required_security_role_status
+  ].map(normalizeCaoSignalText).filter(Boolean).join('_');
+}
+
 function eventHospitalityCaoSignal(source, context = {}) {
-  const caoText = normalizeCaoSignalText(context.cao || context.cao_key || context.default_cao_key || '');
+  const caoText = externalCaoSignalText(context);
   const worksEvent = context.works_event_or_hospitality_security ??
     context.default_works_event_or_hospitality_security ??
     null;
@@ -72,6 +94,47 @@ function eventHospitalityCaoSignal(source, context = {}) {
   return null;
 }
 
+function trafficControllerCaoSignal(source, context = {}) {
+  const text = externalCaoSignalText(context);
+  if (
+    text.includes('verkeersregelaar') ||
+    text.includes('traffic_controller') ||
+    text.includes('traffic_control') ||
+    text.includes('traffic_regulation')
+  ) {
+    return {
+      source,
+      cao_key: CAO_TRAFFIC_CONTROLLERS_KEY,
+      status: 'inferred_external_cao',
+      reason: 'traffic_controller_scope'
+    };
+  }
+  return null;
+}
+
+function safetyDomainCaoSignal(source, context = {}) {
+  const text = externalCaoSignalText(context);
+  if (
+    text.includes('veiligheidsdomein') ||
+    text.includes('safety_domain') ||
+    text.includes('public_safety')
+  ) {
+    return {
+      source,
+      cao_key: CAO_SAFETY_DOMAIN_KEY,
+      status: 'inferred_external_cao',
+      reason: 'safety_domain_scope'
+    };
+  }
+  return null;
+}
+
+function addKnownExternalCaoSignals(signals, source, context = {}) {
+  addExternalCaoSignal(signals, eventHospitalityCaoSignal(source, context));
+  addExternalCaoSignal(signals, trafficControllerCaoSignal(source, context));
+  addExternalCaoSignal(signals, safetyDomainCaoSignal(source, context));
+}
+
 function addExternalCaoSignal(signals, signal) {
   if (!signal) return;
   const key = `${signal.source}:${signal.status}:${signal.cao_key || ''}:${signal.reason || ''}`;
@@ -82,11 +145,11 @@ function addExternalCaoSignal(signals, signal) {
 
 function collectInlineExternalCaoSignals(shifts = [], body = {}) {
   const signals = [];
-  addExternalCaoSignal(signals, eventHospitalityCaoSignal('body', body));
-  addExternalCaoSignal(signals, eventHospitalityCaoSignal('body.service_context', body.service_context || {}));
+  addKnownExternalCaoSignals(signals, 'body', body);
+  addKnownExternalCaoSignals(signals, 'body.service_context', body.service_context || {});
   for (const [index, shift] of (shifts || []).entries()) {
-    addExternalCaoSignal(signals, eventHospitalityCaoSignal(`shift[${index}]`, shift || {}));
-    addExternalCaoSignal(signals, eventHospitalityCaoSignal(`shift[${index}].service_context`, shift?.service_context || {}));
+    addKnownExternalCaoSignals(signals, `shift[${index}]`, shift || {});
+    addKnownExternalCaoSignals(signals, `shift[${index}].service_context`, shift?.service_context || {});
   }
   return signals;
 }
@@ -233,13 +296,13 @@ async function collectReferencedExternalCaoSignals(base44, shifts, body = {}) {
   for (const taskId of collectScheduleTaskIds(shifts, body)) {
     try {
       const task = await base44.asServiceRole.entities.Task.get(taskId);
-      addExternalCaoSignal(signals, eventHospitalityCaoSignal(`task:${taskId}`, task || {}));
+      addKnownExternalCaoSignals(signals, `task:${taskId}`, task || {});
     } catch { /* taakcontext is optioneel */ }
   }
   for (const objectId of collectScheduleObjectIds(shifts, body)) {
     try {
       const object = await base44.asServiceRole.entities.SurveillanceObject.get(objectId);
-      addExternalCaoSignal(signals, eventHospitalityCaoSignal(`object:${objectId}`, object || {}));
+      addKnownExternalCaoSignals(signals, `object:${objectId}`, object || {});
     } catch { /* objectcontext is optioneel */ }
   }
   return signals;

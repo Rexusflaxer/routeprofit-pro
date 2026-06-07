@@ -29,7 +29,17 @@ function uniqueValues(values) {
   return [...new Set((values || []).filter(Boolean))];
 }
 
-function inferServiceCaoKey({ explicitCaoKey, explicitCao, worksEventOrHospitalitySecurity, eventHospitalityCaoApplies }) {
+function buildServiceSignalText(values = []) {
+  return values.map(normalizeToken).filter(Boolean).join('_');
+}
+
+function inferServiceCaoKey({
+  explicitCaoKey,
+  explicitCao,
+  worksEventOrHospitalitySecurity,
+  eventHospitalityCaoApplies,
+  serviceSignalText
+}) {
   if (explicitCaoKey) {
     return {
       cao_key: explicitCaoKey,
@@ -66,6 +76,34 @@ function inferServiceCaoKey({ explicitCaoKey, explicitCao, worksEventOrHospitali
       manual_review_required: true,
       suggested_cao_keys: [CAO_EVENT_HOSPITALITY_SECURITY_KEY],
       warning: 'Dienst lijkt evenementen-/horecabeveiliging, maar event_hospitality_cao_applies is niet expliciet bevestigd. Kies de juiste cao_key voordat planning/payroll definitief mag zijn.'
+    };
+  }
+
+  const combinedSignalText = buildServiceSignalText([explicitCao, serviceSignalText]);
+  if (
+    combinedSignalText.includes('verkeersregelaar') ||
+    combinedSignalText.includes('traffic_controller') ||
+    combinedSignalText.includes('traffic_control') ||
+    combinedSignalText.includes('traffic_regulation')
+  ) {
+    return {
+      cao_key: CAO_TRAFFIC_CONTROLLERS_KEY,
+      cao_key_source: 'traffic_controller_scope',
+      inferred: true,
+      suggested_cao_keys: [CAO_TRAFFIC_CONTROLLERS_KEY]
+    };
+  }
+
+  if (
+    combinedSignalText.includes('veiligheidsdomein') ||
+    combinedSignalText.includes('safety_domain') ||
+    combinedSignalText.includes('public_safety')
+  ) {
+    return {
+      cao_key: CAO_SAFETY_DOMAIN_KEY,
+      cao_key_source: 'safety_domain_scope',
+      inferred: true,
+      suggested_cao_keys: [CAO_SAFETY_DOMAIN_KEY]
     };
   }
 
@@ -148,7 +186,16 @@ function buildServiceContext({ body, task, object, route }) {
     explicitCaoKey,
     explicitCao,
     worksEventOrHospitalitySecurity,
-    eventHospitalityCaoApplies
+    eventHospitalityCaoApplies,
+    serviceSignalText: buildServiceSignalText([
+      taskType,
+      functionType,
+      caoFunctionGroup,
+      caoFunctionLevel,
+      securityRoleStatus,
+      task?.service_function_type,
+      object?.default_service_function_type
+    ])
   });
   const operatingCompany = resolveOperatingCompanyContext({ body, input, task, object, route });
 

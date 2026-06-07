@@ -26,6 +26,10 @@ function normalizeToken(value) {
     .trim();
 }
 
+function buildServiceSignalText(values = []) {
+  return values.map(normalizeToken).filter(Boolean).join('_');
+}
+
 function addToken(tokens, value) {
   const normalized = normalizeToken(value);
   if (normalized) tokens.push(normalized);
@@ -35,7 +39,13 @@ function booleanTrue(value) {
   return value === true || value === 'true' || value === 'yes' || value === 'ja';
 }
 
-function inferServiceCaoKey({ explicitCaoKey, explicitCao, worksEventOrHospitalitySecurity, eventHospitalityCaoApplies }) {
+function inferServiceCaoKey({
+  explicitCaoKey,
+  explicitCao,
+  worksEventOrHospitalitySecurity,
+  eventHospitalityCaoApplies,
+  serviceSignalText
+}) {
   if (explicitCaoKey) {
     return {
       cao_key: explicitCaoKey,
@@ -72,6 +82,34 @@ function inferServiceCaoKey({ explicitCaoKey, explicitCao, worksEventOrHospitali
       manual_review_required: true,
       suggested_cao_keys: [CAO_EVENT_HOSPITALITY_SECURITY_KEY],
       warning: 'Dienst lijkt evenementen-/horecabeveiliging, maar event_hospitality_cao_applies is niet expliciet bevestigd. Kies de juiste cao_key voordat planning/payroll definitief mag zijn.'
+    };
+  }
+
+  const combinedSignalText = buildServiceSignalText([explicitCao, serviceSignalText]);
+  if (
+    combinedSignalText.includes('verkeersregelaar') ||
+    combinedSignalText.includes('traffic_controller') ||
+    combinedSignalText.includes('traffic_control') ||
+    combinedSignalText.includes('traffic_regulation')
+  ) {
+    return {
+      cao_key: CAO_TRAFFIC_CONTROLLERS_KEY,
+      cao_key_source: 'traffic_controller_scope',
+      inferred: true,
+      suggested_cao_keys: [CAO_TRAFFIC_CONTROLLERS_KEY]
+    };
+  }
+
+  if (
+    combinedSignalText.includes('veiligheidsdomein') ||
+    combinedSignalText.includes('safety_domain') ||
+    combinedSignalText.includes('public_safety')
+  ) {
+    return {
+      cao_key: CAO_SAFETY_DOMAIN_KEY,
+      cao_key_source: 'safety_domain_scope',
+      inferred: true,
+      suggested_cao_keys: [CAO_SAFETY_DOMAIN_KEY]
     };
   }
 
@@ -906,20 +944,29 @@ function resolveOperatingCompanyContext({ body, input, task, object, route }) {
 
 function inferServiceContext({ body, task, route, object }) {
   const input = body.service_context || {};
-  const taskType = input.task_type || task?.task_type || null;
+  const taskType = input.task_type || body.task_type || task?.task_type || null;
   const functionType = input.function_type ||
+    body.function_type ||
+    body.service_function_type ||
+    body.required_function_type ||
     task?.service_function_type ||
     object?.default_service_function_type ||
     null;
   const caoFunctionGroup = input.cao_function_group ||
+    body.cao_function_group ||
+    body.required_cao_function_group ||
     task?.required_cao_function_group ||
     object?.default_cao_function_group ||
     null;
   const caoFunctionLevel = input.cao_function_level ||
+    body.cao_function_level ||
+    body.required_cao_function_level ||
     task?.required_cao_function_level ||
     object?.default_cao_function_level ||
     null;
   const securityRoleStatus = input.security_role_status ||
+    body.security_role_status ||
+    body.required_security_role_status ||
     task?.required_security_role_status ||
     object?.default_security_role_status ||
     null;
@@ -935,11 +982,13 @@ function inferServiceContext({ body, task, route, object }) {
   const explicitCao = input.cao || body.cao || task?.cao || object?.cao || route?.cao || null;
   const objectId = body.object_id || input.object_id || task?.object_id || object?.id || null;
   const worksEventOrHospitalitySecurity = input.works_event_or_hospitality_security ??
+    body.works_event_or_hospitality_security ??
     task?.works_event_or_hospitality_security ??
     object?.default_works_event_or_hospitality_security ??
     object?.works_event_or_hospitality_security ??
     null;
   const eventHospitalityCaoApplies = input.event_hospitality_cao_applies ??
+    body.event_hospitality_cao_applies ??
     task?.event_hospitality_cao_applies ??
     object?.default_event_hospitality_cao_applies ??
     object?.event_hospitality_cao_applies ??
@@ -948,7 +997,16 @@ function inferServiceContext({ body, task, route, object }) {
     explicitCaoKey,
     explicitCao,
     worksEventOrHospitalitySecurity,
-    eventHospitalityCaoApplies
+    eventHospitalityCaoApplies,
+    serviceSignalText: buildServiceSignalText([
+      taskType,
+      functionType,
+      caoFunctionGroup,
+      caoFunctionLevel,
+      securityRoleStatus,
+      task?.service_function_type,
+      object?.default_service_function_type
+    ])
   });
   const operatingCompany = resolveOperatingCompanyContext({ body, input, task, object, route });
 
@@ -963,8 +1021,8 @@ function inferServiceContext({ body, task, route, object }) {
     cao: explicitCao,
     company_id: operatingCompany.company_id,
     company_id_source: operatingCompany.company_id_source,
-    route_id: body.route_id || null,
-    task_id: body.task_id || null,
+    route_id: body.route_id || input.route_id || route?.id || null,
+    task_id: body.task_id || input.task_id || task?.id || null,
     object_id: objectId,
     task_type: taskType,
     function_type: functionType,
@@ -984,21 +1042,25 @@ function inferServiceContext({ body, task, route, object }) {
       ...normalizeArray(object?.default_required_qualification_groups)
     ]),
     performs_security_work: input.performs_security_work ??
+      body.performs_security_work ??
       task?.performs_security_work ??
       object?.default_performs_security_work ??
       object?.performs_security_work ??
       null,
     security_work_percentage: input.security_work_percentage ??
+      body.security_work_percentage ??
       task?.security_work_percentage ??
       object?.default_security_work_percentage ??
       object?.security_work_percentage ??
       null,
     works_airport_schiphol: input.works_airport_schiphol ??
+      body.works_airport_schiphol ??
       task?.works_airport_schiphol ??
       object?.default_works_airport_schiphol ??
       object?.works_airport_schiphol ??
       null,
     works_cash_value_logistics: input.works_cash_value_logistics ??
+      body.works_cash_value_logistics ??
       task?.works_cash_value_logistics ??
       object?.default_works_cash_value_logistics ??
       object?.works_cash_value_logistics ??
@@ -1006,20 +1068,23 @@ function inferServiceContext({ body, task, route, object }) {
     works_event_or_hospitality_security: worksEventOrHospitalitySecurity,
     event_hospitality_cao_applies: eventHospitalityCaoApplies,
     customer_billable: input.customer_billable ??
+      body.customer_billable ??
       task?.customer_billable ??
       object?.default_customer_billable ??
       object?.customer_billable ??
       null,
     counts_toward_required_staffing: input.counts_toward_required_staffing ??
+      body.counts_toward_required_staffing ??
       task?.counts_toward_required_staffing ??
       object?.default_counts_toward_required_staffing ??
       object?.counts_toward_required_staffing ??
       null,
-    internship_practice_trainer_personnel_id: input.internship_practice_trainer_personnel_id ?? task?.internship_practice_trainer_personnel_id ?? null,
-    internship_mentor_personnel_id: input.internship_mentor_personnel_id ?? task?.internship_mentor_personnel_id ?? null,
-    internship_one_to_one_guidance_confirmed: input.internship_one_to_one_guidance_confirmed ?? task?.internship_one_to_one_guidance_confirmed ?? null,
-    internship_uniform_label_confirmed: input.internship_uniform_label_confirmed ?? task?.internship_uniform_label_confirmed ?? null,
+    internship_practice_trainer_personnel_id: input.internship_practice_trainer_personnel_id ?? body.internship_practice_trainer_personnel_id ?? task?.internship_practice_trainer_personnel_id ?? null,
+    internship_mentor_personnel_id: input.internship_mentor_personnel_id ?? body.internship_mentor_personnel_id ?? task?.internship_mentor_personnel_id ?? null,
+    internship_one_to_one_guidance_confirmed: input.internship_one_to_one_guidance_confirmed ?? body.internship_one_to_one_guidance_confirmed ?? task?.internship_one_to_one_guidance_confirmed ?? null,
+    internship_uniform_label_confirmed: input.internship_uniform_label_confirmed ?? body.internship_uniform_label_confirmed ?? task?.internship_uniform_label_confirmed ?? null,
     contract_assignment_policy: input.contract_assignment_policy ||
+      body.contract_assignment_policy ||
       task?.contract_assignment_policy ||
       object?.contract_assignment_policy ||
       'strict_contract_match'
