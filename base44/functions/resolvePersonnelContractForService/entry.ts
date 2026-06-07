@@ -13,6 +13,34 @@ function isWithinDateRange(record, date, startField = 'valid_from', endField = '
   return true;
 }
 
+function getServiceActivityTokens(serviceContext, requestedCaoKey) {
+  return uniq([
+    requestedCaoKey,
+    serviceContext?.cao_key,
+    serviceContext?.cao,
+    serviceContext?.task_type,
+    serviceContext?.function_type,
+    serviceContext?.cao_function_group,
+    serviceContext?.cao_function_level,
+    serviceContext?.security_role_status
+  ]);
+}
+
+function companyCaoAssignmentMatchesService(assignment, serviceContext, requestedCaoKey) {
+  const activities = normalizeArray(assignment?.applies_to_activities);
+  if (activities.length === 0 || activities.includes('all')) {
+    return { matched: true, reason: activities.includes('all') ? 'all' : 'no_activity_scope' };
+  }
+  const serviceTokens = getServiceActivityTokens(serviceContext, requestedCaoKey);
+  const matched = activities.some(activity => serviceTokens.includes(activity));
+  return {
+    matched,
+    reason: matched ? 'activity_scope_match' : 'activity_scope_mismatch',
+    applies_to_activities: activities,
+    service_tokens: serviceTokens
+  };
+}
+
 function isContractActive(contract, date) {
   if (!contract || contract.is_current === false) return false;
   if (contract.contract_start_date && contract.contract_start_date > date) return false;
@@ -429,7 +457,7 @@ function evaluateHiredWorkerServiceConstraints(contract) {
   };
 }
 
-async function getCaoConfigForContract(base44, { contract, companyAssignment, company, companyCaoAssignments, serviceDate, requestedCaoKey }) {
+async function getCaoConfigForContract(base44, { contract, companyAssignment, company, companyCaoAssignments, serviceDate, requestedCaoKey, serviceContext }) {
   const explicitId = contract?.cao_configuration_id ||
     companyAssignment?.default_cao_configuration_id ||
     company?.default_cao_configuration_id ||
@@ -455,17 +483,88 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
     }
   }
 
-  const matchingCompanyCao = (companyCaoAssignments || [])
-    .filter(a => isWithinDateRange(a, serviceDate))
-    .sort((a, b) => {
-      if (a.is_primary && !b.is_primary) return -1;
-      if (!a.is_primary && b.is_primary) return 1;
-      return String(b.valid_from || '').localeCompare(String(a.valid_from || ''));
-    })[0] || null;
+  const activeCompanyCaoAssignments = (companyCaoAssignments || [])
+    .filter(assignment => isWithinDateRange(assignment, serviceDate));
+  const scopedCompanyCaoAssignments = activeCompanyCaoAssignments
+    .map(assignment => ({
+      assignment,
+      match: companyCaoAssignmentMatchesService(assignment, serviceContext, requestedCaoKey)
+    }));
+  const matchingCompanyCaoAssignments = scopedCompanyCaoAssignments
+    .filter(item => item.match.matched)
+    .map(item => item.assignment);
 
-  if (matchingCompanyCao?.cao_configuration_id) {
-    const config = await base44.asServiceRole.entities.CAOConfiguration.get(matchingCompanyCao.cao_configuration_id);
-    return { config, source: 'company_cao_assignment', company_cao_assignment_id: matchingCompanyCao.id };
+  if (activeCompanyCaoAssignments.length > 0 && matchingCompanyCaoAssignments.length === 0) {
+    return {
+      config: null,
+      source: 'company_cao_assignment_activity_scope_mismatch',
+      candidate_company_cao_assignment_ids: activeCompanyCaoAssignments.map(assignment => assignment.id).filter(Boolean),
+      warning: `Actieve bedrijfs-CAO-koppelingen gevonden voor ${serviceDate}, maar geen koppeling past op de dienstactiviteit/-functie.`
+    };
+  }
+
+  if (matchingCompanyCaoAssignments.length > 0) {
+    const resolvedCompanyCaos = await Promise.all(matchingCompanyCaoAssignments.map(async assignment => {
+      try {
+        const config = await base44.asServiceRole.entities.CAOConfiguration.get(assignment.cao_configuration_id);
+        return { assignment, config, error: null };
+      } catch {
+        return { assignment, config: null, error: 'config_not_found' };
+      }
+    }));
+
+    const validLinks = resolvedCompanyCaos
+      .filter(item => item.config && isWithinDateRange(item.config, serviceDate, 'valid_from', 'valid_until'))
+      .sort((a, b) => {
+        if (a.assignment.is_primary && !b.assignment.is_primary) return -1;
+        if (!a.assignment.is_primary && b.assignment.is_primary) return 1;
+        const assignmentDateCompare = String(b.assignment.valid_from || '').localeCompare(String(a.assignment.valid_from || ''));
+        if (assignmentDateCompare !== 0) return assignmentDateCompare;
+        return String(b.config.valid_from || '').localeCompare(String(a.config.valid_from || ''));
+      });
+
+    if (validLinks.length > 1) {
+      return {
+        config: null,
+        source: 'ambiguous_company_cao_assignments',
+        candidate_company_cao_assignment_ids: validLinks.map(item => item.assignment.id).filter(Boolean),
+        candidate_configuration_ids: validLinks.map(item => item.config.id).filter(Boolean),
+        warning: `Meerdere actieve bedrijfs-CAO-koppelingen hebben een geldige CAO-configuratie op ${serviceDate}; planning/payroll is geblokkeerd totdat de bedrijfs-CAO-koppelingen zijn opgeschoond.`
+      };
+    }
+
+    if (validLinks.length === 1) {
+      const invalidLinks = resolvedCompanyCaos.filter(item =>
+        !item.config || !isWithinDateRange(item.config, serviceDate, 'valid_from', 'valid_until')
+      );
+      if (invalidLinks.length > 0) {
+        return {
+          config: null,
+          source: 'company_cao_assignment_contains_invalid_config',
+          candidate_company_cao_assignment_ids: resolvedCompanyCaos.map(item => item.assignment.id).filter(Boolean),
+          candidate_configuration_ids: resolvedCompanyCaos.map(item => item.assignment.cao_configuration_id).filter(Boolean),
+          warning: `Actieve bedrijfs-CAO-koppelingen gevonden voor ${serviceDate}, maar minimaal een gekoppelde CAO-configuratie ontbreekt of is niet geldig op die datum.`
+        };
+      }
+      return {
+        config: validLinks[0].config,
+        source: 'company_cao_assignment',
+        company_cao_assignment_id: validLinks[0].assignment.id,
+        candidate_company_cao_assignment_ids: matchingCompanyCaoAssignments.map(assignment => assignment.id).filter(Boolean),
+        candidate_configuration_ids: [validLinks[0].config.id].filter(Boolean)
+      };
+    }
+
+    const source = resolvedCompanyCaos.every(item => item.error === 'config_not_found')
+      ? 'company_cao_assignment_config_not_found'
+      : 'company_cao_assignment_config_not_valid_on_service_date';
+    return {
+      config: null,
+      source,
+      candidate_company_cao_assignment_ids: matchingCompanyCaoAssignments.map(assignment => assignment.id).filter(Boolean),
+      candidate_configuration_ids: matchingCompanyCaoAssignments.map(assignment => assignment.cao_configuration_id).filter(Boolean),
+      warning: `Actieve bedrijfs-CAO-koppeling gevonden voor ${serviceDate}, maar de gekoppelde CAO-configuratie ontbreekt of is niet geldig op die datum.`
+    };
   }
 
   const caoKey = contract?.cao_key || companyAssignment?.cao_key || requestedCaoKey || CAO_PB_KEY;
@@ -672,9 +771,11 @@ Deno.serve(async (req) => {
         company,
         companyCaoAssignments,
         serviceDate: serviceContext.service_date,
-        requestedCaoKey: serviceContext.cao_key
+        requestedCaoKey: serviceContext.cao_key,
+        serviceContext
       });
       if (caoResolution.warning) warnings.push(caoResolution.warning);
+      if (Array.isArray(caoResolution.warnings)) warnings.push(...caoResolution.warnings);
     }
 
     if (!caoResolution.config) {
@@ -798,6 +899,7 @@ Deno.serve(async (req) => {
       cao_key: caoResolution.config?.cao_key || selectedContract?.cao_key || personnel.cao || null,
       cao_resolution_source: caoResolution.source,
       cao_resolution_candidate_configuration_ids: caoResolution.candidate_configuration_ids || [],
+      cao_resolution_candidate_company_cao_assignment_ids: caoResolution.candidate_company_cao_assignment_ids || [],
       cao_version_label: caoResolution.config?.version_label || caoResolution.config?.name || null,
       cao_valid_from: caoResolution.config?.valid_from || null,
       cao_valid_until: caoResolution.config?.valid_until || null,
