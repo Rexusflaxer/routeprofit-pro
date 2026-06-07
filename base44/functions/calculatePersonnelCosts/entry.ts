@@ -2117,9 +2117,49 @@ async function markCaoCorrectionsApplied(base44, { corrections, adjustments, pay
         `Toegepast in payrollrun ${payrollRun.id} (${responsePayload.pay_period_year || 'jaar onbekend'}-${responsePayload.pay_period_number || 'periode onbekend'}).`
       ].filter(Boolean).join('\n')
     });
+    await markAffectedPayrollRunCorrectionApplied(base44, {
+      correction,
+      correctionPayrollRunId: payrollRun.id
+    });
     appliedCorrectionIds.push(correction.id);
   }
   return appliedCorrectionIds;
+}
+
+async function markAffectedPayrollRunCorrectionApplied(base44, { correction, correctionPayrollRunId }) {
+  if (!correction?.affected_payroll_run_id || !correctionPayrollRunId) return null;
+  const affectedRun = await base44.asServiceRole.entities.PayrollCalculationRun
+    .get(correction.affected_payroll_run_id)
+    .catch(() => null);
+  if (!affectedRun) return null;
+
+  const existingReasonIds = Array.isArray(affectedRun.cao_recalculation_reason_ids)
+    ? affectedRun.cao_recalculation_reason_ids
+    : [];
+  const remainingReasonIds = existingReasonIds.filter(id => id !== correction.cao_change_review_id);
+  const correctedByIds = [
+    ...new Set([
+      ...(Array.isArray(affectedRun.corrected_by_payroll_run_ids) ? affectedRun.corrected_by_payroll_run_ids : []),
+      correctionPayrollRunId
+    ])
+  ];
+  const finalizedStatuses = ['approved', 'exported', 'paid', 'corrected'];
+  const updates = {
+    corrected_by_payroll_run_ids: correctedByIds,
+    cao_correction_applied_at: new Date().toISOString(),
+    cao_recalculation_reason_ids: remainingReasonIds,
+    requires_cao_recalculation: remainingReasonIds.length > 0
+  };
+  if (remainingReasonIds.length === 0 && finalizedStatuses.includes(affectedRun.payroll_run_status || 'calculated')) {
+    updates.payroll_run_status = 'corrected';
+  }
+  await base44.asServiceRole.entities.PayrollCalculationRun.update(affectedRun.id, updates);
+  return {
+    affected_payroll_run_id: affectedRun.id,
+    corrected_by_payroll_run_ids: correctedByIds,
+    remaining_cao_recalculation_reason_ids: remainingReasonIds,
+    payroll_run_status: updates.payroll_run_status || affectedRun.payroll_run_status || null
+  };
 }
 
 Deno.serve(async (req) => {
@@ -3851,6 +3891,8 @@ Deno.serve(async (req) => {
         supersedes_payroll_run_ids: applyQueuedCaoCorrections
           ? caoCorrectionApplication.affected_payroll_run_ids
           : [],
+        corrected_by_payroll_run_ids: [],
+        cao_correction_applied_at: null,
         pay_period_year: responsePayload.pay_period_year,
         pay_period_number: responsePayload.pay_period_number,
         pay_period_start: responsePayload.pay_period_start,

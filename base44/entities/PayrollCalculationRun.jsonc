@@ -87,6 +87,20 @@
       },
       "description": "Eerdere payroll runs die door deze correctierun worden gecorrigeerd."
     },
+    "corrected_by_payroll_run_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Latere PayrollCalculationRun IDs die deze run corrigeren."
+    },
+    "cao_correction_applied_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datetime waarop de laatste CAO-correctie voor deze run als toegepast is gemarkeerd."
+    },
     "pay_period_year": {
       "type": "number"
     },
