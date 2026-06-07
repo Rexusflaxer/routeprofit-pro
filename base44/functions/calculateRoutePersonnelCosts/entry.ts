@@ -91,6 +91,17 @@ function collectRouteExternalCaoSignals(route = {}, serviceSources = {}) {
   return signals;
 }
 
+function collectRouteExplicitCaoKeys(route = {}, serviceSources = {}) {
+  const keys = [];
+  keys.push(route?.cao_key, route?.cao);
+  const objectById = serviceSources?.objectById || {};
+  for (const task of serviceSources?.tasks || []) {
+    const object = task?.object_id ? objectById[task.object_id] : null;
+    keys.push(task?.cao_key, task?.cao, object?.cao_key, object?.cao);
+  }
+  return uniqueNonEmpty(keys);
+}
+
 function buildExternalCaoScopeGate({ targetCaoKey, signals }) {
   const activeSignals = signals || [];
   const inferredKeys = [...new Set(activeSignals.map(signal => signal.cao_key).filter(Boolean))];
@@ -1620,14 +1631,54 @@ Deno.serve(async (req) => {
     const targetWeekday = weekday || route.weekdays?.[0] || 1;
     const shiftDate = getNextDateForWeekday(targetWeekday);
     const routeServiceSources = await loadRouteServiceSources(base44, route);
+    const routeServiceCaoKeys = collectRouteExplicitCaoKeys(route, routeServiceSources);
     const externalCaoSignals = collectRouteExternalCaoSignals(route, routeServiceSources);
     const inferredExternalCaoKeys = [...new Set(externalCaoSignals.map(signal => signal.cao_key).filter(Boolean))];
     const inferredExternalCaoKey = inferredExternalCaoKeys.length === 1 ? inferredExternalCaoKeys[0] : null;
+    const explicitRouteServiceCaoKey = routeServiceCaoKeys.length === 1 ? routeServiceCaoKeys[0] : null;
+
+    if (routeServiceCaoKeys.length > 1 || (body.cao_key && routeServiceCaoKeys.some(key => key !== body.cao_key))) {
+      return Response.json({
+        error: 'Routekosten geblokkeerd: route, taken of objecten bevatten meerdere of afwijkende cao_key waarden.',
+        calculation_warnings: [
+          'Splits de routekostencontrole per cao_key of geef een consistente cao_key mee op route, taken en objecten.'
+        ],
+        route_id,
+        shift_date: shiftDate,
+        weekday: targetWeekday,
+        requested_cao_key: body.cao_key || null,
+        route_service_cao_keys: routeServiceCaoKeys,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_mixed_route_service_cao_keys'
+      }, { status: 400 });
+    }
+
     const targetCaoKey = body.cao_key ||
-      route.cao_key ||
-      route.cao ||
+      explicitRouteServiceCaoKey ||
       inferredExternalCaoKey ||
-      CAO_PB_KEY;
+      null;
+
+    if (!targetCaoKey) {
+      return Response.json({
+        error: 'Routekosten geblokkeerd: cao_key ontbreekt op route, taken en objecten.',
+        calculation_warnings: [
+          'Routekosten mogen niet standaard naar CAO PB vallen. Leg de toepasselijke cao_key vast op route, taak of object voordat deze berekening payroll-final mag zijn.'
+        ],
+        route_id,
+        shift_date: shiftDate,
+        weekday: targetWeekday,
+        route_service_cao_keys: routeServiceCaoKeys,
+        external_cao_scope_gate: {
+          passed: false,
+          status: 'blocked_missing_cao_key',
+          signals: externalCaoSignals
+        },
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_missing_cao_key'
+      }, { status: 400 });
+    }
 
     const externalCaoScopeGate = buildExternalCaoScopeGate({
       targetCaoKey,
@@ -1644,6 +1695,7 @@ Deno.serve(async (req) => {
         weekday: targetWeekday,
         cao_key: targetCaoKey,
         route_cao_key: route.cao_key || route.cao || null,
+        route_service_cao_keys: routeServiceCaoKeys,
         external_cao_scope_gate: externalCaoScopeGate,
         manual_review_required: true,
         payroll_final_allowed: false,
@@ -1653,6 +1705,9 @@ Deno.serve(async (req) => {
 
     const syncResult = await lazySyncCao(base44, !!force_cao_sync, targetCaoKey);
     const syncWarnings = [];
+    if (!body.cao_key && explicitRouteServiceCaoKey) {
+      syncWarnings.push(`Routekosten cao_key ${targetCaoKey} is afgeleid uit route/taak/object-context; geen PB-default toegepast.`);
+    }
     if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
     if (syncResult?.reason === 'skipped_unsupported_cao_sync') syncWarnings.push('CAO Cloudflare lazy-sync overgeslagen: deze runtime ondersteunt alleen CAO Particuliere Beveiliging.');
     if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
