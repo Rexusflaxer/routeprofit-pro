@@ -67,6 +67,28 @@ function round2(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
+function firstNumber(...values) {
+  for (const value of values) {
+    const n = numberOrNull(value);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
+function firstObject(...values) {
+  return values.find(value => value && typeof value === 'object' && !Array.isArray(value)) || {};
+}
+
+function parameterSource(field, configuredValue, fallbackValue, fallbackSourceRuleIds) {
+  return {
+    field,
+    source: configuredValue !== null && configuredValue !== undefined ? 'cao_configuration' : 'cao_pb_runtime_default',
+    configured_value_present: configuredValue !== null && configuredValue !== undefined,
+    value: configuredValue !== null && configuredValue !== undefined ? configuredValue : fallbackValue,
+    fallback_source_rule_ids: fallbackSourceRuleIds
+  };
+}
+
 function asIsoDate(value) {
   if (!value) return null;
   return String(value).slice(0, 10);
@@ -284,37 +306,125 @@ function extraVacationDaysForServiceYears(years) {
   return Math.floor(serviceYears / 5);
 }
 
-function getVacationAccrualProfile(input) {
-  if (input?.cao_scope_profile === 'cash_value_logistics' || input?.works_cash_value_logistics === true) {
-    return {
-      profile: 'cash_value_logistics',
-      fulltimeAnnualHours: 180,
-      fulltimeAnnualDays: 25,
-      fulltimePerPeriodHours: 13.85,
-      fulltimePeriodHours: 144,
-      fulltimeWeeklyHours: 36,
-      vacationDayHours: 7.2,
-      ruleIds: ['CAO-PB-2024-R1601', 'CAO-PB-2024-R1602'],
-      extraVacationDaysPolicy: 'manual_review_article_100_deviates_from_article_59',
-      extraVacationDaysManualReviewRequired: true
-    };
-  }
+function resolveLeaveSicknessParameters(caoConfig) {
+  const leaveRules = caoConfig?.leave_rules || {};
+  const sicknessRules = caoConfig?.sickness_rules || {};
+  const cashValueRules = caoConfig?.cash_value_logistics_rules || {};
+  const standardVacation = firstObject(
+    leaveRules.standard_vacation,
+    leaveRules.article_59,
+    leaveRules.vacation_accrual,
+    leaveRules.vakantieopbouw
+  );
+  const callWorkerVacation = firstObject(
+    leaveRules.call_worker_vacation,
+    leaveRules.call_worker_vacation_payout,
+    leaveRules.oproepkracht_vakantie,
+    leaveRules.article_59_call_worker
+  );
+  const cashValueVacation = firstObject(
+    leaveRules.cash_value_vacation,
+    cashValueRules.vacation_accrual,
+    cashValueRules.article_100_vacation
+  );
+
+  const standardAnnualHours = firstNumber(standardVacation.fulltime_annual_hours, standardVacation.annual_hours, leaveRules.fulltime_annual_vacation_hours);
+  const standardAnnualDays = firstNumber(standardVacation.fulltime_annual_days, standardVacation.annual_days, leaveRules.fulltime_annual_vacation_days);
+  const standardPerPeriodHours = firstNumber(standardVacation.fulltime_per_period_hours, standardVacation.per_pay_period_hours, leaveRules.fulltime_vacation_hours_per_pay_period);
+  const standardFulltimePeriodHours = firstNumber(standardVacation.fulltime_period_hours, standardVacation.fulltime_hours_per_pay_period, leaveRules.fulltime_hours_per_pay_period);
+  const standardWeeklyHours = firstNumber(standardVacation.fulltime_weekly_hours, standardVacation.weekly_hours, leaveRules.fulltime_weekly_hours);
+  const standardVacationDayHours = firstNumber(standardVacation.vacation_day_hours, leaveRules.vacation_day_hours);
+  const callWorkerPayoutPercentage = firstNumber(callWorkerVacation.payout_percentage, callWorkerVacation.vacation_payout_percentage, leaveRules.call_worker_vacation_payout_percentage);
+  const callWorkerMaxHoursPerPeriod = firstNumber(
+    callWorkerVacation.max_hours_per_period,
+    callWorkerVacation.max_hours_per_pay_period,
+    callWorkerVacation.max_paid_hours_per_pay_period,
+    leaveRules.call_worker_vacation_max_hours_per_period
+  );
+
+  const cashValueAnnualHours = firstNumber(cashValueVacation.fulltime_annual_hours, cashValueVacation.annual_hours);
+  const cashValueAnnualDays = firstNumber(cashValueVacation.fulltime_annual_days, cashValueVacation.annual_days);
+  const cashValuePerPeriodHours = firstNumber(cashValueVacation.fulltime_per_period_hours, cashValueVacation.per_pay_period_hours);
+  const cashValueFulltimePeriodHours = firstNumber(cashValueVacation.fulltime_period_hours, cashValueVacation.fulltime_hours_per_pay_period, standardFulltimePeriodHours);
+  const cashValueWeeklyHours = firstNumber(cashValueVacation.fulltime_weekly_hours, cashValueVacation.weekly_hours, standardWeeklyHours);
+  const cashValueVacationDayHours = firstNumber(cashValueVacation.vacation_day_hours, standardVacationDayHours);
+
+  const waitingDaySeniorityPeriods = firstNumber(sicknessRules.waiting_day_seniority_periods, sicknessRules.waiting_day_threshold_pay_periods, sicknessRules.article_66_waiting_day_threshold_periods);
+  const shortSeniorityPercentage = firstNumber(sicknessRules.short_seniority_payment_percentage, sicknessRules.payment_percentage_under_waiting_day_threshold);
+  const callWorkerPercentage = firstNumber(sicknessRules.call_worker_payment_percentage, sicknessRules.call_agreement_payment_percentage);
+  const firstSixMonthsPercentage = firstNumber(sicknessRules.first_six_months_percentage, sicknessRules.first_6_months_percentage);
+  const secondSixMonthsPercentage = firstNumber(sicknessRules.second_six_months_percentage, sicknessRules.second_6_months_percentage);
+  const secondYearPercentage = firstNumber(sicknessRules.second_year_reintegration_percentage, sicknessRules.second_year_percentage);
+  const thirdFourthYearSupplementPercentage = firstNumber(sicknessRules.third_fourth_year_supplement_percentage, sicknessRules.wga_supplement_percentage);
+  const firstSixMonthsDays = firstNumber(sicknessRules.first_six_months_days, sicknessRules.first_6_months_days);
+  const secondSixMonthsDays = firstNumber(sicknessRules.second_six_months_days, sicknessRules.second_6_months_days);
+  const secondYearDays = firstNumber(sicknessRules.second_year_days);
+  const thirdFourthYearDays = firstNumber(sicknessRules.third_fourth_year_days);
+
   return {
-    profile: 'standard_article_59',
-    fulltimeAnnualHours: 172.8, // 24 dagen * 7,2 uur
-    fulltimeAnnualDays: 24,
-    fulltimePerPeriodHours: 13.3,
-    fulltimePeriodHours: 144,
-    fulltimeWeeklyHours: 36,
-    vacationDayHours: 7.2,
-    ruleIds: ['CAO-PB-2024-R0999'],
-    extraVacationDaysPolicy: 'article_59_lid_4',
-    extraVacationDaysManualReviewRequired: false
+    standard_vacation: {
+      profile: 'standard_article_59',
+      fulltimeAnnualHours: standardAnnualHours ?? 172.8,
+      fulltimeAnnualDays: standardAnnualDays ?? 24,
+      fulltimePerPeriodHours: standardPerPeriodHours ?? 13.3,
+      fulltimePeriodHours: standardFulltimePeriodHours ?? 144,
+      fulltimeWeeklyHours: standardWeeklyHours ?? 36,
+      vacationDayHours: standardVacationDayHours ?? 7.2,
+      ruleIds: standardVacation.source_rule_ids || ['CAO-PB-2024-R0999'],
+      extraVacationDaysPolicy: standardVacation.extra_vacation_days_policy || 'article_59_lid_4',
+      extraVacationDaysManualReviewRequired: standardVacation.extra_vacation_days_manual_review_required === true
+    },
+    cash_value_vacation: {
+      profile: 'cash_value_logistics',
+      fulltimeAnnualHours: cashValueAnnualHours ?? 180,
+      fulltimeAnnualDays: cashValueAnnualDays ?? 25,
+      fulltimePerPeriodHours: cashValuePerPeriodHours ?? 13.85,
+      fulltimePeriodHours: cashValueFulltimePeriodHours ?? 144,
+      fulltimeWeeklyHours: cashValueWeeklyHours ?? 36,
+      vacationDayHours: cashValueVacationDayHours ?? 7.2,
+      ruleIds: cashValueVacation.source_rule_ids || ['CAO-PB-2024-R1601', 'CAO-PB-2024-R1602'],
+      extraVacationDaysPolicy: cashValueVacation.extra_vacation_days_policy || 'manual_review_article_100_deviates_from_article_59',
+      extraVacationDaysManualReviewRequired: cashValueVacation.extra_vacation_days_manual_review_required !== false
+    },
+    call_worker_vacation_payout_percentage: callWorkerPayoutPercentage ?? 9.24,
+    call_worker_vacation_max_hours_per_period: callWorkerMaxHoursPerPeriod ?? 144,
+    sickness: {
+      waiting_day_seniority_periods: waitingDaySeniorityPeriods ?? 13,
+      short_seniority_payment_percentage: shortSeniorityPercentage ?? 70,
+      call_worker_payment_percentage: callWorkerPercentage ?? 70,
+      first_six_months_days: firstSixMonthsDays ?? 182,
+      second_six_months_days: secondSixMonthsDays ?? 183,
+      second_year_days: secondYearDays ?? 365,
+      third_fourth_year_days: thirdFourthYearDays ?? 730,
+      first_six_months_percentage: firstSixMonthsPercentage ?? 100,
+      second_six_months_percentage: secondSixMonthsPercentage ?? 90,
+      second_year_reintegration_percentage: secondYearPercentage ?? 85,
+      third_fourth_year_supplement_percentage: thirdFourthYearSupplementPercentage ?? 10
+    },
+    provenance: {
+      standard_vacation_annual_hours: parameterSource('leave_rules.standard_vacation.fulltime_annual_hours', standardAnnualHours, 172.8, ['CAO-PB-2024-R0999']),
+      standard_vacation_per_period_hours: parameterSource('leave_rules.standard_vacation.fulltime_per_period_hours', standardPerPeriodHours, 13.3, ['CAO-PB-2024-R0999']),
+      call_worker_vacation_payout_percentage: parameterSource('leave_rules.call_worker_vacation.payout_percentage', callWorkerPayoutPercentage, 9.24, ['CAO-PB-2024-R1016']),
+      call_worker_vacation_max_hours_per_period: parameterSource('leave_rules.call_worker_vacation.max_hours_per_period', callWorkerMaxHoursPerPeriod, 144, ['CAO-PB-2024-R1016']),
+      waiting_day_seniority_periods: parameterSource('sickness_rules.waiting_day_seniority_periods', waitingDaySeniorityPeriods, 13, ['CAO-PB-2024-R1149']),
+      short_seniority_payment_percentage: parameterSource('sickness_rules.short_seniority_payment_percentage', shortSeniorityPercentage, 70, ['CAO-PB-2024-R1148']),
+      call_worker_payment_percentage: parameterSource('sickness_rules.call_worker_payment_percentage', callWorkerPercentage, 70, ['CAO-PB-2024-R1172']),
+      sickness_first_six_months_percentage: parameterSource('sickness_rules.first_six_months_percentage', firstSixMonthsPercentage, 100, ['CAO-PB-2024-R1159']),
+      sickness_second_six_months_percentage: parameterSource('sickness_rules.second_six_months_percentage', secondSixMonthsPercentage, 90, ['CAO-PB-2024-R1160']),
+      sickness_second_year_reintegration_percentage: parameterSource('sickness_rules.second_year_reintegration_percentage', secondYearPercentage, 85, ['CAO-PB-2024-R1161'])
+    }
   };
 }
 
-function calculateVacationAccrual(input) {
-  const profile = getVacationAccrualProfile(input);
+function getVacationAccrualProfile(input, parameters = resolveLeaveSicknessParameters(null)) {
+  if (input?.cao_scope_profile === 'cash_value_logistics' || input?.works_cash_value_logistics === true) {
+    return parameters.cash_value_vacation;
+  }
+  return parameters.standard_vacation;
+}
+
+function calculateVacationAccrual(input, parameters = resolveLeaveSicknessParameters(null)) {
+  const profile = getVacationAccrualProfile(input, parameters);
   const fulltimeAnnualHours = profile.fulltimeAnnualHours;
   const fulltimeAnnualDays = profile.fulltimeAnnualDays;
   const fulltimePerPeriodHours = profile.fulltimePerPeriodHours;
@@ -330,7 +440,8 @@ function calculateVacationAccrual(input) {
       numberOrNull(input.period_hours) ??
       numberOrNull(input.paid_hours_per_pay_period) ??
       0;
-    const payoutBaseHours = Math.min(workedHours, fulltimePeriodHours);
+    const maxPayoutHours = parameters.call_worker_vacation_max_hours_per_period ?? fulltimePeriodHours;
+    const payoutBaseHours = Math.min(workedHours, maxPayoutHours);
     const hourlyRate = numberOrNull(input.base_hourly_rate) ?? numberOrNull(input.hourly_rate);
     const explicitBaseAmount = numberOrNull(input.vacation_payout_base_amount) ??
       numberOrNull(input.period_gross_wage) ??
@@ -346,7 +457,7 @@ function calculateVacationAccrual(input) {
       missingEvidence.push({
         field: 'vacation_payout_base_amount/base_hourly_rate',
         rule_id: 'CAO-PB-2024-R1016',
-        message: 'Voor oproepkrachten moet de 9,24% vakantietoeslag over het loon van maximaal 144 uur per loonperiode worden berekend.'
+        message: `Voor oproepkrachten moet de ${parameters.call_worker_vacation_payout_percentage}% vakantietoeslag over het loon van maximaal ${maxPayoutHours} uur per loonperiode worden berekend.`
       });
     }
 
@@ -354,19 +465,27 @@ function calculateVacationAccrual(input) {
       rule_ids: ['CAO-PB-2024-R1014', 'CAO-PB-2024-R1015', 'CAO-PB-2024-R1016', 'CAO-PB-2024-R1017'],
       vacation_accrual_type: 'call_worker_paid_in_money',
       vacation_days_takeable: false,
-      vacation_payout_percentage: 9.24,
+      vacation_payout_percentage: parameters.call_worker_vacation_payout_percentage,
       worked_hours: workedHours,
       payout_base_hours: payoutBaseHours,
-      capped_at_144_hours_per_pay_period: workedHours > fulltimePeriodHours,
+      max_payout_hours_per_pay_period: maxPayoutHours,
+      capped_at_max_hours_per_pay_period: workedHours > maxPayoutHours,
+      capped_at_144_hours_per_pay_period: workedHours > 144,
       payout_base_amount: payoutBaseAmount !== null ? round2(payoutBaseAmount) : null,
-      vacation_payout_amount: payoutBaseAmount !== null ? round2(payoutBaseAmount * 0.0924) : null,
+      vacation_payout_amount: payoutBaseAmount !== null
+        ? round2(payoutBaseAmount * (parameters.call_worker_vacation_payout_percentage / 100))
+        : null,
       vacation_hours_accrued_per_period: 0,
       vacation_hours_annual: 0,
+      parameter_provenance: {
+        vacation_payout_percentage: parameters.provenance.call_worker_vacation_payout_percentage,
+        max_payout_hours_per_pay_period: parameters.provenance.call_worker_vacation_max_hours_per_period
+      },
       manual_review_required: manualReviewRequired,
       payroll_final_allowed: !manualReviewRequired,
       missing_evidence: missingEvidence,
       warnings,
-      note: 'Oproepkracht: geen opneembare vakantiedagen; 9,24% uitbetaling per loonperiode over loon van maximaal 144 uur.'
+      note: `Oproepkracht: geen opneembare vakantiedagen; ${parameters.call_worker_vacation_payout_percentage}% uitbetaling per loonperiode over loon van maximaal ${maxPayoutHours} uur.`
     };
   }
 
@@ -442,7 +561,7 @@ function waitingDayExceptionApplies(input) {
     booleanOrNull(input.disabled_employee_status) === true;
 }
 
-function calculateSicknessPayment(input) {
+function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParameters(null)) {
   const {
     sickness_start_date,
     sickness_end_date,
@@ -534,9 +653,12 @@ function calculateSicknessPayment(input) {
         sickness_days_total: sicknessDays,
         call_agreement_type: callAgreementType,
         sickness_started_during_call_period: true,
-        payment_percentage: 70,
-        total_sickness_payment: round2(callPeriodAmount * 0.7),
+        payment_percentage: parameters.sickness.call_worker_payment_percentage,
+        total_sickness_payment: round2(callPeriodAmount * (parameters.sickness.call_worker_payment_percentage / 100)),
         minimum_wage_floor_required: true,
+        parameter_provenance: {
+          call_worker_payment_percentage: parameters.provenance.call_worker_payment_percentage
+        },
         manual_review_required: manualReviewRequired,
         payroll_final_allowed: !manualReviewRequired,
         missing_evidence: missingEvidence,
@@ -569,9 +691,12 @@ function calculateSicknessPayment(input) {
         sickness_days_total: sicknessDays,
         call_agreement_type: callAgreementType,
         guarantee_hours_basis: guaranteeHours,
-        payment_percentage: 70,
-        total_sickness_payment: round2(guaranteeBaseAmount * 0.7),
+        payment_percentage: parameters.sickness.call_worker_payment_percentage,
+        total_sickness_payment: round2(guaranteeBaseAmount * (parameters.sickness.call_worker_payment_percentage / 100)),
         minimum_wage_floor_required: true,
+        parameter_provenance: {
+          call_worker_payment_percentage: parameters.provenance.call_worker_payment_percentage
+        },
         manual_review_required: manualReviewRequired,
         payroll_final_allowed: !manualReviewRequired,
         missing_evidence: missingEvidence,
@@ -588,7 +713,7 @@ function calculateSicknessPayment(input) {
     });
   }
 
-  if (seniority < 13) {
+  if (seniority < parameters.sickness.waiting_day_seniority_periods) {
     ruleIds.push('CAO-PB-2024-R1148', 'CAO-PB-2024-R1149');
     const hasWaitingDay = !waitingDayExceptionApplies(input);
     if (!hasWaitingDay) ruleIds.push('CAO-PB-2024-R1150', 'CAO-PB-2024-R1151', 'CAO-PB-2024-R1152', 'CAO-PB-2024-R1153', 'CAO-PB-2024-R1154');
@@ -600,10 +725,15 @@ function calculateSicknessPayment(input) {
       waiting_day_unpaid: hasWaitingDay,
       industry_seniority_periods: seniority,
       paid_days_70_percent: paidDays,
-      payment_percentage: 70,
-      payment_70_percent: round2(paidDays * dailySalary * 0.7),
-      total_sickness_payment: round2(paidDays * dailySalary * 0.7),
+      payment_percentage: parameters.sickness.short_seniority_payment_percentage,
+      payment_amount: round2(paidDays * dailySalary * (parameters.sickness.short_seniority_payment_percentage / 100)),
+      payment_70_percent: round2(paidDays * dailySalary * (parameters.sickness.short_seniority_payment_percentage / 100)),
+      total_sickness_payment: round2(paidDays * dailySalary * (parameters.sickness.short_seniority_payment_percentage / 100)),
       minimum_wage_floor_required: true,
+      parameter_provenance: {
+        waiting_day_seniority_periods: parameters.provenance.waiting_day_seniority_periods,
+        short_seniority_payment_percentage: parameters.provenance.short_seniority_payment_percentage
+      },
       manual_review_required: manualReviewRequired,
       payroll_final_allowed: !manualReviewRequired,
       missing_evidence: missingEvidence,
@@ -615,9 +745,13 @@ function calculateSicknessPayment(input) {
   }
 
   ruleIds.push('CAO-PB-2024-R1157', 'CAO-PB-2024-R1158', 'CAO-PB-2024-R1159', 'CAO-PB-2024-R1160', 'CAO-PB-2024-R1161');
-  const firstSixMonthDays = Math.min(sicknessDays, 182);
-  const secondSixMonthDays = Math.min(Math.max(0, sicknessDays - 182), 183);
-  const secondYearDays = Math.min(Math.max(0, sicknessDays - 365), 365);
+  const firstSixMonthDays = Math.min(sicknessDays, parameters.sickness.first_six_months_days);
+  const secondSixMonthDays = Math.min(
+    Math.max(0, sicknessDays - parameters.sickness.first_six_months_days),
+    parameters.sickness.second_six_months_days
+  );
+  const secondYearStartDay = parameters.sickness.first_six_months_days + parameters.sickness.second_six_months_days;
+  const secondYearDays = Math.min(Math.max(0, sicknessDays - secondYearStartDay), parameters.sickness.second_year_days);
   const reintegrationConfirmed = booleanOrNull(input.active_reintegration_confirmed);
   if (secondYearDays > 0 && reintegrationConfirmed !== true) {
     manualReviewRequired = true;
@@ -630,7 +764,8 @@ function calculateSicknessPayment(input) {
   const thirdFourthYearSupplementEligible = booleanOrNull(input.wga_35_80) === true &&
     booleanOrNull(input.medical_limitations_confirmed) === true &&
     booleanOrNull(input.active_reintegration_confirmed) === true;
-  const thirdFourthYearDays = Math.min(Math.max(0, sicknessDays - 730), 730);
+  const thirdFourthYearStartDay = secondYearStartDay + parameters.sickness.second_year_days;
+  const thirdFourthYearDays = Math.min(Math.max(0, sicknessDays - thirdFourthYearStartDay), parameters.sickness.third_fourth_year_days);
   if (thirdFourthYearDays > 0) {
     ruleIds.push('CAO-PB-2024-R1162');
     if (!thirdFourthYearSupplementEligible) {
@@ -643,11 +778,13 @@ function calculateSicknessPayment(input) {
     }
   }
 
-  const paymentFirstSixMonths = firstSixMonthDays * dailySalary;
-  const paymentSecondSixMonths = secondSixMonthDays * dailySalary * 0.9;
-  const paymentSecondYear = reintegrationConfirmed === true ? secondYearDays * dailySalary * 0.85 : 0;
+  const paymentFirstSixMonths = firstSixMonthDays * dailySalary * (parameters.sickness.first_six_months_percentage / 100);
+  const paymentSecondSixMonths = secondSixMonthDays * dailySalary * (parameters.sickness.second_six_months_percentage / 100);
+  const paymentSecondYear = reintegrationConfirmed === true
+    ? secondYearDays * dailySalary * (parameters.sickness.second_year_reintegration_percentage / 100)
+    : 0;
   const supplementThirdFourthYear = thirdFourthYearSupplementEligible
-    ? (numberOrNull(input.wga_related_benefit_per_day) ?? dailySalary) * thirdFourthYearDays * 0.1
+    ? (numberOrNull(input.wga_related_benefit_per_day) ?? dailySalary) * thirdFourthYearDays * (parameters.sickness.third_fourth_year_supplement_percentage / 100)
     : 0;
 
   return {
@@ -660,12 +797,21 @@ function calculateSicknessPayment(input) {
     days_second_six_months_90_percent: secondSixMonthDays,
     days_second_year_85_percent: secondYearDays,
     days_third_fourth_year_supplement: thirdFourthYearDays,
+    first_six_months_percentage: parameters.sickness.first_six_months_percentage,
+    second_six_months_percentage: parameters.sickness.second_six_months_percentage,
+    second_year_reintegration_percentage: parameters.sickness.second_year_reintegration_percentage,
+    third_fourth_year_supplement_percentage: parameters.sickness.third_fourth_year_supplement_percentage,
     payment_first_six_months: round2(paymentFirstSixMonths),
     payment_second_six_months: round2(paymentSecondSixMonths),
     payment_second_year: round2(paymentSecondYear),
     supplement_third_fourth_year: round2(supplementThirdFourthYear),
     total_sickness_payment: round2(paymentFirstSixMonths + paymentSecondSixMonths + paymentSecondYear + supplementThirdFourthYear),
     ort_included: numberOrNull(avg_ort_per_period) !== null,
+    parameter_provenance: {
+      first_six_months_percentage: parameters.provenance.sickness_first_six_months_percentage,
+      second_six_months_percentage: parameters.provenance.sickness_second_six_months_percentage,
+      second_year_reintegration_percentage: parameters.provenance.sickness_second_year_reintegration_percentage
+    },
     manual_review_required: manualReviewRequired,
     payroll_final_allowed: !manualReviewRequired,
     missing_evidence: missingEvidence,
@@ -791,6 +937,7 @@ Deno.serve(async (req) => {
     }
 
     const caoConfig = caoConfigResolution.config;
+    const leaveSicknessParameters = resolveLeaveSicknessParameters(caoConfig);
     const caoPayrollReadiness = getCaoPayrollReadiness(caoConfig);
     const caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
     if (!caoPayrollReadiness.ready) {
@@ -881,7 +1028,7 @@ Deno.serve(async (req) => {
     };
 
     if (action === 'calculate_vacation_accrual') {
-      const result = calculateVacationAccrual(vacationInput);
+      const result = calculateVacationAccrual(vacationInput, leaveSicknessParameters);
       const manualReviewRequired = isUnknownOrMixed || result.manual_review_required === true;
       return Response.json({
         success: true,
@@ -893,6 +1040,7 @@ Deno.serve(async (req) => {
         cao_valid_until: caoConfig.valid_until || null,
         cao_payroll_readiness: caoPayrollReadiness,
         cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_leave_sickness_parameters: leaveSicknessParameters,
         contract_id: contract_id || contract?.id || null,
         contract_cao_resolution: {
           ...contractCaoResolution,
@@ -910,7 +1058,7 @@ Deno.serve(async (req) => {
     }
 
     if (action === 'calculate_sickness_payment') {
-      const result = calculateSicknessPayment(body);
+      const result = calculateSicknessPayment(body, leaveSicknessParameters);
       if (result.error) return Response.json({ error: result.error }, { status: 400 });
       const manualReviewRequired = isUnknownOrMixed || result.manual_review_required === true;
       return Response.json({
@@ -923,6 +1071,7 @@ Deno.serve(async (req) => {
         cao_valid_until: caoConfig.valid_until || null,
         cao_payroll_readiness: caoPayrollReadiness,
         cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_leave_sickness_parameters: leaveSicknessParameters,
         contract_id: contract_id || contract?.id || null,
         contract_cao_resolution: {
           ...contractCaoResolution,
@@ -939,8 +1088,8 @@ Deno.serve(async (req) => {
     }
 
     // Default: bereken beide
-    const vacation = calculateVacationAccrual(vacationInput);
-    const sickness = body.sickness_start_date ? calculateSicknessPayment(body) : null;
+    const vacation = calculateVacationAccrual(vacationInput, leaveSicknessParameters);
+    const sickness = body.sickness_start_date ? calculateSicknessPayment(body, leaveSicknessParameters) : null;
     const manualReviewRequired = isUnknownOrMixed ||
       vacation.manual_review_required === true ||
       sickness?.manual_review_required === true;
@@ -955,6 +1104,7 @@ Deno.serve(async (req) => {
       cao_valid_until: caoConfig.valid_until || null,
       cao_payroll_readiness: caoPayrollReadiness,
       cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+      cao_leave_sickness_parameters: leaveSicknessParameters,
       contract_id: contract_id || contract?.id || null,
       contract_cao_resolution: {
         ...contractCaoResolution,

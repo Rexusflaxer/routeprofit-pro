@@ -60,6 +60,111 @@ const REIMBURSEMENT_RATES = {
   accommodation_per_night: null,      // manual_review_required
 };
 
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function firstNumber(...values) {
+  for (const value of values) {
+    const n = numberOrNull(value);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
+function firstObject(...values) {
+  return values.find(value => value && typeof value === 'object' && !Array.isArray(value)) || {};
+}
+
+function parameterSource(field, configuredValue, fallbackValue, fallbackSourceRuleIds) {
+  return {
+    field,
+    source: configuredValue !== null && configuredValue !== undefined ? 'cao_configuration' : 'cao_pb_runtime_default',
+    configured_value_present: configuredValue !== null && configuredValue !== undefined,
+    value: configuredValue !== null && configuredValue !== undefined ? configuredValue : fallbackValue,
+    fallback_source_rule_ids: fallbackSourceRuleIds
+  };
+}
+
+function resolveReimbursementParameters(caoConfig) {
+  const allowances = caoConfig?.allowances || {};
+  const cashValueRules = caoConfig?.cash_value_logistics_rules || {};
+  const travel = firstObject(
+    allowances.travel_reimbursement,
+    allowances.travel,
+    allowances.reiskosten,
+    allowances.article_47,
+    caoConfig?.travel_reimbursement_rules
+  );
+  const meal = firstObject(
+    allowances.meal_allowance,
+    allowances.meal,
+    allowances.maaltijdvergoeding,
+    allowances.article_48
+  );
+  const valueServices = firstObject(
+    cashValueRules.value_services_early_shift_allowance,
+    cashValueRules.early_shift_allowance,
+    allowances.value_services_early_shift,
+    allowances.cash_value_early_shift,
+    allowances.article_103
+  );
+
+  const configuredTravelRate = firstNumber(
+    travel.rate_per_km,
+    travel.travel_cost_per_km,
+    travel.amount_per_km,
+    allowances.travel_cost_per_km
+  );
+  const configuredTravelMinKm = firstNumber(
+    travel.min_km,
+    travel.minimum_one_way_km,
+    travel.travel_min_km,
+    allowances.travel_min_km
+  );
+  const configuredMealMax = firstNumber(
+    meal.max_amount,
+    meal.meal_allowance_max,
+    meal.amount,
+    allowances.meal_allowance_max
+  );
+  const configuredMealMinHours = firstNumber(
+    meal.minimum_shift_hours,
+    meal.min_hours_worked,
+    meal.eligible_from_hours,
+    allowances.meal_allowance_min_hours
+  );
+  const configuredEarlyShiftAmount = firstNumber(
+    valueServices.amount,
+    valueServices.rate_per_shift,
+    valueServices.value_services_early_shift,
+    allowances.value_services_early_shift
+  );
+
+  return {
+    travel_cost_per_km: configuredTravelRate ?? REIMBURSEMENT_RATES.travel_cost_per_km,
+    travel_min_km: configuredTravelMinKm ?? REIMBURSEMENT_RATES.travel_min_km,
+    meal_allowance_max: configuredMealMax ?? REIMBURSEMENT_RATES.meal_allowance_max,
+    meal_allowance_min_hours: configuredMealMinHours ?? 10,
+    value_services_early_shift: configuredEarlyShiftAmount ?? REIMBURSEMENT_RATES.value_services_early_shift,
+    value_services_early_shift_amount: configuredEarlyShiftAmount ?? REIMBURSEMENT_RATES.value_services_early_shift,
+    source_rule_ids: {
+      travel: travel.source_rule_ids || ['CAO-PB-2024-R0855'],
+      meal: meal.source_rule_ids || ['CAO-PB-2024-R0878'],
+      value_services_early_shift: valueServices.source_rule_ids || ['CAO-PB-2024-R1609']
+    },
+    provenance: {
+      travel_cost_per_km: parameterSource('allowances.travel.rate_per_km', configuredTravelRate, REIMBURSEMENT_RATES.travel_cost_per_km, ['CAO-PB-2024-R0855']),
+      travel_min_km: parameterSource('allowances.travel.min_km', configuredTravelMinKm, REIMBURSEMENT_RATES.travel_min_km, ['CAO-PB-2024-R0855']),
+      meal_allowance_max: parameterSource('allowances.meal.max_amount', configuredMealMax, REIMBURSEMENT_RATES.meal_allowance_max, ['CAO-PB-2024-R0878']),
+      meal_allowance_min_hours: parameterSource('allowances.meal.minimum_shift_hours', configuredMealMinHours, 10, ['CAO-PB-2024-R0878']),
+      value_services_early_shift: parameterSource('cash_value_logistics_rules.value_services_early_shift_allowance.amount', configuredEarlyShiftAmount, REIMBURSEMENT_RATES.value_services_early_shift, ['CAO-PB-2024-R1609'])
+    }
+  };
+}
+
 function isoDate(value) {
   if (!value) return null;
   return String(value).slice(0, 10);
@@ -246,59 +351,81 @@ function getCaoPayrollReadiness(caoConfig) {
   };
 }
 
-function calculateTravelCost(km_one_way, km_driven = null) {
+function calculateTravelCost(km_one_way, km_driven = null, parameters = resolveReimbursementParameters(null)) {
   // R0855: eigen vervoer v.a. 9 km, EUR 0,23/km over alle kilometers
-  if (km_one_way < REIMBURSEMENT_RATES.travel_min_km) {
+  if (km_one_way < parameters.travel_min_km) {
     return {
-      rule_id: 'CAO-PB-2024-R0855',
+      rule_id: parameters.source_rule_ids.travel[0] || 'CAO-PB-2024-R0855',
+      source_rule_ids: parameters.source_rule_ids.travel,
       eligible: false,
-      reason: `Afstand ${km_one_way} km is minder dan ${REIMBURSEMENT_RATES.travel_min_km} km; geen reiskosten.`,
+      reason: `Afstand ${km_one_way} km is minder dan ${parameters.travel_min_km} km; geen reiskosten.`,
       amount: 0,
-      km_used: km_one_way
+      km_used: km_one_way,
+      parameter_provenance: {
+        travel_min_km: parameters.provenance.travel_min_km
+      }
     };
   }
 
   const km = km_driven !== null ? km_driven : km_one_way * 2; // heen en terug
-  const amount = km * REIMBURSEMENT_RATES.travel_cost_per_km;
+  const amount = km * parameters.travel_cost_per_km;
 
   return {
-    rule_id: 'CAO-PB-2024-R0855',
+    rule_id: parameters.source_rule_ids.travel[0] || 'CAO-PB-2024-R0855',
+    source_rule_ids: parameters.source_rule_ids.travel,
     eligible: true,
     km_one_way,
     km_total: km,
-    rate_per_km: REIMBURSEMENT_RATES.travel_cost_per_km,
+    rate_per_km: parameters.travel_cost_per_km,
     amount: Math.round(amount * 100) / 100,
     tax_treatment: 'netto',
-    note: 'EUR 0,23/km netto over alle gereden kilometers (geen drempel)'
+    parameter_provenance: {
+      travel_cost_per_km: parameters.provenance.travel_cost_per_km,
+      travel_min_km: parameters.provenance.travel_min_km
+    },
+    note: `EUR ${parameters.travel_cost_per_km}/km netto over alle gereden kilometers bij minimaal ${parameters.travel_min_km} km enkele reis.`
   };
 }
 
-function calculateMealAllowance(hours_worked, start_time = null) {
+function calculateMealAllowance(hours_worked, start_time = null, parameters = resolveReimbursementParameters(null)) {
   // R0878: maaltijdvergoeding bij diensten van bepaalde duur
   // Exacte drempel: manual_review_required conform CAO art. 48
-  const max = REIMBURSEMENT_RATES.meal_allowance_max;
+  const max = parameters.meal_allowance_max;
+  const minimumHours = parameters.meal_allowance_min_hours;
 
-  if (hours_worked >= 10) {
+  if (hours_worked >= minimumHours) {
     return {
-      rule_id: 'CAO-PB-2024-R0878',
+      rule_id: parameters.source_rule_ids.meal[0] || 'CAO-PB-2024-R0878',
+      source_rule_ids: parameters.source_rule_ids.meal,
       eligible: true,
       amount: max,
       max_amount: max,
-      note: 'Maaltijdvergoeding max EUR 11,91 bij dienst >= 10 uur'
+      minimum_shift_hours: minimumHours,
+      parameter_provenance: {
+        meal_allowance_max: parameters.provenance.meal_allowance_max,
+        meal_allowance_min_hours: parameters.provenance.meal_allowance_min_hours
+      },
+      note: `Maaltijdvergoeding max EUR ${max} bij dienst >= ${minimumHours} uur.`
     };
   }
 
   return {
-    rule_id: 'CAO-PB-2024-R0878',
+    rule_id: parameters.source_rule_ids.meal[0] || 'CAO-PB-2024-R0878',
+    source_rule_ids: parameters.source_rule_ids.meal,
     eligible: false,
     amount: 0,
     max_amount: max,
+    minimum_shift_hours: minimumHours,
     manual_review_required: true,
+    parameter_provenance: {
+      meal_allowance_max: parameters.provenance.meal_allowance_max,
+      meal_allowance_min_hours: parameters.provenance.meal_allowance_min_hours
+    },
     note: 'Controleer CAO art. 48 voor exacte toepassingsdrempel maaltijdvergoeding.'
   };
 }
 
-function calculateValueServicesEarlyShift(shifts) {
+function calculateValueServicesEarlyShift(shifts, parameters = resolveReimbursementParameters(null)) {
   // R1609: value services vroege dienst tussen 02:00 en 04:00 -> EUR 7,50 bruto per dienst
   const eligible = [];
 
@@ -306,20 +433,29 @@ function calculateValueServicesEarlyShift(shifts) {
     const startHour = parseInt((shift.start_time || '00:00').split(':')[0], 10);
     if (startHour >= 2 && startHour < 4) {
       eligible.push({
-        rule_id: 'CAO-PB-2024-R1609',
+        rule_id: parameters.source_rule_ids.value_services_early_shift[0] || 'CAO-PB-2024-R1609',
+        source_rule_ids: parameters.source_rule_ids.value_services_early_shift,
         date: shift.date,
         start_time: shift.start_time,
-        amount: REIMBURSEMENT_RATES.value_services_early_shift,
+        amount: parameters.value_services_early_shift,
         tax_treatment: 'bruto',
-        note: 'Vroege dienst 02:00-04:00: EUR 7,50 bruto per dienst (Value Services)'
+        parameter_provenance: {
+          value_services_early_shift: parameters.provenance.value_services_early_shift
+        },
+        note: `Vroege dienst 02:00-04:00: EUR ${parameters.value_services_early_shift} bruto per dienst (Value Services).`
       });
     }
   }
 
   return {
-    rule_id: 'CAO-PB-2024-R1609',
+    rule_id: parameters.source_rule_ids.value_services_early_shift[0] || 'CAO-PB-2024-R1609',
+    source_rule_ids: parameters.source_rule_ids.value_services_early_shift,
     eligible_shifts: eligible.length,
-    total_amount: eligible.length * REIMBURSEMENT_RATES.value_services_early_shift,
+    rate_per_shift: parameters.value_services_early_shift,
+    total_amount: Math.round(eligible.length * parameters.value_services_early_shift * 100) / 100,
+    parameter_provenance: {
+      value_services_early_shift: parameters.provenance.value_services_early_shift
+    },
     details: eligible
   };
 }
@@ -441,6 +577,7 @@ Deno.serve(async (req) => {
     }
 
     const caoConfig = caoConfigResolution.config;
+    const reimbursementParameters = resolveReimbursementParameters(caoConfig);
     const caoPayrollReadiness = getCaoPayrollReadiness(caoConfig);
     const caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
     if (!caoPayrollReadiness.ready) {
@@ -556,19 +693,19 @@ Deno.serve(async (req) => {
 
     if (!action || action === 'travel_cost') {
       if (km_one_way !== undefined) {
-        result.travel_cost = calculateTravelCost(km_one_way, km_driven);
+        result.travel_cost = calculateTravelCost(km_one_way, km_driven, reimbursementParameters);
       }
     }
 
     if (!action || action === 'meal_allowance') {
       if (hours_worked !== undefined) {
-        result.meal_allowance = calculateMealAllowance(hours_worked, start_time);
+        result.meal_allowance = calculateMealAllowance(hours_worked, start_time, reimbursementParameters);
       }
     }
 
     if (!action || action === 'value_services') {
       if (Array.isArray(shifts)) {
-        result.value_services = calculateValueServicesEarlyShift(shifts);
+        result.value_services = calculateValueServicesEarlyShift(shifts, reimbursementParameters);
       }
     }
 
@@ -592,6 +729,7 @@ Deno.serve(async (req) => {
       cao_valid_until: caoConfig.valid_until || null,
       cao_payroll_readiness: caoPayrollReadiness,
       cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+      cao_reimbursement_parameters: reimbursementParameters,
       contract_id: contract_id || contract?.id || null,
       contract_cao_resolution: {
         ...contractCaoResolution,

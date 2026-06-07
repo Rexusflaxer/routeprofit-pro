@@ -400,9 +400,122 @@ function numberOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
-function calculateCallWorkerVacationPayoutArticle59({ baseWageAmount, minimumServiceAmount, baseHourlyRate, paidBaseHours }) {
-  const maxHoursPerPayPeriod = 144;
-  const percentage = 9.24;
+function firstNumber(...values) {
+  for (const value of values) {
+    const n = numberOrNull(value);
+    if (n !== null) return n;
+  }
+  return null;
+}
+
+function firstObject(...values) {
+  return values.find(value => value && typeof value === 'object' && !Array.isArray(value)) || {};
+}
+
+function parameterSource(field, configuredValue, fallbackValue, fallbackSourceRuleIds) {
+  return {
+    field,
+    source: configuredValue !== null && configuredValue !== undefined ? 'cao_configuration' : 'cao_pb_runtime_default',
+    configured_value_present: configuredValue !== null && configuredValue !== undefined,
+    value: configuredValue !== null && configuredValue !== undefined ? configuredValue : fallbackValue,
+    fallback_source_rule_ids: fallbackSourceRuleIds
+  };
+}
+
+function resolvePayrollCaoParameters(caoConfig) {
+  const leaveRules = caoConfig?.leave_rules || {};
+  const allowances = caoConfig?.allowances || {};
+  const cashValueRules = caoConfig?.cash_value_logistics_rules || {};
+  const standardVacation = firstObject(
+    leaveRules.standard_vacation,
+    leaveRules.article_59,
+    leaveRules.vacation_accrual,
+    leaveRules.vakantieopbouw
+  );
+  const callWorkerVacation = firstObject(
+    leaveRules.call_worker_vacation,
+    leaveRules.call_worker_vacation_payout,
+    leaveRules.oproepkracht_vakantie,
+    leaveRules.article_59_call_worker
+  );
+  const cashValueVacation = firstObject(
+    leaveRules.cash_value_vacation,
+    cashValueRules.vacation_accrual,
+    cashValueRules.article_100_vacation
+  );
+  const valueServices = firstObject(
+    cashValueRules.value_services_early_shift_allowance,
+    cashValueRules.early_shift_allowance,
+    allowances.value_services_early_shift,
+    allowances.cash_value_early_shift,
+    allowances.article_103
+  );
+
+  const standardAnnualHours = firstNumber(standardVacation.fulltime_annual_hours, standardVacation.annual_hours, leaveRules.fulltime_annual_vacation_hours);
+  const standardAnnualDays = firstNumber(standardVacation.fulltime_annual_days, standardVacation.annual_days, leaveRules.fulltime_annual_vacation_days);
+  const standardPerPeriodHours = firstNumber(standardVacation.fulltime_per_period_hours, standardVacation.per_pay_period_hours, leaveRules.fulltime_vacation_hours_per_pay_period);
+  const standardFulltimePeriodHours = firstNumber(standardVacation.fulltime_period_hours, standardVacation.fulltime_hours_per_pay_period, leaveRules.fulltime_hours_per_pay_period);
+  const standardVacationDayHours = firstNumber(standardVacation.vacation_day_hours, leaveRules.vacation_day_hours);
+  const callWorkerPayoutPercentage = firstNumber(callWorkerVacation.payout_percentage, callWorkerVacation.vacation_payout_percentage, leaveRules.call_worker_vacation_payout_percentage);
+  const callWorkerMaxHoursPerPeriod = firstNumber(
+    callWorkerVacation.max_hours_per_period,
+    callWorkerVacation.max_hours_per_pay_period,
+    callWorkerVacation.max_paid_hours_per_pay_period,
+    leaveRules.call_worker_vacation_max_hours_per_period
+  );
+
+  const cashValueAnnualHours = firstNumber(cashValueVacation.fulltime_annual_hours, cashValueVacation.annual_hours);
+  const cashValueAnnualDays = firstNumber(cashValueVacation.fulltime_annual_days, cashValueVacation.annual_days);
+  const cashValuePerPeriodHours = firstNumber(cashValueVacation.fulltime_per_period_hours, cashValueVacation.per_pay_period_hours);
+  const cashValueFulltimePeriodHours = firstNumber(cashValueVacation.fulltime_period_hours, cashValueVacation.fulltime_hours_per_pay_period, standardFulltimePeriodHours);
+  const cashValueVacationDayHours = firstNumber(cashValueVacation.vacation_day_hours, standardVacationDayHours);
+  const earlyShiftAmount = firstNumber(valueServices.amount, valueServices.rate_per_shift, valueServices.value_services_early_shift);
+
+  return {
+    standard_vacation: {
+      profile: 'standard_article_59',
+      fulltimeAnnualHours: standardAnnualHours ?? 172.8,
+      fulltimeAnnualDays: standardAnnualDays ?? 24,
+      fulltimeVacationHoursPerPeriod: standardPerPeriodHours ?? 13.3,
+      fulltimePeriodHours: standardFulltimePeriodHours ?? 144,
+      vacationDayHours: standardVacationDayHours ?? 7.2,
+      source_rule_ids: standardVacation.source_rule_ids || ['CAO-PB-2024-R0999'],
+      extra_vacation_days_policy: standardVacation.extra_vacation_days_policy || 'article_59_lid_4'
+    },
+    cash_value_vacation: {
+      profile: 'cash_value_logistics',
+      fulltimeAnnualHours: cashValueAnnualHours ?? 180,
+      fulltimeAnnualDays: cashValueAnnualDays ?? 25,
+      fulltimeVacationHoursPerPeriod: cashValuePerPeriodHours ?? 13.85,
+      fulltimePeriodHours: cashValueFulltimePeriodHours ?? 144,
+      vacationDayHours: cashValueVacationDayHours ?? 7.2,
+      source_rule_ids: cashValueVacation.source_rule_ids || ['CAO-PB-2024-R1601', 'CAO-PB-2024-R1602'],
+      extra_vacation_days_policy: cashValueVacation.extra_vacation_days_policy || 'manual_review_article_100_deviates_from_article_59'
+    },
+    call_worker_vacation_payout_percentage: callWorkerPayoutPercentage ?? 9.24,
+    call_worker_vacation_max_hours_per_period: callWorkerMaxHoursPerPeriod ?? 144,
+    value_services_early_shift_amount: earlyShiftAmount ?? 7.50,
+    value_services_early_shift_source_rule_ids: valueServices.source_rule_ids || ['CAO-PB-2024-R1609'],
+    provenance: {
+      standard_vacation_annual_hours: parameterSource('leave_rules.standard_vacation.fulltime_annual_hours', standardAnnualHours, 172.8, ['CAO-PB-2024-R0999']),
+      standard_vacation_per_period_hours: parameterSource('leave_rules.standard_vacation.fulltime_per_period_hours', standardPerPeriodHours, 13.3, ['CAO-PB-2024-R0999']),
+      call_worker_vacation_payout_percentage: parameterSource('leave_rules.call_worker_vacation.payout_percentage', callWorkerPayoutPercentage, 9.24, ['CAO-PB-2024-R1016']),
+      call_worker_vacation_max_hours_per_period: parameterSource('leave_rules.call_worker_vacation.max_hours_per_period', callWorkerMaxHoursPerPeriod, 144, ['CAO-PB-2024-R1016']),
+      value_services_early_shift_amount: parameterSource('cash_value_logistics_rules.value_services_early_shift_allowance.amount', earlyShiftAmount, 7.50, ['CAO-PB-2024-R1609'])
+    }
+  };
+}
+
+function calculateCallWorkerVacationPayoutArticle59({
+  baseWageAmount,
+  minimumServiceAmount,
+  baseHourlyRate,
+  paidBaseHours,
+  vacationPayoutPercentage = 9.24,
+  maxHoursPerPayPeriod = 144,
+  parameterProvenance = null
+}) {
+  const percentage = vacationPayoutPercentage;
   const paidHours = Math.max(0, numberOrZero(paidBaseHours));
   const uncappedBaseAmount = Math.max(0, numberOrZero(baseWageAmount) + numberOrZero(minimumServiceAmount));
   const hourlyRate = numberOrNull(baseHourlyRate);
@@ -420,7 +533,9 @@ function calculateCallWorkerVacationPayoutArticle59({ baseWageAmount, minimumSer
     payout_base_hours: r2(Math.min(paidHours, maxHoursPerPayPeriod)),
     uncapped_paid_base_hours: r2(paidHours),
     max_hours_per_pay_period: maxHoursPerPayPeriod,
-    capped_at_144_hours_per_pay_period: capped,
+    capped_at_max_hours_per_pay_period: capped,
+    capped_at_144_hours_per_pay_period: paidHours > 144,
+    parameter_provenance: parameterProvenance,
     manual_review_required: manualReviewRequired,
     source_rule_ids: ['CAO-PB-2024-R1014', 'CAO-PB-2024-R1015', 'CAO-PB-2024-R1016', 'CAO-PB-2024-R1017']
   };
@@ -652,32 +767,21 @@ function buildVacationServiceContext({ personnel, body, contractResolutionResult
   };
 }
 
-function getVacationEntitlementProfile(caoScopeProfile) {
+function getVacationEntitlementProfile(caoScopeProfile, payrollCaoParameters = resolvePayrollCaoParameters(null)) {
   if (caoScopeProfile === 'cash_value_logistics') {
-    return {
-      profile: 'cash_value_logistics',
-      fulltimeAnnualHours: 180,
-      fulltimeAnnualDays: 25,
-      fulltimeVacationHoursPerPeriod: 13.85,
-      vacationDayHours: 7.2,
-      source_rule_ids: ['CAO-PB-2024-R1601', 'CAO-PB-2024-R1602'],
-      extra_vacation_days_policy: 'manual_review_article_100_deviates_from_article_59'
-    };
+    return payrollCaoParameters.cash_value_vacation;
   }
-  return {
-    profile: 'standard_article_59',
-    fulltimeAnnualHours: 172.8,
-    fulltimeAnnualDays: 24,
-    fulltimeVacationHoursPerPeriod: 13.3,
-    vacationDayHours: 7.2,
-    source_rule_ids: ['CAO-PB-2024-R0999'],
-    extra_vacation_days_policy: 'article_59_lid_4'
-  };
+  return payrollCaoParameters.standard_vacation;
 }
 
-function calculateVacationEntitlementForPayPeriod({ paidHoursPerPayPeriod, vacationServiceContext, caoScopeProfile = null }) {
-  const profile = getVacationEntitlementProfile(caoScopeProfile);
-  const fulltimePeriodHours = 144;
+function calculateVacationEntitlementForPayPeriod({
+  paidHoursPerPayPeriod,
+  vacationServiceContext,
+  caoScopeProfile = null,
+  payrollCaoParameters = resolvePayrollCaoParameters(null)
+}) {
+  const profile = getVacationEntitlementProfile(caoScopeProfile, payrollCaoParameters);
+  const fulltimePeriodHours = profile.fulltimePeriodHours ?? 144;
   const paidHours = Math.max(0, numberOrZero(paidHoursPerPayPeriod));
   const cappedPaidHours = Math.min(paidHours, fulltimePeriodHours);
   const parttimeRatio = cappedPaidHours / fulltimePeriodHours;
@@ -701,6 +805,10 @@ function calculateVacationEntitlementForPayPeriod({ paidHoursPerPayPeriod, vacat
     vacation_hours_accrued_per_pay_period: r2((profile.fulltimeVacationHoursPerPeriod * parttimeRatio) + extraHoursPerPeriod),
     service_years_context: vacationServiceContext,
     capped_at_144_hours_per_pay_period: paidHours > fulltimePeriodHours,
+    parameter_provenance: {
+      standard_vacation_annual_hours: payrollCaoParameters.provenance.standard_vacation_annual_hours,
+      standard_vacation_per_period_hours: payrollCaoParameters.provenance.standard_vacation_per_period_hours
+    },
     manual_review_required: vacationServiceContext?.manual_review_required === true || usesCashValueProfile,
     source_rule_ids: [
       ...profile.source_rule_ids, 'CAO-PB-2024-R1002', 'CAO-PB-2024-R1003', 'CAO-PB-2024-R1004',
@@ -835,20 +943,24 @@ function getActingFunctionAllowanceRules(caoConfig) {
   };
 }
 
-function resolveValueServicesEarlyShiftAllowance(shift, caoScope) {
+function resolveValueServicesEarlyShiftAllowance(shift, caoScope, payrollCaoParameters = resolvePayrollCaoParameters(null)) {
   const serviceContext = shift?.service_context || {};
   const appliesScope = caoScope?.cao_scope_profile === 'cash_value_logistics' ||
     shift?.works_cash_value_logistics === true ||
     serviceContext.works_cash_value_logistics === true;
   const clock = parseClockParts(shift?.start_time);
   const applies = appliesScope && clock && clock.total_minutes >= 120 && clock.total_minutes < 240;
+  const rate = payrollCaoParameters.value_services_early_shift_amount;
   return {
     applies: !!applies,
-    amount: applies ? 7.50 : 0,
-    rate_per_shift: 7.50,
+    amount: applies ? rate : 0,
+    rate_per_shift: rate,
     tax_treatment: 'bruto',
-    source_rule_ids: applies ? ['CAO-PB-2024-R1609'] : [],
-    note: applies ? 'Geld- en waardelogistiek vroege dienst 02:00-04:00: EUR 7,50 bruto per dienst.' : null
+    source_rule_ids: applies ? payrollCaoParameters.value_services_early_shift_source_rule_ids : [],
+    parameter_provenance: {
+      value_services_early_shift_amount: payrollCaoParameters.provenance.value_services_early_shift_amount
+    },
+    note: applies ? `Geld- en waardelogistiek vroege dienst 02:00-04:00: EUR ${rate} bruto per dienst.` : null
   };
 }
 
@@ -2625,6 +2737,7 @@ Deno.serve(async (req) => {
     }
 
     const caoConfig = caoConfigResolution.config;
+    const payrollCaoParameters = resolvePayrollCaoParameters(caoConfig);
 
     const payrollReadiness = getCaoPayrollReadiness(caoConfig);
     const caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
@@ -3020,7 +3133,7 @@ Deno.serve(async (req) => {
       value_services_early_shift_allowance: {
         shift_count: 0,
         amount: 0,
-        rate_per_shift: 7.50,
+        rate_per_shift: payrollCaoParameters.value_services_early_shift_amount,
         tax_treatment: 'bruto',
         details: [],
         source_rule_ids: []
@@ -3373,7 +3486,7 @@ Deno.serve(async (req) => {
           ];
         }
 
-        const valueServicesEarlyShiftAllowance = resolveValueServicesEarlyShiftAllowance(shift, caoScope);
+        const valueServicesEarlyShiftAllowance = resolveValueServicesEarlyShiftAllowance(shift, caoScope, payrollCaoParameters);
         if (valueServicesEarlyShiftAllowance.applies) {
           payslip.value_services_early_shift_allowance.shift_count += 1;
           payslip.value_services_early_shift_allowance.amount += valueServicesEarlyShiftAllowance.amount;
@@ -3381,8 +3494,10 @@ Deno.serve(async (req) => {
             date,
             start_time,
             amount: valueServicesEarlyShiftAllowance.amount,
+            rate_per_shift: valueServicesEarlyShiftAllowance.rate_per_shift,
             tax_treatment: valueServicesEarlyShiftAllowance.tax_treatment,
-            source_rule_ids: valueServicesEarlyShiftAllowance.source_rule_ids
+            source_rule_ids: valueServicesEarlyShiftAllowance.source_rule_ids,
+            parameter_provenance: valueServicesEarlyShiftAllowance.parameter_provenance
           });
           payslip.value_services_early_shift_allowance.source_rule_ids = [
             ...new Set([
@@ -3560,7 +3675,13 @@ Deno.serve(async (req) => {
           baseWageAmount: payslip.base_salary,
           minimumServiceAmount,
           baseHourlyRate,
-          paidBaseHours: totalHours + payslip.minimum_service_compensation.top_up_hours
+          paidBaseHours: totalHours + payslip.minimum_service_compensation.top_up_hours,
+          vacationPayoutPercentage: payrollCaoParameters.call_worker_vacation_payout_percentage,
+          maxHoursPerPayPeriod: payrollCaoParameters.call_worker_vacation_max_hours_per_period,
+          parameterProvenance: {
+            vacation_payout_percentage: payrollCaoParameters.provenance.call_worker_vacation_payout_percentage,
+            max_hours_per_pay_period: payrollCaoParameters.provenance.call_worker_vacation_max_hours_per_period
+          }
         });
         payslip.vacation_pay_call_worker_article_59 = callWorkerVacationPayout;
         payslip.vacation_hours_call_worker = callWorkerVacationPayout.amount;
@@ -3568,7 +3689,7 @@ Deno.serve(async (req) => {
           payrollRuntimeReviewItems.push({
             rule_id: 'CAO-PB-2024-R1016',
             domain: 'call_worker_vacation_payout',
-            message: 'Vakantiedagenuitbetaling oproepkracht is afgetopt op 144 uur, maar de basisuurloon-context ontbreekt voor definitieve cap-berekening.',
+            message: `Vakantiedagenuitbetaling oproepkracht is afgetopt op ${payrollCaoParameters.call_worker_vacation_max_hours_per_period} uur, maar de basisuurloon-context ontbreekt voor definitieve cap-berekening.`,
             field: 'base_hourly_rate'
           });
           runtimePayrollFinalAllowed = false;
@@ -3681,7 +3802,8 @@ Deno.serve(async (req) => {
         const vacationEntitlement = calculateVacationEntitlementForPayPeriod({
           paidHoursPerPayPeriod: paidHoursForVacationAccrual,
           vacationServiceContext,
-          caoScopeProfile: caoScope?.cao_scope_profile || null
+          caoScopeProfile: caoScope?.cao_scope_profile || null,
+          payrollCaoParameters
         });
         payslip.vacation_entitlement = vacationEntitlement;
 
@@ -3800,6 +3922,7 @@ Deno.serve(async (req) => {
       cao_payroll_readiness: payrollReadiness,
       cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
       cao_runtime_support: payrollRuntimeSupport,
+      cao_payroll_parameters: payrollCaoParameters,
       pay_period_year: pay_period_year || refDate.getFullYear(),
       pay_period_number: pay_period_number || null,
       pay_period_start: payrollPeriod.period_start,
@@ -3823,6 +3946,7 @@ Deno.serve(async (req) => {
           max_hours_per_pay_period: payslip.vacation_pay_call_worker_article_59.max_hours_per_pay_period,
           capped_at_144_hours_per_pay_period: payslip.vacation_pay_call_worker_article_59.capped_at_144_hours_per_pay_period,
           manual_review_required: payslip.vacation_pay_call_worker_article_59.manual_review_required,
+          parameter_provenance: payslip.vacation_pay_call_worker_article_59.parameter_provenance,
           source_rule_ids: payslip.vacation_pay_call_worker_article_59.source_rule_ids
         },
         vacation_paid: Math.round(payslip.vacation_paid * 100) / 100,
@@ -3895,6 +4019,9 @@ Deno.serve(async (req) => {
             ...item,
             amount: r2(item.amount)
           })),
+          parameter_provenance: {
+            value_services_early_shift_amount: payrollCaoParameters.provenance.value_services_early_shift_amount
+          },
           source_rule_ids: payslip.value_services_early_shift_allowance.source_rule_ids
         },
         cash_value_late_next_day_notice_allowance: {
