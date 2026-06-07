@@ -3,6 +3,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 // ── Revisie-gebaseerde lazy CAO-sync helper ──
 // Slaat sync over ALLEEN als cloudflare_revision al overeenkomt. Geen tijdgebaseerde skip.
 const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const CAO_EVENT_HOSPITALITY_SECURITY_KEY = 'cao_evenementen_horecabeveiliging';
 const SUPPORTED_PAYROLL_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
 
 function getCaoRuntimeSupport(caoKey, functionName) {
@@ -17,6 +18,121 @@ function getCaoRuntimeSupport(caoKey, functionName) {
     message: supported
       ? `Runtime ${functionName} ondersteunt CAO ${key}.`
       : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Payroll-final is geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+  };
+}
+
+function booleanTrue(value) {
+  return value === true || value === 'true' || value === 'yes' || value === 'ja';
+}
+
+function normalizeCaoSignalText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_\s-]+/g, '_')
+    .trim();
+}
+
+function eventHospitalityCaoSignal(source, context = {}) {
+  const caoText = normalizeCaoSignalText(context.cao || context.cao_key || context.default_cao_key || '');
+  const worksEvent = context.works_event_or_hospitality_security ??
+    context.default_works_event_or_hospitality_security ??
+    null;
+  const eventCaoApplies = context.event_hospitality_cao_applies ??
+    context.default_event_hospitality_cao_applies ??
+    null;
+
+  if (caoText.includes('evenement') || caoText.includes('horeca')) {
+    return {
+      source,
+      cao_key: CAO_EVENT_HOSPITALITY_SECURITY_KEY,
+      status: 'inferred_external_cao',
+      reason: 'cao_text_event_hospitality'
+    };
+  }
+  if (booleanTrue(worksEvent) && booleanTrue(eventCaoApplies)) {
+    return {
+      source,
+      cao_key: CAO_EVENT_HOSPITALITY_SECURITY_KEY,
+      status: 'inferred_external_cao',
+      reason: 'event_hospitality_scope_confirmed'
+    };
+  }
+  if (booleanTrue(worksEvent) && eventCaoApplies !== false) {
+    return {
+      source,
+      cao_key: null,
+      status: 'ambiguous_external_cao_scope',
+      suggested_cao_keys: [CAO_EVENT_HOSPITALITY_SECURITY_KEY],
+      reason: 'event_hospitality_scope_requires_confirmation',
+      message: 'Dienst lijkt evenementen-/horecabeveiliging, maar event_hospitality_cao_applies is niet expliciet bevestigd.'
+    };
+  }
+  return null;
+}
+
+function addExternalCaoSignal(signals, signal) {
+  if (!signal) return;
+  const key = `${signal.source}:${signal.status}:${signal.cao_key || ''}:${signal.reason || ''}`;
+  if (!signals.some(existing => `${existing.source}:${existing.status}:${existing.cao_key || ''}:${existing.reason || ''}` === key)) {
+    signals.push(signal);
+  }
+}
+
+function collectInlineExternalCaoSignals(workSchedule = [], body = {}) {
+  const signals = [];
+  addExternalCaoSignal(signals, eventHospitalityCaoSignal('body', body));
+  addExternalCaoSignal(signals, eventHospitalityCaoSignal('body.service_context', body.service_context || {}));
+  for (const [index, shift] of (workSchedule || []).entries()) {
+    addExternalCaoSignal(signals, eventHospitalityCaoSignal(`shift[${index}]`, shift || {}));
+    addExternalCaoSignal(signals, eventHospitalityCaoSignal(`shift[${index}].service_context`, shift?.service_context || {}));
+  }
+  return signals;
+}
+
+function buildExternalCaoScopeGate({ targetCaoKey, signals }) {
+  const activeSignals = signals || [];
+  const inferredKeys = [...new Set(activeSignals.map(signal => signal.cao_key).filter(Boolean))];
+  const ambiguousSignals = activeSignals.filter(signal => signal.status === 'ambiguous_external_cao_scope');
+  const suggestedKeys = [...new Set(activeSignals.flatMap(signal => signal.suggested_cao_keys || []).filter(Boolean))];
+
+  if (ambiguousSignals.length > 0 && inferredKeys.length === 0) {
+    return {
+      passed: false,
+      status: 'blocked_ambiguous_external_cao_scope',
+      message: 'Loonrun geblokkeerd: een of meer diensten lijken onder een andere CAO te vallen, maar de cao_key is niet expliciet bevestigd.',
+      signals: activeSignals,
+      suggested_cao_keys: suggestedKeys
+    };
+  }
+
+  if (inferredKeys.length > 1) {
+    return {
+      passed: false,
+      status: 'blocked_mixed_external_cao_scope',
+      message: 'Loonrun geblokkeerd: diensten wijzen naar meerdere externe CAO-scope signalen. Splits de loonrun per CAO.',
+      signals: activeSignals,
+      inferred_cao_keys: inferredKeys
+    };
+  }
+
+  if (inferredKeys.length === 1 && targetCaoKey && inferredKeys[0] !== targetCaoKey) {
+    return {
+      passed: false,
+      status: 'blocked_cao_scope_signal_mismatch',
+      message: `Loonrun geblokkeerd: dienstcontext wijst naar ${inferredKeys[0]}, maar payroll zou ${targetCaoKey} gebruiken.`,
+      signals: activeSignals,
+      inferred_cao_keys: inferredKeys
+    };
+  }
+
+  return {
+    passed: true,
+    status: 'ok',
+    signals: activeSignals,
+    inferred_cao_key: inferredKeys[0] || null,
+    suggested_cao_keys: suggestedKeys
   };
 }
 
@@ -1428,6 +1544,17 @@ function collectScheduleObjectIds(workSchedule, body = {}) {
   return ids;
 }
 
+function collectScheduleTaskIds(workSchedule, body = {}) {
+  const ids = [];
+  addUnique(ids, body?.task_id);
+  addUnique(ids, body?.service_context?.task_id);
+  for (const shift of workSchedule || []) {
+    addUnique(ids, shift?.task_id);
+    addUnique(ids, shift?.service_context?.task_id);
+  }
+  return ids;
+}
+
 async function collectObjectCaoKeys(base44, workSchedule, body = {}) {
   const objectIds = collectScheduleObjectIds(workSchedule, body);
   const keys = [];
@@ -1438,6 +1565,23 @@ async function collectObjectCaoKeys(base44, workSchedule, body = {}) {
     } catch { /* objectcontext is optioneel */ }
   }
   return keys;
+}
+
+async function collectReferencedExternalCaoSignals(base44, workSchedule, body = {}) {
+  const signals = [];
+  for (const taskId of collectScheduleTaskIds(workSchedule, body)) {
+    try {
+      const task = await base44.asServiceRole.entities.Task.get(taskId);
+      addExternalCaoSignal(signals, eventHospitalityCaoSignal(`task:${taskId}`, task || {}));
+    } catch { /* taakcontext is optioneel */ }
+  }
+  for (const objectId of collectScheduleObjectIds(workSchedule, body)) {
+    try {
+      const object = await base44.asServiceRole.entities.SurveillanceObject.get(objectId);
+      addExternalCaoSignal(signals, eventHospitalityCaoSignal(`object:${objectId}`, object || {}));
+    } catch { /* objectcontext is optioneel */ }
+  }
+  return signals;
 }
 
 function collectWorkScheduleDates(workSchedule) {
@@ -2038,12 +2182,40 @@ Deno.serve(async (req) => {
     }
     const objectCaoKeys = await collectObjectCaoKeys(base44, work_schedule, body);
     const objectCaoKey = objectCaoKeys[0] || null;
+    const externalCaoSignals = [
+      ...collectInlineExternalCaoSignals(work_schedule, body),
+      ...await collectReferencedExternalCaoSignals(base44, work_schedule, body)
+    ];
+    const inferredExternalCaoKeys = [...new Set(externalCaoSignals.map(signal => signal.cao_key).filter(Boolean))];
+    const inferredExternalCaoKey = inferredExternalCaoKeys.length === 1 ? inferredExternalCaoKeys[0] : null;
     const targetCaoKey = body.cao_key ||
       service_context?.cao_key ||
       firstScheduleCaoKey(work_schedule) ||
       objectCaoKey ||
+      inferredExternalCaoKey ||
       personnel.cao ||
       CAO_PB_KEY;
+
+    const externalCaoScopeGate = buildExternalCaoScopeGate({
+      targetCaoKey,
+      signals: externalCaoSignals
+    });
+    if (!externalCaoScopeGate.passed) {
+      return Response.json({
+        error: externalCaoScopeGate.message,
+        calculation_warnings: [
+          'Payroll geblokkeerd: bepaal expliciet de juiste cao_key voordat deze loonrun definitief mag zijn.'
+        ],
+        personnel_id,
+        cao_key: targetCaoKey,
+        schedule_cao_keys: collectScheduleCaoKeys(work_schedule),
+        object_cao_keys: objectCaoKeys,
+        external_cao_scope_gate: externalCaoScopeGate,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: externalCaoScopeGate.status
+      }, { status: 400 });
+    }
 
     const calculationWarnings = [];
     const explicitScheduleCaoKeys = collectScheduleCaoKeys(work_schedule);
