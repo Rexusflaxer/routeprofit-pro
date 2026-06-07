@@ -1919,11 +1919,25 @@ function extractCaoCorrectionDeltaAmounts(delta = {}) {
 
 async function loadOpenCaoPayrollCorrections(base44, { personnelId, caoKey }) {
   if (!personnelId || !caoKey) return [];
-  const corrections = await base44.asServiceRole.entities.CAOPayrollCorrection.filter({
-    personnel_id: personnelId,
-    cao_key: caoKey
-  }).catch(() => []);
-  return (corrections || [])
+  const [personnelCorrections, caoCorrections] = await Promise.all([
+    base44.asServiceRole.entities.CAOPayrollCorrection.filter({
+      personnel_id: personnelId,
+      cao_key: caoKey
+    }).catch(() => []),
+    base44.asServiceRole.entities.CAOPayrollCorrection.filter({
+      cao_key: caoKey
+    }).catch(() => [])
+  ]);
+  const correctionsById = new Map();
+  for (const correction of [...(personnelCorrections || []), ...(caoCorrections || [])]) {
+    if (!correction?.id) continue;
+    const isPersonnelCorrection = correction.personnel_id === personnelId;
+    const isGlobalUnscopedCorrection = !correction.personnel_id && !correction.affected_payroll_run_id;
+    if (isPersonnelCorrection || isGlobalUnscopedCorrection) {
+      correctionsById.set(correction.id, correction);
+    }
+  }
+  return [...correctionsById.values()]
     .filter(isOpenCaoPayrollCorrection)
     .sort((a, b) => String(a.effective_from || '').localeCompare(String(b.effective_from || '')) ||
       String(a.created_at || '').localeCompare(String(b.created_at || '')));
@@ -1931,13 +1945,22 @@ async function loadOpenCaoPayrollCorrections(base44, { personnelId, caoKey }) {
 
 function buildCaoCorrectionApplication(corrections, adjustments, shouldApply) {
   const openCorrections = corrections || [];
+  const manualReviewCorrections = openCorrections.filter(correction =>
+    correction.status === 'manual_review_required'
+  );
+  const globalUnscopedCorrections = openCorrections.filter(correction =>
+    !correction.personnel_id && !correction.affected_payroll_run_id
+  );
+  const autoApplicableCorrections = openCorrections.filter(correction =>
+    correction.status !== 'manual_review_required'
+  );
   const missingAdjustmentIds = shouldApply
-    ? openCorrections
+    ? autoApplicableCorrections
       .filter(correction => !adjustments[correction.id]?.delta_snapshot)
       .map(correction => correction.id)
     : [];
   const missingPayrollAmountIds = shouldApply
-    ? openCorrections
+    ? autoApplicableCorrections
       .filter(correction => {
         const delta = adjustments[correction.id]?.delta_snapshot;
         return delta && !extractCaoCorrectionDeltaAmounts(delta).has_known_payroll_amount;
@@ -1947,17 +1970,28 @@ function buildCaoCorrectionApplication(corrections, adjustments, shouldApply) {
   return {
     open_correction_count: openCorrections.length,
     has_open_corrections: openCorrections.length > 0,
+    manual_review_required_correction_ids: manualReviewCorrections.map(correction => correction.id),
+    has_unresolved_manual_review_corrections: manualReviewCorrections.length > 0,
+    global_unscoped_correction_ids: globalUnscopedCorrections.map(correction => correction.id),
+    has_global_unscoped_corrections: globalUnscopedCorrections.length > 0,
     apply_requested: shouldApply === true,
     ready_to_apply: openCorrections.length === 0 ||
-      (shouldApply === true && missingAdjustmentIds.length === 0 && missingPayrollAmountIds.length === 0),
+      (
+        shouldApply === true &&
+        manualReviewCorrections.length === 0 &&
+        missingAdjustmentIds.length === 0 &&
+        missingPayrollAmountIds.length === 0
+      ),
     missing_adjustment_ids: missingAdjustmentIds,
     missing_payroll_amount_ids: missingPayrollAmountIds,
     correction_ids: openCorrections.map(correction => correction.id),
+    auto_applicable_correction_ids: autoApplicableCorrections.map(correction => correction.id),
     review_ids: [...new Set(openCorrections.map(correction => correction.cao_change_review_id).filter(Boolean))],
     affected_payroll_run_ids: [...new Set(openCorrections.map(correction => correction.affected_payroll_run_id).filter(Boolean))],
     corrections: openCorrections.map(correction => ({
       id: correction.id,
       status: correction.status,
+      personnel_id: correction.personnel_id || null,
       cao_change_review_id: correction.cao_change_review_id || null,
       affected_payroll_run_id: correction.affected_payroll_run_id || null,
       rule_key: correction.rule_key || null,
@@ -2365,6 +2399,26 @@ Deno.serve(async (req) => {
     );
 
     if (record_payroll_run === true && caoCorrectionApplication.has_open_corrections) {
+      if (caoCorrectionApplication.has_unresolved_manual_review_corrections) {
+        return Response.json({
+          error: 'Definitieve loonrun geblokkeerd: er staan CAO-correcties met handmatige review open.',
+          cao_sync_status: caoSyncStatus,
+          calculation_warnings: [
+            ...calculationWarnings,
+            'Los manual_review_required CAO-correcties eerst op via beheerder/Codex voordat payroll definitief mag worden vastgelegd.'
+          ],
+          personnel_id,
+          cao_configuration_id: caoConfig.id,
+          cao_key: caoConfig.cao_key || targetCaoKey,
+          cao_version_label: caoConfig.version_label || caoConfig.name,
+          cao_valid_from: caoConfig.valid_from,
+          cao_payroll_readiness: payrollReadiness,
+          cao_payroll_corrections: caoCorrectionApplication,
+          manual_review_required: true,
+          payroll_final_allowed: false,
+          calculation_status: 'blocked_manual_review_cao_corrections'
+        }, { status: 400 });
+      }
       if (!applyQueuedCaoCorrections) {
         return Response.json({
           error: 'Definitieve loonrun geblokkeerd: er staan open retroactieve CAO-correcties klaar voor deze medewerker/CAO.',
@@ -2793,7 +2847,18 @@ Deno.serve(async (req) => {
     let runtimeCalculationStatus = calculationStatus;
     const payrollRuntimeReviewItems = [];
     let minimumServiceTopUpHoursForOvertime = 0;
-    if (caoCorrectionApplication.has_open_corrections && !applyQueuedCaoCorrections) {
+    if (caoCorrectionApplication.has_unresolved_manual_review_corrections) {
+      runtimePayrollFinalAllowed = false;
+      runtimeCalculationStatus = 'blocked_manual_review_cao_corrections';
+      calculationWarnings.push('Open CAO-correcties met handmatige review gevonden; deze berekening is niet payroll-final totdat beheerder/Codex deze heeft opgelost.');
+      payrollRuntimeReviewItems.push({
+        rule_id: 'cao_payroll_corrections',
+        domain: 'retroactive_cao_corrections',
+        message: 'Manual-review CAO-correcties blokkeren definitieve payroll.',
+        correction_ids: caoCorrectionApplication.manual_review_required_correction_ids,
+        global_unscoped_correction_ids: caoCorrectionApplication.global_unscoped_correction_ids
+      });
+    } else if (caoCorrectionApplication.has_open_corrections && !applyQueuedCaoCorrections) {
       runtimePayrollFinalAllowed = false;
       runtimeCalculationStatus = 'blocked_pending_cao_corrections';
       calculationWarnings.push('Open retroactieve CAO-correcties gevonden; deze berekening is niet payroll-final totdat correcties met delta-bewijs zijn verwerkt.');
@@ -2802,6 +2867,18 @@ Deno.serve(async (req) => {
         domain: 'retroactive_cao_corrections',
         message: 'Open retroactieve CAO-correcties moeten in de loonrun worden verwerkt.',
         correction_ids: caoCorrectionApplication.correction_ids
+      });
+    } else if (caoCorrectionApplication.has_open_corrections && applyQueuedCaoCorrections && !caoCorrectionApplication.ready_to_apply) {
+      runtimePayrollFinalAllowed = false;
+      runtimeCalculationStatus = 'blocked_missing_cao_correction_adjustments';
+      calculationWarnings.push('Open retroactieve CAO-correcties zijn niet volledig voorzien van financiële delta-bewijzen.');
+      payrollRuntimeReviewItems.push({
+        rule_id: 'cao_payroll_corrections',
+        domain: 'retroactive_cao_corrections',
+        message: 'Niet alle CAO-correcties hebben een bruikbare delta_snapshot met herkenbare bedragvelden.',
+        correction_ids: caoCorrectionApplication.correction_ids,
+        missing_adjustment_ids: caoCorrectionApplication.missing_adjustment_ids,
+        missing_payroll_amount_ids: caoCorrectionApplication.missing_payroll_amount_ids
       });
     }
 
@@ -3397,7 +3474,7 @@ Deno.serve(async (req) => {
       }
     }
 
-    if (applyQueuedCaoCorrections && caoCorrectionApplication.has_open_corrections) {
+    if (applyQueuedCaoCorrections && caoCorrectionApplication.has_open_corrections && caoCorrectionApplication.ready_to_apply) {
       const correctionComponent = buildCaoCorrectionPayrollComponent(openCaoPayrollCorrections, caoCorrectionAdjustments);
       payslip.cao_retroactive_corrections = correctionComponent;
       payslip.total_gross += correctionComponent.total_gross_delta;

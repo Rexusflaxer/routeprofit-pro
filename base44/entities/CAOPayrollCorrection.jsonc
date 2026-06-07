@@ -85,6 +85,30 @@
       ],
       "format": "date"
     },
+    "effective_from_source": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Herkomst van de gebruikte ingangsdatum, bijv. change.effective_from of candidate_configuration.valid_from."
+    },
+    "effective_from_inferred": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als de ingangsdatum is afgeleid en niet expliciet op de wijziging stond."
+    },
+    "effective_date_manual_review_required": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als de ingangsdatum/werkingsperiode niet veilig automatisch kan worden toegepast."
+    },
+    "effective_date_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Auditnotities over ontbrekende, afgeleide of conflicterende ingangsdata."
+    },
     "pay_period_year": {
       "type": [
         "number",
