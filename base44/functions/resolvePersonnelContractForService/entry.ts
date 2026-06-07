@@ -1,6 +1,10 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
 const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const CAO_EVENT_HOSPITALITY_SECURITY_KEY = 'cao_evenementen_horecabeveiliging';
+const CAO_TRAFFIC_CONTROLLERS_KEY = 'cao_verkeersregelaars';
+const CAO_SAFETY_DOMAIN_KEY = 'cao_veiligheidsdomein';
+const SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS = [CAO_PB_KEY];
 
 function todayIsoDate() {
   return new Date().toISOString().slice(0, 10);
@@ -13,8 +17,75 @@ function isWithinDateRange(record, date, startField = 'valid_from', endField = '
   return true;
 }
 
+function normalizeToken(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_\s-]+/g, '_')
+    .trim();
+}
+
+function addToken(tokens, value) {
+  const normalized = normalizeToken(value);
+  if (normalized) tokens.push(normalized);
+}
+
+function booleanTrue(value) {
+  return value === true || value === 'true' || value === 'yes' || value === 'ja';
+}
+
+function inferServiceCaoKey({ explicitCaoKey, explicitCao, worksEventOrHospitalitySecurity, eventHospitalityCaoApplies }) {
+  if (explicitCaoKey) {
+    return {
+      cao_key: explicitCaoKey,
+      cao_key_source: 'explicit_service_or_object_context',
+      inferred: false,
+      suggested_cao_keys: []
+    };
+  }
+
+  const explicitCaoText = normalizeToken(explicitCao);
+  if (explicitCaoText.includes('evenement') || explicitCaoText.includes('horeca')) {
+    return {
+      cao_key: CAO_EVENT_HOSPITALITY_SECURITY_KEY,
+      cao_key_source: 'explicit_cao_text_event_hospitality',
+      inferred: true,
+      suggested_cao_keys: [CAO_EVENT_HOSPITALITY_SECURITY_KEY]
+    };
+  }
+
+  if (booleanTrue(worksEventOrHospitalitySecurity) && booleanTrue(eventHospitalityCaoApplies)) {
+    return {
+      cao_key: CAO_EVENT_HOSPITALITY_SECURITY_KEY,
+      cao_key_source: 'event_hospitality_scope',
+      inferred: true,
+      suggested_cao_keys: [CAO_EVENT_HOSPITALITY_SECURITY_KEY]
+    };
+  }
+
+  if (booleanTrue(worksEventOrHospitalitySecurity) && eventHospitalityCaoApplies !== false) {
+    return {
+      cao_key: null,
+      cao_key_source: 'event_hospitality_scope_requires_confirmation',
+      inferred: false,
+      manual_review_required: true,
+      suggested_cao_keys: [CAO_EVENT_HOSPITALITY_SECURITY_KEY],
+      warning: 'Dienst lijkt evenementen-/horecabeveiliging, maar event_hospitality_cao_applies is niet expliciet bevestigd. Kies de juiste cao_key voordat planning/payroll definitief mag zijn.'
+    };
+  }
+
+  return {
+    cao_key: null,
+    cao_key_source: 'not_provided',
+    inferred: false,
+    suggested_cao_keys: []
+  };
+}
+
 function getServiceActivityTokens(serviceContext, requestedCaoKey) {
-  return uniq([
+  const tokens = [];
+  [
     requestedCaoKey,
     serviceContext?.cao_key,
     serviceContext?.cao,
@@ -23,11 +94,50 @@ function getServiceActivityTokens(serviceContext, requestedCaoKey) {
     serviceContext?.cao_function_group,
     serviceContext?.cao_function_level,
     serviceContext?.security_role_status
-  ]);
+  ].forEach(value => addToken(tokens, value));
+
+  if (booleanTrue(serviceContext?.works_event_or_hospitality_security) || booleanTrue(serviceContext?.event_hospitality_cao_applies)) {
+    [
+      'event_hospitality_security',
+      'evenementen_horecabeveiliging',
+      'horecabeveiliging',
+      CAO_EVENT_HOSPITALITY_SECURITY_KEY
+    ].forEach(value => addToken(tokens, value));
+  }
+  if (normalizeToken(serviceContext?.function_type).includes('verkeersregelaar') ||
+      normalizeToken(serviceContext?.task_type).includes('verkeersregelaar')) {
+    [
+      'verkeersregelaar',
+      'traffic_controller',
+      'traffic_regulation',
+      'traffic_control',
+      CAO_TRAFFIC_CONTROLLERS_KEY
+    ].forEach(value => addToken(tokens, value));
+  }
+  if (booleanTrue(serviceContext?.works_cash_value_logistics)) {
+    ['cash_value_logistics', 'geld_waardelogistiek', 'geld_waardetransport', 'waardetransport'].forEach(value => addToken(tokens, value));
+  }
+  if (booleanTrue(serviceContext?.works_airport_schiphol)) {
+    ['airport_schiphol', 'schiphol', 'airport_security'].forEach(value => addToken(tokens, value));
+  }
+  if (normalizeToken(serviceContext?.function_type).includes('veiligheidsdomein') ||
+      normalizeToken(serviceContext?.task_type).includes('veiligheidsdomein')) {
+    ['veiligheidsdomein', 'safety_domain', CAO_SAFETY_DOMAIN_KEY].forEach(value => addToken(tokens, value));
+  }
+
+  return uniq(tokens);
 }
 
 function companyCaoAssignmentMatchesService(assignment, serviceContext, requestedCaoKey) {
-  const activities = normalizeArray(assignment?.applies_to_activities);
+  if (assignment?.cao_key && requestedCaoKey && assignment.cao_key !== requestedCaoKey) {
+    return {
+      matched: false,
+      reason: 'assignment_cao_key_mismatch',
+      assignment_cao_key: assignment.cao_key,
+      requested_cao_key: requestedCaoKey
+    };
+  }
+  const activities = normalizeArray(assignment?.applies_to_activities).map(normalizeToken);
   if (activities.length === 0 || activities.includes('all')) {
     return { matched: true, reason: activities.includes('all') ? 'all' : 'no_activity_scope' };
   }
@@ -80,6 +190,20 @@ function serviceRequiresSecurityScope(serviceContext) {
     SECURITY_FUNCTION_TYPES.includes(serviceContext.function_type);
 }
 
+function getContractResolutionRuntimeSupport(caoKey) {
+  const key = caoKey || CAO_PB_KEY;
+  const supported = SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS.includes(key);
+  return {
+    supported,
+    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    cao_key: key,
+    supported_cao_keys: SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS,
+    message: supported
+      ? `Contractresolver ondersteunt CAO ${key}.`
+      : `Contractresolver ondersteunt CAO ${key} nog niet volledig. Definitieve planning/payroll is geblokkeerd totdat deze CAO-runtime lokaal is geimplementeerd en geverifieerd.`
+  };
+}
+
 function listAllowsValue(list, value) {
   if (!value) return { matched: true, reason: 'no_requested_value' };
   const values = normalizeArray(list);
@@ -110,7 +234,7 @@ function inferServiceContext({ body, task, route, object }) {
     task?.required_security_role_status ||
     object?.default_security_role_status ||
     null;
-  const caoKey = input.cao_key ||
+  const explicitCaoKey = input.cao_key ||
     body.cao_key ||
     task?.cao_key ||
     task?.cao ||
@@ -119,12 +243,34 @@ function inferServiceContext({ body, task, route, object }) {
     route?.cao_key ||
     route?.cao ||
     null;
+  const explicitCao = input.cao || body.cao || task?.cao || object?.cao || route?.cao || null;
   const objectId = body.object_id || input.object_id || task?.object_id || object?.id || null;
+  const worksEventOrHospitalitySecurity = input.works_event_or_hospitality_security ??
+    task?.works_event_or_hospitality_security ??
+    object?.default_works_event_or_hospitality_security ??
+    object?.works_event_or_hospitality_security ??
+    null;
+  const eventHospitalityCaoApplies = input.event_hospitality_cao_applies ??
+    task?.event_hospitality_cao_applies ??
+    object?.default_event_hospitality_cao_applies ??
+    object?.event_hospitality_cao_applies ??
+    null;
+  const caoKeyResolution = inferServiceCaoKey({
+    explicitCaoKey,
+    explicitCao,
+    worksEventOrHospitalitySecurity,
+    eventHospitalityCaoApplies
+  });
 
   return {
     service_date: body.service_date || input.service_date || todayIsoDate(),
-    cao_key: caoKey,
-    cao: input.cao || body.cao || task?.cao || object?.cao || route?.cao || null,
+    cao_key: caoKeyResolution.cao_key,
+    cao_key_source: caoKeyResolution.cao_key_source,
+    cao_key_inferred: caoKeyResolution.inferred === true,
+    suggested_cao_keys: caoKeyResolution.suggested_cao_keys || [],
+    cao_key_manual_review_required: caoKeyResolution.manual_review_required === true,
+    cao_key_resolution_warning: caoKeyResolution.warning || null,
+    cao: explicitCao,
     company_id: body.company_id || input.company_id || route?.operating_company_id || null,
     route_id: body.route_id || null,
     task_id: body.task_id || null,
@@ -154,16 +300,8 @@ function inferServiceContext({ body, task, route, object }) {
       object?.default_works_cash_value_logistics ??
       object?.works_cash_value_logistics ??
       null,
-    works_event_or_hospitality_security: input.works_event_or_hospitality_security ??
-      task?.works_event_or_hospitality_security ??
-      object?.default_works_event_or_hospitality_security ??
-      object?.works_event_or_hospitality_security ??
-      null,
-    event_hospitality_cao_applies: input.event_hospitality_cao_applies ??
-      task?.event_hospitality_cao_applies ??
-      object?.default_event_hospitality_cao_applies ??
-      object?.event_hospitality_cao_applies ??
-      null,
+    works_event_or_hospitality_security: worksEventOrHospitalitySecurity,
+    event_hospitality_cao_applies: eventHospitalityCaoApplies,
     customer_billable: input.customer_billable ??
       task?.customer_billable ??
       object?.default_customer_billable ??
@@ -310,6 +448,16 @@ function getCaoRuleRegistrySnapshot(caoConfig) {
     source_coverage_passed: snapshot?.source_coverage?.passed ?? null,
     missing_rule_ids_truncated: snapshot?.missing_rule_ids_truncated ?? false
   };
+}
+
+function configMatchesRequestedCaoKey(config, requestedCaoKey) {
+  if (!requestedCaoKey) return true;
+  return config?.cao_key === requestedCaoKey;
+}
+
+function assignmentMatchesConfigCaoKey(assignment, config) {
+  if (!assignment?.cao_key) return true;
+  return config?.cao_key === assignment.cao_key;
 }
 
 function evaluateInternshipServiceConstraints(contract, serviceContext) {
@@ -462,11 +610,23 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
     companyAssignment?.default_cao_configuration_id ||
     company?.default_cao_configuration_id ||
     null;
+  const expectedExplicitCaoKey = requestedCaoKey ||
+    contract?.cao_key ||
+    companyAssignment?.cao_key ||
+    null;
 
   if (explicitId) {
     try {
       const config = await base44.asServiceRole.entities.CAOConfiguration.get(explicitId);
       if (config && isWithinDateRange(config, serviceDate, 'valid_from', 'valid_until')) {
+        if (!configMatchesRequestedCaoKey(config, expectedExplicitCaoKey)) {
+          return {
+            config: null,
+            source: 'explicit_id_cao_key_mismatch',
+            candidate_configuration_ids: [config.id].filter(Boolean),
+            warning: `CAO-configuratie ${explicitId} hoort bij ${config.cao_key || 'cao_key onbekend'}, maar de contract-/dienstcontext vraagt ${expectedExplicitCaoKey}.`
+          };
+        }
         return { config, source: contract?.cao_configuration_id ? 'contract' : companyAssignment?.default_cao_configuration_id ? 'personnel_company_assignment' : 'company_default' };
       }
       return {
@@ -513,8 +673,15 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
       }
     }));
 
-    const validLinks = resolvedCompanyCaos
-      .filter(item => item.config && isWithinDateRange(item.config, serviceDate, 'valid_from', 'valid_until'))
+    const dateValidLinks = resolvedCompanyCaos
+      .filter(item => item.config && isWithinDateRange(item.config, serviceDate, 'valid_from', 'valid_until'));
+    const assignmentConfigMismatches = dateValidLinks
+      .filter(item => !assignmentMatchesConfigCaoKey(item.assignment, item.config));
+    const caoKeyMismatches = dateValidLinks
+      .filter(item => !configMatchesRequestedCaoKey(item.config, requestedCaoKey));
+    const validLinks = dateValidLinks
+      .filter(item => configMatchesRequestedCaoKey(item.config, requestedCaoKey))
+      .filter(item => assignmentMatchesConfigCaoKey(item.assignment, item.config))
       .sort((a, b) => {
         if (a.assignment.is_primary && !b.assignment.is_primary) return -1;
         if (!a.assignment.is_primary && b.assignment.is_primary) return 1;
@@ -522,6 +689,28 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
         if (assignmentDateCompare !== 0) return assignmentDateCompare;
         return String(b.config.valid_from || '').localeCompare(String(a.config.valid_from || ''));
       });
+
+    if (requestedCaoKey && dateValidLinks.length > 0 && validLinks.length === 0) {
+      return {
+        config: null,
+        source: 'company_cao_assignment_cao_key_mismatch',
+        cao_key: requestedCaoKey,
+        candidate_company_cao_assignment_ids: matchingCompanyCaoAssignments.map(assignment => assignment.id).filter(Boolean),
+        candidate_configuration_ids: dateValidLinks.map(item => item.config.id).filter(Boolean),
+        mismatching_cao_keys: [...new Set(caoKeyMismatches.map(item => item.config.cao_key || 'unknown'))],
+        warning: `Actieve bedrijfs-CAO-koppelingen matchen de dienstactiviteit, maar geen gekoppelde CAO-configuratie hoort bij cao_key ${requestedCaoKey}.`
+      };
+    }
+
+    if (assignmentConfigMismatches.length > 0 && validLinks.length === 0) {
+      return {
+        config: null,
+        source: 'company_cao_assignment_config_cao_key_mismatch',
+        candidate_company_cao_assignment_ids: assignmentConfigMismatches.map(item => item.assignment.id).filter(Boolean),
+        candidate_configuration_ids: assignmentConfigMismatches.map(item => item.config.id).filter(Boolean),
+        warning: 'Een of meer bedrijfs-CAO-koppelingen hebben een cao_key die niet overeenkomt met de gekoppelde CAO-configuratie.'
+      };
+    }
 
     if (validLinks.length > 1) {
       return {
@@ -535,7 +724,10 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
 
     if (validLinks.length === 1) {
       const invalidLinks = resolvedCompanyCaos.filter(item =>
-        !item.config || !isWithinDateRange(item.config, serviceDate, 'valid_from', 'valid_until')
+        !item.config ||
+        !isWithinDateRange(item.config, serviceDate, 'valid_from', 'valid_until') ||
+        !configMatchesRequestedCaoKey(item.config, requestedCaoKey) ||
+        !assignmentMatchesConfigCaoKey(item.assignment, item.config)
       );
       if (invalidLinks.length > 0) {
         return {
@@ -621,6 +813,13 @@ Deno.serve(async (req) => {
     const warnings = [];
     const manualReviewReasons = [];
     const blockingReasons = [];
+
+    if (serviceContext.cao_key_resolution_warning) {
+      warnings.push(serviceContext.cao_key_resolution_warning);
+    }
+    if (serviceContext.cao_key_manual_review_required) {
+      manualReviewReasons.push('Dienstcontext wijst op een mogelijke andere CAO, maar cao_key is niet definitief vastgesteld. Kies expliciet de juiste CAO voordat planning/payroll definitief mag zijn.');
+    }
 
     const hasServiceFunctionContext = !!(
       serviceContext.function_type ||
@@ -787,6 +986,15 @@ Deno.serve(async (req) => {
     if (caoResolution.config && !caoPayrollReadiness.ready) {
       manualReviewReasons.push(`CAO-configuratie is niet payroll-ready (${caoPayrollReadiness.status}).`);
     }
+    const resolvedCaoKey = caoResolution.config?.cao_key ||
+      serviceContext.cao_key ||
+      selectedContract?.cao_key ||
+      personnel.cao ||
+      null;
+    const caoRuntimeSupport = getContractResolutionRuntimeSupport(resolvedCaoKey);
+    if (!caoRuntimeSupport.supported) {
+      manualReviewReasons.push(caoRuntimeSupport.message);
+    }
 
     let caoApplicability = null;
     if (selectedContract && (caoResolution.config?.cao_key || selectedContract?.cao_key || 'cao_particuliere_beveiliging') === 'cao_particuliere_beveiliging') {
@@ -896,7 +1104,7 @@ Deno.serve(async (req) => {
         function_match: item.function_match
       })),
       cao_configuration_id: caoResolution.config?.id || null,
-      cao_key: caoResolution.config?.cao_key || selectedContract?.cao_key || personnel.cao || null,
+      cao_key: caoResolution.config?.cao_key || serviceContext.cao_key || selectedContract?.cao_key || personnel.cao || null,
       cao_resolution_source: caoResolution.source,
       cao_resolution_candidate_configuration_ids: caoResolution.candidate_configuration_ids || [],
       cao_resolution_candidate_company_cao_assignment_ids: caoResolution.candidate_company_cao_assignment_ids || [],
@@ -904,7 +1112,8 @@ Deno.serve(async (req) => {
       cao_valid_from: caoResolution.config?.valid_from || null,
       cao_valid_until: caoResolution.config?.valid_until || null,
       cao_payroll_readiness: caoPayrollReadiness,
-      cao_rule_registry_snapshot: caoRuleRegistrySnapshot
+      cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+      cao_runtime_support: caoRuntimeSupport
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

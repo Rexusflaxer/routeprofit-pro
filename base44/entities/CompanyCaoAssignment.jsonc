@@ -10,6 +10,13 @@
       "type": "string",
       "description": "ID van de CAO-configuratie"
     },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Expliciete CAO sleutel voor deze bedrijfs-CAO-koppeling, bijv. cao_particuliere_beveiliging, cao_evenementen_horecabeveiliging, cao_verkeersregelaars of cao_veiligheidsdomein. Moet overeenkomen met de gekoppelde CAOConfiguration."
+    },
     "is_primary": {
       "type": "boolean",
       "default": false
@@ -21,7 +28,8 @@
       ],
       "items": {
         "type": "string"
-      }
+      },
+      "description": "Activiteiten/diensttokens waarop deze CAO-koppeling geldt. Voorbeelden: all, surveillant, objectbeveiliger_receptionist, event_hospitality_security, cao_evenementen_horecabeveiliging, verkeersregelaar, cao_verkeersregelaars, cash_value_logistics."
     },
     "valid_from": {
       "type": [
