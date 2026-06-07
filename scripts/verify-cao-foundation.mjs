@@ -1914,6 +1914,30 @@ function runCaoStaticGovernanceScenarios() {
   );
 
   const functionFiles = listFilesRecursive(path.join(repoRoot, 'base44/functions'), ['.ts']);
+  const customerRuntimeDefaultPbFallbacks = [];
+  const ownerInternalCaoFunctions = new Set([
+    'approveCaoConfiguration',
+    'checkCaoSources',
+    'extractCaoParameters',
+    'ingestCaoAutomationPayload',
+    'syncCaoFromCloudflare',
+    'auditCaoRuleCoverage',
+    'queueCaoPayrollCorrections'
+  ]);
+  for (const file of functionFiles) {
+    const functionName = path.basename(path.dirname(file));
+    if (ownerInternalCaoFunctions.has(functionName)) continue;
+    const source = fs.readFileSync(file, 'utf8');
+    if (/body\.cao_key\s*(\|\||\?\?)\s*CAO_PB_KEY/.test(source)) {
+      customerRuntimeDefaultPbFallbacks.push(relativeRepoPath(file));
+    }
+  }
+  assert.deepEqual(
+    customerRuntimeDefaultPbFallbacks,
+    [],
+    'Customer/runtime functions must not default body.cao_key to CAO PB; missing cao_key must fail closed'
+  );
+
   const syncInvokeWithoutSecret = [];
   for (const file of functionFiles) {
     const source = fs.readFileSync(file, 'utf8');

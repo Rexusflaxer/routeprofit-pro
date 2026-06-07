@@ -30,6 +30,7 @@ const reimbursements = loadFunctionModule('base44/functions/calculateCaoReimburs
 const leaveSickness = loadFunctionModule('base44/functions/calculateCaoLeaveAndSickness/entry.ts');
 const yearEndBonus = loadFunctionModule('base44/functions/calculateCaoYearEndBonus/entry.ts');
 const policyReferenceContext = loadFunctionModule('base44/functions/resolveCaoPolicyReferenceContext/entry.ts');
+const governanceCompliancePolicy = loadFunctionModule('base44/functions/resolveCaoGovernanceCompliancePolicy/entry.ts');
 const planningAssignment = loadFunctionModule('base44/functions/resolveCaoPlanningAssignmentDecision/entry.ts');
 
 const expectedKnownKeys = [
@@ -105,7 +106,8 @@ const payrollRuntimeModules = [
   ['calculateCaoReimbursements', reimbursements],
   ['calculateCaoLeaveAndSickness', leaveSickness],
   ['calculateCaoYearEndBonus', yearEndBonus],
-  ['resolveCaoPolicyReferenceContext', policyReferenceContext]
+  ['resolveCaoPolicyReferenceContext', policyReferenceContext],
+  ['resolveCaoGovernanceCompliancePolicy', governanceCompliancePolicy]
 ];
 
 for (const [functionName, module] of payrollRuntimeModules) {

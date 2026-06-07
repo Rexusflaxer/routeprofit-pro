@@ -1,6 +1,24 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
 const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const SUPPORTED_GOVERNANCE_POLICY_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+
+function getCaoRuntimeSupport(caoKey, functionName) {
+  const key = caoKey || null;
+  const supported = SUPPORTED_GOVERNANCE_POLICY_RUNTIME_CAO_KEYS.includes(key);
+  return {
+    supported,
+    status: supported ? 'supported' : key ? 'blocked_unsupported_cao_runtime' : 'blocked_missing_cao_key',
+    cao_key: key,
+    function_name: functionName,
+    supported_cao_keys: SUPPORTED_GOVERNANCE_POLICY_RUNTIME_CAO_KEYS,
+    message: supported
+      ? `Runtime ${functionName} ondersteunt CAO ${key}.`
+      : key
+      ? `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Governance-policy is geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+      : `Runtime ${functionName} mist cao_key. Governance-policy is geblokkeerd zodat geen PB-default wordt toegepast.`
+  };
+}
 
 function numberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
@@ -555,13 +573,17 @@ Deno.serve(async (req) => {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const caoKey = body.cao_key || CAO_PB_KEY;
-    if (caoKey !== CAO_PB_KEY) {
+    const caoKey = body.cao_key || null;
+    const runtimeSupport = getCaoRuntimeSupport(caoKey, 'resolveCaoGovernanceCompliancePolicy');
+    if (!runtimeSupport.supported) {
       return Response.json({
         success: false,
-        error: `resolveCaoGovernanceCompliancePolicy ondersteunt ${caoKey} nog niet.`,
-        supported_cao_keys: [CAO_PB_KEY]
-      }, { status: 400 });
+        error: runtimeSupport.message,
+        cao_key: caoKey,
+        cao_runtime_support: runtimeSupport,
+        supported_cao_keys: runtimeSupport.supported_cao_keys,
+        manual_review_required: true
+      }, { status: caoKey ? 400 : 422 });
     }
 
     const policies = {
