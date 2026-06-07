@@ -173,6 +173,10 @@ function booleanOrNull(value) {
   return null;
 }
 
+function asIsoDate(value) {
+  return value ? String(value).slice(0, 10) : null;
+}
+
 function numberOrNull(value) {
   if (value === null || value === undefined || value === '') return null;
   const number = Number(value);
@@ -210,6 +214,96 @@ function serviceRequiresSecurityScope(serviceContext) {
     SECURITY_ROLE_STATUSES.includes(securityRoleStatus) ||
     SECURITY_FUNCTION_GROUPS.includes(caoFunctionGroup) ||
     SECURITY_FUNCTION_TYPES.includes(functionType);
+}
+
+function contractOrPersonnelRequiresWpbr(contract, personnel, serviceContext) {
+  return serviceRequiresSecurityScope(serviceContext) ||
+    contract?.wpbr_required === true ||
+    personnel?.wpbr_required === true ||
+    SECURITY_ROLE_STATUSES.includes(normalizeToken(contract?.security_role_status)) ||
+    normalizeArray(contract?.allowed_security_role_statuses).map(normalizeToken).some(value => SECURITY_ROLE_STATUSES.includes(value));
+}
+
+function pickFirst(...values) {
+  for (const value of values) {
+    if (value !== undefined && value !== null && value !== '') return value;
+  }
+  return null;
+}
+
+function evaluateWpbrPermissionForService(contract, personnel, serviceContext) {
+  const sourceRuleIds = ['CAO-PB-2024-R0312'];
+  const serviceDate = asIsoDate(serviceContext?.service_date || todayIsoDate());
+  const required = contractOrPersonnelRequiresWpbr(contract, personnel, serviceContext);
+  const status = pickFirst(contract?.wpbr_status, personnel?.wpbr_status, null);
+  const validFrom = asIsoDate(pickFirst(contract?.wpbr_permission_valid_from, personnel?.wpbr_permission_valid_from, null));
+  const validUntil = asIsoDate(pickFirst(contract?.wpbr_permission_valid_until, personnel?.wpbr_permission_valid_until, null));
+  const permissionNumber = pickFirst(contract?.wpbr_permission_number, personnel?.wpbr_permission_number, null);
+  const authority = pickFirst(contract?.wpbr_authority, personnel?.wpbr_authority, null);
+  const blockingReasons = [];
+  const manualReviewReasons = [];
+  const warnings = [];
+
+  if (!required) {
+    return {
+      required: false,
+      status: 'not_required',
+      wpbr_status: status || 'not_required',
+      service_date: serviceDate,
+      source_rule_ids: [],
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      warnings,
+      planning_allowed: true,
+      payroll_final_allowed: true
+    };
+  }
+
+  if (!status) {
+    manualReviewReasons.push('CAO artikel 9 lid 1d: beveiligingsdienst vereist overheidstoestemming/WPBR, maar status ontbreekt.');
+  } else if (status !== 'approved') {
+    blockingReasons.push(`CAO artikel 9 lid 1d: beveiligingsdienst vereist goedgekeurde overheidstoestemming/WPBR; huidige status is ${status}.`);
+  }
+  if (!permissionNumber) {
+    manualReviewReasons.push('CAO artikel 9 lid 1d: bewijsnummer van overheidstoestemming/WPBR ontbreekt.');
+  }
+  if (!authority) {
+    manualReviewReasons.push('CAO artikel 9 lid 1d: bevoegde instantie voor overheidstoestemming/WPBR ontbreekt.');
+  }
+  if (!validFrom) {
+    manualReviewReasons.push('CAO artikel 9 lid 1d: geldigheid vanaf-datum van overheidstoestemming/WPBR ontbreekt.');
+  }
+  if (!validUntil) {
+    manualReviewReasons.push('CAO artikel 9 lid 1d: geldigheid tot-datum van overheidstoestemming/WPBR ontbreekt.');
+  }
+  if (validFrom && serviceDate && validFrom > serviceDate) {
+    blockingReasons.push(`CAO artikel 9 lid 1d: WPBR/toestemming is pas geldig vanaf ${validFrom}, maar dienstdatum is ${serviceDate}.`);
+  }
+  if (validUntil && serviceDate && validUntil < serviceDate) {
+    blockingReasons.push(`CAO artikel 9 lid 1d: WPBR/toestemming is verlopen op ${validUntil}, maar dienstdatum is ${serviceDate}.`);
+  }
+  if (validUntil && serviceDate && validUntil >= serviceDate) {
+    warnings.push(`WPBR/toestemming is geldig tot ${validUntil}; planning na deze datum moet blokkeren tot hernieuwde toestemming is vastgelegd.`);
+  }
+
+  const hasBlocking = blockingReasons.length > 0;
+  const manualReviewRequired = manualReviewReasons.length > 0;
+  return {
+    required: true,
+    status: hasBlocking ? 'blocked' : manualReviewRequired ? 'manual_review_required' : 'compliant',
+    wpbr_status: status,
+    wpbr_authority: authority,
+    wpbr_permission_number_present: !!permissionNumber,
+    wpbr_permission_valid_from: validFrom,
+    wpbr_permission_valid_until: validUntil,
+    service_date: serviceDate,
+    source_rule_ids: sourceRuleIds,
+    blocking_reasons: blockingReasons,
+    manual_review_reasons: manualReviewReasons,
+    warnings,
+    planning_allowed: !hasBlocking && !manualReviewRequired,
+    payroll_final_allowed: !hasBlocking && !manualReviewRequired
+  };
 }
 
 function getContractResolutionRuntimeSupport(caoKey) {
@@ -1322,10 +1416,12 @@ Deno.serve(async (req) => {
     const evaluatedContracts = contractCandidates.map(contract => {
       const functionMatch = evaluateFunctionMatch(contract, serviceContext);
       const securityScopeMatch = evaluateSecurityScopeMatch(contract, serviceContext);
+      const wpbrPermission = evaluateWpbrPermissionForService(contract, personnel, serviceContext);
       return {
         contract,
         function_match: functionMatch,
         security_scope_match: securityScopeMatch,
+        wpbr_permission_check: wpbrPermission,
         matched: functionMatch.matched && securityScopeMatch.matched
       };
     });
@@ -1401,6 +1497,12 @@ Deno.serve(async (req) => {
       blockingReasons.push(...hiredWorkerServiceCheck.blocking_reasons);
       manualReviewReasons.push(...hiredWorkerServiceCheck.manual_review_reasons);
       warnings.push(...hiredWorkerServiceCheck.warnings);
+    }
+    const wpbrPermissionCheck = selectedItem?.wpbr_permission_check || null;
+    if (wpbrPermissionCheck) {
+      blockingReasons.push(...wpbrPermissionCheck.blocking_reasons);
+      manualReviewReasons.push(...wpbrPermissionCheck.manual_review_reasons);
+      warnings.push(...wpbrPermissionCheck.warnings);
     }
 
     let company = null;
@@ -1524,6 +1626,11 @@ Deno.serve(async (req) => {
         allowed_security_role_statuses: selectedContract.allowed_security_role_statuses || [],
         performs_security_work: selectedContract.performs_security_work ?? null,
         security_work_percentage: selectedContract.security_work_percentage ?? null,
+        wpbr_required: wpbrPermissionCheck?.required ?? false,
+        wpbr_status: wpbrPermissionCheck?.wpbr_status || selectedContract.wpbr_status || personnel.wpbr_status || null,
+        wpbr_permission_valid_from: wpbrPermissionCheck?.wpbr_permission_valid_from || selectedContract.wpbr_permission_valid_from || personnel.wpbr_permission_valid_from || null,
+        wpbr_permission_valid_until: wpbrPermissionCheck?.wpbr_permission_valid_until || selectedContract.wpbr_permission_valid_until || personnel.wpbr_permission_valid_until || null,
+        wpbr_permission_check_status: wpbrPermissionCheck?.status || null,
         cao_scope_profile: selectedContract.cao_scope_profile || null,
         cao_function_group: selectedContract.cao_function_group || null,
         allowed_cao_function_groups: selectedContract.allowed_cao_function_groups || [],
@@ -1551,6 +1658,7 @@ Deno.serve(async (req) => {
       service_context_readiness: serviceContextReadiness,
       internship_service_check: internshipServiceCheck,
       hired_worker_service_check: hiredWorkerServiceCheck,
+      wpbr_permission_check: wpbrPermissionCheck,
       selected_contract_readiness: selectedContractReadiness,
       cao_applicability: caoApplicability,
       function_match: selectedItem?.function_match || null,
@@ -1573,6 +1681,8 @@ Deno.serve(async (req) => {
         allowed_security_role_statuses: item.contract.allowed_security_role_statuses || [],
         performs_security_work: item.contract.performs_security_work ?? null,
         security_work_percentage: item.contract.security_work_percentage ?? null,
+        wpbr_required: item.wpbr_permission_check?.required ?? false,
+        wpbr_permission_check_status: item.wpbr_permission_check?.status || null,
         cao_scope_profile: item.contract.cao_scope_profile || null,
         stored_contract_readiness: evaluateStoredContractReadiness(item.contract),
         function_match: item.function_match,

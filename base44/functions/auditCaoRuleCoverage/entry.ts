@@ -261,7 +261,7 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'applyCaoContractRules.contract_clauses_and_termination_article_9': {
     functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'validateCaoScheduleRules', 'calculatePersonnelCosts', 'queueCaoPayrollCorrections'],
     rule_ids: [
-      ...ruleIds(236, 311),
+      ...ruleIds(236, 311, 312),
       ...ruleRange(323, 335)
     ]
   },

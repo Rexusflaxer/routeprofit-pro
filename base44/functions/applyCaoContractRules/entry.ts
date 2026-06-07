@@ -1080,6 +1080,168 @@ function addConfirmedEvidence(target, input, field, ruleId, message) {
   addMissingEvidence(target, booleanOrNull(input[field]) === true, ruleId, message, field);
 }
 
+function evaluateWpbrPermissionForContract(input, { isSecurityWorker, isScopeUnknown }) {
+  const sourceRuleId = 'CAO-PB-2024-R0312';
+  const warnings = [];
+  const violations = [];
+  const missingEvidence = [];
+  const contractStartDate = asIsoDate(input.contract_start_date);
+  const contractEndDate = asIsoDate(input.contract_end_date);
+  const wpbrRequired = isSecurityWorker || booleanOrNull(input.wpbr_required) === true;
+  const wpbrStatus = input.wpbr_status || null;
+  const validFrom = asIsoDate(input.wpbr_permission_valid_from);
+  const validUntil = asIsoDate(input.wpbr_permission_valid_until);
+  const permissionNumber = input.wpbr_permission_number || null;
+  const authority = input.wpbr_authority || null;
+
+  if (!wpbrRequired) {
+    if (isScopeUnknown && wpbrStatus && wpbrStatus !== 'not_required') {
+      missingEvidence.push({
+        rule_id: sourceRuleId,
+        field: 'cao_scope_profile',
+        message: 'WPBR/toestemming is aanwezig, maar contractscope is onzeker. Bevestig of dit beveiligingswerk is voordat artikel 9 lid 1d automatisch wordt toegepast.'
+      });
+    }
+    return {
+      status: missingEvidence.length > 0 ? 'manual_review_required' : 'not_applicable',
+      compliant: missingEvidence.length === 0,
+      wpbr_required: false,
+      wpbr_status: wpbrStatus || 'not_required',
+      wpbr_permission_valid_from: validFrom,
+      wpbr_permission_valid_until: validUntil,
+      warnings,
+      missing_evidence: missingEvidence,
+      contract_rule_violations: violations,
+      manual_review_required: missingEvidence.length > 0,
+      source_rule_ids: missingEvidence.length > 0 ? [sourceRuleId] : [],
+      recommended_contract_update: {
+        wpbr_required: false,
+        wpbr_status: wpbrStatus || 'not_required',
+        wpbr_authority: authority,
+        wpbr_permission_number: permissionNumber,
+        wpbr_permission_valid_from: validFrom,
+        wpbr_permission_valid_until: validUntil,
+        wpbr_permission_rule_status: missingEvidence.length > 0 ? 'manual_review_required' : 'not_applicable',
+        wpbr_permission_manual_review_required: missingEvidence.length > 0
+      }
+    };
+  }
+
+  if (!wpbrStatus) {
+    missingEvidence.push({
+      rule_id: sourceRuleId,
+      field: 'wpbr_status',
+      message: 'Beveiligingscontract mist status van de overheidstoestemming/WPBR.'
+    });
+  } else if (wpbrStatus !== 'approved') {
+    violations.push({
+      rule_id: sourceRuleId,
+      severity: 'high',
+      field: 'wpbr_status',
+      message: `Beveiligingscontract vereist overheidstoestemming/WPBR, maar status is ${wpbrStatus}. Werknemer mag niet definitief voor beveiligingswerk worden gepland of verloond.`,
+      wpbr_status: wpbrStatus
+    });
+  }
+
+  if (wpbrStatus === 'approved') {
+    if (!permissionNumber) {
+      missingEvidence.push({
+        rule_id: sourceRuleId,
+        field: 'wpbr_permission_number',
+        message: 'WPBR/toestemming is goedgekeurd, maar bewijsnummer ontbreekt.'
+      });
+    }
+    if (!authority) {
+      missingEvidence.push({
+        rule_id: sourceRuleId,
+        field: 'wpbr_authority',
+        message: 'WPBR/toestemming is goedgekeurd, maar bevoegde instantie ontbreekt.'
+      });
+    }
+    if (!validFrom) {
+      missingEvidence.push({
+        rule_id: sourceRuleId,
+        field: 'wpbr_permission_valid_from',
+        message: 'WPBR/toestemming is goedgekeurd, maar geldigheid vanaf-datum ontbreekt.'
+      });
+    }
+    if (!validUntil) {
+      missingEvidence.push({
+        rule_id: sourceRuleId,
+        field: 'wpbr_permission_valid_until',
+        message: 'WPBR/toestemming is goedgekeurd, maar geldigheid tot-datum ontbreekt. Datumvaste planning/payroll kan dit niet audit-proof controleren.'
+      });
+    }
+    if (contractStartDate && validFrom && contractStartDate < validFrom) {
+      violations.push({
+        rule_id: sourceRuleId,
+        severity: 'high',
+        field: 'wpbr_permission_valid_from',
+        message: `Contract start op ${contractStartDate}, maar WPBR/toestemming is pas geldig vanaf ${validFrom}.`,
+        contract_start_date: contractStartDate,
+        wpbr_permission_valid_from: validFrom
+      });
+    }
+    if (contractStartDate && validUntil && contractStartDate > validUntil) {
+      violations.push({
+        rule_id: sourceRuleId,
+        severity: 'high',
+        field: 'wpbr_permission_valid_until',
+        message: `Contract start op ${contractStartDate}, maar WPBR/toestemming is verlopen op ${validUntil}.`,
+        contract_start_date: contractStartDate,
+        wpbr_permission_valid_until: validUntil
+      });
+    }
+    if (contractEndDate && validUntil && contractEndDate > validUntil) {
+      violations.push({
+        rule_id: sourceRuleId,
+        severity: 'high',
+        field: 'wpbr_permission_valid_until',
+        message: `Contract loopt tot ${contractEndDate}, maar WPBR/toestemming verloopt op ${validUntil}. Contract mag niet over de toestemmingsdatum heen final-ready zijn.`,
+        contract_end_date: contractEndDate,
+        wpbr_permission_valid_until: validUntil
+      });
+    }
+    if (!contractEndDate && validUntil) {
+      warnings.push(`WPBR/toestemming verloopt op ${validUntil}; planning/payroll moet per dienst na die datum blokkeren of hernieuwde toestemming eisen.`);
+    }
+  }
+
+  const hasBlockingViolation = violations.some(v => ['high', 'critical'].includes(v.severity));
+  const manualReviewRequired = missingEvidence.length > 0;
+  const status = hasBlockingViolation
+    ? 'blocked'
+    : manualReviewRequired
+    ? 'manual_review_required'
+    : 'compliant';
+
+  return {
+    status,
+    compliant: !hasBlockingViolation && !manualReviewRequired,
+    wpbr_required: true,
+    wpbr_status: wpbrStatus,
+    wpbr_authority: authority,
+    wpbr_permission_number: permissionNumber,
+    wpbr_permission_valid_from: validFrom,
+    wpbr_permission_valid_until: validUntil,
+    warnings,
+    missing_evidence: missingEvidence,
+    contract_rule_violations: violations,
+    manual_review_required: manualReviewRequired,
+    source_rule_ids: [sourceRuleId],
+    recommended_contract_update: {
+      wpbr_required: true,
+      wpbr_status: wpbrStatus,
+      wpbr_authority: authority,
+      wpbr_permission_number: permissionNumber,
+      wpbr_permission_valid_from: validFrom,
+      wpbr_permission_valid_until: validUntil,
+      wpbr_permission_rule_status: status,
+      wpbr_permission_manual_review_required: manualReviewRequired
+    }
+  };
+}
+
 function pickFirst(...values) {
   for (const value of values) {
     if (value !== undefined && value !== null && value !== '') return value;
@@ -3219,6 +3381,11 @@ function evaluateContractClauseRules(input, caoScope) {
   const writtenContractConfirmed = booleanOrNull(input.written_contract_model_terms_confirmed);
   const nonCompetePresent = booleanOrNull(input.non_compete_clause_present ?? input.has_non_compete_clause);
   const nonCompeteAbsentConfirmed = booleanOrNull(input.non_compete_clause_absent_confirmed);
+  const wpbrPermission = evaluateWpbrPermissionForContract(input, { isSecurityWorker, isScopeUnknown });
+  sourceRuleIds.push(...(wpbrPermission.source_rule_ids || []));
+  warnings.push(...(wpbrPermission.warnings || []));
+  violations.push(...(wpbrPermission.contract_rule_violations || []));
+  missingEvidence.push(...(wpbrPermission.missing_evidence || []));
 
   if (writtenContractConfirmed !== true) {
     missingEvidence.push({
@@ -3261,16 +3428,18 @@ function evaluateContractClauseRules(input, caoScope) {
       ? 'manual_review_required'
       : 'compliant',
     contract_clause_compliant: !hasBlockingViolation && !manualReviewRequired,
-    source_rule_ids: sourceRuleIds,
+    source_rule_ids: [...new Set(sourceRuleIds)],
     warnings,
     missing_evidence: missingEvidence,
     contract_rule_violations: violations,
     payroll_entitlements: [],
     manual_review_required: manualReviewRequired,
+    wpbr_permission: wpbrPermission,
     recommended_contract_update: {
       written_contract_model_terms_confirmed: writtenContractConfirmed === true,
       non_compete_clause_absent_confirmed: isSecurityWorker ? nonCompetePresent === false || nonCompeteAbsentConfirmed === true : nonCompeteAbsentConfirmed === true,
-      non_compete_clause_present: nonCompetePresent === true
+      non_compete_clause_present: nonCompetePresent === true,
+      ...(wpbrPermission.recommended_contract_update || {})
     }
   };
 }
@@ -3633,6 +3802,7 @@ function buildFullContractRuleResult(input, caoScope) {
     contract_clauses: {
       contract_clause_status: contractClauses.contract_clause_status,
       contract_clause_compliant: contractClauses.contract_clause_compliant,
+      wpbr_permission: contractClauses.wpbr_permission || null,
       missing_evidence: contractClauses.missing_evidence || []
     },
     contract_termination: {
@@ -3739,6 +3909,12 @@ function buildContractRuleInput(body, personnel, contract) {
     non_compete_clause_present: pickFirst(body.non_compete_clause_present, body.has_non_compete_clause, contract?.non_compete_clause_present, null),
     has_non_compete_clause: pickFirst(body.has_non_compete_clause, null),
     non_compete_clause_absent_confirmed: pickFirst(body.non_compete_clause_absent_confirmed, contract?.non_compete_clause_absent_confirmed, null),
+    wpbr_required: pickFirst(body.wpbr_required, contract?.wpbr_required, personnel?.wpbr_required, null),
+    wpbr_status: pickFirst(body.wpbr_status, contract?.wpbr_status, personnel?.wpbr_status, null),
+    wpbr_authority: pickFirst(body.wpbr_authority, contract?.wpbr_authority, personnel?.wpbr_authority, null),
+    wpbr_permission_number: pickFirst(body.wpbr_permission_number, contract?.wpbr_permission_number, personnel?.wpbr_permission_number, null),
+    wpbr_permission_valid_from: pickFirst(body.wpbr_permission_valid_from, contract?.wpbr_permission_valid_from, personnel?.wpbr_permission_valid_from, null),
+    wpbr_permission_valid_until: pickFirst(body.wpbr_permission_valid_until, contract?.wpbr_permission_valid_until, personnel?.wpbr_permission_valid_until, null),
     fixed_term_end_notice_sent_at: pickFirst(body.fixed_term_end_notice_sent_at, body.end_of_fixed_term_notice_sent_at, contract?.fixed_term_end_notice_sent_at, null),
     end_of_fixed_term_notice_sent_at: pickFirst(body.end_of_fixed_term_notice_sent_at, null),
     fixed_term_renewal_decision: pickFirst(body.fixed_term_renewal_decision, contract?.fixed_term_renewal_decision, null),
@@ -3965,6 +4141,14 @@ function buildContractRulePersistence(result) {
     written_contract_model_terms_confirmed: result.contract_clause_rule_result?.recommended_contract_update?.written_contract_model_terms_confirmed ?? undefined,
     non_compete_clause_absent_confirmed: result.contract_clause_rule_result?.recommended_contract_update?.non_compete_clause_absent_confirmed ?? undefined,
     non_compete_clause_present: result.contract_clause_rule_result?.recommended_contract_update?.non_compete_clause_present ?? undefined,
+    wpbr_required: result.contract_clause_rule_result?.recommended_contract_update?.wpbr_required ?? undefined,
+    wpbr_status: result.contract_clause_rule_result?.recommended_contract_update?.wpbr_status ?? undefined,
+    wpbr_authority: result.contract_clause_rule_result?.recommended_contract_update?.wpbr_authority ?? undefined,
+    wpbr_permission_number: result.contract_clause_rule_result?.recommended_contract_update?.wpbr_permission_number ?? undefined,
+    wpbr_permission_valid_from: result.contract_clause_rule_result?.recommended_contract_update?.wpbr_permission_valid_from ?? undefined,
+    wpbr_permission_valid_until: result.contract_clause_rule_result?.recommended_contract_update?.wpbr_permission_valid_until ?? undefined,
+    wpbr_permission_rule_status: result.contract_clause_rule_result?.recommended_contract_update?.wpbr_permission_rule_status ?? undefined,
+    wpbr_permission_manual_review_required: result.contract_clause_rule_result?.recommended_contract_update?.wpbr_permission_manual_review_required ?? undefined,
     contract_clause_rule_status: result.contract_clauses?.contract_clause_status ?? undefined,
     contract_clause_manual_review_required: result.contract_clauses
       ? result.contract_clauses.contract_clause_status === 'manual_review_required'

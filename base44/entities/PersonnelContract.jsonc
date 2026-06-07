@@ -364,6 +364,79 @@
       "default": false,
       "description": "Bevestigt expliciet dat geen concurrentiebeding in het beveiligerscontract staat."
     },
+    "wpbr_required": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als voor dit contract toestemming van de overheid/WPBR vereist is omdat de werknemer beveiligingswerk verricht."
+    },
+    "wpbr_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "not_required",
+        "not_started",
+        "requested",
+        "approved",
+        "rejected",
+        "expired",
+        null
+      ],
+      "description": "Status van de overheidstoestemming/WPBR voor beveiligingswerk."
+    },
+    "wpbr_authority": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "korpschef",
+        "kmar",
+        "justis",
+        "other",
+        null
+      ]
+    },
+    "wpbr_permission_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "wpbr_permission_valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "wpbr_permission_valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "wpbr_permission_rule_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Validatiestatus van CAO PB artikel 9 lid 1d overheidstoestemming/WPBR."
+    },
+    "wpbr_permission_manual_review_required": {
+      "type": "boolean",
+      "default": false
+    },
     "contract_clause_rule_status": {
       "type": [
         "string",

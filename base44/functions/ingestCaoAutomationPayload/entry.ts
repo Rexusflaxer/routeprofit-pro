@@ -493,7 +493,7 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'applyCaoContractRules.contract_clauses_and_termination_article_9': {
     functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'validateCaoScheduleRules', 'calculatePersonnelCosts', 'queueCaoPayrollCorrections'],
     rule_ids: [
-      'CAO-PB-2024-R0236', 'CAO-PB-2024-R0311',
+      'CAO-PB-2024-R0236', 'CAO-PB-2024-R0311', 'CAO-PB-2024-R0312',
       'CAO-PB-2024-R0323', 'CAO-PB-2024-R0324', 'CAO-PB-2024-R0325',
       'CAO-PB-2024-R0326', 'CAO-PB-2024-R0327', 'CAO-PB-2024-R0328',
       'CAO-PB-2024-R0329', 'CAO-PB-2024-R0330', 'CAO-PB-2024-R0331',
