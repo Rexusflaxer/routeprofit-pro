@@ -32,6 +32,18 @@ const SECURITY_FUNCTION_GROUPS = [
 const SECURITY_FUNCTION_TYPES = ['surveillant', 'centralist', 'verkeersregelaar', 'brandwacht', 'rechercheur'];
 const SECURITY_ROLE_STATUSES = ['aspirant_beveiliger', 'beveiliger', 'leidinggevende'];
 const NON_SECURITY_FUNCTION_TYPES = ['binnendienst', 'planner', 'installateur', 'host', 'other'];
+const SECURITY_FUNCTION_TEXT_KEYWORDS = [
+  'beveiliger', 'beveiliging', 'surveillant', 'security', 'objectbeveiliger',
+  'mobiel surveillant', 'winkelsurveillant', 'brandwacht', 'centralist',
+  'geldtransport', 'waardetransport', 'geld- en waardelogistiek', 'rechercheur'
+];
+const NON_SECURITY_FUNCTION_TEXT_KEYWORDS = [
+  'klantrelatie', 'klantenrelatie', 'relatiebeheer', 'accountmanager', 'sales',
+  'commercieel', 'binnendienst', 'administratie', 'administratief', 'hr',
+  'personeelszaken', 'planner', 'planning', 'roosteraar', 'boekhouding',
+  'finance', 'financieel', 'kantoor', 'backoffice', 'office', 'controller',
+  'debiteuren', 'crediteuren', 'recruiter', 'installateur'
+];
 const CONTRACT_SCOPE_FIELDS = [
   'performs_security_work',
   'security_work_percentage',
@@ -39,6 +51,13 @@ const CONTRACT_SCOPE_FIELDS = [
   'cao_function_group',
   'cao_function_level',
   'function_type',
+  'job_title_raw',
+  'function_title',
+  'free_function_title',
+  'job_title',
+  'role_title',
+  'position_title',
+  'function_name',
   'works_airport_schiphol',
   'works_cash_value_logistics',
   'works_event_or_hospitality_security',
@@ -107,6 +126,37 @@ function buildRuleSubject(personnel, contract, workContext) {
   };
 }
 
+function normalizeText(value) {
+  return String(value || '').toLowerCase();
+}
+
+function functionText(p, wc = {}) {
+  return [
+    wc.job_title_raw,
+    wc.function_title,
+    wc.free_function_title,
+    wc.job_title,
+    wc.role_title,
+    wc.position_title,
+    wc.function_name,
+    wc.function_type,
+    p.job_title_raw,
+    p.function_title,
+    p.free_function_title,
+    p.job_title,
+    p.role_title,
+    p.position_title,
+    p.function_name,
+    p.function_type,
+    p.cao_function_group,
+    p.cao_function_level
+  ].filter(hasValue).map(normalizeText).join(' ');
+}
+
+function textMatchesAny(text, keywords) {
+  return keywords.some(keyword => text.includes(keyword));
+}
+
 /**
  * Detecteer conflicten tussen velden.
  * Retourneert een array van conflictbeschrijvingen.
@@ -118,6 +168,9 @@ function detectConflicts(p, wc) {
   const group = p.cao_function_group;
   const ftype = p.function_type;
   const pct = wc.security_work_percentage !== undefined ? wc.security_work_percentage : p.security_work_percentage;
+  const text = functionText(p, wc);
+  const securityTitleSignal = textMatchesAny(text, SECURITY_FUNCTION_TEXT_KEYWORDS);
+  const nonSecurityTitleSignal = textMatchesAny(text, NON_SECURITY_FUNCTION_TEXT_KEYWORDS);
 
   // performs_security_work=false maar aspirant/beveiliger role
   if (psw === false && SECURITY_ROLE_STATUSES.includes(role)) {
@@ -127,9 +180,18 @@ function detectConflicts(p, wc) {
   if (psw === false && group && SECURITY_FUNCTION_GROUPS.includes(group)) {
     conflicts.push(`performs_security_work=false maar cao_function_group=${group}. Functiegroep bijlage 2 impliceert beveiligingswerk.`);
   }
+  if (psw === false && securityTitleSignal) {
+    conflicts.push('performs_security_work=false maar functietekst lijkt op beveiligingswerk. Controleer functietitel en scope.');
+  }
   // binnendienst/planner function_type maar security_work_percentage >= 50
-  if (NON_SECURITY_FUNCTION_TYPES.includes(ftype) && typeof pct === 'number' && pct >= 50) {
-    conflicts.push(`function_type=${ftype} (niet-beveiliging) maar security_work_percentage=${pct}%. Percentage impliceert beveiligingswerk.`);
+  if ((NON_SECURITY_FUNCTION_TYPES.includes(ftype) || nonSecurityTitleSignal) && typeof pct === 'number' && pct >= 50) {
+    conflicts.push(`Niet-beveiligingsfunctie herkend maar security_work_percentage=${pct}%. Percentage impliceert beveiligingswerk.`);
+  }
+  if (NON_SECURITY_FUNCTION_TYPES.includes(ftype) && securityTitleSignal) {
+    conflicts.push(`function_type=${ftype} lijkt niet-beveiliging, maar functietekst lijkt op beveiligingswerk.`);
+  }
+  if (SECURITY_FUNCTION_TYPES.includes(ftype) && nonSecurityTitleSignal && !securityTitleSignal) {
+    conflicts.push(`function_type=${ftype} lijkt beveiliging, maar functietekst lijkt op niet-beveiligingswerk.`);
   }
   // non_security_staff maar security role status
   if (group === 'non_security_staff' && SECURITY_ROLE_STATUSES.includes(role)) {
@@ -138,6 +200,9 @@ function detectConflicts(p, wc) {
   // performs_security_work=true maar non_security_staff group
   if (psw === true && group === 'non_security_staff') {
     conflicts.push(`performs_security_work=true maar cao_function_group=non_security_staff. Tegenstrijdig.`);
+  }
+  if (psw === true && nonSecurityTitleSignal && !securityTitleSignal) {
+    conflicts.push('performs_security_work=true maar functietekst lijkt op niet-beveiligingswerk. Controleer of deze medewerker normaal beveiligingswerk doet.');
   }
   return conflicts;
 }
@@ -162,6 +227,9 @@ function determinePerformsSecurityWork(p, wc) {
   const role = p.security_role_status;
   const group = p.cao_function_group;
   const ftype = p.function_type;
+  const text = functionText(p, wc);
+  const securityTitleSignal = textMatchesAny(text, SECURITY_FUNCTION_TEXT_KEYWORDS);
+  const nonSecurityTitleSignal = textMatchesAny(text, NON_SECURITY_FUNCTION_TEXT_KEYWORDS);
 
   // 1. Expliciete override
   if (psw === true) return true;
@@ -174,9 +242,11 @@ function determinePerformsSecurityWork(p, wc) {
   if (group === 'non_security_staff') return false;
 
   // 4. Non-security function_type zonder security-signalen
-  if (NON_SECURITY_FUNCTION_TYPES.includes(ftype)) {
+  if (NON_SECURITY_FUNCTION_TYPES.includes(ftype) || nonSecurityTitleSignal) {
     const hasSecuritySignal = SECURITY_ROLE_STATUSES.includes(role) ||
       (group && SECURITY_FUNCTION_GROUPS.includes(group)) ||
+      SECURITY_FUNCTION_TYPES.includes(ftype) ||
+      securityTitleSignal ||
       (typeof pct === 'number' && pct > 0);
     if (!hasSecuritySignal) return false;
     // function_type is non-security maar er zijn security-signalen → mixed
@@ -185,7 +255,7 @@ function determinePerformsSecurityWork(p, wc) {
 
   // 5. Percentage >= 50 met security signaal → true
   if (typeof pct === 'number' && pct >= 50) {
-    if (SECURITY_FUNCTION_TYPES.includes(ftype) || (group && SECURITY_FUNCTION_GROUPS.includes(group)) || SECURITY_ROLE_STATUSES.includes(role)) {
+    if (SECURITY_FUNCTION_TYPES.includes(ftype) || (group && SECURITY_FUNCTION_GROUPS.includes(group)) || SECURITY_ROLE_STATUSES.includes(role) || securityTitleSignal) {
       return true;
     }
   }
@@ -200,6 +270,7 @@ function determinePerformsSecurityWork(p, wc) {
   if (role === 'not_applicable') return false;
   if (group && SECURITY_FUNCTION_GROUPS.includes(group)) return true;
   if (SECURITY_FUNCTION_TYPES.includes(ftype)) return true;
+  if (securityTitleSignal) return true;
 
   // 8. Onvoldoende data
   return null;
