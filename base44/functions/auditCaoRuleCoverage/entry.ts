@@ -306,7 +306,21 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       ...ruleRange(714, 716),
       ...ruleIds(728, 729, 731, 733, 734),
       ...ruleRange(738, 747),
-      ...ruleIds(1751, 1813)
+      ...ruleIds(1751, 1810, 1811, 1812, 1813, 1814, 1837, 1838, 1840)
+    ]
+  },
+  'applyCaoContractRules.appendix_2_function_qualification_requirements': {
+    functions: [
+      'applyCaoContractRules',
+      'resolvePersonnelContractForService',
+      'validateCaoScheduleRules',
+      'calculatePersonnelCosts',
+      'calculateRoutePersonnelCosts'
+    ],
+    rule_ids: [
+      ...ruleRange(1752, 1760),
+      ...ruleRange(1763, 1808),
+      ...ruleRange(1815, 1836)
     ]
   },
   'calculatePersonnelCosts.article_39_acting_function_allowance': {
