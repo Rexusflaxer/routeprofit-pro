@@ -34,6 +34,8 @@ const policyReferenceContext = loadFunctionModule('base44/functions/resolveCaoPo
 const caoRuntimeReadiness = loadFunctionModule('base44/functions/resolveCaoRuntimeReadiness/entry.ts');
 const planningAssignment = loadFunctionModule('base44/functions/resolveCaoPlanningAssignmentDecision/entry.ts');
 const caoConfigurationOptions = loadFunctionModule('base44/functions/listCaoConfigurationOptions/entry.ts');
+const ingestCaoAutomation = loadFunctionModule('base44/functions/ingestCaoAutomationPayload/entry.ts');
+const syncCaoFromCloudflare = loadFunctionModule('base44/functions/syncCaoFromCloudflare/entry.ts');
 
 function assertIncludes(values, expected, message) {
   assert.ok(values.includes(expected), `${message}: expected ${expected} in ${JSON.stringify(values)}`);
@@ -866,6 +868,63 @@ function runProbationScenarios() {
 }
 
 function runEffectiveDateCorrectionScenarios() {
+  for (const module of [ingestCaoAutomation, syncCaoFromCloudflare]) {
+    const explicitPayrollChange = module.buildChangeEffectiveMetadata({
+      rule_key: 'wage_scales.2026.scale_3.period_0',
+      field_path: 'wage_scales_detailed.3.0.hourly_rate',
+      payroll_impact: true,
+      effective_from: '2026-05-10',
+      change_type: 'updated'
+    }, '2026-01-01', '2026-06-01T10:00:00Z');
+    assert.equal(explicitPayrollChange.effective_from, '2026-05-10');
+    assert.equal(explicitPayrollChange.effective_from_source, 'change.effective_from');
+    assert.equal(explicitPayrollChange.effective_from_inferred, false);
+    assert.equal(explicitPayrollChange.effective_date_manual_review_required, false);
+    assert.equal(explicitPayrollChange.retroactive, true);
+    assert.equal(explicitPayrollChange.correction_required, true);
+    assert.equal(explicitPayrollChange.correction_status, 'candidate');
+
+    const futurePayrollChange = module.buildChangeEffectiveMetadata({
+      rule_key: 'wage_scales.2026.scale_3.period_0',
+      field_path: 'wage_scales_detailed.3.0.hourly_rate',
+      payroll_impact: true,
+      effective_from: '2026-07-01',
+      change_type: 'updated'
+    }, '2026-01-01', '2026-06-01T10:00:00Z');
+    assert.equal(futurePayrollChange.effective_from, '2026-07-01');
+    assert.equal(futurePayrollChange.retroactive, false);
+    assert.equal(futurePayrollChange.correction_required, false);
+    assert.equal(futurePayrollChange.correction_status, 'not_required');
+
+    const fallbackPayrollChange = module.buildChangeEffectiveMetadata({
+      rule_key: 'wage_scales.2026.scale_3.period_0',
+      field_path: 'wage_scales_detailed.3.0.hourly_rate',
+      payroll_impact: true,
+      change_type: 'updated'
+    }, '2026-01-01', '2026-06-01T10:00:00Z');
+    assert.equal(fallbackPayrollChange.effective_from, '2026-01-01');
+    assert.equal(fallbackPayrollChange.effective_from_source, 'candidate_configuration.valid_from');
+    assert.equal(fallbackPayrollChange.effective_from_inferred, true);
+    assert.equal(fallbackPayrollChange.effective_date_manual_review_required, true);
+    assert.equal(fallbackPayrollChange.correction_required, true);
+    assert.equal(fallbackPayrollChange.correction_status, 'manual_review_required');
+
+    const invalidRangeChange = module.buildChangeEffectiveMetadata({
+      rule_key: 'wage_scales.2026.scale_3.period_0',
+      field_path: 'wage_scales_detailed.3.0.hourly_rate',
+      payroll_impact: true,
+      effective_from: '2026-05-10',
+      effective_until: '2026-05-09',
+      change_type: 'updated'
+    }, '2026-01-01', '2026-06-01T10:00:00Z');
+    assert.equal(invalidRangeChange.effective_date_manual_review_required, true);
+    assert.equal(invalidRangeChange.correction_status, 'manual_review_required');
+    assert.ok(
+      invalidRangeChange.effective_date_warnings.some(message => message.includes('effective_until ligt voor effective_from')),
+      'Invalid effective date range must be visible in review warnings'
+    );
+  }
+
   const review = {
     id: 'review-2026-wage',
     cao_key: 'cao_particuliere_beveiliging',
