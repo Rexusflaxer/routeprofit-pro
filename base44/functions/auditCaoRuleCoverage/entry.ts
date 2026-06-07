@@ -329,12 +329,36 @@ function runtimeBindingStatusForSummary(rule) {
   return rule.runtime_binding_status || 'missing_local_runtime';
 }
 
-function hasTestEvidence(rule) {
-  const tests = rule.tests;
-  if (!tests) return false;
-  if (Array.isArray(tests)) return tests.length > 0;
-  if (typeof tests === 'object') return Object.keys(tests).length > 0;
-  return false;
+function isPositiveTestEvidence(value, key = '') {
+  const normalizedKey = String(key || '').toLowerCase();
+  const positiveEvidenceKey = /^(passed|pass|success|successful|verified|coverage_verified|ok|green)$/.test(normalizedKey);
+  const negativeEvidenceKey = /^(failed|fail|todo|pending|missing|skipped|skip|unknown|error)$/.test(normalizedKey);
+  const descriptiveKey = /^(name|title|description|note|comment|source|url|file|path)$/.test(normalizedKey);
+
+  if (value === true) return normalizedKey === '' || positiveEvidenceKey;
+  if (value === false || value === null || value === undefined || value === '') return false;
+  if (negativeEvidenceKey) return false;
+  if (Array.isArray(value)) return value.some(item => isPositiveTestEvidence(item));
+  if (typeof value === 'string') {
+    const normalized = value.toLowerCase();
+    if (/(not\s+pass|fail|failed|todo|pending|missing|skip|skipped|unknown|error)/.test(normalized)) return false;
+    if (descriptiveKey) return false;
+    return /^(pass|passed|success|successful|verified|ok|green)$/.test(normalized) ||
+      /\b(passed|success|successful|verified|ok|green)\b/.test(normalized);
+  }
+  if (typeof value !== 'object') return false;
+
+  const directStatus = String(value.status || value.result || value.outcome || '').toLowerCase();
+  if (['passed', 'pass', 'success', 'successful', 'verified', 'ok', 'green'].includes(directStatus)) return true;
+  if (['failed', 'fail', 'todo', 'pending', 'missing', 'skipped', 'skip', 'unknown', 'error'].includes(directStatus)) return false;
+  if (value.passed === true || value.success === true || value.verified === true || value.coverage_verified === true) return true;
+  if (value.passed === false || value.success === false || value.verified === false || value.coverage_verified === false) return false;
+
+  return Object.entries(value).some(([entryKey, entryValue]) => isPositiveTestEvidence(entryValue, entryKey));
+}
+
+function hasVerifiedTestEvidence(rule) {
+  return isPositiveTestEvidence(rule?.tests);
 }
 
 function countBy(collection, keyFn) {
@@ -402,7 +426,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
     const status = String(rule.implementation_status || 'MISSING').toUpperCase();
     const runtimeBound = hasRuntimeBinding(rule);
     const runtimeMetadataPresent = hasRuntimeBindingMetadata(rule);
-    const testEvidence = hasTestEvidence(rule);
+    const testEvidence = hasVerifiedTestEvidence(rule);
     const payrollCritical = isPayrollCriticalRule(rule);
     const missingText = !rule.rule_text && !rule.rule_text_summary;
 
@@ -446,7 +470,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
     if (implementedNoTests) {
       counts.implemented_without_test_evidence++;
       implementedWithoutTestEvidence.push(summarizeRule(rule, {
-        message: 'Rule claims IMPLEMENTED but has no test evidence recorded in CAORule.tests.'
+        message: 'Rule claims IMPLEMENTED but has no verified passing test evidence recorded in CAORule.tests.'
       }));
     }
     if (partialNoManualReview) {
@@ -468,7 +492,8 @@ function evaluateCoverageGate(config, rules, options = {}) {
       openCriticalRules.push(summarizeRule(rule, {
         has_runtime_binding: runtimeBound,
         has_runtime_binding_metadata: runtimeMetadataPresent,
-        has_test_evidence: testEvidence
+        has_test_evidence: testEvidence,
+        has_verified_test_evidence: testEvidence
       }));
     }
   }
@@ -543,7 +568,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
     blockingFindings.push({
       code: 'implemented_rules_without_test_evidence',
       severity: 'high',
-      message: `${implementedWithoutTestEvidence.length} payrollkritische CAO-regels claimen IMPLEMENTED, maar missen testbewijs.`
+      message: `${implementedWithoutTestEvidence.length} payrollkritische CAO-regels claimen IMPLEMENTED, maar missen geverifieerd testbewijs.`
     });
   }
   if (partialWithoutManualReview.length > 0) {

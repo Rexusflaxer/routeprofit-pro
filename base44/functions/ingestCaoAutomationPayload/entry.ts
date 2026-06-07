@@ -595,6 +595,38 @@ function isPayrollCriticalRule(rule) {
     hasAnyNeedle(rule.rule_id, ['R031', 'R032', 'R037', 'R038', 'R039', 'R040', 'R041', 'R042', 'R043', 'R047', 'R048', 'R056', 'R057', 'R058', 'R059', 'R064', 'R065', 'R066', 'R067', 'R072', 'R073', 'R085', 'R087', 'R088', 'R089', 'R090', 'R099', 'R114', 'R115', 'R116', 'R160', 'R175', 'R181']);
 }
 
+function isPositiveTestEvidence(value, key = '') {
+  const normalizedKey = String(key || '').toLowerCase();
+  const positiveEvidenceKey = /^(passed|pass|success|successful|verified|coverage_verified|ok|green)$/.test(normalizedKey);
+  const negativeEvidenceKey = /^(failed|fail|todo|pending|missing|skipped|skip|unknown|error)$/.test(normalizedKey);
+  const descriptiveKey = /^(name|title|description|note|comment|source|url|file|path)$/.test(normalizedKey);
+
+  if (value === true) return normalizedKey === '' || positiveEvidenceKey;
+  if (value === false || value === null || value === undefined || value === '') return false;
+  if (negativeEvidenceKey) return false;
+  if (Array.isArray(value)) return value.some(item => isPositiveTestEvidence(item));
+  if (typeof value === 'string') {
+    const normalized = value.toLowerCase();
+    if (/(not\s+pass|fail|failed|todo|pending|missing|skip|skipped|unknown|error)/.test(normalized)) return false;
+    if (descriptiveKey) return false;
+    return /^(pass|passed|success|successful|verified|ok|green)$/.test(normalized) ||
+      /\b(passed|success|successful|verified|ok|green)\b/.test(normalized);
+  }
+  if (typeof value !== 'object') return false;
+
+  const directStatus = String(value.status || value.result || value.outcome || '').toLowerCase();
+  if (['passed', 'pass', 'success', 'successful', 'verified', 'ok', 'green'].includes(directStatus)) return true;
+  if (['failed', 'fail', 'todo', 'pending', 'missing', 'skipped', 'skip', 'unknown', 'error'].includes(directStatus)) return false;
+  if (value.passed === true || value.success === true || value.verified === true || value.coverage_verified === true) return true;
+  if (value.passed === false || value.success === false || value.verified === false || value.coverage_verified === false) return false;
+
+  return Object.entries(value).some(([entryKey, entryValue]) => isPositiveTestEvidence(entryValue, entryKey));
+}
+
+function hasVerifiedTestEvidence(rule) {
+  return isPositiveTestEvidence(rule?.tests);
+}
+
 function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
   const rules = Array.isArray(candidateRules) ? candidateRules : [];
   const caoKey = normalizeCaoKey(candidateCfg?.cao_key) || CAO_PB_KEY;
@@ -643,9 +675,8 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
       else counts.runtime_missing++;
 
       const lacksRuntimeBinding = status === 'IMPLEMENTED' && !runtimeBinding;
-      const lacksTestEvidence = status === 'IMPLEMENTED' &&
-        (!rule.tests || (Array.isArray(rule.tests) && rule.tests.length === 0) ||
-          (typeof rule.tests === 'object' && !Array.isArray(rule.tests) && Object.keys(rule.tests).length === 0));
+      const hasTestEvidence = hasVerifiedTestEvidence(rule);
+      const lacksTestEvidence = status === 'IMPLEMENTED' && !hasTestEvidence;
       const partialWithoutReview = status === 'PARTIAL' && rule.manual_review_required !== true;
       if (lacksRuntimeBinding) {
         counts.implemented_without_runtime_binding++;
@@ -664,7 +695,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
           domain: rule.domain || null,
           implementation_status: rule.implementation_status || 'IMPLEMENTED',
           implemented_in: rule.implemented_in || [],
-          message: 'Regel claimt IMPLEMENTED, maar CAORule.tests bevat geen testbewijs.'
+          message: 'Regel claimt IMPLEMENTED, maar CAORule.tests bevat geen geverifieerd geslaagd testbewijs.'
         });
       }
       if (partialWithoutReview) {
@@ -688,7 +719,8 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
           calculation_policy: rule.calculation_policy || null,
           runtime_binding_status: runtimeBinding ? 'verified_local_runtime' : 'missing_local_runtime',
           runtime_binding_key: runtimeBinding?.key || null,
-          runtime_binding_functions: runtimeBinding?.functions || []
+          runtime_binding_functions: runtimeBinding?.functions || [],
+          has_verified_test_evidence: hasTestEvidence
         });
       }
     }
@@ -749,7 +781,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
     blockingFindings.push({
       code: 'implemented_rules_without_test_evidence',
       severity: 'high',
-      message: `${implementedWithoutTestEvidence.length} payrollkritische CAO-regels claimen IMPLEMENTED, maar missen testbewijs.`
+      message: `${implementedWithoutTestEvidence.length} payrollkritische CAO-regels claimen IMPLEMENTED, maar missen geverifieerd testbewijs.`
     });
   }
   if (partialWithoutManualReview.length > 0) {
