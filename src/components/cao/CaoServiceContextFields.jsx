@@ -59,8 +59,7 @@ const SECURITY_STATUS_OPTIONS = [
 
 const CONTRACT_POLICY_OPTIONS = [
   { value: "strict_contract_match", label: "Strikt contract" },
-  { value: "allow_manual_review", label: "Review toestaan" },
-  { value: "not_required", label: "Niet vereist" }
+  { value: "allow_manual_review", label: "Review toestaan" }
 ];
 
 const BOOLEAN_OPTIONS = [
@@ -129,6 +128,10 @@ function numberValue(value) {
   return value;
 }
 
+function contractPolicyValue(value) {
+  return value === "allow_manual_review" ? "allow_manual_review" : "strict_contract_match";
+}
+
 function FieldSelect({ label, value, options, onChange }) {
   return (
     <div className="space-y-2">
@@ -172,7 +175,7 @@ export default function CaoServiceContextFields({ value, onChange, mode = "task"
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">
         <FieldSelect label="CAO" value={get("cao_key")} options={CAO_OPTIONS} onChange={(next) => set("cao_key", next)} />
         <FieldSelect label="Functiesoort" value={get("service_function_type")} options={FUNCTION_TYPE_OPTIONS} onChange={(next) => set("service_function_type", next)} />
-        <FieldSelect label="Contractmatch" value={get("contract_assignment_policy")} options={CONTRACT_POLICY_OPTIONS} onChange={(next) => set("contract_assignment_policy", next || "strict_contract_match")} />
+        <FieldSelect label="Contractmatch" value={contractPolicyValue(get("contract_assignment_policy"))} options={CONTRACT_POLICY_OPTIONS} onChange={(next) => set("contract_assignment_policy", contractPolicyValue(next))} />
       </div>
 
       <div className="grid grid-cols-1 md:grid-cols-3 gap-4">

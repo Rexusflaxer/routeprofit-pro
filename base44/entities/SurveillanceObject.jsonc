@@ -122,6 +122,11 @@
         "string",
         "null"
       ],
+      "enum": [
+        "strict_contract_match",
+        "allow_manual_review",
+        null
+      ],
       "description": "Default contractmatchingbeleid voor diensten op dit object"
     },
     "default_operating_company_id": {

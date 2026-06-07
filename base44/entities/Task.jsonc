@@ -79,8 +79,7 @@
       "type": "string",
       "enum": [
         "strict_contract_match",
-        "allow_manual_review",
-        "not_required"
+        "allow_manual_review"
       ],
       "default": "strict_contract_match",
       "description": "Bepaalt hoe streng de planning deze taak aan een arbeidscontract moet koppelen."

@@ -126,6 +126,28 @@ function runPlanningContextScenarios() {
   assert.equal(readiness.status, 'planning_context_ready');
   assert.equal(readiness.ready, true);
 
+  const legacyNotRequiredService = taskContext.buildServiceContext({
+    body: {
+      company_id: 'company-a',
+      cao_key: 'cao_particuliere_beveiliging',
+      performs_security_work: false,
+      security_work_percentage: 0,
+      security_role_status: 'not_applicable',
+      contract_assignment_policy: 'not_required'
+    },
+    task: null,
+    object: null,
+    route: null
+  });
+  const legacyReadiness = taskContext.evaluateServiceContextReadiness(legacyNotRequiredService);
+  assert.equal(legacyNotRequiredService.contract_assignment_policy, 'strict_contract_match', 'Legacy not_required policy must normalize to strict contract matching');
+  assert.equal(legacyReadiness.status, 'blocked', 'Legacy not_required policy must not bypass missing function context');
+  assertIncludes(
+    legacyReadiness.blocking_reasons,
+    'Dienst mist functiecontext. Stel service_function_type, required_cao_function_group of task_type in voordat contractmatching definitief mag zijn.',
+    'Legacy not_required planning context must fail closed'
+  );
+
   const trafficService = taskContext.buildServiceContext({
     body: {
       company_id: 'company-a',
@@ -276,6 +298,15 @@ function runContractResolverScenarios() {
   const blockedScope = contractResolver.evaluateSecurityScopeMatch(securityOnlyContract, serviceContext);
   assert.equal(blockedScope.matched, false, 'Non-security service must not match security-only contract');
   assert.ok(blockedScope.blocking_checks.length > 0, 'Security-only mismatch should be blocking, not merely advisory');
+
+  const legacyBypassServiceContext = {
+    ...serviceContext,
+    contract_assignment_policy: 'not_required'
+  };
+  const blockedFunctionByLegacyPolicy = contractResolver.evaluateFunctionMatch(securityOnlyContract, legacyBypassServiceContext);
+  const blockedScopeByLegacyPolicy = contractResolver.evaluateSecurityScopeMatch(securityOnlyContract, legacyBypassServiceContext);
+  assert.equal(blockedFunctionByLegacyPolicy.matched, false, 'not_required must not bypass function matching');
+  assert.equal(blockedScopeByLegacyPolicy.matched, false, 'not_required must not bypass article 3 security-scope matching');
 
   const activeContracts = [
     { id: 'contract-company-a', company_id: 'company-a' },
@@ -1370,6 +1401,25 @@ function runCaoStaticGovernanceScenarios() {
   assert.ok(
     routePersonnelCostsSource.includes('Routekosten zijn een conceptpreview'),
     'Route personnel cost UI must visibly label route costs as concept preview'
+  );
+
+  const caoServiceContextSource = fs.readFileSync(path.join(repoRoot, 'src/components/cao/CaoServiceContextFields.jsx'), 'utf8');
+  assert.equal(
+    caoServiceContextSource.includes('value: "not_required"'),
+    false,
+    'Service context UI must not expose a no-contract-required CAO planning option'
+  );
+  const taskEntitySource = fs.readFileSync(path.join(repoRoot, 'base44/entities/Task.jsonc'), 'utf8');
+  assert.equal(
+    taskEntitySource.includes('"not_required"'),
+    false,
+    'Task contract_assignment_policy schema must not allow no-contract-required planning'
+  );
+  const resolverSource = fs.readFileSync(path.join(repoRoot, 'base44/functions/resolvePersonnelContractForService/entry.ts'), 'utf8');
+  assert.equal(
+    resolverSource.includes('function_match_not_required') || resolverSource.includes('security_scope_match_not_required'),
+    false,
+    'Contract resolver must not contain not_required bypass paths for function or security-scope matching'
   );
 }
 

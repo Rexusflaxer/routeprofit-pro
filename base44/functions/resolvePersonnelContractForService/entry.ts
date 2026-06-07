@@ -26,6 +26,11 @@ function normalizeToken(value) {
     .trim();
 }
 
+function normalizeContractAssignmentPolicy(value) {
+  const policy = normalizeToken(value);
+  return policy === 'allow_manual_review' ? 'allow_manual_review' : 'strict_contract_match';
+}
+
 function buildServiceSignalText(values = []) {
   return values.map(normalizeToken).filter(Boolean).join('_');
 }
@@ -797,7 +802,7 @@ function evaluateFunctionExperienceRequirement(contract, serviceContext, minimum
 function evaluateCaoPbQualificationForService(contract, personnelQualifications, serviceContext, companyId, qualificationFetchError = null) {
   const serviceDate = asIsoDate(serviceContext?.service_date || todayIsoDate());
   const requirementSet = getCaoPbFunctionQualificationRequirements(serviceContext, contract);
-  const strict = serviceContext.contract_assignment_policy === 'strict_contract_match';
+  const strict = normalizeContractAssignmentPolicy(serviceContext.contract_assignment_policy) === 'strict_contract_match';
   const blockingReasons = [];
   const manualReviewReasons = [...(requirementSet.manual_review_reasons || [])];
   const warnings = [...(requirementSet.warnings || [])];
@@ -1134,25 +1139,15 @@ function inferServiceContext({ body, task, route, object }) {
     internship_mentor_personnel_id: input.internship_mentor_personnel_id ?? body.internship_mentor_personnel_id ?? task?.internship_mentor_personnel_id ?? null,
     internship_one_to_one_guidance_confirmed: input.internship_one_to_one_guidance_confirmed ?? body.internship_one_to_one_guidance_confirmed ?? task?.internship_one_to_one_guidance_confirmed ?? null,
     internship_uniform_label_confirmed: input.internship_uniform_label_confirmed ?? body.internship_uniform_label_confirmed ?? task?.internship_uniform_label_confirmed ?? null,
-    contract_assignment_policy: input.contract_assignment_policy ||
+    contract_assignment_policy: normalizeContractAssignmentPolicy(input.contract_assignment_policy ||
       body.contract_assignment_policy ||
       task?.contract_assignment_policy ||
       object?.contract_assignment_policy ||
-      'strict_contract_match'
+      'strict_contract_match')
   };
 }
 
 function evaluateFunctionMatch(contract, serviceContext) {
-  if (serviceContext.contract_assignment_policy === 'not_required') {
-    return {
-      matched: true,
-      manual_review_required: false,
-      blocking_checks: [],
-      missing_proof_checks: [],
-      checks: [{ field: 'contract_assignment_policy', requested: 'not_required', allowed: ['not_required'], matched: true, reason: 'function_match_not_required' }]
-    };
-  }
-
   const checks = [];
   const requestedFunctionType = serviceContext.function_type || null;
   const requestedGroup = serviceContext.cao_function_group || null;
@@ -1201,7 +1196,7 @@ function evaluateFunctionMatch(contract, serviceContext) {
     check.requested &&
     check.reason === 'contract_has_no_allowed_values'
   );
-  const strict = serviceContext.contract_assignment_policy === 'strict_contract_match';
+  const strict = normalizeContractAssignmentPolicy(serviceContext.contract_assignment_policy) === 'strict_contract_match';
 
   return {
     matched: blocking.length === 0 && (!strict || missingProof.length === 0),
@@ -1300,22 +1295,9 @@ function contractSecurityCapabilities(contract = {}) {
 }
 
 function evaluateSecurityScopeMatch(contract, serviceContext) {
-  if (serviceContext.contract_assignment_policy === 'not_required') {
-    return {
-      matched: true,
-      manual_review_required: false,
-      blocking_checks: [],
-      missing_proof_checks: [],
-      source_rule_ids: ['CAO-PB-2024-R0227', 'CAO-PB-2024-R0228', 'CAO-PB-2024-R0229', 'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232', 'CAO-PB-2024-R0233'],
-      service_security_intent: { intent: 'not_required', security_signals: [], non_security_signals: [] },
-      contract_security_capabilities: contractSecurityCapabilities(contract),
-      checks: [{ field: 'contract_assignment_policy', requested: 'not_required', matched: true, reason: 'security_scope_match_not_required' }]
-    };
-  }
-
   const serviceIntent = serviceSecurityIntent(serviceContext);
   const contractCapabilities = contractSecurityCapabilities(contract);
-  const strict = serviceContext.contract_assignment_policy === 'strict_contract_match';
+  const strict = normalizeContractAssignmentPolicy(serviceContext.contract_assignment_policy) === 'strict_contract_match';
   const sourceRuleIds = ['CAO-PB-2024-R0227', 'CAO-PB-2024-R0228', 'CAO-PB-2024-R0229', 'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232', 'CAO-PB-2024-R0233'];
   const checks = [];
   const blockingChecks = [];
@@ -1395,6 +1377,7 @@ function evaluateServiceContextReadiness(serviceContext) {
     'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232',
     'CAO-PB-2024-R0233'
   ];
+  const contractAssignmentPolicy = normalizeContractAssignmentPolicy(serviceContext.contract_assignment_policy);
   const hasFunctionContext = !!(
     serviceContext.function_type ||
     serviceContext.cao_function_group ||
@@ -1425,17 +1408,17 @@ function evaluateServiceContextReadiness(serviceContext) {
 
   if (!serviceContext.company_id) {
     missingFields.push('operating_company_id');
-    if (serviceContext.contract_assignment_policy === 'strict_contract_match') {
+    if (contractAssignmentPolicy === 'strict_contract_match') {
       blockingReasons.push('Dienst mist uitvoerende werkgever/bedrijf. Stel operating_company_id/company_id in op taak, route of object-default voordat een arbeidscontract audit-proof gekoppeld kan worden.');
     } else {
       manualReviewReasons.push('Dienst mist uitvoerende werkgever/bedrijf. Handmatige review vereist voordat de juiste bedrijf-CAO en het juiste arbeidscontract gekozen kunnen worden.');
     }
   }
 
-  if (!hasFunctionContext && serviceContext.contract_assignment_policy === 'strict_contract_match') {
+  if (!hasFunctionContext && contractAssignmentPolicy === 'strict_contract_match') {
     missingFields.push('service_function_type_or_cao_function_group_or_task_type');
     blockingReasons.push('Dienst mist functiecontext. Stel service_function_type, required_cao_function_group of task_type in voordat contractmatching definitief mag zijn.');
-  } else if (!hasFunctionContext && serviceContext.contract_assignment_policy === 'allow_manual_review') {
+  } else if (!hasFunctionContext && contractAssignmentPolicy === 'allow_manual_review') {
     missingFields.push('service_function_type_or_cao_function_group_or_task_type');
     manualReviewReasons.push('Dienst mist functiecontext. Handmatige review vereist om te bepalen welk contract bij deze dienst hoort.');
   }
@@ -1474,7 +1457,7 @@ function evaluateServiceContextReadiness(serviceContext) {
     has_function_context: hasFunctionContext,
     has_cao_resolution_context: hasCaoResolutionContext,
     has_security_scope_evidence: hasSecurityScopeEvidence,
-    contract_assignment_policy: serviceContext.contract_assignment_policy || null,
+    contract_assignment_policy: contractAssignmentPolicy,
     cao_key_source: serviceContext.cao_key_source || null,
     company_id_source: serviceContext.company_id_source || null
   };
