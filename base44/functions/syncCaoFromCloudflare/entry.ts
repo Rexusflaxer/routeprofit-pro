@@ -602,7 +602,90 @@ function localRuleIds(...ids) {
   return ids.map(id => `CAO-PB-2024-R${String(id).padStart(4, '0')}`);
 }
 
+function localRuleRange(start, end, excluded = []) {
+  const excludedSet = new Set(excluded);
+  const ids = [];
+  for (let number = start; number <= end; number += 1) {
+    if (!excludedSet.has(number)) ids.push(`CAO-PB-2024-R${String(number).padStart(4, '0')}`);
+  }
+  return ids;
+}
+
+const HIGH_IMPACT_REFERENCE_POLICY_RULE_IDS = [
+  ...localRuleIds(176),
+  ...localRuleRange(296, 300),
+  ...localRuleRange(302, 304),
+  ...localRuleRange(307, 308),
+  ...localRuleIds(336),
+  ...localRuleRange(340, 341),
+  ...localRuleIds(344, 348, 366, 370, 375, 379),
+  ...localRuleRange(381, 386),
+  ...localRuleIds(395, 400, 406, 413, 416),
+  ...localRuleRange(439, 444),
+  ...localRuleRange(449, 450),
+  ...localRuleIds(452),
+  ...localRuleRange(454, 455),
+  ...localRuleRange(457, 460),
+  ...localRuleIds(463, 546),
+  ...localRuleRange(550, 551),
+  ...localRuleIds(554),
+  ...localRuleRange(558, 559),
+  ...localRuleRange(717, 718),
+  ...localRuleRange(726, 727),
+  ...localRuleIds(730, 732),
+  ...localRuleRange(735, 737),
+  ...localRuleIds(754, 756),
+  ...localRuleRange(758, 759),
+  ...localRuleIds(763),
+  ...localRuleRange(768, 769),
+  ...localRuleIds(809, 819, 846, 848),
+  ...localRuleRange(850, 852),
+  ...localRuleIds(863, 871),
+  ...localRuleRange(874, 876),
+  ...localRuleIds(886, 929),
+  ...localRuleRange(933, 936),
+  ...localRuleIds(948),
+  ...localRuleRange(954, 955),
+  ...localRuleIds(961, 963, 967, 969, 988, 990, 996, 1020),
+  ...localRuleRange(1023, 1030),
+  ...localRuleIds(1048, 1051, 1055, 1063, 1069, 1131),
+  ...localRuleRange(1138, 1146),
+  ...localRuleIds(1194, 1199, 1201),
+  ...localRuleRange(1203, 1209),
+  ...localRuleRange(1212, 1213),
+  ...localRuleIds(1216),
+  ...localRuleRange(1219, 1220),
+  ...localRuleIds(1228, 1236),
+  ...localRuleRange(1238, 1241),
+  ...localRuleIds(1243, 1247),
+  ...localRuleRange(1249, 1252),
+  ...localRuleIds(1269, 1295),
+  ...localRuleRange(1341, 1342),
+  ...localRuleRange(1352, 1353),
+  ...localRuleIds(1397, 1429, 1462, 1487),
+  ...localRuleRange(1503, 1505),
+  ...localRuleIds(1507, 1512, 1572, 1590),
+  ...localRuleRange(1603, 1604),
+  ...localRuleIds(1643, 1650, 1663, 1672, 1687, 1710, 1713, 1715),
+  ...localRuleRange(1761, 1762),
+  ...localRuleIds(1809, 1839),
+  ...localRuleRange(1851, 1852),
+  ...localRuleIds(1854),
+  ...localRuleRange(1866, 1867),
+  ...localRuleIds(1876, 1878, 1880, 1901, 1922, 1924, 1926),
+  ...localRuleRange(1930, 1931),
+  ...localRuleIds(1933),
+  ...localRuleRange(1954, 1955),
+  ...localRuleIds(1969, 1996, 1999, 2014, 2037),
+  ...localRuleRange(2082, 2083),
+  ...localRuleIds(2106)
+];
+
 const LOCAL_RUNTIME_RULE_BINDINGS = {
+  'resolveCaoPolicyReferenceContext.high_impact_reference_policy_context': {
+    functions: ['resolveCaoPolicyReferenceContext'],
+    rule_ids: HIGH_IMPACT_REFERENCE_POLICY_RULE_IDS
+  },
   'resolveCaoApplicability.article_3_scope': {
     functions: ['resolveCaoApplicability', 'validateTaskPlanningContext', 'calculatePersonnelCosts', 'validateCaoScheduleRules'],
     rule_ids: [

@@ -117,6 +117,12 @@ function countBy(rules, key) {
   }, {});
 }
 
+function isHighImpactReferencePolicy(rule) {
+  if (rule.automation_level !== 'reference_or_policy') return false;
+  return /payroll|loon|wage|salary|contract|planning|schedule|rooster|vacation|vakantie|leave|holiday|feest|sickness|ziekte|allowance|toeslag|premium|reimbursement|vergoeding|overtime|overwerk|pension|fund|function|functie|contract_change|wissel|base_hourly|hourly|scale|schaal/i
+    .test(`${rule.domain} ${rule.impact} ${rule.text}`);
+}
+
 function summarizeLevel(rules, repoText, runtimeIds, level) {
   const subset = rules.filter(rule => rule.automation_level === level);
   const explicit = subset.filter(rule => repoText.includes(rule.rule_id));
@@ -149,6 +155,8 @@ const automaticRuntimeMissing = rules.filter(rule =>
   rule.automation_level === 'automatic_or_calculation' &&
   !runtimeIds.has(rule.rule_id)
 );
+const highImpactReferencePolicyRules = rules.filter(isHighImpactReferencePolicy);
+const highImpactReferencePolicyRuntimeMissing = highImpactReferencePolicyRules.filter(rule => !runtimeIds.has(rule.rule_id));
 
 console.log(`CAO coverage CSV: ${coverageCsvPath}`);
 console.log(`Total source rules: ${rules.length}`);
@@ -156,8 +164,9 @@ console.log(`By automation level: ${JSON.stringify(countBy(rules, 'automation_le
 for (const summary of summaries) {
   console.log(`${summary.level}: total=${summary.total}, explicit=${summary.explicit_references}, missing_explicit=${summary.missing_explicit_references}, runtime_index=${summary.runtime_index_bindings}, missing_runtime_index=${summary.missing_runtime_index_bindings}`);
 }
+console.log(`high_impact_reference_or_policy: total=${highImpactReferencePolicyRules.length}, runtime_index=${highImpactReferencePolicyRules.length - highImpactReferencePolicyRuntimeMissing.length}, missing_runtime_index=${highImpactReferencePolicyRuntimeMissing.length}`);
 
-if (requiredExplicitMissing.length > 0 || automaticRuntimeMissing.length > 0) {
+if (requiredExplicitMissing.length > 0 || automaticRuntimeMissing.length > 0 || highImpactReferencePolicyRuntimeMissing.length > 0) {
   console.error('\nCAO coverage audit failed.');
   for (const rule of requiredExplicitMissing.slice(0, 50)) {
     console.error(`missing explicit reference: ${rule.rule_id} ${rule.automation_level} ${rule.domain} | ${rule.text.slice(0, 140)}`);
@@ -165,7 +174,10 @@ if (requiredExplicitMissing.length > 0 || automaticRuntimeMissing.length > 0) {
   for (const rule of automaticRuntimeMissing.slice(0, 50)) {
     console.error(`missing runtime binding: ${rule.rule_id} ${rule.domain} | ${rule.text.slice(0, 140)}`);
   }
+  for (const rule of highImpactReferencePolicyRuntimeMissing.slice(0, 50)) {
+    console.error(`missing policy runtime binding: ${rule.rule_id} ${rule.domain} | ${rule.text.slice(0, 140)}`);
+  }
   process.exit(1);
 }
 
-console.log('ok - CAO PB automatic/validation/workflow source coverage is explicitly referenced, and automatic rules are in the local runtime index.');
+console.log('ok - CAO PB automatic/validation/workflow source coverage is explicitly referenced, automatic rules are in the local runtime index, and high-impact reference/policy rules have policy runtime anchors.');

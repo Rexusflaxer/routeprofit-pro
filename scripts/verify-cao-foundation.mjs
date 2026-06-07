@@ -29,6 +29,7 @@ const yearEndBonus = loadFunctionModule('base44/functions/calculateCaoYearEndBon
 const personnelCosts = loadFunctionModule('base44/functions/calculatePersonnelCosts/entry.ts');
 const functionClassification = loadFunctionModule('base44/functions/resolveCaoFunctionClassification/entry.ts');
 const caoApplicability = loadFunctionModule('base44/functions/resolveCaoApplicability/entry.ts');
+const policyReferenceContext = loadFunctionModule('base44/functions/resolveCaoPolicyReferenceContext/entry.ts');
 
 function assertIncludes(values, expected, message) {
   assert.ok(values.includes(expected), `${message}: expected ${expected} in ${JSON.stringify(values)}`);
@@ -122,6 +123,36 @@ function runCaoApplicabilityScenarios() {
   assertIncludes(nonSecurityApplicability.source_rule_ids, 'CAO-PB-2024-R0164', 'Article 4 rights source rule must be retained in applicability output');
   assertIncludes(nonSecurityApplicability.source_rule_ids, 'CAO-PB-2024-R0234', 'Article 4 rights source rule must be retained in applicability output');
   assertIncludes(nonSecurityApplicability.source_rule_ids, 'CAO-PB-2024-R0233', 'Appendix 2 exclusion source rule must be retained for non-security work');
+}
+
+function runPolicyReferenceContextScenarios() {
+  const contractPolicyContext = policyReferenceContext.resolvePolicyReferenceContext({
+    cao_key: 'cao_particuliere_beveiliging',
+    domains: ['contract_employment']
+  });
+  assert.equal(contractPolicyContext.policy_reference_context_status, 'resolved');
+  assert.equal(contractPolicyContext.calculation_policy, 'policy_only');
+  assert.equal(contractPolicyContext.manual_review_required, false);
+  assert.equal(contractPolicyContext.payroll_final_allowed, true);
+  assert.ok(contractPolicyContext.source_rule_count >= 50, 'Contract policy context should expose high-impact contract reference rules');
+  assertIncludes(contractPolicyContext.source_rule_ids, 'CAO-PB-2024-R0296', 'Fulltime contract article heading policy anchor missing');
+  assertIncludes(contractPolicyContext.source_rule_ids, 'CAO-PB-2024-R0452', 'Summary dismissal policy anchor missing');
+
+  const payrollPolicyContext = policyReferenceContext.resolvePolicyReferenceContext({
+    cao_key: 'cao_particuliere_beveiliging',
+    surfaces: ['payroll']
+  });
+  assert.equal(payrollPolicyContext.policy_reference_context_status, 'resolved');
+  assert.ok(payrollPolicyContext.source_rule_ids.includes('CAO-PB-2024-R1201'), 'Pension/older-worker payroll policy anchor missing');
+  assert.ok(payrollPolicyContext.source_rule_ids.includes('CAO-PB-2024-R0768'), 'Year-end bonus policy anchor missing');
+
+  const unsupported = policyReferenceContext.resolvePolicyReferenceContext({
+    cao_key: 'cao_verkeersregelaars',
+    surfaces: ['payroll']
+  });
+  assert.equal(unsupported.policy_reference_context_status, 'blocked_unsupported_cao_runtime');
+  assert.equal(unsupported.manual_review_required, true);
+  assert.equal(unsupported.payroll_final_allowed, false);
 }
 
 function runContractResolverScenarios() {
@@ -690,6 +721,7 @@ async function main() {
     ['external CAO gates', () => runExternalCaoGateScenarios()],
     ['planning context', () => runPlanningContextScenarios()],
     ['CAO applicability', () => runCaoApplicabilityScenarios()],
+    ['policy reference context', () => runPolicyReferenceContextScenarios()],
     ['contract resolver scope', () => runContractResolverScenarios()],
     ['contract scope persistence', () => runContractScopePersistenceScenarios()],
     ['probation rules', () => runProbationScenarios()],
