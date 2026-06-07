@@ -60,6 +60,15 @@ assert.equal(pb.known_cao, true);
 assert.equal(pb.payroll_final_allowed_by_static_runtime, true);
 assert.equal(pb.manual_review_required, false);
 assert.equal(pb.runtime_surfaces.filter(surface => surface.required_for_payroll_final && !surface.supported).length, 0);
+assert.ok(
+  pb.runtime_surfaces.some(surface =>
+    surface.surface_key === 'planning_assignment_decision' &&
+    surface.function_name === 'resolveCaoPlanningAssignmentDecision' &&
+    surface.required_for_payroll_final &&
+    surface.supported
+  ),
+  'PB runtime must include the central planning assignment decision gate'
+);
 
 for (const key of matrix.known_source_monitoring_only_cao_keys) {
   const readiness = runtimeReadiness.buildCaoRuntimeReadinessForKey(key);

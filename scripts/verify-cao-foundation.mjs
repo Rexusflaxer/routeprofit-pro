@@ -31,6 +31,7 @@ const functionClassification = loadFunctionModule('base44/functions/resolveCaoFu
 const caoApplicability = loadFunctionModule('base44/functions/resolveCaoApplicability/entry.ts');
 const policyReferenceContext = loadFunctionModule('base44/functions/resolveCaoPolicyReferenceContext/entry.ts');
 const caoRuntimeReadiness = loadFunctionModule('base44/functions/resolveCaoRuntimeReadiness/entry.ts');
+const planningAssignment = loadFunctionModule('base44/functions/resolveCaoPlanningAssignmentDecision/entry.ts');
 
 function assertIncludes(values, expected, message) {
   assert.ok(values.includes(expected), `${message}: expected ${expected} in ${JSON.stringify(values)}`);
@@ -316,6 +317,204 @@ function runContractResolverScenarios() {
     wrongCompanyCandidates.blocking_reasons.some(message => message.includes('Geen actief arbeidscontract gevonden voor bedrijf company-b')),
     'Contract belonging to another company must not be usable for the service company'
   );
+}
+
+function runPlanningAssignmentDecisionScenarios() {
+  const readyServiceContext = {
+    service_date: '2026-01-15',
+    company_id: 'company-a',
+    task_id: 'task-1',
+    object_id: 'object-1',
+    cao_key: 'cao_particuliere_beveiliging',
+    function_type: 'objectbeveiliger',
+    cao_function_group: 'objectbeveiliger_receptionist',
+    security_role_status: 'beveiliger',
+    performs_security_work: true,
+    security_work_percentage: 100
+  };
+  const serviceContextValidation = {
+    service_context: readyServiceContext,
+    service_context_readiness: {
+      status: 'planning_context_ready',
+      ready: true,
+      source_rule_ids: ['CAO-PB-2024-R0227', 'CAO-PB-2024-R0227'],
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      warnings: []
+    }
+  };
+  const contractResolution = {
+    status: 'resolved',
+    planning_allowed: true,
+    payroll_final_allowed: true,
+    manual_review_required: false,
+    personnel_id: 'person-1',
+    company_id: 'company-a',
+    contract_id: 'contract-1',
+    cao_key: 'cao_particuliere_beveiliging',
+    cao_configuration_id: 'cao-config-1',
+    selected_contract: {
+      id: 'contract-1',
+      company_id: 'company-a',
+      cao_key: 'cao_particuliere_beveiliging',
+      cao_configuration_id: 'cao-config-1'
+    },
+    service_context: readyServiceContext,
+    service_context_readiness: {
+      source_rule_ids: ['CAO-PB-2024-R0228']
+    },
+    cao_applicability: {
+      source_rule_ids: ['CAO-PB-2024-R0164']
+    },
+    blocking_reasons: [],
+    manual_review_reasons: [],
+    warnings: []
+  };
+  const runtimeReadiness = {
+    cao_readiness: [{
+      cao_key: 'cao_particuliere_beveiliging',
+      status: 'local_payroll_runtime_supported',
+      payroll_final_allowed_by_static_runtime: true,
+      planning_final_allowed_by_static_runtime: true,
+      manual_review_required: false,
+      blocking_reasons: []
+    }]
+  };
+
+  const allowed = planningAssignment.buildCaoPlanningAssignmentDecision({
+    body: { personnel_id: 'person-1' },
+    serviceContextValidation,
+    contractResolution,
+    caoRuntimeReadiness: runtimeReadiness
+  });
+  assert.equal(allowed.decision_status, 'assignable');
+  assert.equal(allowed.planning_assignment_allowed, true);
+  assert.equal(allowed.payroll_final_allowed, false);
+  assert.equal(allowed.schedule_gate.status, 'not_required_for_assignment_gate');
+  assert.equal(allowed.cao_key, 'cao_particuliere_beveiliging');
+  assert.equal(allowed.contract_id, 'contract-1');
+  assert.equal(allowed.cao_configuration_id, 'cao-config-1');
+  assertIncludes(allowed.source_rule_ids, 'CAO-PB-2024-R0164', 'Assignment decision must retain applicability source rules');
+  assert.equal(
+    allowed.source_rule_ids.filter(ruleId => ruleId === 'CAO-PB-2024-R0227').length,
+    1,
+    'Assignment decision source_rule_ids must be deduplicated'
+  );
+
+  const payrollFinalWithSchedule = planningAssignment.buildCaoPlanningAssignmentDecision({
+    body: { personnel_id: 'person-1' },
+    serviceContextValidation,
+    contractResolution,
+    scheduleValidation: {
+      planning_allowed: true,
+      payroll_final_allowed: true,
+      calculation_status: 'valid',
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      warnings: [],
+      source_rule_ids: ['CAO-PB-2024-R0560']
+    },
+    caoRuntimeReadiness: runtimeReadiness,
+    requireScheduleValidation: true
+  });
+  assert.equal(payrollFinalWithSchedule.decision_status, 'assignable');
+  assert.equal(payrollFinalWithSchedule.planning_assignment_allowed, true);
+  assert.equal(payrollFinalWithSchedule.payroll_final_allowed, true);
+  assert.equal(payrollFinalWithSchedule.schedule_gate.status, 'schedule_validation_ready');
+  assertIncludes(payrollFinalWithSchedule.source_rule_ids, 'CAO-PB-2024-R0560', 'Assignment decision must retain schedule validation source rules');
+
+  const missingContext = planningAssignment.buildCaoPlanningAssignmentDecision({
+    body: { personnel_id: 'person-1' },
+    serviceContextValidation: {
+      service_context: { company_id: null },
+      service_context_readiness: {
+        status: 'blocked',
+        ready: false,
+        blocking_reasons: ['Dienst mist uitvoerende werkgever/bedrijf.'],
+        manual_review_reasons: [],
+        warnings: [],
+        source_rule_ids: ['CAO-PB-2024-R0227']
+      }
+    },
+    contractResolution,
+    caoRuntimeReadiness: runtimeReadiness
+  });
+  assert.equal(missingContext.decision_status, 'blocked');
+  assert.equal(missingContext.planning_assignment_allowed, false);
+  assert.equal(missingContext.payroll_final_allowed, false);
+  assert.ok(
+    missingContext.blocking_reasons.some(reason => reason.includes('uitvoerende werkgever')),
+    'Missing company/service context must block final assignment'
+  );
+
+  const manualContractReview = planningAssignment.buildCaoPlanningAssignmentDecision({
+    body: { personnel_id: 'person-1' },
+    serviceContextValidation,
+    contractResolution: {
+      ...contractResolution,
+      planning_allowed: true,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      manual_review_reasons: ['Meerdere actieve contracten matchen deze dienst. Kies expliciet contract_id.']
+    },
+    caoRuntimeReadiness: runtimeReadiness
+  });
+  assert.equal(manualContractReview.decision_status, 'manual_review_required');
+  assert.equal(manualContractReview.draft_assignment_allowed, true);
+  assert.equal(manualContractReview.planning_assignment_allowed, false);
+  assert.equal(manualContractReview.payroll_final_allowed, false);
+
+  const unsupportedTraffic = planningAssignment.buildCaoPlanningAssignmentDecision({
+    body: { personnel_id: 'person-traffic', service_context: { cao_key: 'cao_verkeersregelaars' } },
+    serviceContextValidation: {
+      service_context: { ...readyServiceContext, cao_key: 'cao_verkeersregelaars' },
+      service_context_readiness: {
+        status: 'planning_context_ready',
+        ready: true,
+        source_rule_ids: [],
+        blocking_reasons: [],
+        manual_review_reasons: [],
+        warnings: []
+      }
+    },
+    contractResolution: {
+      ...contractResolution,
+      cao_key: 'cao_verkeersregelaars',
+      service_context: { ...readyServiceContext, cao_key: 'cao_verkeersregelaars' },
+      selected_contract: {
+        ...contractResolution.selected_contract,
+        cao_key: 'cao_verkeersregelaars'
+      }
+    },
+    caoRuntimeReadiness: {
+      cao_readiness: [{
+        cao_key: 'cao_verkeersregelaars',
+        status: 'known_cao_runtime_not_implemented',
+        payroll_final_allowed_by_static_runtime: false,
+        planning_final_allowed_by_static_runtime: false,
+        manual_review_required: true,
+        blocking_reasons: ['CAO cao_verkeersregelaars is bekend voor bronbewaking, maar mist geverifieerde lokale runtime.']
+      }]
+    }
+  });
+  assert.equal(unsupportedTraffic.decision_status, 'blocked');
+  assert.equal(unsupportedTraffic.cao_key, 'cao_verkeersregelaars');
+  assert.equal(unsupportedTraffic.planning_assignment_allowed, false);
+  assert.ok(
+    unsupportedTraffic.blocking_reasons.some(reason => reason.includes('cao_verkeersregelaars')),
+    'Unsupported external CAO must fail closed and must not fall back to PB'
+  );
+
+  const scheduleRequired = planningAssignment.buildCaoPlanningAssignmentDecision({
+    body: { personnel_id: 'person-1' },
+    serviceContextValidation,
+    contractResolution,
+    caoRuntimeReadiness: runtimeReadiness,
+    requireScheduleValidation: true
+  });
+  assert.equal(scheduleRequired.decision_status, 'blocked');
+  assert.equal(scheduleRequired.schedule_gate.status, 'blocked_missing_schedule_validation');
+  assert.equal(scheduleRequired.payroll_final_allowed, false);
 }
 
 async function runContractScopePersistenceScenarios() {
@@ -834,6 +1033,7 @@ async function main() {
     ['CAO applicability', () => runCaoApplicabilityScenarios()],
     ['policy reference context', () => runPolicyReferenceContextScenarios()],
     ['contract resolver scope', () => runContractResolverScenarios()],
+    ['planning assignment decision', () => runPlanningAssignmentDecisionScenarios()],
     ['contract scope persistence', () => runContractScopePersistenceScenarios()],
     ['probation rules', () => runProbationScenarios()],
     ['effective-date correction queue', () => runEffectiveDateCorrectionScenarios()],

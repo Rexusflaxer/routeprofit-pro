@@ -353,6 +353,12 @@ const PAYROLL_FINAL_RUNTIME_SURFACES = [
     required_for_payroll_final: true
   },
   {
+    surface_key: 'planning_assignment_decision',
+    function_name: 'resolveCaoPlanningAssignmentDecision',
+    supported_cao_keys: [CAO_PB_KEY],
+    required_for_payroll_final: true
+  },
+  {
     surface_key: 'schedule_validation',
     function_name: 'validateCaoScheduleRules',
     supported_cao_keys: [CAO_PB_KEY],
