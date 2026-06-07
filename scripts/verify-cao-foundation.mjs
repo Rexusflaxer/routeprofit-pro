@@ -1295,6 +1295,22 @@ function runCaoStaticGovernanceScenarios() {
   assert.ok(ingestSource.includes('CAO_AUTOMATION_SHARED_SECRET'), 'ingestCaoAutomationPayload must stay secret-only');
   const syncSource = fs.readFileSync(path.join(repoRoot, 'base44/functions/syncCaoFromCloudflare/entry.ts'), 'utf8');
   assert.ok(syncSource.includes('BASE44_CAO_SYNC_TRIGGER_SECRET'), 'syncCaoFromCloudflare must require the internal sync secret');
+
+  const personnelContractsSource = fs.readFileSync(path.join(repoRoot, 'src/components/personnel/PersonnelContractsTab.jsx'), 'utf8');
+  assert.ok(
+    personnelContractsSource.includes('listCaoConfigurationOptions'),
+    'Personnel contract UI must use sanitized CAO configuration options'
+  );
+  assert.equal(
+    personnelContractsSource.includes('<Input value={form.cao_configuration_id'),
+    false,
+    'Personnel contract UI must not expose cao_configuration_id as free-text input'
+  );
+  assert.equal(
+    personnelContractsSource.includes('CAO-configuratie id'),
+    false,
+    'Personnel contract UI must not label CAO configuration selection as raw id input'
+  );
 }
 
 async function main() {

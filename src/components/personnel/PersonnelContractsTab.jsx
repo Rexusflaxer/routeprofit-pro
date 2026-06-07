@@ -95,8 +95,54 @@ function boolToSelect(value) {
   return "unknown";
 }
 
+function uniqueValues(values) {
+  return [...new Set((values || []).filter(Boolean))];
+}
+
 function hasMeaningfulSecurityRole(value) {
   return !!value && !["unknown", "not_applicable"].includes(value);
+}
+
+function isDateWithinOptionRange(option, date) {
+  if (!date || !option) return true;
+  const isoDate = String(date).slice(0, 10);
+  if (option.valid_from && String(option.valid_from).slice(0, 10) > isoDate) return false;
+  if (option.valid_until && String(option.valid_until).slice(0, 10) < isoDate) return false;
+  return true;
+}
+
+function caoConfigurationLabel(option) {
+  const label = option?.label || option?.display_name || option?.name || option?.cao_key || "CAO";
+  const version = option?.version_label ? ` (${option.version_label})` : "";
+  const validity = option?.valid_from || option?.valid_until
+    ? ` | ${option.valid_from || "?"} t/m ${option.valid_until || "?"}`
+    : "";
+  return `${label}${version}${validity}`;
+}
+
+function filterCaoConfigurationOptions(options, form) {
+  const selectedId = form.cao_configuration_id || null;
+  return (options || []).filter(option => {
+    if (selectedId && option.id === selectedId) return true;
+    if (form.cao_key && option.cao_key && option.cao_key !== form.cao_key) return false;
+    if (!isDateWithinOptionRange(option, form.contract_start_date)) return false;
+    return option.selectable !== false;
+  });
+}
+
+function selectedCaoConfigurationWarning(selectedOption, form) {
+  if (!selectedOption) return null;
+  const warnings = [];
+  if (selectedOption.selectable === false) {
+    warnings.push("Deze CAO-configuratie is niet actief en blijft alleen zichtbaar omdat het contract hier al aan gekoppeld is.");
+  }
+  if (form.cao_key && selectedOption.cao_key && selectedOption.cao_key !== form.cao_key) {
+    warnings.push(`Deze CAO-configuratie hoort bij ${selectedOption.cao_key}, niet bij ${form.cao_key}.`);
+  }
+  if (!isDateWithinOptionRange(selectedOption, form.contract_start_date)) {
+    warnings.push("Deze CAO-configuratie is niet geldig op de contractstartdatum.");
+  }
+  return warnings.length > 0 ? warnings.join(" ") : null;
 }
 
 function getMissingContractFields(form) {
@@ -251,9 +297,26 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     String(b.contract_start_date || "").localeCompare(String(a.contract_start_date || ""))
   ), [contracts]);
 
+  const selectedCaoConfigurationIds = useMemo(() => uniqueValues([
+    personnel.cao_configuration_id,
+    form.cao_configuration_id,
+    ...contracts.map(contract => contract.cao_configuration_id)
+  ]), [contracts, form.cao_configuration_id, personnel.cao_configuration_id]);
+
+  const { data: caoConfigurationOptions = [] } = useQuery({
+    queryKey: ["cao-configuration-options", "personnel-contracts", personnel.id, selectedCaoConfigurationIds],
+    queryFn: async () => {
+      const { data } = await base44.functions.invoke("listCaoConfigurationOptions", {
+        include_ids: selectedCaoConfigurationIds,
+      });
+      return data?.options || [];
+    },
+  });
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["personnel_contracts", personnel.id] });
     queryClient.invalidateQueries({ queryKey: ["personnel"] });
+    queryClient.invalidateQueries({ queryKey: ["cao-configuration-options"] });
   };
 
   const saveMutation = useMutation({
@@ -286,6 +349,17 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   });
 
   const set = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
+  const setCaoKey = (value) => setForm(prev => {
+    const caoKey = value === "none" ? null : value;
+    const selectedOption = caoConfigurationOptions.find(option => option.id === prev.cao_configuration_id);
+    const nextConfigId = selectedOption && selectedOption.cao_key !== caoKey ? null : prev.cao_configuration_id;
+    return { ...prev, cao_key: caoKey, cao_configuration_id: nextConfigId };
+  });
+  const setContractStartDate = (value) => setForm(prev => {
+    const selectedOption = caoConfigurationOptions.find(option => option.id === prev.cao_configuration_id);
+    const nextConfigId = selectedOption && !isDateWithinOptionRange(selectedOption, value) ? null : prev.cao_configuration_id;
+    return { ...prev, contract_start_date: value, cao_configuration_id: nextConfigId };
+  });
   const companyName = (id) => companies.find(company => company.id === id)?.display_name || id || "-";
   const openNew = () => {
     setEditingId(null);
@@ -299,6 +373,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setFormOpen(true);
     setLastFinalizeResult(null);
   };
+
+  const visibleCaoConfigurationOptions = filterCaoConfigurationOptions(caoConfigurationOptions, form);
+  const selectedCaoConfiguration = caoConfigurationOptions.find(option => option.id === form.cao_configuration_id) || null;
+  const caoConfigurationSelectionWarning = selectedCaoConfigurationWarning(selectedCaoConfiguration, form);
 
   return (
     <div className="space-y-5">
@@ -350,7 +428,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             </div>
             <div className="space-y-1">
               <Label>Contract-CAO</Label>
-              <Select value={form.cao_key || "none"} onValueChange={value => set("cao_key", value === "none" ? null : value)}>
+              <Select value={form.cao_key || "none"} onValueChange={setCaoKey}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Kies CAO</SelectItem>
@@ -391,7 +469,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
 
             <div className="space-y-1">
               <Label>Startdatum</Label>
-              <Input type="date" value={form.contract_start_date || ""} onChange={event => set("contract_start_date", event.target.value)} />
+              <Input type="date" value={form.contract_start_date || ""} onChange={event => setContractStartDate(event.target.value)} />
             </div>
             <div className="space-y-1">
               <Label>Einddatum</Label>
@@ -514,8 +592,21 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               <Input type="number" min="0" value={form.industry_seniority_pay_periods ?? ""} onChange={event => set("industry_seniority_pay_periods", event.target.value)} />
             </div>
             <div className="space-y-1">
-              <Label>CAO-configuratie id</Label>
-              <Input value={form.cao_configuration_id || ""} onChange={event => set("cao_configuration_id", event.target.value || null)} placeholder="Automatisch bij finalisatie als leeg" />
+              <Label>CAO-configuratie</Label>
+              <Select value={form.cao_configuration_id || "auto"} onValueChange={value => set("cao_configuration_id", value === "auto" ? null : value)}>
+                <SelectTrigger><SelectValue placeholder="Automatisch bij finalisatie" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="auto">Automatisch bepalen bij finalisatie</SelectItem>
+                  {visibleCaoConfigurationOptions.map(option => (
+                    <SelectItem key={option.id} value={option.id} disabled={option.selectable === false}>
+                      {caoConfigurationLabel(option)}{option.selectable === false ? " (niet actief)" : ""}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              {caoConfigurationSelectionWarning && (
+                <p className="text-xs text-amber-700">{caoConfigurationSelectionWarning}</p>
+              )}
             </div>
           </div>
 
