@@ -412,36 +412,55 @@ async function resolveActiveCaoConfig(base44, referenceDate, caoKey = CAO_PB_KEY
 }
 
 /**
- * Haal uurloon op uit wage_scales_detailed of legacy wage_scales.
+ * Haal uurloon op uit datumvaste jaartabellen of fallback wage_scales_detailed/legacy wage_scales.
  * Geen fallback. Retourneert null als niet gevonden.
  */
-function getHourlyRate(scale, period, caoConfig) {
+function resolveWageScaleTablesForDate(caoConfig, referenceDate) {
+  const refYear = Number((asIsoDate(referenceDate) || '').slice(0, 4));
+  const yearKey = Number.isFinite(refYear) ? String(refYear) : null;
+  const detailedByYear = yearKey && caoConfig?.wage_scales_detailed_by_year?.[yearKey]
+    ? caoConfig.wage_scales_detailed_by_year[yearKey]
+    : null;
+  const legacyByYear = yearKey && caoConfig?.wage_scales_by_year?.[yearKey]
+    ? caoConfig.wage_scales_by_year[yearKey]
+    : null;
+
+  return {
+    wage_scales_detailed: detailedByYear || caoConfig?.wage_scales_detailed || null,
+    wage_scales: legacyByYear || caoConfig?.wage_scales || null,
+    wage_table_year: detailedByYear || legacyByYear ? refYear : null
+  };
+}
+
+function getHourlyRate(scale, period, caoConfig, referenceDate = null) {
   const sk = String(scale);
   const pk = String(period);
-  if (caoConfig?.wage_scales_detailed?.[sk]) {
-    const entry = caoConfig.wage_scales_detailed[sk][pk];
-    if (entry?.hourly_rate) return { hourly_rate: entry.hourly_rate, found: true };
+  const tables = resolveWageScaleTablesForDate(caoConfig, referenceDate);
+  if (tables.wage_scales_detailed?.[sk]) {
+    const entry = tables.wage_scales_detailed[sk][pk];
+    if (entry?.hourly_rate) return { hourly_rate: entry.hourly_rate, found: true, wage_table_year: tables.wage_table_year };
   }
-  if (caoConfig?.wage_scales?.[sk]) {
-    const rate = caoConfig.wage_scales[sk][pk];
-    if (rate != null) return { hourly_rate: rate, found: true };
+  if (tables.wage_scales?.[sk]) {
+    const rate = tables.wage_scales[sk][pk];
+    if (rate != null) return { hourly_rate: rate, found: true, wage_table_year: tables.wage_table_year };
   }
-  return { hourly_rate: null, found: false };
+  return { hourly_rate: null, found: false, wage_table_year: tables.wage_table_year };
 }
 
 /**
  * Controleer of een periodiek bestaat/geldig is voor een schaal in de loontabel.
  * Retourneert null als loontabel ontbreekt (geen uitspraak mogelijk).
  */
-function isPeriodValidForScale(scale, period, caoConfig) {
+function isPeriodValidForScale(scale, period, caoConfig, referenceDate = null) {
   if (!caoConfig) return null;
   const sk = String(scale);
   const pk = String(period);
-  if (caoConfig.wage_scales_detailed?.[sk]) {
-    return !!(caoConfig.wage_scales_detailed[sk][pk]?.hourly_rate);
+  const tables = resolveWageScaleTablesForDate(caoConfig, referenceDate);
+  if (tables.wage_scales_detailed?.[sk]) {
+    return !!(tables.wage_scales_detailed[sk][pk]?.hourly_rate);
   }
-  if (caoConfig.wage_scales?.[sk]) {
-    return caoConfig.wage_scales[sk][pk] != null;
+  if (tables.wage_scales?.[sk]) {
+    return tables.wage_scales[sk][pk] != null;
   }
   return null; // loontabel onbekend
 }
@@ -916,7 +935,7 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate, pe
 
   // ── Valideer periodiek in loontabel ──
   const periodValid = currentPeriod != null && caoConfig
-    ? isPeriodValidForScale(suggestedScale, currentPeriod, caoConfig)
+    ? isPeriodValidForScale(suggestedScale, currentPeriod, caoConfig, referenceDate)
     : null;
 
   if (periodValid === false) {
@@ -953,9 +972,11 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate, pe
   const wagePeriodToUse = currentPeriod != null ? currentPeriod : 0;
   let hourlyRate = null;
   let wageRateFound = false;
+  let wageTableYear = null;
 
   if (caoConfig && wageScaleToUse != null) {
-    const r = getHourlyRate(wageScaleToUse, wagePeriodToUse, caoConfig);
+    const r = getHourlyRate(wageScaleToUse, wagePeriodToUse, caoConfig, referenceDate);
+    wageTableYear = r.wage_table_year || null;
     if (r.found) {
       hourlyRate = r.hourly_rate;
       wageRateFound = true;
@@ -988,6 +1009,7 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate, pe
     scale_valid_for_classification: scaleAcceptableForReferenceDate && currentScale != null,
     period_valid_for_scale: periodValid,
     wage_rate_found: wageRateFound,
+    wage_table_year: wageTableYear,
     hourly_rate: hourlyRate,
     monthly_or_period_salary: null,
     confidence,

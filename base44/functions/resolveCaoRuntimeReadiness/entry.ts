@@ -107,6 +107,7 @@ const SOURCE_MONITORING_CONTRACT_BY_CAO_KEY = {
       family_key: 'pay_periods',
       label: 'CAO PB loonperiodetabellen',
       primary_urls: [
+        'https://www.beveiligingsbranche.nl/wp-content/uploads/Loonperiodes-2025.pdf',
         'https://www.beveiligingsbranche.nl/wp-content/uploads/Loonperiodes-2026.pdf',
         'https://www.beveiligingsbranche.nl/cao/'
       ],
@@ -114,7 +115,7 @@ const SOURCE_MONITORING_CONTRACT_BY_CAO_KEY = {
       official_hosts: ['beveiligingsbranche.nl', 'www.beveiligingsbranche.nl'],
       payroll_relevance: 'critical',
       change_detection: ['content_hash', 'pay_period_table_hash'],
-      watch_for_keywords: ['loonperiodes', 'loonperioden', '2026', '14e loonperiode'],
+      watch_for_keywords: ['loonperiodes', 'loonperioden', '2025', '2026', '14e loonperiode'],
       effective_date_fields: ['period_start', 'period_end', 'pay_period_year']
     },
     {

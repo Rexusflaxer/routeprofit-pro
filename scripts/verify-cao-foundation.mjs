@@ -104,6 +104,11 @@ function runExternalCaoGateScenarios() {
     'https://www.beveiligingsbranche.nl/wp-content/uploads/Salarisschaal-per-loonperiode-1-2026-per-uur-en-per-4-weken.pdf',
     'PB source monitoring must include the official 2026 wage table'
   );
+  assertIncludes(
+    pbReadiness.source_monitoring_summary.primary_urls,
+    'https://www.beveiligingsbranche.nl/wp-content/uploads/Loonperiodes-2025.pdf',
+    'PB source monitoring must include the official 2025 pay-period table'
+  );
   const ehbReadiness = caoRuntimeReadiness.buildCaoRuntimeReadinessForKey('cao_evenementen_horecabeveiliging');
   assertIncludes(
     ehbReadiness.source_monitoring_summary.primary_urls,
@@ -1712,6 +1717,64 @@ function runFunctionClassificationScenarios() {
   assertIncludes(security.source_rule_ids, 'CAO-PB-2024-R1838', 'Appendix 4 wage-scale source missing');
   assertIncludes(security.source_rule_ids, 'CAO-PB-2024-R1753', 'Objectbeveiliger/receptionist function description source missing');
   assertIncludes(security.source_rule_ids, 'CAO-PB-2024-R1755', 'Winkelsurveillant function description source missing');
+
+  const dateAwareWageConfig = {
+    wage_scales_detailed_by_year: {
+      2025: {
+        3: {
+          1: { hourly_rate: 16.73, period_salary_4_weeks: 2410.43 }
+        }
+      },
+      2026: {
+        3: {
+          1: { hourly_rate: 17.37, period_salary_4_weeks: 2502.03 }
+        }
+      }
+    }
+  };
+  const dateAwareSecurityWorker = {
+    function_type: 'objectbeveiliger',
+    cao_function_group: 'objectbeveiliger_receptionist',
+    cao_function_level: 'a',
+    security_role_status: 'beveiliger',
+    performs_security_work: true,
+    security_work_percentage: 100,
+    cao_scale: 3,
+    cao_period: 1,
+    written_classification_notice_confirmed: true,
+    written_scale_period_notice_confirmed: true,
+    periodic_increase_due_confirmed: true
+  };
+  const dateAwareScope = {
+    cao_scope_profile: 'full_security_worker',
+    manual_review_required: false,
+    payroll_rule_profile: {
+      apply_appendix_2_function_scales: true
+    }
+  };
+  const wage2025 = functionClassification.classify(
+    dateAwareSecurityWorker,
+    {},
+    dateAwareScope,
+    dateAwareWageConfig,
+    '2025-06-01',
+    []
+  );
+  assert.equal(wage2025.wage_table_year, 2025);
+  assertAlmostEqual(wage2025.hourly_rate, 16.73, '2025 services must use the 2025 wage table');
+  assert.equal(wage2025.payroll_final_allowed, true);
+
+  const wage2026 = functionClassification.classify(
+    dateAwareSecurityWorker,
+    {},
+    dateAwareScope,
+    dateAwareWageConfig,
+    '2026-06-01',
+    []
+  );
+  assert.equal(wage2026.wage_table_year, 2026);
+  assertAlmostEqual(wage2026.hourly_rate, 17.37, '2026 services must use the 2026 wage table');
+  assert.equal(wage2026.payroll_final_allowed, true);
 }
 
 function runCaoGovernanceUiOptionScenarios() {
