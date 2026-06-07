@@ -1,5 +1,23 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
+const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const SUPPORTED_FUNCTION_CLASSIFICATION_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+
+function getCaoRuntimeSupport(caoKey, functionName) {
+  const key = caoKey || CAO_PB_KEY;
+  const supported = SUPPORTED_FUNCTION_CLASSIFICATION_RUNTIME_CAO_KEYS.includes(key);
+  return {
+    supported,
+    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    cao_key: key,
+    function_name: functionName,
+    supported_cao_keys: SUPPORTED_FUNCTION_CLASSIFICATION_RUNTIME_CAO_KEYS,
+    message: supported
+      ? `Runtime ${functionName} ondersteunt CAO ${key}.`
+      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Functie-indeling is geblokkeerd zodat geen PB-bijlage-2 regels op een andere CAO worden toegepast.`
+  };
+}
+
 /**
  * resolveCaoFunctionClassification
  * Bepaalt CAO PB functie-indeling, loonschaal en periodiek-validatie op basis van artikel 34/35 en bijlage 2.
@@ -175,7 +193,15 @@ function inferFunctionGroup(p, wc) {
   return { group: null, source: null, matched_alias: null };
 }
 
-async function lazySyncCao(base44, force = false) {
+async function lazySyncCao(base44, force = false, caoKey = CAO_PB_KEY) {
+  if (caoKey !== CAO_PB_KEY) {
+    return {
+      changed: false,
+      reason: 'skipped_unsupported_cao_sync',
+      cao_key: caoKey,
+      note: 'Lazy Cloudflare sync is alleen ingericht voor CAO Particuliere Beveiliging.'
+    };
+  }
   try {
     const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
       force, trigger_source: 'lazy_function_classification', sync_trigger_secret: Deno.env.get('BASE44_CAO_SYNC_TRIGGER_SECRET')
@@ -187,9 +213,12 @@ async function lazySyncCao(base44, force = false) {
 /**
  * Haal actieve CAO-configuratie op voor een referentiedatum.
  */
-async function getActiveCaoConfig(base44, referenceDate) {
+async function getActiveCaoConfig(base44, referenceDate, caoKey = CAO_PB_KEY) {
   const refDate = referenceDate ? new Date(referenceDate) : new Date();
-  const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({ status: 'active' });
+  const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({
+    status: 'active',
+    cao_key: caoKey
+  });
   const eligible = allCaos.filter(c => {
     if (c.valid_from && new Date(c.valid_from) > refDate) return false;
     if (c.valid_until && new Date(c.valid_until) < refDate) return false;
@@ -524,6 +553,10 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate) {
     manual_review_reasons.push('CAO-periodiek niet ingesteld. Stel cao_period in.');
     warnings.push('CAO-periodiek (cao_period) ontbreekt.');
   }
+  if (!caoConfig) {
+    manual_review_reasons.push('Geen actieve CAO-configuratie gevonden voor deze cao_key en referentiedatum; loontabel kan niet worden gevalideerd.');
+    warnings.push('Actieve CAO-configuratie ontbreekt. Functie-indeling is niet payroll-final.');
+  }
 
   const periodicReviewSignals = [
     wc.periodic_increase_due_confirmed,
@@ -610,11 +643,29 @@ Deno.serve(async (req) => {
     }
     if (!personnel) return Response.json({ error: 'personnel of personnel_id is verplicht' }, { status: 400 });
 
+    const targetCaoKey = body.cao_key ||
+      work_context?.cao_key ||
+      work_context?.cao ||
+      personnel.cao ||
+      CAO_PB_KEY;
+    const functionClassificationRuntimeSupport = getCaoRuntimeSupport(targetCaoKey, 'resolveCaoFunctionClassification');
+    if (!functionClassificationRuntimeSupport.supported) {
+      return Response.json({
+        error: functionClassificationRuntimeSupport.message,
+        personnel_id: personnel_id || null,
+        cao_key: targetCaoKey,
+        cao_runtime_support: functionClassificationRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        classification_status: functionClassificationRuntimeSupport.status
+      }, { status: 422 });
+    }
+
     // Lazy CAO-sync
-    await lazySyncCao(base44, force_cao_sync);
+    const syncResult = await lazySyncCao(base44, force_cao_sync, targetCaoKey);
 
     // Haal actieve CAO-configuratie op
-    const caoConfig = await getActiveCaoConfig(base44, reference_date);
+    const caoConfig = await getActiveCaoConfig(base44, reference_date, targetCaoKey);
 
     // Haal CAO-toepassingsprofiel op (altijd als basis)
     let caoScope = null;
@@ -622,7 +673,8 @@ Deno.serve(async (req) => {
       const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
         personnel_id: personnel_id || undefined,
         personnel: personnel_id ? undefined : personnel,
-        work_context: work_context || {}
+        work_context: work_context || {},
+        cao_key: targetCaoKey
       });
       caoScope = scopeRes?.data || null;
     } catch { /* stille fallback */ }
@@ -657,12 +709,23 @@ Deno.serve(async (req) => {
           ...result,
           resolved_at: new Date().toISOString(),
           cao_config_id: caoConfig?.id || null,
-          cao_config_version: caoConfig?.version_label || null
+          cao_config_version: caoConfig?.version_label || null,
+          cao_key: targetCaoKey
         }
       });
     }
 
-    return Response.json({ success: true, ...result });
+    return Response.json({
+      success: true,
+      cao_key: targetCaoKey,
+      cao_runtime_support: functionClassificationRuntimeSupport,
+      cao_sync_status: {
+        changed: syncResult?.changed ?? false,
+        reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
+        revision: syncResult?.revision || null
+      },
+      ...result
+    });
 
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

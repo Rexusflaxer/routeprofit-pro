@@ -1,5 +1,23 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
+const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const SUPPORTED_YEAR_END_BONUS_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+
+function getCaoRuntimeSupport(caoKey, functionName) {
+  const key = caoKey || CAO_PB_KEY;
+  const supported = SUPPORTED_YEAR_END_BONUS_RUNTIME_CAO_KEYS.includes(key);
+  return {
+    supported,
+    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    cao_key: key,
+    function_name: functionName,
+    supported_cao_keys: SUPPORTED_YEAR_END_BONUS_RUNTIME_CAO_KEYS,
+    message: supported
+      ? `Runtime ${functionName} ondersteunt CAO ${key}.`
+      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Eindejaarsuitkering is geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+  };
+}
+
 const ARTICLE_38_RULE_IDS = [
   'CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773'
 ];
@@ -262,9 +280,12 @@ function calculateYearEndBonus({ personnel, contracts, caoConfig, payrollRuns, p
   };
 }
 
-async function getActiveCaoConfig(base44, referenceDate) {
+async function getActiveCaoConfig(base44, referenceDate, caoKey = CAO_PB_KEY) {
   const refDate = referenceDate ? new Date(referenceDate) : new Date();
-  const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({ status: 'active' });
+  const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({
+    status: 'active',
+    cao_key: caoKey
+  });
   const eligible = allCaos.filter(c => {
     if (c.valid_from && new Date(c.valid_from) > refDate) return false;
     if (c.valid_until && new Date(c.valid_until) < refDate) return false;
@@ -300,11 +321,32 @@ Deno.serve(async (req) => {
     ]);
     if (!personnel) return Response.json({ error: `Medewerker niet gevonden: ${personnelId}` }, { status: 404 });
 
-    if (personnel.employee_type !== 'loondienst' || personnel.cao !== 'cao_particuliere_beveiliging') {
+    const targetCaoKey = body.cao_key ||
+      body.service_context?.cao_key ||
+      personnel.cao ||
+      CAO_PB_KEY;
+    const yearEndBonusRuntimeSupport = getCaoRuntimeSupport(targetCaoKey, 'calculateCaoYearEndBonus');
+    if (!yearEndBonusRuntimeSupport.supported) {
+      return Response.json({
+        error: yearEndBonusRuntimeSupport.message,
+        personnel_id: personnelId,
+        cao_key: targetCaoKey,
+        cao_runtime_support: yearEndBonusRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: yearEndBonusRuntimeSupport.status,
+        source_rule_ids: ARTICLE_38_RULE_IDS
+      }, { status: 422 });
+    }
+
+    if (personnel.employee_type !== 'loondienst') {
       return Response.json({
         success: true,
         applies: false,
-        reason: 'Artikel 38 CAO PB is alleen automatisch ingericht voor loondienst onder cao_particuliere_beveiliging.',
+        reason: 'Artikel 38 CAO PB is alleen automatisch ingericht voor werknemers in loondienst.',
+        personnel_id: personnelId,
+        cao_key: targetCaoKey,
+        cao_runtime_support: yearEndBonusRuntimeSupport,
         payroll_final_allowed: true,
         manual_review_required: false,
         source_rule_ids: ARTICLE_38_RULE_IDS
@@ -312,9 +354,29 @@ Deno.serve(async (req) => {
     }
 
     const referenceDate = body.reference_date || findPeriod(flattenPayPeriods(body.pay_periods), payoutYear, payoutPeriodNumber)?.end_date || `${payoutYear}-12-01`;
-    const caoConfig = body.cao_config || await getActiveCaoConfig(base44, referenceDate);
+    const caoConfig = body.cao_config || await getActiveCaoConfig(base44, referenceDate, targetCaoKey);
     if (!caoConfig) {
-      return Response.json({ error: `Geen actieve CAO-configuratie gevonden voor ${referenceDate}.` }, { status: 400 });
+      return Response.json({
+        error: `Geen actieve CAO-configuratie gevonden voor ${targetCaoKey} op ${referenceDate}.`,
+        personnel_id: personnelId,
+        cao_key: targetCaoKey,
+        cao_runtime_support: yearEndBonusRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_missing_active_cao_config'
+      }, { status: 400 });
+    }
+    if ((caoConfig.cao_key || targetCaoKey) !== targetCaoKey) {
+      return Response.json({
+        error: `Meegegeven CAO-configuratie (${caoConfig.cao_key || 'cao_key onbekend'}) hoort niet bij gevraagde cao_key ${targetCaoKey}.`,
+        personnel_id: personnelId,
+        cao_configuration_id: caoConfig.id || null,
+        cao_key: targetCaoKey,
+        cao_runtime_support: yearEndBonusRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_cao_config_key_mismatch'
+      }, { status: 400 });
     }
 
     const result = calculateYearEndBonus({
@@ -332,6 +394,8 @@ Deno.serve(async (req) => {
       personnel_id: personnelId,
       personnel_name: personnel.name || null,
       cao_configuration_id: caoConfig.id || null,
+      cao_key: caoConfig.cao_key || targetCaoKey,
+      cao_runtime_support: yearEndBonusRuntimeSupport,
       cao_version_label: caoConfig.version_label || caoConfig.name || null,
       ...result
     });

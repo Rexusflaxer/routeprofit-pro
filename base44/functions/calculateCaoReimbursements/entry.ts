@@ -1,7 +1,33 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
 // ── Revisie-gebaseerde lazy CAO-sync helper ──
-async function lazySyncCao(base44, forceCaoSync = false) {
+const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const SUPPORTED_REIMBURSEMENT_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+
+function getCaoRuntimeSupport(caoKey, functionName) {
+  const key = caoKey || CAO_PB_KEY;
+  const supported = SUPPORTED_REIMBURSEMENT_RUNTIME_CAO_KEYS.includes(key);
+  return {
+    supported,
+    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    cao_key: key,
+    function_name: functionName,
+    supported_cao_keys: SUPPORTED_REIMBURSEMENT_RUNTIME_CAO_KEYS,
+    message: supported
+      ? `Runtime ${functionName} ondersteunt CAO ${key}.`
+      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Vergoedingen zijn geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+  };
+}
+
+async function lazySyncCao(base44, forceCaoSync = false, caoKey = CAO_PB_KEY) {
+  if (caoKey !== CAO_PB_KEY) {
+    return {
+      changed: false,
+      reason: 'skipped_unsupported_cao_sync',
+      cao_key: caoKey,
+      note: 'Lazy Cloudflare sync is alleen ingericht voor CAO Particuliere Beveiliging.'
+    };
+  }
   try {
     const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
       force: forceCaoSync,
@@ -119,10 +145,22 @@ Deno.serve(async (req) => {
     const body = await req.json().catch(() => ({}));
     const { action, km_one_way, km_driven, hours_worked, start_time, shifts, force_cao_sync, personnel_id } = body;
 
+    let personnel = body.personnel || null;
+    if (personnel_id && !personnel) {
+      personnel = await base44.entities.Personnel.get(personnel_id).catch(() => null);
+      if (!personnel) return Response.json({ error: `Medewerker niet gevonden: ${personnel_id}` }, { status: 404 });
+    }
+
+    const targetCaoKey = body.cao_key ||
+      body.service_context?.cao_key ||
+      personnel?.cao ||
+      CAO_PB_KEY;
+
     // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
-    const syncResult = await lazySyncCao(base44, !!force_cao_sync);
+    const syncResult = await lazySyncCao(base44, !!force_cao_sync, targetCaoKey);
     const syncWarnings = [];
     if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'skipped_unsupported_cao_sync') syncWarnings.push('CAO Cloudflare lazy-sync overgeslagen: deze runtime ondersteunt alleen CAO Particuliere Beveiliging.');
     if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
     if (syncResult?.reason === 'cloudflare_unavailable' || syncResult?.reason === 'cloudflare_current_unavailable') syncWarnings.push('Cloudflare onbereikbaar; actieve Base44 CAO gebruikt.');
 
@@ -131,6 +169,25 @@ Deno.serve(async (req) => {
       reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
       revision: syncResult?.revision || null
     };
+
+    const reimbursementRuntimeSupport = getCaoRuntimeSupport(targetCaoKey, 'calculateCaoReimbursements');
+    if (!reimbursementRuntimeSupport.supported) {
+      return Response.json({
+        error: reimbursementRuntimeSupport.message,
+        action: action || 'calculate_reimbursements',
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          'Vergoedingencalculator geblokkeerd: CAO-runtime voor deze cao_key is nog niet lokaal geimplementeerd en geverifieerd.'
+        ],
+        personnel_id: personnel_id || null,
+        cao_key: targetCaoKey,
+        cao_runtime_support: reimbursementRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: reimbursementRuntimeSupport.status
+      }, { status: 422 });
+    }
 
     // ── Normaliseer CAO-scope: null = fail-closed ──
     function normalizeCaoScope(scope) {
@@ -159,7 +216,7 @@ Deno.serve(async (req) => {
     // ── CAO-toepassingscheck (hoofdstuk 5 vergoedingen) ──
     let rawScope = null;
     const scopeWarnings = [];
-    if (personnel_id) {
+    if (targetCaoKey === CAO_PB_KEY && personnel_id) {
       try {
         const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
         rawScope = scopeRes?.data || null;
@@ -185,6 +242,8 @@ Deno.serve(async (req) => {
         manual_review_required: true,
         chapter_5_skipped: true,
         cao_sync_status: caoSyncStatus,
+        cao_key: targetCaoKey,
+        cao_runtime_support: reimbursementRuntimeSupport,
         calculation_warnings: [...syncWarnings],
         scope_warnings: scopeWarnings,
         cao_scope_profile: caoScope.cao_scope_profile
@@ -221,7 +280,16 @@ Deno.serve(async (req) => {
       { rule_id: 'CAO-PB-2024-R0905', domain: 'jubileum', message: 'Jubileumvergoeding: handmatige review vereist (CAO art. 54)', manual_review_required: true }
     ];
 
-    return Response.json({ success: true, cao_sync_status: caoSyncStatus, calculation_warnings: syncWarnings, scope_warnings: scopeWarnings, cao_scope_profile: caoScope?.cao_scope_profile || null, ...result });
+    return Response.json({
+      success: true,
+      cao_sync_status: caoSyncStatus,
+      cao_key: targetCaoKey,
+      cao_runtime_support: reimbursementRuntimeSupport,
+      calculation_warnings: syncWarnings,
+      scope_warnings: scopeWarnings,
+      cao_scope_profile: caoScope?.cao_scope_profile || null,
+      ...result
+    });
 
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

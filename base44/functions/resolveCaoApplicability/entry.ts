@@ -1,5 +1,23 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
+const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const SUPPORTED_APPLICABILITY_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+
+function getCaoRuntimeSupport(caoKey, functionName) {
+  const key = caoKey || CAO_PB_KEY;
+  const supported = SUPPORTED_APPLICABILITY_RUNTIME_CAO_KEYS.includes(key);
+  return {
+    supported,
+    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    cao_key: key,
+    function_name: functionName,
+    supported_cao_keys: SUPPORTED_APPLICABILITY_RUNTIME_CAO_KEYS,
+    message: supported
+      ? `Runtime ${functionName} ondersteunt CAO ${key}.`
+      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. CAO-toepassingsscope is geblokkeerd zodat geen PB artikel-3 regels op een andere CAO worden toegepast.`
+  };
+}
+
 /**
  * resolveCaoApplicability
  * Bepaalt per medewerker welke CAO PB-regels van toepassing zijn.
@@ -468,6 +486,27 @@ Deno.serve(async (req) => {
 
     if (!personnel) return Response.json({ error: 'personnel of personnel_id is verplicht' }, { status: 400 });
 
+    const targetCaoKey = body.cao_key ||
+      contract?.cao_key ||
+      work_context?.cao_key ||
+      work_context?.cao ||
+      personnel.cao ||
+      CAO_PB_KEY;
+    const applicabilityRuntimeSupport = getCaoRuntimeSupport(targetCaoKey, 'resolveCaoApplicability');
+    if (!applicabilityRuntimeSupport.supported) {
+      return Response.json({
+        error: applicabilityRuntimeSupport.message,
+        personnel_id: personnel_id || null,
+        cao_key: targetCaoKey,
+        cao_runtime_support: applicabilityRuntimeSupport,
+        applies_cao_pb: false,
+        applies_full_security_rules: false,
+        cao_scope_profile: 'blocked_unsupported_cao_runtime',
+        manual_review_required: true,
+        payroll_final_allowed: false
+      }, { status: 422 });
+    }
+
     const result = resolveApplicability(personnel, contract, work_context);
 
     if (save && personnel_id) {
@@ -485,7 +524,12 @@ Deno.serve(async (req) => {
       });
     }
 
-    return Response.json({ success: true, ...result });
+    return Response.json({
+      success: true,
+      cao_key: targetCaoKey,
+      cao_runtime_support: applicabilityRuntimeSupport,
+      ...result
+    });
 
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
