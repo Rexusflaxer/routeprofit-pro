@@ -30,6 +30,7 @@ const personnelCosts = loadFunctionModule('base44/functions/calculatePersonnelCo
 const functionClassification = loadFunctionModule('base44/functions/resolveCaoFunctionClassification/entry.ts');
 const caoApplicability = loadFunctionModule('base44/functions/resolveCaoApplicability/entry.ts');
 const policyReferenceContext = loadFunctionModule('base44/functions/resolveCaoPolicyReferenceContext/entry.ts');
+const caoRuntimeReadiness = loadFunctionModule('base44/functions/resolveCaoRuntimeReadiness/entry.ts');
 
 function assertIncludes(values, expected, message) {
   assert.ok(values.includes(expected), `${message}: expected ${expected} in ${JSON.stringify(values)}`);
@@ -41,6 +42,10 @@ function assertAlmostEqual(actual, expected, message) {
 
 function assertCleanBooleanField(value, expected, field) {
   assert.equal(value, expected, `${field} should remain ${expected}, not be dropped as an empty value`);
+}
+
+function assertSameValues(actual, expected, message) {
+  assert.deepEqual([...actual], expected, message);
 }
 
 function runExternalCaoGateScenarios() {
@@ -66,6 +71,20 @@ function runExternalCaoGateScenarios() {
   const unsupportedTraffic = schedule.getCaoRuntimeSupport('cao_verkeersregelaars', 'validateCaoScheduleRules');
   assert.equal(supportedPb.supported, true, 'PB runtime should remain supported');
   assert.equal(unsupportedTraffic.supported, false, 'Traffic-controller runtime must fail closed until implemented');
+
+  const readinessMatrix = caoRuntimeReadiness.resolveCaoRuntimeReadiness();
+  assertIncludes(readinessMatrix.known_security_cao_keys, 'cao_particuliere_beveiliging', 'PB CAO catalog entry missing');
+  assertIncludes(readinessMatrix.known_security_cao_keys, 'cao_evenementen_horecabeveiliging', 'EHB CAO catalog entry missing');
+  assertIncludes(readinessMatrix.known_security_cao_keys, 'cao_veiligheidsdomein', 'Safety-domain CAO catalog entry missing');
+  assertIncludes(readinessMatrix.known_security_cao_keys, 'cao_verkeersregelaars', 'Traffic-controller CAO catalog entry missing');
+  assertSameValues(readinessMatrix.supported_payroll_runtime_cao_keys, ['cao_particuliere_beveiliging'], 'Only CAO PB should be payroll-runtime supported');
+  assertIncludes(readinessMatrix.known_source_monitoring_only_cao_keys, 'cao_evenementen_horecabeveiliging', 'EHB must stay source-monitored but blocked until runtime exists');
+  assertIncludes(readinessMatrix.known_source_monitoring_only_cao_keys, 'cao_veiligheidsdomein', 'Safety-domain must stay source-monitored but blocked until runtime exists');
+  assertIncludes(readinessMatrix.known_source_monitoring_only_cao_keys, 'cao_verkeersregelaars', 'Traffic-controller must stay source-monitored but blocked until runtime exists');
+
+  const unknownReadiness = caoRuntimeReadiness.buildCaoRuntimeReadinessForKey('cao_onbekend');
+  assert.equal(unknownReadiness.status, 'blocked_unknown_cao_key');
+  assert.equal(unknownReadiness.payroll_final_allowed_by_static_runtime, false);
 }
 
 function runPlanningContextScenarios() {
