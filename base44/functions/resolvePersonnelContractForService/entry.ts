@@ -759,7 +759,15 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
     };
   }
 
-  const caoKey = contract?.cao_key || companyAssignment?.cao_key || requestedCaoKey || CAO_PB_KEY;
+  const caoKey = contract?.cao_key || companyAssignment?.cao_key || requestedCaoKey || null;
+  if (!caoKey) {
+    return {
+      config: null,
+      source: 'missing_cao_key',
+      warning: 'Geen cao_key gevonden op contract, medewerker-bedrijfskoppeling of dienstcontext. Contractresolutie mag niet standaard naar CAO PB vallen; leg de toepasselijke CAO expliciet vast.'
+    };
+  }
+
   const configs = await base44.asServiceRole.entities.CAOConfiguration.filter({
     cao_key: caoKey,
     is_active: true
@@ -938,6 +946,10 @@ Deno.serve(async (req) => {
       manualReviewReasons.push('Contract mist expliciete allowed_* functievelden voor de gevraagde dienst. Dit moet worden aangevuld voor definitieve planning/payroll.');
     }
 
+    if (selectedContract && !selectedContract.cao_key) {
+      manualReviewReasons.push('Geselecteerd contract mist cao_key. Leg de toepasselijke CAO expliciet vast op het arbeidscontract voordat planning/payroll definitief mag zijn.');
+    }
+
     const internshipServiceCheck = selectedContract
       ? evaluateInternshipServiceConstraints(selectedContract, serviceContext)
       : null;
@@ -989,7 +1001,7 @@ Deno.serve(async (req) => {
     const resolvedCaoKey = caoResolution.config?.cao_key ||
       serviceContext.cao_key ||
       selectedContract?.cao_key ||
-      personnel.cao ||
+      companyAssignment?.cao_key ||
       null;
     const caoRuntimeSupport = getContractResolutionRuntimeSupport(resolvedCaoKey);
     if (!caoRuntimeSupport.supported) {
@@ -1109,7 +1121,7 @@ Deno.serve(async (req) => {
         function_match: item.function_match
       })),
       cao_configuration_id: caoResolution.config?.id || null,
-      cao_key: caoResolution.config?.cao_key || serviceContext.cao_key || selectedContract?.cao_key || personnel.cao || null,
+      cao_key: caoResolution.config?.cao_key || serviceContext.cao_key || selectedContract?.cao_key || companyAssignment?.cao_key || null,
       cao_resolution_source: caoResolution.source,
       cao_resolution_candidate_configuration_ids: caoResolution.candidate_configuration_ids || [],
       cao_resolution_candidate_company_cao_assignment_ids: caoResolution.candidate_company_cao_assignment_ids || [],

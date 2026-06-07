@@ -8,6 +8,13 @@
     "company_id": {
       "type": "string"
     },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Default CAO sleutel voor deze medewerker-bedrijfskoppeling. Wordt gebruikt als contract/dienst geen specifiekere cao_key heeft; moet overeenkomen met default_cao_configuration_id wanneer die is gevuld."
+    },
     "assignment_status": {
       "type": "string",
       "enum": [
