@@ -432,10 +432,54 @@ const HIGH_IMPACT_REFERENCE_POLICY_RULE_IDS = [
   ...ruleIds(2106)
 ];
 
+const GENERAL_REFERENCE_POLICY_RULE_IDS = [
+  ...ruleRange(1, 163), ...ruleRange(165, 170), ...ruleIds(173), ...ruleRange(178, 181),
+  ...ruleIds(183), ...ruleIds(207), ...ruleRange(212, 220), ...ruleRange(222, 226),
+  ...ruleIds(235), ...ruleRange(237, 295), ...ruleIds(837), ...ruleIds(949),
+  ...ruleIds(951, 952), ...ruleIds(960), ...ruleIds(964, 965), ...ruleIds(970),
+  ...ruleRange(972, 975), ...ruleIds(977, 978), ...ruleRange(983, 987), ...ruleIds(989),
+  ...ruleIds(992), ...ruleIds(1132), ...ruleRange(1168, 1171), ...ruleIds(1185),
+  ...ruleIds(1200), ...ruleRange(1297, 1302), ...ruleRange(1304, 1310), ...ruleIds(1312),
+  ...ruleRange(1314, 1321), ...ruleRange(1323, 1326), ...ruleIds(1328, 1329), ...ruleRange(1331, 1336),
+  ...ruleIds(1339, 1340), ...ruleRange(1343, 1351), ...ruleRange(1354, 1356), ...ruleRange(1361, 1365),
+  ...ruleRange(1367, 1374), ...ruleIds(1376), ...ruleRange(1378, 1385), ...ruleRange(1388, 1391),
+  ...ruleIds(1394), ...ruleIds(1396), ...ruleIds(1398), ...ruleRange(1402, 1407),
+  ...ruleRange(1410, 1422), ...ruleRange(1424, 1428), ...ruleRange(1430, 1435), ...ruleIds(1437),
+  ...ruleRange(1446, 1454), ...ruleRange(1456, 1459), ...ruleIds(1461), ...ruleRange(1463, 1471),
+  ...ruleIds(1473), ...ruleRange(1475, 1483), ...ruleIds(1485, 1486), ...ruleRange(1488, 1490),
+  ...ruleRange(1492, 1494), ...ruleRange(1496, 1498), ...ruleIds(1502), ...ruleIds(1511),
+  ...ruleIds(1513), ...ruleRange(1517, 1519), ...ruleIds(1522), ...ruleRange(1526, 1530),
+  ...ruleRange(1534, 1538), ...ruleRange(1540, 1542), ...ruleIds(1544), ...ruleIds(1546),
+  ...ruleRange(1548, 1550), ...ruleIds(1552, 1553), ...ruleIds(1557), ...ruleIds(1563),
+  ...ruleIds(1570, 1571), ...ruleIds(1574, 1575), ...ruleIds(1581), ...ruleIds(1587, 1588),
+  ...ruleIds(1591), ...ruleRange(1594, 1600), ...ruleRange(1606, 1608), ...ruleIds(1611, 1612),
+  ...ruleIds(1614), ...ruleIds(1625), ...ruleIds(1634), ...ruleRange(1644, 1649),
+  ...ruleRange(1653, 1657), ...ruleRange(1659, 1662), ...ruleRange(1664, 1667), ...ruleIds(1674),
+  ...ruleIds(1680), ...ruleIds(1684, 1685), ...ruleIds(1688), ...ruleIds(1697),
+  ...ruleRange(1699, 1706), ...ruleIds(1709), ...ruleIds(1711), ...ruleIds(1718),
+  ...ruleIds(1721), ...ruleIds(1724), ...ruleRange(1726, 1735), ...ruleRange(1737, 1739),
+  ...ruleIds(1741), ...ruleIds(1743), ...ruleIds(1748), ...ruleIds(1842, 1843),
+  ...ruleIds(1845, 1846), ...ruleIds(1849), ...ruleIds(1853), ...ruleIds(1855, 1856),
+  ...ruleIds(1860), ...ruleIds(1863, 1864), ...ruleIds(1870), ...ruleIds(1882),
+  ...ruleIds(1899), ...ruleIds(1906, 1907), ...ruleIds(1909), ...ruleIds(1912),
+  ...ruleIds(1956), ...ruleIds(1960, 1961), ...ruleIds(1963, 1964), ...ruleIds(1967, 1968),
+  ...ruleIds(1970), ...ruleIds(1972), ...ruleIds(1980, 1981), ...ruleIds(1986),
+  ...ruleIds(1988), ...ruleIds(1992), ...ruleIds(1994, 1995), ...ruleIds(1998),
+  ...ruleIds(2000), ...ruleIds(2002), ...ruleIds(2004, 2005), ...ruleIds(2007),
+  ...ruleIds(2009), ...ruleIds(2015, 2016), ...ruleRange(2019, 2023), ...ruleIds(2025),
+  ...ruleIds(2027), ...ruleRange(2029, 2034), ...ruleRange(2047, 2052), ...ruleIds(2054),
+  ...ruleRange(2056, 2063), ...ruleIds(2066), ...ruleIds(2073), ...ruleIds(2075, 2076),
+  ...ruleRange(2085, 2087), ...ruleRange(2096, 2098), ...ruleIds(2104)
+];
+
 const LOCAL_RUNTIME_RULE_BINDINGS = {
   'resolveCaoPolicyReferenceContext.high_impact_reference_policy_context': {
     functions: ['resolveCaoPolicyReferenceContext'],
     rule_ids: HIGH_IMPACT_REFERENCE_POLICY_RULE_IDS
+  },
+  'resolveCaoPolicyReferenceContext.general_reference_policy_context': {
+    functions: ['resolveCaoPolicyReferenceContext'],
+    rule_ids: GENERAL_REFERENCE_POLICY_RULE_IDS
   },
   'resolveCaoApplicability.article_3_scope': {
     functions: ['resolveCaoApplicability', 'validateTaskPlanningContext', 'calculatePersonnelCosts', 'validateCaoScheduleRules'],

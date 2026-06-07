@@ -161,6 +161,25 @@ function runPolicyReferenceContextScenarios() {
   assert.ok(payrollPolicyContext.source_rule_ids.includes('CAO-PB-2024-R1201'), 'Pension/older-worker payroll policy anchor missing');
   assert.ok(payrollPolicyContext.source_rule_ids.includes('CAO-PB-2024-R0768'), 'Year-end bonus policy anchor missing');
 
+  const metadataContext = policyReferenceContext.resolvePolicyReferenceContext({
+    cao_key: 'cao_particuliere_beveiliging',
+    domains: ['metadata_toc']
+  });
+  assert.equal(metadataContext.policy_reference_context_status, 'resolved');
+  assert.equal(metadataContext.policy_reference_context_type, 'cao_reference_and_policy_rules');
+  assert.ok(metadataContext.source_rule_count >= 150, 'Metadata/table-of-contents context should expose full CAO navigation references');
+  assertIncludes(metadataContext.source_rule_ids, 'CAO-PB-2024-R0008', 'CAO table-of-contents context must include inhoud heading');
+  assertIncludes(metadataContext.source_rule_ids, 'CAO-PB-2024-R0159', 'CAO table-of-contents context must include appendix/protocol tail references');
+
+  const schipholAgreementContext = policyReferenceContext.resolvePolicyReferenceContext({
+    cao_key: 'cao_particuliere_beveiliging',
+    domains: ['airport_schiphol_agreements'],
+    surfaces: ['reimbursement']
+  });
+  assert.equal(schipholAgreementContext.policy_reference_context_status, 'resolved');
+  assertIncludes(schipholAgreementContext.source_rule_ids, 'CAO-PB-2024-R1956', 'Schiphol agreement reference context missing');
+  assertIncludes(schipholAgreementContext.source_rule_ids, 'CAO-PB-2024-R2073', 'Schiphol agreement tail reference context missing');
+
   const unsupported = policyReferenceContext.resolvePolicyReferenceContext({
     cao_key: 'cao_verkeersregelaars',
     surfaces: ['payroll']
