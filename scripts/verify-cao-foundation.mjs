@@ -1203,6 +1203,100 @@ function runCaoGovernanceUiOptionScenarios() {
   assert.ok(includedInactive.warning.includes('niet actief'));
 }
 
+function listFilesRecursive(rootDir, extensions) {
+  const files = [];
+  for (const entry of fs.readdirSync(rootDir, { withFileTypes: true })) {
+    const fullPath = path.join(rootDir, entry.name);
+    if (entry.isDirectory()) {
+      if (['node_modules', 'dist', '.git'].includes(entry.name)) continue;
+      files.push(...listFilesRecursive(fullPath, extensions));
+    } else if (extensions.some(ext => entry.name.endsWith(ext))) {
+      files.push(fullPath);
+    }
+  }
+  return files;
+}
+
+function relativeRepoPath(absolutePath) {
+  return path.relative(repoRoot, absolutePath);
+}
+
+function runCaoStaticGovernanceScenarios() {
+  const srcFiles = listFilesRecursive(path.join(repoRoot, 'src'), ['.js', '.jsx', '.ts', '.tsx']);
+  const frontendSensitiveEntityReads = srcFiles
+    .filter(file => fs.readFileSync(file, 'utf8').includes('base44.entities.CAOConfiguration.list('))
+    .map(relativeRepoPath);
+  assert.deepEqual(
+    frontendSensitiveEntityReads,
+    [],
+    'Customer UI must not read raw CAOConfiguration records; use listCaoConfigurationOptions instead'
+  );
+
+  const sensitiveOwnerFunctions = [
+    'approveCaoConfiguration',
+    'checkCaoSources',
+    'extractCaoParameters',
+    'ingestCaoAutomationPayload',
+    'syncCaoFromCloudflare',
+    'auditCaoRuleCoverage',
+    'queueCaoPayrollCorrections'
+  ];
+  const frontendSensitiveFunctionInvokes = srcFiles
+    .filter(file => {
+      const source = fs.readFileSync(file, 'utf8');
+      return sensitiveOwnerFunctions.some(name =>
+        source.includes(`functions.invoke("${name}"`) ||
+        source.includes(`functions.invoke('${name}'`)
+      );
+    })
+    .map(relativeRepoPath);
+  assert.deepEqual(
+    frontendSensitiveFunctionInvokes,
+    [],
+    'Customer UI must not invoke owner/internal CAO mutation, audit or source-monitoring functions'
+  );
+
+  const functionFiles = listFilesRecursive(path.join(repoRoot, 'base44/functions'), ['.ts']);
+  const syncInvokeWithoutSecret = [];
+  for (const file of functionFiles) {
+    const source = fs.readFileSync(file, 'utf8');
+    let searchFrom = 0;
+    while (searchFrom < source.length) {
+      const singleQuoteIndex = source.indexOf("functions.invoke('syncCaoFromCloudflare'", searchFrom);
+      const doubleQuoteIndex = source.indexOf('functions.invoke("syncCaoFromCloudflare"', searchFrom);
+      const indexes = [singleQuoteIndex, doubleQuoteIndex].filter(index => index >= 0);
+      if (indexes.length === 0) break;
+      const index = Math.min(...indexes);
+      const snippet = source.slice(index, index + 700);
+      if (!snippet.includes('sync_trigger_secret')) {
+        syncInvokeWithoutSecret.push(`${relativeRepoPath(file)}:${index}`);
+      }
+      searchFrom = index + 1;
+    }
+  }
+  assert.deepEqual(
+    syncInvokeWithoutSecret,
+    [],
+    'Internal syncCaoFromCloudflare invokes must pass BASE44_CAO_SYNC_TRIGGER_SECRET'
+  );
+
+  const disabledCustomerFunctions = [
+    'approveCaoConfiguration',
+    'checkCaoSources',
+    'extractCaoParameters'
+  ];
+  for (const name of disabledCustomerFunctions) {
+    const source = fs.readFileSync(path.join(repoRoot, 'base44/functions', name, 'entry.ts'), 'utf8');
+    assert.ok(source.includes('DISABLED'), `${name} must remain visibly disabled for customer roles`);
+    assert.ok(source.includes('status: 403'), `${name} must return 403 for customer access`);
+  }
+
+  const ingestSource = fs.readFileSync(path.join(repoRoot, 'base44/functions/ingestCaoAutomationPayload/entry.ts'), 'utf8');
+  assert.ok(ingestSource.includes('CAO_AUTOMATION_SHARED_SECRET'), 'ingestCaoAutomationPayload must stay secret-only');
+  const syncSource = fs.readFileSync(path.join(repoRoot, 'base44/functions/syncCaoFromCloudflare/entry.ts'), 'utf8');
+  assert.ok(syncSource.includes('BASE44_CAO_SYNC_TRIGGER_SECRET'), 'syncCaoFromCloudflare must require the internal sync secret');
+}
+
 async function main() {
   const scenarios = [
     ['external CAO gates', () => runExternalCaoGateScenarios()],
@@ -1219,7 +1313,8 @@ async function main() {
     ['payroll policy and corrections', () => runPayrollPolicyScenarios()],
     ['route cost schedule gate', () => runRouteCostScheduleGateScenarios()],
     ['function classification and wage scales', () => runFunctionClassificationScenarios()],
-    ['CAO governance UI options', () => runCaoGovernanceUiOptionScenarios()]
+    ['CAO governance UI options', () => runCaoGovernanceUiOptionScenarios()],
+    ['CAO static governance guards', () => runCaoStaticGovernanceScenarios()]
   ];
 
   for (const [name, fn] of scenarios) {
