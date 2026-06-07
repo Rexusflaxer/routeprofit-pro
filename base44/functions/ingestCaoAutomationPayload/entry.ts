@@ -63,6 +63,65 @@ const CAO_SOURCE_TYPES = [
   'other'
 ];
 
+const CAO_PB_REQUIRED_SOURCE_FAMILIES = [
+  {
+    key: 'cao_landing_page',
+    label: 'CAO-overzichtspagina beveiligingsbranche',
+    source_types: ['cao_page', 'official_webpage'],
+    keywords: ['beveiligingsbranche.nl/cao', '/cao/'],
+    minimum_count: 1
+  },
+  {
+    key: 'main_cao_pdf',
+    label: 'Hoofd-CAO Particuliere Beveiliging PDF',
+    source_types: ['cao_pdf'],
+    keywords: ['cao-pb', 'particuliere beveiliging', 'met-omslag'],
+    minimum_count: 1
+  },
+  {
+    key: 'wage_tables',
+    label: 'Loontabellen',
+    source_types: ['wage_table_pdf', 'wage_table_xlsx'],
+    keywords: ['loontabel', 'loontabellen', 'loongebouw', 'wage table'],
+    minimum_count: 1
+  },
+  {
+    key: 'pay_periods',
+    label: 'Loonperiodetabellen',
+    source_types: ['pay_periods_pdf', 'pay_periods_xlsx'],
+    keywords: ['loonperiode', 'loonperioden', 'loonperiodes', 'pay period'],
+    minimum_count: 1
+  },
+  {
+    key: 'fonds_cao',
+    label: 'Fonds-CAO / SFPB-bronnen',
+    source_types: ['fonds_cao_pdf'],
+    keywords: ['fonds-cao', 'fonds cao', 'sociaalfondsbeveiliging', 'sociaal fonds beveiliging', 'sfpb'],
+    minimum_count: 1
+  },
+  {
+    key: 'question_answer',
+    label: 'Vraagbaak / FAQ',
+    source_types: ['faq_page', 'question_answer_page'],
+    keywords: ['vraagbaak', 'veelgestelde', 'faq', 'q&a'],
+    minimum_count: 1
+  },
+  {
+    key: 'social_committee',
+    label: 'Sociale commissie / uitspraken',
+    source_types: ['sociale_commissie_page', 'sociale_commissie_pdf', 'sociale_commissie_decision_pdf'],
+    keywords: ['sociale commissie', 'sociale-commissie', 'uitspraak', 'uitspraken'],
+    minimum_count: 1
+  },
+  {
+    key: 'news_updates',
+    label: 'CAO-nieuws en losse updates',
+    source_types: ['news_page', 'news_update'],
+    keywords: ['nieuws', 'news', 'update'],
+    minimum_count: 1
+  }
+];
+
 const OFFICIAL_CAO_SOURCE_HOSTS = [
   'beveiligingsbranche.nl',
   'www.beveiligingsbranche.nl',
@@ -165,6 +224,163 @@ function normalizeMonitoringFrequency(value, relevance) {
 function normalizeExtractionStatus(value, fallback = 'ok') {
   const normalized = String(value || fallback || '').trim().toLowerCase();
   return ['pending', 'ok', 'failed', 'manual_review_required'].includes(normalized) ? normalized : fallback;
+}
+
+function getSourceDocumentsForCoverage(config) {
+  const sourceSets = [
+    config?.source_documents_snapshot,
+    config?.source_documents,
+    config?.monitored_source_documents,
+    config?.rule_engine_metadata?.source_documents,
+    config?.rule_engine_metadata?.source_documents_snapshot,
+    config?.coverage_summary?.source_documents,
+    config?.source_coverage_summary?.source_documents
+  ];
+  const docsByUrl = new Map();
+  for (const sourceSet of sourceSets) {
+    if (!Array.isArray(sourceSet)) continue;
+    for (const doc of sourceSet) {
+      if (!doc || typeof doc !== 'object') continue;
+      const key = String(doc.canonical_url || doc.url || doc.title || JSON.stringify(doc)).toLowerCase();
+      if (!docsByUrl.has(key)) docsByUrl.set(key, doc);
+    }
+  }
+  return [...docsByUrl.values()];
+}
+
+function sourceDocumentSearchText(doc) {
+  return [
+    doc?.source_type,
+    doc?.document_type,
+    doc?.type,
+    doc?.source_category,
+    doc?.category,
+    doc?.title,
+    doc?.url,
+    doc?.canonical_url,
+    doc?.discovered_from_url
+  ].filter(Boolean).join(' ').toLowerCase();
+}
+
+function normalizedSourceTypeForCoverage(doc) {
+  return normalizeCaoSourceType(
+    doc?.source_type || doc?.document_type || doc?.type || doc?.source_category,
+    doc || {},
+    'other'
+  );
+}
+
+function sourceDocumentMatchesFamily(doc, family) {
+  const sourceType = normalizedSourceTypeForCoverage(doc);
+  const text = sourceDocumentSearchText(doc);
+  return family.source_types.includes(sourceType) ||
+    family.keywords.some(keyword => text.includes(keyword));
+}
+
+function sourceDocumentHasHashEvidence(doc) {
+  return Boolean(
+    doc?.content_hash ||
+    doc?.source_hash ||
+    doc?.sha256 ||
+    doc?.content_sha256 ||
+    doc?.extracted_text_hash ||
+    doc?.text_hash
+  );
+}
+
+function sourceDocumentIsOfficial(doc) {
+  const explicitOfficial = booleanOrNull(doc?.is_official_source ?? doc?.official_source);
+  if (explicitOfficial !== null) return explicitOfficial;
+  const confidence = String(doc?.official_source_confidence || '').toLowerCase();
+  if (['high', 'medium'].includes(confidence)) return true;
+  return inferOfficialSource(doc?.canonical_url || doc?.url || '');
+}
+
+function sourceDocumentExtractionBlocks(doc) {
+  const status = String(doc?.extraction_status || doc?.parse_status || '').toLowerCase();
+  return ['pending', 'failed', 'manual_review_required'].includes(status);
+}
+
+function evaluateRequiredSourceFamilyCoverage(config) {
+  const caoKey = normalizeCaoKey(config?.cao_key) || CAO_PB_KEY;
+  const sourceDocuments = getSourceDocumentsForCoverage(config);
+  if (caoKey !== CAO_PB_KEY) {
+    return {
+      passed: true,
+      required: false,
+      source_document_count: sourceDocuments.length,
+      required_families: [],
+      missing_families: [],
+      blocking_findings: []
+    };
+  }
+
+  const requiredFamilies = CAO_PB_REQUIRED_SOURCE_FAMILIES.map(family => {
+    const matches = sourceDocuments.filter(doc => sourceDocumentMatchesFamily(doc, family));
+    const officialMatches = matches.filter(sourceDocumentIsOfficial);
+    const hashMatches = matches.filter(sourceDocumentHasHashEvidence);
+    const extractionBlockedMatches = matches.filter(sourceDocumentExtractionBlocks);
+    return {
+      key: family.key,
+      label: family.label,
+      minimum_count: family.minimum_count,
+      matched_count: matches.length,
+      official_count: officialMatches.length,
+      hash_evidence_count: hashMatches.length,
+      extraction_blocked_count: extractionBlockedMatches.length,
+      matched_urls: matches.slice(0, 20).map(doc => doc.url || doc.canonical_url || doc.title || null).filter(Boolean),
+      matched_urls_truncated: matches.length > 20
+    };
+  });
+
+  const missingFamilies = requiredFamilies.filter(family => family.matched_count < family.minimum_count);
+  const unofficialFamilies = requiredFamilies.filter(family => family.matched_count >= family.minimum_count && family.official_count === 0);
+  const missingHashFamilies = requiredFamilies.filter(family => family.matched_count >= family.minimum_count && family.hash_evidence_count === 0);
+  const extractionBlockedFamilies = requiredFamilies.filter(family => family.extraction_blocked_count > 0);
+  const blockingFindings = [];
+
+  if (missingFamilies.length > 0) {
+    blockingFindings.push({
+      code: 'missing_required_cao_source_family',
+      severity: 'critical',
+      message: `CAO PB bronmonitoring mist verplichte bronfamilies: ${missingFamilies.map(family => family.label).join(', ')}. Payroll-ready blijft geblokkeerd.`
+    });
+  }
+  if (unofficialFamilies.length > 0) {
+    blockingFindings.push({
+      code: 'unverified_required_cao_source_officiality',
+      severity: 'critical',
+      message: `CAO PB bronmonitoring bevat bronfamilies zonder bewezen officiele bron: ${unofficialFamilies.map(family => family.label).join(', ')}.`
+    });
+  }
+  if (missingHashFamilies.length > 0) {
+    blockingFindings.push({
+      code: 'missing_required_cao_source_hash',
+      severity: 'critical',
+      message: `CAO PB bronmonitoring mist hashbewijs voor verplichte bronfamilies: ${missingHashFamilies.map(family => family.label).join(', ')}. Wijzigingen zijn dan niet audit-proof detecteerbaar.`
+    });
+  }
+  if (extractionBlockedFamilies.length > 0) {
+    blockingFindings.push({
+      code: 'blocked_required_cao_source_extraction',
+      severity: 'critical',
+      message: `CAO PB bronmonitoring heeft onvolledig of mislukt extractiewerk voor: ${extractionBlockedFamilies.map(family => family.label).join(', ')}.`
+    });
+  }
+
+  return {
+    passed: blockingFindings.length === 0,
+    required: true,
+    source_document_count: sourceDocuments.length,
+    required_family_count: requiredFamilies.length,
+    present_family_count: requiredFamilies.length - missingFamilies.length,
+    required_families: requiredFamilies,
+    missing_families: missingFamilies,
+    unofficial_families: unofficialFamilies,
+    missing_hash_families: missingHashFamilies,
+    extraction_blocked_families: extractionBlockedFamilies,
+    blocking_findings: blockingFindings
+  };
 }
 
 function buildCaoSourceDocumentData(doc, existingDoc, { now, caoKey, revision, defaultSourceType = 'other' }) {
@@ -989,6 +1205,7 @@ function evaluateSourceCoverageCompleteness(candidateCfg, rules) {
   const minimums = getSourceCoverageMinimums(candidateCfg);
   const uniqueRuleIds = new Set(rules.map(rule => rule.rule_id).filter(Boolean));
   const byAutomationLevel = countByAutomationLevel(rules);
+  const sourceFamilyCoverage = evaluateRequiredSourceFamilyCoverage(candidateCfg);
   const blockingFindings = [];
   const payrollCriticalMissingSourceLocator = [];
   const payrollCriticalMissingSourceHash = [];
@@ -1045,12 +1262,14 @@ function evaluateSourceCoverageCompleteness(candidateCfg, rules) {
       message: `${payrollCriticalMissingSourceHash.length} payrollkritische CAO-regels missen een regelhash; payroll-ready wordt geblokkeerd.`
     });
   }
+  blockingFindings.push(...sourceFamilyCoverage.blocking_findings);
 
   return {
     passed: blockingFindings.length === 0,
     unique_rule_ids: uniqueRuleIds.size,
     by_automation_level: byAutomationLevel,
     minimums,
+    source_family_coverage: sourceFamilyCoverage,
     payroll_critical_source_evidence: {
       missing_source_locator_count: payrollCriticalMissingSourceLocator.length,
       missing_source_hash_count: payrollCriticalMissingSourceHash.length,
@@ -1692,7 +1911,10 @@ Deno.serve(async (req) => {
     const approval_status = isOwnerApproved ? 'owner_approved' : 'proposed';
     const candidateConfigurationForGate = {
       ...candidate_configuration,
-      cao_key: normalizedCaoKey
+      cao_key: normalizedCaoKey,
+      source_documents_snapshot: Array.isArray(candidate_configuration.source_documents_snapshot) && candidate_configuration.source_documents_snapshot.length > 0
+        ? candidate_configuration.source_documents_snapshot
+        : source_documents
     };
     const normalizedCandidateRules = normalizeCaoRulesInput(candidate_rules, normalizedCaoKey)
       .map(rule => withLocalRuntimeBindingMetadata(rule));
