@@ -1427,12 +1427,17 @@ function nightWorkHoursBetween00And06(shift) {
   return total;
 }
 
+function hasObjectValues(value) {
+  return value && typeof value === 'object' &&
+    Object.values(value).some(v => v !== null && v !== undefined && v !== '');
+}
+
 function shiftHasContractContext(shift) {
   return !!(
     shift.company_id ||
     shift.route_id ||
     shift.task_id ||
-    shift.service_context ||
+    hasObjectValues(shift.service_context) ||
     shift.service_function_type ||
     shift.function_type ||
     shift.cao_function_group ||
@@ -3433,6 +3438,14 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
     !(s.is_time_window === true || s.roster_block_type === 'time_window' || s.block_type === 'time_window')
   );
   const enforceContractResolution = body.enforce_contract_resolution === true ||
+    body.contract_id ||
+    body.company_id ||
+    body.route_id ||
+    body.task_id ||
+    body.object_id ||
+    body.cao_key ||
+    body.cao ||
+    hasObjectValues(body.service_context) ||
     periodShifts.some(shiftHasContractContext);
 
   if (!enforceContractResolution) {
@@ -3615,6 +3628,25 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
   };
 }
 
+function collectContractResolutionScopeProfiles(contractResults) {
+  const profiles = [];
+  for (const item of contractResults || []) {
+    const profile = item?.cao_applicability?.cao_scope_profile ||
+      item?.contract_resolution?.cao_applicability?.cao_scope_profile ||
+      null;
+    if (profile && !profiles.includes(profile)) profiles.push(profile);
+  }
+  return profiles;
+}
+
+function findContractResolutionScope(contractResults, profile) {
+  for (const item of contractResults || []) {
+    const scope = item?.cao_applicability || item?.contract_resolution?.cao_applicability || null;
+    if (scope?.cao_scope_profile === profile) return scope;
+  }
+  return null;
+}
+
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
@@ -3709,11 +3741,16 @@ Deno.serve(async (req) => {
     let rawCaoScope = null;
     if (targetCaoKey === CAO_PB_KEY && personnel_id) {
       try {
-        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
+          personnel_id,
+          cao_key: targetCaoKey,
+          work_context: body.service_context || null
+        });
         rawCaoScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
     }
-    const caoScope = normalizeCaoScope(rawCaoScope);
+    let caoScope = normalizeCaoScope(rawCaoScope);
+    const globalCaoScopeProfile = caoScope?.cao_scope_profile || null;
 
     let pStart = period_start, pEnd = period_end;
     if (!pStart || !pEnd) {
@@ -3734,7 +3771,6 @@ Deno.serve(async (req) => {
       scheduleBody.personnel_date_of_birth = personnelContext.date_of_birth;
     }
 
-    const result = validateSchedule(shifts, pStart, pEnd, caoScope, scheduleBody);
     const contractValidation = await validateShiftContractResolution(base44, {
       shifts,
       periodStart: pStart,
@@ -3742,6 +3778,48 @@ Deno.serve(async (req) => {
       personnel_id,
       body: scheduleBody
     });
+    const resolvedScopeProfiles = collectContractResolutionScopeProfiles(contractValidation.contract_resolution_results);
+    const scopeSelectionWarnings = [];
+    if (resolvedScopeProfiles.length > 1) {
+      return Response.json({
+        error: 'Roostercontrole geblokkeerd: dit rooster bevat meerdere CAO-toepassingsscopes.',
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          'Planning geblokkeerd: deze runtime valideert roosterregels nog met een scope per roostercontrole. Splits de controle of implementeer per-dienst scope-validatie.'
+        ],
+        period_start: pStart,
+        period_end: pEnd,
+        personnel_id: personnel_id || null,
+        cao_key: targetCaoKey,
+        task_cao_key: taskCaoKey || null,
+        object_cao_keys: objectCaoKeys,
+        cao_runtime_support: scheduleRuntimeSupport,
+        contract_resolution_required: contractValidation.contract_resolution_required,
+        contract_resolution_results: contractValidation.contract_resolution_results,
+        global_cao_scope_profile: globalCaoScopeProfile,
+        resolved_contract_cao_scope_profiles: resolvedScopeProfiles,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        planning_allowed: false,
+        calculation_status: 'blocked_contract_scope_mismatch'
+      }, { status: 400 });
+    }
+    if (resolvedScopeProfiles.length === 1) {
+      const resolvedScope = findContractResolutionScope(contractValidation.contract_resolution_results, resolvedScopeProfiles[0]);
+      if (resolvedScope) {
+        caoScope = normalizeCaoScope(resolvedScope);
+        if (globalCaoScopeProfile && resolvedScopeProfiles[0] !== globalCaoScopeProfile) {
+          scopeSelectionWarnings.push({
+            message: `Roostercontrole gebruikt contract-/dienstspecifieke CAO-scope ${resolvedScopeProfiles[0]} in plaats van medewerkerstamdata-scope ${globalCaoScopeProfile}.`,
+            global_cao_scope_profile: globalCaoScopeProfile,
+            resolved_contract_cao_scope_profile: resolvedScopeProfiles[0]
+          });
+        }
+      }
+    }
+
+    const result = validateSchedule(shifts, pStart, pEnd, caoScope, scheduleBody);
 
     result.violations = [
       ...(result.violations || []),
@@ -3756,7 +3834,7 @@ Deno.serve(async (req) => {
       result.cao_evidence_mode === 'strict';
 
     // Scope-context in response
-    const scopeWarnings = [];
+    const scopeWarnings = [...scopeSelectionWarnings];
     const isUnknownOrMixed = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope.cao_scope_profile);
 
     if (!caoScope.applies_full_security_rules) {
@@ -3800,6 +3878,8 @@ Deno.serve(async (req) => {
       calculation_warnings: syncWarnings,
       scope_warnings: scopeWarnings,
       cao_scope_profile: caoScope?.cao_scope_profile || null,
+      global_cao_scope_profile: globalCaoScopeProfile,
+      resolved_contract_cao_scope_profiles: resolvedScopeProfiles,
       applies_full_security_rules: caoScope?.applies_full_security_rules ?? null,
       contract_resolution_required: contractValidation.contract_resolution_required,
       contract_resolution_results: contractValidation.contract_resolution_results,
