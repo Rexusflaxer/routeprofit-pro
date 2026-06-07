@@ -363,7 +363,7 @@ async function lazySyncCao(base44, force = false, caoKey = CAO_PB_KEY) {
 /**
  * Haal actieve CAO-configuratie op voor een referentiedatum.
  */
-async function getActiveCaoConfig(base44, referenceDate, caoKey = CAO_PB_KEY) {
+async function resolveActiveCaoConfig(base44, referenceDate, caoKey = CAO_PB_KEY) {
   const refDate = referenceDate ? new Date(referenceDate) : new Date();
   const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({
     status: 'active',
@@ -379,7 +379,36 @@ async function getActiveCaoConfig(base44, referenceDate, caoKey = CAO_PB_KEY) {
     const db = b.valid_from ? new Date(b.valid_from) : new Date(0);
     return db - da;
   });
-  return eligible[0] || null;
+  const candidates = eligible.map(config => ({
+    id: config.id,
+    name: config.name || config.version_label || null,
+    cloudflare_revision: config.cloudflare_revision || null,
+    valid_from: config.valid_from || null,
+    valid_until: config.valid_until || null
+  }));
+
+  if (eligible.length > 1) {
+    return {
+      config: null,
+      candidates,
+      status: 'blocked_ambiguous_active_cao_config',
+      message: `Meerdere actieve CAO-configuraties gevonden voor ${caoKey} op ${referenceDate || new Date().toISOString().slice(0, 10)}; functie-indeling is geblokkeerd om historische loontabelkeuze niet te gokken.`
+    };
+  }
+  if (eligible.length === 0) {
+    return {
+      config: null,
+      candidates: [],
+      status: 'blocked_missing_active_cao_config',
+      message: `Geen actieve CAO-configuratie gevonden voor ${caoKey} op ${referenceDate || new Date().toISOString().slice(0, 10)}.`
+    };
+  }
+  return {
+    config: eligible[0],
+    candidates,
+    status: 'resolved',
+    message: null
+  };
 }
 
 /**
@@ -1048,7 +1077,23 @@ Deno.serve(async (req) => {
     const syncResult = await lazySyncCao(base44, force_cao_sync, targetCaoKey);
 
     // Haal actieve CAO-configuratie op
-    const caoConfig = await getActiveCaoConfig(base44, reference_date, targetCaoKey);
+    const caoConfigResolution = await resolveActiveCaoConfig(base44, reference_date, targetCaoKey);
+    if (caoConfigResolution.status !== 'resolved') {
+      return Response.json({
+        error: caoConfigResolution.message,
+        personnel_id: personnel_id || null,
+        cao_key: targetCaoKey,
+        reference_date: reference_date || null,
+        cao_config_resolution: caoConfigResolution,
+        active_cao_configuration_candidates: caoConfigResolution.candidates || [],
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        classification_status: caoConfigResolution.status,
+        warnings: [caoConfigResolution.message].filter(Boolean),
+        manual_review_reasons: [caoConfigResolution.message].filter(Boolean)
+      }, { status: 422 });
+    }
+    const caoConfig = caoConfigResolution.config;
 
     // Haal CAO-toepassingsprofiel op (altijd als basis)
     let caoScope = null;

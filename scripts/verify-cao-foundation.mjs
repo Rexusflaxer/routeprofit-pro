@@ -1028,6 +1028,135 @@ function runEffectiveDateCorrectionScenarios() {
   );
 }
 
+async function runCaoConfigurationDateSelectionScenarios() {
+  const oldConfig = {
+    id: 'cao-old',
+    cao_key: 'cao_particuliere_beveiliging',
+    status: 'active',
+    is_active: true,
+    valid_from: '2024-12-18',
+    valid_until: '2026-05-09'
+  };
+  const newConfig = {
+    id: 'cao-new',
+    cao_key: 'cao_particuliere_beveiliging',
+    status: 'active',
+    is_active: true,
+    valid_from: '2026-05-10',
+    valid_until: '2026-12-27'
+  };
+
+  const beforeChangePayroll = personnelCosts.resolvePayrollCaoConfiguration([oldConfig, newConfig], {
+    caoKey: 'cao_particuliere_beveiliging',
+    periodStart: '2026-05-01',
+    periodEnd: '2026-05-09'
+  });
+  assert.equal(beforeChangePayroll.status, 'resolved');
+  assert.equal(beforeChangePayroll.config.id, 'cao-old', 'Payroll through 2026-05-09 must use the old CAO config');
+
+  const afterChangePayroll = personnelCosts.resolvePayrollCaoConfiguration([oldConfig, newConfig], {
+    caoKey: 'cao_particuliere_beveiliging',
+    periodStart: '2026-05-10',
+    periodEnd: '2026-05-28'
+  });
+  assert.equal(afterChangePayroll.status, 'resolved');
+  assert.equal(afterChangePayroll.config.id, 'cao-new', 'Payroll from 2026-05-10 must use the new CAO config');
+
+  const spanningPayroll = personnelCosts.resolvePayrollCaoConfiguration([oldConfig, newConfig], {
+    caoKey: 'cao_particuliere_beveiliging',
+    periodStart: '2026-05-01',
+    periodEnd: '2026-05-28'
+  });
+  assert.equal(spanningPayroll.status, 'blocked_payroll_period_spans_multiple_cao_configs');
+  assert.equal(spanningPayroll.config, null);
+  assert.deepEqual(
+    spanningPayroll.candidates.map(candidate => candidate.id),
+    ['cao-new', 'cao-old'],
+    'Payroll period crossing a CAO change must expose both candidates and require splitting'
+  );
+
+  const scheduleBase44 = {
+    asServiceRole: {
+      entities: {
+        CAOConfiguration: {
+          filter: async () => [oldConfig, newConfig]
+        }
+      }
+    }
+  };
+  const beforeChangeSchedule = await schedule.resolveScheduleCaoConfiguration(scheduleBase44, {
+    caoKey: 'cao_particuliere_beveiliging',
+    periodStart: '2026-05-01',
+    periodEnd: '2026-05-09'
+  });
+  assert.equal(beforeChangeSchedule.status, 'resolved');
+  assert.equal(beforeChangeSchedule.config.id, 'cao-old');
+
+  const afterChangeSchedule = await schedule.resolveScheduleCaoConfiguration(scheduleBase44, {
+    caoKey: 'cao_particuliere_beveiliging',
+    periodStart: '2026-05-10',
+    periodEnd: '2026-05-28'
+  });
+  assert.equal(afterChangeSchedule.status, 'resolved');
+  assert.equal(afterChangeSchedule.config.id, 'cao-new');
+
+  const spanningSchedule = await schedule.resolveScheduleCaoConfiguration(scheduleBase44, {
+    caoKey: 'cao_particuliere_beveiliging',
+    periodStart: '2026-05-01',
+    periodEnd: '2026-05-28'
+  });
+  assert.equal(spanningSchedule.status, 'blocked_schedule_period_spans_multiple_cao_configs');
+  assert.equal(spanningSchedule.config, null);
+
+  const classificationBase44 = {
+    asServiceRole: {
+      entities: {
+        CAOConfiguration: {
+          filter: async () => [oldConfig, newConfig]
+        }
+      }
+    }
+  };
+  const beforeChangeClassification = await functionClassification.resolveActiveCaoConfig(
+    classificationBase44,
+    '2026-05-09',
+    'cao_particuliere_beveiliging'
+  );
+  assert.equal(beforeChangeClassification.status, 'resolved');
+  assert.equal(beforeChangeClassification.config.id, 'cao-old');
+
+  const afterChangeClassification = await functionClassification.resolveActiveCaoConfig(
+    classificationBase44,
+    '2026-05-10',
+    'cao_particuliere_beveiliging'
+  );
+  assert.equal(afterChangeClassification.status, 'resolved');
+  assert.equal(afterChangeClassification.config.id, 'cao-new');
+
+  const overlappingOldConfig = { ...oldConfig, id: 'cao-old-overlap', valid_until: '2026-05-15' };
+  const overlappingBase44 = {
+    asServiceRole: {
+      entities: {
+        CAOConfiguration: {
+          filter: async () => [overlappingOldConfig, newConfig]
+        }
+      }
+    }
+  };
+  const ambiguousClassification = await functionClassification.resolveActiveCaoConfig(
+    overlappingBase44,
+    '2026-05-10',
+    'cao_particuliere_beveiliging'
+  );
+  assert.equal(ambiguousClassification.status, 'blocked_ambiguous_active_cao_config');
+  assert.equal(ambiguousClassification.config, null);
+  assert.deepEqual(
+    ambiguousClassification.candidates.map(candidate => candidate.id),
+    ['cao-new', 'cao-old-overlap'],
+    'Overlapping function-classification CAO configs must block instead of silently selecting latest'
+  );
+}
+
 function runReimbursementScenarios() {
   const params = reimbursements.resolveReimbursementParameters(null);
   assert.equal(params.travel_cost_per_km, 0.23);
@@ -1753,6 +1882,7 @@ async function main() {
     ['contract scope persistence', () => runContractScopePersistenceScenarios()],
     ['probation rules', () => runProbationScenarios()],
     ['effective-date correction queue', () => runEffectiveDateCorrectionScenarios()],
+    ['CAO configuration date selection', () => runCaoConfigurationDateSelectionScenarios()],
     ['reimbursements', () => runReimbursementScenarios()],
     ['leave and sickness', () => runLeaveSicknessScenarios()],
     ['payroll policy and corrections', () => runPayrollPolicyScenarios()],
