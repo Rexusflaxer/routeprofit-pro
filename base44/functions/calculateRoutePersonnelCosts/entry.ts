@@ -998,6 +998,7 @@ function buildRouteServiceRequirement({ route, serviceSources, targetCaoKey }) {
       works_cash_value_logistics: task.works_cash_value_logistics ?? object.default_works_cash_value_logistics ?? null,
       customer_billable: task.customer_billable ?? object.default_customer_billable ?? null,
       counts_toward_required_staffing: task.counts_toward_required_staffing ?? object.default_counts_toward_required_staffing ?? null,
+      operating_company_id: task.operating_company_id || object.default_operating_company_id || object.operating_company_id || null,
       contract_assignment_policy: task.contract_assignment_policy || object.contract_assignment_policy || null
     };
   });
@@ -1027,8 +1028,13 @@ function buildRouteServiceRequirement({ route, serviceSources, targetCaoKey }) {
     works_cash_value_logistics: singleBooleanOrConflict(entries.map(entry => entry.works_cash_value_logistics), 'works_cash_value_logistics', blockingReasons),
     customer_billable: singleBooleanOrConflict(entries.map(entry => entry.customer_billable), 'customer_billable', blockingReasons),
     counts_toward_required_staffing: singleBooleanOrConflict(entries.map(entry => entry.counts_toward_required_staffing), 'counts_toward_required_staffing', blockingReasons),
+    operating_company_id: singleValueOrConflict([
+      route.operating_company_id,
+      ...entries.map(entry => entry.operating_company_id)
+    ], 'operating_company_id', blockingReasons) || null,
     contract_assignment_policy: singleValueOrConflict(entries.map(entry => entry.contract_assignment_policy), 'contract_assignment_policy', blockingReasons) || 'strict_contract_match'
   };
+  serviceContext.company_id = serviceContext.operating_company_id;
 
   const securityWorkPercentages = uniqueNonEmpty(entries.map(entry => entry.security_work_percentage));
   if (securityWorkPercentages.length > 1) {
@@ -1098,9 +1104,14 @@ function applyRouteServiceRequirementReview(contractResolution, routeServiceRequ
 }
 
 async function resolveRouteContractContext(base44, personnel, route, shiftDate, routeServiceRequirement = {}, options = {}) {
-  if (!route.operating_company_id) {
+  const serviceContext = routeServiceRequirement?.service_context || {};
+  const operatingCompanyId = route.operating_company_id ||
+    serviceContext.operating_company_id ||
+    serviceContext.company_id ||
+    null;
+  if (!operatingCompanyId) {
     if (options.allow_legacy_companyless_route_costing === true) {
-      return {
+      return applyRouteServiceRequirementReview({
         status: 'legacy_companyless_route_concept_only',
         planning_allowed: true,
         payroll_final_allowed: false,
@@ -1109,9 +1120,9 @@ async function resolveRouteContractContext(base44, personnel, route, shiftDate, 
         contract_id: null,
         note: 'Route heeft geen operating_company_id; legacy routekostenflow is alleen concept en nooit payroll-final.',
         manual_review_reasons: ['Koppel de route aan een uitvoerend bedrijf voordat planning/payroll definitief mag worden.']
-      };
+      }, routeServiceRequirement);
     }
-    return {
+    return applyRouteServiceRequirementReview({
       status: 'blocked_missing_operating_company',
       planning_allowed: false,
       payroll_final_allowed: false,
@@ -1119,18 +1130,20 @@ async function resolveRouteContractContext(base44, personnel, route, shiftDate, 
       company_id: null,
       contract_id: null,
       blocking_reasons: ['Route heeft geen operating_company_id; uitvoerend bedrijf is verplicht om contract en CAO-context te bepalen.']
-    };
+    }, routeServiceRequirement);
   }
 
   try {
-    const serviceContext = routeServiceRequirement?.service_context || {};
     const res = await base44.asServiceRole.functions.invoke('resolvePersonnelContractForService', {
       personnel_id: personnel.id,
       route_id: route.id,
-      company_id: route.operating_company_id,
+      company_id: operatingCompanyId,
+      operating_company_id: operatingCompanyId,
       service_date: shiftDate,
       service_context: {
         ...serviceContext,
+        company_id: serviceContext.company_id || operatingCompanyId,
+        operating_company_id: serviceContext.operating_company_id || operatingCompanyId,
         cao_key: serviceContext.cao_key || route.cao_key || route.cao || null,
         cao: serviceContext.cao || route.cao || null,
         contract_assignment_policy: serviceContext.contract_assignment_policy || 'strict_contract_match'
@@ -1859,6 +1872,10 @@ Deno.serve(async (req) => {
       serviceSources: routeServiceSources,
       targetCaoKey
     });
+    const routeOperatingCompanyId = routeServiceRequirement.service_context?.operating_company_id ||
+      routeServiceRequirement.service_context?.company_id ||
+      route.operating_company_id ||
+      null;
 
     // ── Fingerprint-gebaseerde cache check (na laden personeel) ──
     const allPersonnelForCache = [...surveillants, ...binnendienst];
@@ -1866,7 +1883,7 @@ Deno.serve(async (req) => {
       route, weekday: targetWeekday, caoConfig, personnelList: allPersonnelForCache
     });
     const cacheKey = `${targetWeekday}`;
-    const usesContractResolution = !!route.operating_company_id || allow_legacy_companyless_route_costing !== true;
+    const usesContractResolution = !!routeOperatingCompanyId || allow_legacy_companyless_route_costing !== true;
     if (!force_recalculate && !usesContractResolution && route.cached_personnel_costs?.[cacheKey]) {
       const cached = route.cached_personnel_costs[cacheKey];
       if (cached._cache_fingerprint === fingerprint) {
@@ -2089,7 +2106,7 @@ Deno.serve(async (req) => {
       start_time: startTime, end_time: endTime,
       planned_end_time: plannedEndTime,
       alarm_standby: !!route.alarm_standby,
-      operating_company_id: route.operating_company_id || null,
+      operating_company_id: routeOperatingCompanyId,
       contract_resolution_required: usesContractResolution,
       route_service_requirement: routeServiceRequirement,
       contract_resolution_cao_references: contractResolutionCaoReferences,
