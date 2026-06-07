@@ -97,12 +97,13 @@ function buildExternalCaoScopeGate({ targetCaoKey, signals }) {
   const ambiguousSignals = activeSignals.filter(signal => signal.status === 'ambiguous_external_cao_scope');
   const suggestedKeys = [...new Set(activeSignals.flatMap(signal => signal.suggested_cao_keys || []).filter(Boolean))];
 
-  if (ambiguousSignals.length > 0 && inferredKeys.length === 0) {
+  if (ambiguousSignals.length > 0) {
     return {
       passed: false,
       status: 'blocked_ambiguous_external_cao_scope',
       message: 'Loonrun geblokkeerd: een of meer diensten lijken onder een andere CAO te vallen, maar de cao_key is niet expliciet bevestigd.',
       signals: activeSignals,
+      inferred_cao_keys: inferredKeys,
       suggested_cao_keys: suggestedKeys
     };
   }

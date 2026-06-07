@@ -1,6 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
 const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const CAO_EVENT_HOSPITALITY_SECURITY_KEY = 'cao_evenementen_horecabeveiliging';
 const SUPPORTED_PAYROLL_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
 
 function getCaoRuntimeSupport(caoKey, functionName) {
@@ -15,6 +16,124 @@ function getCaoRuntimeSupport(caoKey, functionName) {
     message: supported
       ? `Runtime ${functionName} ondersteunt CAO ${key}.`
       : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Routekosten voor payrollbasis zijn geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+  };
+}
+
+function booleanTrue(value) {
+  return value === true || value === 'true' || value === 'yes' || value === 'ja';
+}
+
+function normalizeCaoSignalText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_\s-]+/g, '_')
+    .trim();
+}
+
+function eventHospitalityCaoSignal(source, context = {}) {
+  const caoText = normalizeCaoSignalText(context.cao || context.cao_key || context.default_cao_key || '');
+  const worksEvent = context.works_event_or_hospitality_security ??
+    context.default_works_event_or_hospitality_security ??
+    null;
+  const eventCaoApplies = context.event_hospitality_cao_applies ??
+    context.default_event_hospitality_cao_applies ??
+    null;
+
+  if (caoText.includes('evenement') || caoText.includes('horeca')) {
+    return {
+      source,
+      cao_key: CAO_EVENT_HOSPITALITY_SECURITY_KEY,
+      status: 'inferred_external_cao',
+      reason: 'cao_text_event_hospitality'
+    };
+  }
+  if (booleanTrue(worksEvent) && booleanTrue(eventCaoApplies)) {
+    return {
+      source,
+      cao_key: CAO_EVENT_HOSPITALITY_SECURITY_KEY,
+      status: 'inferred_external_cao',
+      reason: 'event_hospitality_scope_confirmed'
+    };
+  }
+  if (booleanTrue(worksEvent) && eventCaoApplies !== false) {
+    return {
+      source,
+      cao_key: null,
+      status: 'ambiguous_external_cao_scope',
+      suggested_cao_keys: [CAO_EVENT_HOSPITALITY_SECURITY_KEY],
+      reason: 'event_hospitality_scope_requires_confirmation',
+      message: 'Route/dienst lijkt evenementen-/horecabeveiliging, maar event_hospitality_cao_applies is niet expliciet bevestigd.'
+    };
+  }
+  return null;
+}
+
+function addExternalCaoSignal(signals, signal) {
+  if (!signal) return;
+  const key = `${signal.source}:${signal.status}:${signal.cao_key || ''}:${signal.reason || ''}`;
+  if (!signals.some(existing => `${existing.source}:${existing.status}:${existing.cao_key || ''}:${existing.reason || ''}` === key)) {
+    signals.push(signal);
+  }
+}
+
+function collectRouteExternalCaoSignals(route = {}, serviceSources = {}) {
+  const signals = [];
+  addExternalCaoSignal(signals, eventHospitalityCaoSignal('route', route || {}));
+  addExternalCaoSignal(signals, eventHospitalityCaoSignal('route.service_context', route?.service_context || {}));
+  const objectById = serviceSources?.objectById || {};
+  for (const task of serviceSources?.tasks || []) {
+    addExternalCaoSignal(signals, eventHospitalityCaoSignal(`task:${task.id || 'unknown'}`, task || {}));
+    const object = task?.object_id ? objectById[task.object_id] : null;
+    addExternalCaoSignal(signals, eventHospitalityCaoSignal(`object:${task.object_id || 'unknown'}`, object || {}));
+  }
+  return signals;
+}
+
+function buildExternalCaoScopeGate({ targetCaoKey, signals }) {
+  const activeSignals = signals || [];
+  const inferredKeys = [...new Set(activeSignals.map(signal => signal.cao_key).filter(Boolean))];
+  const ambiguousSignals = activeSignals.filter(signal => signal.status === 'ambiguous_external_cao_scope');
+  const suggestedKeys = [...new Set(activeSignals.flatMap(signal => signal.suggested_cao_keys || []).filter(Boolean))];
+
+  if (ambiguousSignals.length > 0) {
+    return {
+      passed: false,
+      status: 'blocked_ambiguous_external_cao_scope',
+      message: 'Routekosten geblokkeerd: een of meer routes/taken lijken onder een andere CAO te vallen, maar de cao_key is niet expliciet bevestigd.',
+      signals: activeSignals,
+      inferred_cao_keys: inferredKeys,
+      suggested_cao_keys: suggestedKeys
+    };
+  }
+
+  if (inferredKeys.length > 1) {
+    return {
+      passed: false,
+      status: 'blocked_mixed_external_cao_scope',
+      message: 'Routekosten geblokkeerd: route/taken wijzen naar meerdere externe CAO-scope signalen. Splits de routekostencontrole per CAO.',
+      signals: activeSignals,
+      inferred_cao_keys: inferredKeys
+    };
+  }
+
+  if (inferredKeys.length === 1 && targetCaoKey && inferredKeys[0] !== targetCaoKey) {
+    return {
+      passed: false,
+      status: 'blocked_cao_scope_signal_mismatch',
+      message: `Routekosten geblokkeerd: route-/taakcontext wijst naar ${inferredKeys[0]}, maar routekosten zouden ${targetCaoKey} gebruiken.`,
+      signals: activeSignals,
+      inferred_cao_keys: inferredKeys
+    };
+  }
+
+  return {
+    passed: true,
+    status: 'ok',
+    signals: activeSignals,
+    inferred_cao_key: inferredKeys[0] || null,
+    suggested_cao_keys: suggestedKeys
   };
 }
 
@@ -1500,10 +1619,37 @@ Deno.serve(async (req) => {
 
     const targetWeekday = weekday || route.weekdays?.[0] || 1;
     const shiftDate = getNextDateForWeekday(targetWeekday);
+    const routeServiceSources = await loadRouteServiceSources(base44, route);
+    const externalCaoSignals = collectRouteExternalCaoSignals(route, routeServiceSources);
+    const inferredExternalCaoKeys = [...new Set(externalCaoSignals.map(signal => signal.cao_key).filter(Boolean))];
+    const inferredExternalCaoKey = inferredExternalCaoKeys.length === 1 ? inferredExternalCaoKeys[0] : null;
     const targetCaoKey = body.cao_key ||
       route.cao_key ||
       route.cao ||
+      inferredExternalCaoKey ||
       CAO_PB_KEY;
+
+    const externalCaoScopeGate = buildExternalCaoScopeGate({
+      targetCaoKey,
+      signals: externalCaoSignals
+    });
+    if (!externalCaoScopeGate.passed) {
+      return Response.json({
+        error: externalCaoScopeGate.message,
+        calculation_warnings: [
+          'Routekosten geblokkeerd: bepaal expliciet de juiste cao_key op route, taak of object voordat deze berekening payroll-final mag zijn.'
+        ],
+        route_id,
+        shift_date: shiftDate,
+        weekday: targetWeekday,
+        cao_key: targetCaoKey,
+        route_cao_key: route.cao_key || route.cao || null,
+        external_cao_scope_gate: externalCaoScopeGate,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: externalCaoScopeGate.status
+      }, { status: 400 });
+    }
 
     const syncResult = await lazySyncCao(base44, !!force_cao_sync, targetCaoKey);
     const syncWarnings = [];
@@ -1643,7 +1789,6 @@ Deno.serve(async (req) => {
       }
     }
 
-    const routeServiceSources = await loadRouteServiceSources(base44, route);
     const routeServiceRequirement = buildRouteServiceRequirement({
       route,
       serviceSources: routeServiceSources,
