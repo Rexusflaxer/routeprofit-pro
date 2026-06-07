@@ -130,15 +130,112 @@ const CAO_PB_REQUIRED_SOURCE_FAMILIES = [
   }
 ];
 
+const CAO_REQUIRED_SOURCE_FAMILIES_BY_KEY = {
+  [CAO_PB_KEY]: CAO_PB_REQUIRED_SOURCE_FAMILIES,
+  [CAO_EVENT_HOSPITALITY_SECURITY_KEY]: [
+    {
+      key: 'cao_landing_page',
+      label: 'CAO EHB overzichtspagina Nederlandse Veiligheidsbranche',
+      source_types: ['cao_page', 'official_webpage'],
+      keywords: ['veiligheidsbranche.nl/cao/cao-ehb', 'cao-ehb', 'evenementen- en horecabeveiliging'],
+      minimum_count: 1
+    },
+    {
+      key: 'main_cao_pdf',
+      label: 'Hoofd-CAO Evenementen- en Horecabeveiliging PDF',
+      source_types: ['cao_pdf'],
+      keywords: ['cao ehb', 'evenementen- en horecabeveiliging', 'horecabeveiligingsbranche'],
+      minimum_count: 1
+    },
+    {
+      key: 'wage_and_version_updates',
+      label: 'CAO EHB loon-/versie-updates',
+      source_types: ['cao_pdf', 'wage_table_pdf', 'wage_table_xlsx', 'official_webpage', 'news_update'],
+      keywords: ['versie januari 2026', '4,62', 'wml', 'minimumloon', 'loontreden', 'tredeverhoging'],
+      minimum_count: 1
+    },
+    {
+      key: 'scope_membership_rule',
+      label: 'CAO EHB werkingssfeer en lidmaatschapsvoorwaarde',
+      source_types: ['cao_page', 'official_webpage', 'cao_pdf'],
+      keywords: ['sectie ehb', 'aangesloten bij de nederlandse veiligheidsbranche', 'evenementen of in de horeca'],
+      minimum_count: 1
+    }
+  ],
+  [CAO_SAFETY_DOMAIN_KEY]: [
+    {
+      key: 'cao_landing_page',
+      label: 'CAO Veiligheidsdomein overzichtspagina VVNL',
+      source_types: ['cao_page', 'official_webpage'],
+      keywords: ['veiligheidsdomein.nl/caoveiligheidsdomein', 'cao veiligheidsdomein', 'vvnl'],
+      minimum_count: 1
+    },
+    {
+      key: 'main_cao_pdf',
+      label: 'Hoofd-CAO Veiligheidsdomein PDF',
+      source_types: ['cao_pdf'],
+      keywords: ['cao veiligheidsdomein', '28 december 2025', '28 december 2027'],
+      minimum_count: 1
+    },
+    {
+      key: 'wage_and_reimbursement_updates',
+      label: 'CAO Veiligheidsdomein loon- en reiskostenupdates',
+      source_types: ['cao_pdf', 'wage_table_pdf', 'wage_table_xlsx', 'official_webpage', 'news_update'],
+      keywords: ['1 januari 2026', '4%', 'loonstijging', 'reiskosten', 'onderhandelingsakkoord'],
+      minimum_count: 1
+    },
+    {
+      key: 'social_fund_sources',
+      label: 'Sociaal Fonds Veiligheidsdomein bronnen',
+      source_types: ['fonds_cao_pdf', 'official_webpage', 'news_update'],
+      keywords: ['sociaal fonds veiligheidsdomein', 'premie sociaal fonds', 'sociaalfonds'],
+      minimum_count: 1
+    }
+  ],
+  [CAO_TRAFFIC_CONTROLLERS_KEY]: [
+    {
+      key: 'main_cao_pdf',
+      label: 'Hoofd-CAO Verkeersregelaars PDF',
+      source_types: ['cao_pdf'],
+      keywords: ['cao verkeersregelaars', 'verkeersregelaars', 'veiligheidsdomein - voor verkeersregelaars'],
+      minimum_count: 1
+    },
+    {
+      key: 'current_version_or_landing_page',
+      label: 'Actuele verkeersregelaars-CAO pagina of versiebron',
+      source_types: ['cao_page', 'official_webpage', 'cao_pdf'],
+      keywords: ['28 december 2025', '2025-2027', 'jouwveiligheidsdomein.nl', 'veiligheidsdomein.nl', 'vvnl'],
+      minimum_count: 1
+    },
+    {
+      key: 'wage_and_scope_sources',
+      label: 'Verkeersregelaars loon-/werkingsfeerbronnen',
+      source_types: ['cao_pdf', 'wage_table_pdf', 'wage_table_xlsx', 'official_webpage', 'news_update'],
+      keywords: ['loon', 'salaris', 'wml', 'werkingssfeer', 'aangesloten werkgevers', 'verkeersregeling'],
+      minimum_count: 1
+    }
+  ]
+};
+
 const OFFICIAL_CAO_SOURCE_HOSTS = [
   'beveiligingsbranche.nl',
   'www.beveiligingsbranche.nl',
+  'veiligheidsbranche.nl',
+  'www.veiligheidsbranche.nl',
+  'veiligheidsdomein.nl',
+  'www.veiligheidsdomein.nl',
+  'jouwveiligheidsdomein.nl',
+  'www.jouwveiligheidsdomein.nl',
   'sociaalfondsbeveiliging.nl',
   'www.sociaalfondsbeveiliging.nl',
   'sfpb.nl',
   'www.sfpb.nl',
   'cao.minszw.nl',
   'www.uitvoeringarbeidsvoorwaardenwetgeving.nl'
+];
+
+const TRUSTED_OFFICIAL_CAO_CDN_HOSTS = [
+  'd1p3jfjj2ztqji.cloudfront.net'
 ];
 
 function normalizeCaoSourceType(value, doc = {}, defaultSourceType = 'other') {
@@ -196,6 +293,34 @@ function inferOfficialSource(url) {
   } catch (_) {
     return false;
   }
+}
+
+function inferOfficialSourceOrTrustedOfficialCdn(doc) {
+  const url = doc?.canonical_url || doc?.url || '';
+  if (inferOfficialSource(url)) return true;
+  try {
+    const host = typeof URL === 'function'
+      ? new URL(url).hostname.toLowerCase()
+      : String(url || '').replace(/^[a-z]+:\/\//i, '').split('/')[0].toLowerCase();
+    const officialReferrer = inferOfficialSource(doc?.discovered_from_url || doc?.parent_url || '');
+    return TRUSTED_OFFICIAL_CAO_CDN_HOSTS.includes(host) && officialReferrer;
+  } catch (_) {
+    return false;
+  }
+}
+
+function getRequiredSourceFamiliesForCao(caoKey) {
+  return CAO_REQUIRED_SOURCE_FAMILIES_BY_KEY[normalizeCaoKey(caoKey)] || [];
+}
+
+function caoLabel(caoKey) {
+  const labels = {
+    [CAO_PB_KEY]: 'CAO PB',
+    [CAO_EVENT_HOSPITALITY_SECURITY_KEY]: 'CAO EHB',
+    [CAO_TRAFFIC_CONTROLLERS_KEY]: 'CAO Verkeersregelaars',
+    [CAO_SAFETY_DOMAIN_KEY]: 'CAO Veiligheidsdomein'
+  };
+  return labels[normalizeCaoKey(caoKey)] || `CAO ${normalizeCaoKey(caoKey) || 'onbekend'}`;
 }
 
 function normalizeOfficialConfidence(value, official) {
@@ -266,7 +391,11 @@ function sourceDocumentSearchText(doc) {
     doc?.title,
     doc?.url,
     doc?.canonical_url,
-    doc?.discovered_from_url
+    doc?.discovered_from_url,
+    doc?.rule_text_summary,
+    doc?.extracted_text_summary,
+    doc?.content_summary,
+    doc?.extracted_text
   ].filter(Boolean).join(' ').toLowerCase();
 }
 
@@ -301,7 +430,7 @@ function sourceDocumentIsOfficial(doc) {
   if (explicitOfficial !== null) return explicitOfficial;
   const confidence = String(doc?.official_source_confidence || '').toLowerCase();
   if (['high', 'medium'].includes(confidence)) return true;
-  return inferOfficialSource(doc?.canonical_url || doc?.url || '');
+  return inferOfficialSourceOrTrustedOfficialCdn(doc);
 }
 
 function sourceDocumentExtractionBlocks(doc) {
@@ -312,7 +441,8 @@ function sourceDocumentExtractionBlocks(doc) {
 function evaluateRequiredSourceFamilyCoverage(config) {
   const caoKey = normalizeCaoKey(config?.cao_key) || CAO_PB_KEY;
   const sourceDocuments = getSourceDocumentsForCoverage(config);
-  if (caoKey !== CAO_PB_KEY) {
+  const requiredSourceFamilies = getRequiredSourceFamiliesForCao(caoKey);
+  if (requiredSourceFamilies.length === 0) {
     return {
       passed: true,
       required: false,
@@ -323,7 +453,7 @@ function evaluateRequiredSourceFamilyCoverage(config) {
     };
   }
 
-  const requiredFamilies = CAO_PB_REQUIRED_SOURCE_FAMILIES.map(family => {
+  const requiredFamilies = requiredSourceFamilies.map(family => {
     const matches = sourceDocuments.filter(doc => sourceDocumentMatchesFamily(doc, family));
     const officialMatches = matches.filter(sourceDocumentIsOfficial);
     const hashMatches = matches.filter(sourceDocumentHasHashEvidence);
@@ -351,28 +481,28 @@ function evaluateRequiredSourceFamilyCoverage(config) {
     blockingFindings.push({
       code: 'missing_required_cao_source_family',
       severity: 'critical',
-      message: `CAO PB bronmonitoring mist verplichte bronfamilies: ${missingFamilies.map(family => family.label).join(', ')}. Payroll-ready blijft geblokkeerd.`
+      message: `${caoLabel(caoKey)} bronmonitoring mist verplichte bronfamilies: ${missingFamilies.map(family => family.label).join(', ')}. Payroll-ready blijft geblokkeerd.`
     });
   }
   if (unofficialFamilies.length > 0) {
     blockingFindings.push({
       code: 'unverified_required_cao_source_officiality',
       severity: 'critical',
-      message: `CAO PB bronmonitoring bevat bronfamilies zonder bewezen officiele bron: ${unofficialFamilies.map(family => family.label).join(', ')}.`
+      message: `${caoLabel(caoKey)} bronmonitoring bevat bronfamilies zonder bewezen officiele bron: ${unofficialFamilies.map(family => family.label).join(', ')}.`
     });
   }
   if (missingHashFamilies.length > 0) {
     blockingFindings.push({
       code: 'missing_required_cao_source_hash',
       severity: 'critical',
-      message: `CAO PB bronmonitoring mist hashbewijs voor verplichte bronfamilies: ${missingHashFamilies.map(family => family.label).join(', ')}. Wijzigingen zijn dan niet audit-proof detecteerbaar.`
+      message: `${caoLabel(caoKey)} bronmonitoring mist hashbewijs voor verplichte bronfamilies: ${missingHashFamilies.map(family => family.label).join(', ')}. Wijzigingen zijn dan niet audit-proof detecteerbaar.`
     });
   }
   if (extractionBlockedFamilies.length > 0) {
     blockingFindings.push({
       code: 'blocked_required_cao_source_extraction',
       severity: 'critical',
-      message: `CAO PB bronmonitoring heeft onvolledig of mislukt extractiewerk voor: ${extractionBlockedFamilies.map(family => family.label).join(', ')}.`
+      message: `${caoLabel(caoKey)} bronmonitoring heeft onvolledig of mislukt extractiewerk voor: ${extractionBlockedFamilies.map(family => family.label).join(', ')}.`
     });
   }
 
@@ -398,7 +528,7 @@ function buildCaoSourceDocumentData(doc, existingDoc, { now, caoKey, revision, d
     defaultSourceType
   );
   const explicitOfficial = booleanOrNull(doc.is_official_source ?? doc.official_source);
-  const official = explicitOfficial ?? inferOfficialSource(doc.url);
+  const official = explicitOfficial ?? inferOfficialSourceOrTrustedOfficialCdn(doc);
   const payrollRelevance = normalizePayrollRelevance(doc.payroll_relevance ?? doc.payroll_relevant, sourceType);
   const contentHash = doc.content_hash || doc.source_hash || doc.sha256 || doc.content_sha256 || existingDoc?.content_hash || null;
   const changed = doc.changed === true ||
