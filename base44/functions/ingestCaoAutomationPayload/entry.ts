@@ -988,6 +988,10 @@ function uniqueRuleIds(rules) {
   return new Set((Array.isArray(rules) ? rules : []).map(rule => rule.rule_id).filter(Boolean));
 }
 
+function uniqueSorted(values) {
+  return [...new Set((Array.isArray(values) ? values : []).filter(Boolean))].sort();
+}
+
 function stableForHash(value) {
   if (Array.isArray(value)) return value.map(stableForHash);
   if (!value || typeof value !== 'object') return value ?? null;
@@ -1005,6 +1009,36 @@ async function sha256Hex(value) {
   return [...new Uint8Array(digest)]
     .map(byte => byte.toString(16).padStart(2, '0'))
     .join('');
+}
+
+function localRuntimeBindingRegistryEntries() {
+  return Object.entries(LOCAL_RUNTIME_RULE_BINDINGS)
+    .map(([key, binding]) => {
+      const ruleIds = uniqueSorted(binding.rule_ids);
+      return {
+        key,
+        functions: uniqueSorted(binding.functions),
+        rule_ids: ruleIds,
+        bound_rule_count: ruleIds.length
+      };
+    })
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+async function buildLocalRuntimeBindingRegistrySnapshot() {
+  const bindings = localRuntimeBindingRegistryEntries();
+  const canonicalJson = JSON.stringify(stableForHash(bindings));
+  const boundRuleIds = uniqueSorted(bindings.flatMap(binding => binding.rule_ids));
+  return {
+    fingerprint: await sha256Hex(canonicalJson),
+    fingerprint_algorithm: 'sha256',
+    fingerprint_scope: 'local_runtime_rule_bindings',
+    canonical_binding_count: bindings.length,
+    canonical_bound_rule_count: boundRuleIds.length,
+    binding_keys: bindings.map(binding => binding.key),
+    bound_rule_ids: boundRuleIds,
+    bindings
+  };
 }
 
 async function buildRuleRegistryFingerprint(rules) {
@@ -1463,10 +1497,11 @@ function buildSemanticBacklog({
   };
 }
 
-function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
+async function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
   const rules = Array.isArray(candidateRules) ? candidateRules : [];
   const caoKey = normalizeCaoKey(candidateCfg?.cao_key) || CAO_PB_KEY;
   const sourceCoverage = evaluateSourceCoverageCompleteness(candidateCfg, rules);
+  const localRuntimeRegistry = await buildLocalRuntimeBindingRegistrySnapshot();
   const counts = {
     total: rules.length,
     unique_rule_ids: sourceCoverage.unique_rule_ids,
@@ -1740,6 +1775,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
     checked_at: new Date().toISOString(),
     counts,
     source_coverage: sourceCoverage,
+    local_runtime_registry: localRuntimeRegistry,
     semantic_backlog: semanticBacklog,
     blocking_findings: blockingFindings,
     open_payroll_critical_rules: openCriticalRules.slice(0, 100),
@@ -1756,14 +1792,16 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
     payroll_critical_missing_applicability_semantics_truncated: payrollCriticalMissingApplicabilitySemantics.length > 100,
     payroll_critical_missing_action_semantics_rules: payrollCriticalMissingActionSemantics.slice(0, 100),
     payroll_critical_missing_action_semantics_truncated: payrollCriticalMissingActionSemantics.length > 100,
-    local_runtime_binding_keys: Object.keys(LOCAL_RUNTIME_RULE_BINDINGS),
+    local_runtime_binding_keys: localRuntimeRegistry.binding_keys,
+    local_runtime_binding_fingerprint: localRuntimeRegistry.fingerprint,
+    local_runtime_binding_fingerprint_algorithm: localRuntimeRegistry.fingerprint_algorithm,
     missing_rule_text_rule_ids: missingTextRules.slice(0, 100),
     missing_rule_text_truncated: missingTextRules.length > 100
   };
 }
 
-function resolvePayrollReadiness(candidateCfg, candidateRules, isOwnerApproved) {
-  const gate = evaluateCaoCoverageGate(candidateCfg, candidateRules);
+async function resolvePayrollReadiness(candidateCfg, candidateRules, isOwnerApproved) {
+  const gate = await evaluateCaoCoverageGate(candidateCfg, candidateRules);
   const requestedPayrollReady = candidateCfg?.is_payroll_ready === true;
   const isPayrollReady = isOwnerApproved && requestedPayrollReady && gate.passed;
   return {
@@ -1928,7 +1966,7 @@ Deno.serve(async (req) => {
         mismatching_rule_cao_keys: mismatchingRuleCaoKeys
       }, { status: 422 });
     }
-    const payrollReadiness = resolvePayrollReadiness(candidateConfigurationForGate, normalizedCandidateRules, isOwnerApproved);
+    const payrollReadiness = await resolvePayrollReadiness(candidateConfigurationForGate, normalizedCandidateRules, isOwnerApproved);
 
     // Maak ImportRun aan
     const importRun = await base44.asServiceRole.entities.CAOImportRun.create({

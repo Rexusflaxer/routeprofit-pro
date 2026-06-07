@@ -761,6 +761,36 @@ async function sha256Hex(value) {
     .join('');
 }
 
+function localRuntimeBindingRegistryEntries() {
+  return Object.entries(LOCAL_RUNTIME_RULE_BINDINGS)
+    .map(([key, binding]) => {
+      const ruleIds = uniqueSorted(binding.rule_ids);
+      return {
+        key,
+        functions: uniqueSorted(binding.functions),
+        rule_ids: ruleIds,
+        bound_rule_count: ruleIds.length
+      };
+    })
+    .sort((a, b) => a.key.localeCompare(b.key));
+}
+
+async function buildLocalRuntimeBindingRegistrySnapshot() {
+  const bindings = localRuntimeBindingRegistryEntries();
+  const canonicalJson = JSON.stringify(stableForHash(bindings));
+  const boundRuleIds = uniqueSorted(bindings.flatMap(binding => binding.rule_ids));
+  return {
+    fingerprint: await sha256Hex(canonicalJson),
+    fingerprint_algorithm: 'sha256',
+    fingerprint_scope: 'local_runtime_rule_bindings',
+    canonical_binding_count: bindings.length,
+    canonical_bound_rule_count: boundRuleIds.length,
+    binding_keys: bindings.map(binding => binding.key),
+    bound_rule_ids: boundRuleIds,
+    bindings
+  };
+}
+
 async function buildRuleRegistrySnapshot(config, rules) {
   const sourceCoverage = evaluateSourceCoverageCompleteness(config, rules || []);
   const duplicates = duplicateRuleIds(rules || []);
@@ -1126,7 +1156,8 @@ function buildSemanticBacklog({
   };
 }
 
-function evaluateLocalRuntimeBindingCoverage(rules, maxOpenRules) {
+async function evaluateLocalRuntimeBindingCoverage(rules, maxOpenRules) {
+  const registrySnapshot = await buildLocalRuntimeBindingRegistrySnapshot();
   const persistedRuleIds = uniqueRuleIds(rules);
   const bindingSummaries = [];
   const allMissingRuleIds = [];
@@ -1159,18 +1190,21 @@ function evaluateLocalRuntimeBindingCoverage(rules, maxOpenRules) {
     local_runtime_bound_rules_missing_from_registry_count: missingRuleIds.length,
     local_runtime_bound_rules_missing_from_registry: missingRuleIds.slice(0, maxOpenRules),
     local_runtime_bound_rules_missing_from_registry_truncated: missingRuleIds.length > maxOpenRules,
+    registry_fingerprint: registrySnapshot.fingerprint,
+    registry_fingerprint_algorithm: registrySnapshot.fingerprint_algorithm,
+    registry_snapshot: registrySnapshot,
     bindings: bindingSummaries
   };
 }
 
-function evaluateCoverageGate(config, rules, options = {}) {
+async function evaluateCoverageGate(config, rules, options = {}) {
   const maxOpenRules = Math.max(1, Number(options.max_open_rules || 100));
   const activeConfigurationCandidates = Array.isArray(options.active_configuration_candidates)
     ? options.active_configuration_candidates
     : [];
   const caoKey = normalizeCaoKey(config?.cao_key) || CAO_PB_KEY;
   const sourceCoverage = evaluateSourceCoverageCompleteness(config, rules);
-  const localRuntimeCoverage = evaluateLocalRuntimeBindingCoverage(rules, maxOpenRules);
+  const localRuntimeCoverage = await evaluateLocalRuntimeBindingCoverage(rules, maxOpenRules);
   const counts = {
     total: rules.length,
     unique_rule_ids: sourceCoverage.unique_rule_ids,
@@ -1443,6 +1477,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
     counts,
     source_coverage: sourceCoverage,
     local_runtime_coverage: localRuntimeCoverage,
+    local_runtime_registry: localRuntimeCoverage.registry_snapshot,
     by_domain: countBy(rules, rule => rule.domain),
     by_automation_level: countBy(rules, rule => rule.automation_level),
     by_implementation_status: countBy(rules, rule => String(rule.implementation_status || 'MISSING').toUpperCase()),
@@ -1450,6 +1485,8 @@ function evaluateCoverageGate(config, rules, options = {}) {
     by_runtime_binding_key: countBy(rules, rule => runtimeBindingKeyForSummary(rule)),
     has_local_payroll_runtime: hasLocalPayrollRuntime(caoKey),
     local_runtime_binding_keys: localRuntimeCoverage.local_runtime_binding_keys,
+    local_runtime_binding_fingerprint: localRuntimeCoverage.registry_fingerprint,
+    local_runtime_binding_fingerprint_algorithm: localRuntimeCoverage.registry_fingerprint_algorithm,
     semantic_backlog: semanticBacklog,
     blocking_findings: blockingFindings,
     open_payroll_critical_rules: openCriticalRules.slice(0, maxOpenRules),
@@ -1553,7 +1590,7 @@ Deno.serve(async (req) => {
     const auditConfig = activeConfig || { cao_key: caoKey };
     const ruleLoad = await loadRulesForConfiguration(base44, caoKey, activeConfig);
     const rules = ruleLoad.rules;
-    const runtimeGate = evaluateCoverageGate(auditConfig, rules || [], {
+    const runtimeGate = await evaluateCoverageGate(auditConfig, rules || [], {
       max_open_rules: maxOpenRules,
       active_configuration_candidates: activeCandidates
     });
