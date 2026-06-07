@@ -758,7 +758,8 @@ function buildChangeEffectiveMetadata(change, fallbackValidFrom, approvedAt) {
   const approvedDay = approvedDate.toISOString().slice(0, 10);
   const retroactive = change.retroactive === true ||
     (!!effectiveFrom && effectiveFrom < approvedDay);
-  const correctionRequired = payrollImpact && retroactive;
+  const missingEffectiveDate = payrollImpact && !effectiveFrom;
+  const correctionRequired = payrollImpact && (retroactive || missingEffectiveDate);
 
   return {
     effective_from: effectiveFrom,
@@ -766,7 +767,11 @@ function buildChangeEffectiveMetadata(change, fallbackValidFrom, approvedAt) {
     payroll_impact: payrollImpact,
     retroactive,
     correction_required: correctionRequired,
-    correction_status: correctionRequired ? 'candidate' : 'not_required'
+    correction_status: missingEffectiveDate
+      ? 'manual_review_required'
+      : correctionRequired
+      ? 'candidate'
+      : 'not_required'
   };
 }
 
@@ -1068,7 +1073,7 @@ Deno.serve(async (req) => {
       const review = await base44.asServiceRole.entities.CAOChangeReview.create({
         import_run_id: importRun.id,
         cao_configuration_id: configId,
-        cao_key: candidate_configuration.cao_key || null,
+        cao_key,
         rule_key: change.rule_key || change.field_path || 'unknown',
         field_path: change.field_path || '',
         old_value: change.old_value ?? null,

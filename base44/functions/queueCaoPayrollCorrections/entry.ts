@@ -211,6 +211,25 @@ Deno.serve(async (req) => {
         continue;
       }
 
+      if (!review.effective_from) {
+        const data = buildCorrectionData(
+          review,
+          null,
+          'manual_review_required',
+          'CAO-wijziging heeft payroll-impact maar mist effective_from; automatische correctiematching is geblokkeerd omdat historische loonruns niet veilig kunnen worden afgebakend.',
+          reviewCaoKey
+        );
+        const saved = await upsertCorrection(base44, data);
+        if (saved.created) createdCorrectionIds.push(saved.id);
+        else updatedCorrectionIds.push(saved.id);
+        unmatchedReviewIds.push(review.id);
+        unverifiableReviewIds.push(review.id);
+        await base44.asServiceRole.entities.CAOChangeReview.update(review.id, {
+          correction_status: 'manual_review_required'
+        });
+        continue;
+      }
+
       const affectedRuns = payrollRuns.filter(run =>
         runMatchesReviewCao(run, reviewCaoKey, configById) &&
         runTouchesReview(run, review)
