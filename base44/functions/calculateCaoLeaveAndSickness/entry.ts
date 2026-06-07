@@ -58,8 +58,8 @@ function numberOrNull(value) {
 
 function booleanOrNull(value) {
   if (value === true || value === false) return value;
-  if (value === 'true') return true;
-  if (value === 'false') return false;
+  if (value === 'true' || value === 'yes' || value === 'ja' || value === '1' || value === 1) return true;
+  if (value === 'false' || value === 'no' || value === 'nee' || value === '0' || value === 0) return false;
   return null;
 }
 
@@ -99,6 +99,32 @@ function dateFromIso(value) {
   if (!iso) return null;
   const date = new Date(`${iso}T00:00:00.000Z`);
   return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function addDaysIso(dateValue, days) {
+  const date = dateFromIso(dateValue);
+  if (!date) return null;
+  date.setUTCDate(date.getUTCDate() + days);
+  return date.toISOString().slice(0, 10);
+}
+
+function addMonthsIso(dateValue, months) {
+  const date = dateFromIso(dateValue);
+  if (!date) return null;
+  date.setUTCMonth(date.getUTCMonth() + months);
+  return date.toISOString().slice(0, 10);
+}
+
+function isWeekdayIso(dateValue) {
+  const date = dateFromIso(dateValue);
+  if (!date) return false;
+  const day = date.getUTCDay();
+  return day >= 1 && day <= 5;
+}
+
+function normalizeArray(value) {
+  if (Array.isArray(value)) return value;
+  return value ? [value] : [];
 }
 
 function contractCoversDate(contract, referenceDate) {
@@ -310,6 +336,10 @@ function resolveLeaveSicknessParameters(caoConfig) {
   const leaveRules = caoConfig?.leave_rules || {};
   const sicknessRules = caoConfig?.sickness_rules || {};
   const cashValueRules = caoConfig?.cash_value_logistics_rules || {};
+  const holidayRules = firstObject(leaveRules.holidays, leaveRules.article_61, caoConfig?.holiday_rules);
+  const vacationRequestRules = firstObject(leaveRules.vacation_requests, leaveRules.article_60);
+  const extraordinaryLeaveRules = firstObject(leaveRules.extraordinary_leave, leaveRules.article_63, caoConfig?.extraordinary_leave_rules);
+  const vacationAllowanceRules = firstObject(leaveRules.vacation_allowance, leaveRules.article_62);
   const standardVacation = firstObject(
     leaveRules.standard_vacation,
     leaveRules.article_59,
@@ -360,6 +390,13 @@ function resolveLeaveSicknessParameters(caoConfig) {
   const secondSixMonthsDays = firstNumber(sicknessRules.second_six_months_days, sicknessRules.second_6_months_days);
   const secondYearDays = firstNumber(sicknessRules.second_year_days);
   const thirdFourthYearDays = firstNumber(sicknessRules.third_fourth_year_days);
+  const vacationAllowancePercentage = firstNumber(vacationAllowanceRules.percentage, vacationAllowanceRules.vacation_allowance_percentage, caoConfig?.vacation_allowance);
+  const holidayCreditHours = firstNumber(holidayRules.fulltime_credit_hours, holidayRules.vacation_credit_hours, holidayRules.credit_cap_hours);
+  const rosterFreeHolidayWeeklyPercentage = firstNumber(holidayRules.roster_free_weekly_percentage, holidayRules.parttime_roster_free_weekly_percentage);
+  const oneDayVacationResponseDays = firstNumber(vacationRequestRules.one_day_response_days, vacationRequestRules.single_day_response_days);
+  const multiDayVacationResponseMonths = firstNumber(vacationRequestRules.multi_day_response_months, vacationRequestRules.vacation_response_months);
+  const minimumConsecutiveVacationWeeks = firstNumber(vacationRequestRules.minimum_consecutive_vacation_weeks);
+  const entitlementConsecutiveVacationWeeks = firstNumber(vacationRequestRules.entitlement_consecutive_vacation_weeks);
 
   return {
     standard_vacation: {
@@ -388,6 +425,63 @@ function resolveLeaveSicknessParameters(caoConfig) {
     },
     call_worker_vacation_payout_percentage: callWorkerPayoutPercentage ?? 9.24,
     call_worker_vacation_max_hours_per_period: callWorkerMaxHoursPerPeriod ?? 144,
+    vacation_request: {
+      one_day_response_days: oneDayVacationResponseDays ?? 7,
+      multi_day_response_months: multiDayVacationResponseMonths ?? 1,
+      summer_request_deadline_month_day: vacationRequestRules.summer_request_deadline_month_day || '01-31',
+      summer_period_start_month_day: vacationRequestRules.summer_period_start_month_day || '04-30',
+      summer_period_end_month_day: vacationRequestRules.summer_period_end_month_day || '10-01',
+      minimum_consecutive_vacation_weeks: minimumConsecutiveVacationWeeks ?? 2,
+      entitlement_consecutive_vacation_weeks: entitlementConsecutiveVacationWeeks ?? 3,
+      source_rule_ids: vacationRequestRules.source_rule_ids || [
+        'CAO-PB-2024-R1033', 'CAO-PB-2024-R1034', 'CAO-PB-2024-R1035',
+        'CAO-PB-2024-R1036', 'CAO-PB-2024-R1037', 'CAO-PB-2024-R1038',
+        'CAO-PB-2024-R1039', 'CAO-PB-2024-R1040', 'CAO-PB-2024-R1041',
+        'CAO-PB-2024-R1042', 'CAO-PB-2024-R1043', 'CAO-PB-2024-R1044',
+        'CAO-PB-2024-R1045', 'CAO-PB-2024-R1046', 'CAO-PB-2024-R1047',
+        'CAO-PB-2024-R1049'
+      ]
+    },
+    holiday_credit: {
+      fulltime_credit_hours: holidayCreditHours ?? 7.2,
+      credit_cap_hours: holidayCreditHours ?? 7.2,
+      roster_free_weekly_percentage: rosterFreeHolidayWeeklyPercentage ?? 20,
+      source_rule_ids: holidayRules.source_rule_ids || [
+        'CAO-PB-2024-R1052', 'CAO-PB-2024-R1053', 'CAO-PB-2024-R1054',
+        'CAO-PB-2024-R1056', 'CAO-PB-2024-R1057', 'CAO-PB-2024-R1058'
+      ]
+    },
+    vacation_allowance: {
+      percentage: vacationAllowancePercentage ?? 8,
+      latest_regular_payment_month: firstNumber(vacationAllowanceRules.latest_regular_payment_month) ?? 6,
+      source_rule_ids: vacationAllowanceRules.source_rule_ids || [
+        'CAO-PB-2024-R1060', 'CAO-PB-2024-R1061', 'CAO-PB-2024-R1062',
+        'CAO-PB-2024-R1064', 'CAO-PB-2024-R1065', 'CAO-PB-2024-R1066',
+        'CAO-PB-2024-R1067', 'CAO-PB-2024-R1068'
+      ]
+    },
+    extraordinary_leave: {
+      paid_percentage: firstNumber(extraordinaryLeaveRules.paid_percentage) ?? 100,
+      union_meeting_max_days_per_year: firstNumber(extraordinaryLeaveRules.union_meeting_max_days_per_year) ?? 8,
+      union_training_max_days_per_year: firstNumber(extraordinaryLeaveRules.union_training_max_days_per_year) ?? 6,
+      pension_course_max_days: firstNumber(extraordinaryLeaveRules.pension_course_max_days) ?? 5,
+      voting_max_hours: firstNumber(extraordinaryLeaveRules.voting_max_hours) ?? 2,
+      legal_obligation_max_days: firstNumber(extraordinaryLeaveRules.legal_obligation_max_days) ?? 1,
+      short_term_care_weekly_hours_multiplier: firstNumber(extraordinaryLeaveRules.short_term_care_weekly_hours_multiplier) ?? 2,
+      source_rule_ids: extraordinaryLeaveRules.source_rule_ids || [
+        'CAO-PB-2024-R1070', 'CAO-PB-2024-R1071', 'CAO-PB-2024-R1072',
+        'CAO-PB-2024-R1074', 'CAO-PB-2024-R1075', 'CAO-PB-2024-R1076',
+        'CAO-PB-2024-R1079', 'CAO-PB-2024-R1083', 'CAO-PB-2024-R1086',
+        'CAO-PB-2024-R1089', 'CAO-PB-2024-R1090', 'CAO-PB-2024-R1091',
+        'CAO-PB-2024-R1093', 'CAO-PB-2024-R1094', 'CAO-PB-2024-R1095',
+        'CAO-PB-2024-R1096', 'CAO-PB-2024-R1099', 'CAO-PB-2024-R1102',
+        'CAO-PB-2024-R1104', 'CAO-PB-2024-R1108', 'CAO-PB-2024-R1109',
+        'CAO-PB-2024-R1112', 'CAO-PB-2024-R1115', 'CAO-PB-2024-R1118',
+        'CAO-PB-2024-R1119', 'CAO-PB-2024-R1120', 'CAO-PB-2024-R1121',
+        'CAO-PB-2024-R1122', 'CAO-PB-2024-R1128', 'CAO-PB-2024-R1129',
+        'CAO-PB-2024-R1130'
+      ]
+    },
     sickness: {
       waiting_day_seniority_periods: waitingDaySeniorityPeriods ?? 13,
       short_seniority_payment_percentage: shortSeniorityPercentage ?? 70,
@@ -406,6 +500,8 @@ function resolveLeaveSicknessParameters(caoConfig) {
       standard_vacation_per_period_hours: parameterSource('leave_rules.standard_vacation.fulltime_per_period_hours', standardPerPeriodHours, 13.3, ['CAO-PB-2024-R0999']),
       call_worker_vacation_payout_percentage: parameterSource('leave_rules.call_worker_vacation.payout_percentage', callWorkerPayoutPercentage, 9.24, ['CAO-PB-2024-R1016']),
       call_worker_vacation_max_hours_per_period: parameterSource('leave_rules.call_worker_vacation.max_hours_per_period', callWorkerMaxHoursPerPeriod, 144, ['CAO-PB-2024-R1016']),
+      holiday_credit_hours: parameterSource('leave_rules.holidays.fulltime_credit_hours', holidayCreditHours, 7.2, ['CAO-PB-2024-R1052']),
+      vacation_allowance_percentage: parameterSource('leave_rules.vacation_allowance.percentage', vacationAllowancePercentage, 8, ['CAO-PB-2024-R1060']),
       waiting_day_seniority_periods: parameterSource('sickness_rules.waiting_day_seniority_periods', waitingDaySeniorityPeriods, 13, ['CAO-PB-2024-R1149']),
       short_seniority_payment_percentage: parameterSource('sickness_rules.short_seniority_payment_percentage', shortSeniorityPercentage, 70, ['CAO-PB-2024-R1148']),
       call_worker_payment_percentage: parameterSource('sickness_rules.call_worker_payment_percentage', callWorkerPercentage, 70, ['CAO-PB-2024-R1172']),
@@ -551,6 +647,545 @@ function calculateVacationAccrual(input, parameters = resolveLeaveSicknessParame
     note: parttimeRatio < 1
       ? `Parttime vakantieopbouw naar rato over ${cappedPaidHours} betaalde uren per loonperiode.`
       : 'Fulltime vakantieopbouw op basis van 144 uur per loonperiode / 36 uur per week.'
+  };
+}
+
+function isSummerVacationRequest(requestStartDate, requestEndDate, requestDate, parameters) {
+  const start = asIsoDate(requestStartDate);
+  const end = asIsoDate(requestEndDate) || start;
+  const requestedAt = asIsoDate(requestDate);
+  if (!start || !requestedAt) return false;
+  const year = Number(start.slice(0, 4));
+  const summerStart = `${year}-${parameters.vacation_request.summer_period_start_month_day}`;
+  const summerEnd = `${year}-${parameters.vacation_request.summer_period_end_month_day}`;
+  return requestedAt < `${year}-01-01` && start <= summerEnd && end >= summerStart;
+}
+
+function requestWindowAllowsMoreThanThreeWeeks(requestStartDate, requestEndDate) {
+  const start = asIsoDate(requestStartDate);
+  const end = asIsoDate(requestEndDate) || start;
+  if (!start) return false;
+  const year = Number(start.slice(0, 4));
+  const allowedAStart = `${year}-01-01`;
+  const allowedAEnd = `${year}-06-30`;
+  const allowedBStart = `${year}-09-07`;
+  const allowedBEnd = `${year}-11-30`;
+  return (start >= allowedAStart && end <= allowedAEnd) || (start >= allowedBStart && end <= allowedBEnd);
+}
+
+function calculateVacationRequestPolicy(input, parameters = resolveLeaveSicknessParameters(null)) {
+  const startDate = asIsoDate(input.vacation_start_date || input.leave_start_date || input.requested_start_date);
+  const endDate = asIsoDate(input.vacation_end_date || input.leave_end_date || input.requested_end_date || startDate);
+  const requestDate = asIsoDate(input.vacation_request_date || input.request_date || input.submitted_at);
+  const responseDate = asIsoDate(input.employer_response_date || input.response_date || input.responded_at);
+  const responseStatus = String(input.employer_response_status || input.response_status || input.status || '').toLowerCase();
+  const rejectionReason = input.rejection_reason || input.employer_rejection_reason || null;
+  const manualItems = [];
+  const violations = [];
+  const entitlements = [];
+  const warnings = [];
+  const sourceRuleIds = parameters.vacation_request.source_rule_ids;
+
+  const requestedDays = daysBetweenInclusive(startDate, endDate) ?? numberOrNull(input.requested_vacation_days) ?? null;
+  if (!startDate || !requestDate || requestedDays === null) {
+    manualItems.push({
+      rule_id: 'CAO-PB-2024-R1040',
+      domain: 'vacation_request',
+      field: 'vacation_start_date/vacation_request_date/requested_vacation_days',
+      message: 'Vakantieaanvraag mist startdatum, aanvraagdatum of duur; artikel 60-termijnen kunnen niet definitief worden toegepast.'
+    });
+  }
+
+  let responseDeadline = null;
+  let responseDeadlineRuleId = null;
+  if (startDate && requestDate && requestedDays !== null) {
+    if (isSummerVacationRequest(startDate, endDate, requestDate, parameters)) {
+      responseDeadline = `${startDate.slice(0, 4)}-${parameters.vacation_request.summer_request_deadline_month_day}`;
+      responseDeadlineRuleId = 'CAO-PB-2024-R1044';
+    } else if (requestedDays <= 1) {
+      responseDeadline = addDaysIso(requestDate, parameters.vacation_request.one_day_response_days);
+      responseDeadlineRuleId = 'CAO-PB-2024-R1041';
+    } else {
+      responseDeadline = addMonthsIso(requestDate, parameters.vacation_request.multi_day_response_months);
+      responseDeadlineRuleId = 'CAO-PB-2024-R1043';
+    }
+  }
+
+  const noTimelyResponse = responseDeadline && (!responseDate || responseDate > responseDeadline);
+  if (noTimelyResponse) {
+    entitlements.push({
+      rule_id: responseDeadlineRuleId,
+      type: 'vacation_request_deemed_approved',
+      response_deadline: responseDeadline,
+      response_date: responseDate,
+      message: 'Werkgever reageerde niet tijdig schriftelijk; de aangevraagde vakantie mag worden opgenomen.'
+    });
+  }
+  if (responseStatus.includes('reject') || responseStatus.includes('afgewezen') || responseStatus.includes('denied')) {
+    if (!rejectionReason) {
+      violations.push({
+        rule_id: responseDeadlineRuleId || 'CAO-PB-2024-R1041',
+        severity: 'medium',
+        message: 'Afwijzing van vakantieaanvraag mist schriftelijke reden.',
+        manual_review_required: true,
+        payroll_impact: false
+      });
+    }
+  }
+  if (booleanOrNull(input.approved_vacation_changed_by_employer) === true) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R1034',
+      severity: 'high',
+      message: 'Goedgekeurde vakantiedagen mogen door werkgever niet eenzijdig worden gewijzigd.',
+      manual_review_required: true,
+      payroll_impact: false
+    });
+  }
+
+  const requestedWeeks = requestedDays !== null ? requestedDays / 7 : null;
+  if (requestedWeeks !== null && requestedWeeks >= parameters.vacation_request.entitlement_consecutive_vacation_weeks) {
+    entitlements.push({
+      rule_id: 'CAO-PB-2024-R1036',
+      type: 'three_week_consecutive_vacation_entitlement',
+      requested_days: requestedDays,
+      requested_weeks: round2(requestedWeeks),
+      message: 'Werknemer heeft recht op 3 weken aaneengesloten vakantie, behoudens bedrijfsbelang en juiste vaststelling.'
+    });
+  }
+  if (booleanOrNull(input.minimum_two_weeks_consecutive_vacation_taken) === false) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R1037',
+      severity: 'medium',
+      message: 'Werknemer moet jaarlijks minimaal 2 weken aaneengesloten vakantie opnemen; dit is niet bevestigd.',
+      manual_review_required: true,
+      payroll_impact: false
+    });
+  }
+  if (requestedWeeks !== null && requestedWeeks > parameters.vacation_request.entitlement_consecutive_vacation_weeks && !requestWindowAllowsMoreThanThreeWeeks(startDate, endDate)) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R1038',
+      severity: 'medium',
+      message: 'Meer dan 3 weken aaneengesloten vakantie valt buiten de CAO-vensters 1 januari-30 juni of 7 september-30 november.',
+      requested_days: requestedDays,
+      manual_review_required: true,
+      payroll_impact: false
+    });
+  }
+  if (booleanOrNull(input.employee_sick_during_vacation_request) === true && booleanOrNull(input.company_doctor_vacation_supports_recovery) !== true) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R1039',
+      severity: 'medium',
+      message: 'Vakantie tijdens arbeidsongeschiktheid vereist oordeel bedrijfsarts/arbo-arts dat vakantie herstel of rust ondersteunt.',
+      manual_review_required: true,
+      payroll_impact: true
+    });
+  }
+
+  if (numberOrNull(input.statutory_vacation_days_taken_year_to_date) !== null && numberOrNull(input.statutory_vacation_days_required_per_year) !== null) {
+    const taken = numberOrNull(input.statutory_vacation_days_taken_year_to_date);
+    const required = numberOrNull(input.statutory_vacation_days_required_per_year);
+    if (taken < required && booleanOrNull(input.employer_enabled_statutory_vacation_take_up) !== true) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R1035',
+        severity: 'medium',
+        message: 'Werkgever moet werknemer in staat stellen jaarlijks minimaal wettelijke vakantiedagen op te nemen en saldo bijhouden.',
+        statutory_days_taken: taken,
+        statutory_days_required: required,
+        manual_review_required: true,
+        payroll_impact: false
+      });
+    }
+  } else if (booleanOrNull(input.vacation_balance_tracking_confirmed) !== true) {
+    manualItems.push({
+      rule_id: 'CAO-PB-2024-R1035',
+      domain: 'vacation_balance',
+      field: 'vacation_balance_tracking_confirmed/statutory_vacation_days_taken_year_to_date',
+      message: 'Vakantiesaldo-administratie moet wettelijke opname en restant kunnen aantonen.'
+    });
+  }
+
+  const accrualYear = numberOrNull(input.vacation_accrual_year);
+  if (accrualYear !== null) {
+    entitlements.push({
+      rule_id: 'CAO-PB-2024-R1047',
+      type: 'statutory_vacation_expiry',
+      accrual_year: accrualYear,
+      expiry_date: `${accrualYear + 5}-12-31`,
+      message: 'Niet-opgenomen wettelijke vakantiedagen vervallen 5 jaar na de laatste dag van het opbouwjaar.'
+    });
+    entitlements.push({
+      rule_id: 'CAO-PB-2024-R1049',
+      type: 'above_statutory_vacation_expiry',
+      accrual_year: accrualYear,
+      expiry_date: `${accrualYear + 5}-12-31`,
+      message: 'Niet-opgenomen bovenwettelijke vakantiedagen vervallen 5 jaar na de laatste dag van het opbouwjaar.'
+    });
+  }
+
+  return {
+    rule_ids: sourceRuleIds,
+    start_date: startDate,
+    end_date: endDate,
+    request_date: requestDate,
+    requested_days: requestedDays,
+    response_deadline: responseDeadline,
+    response_deadline_rule_id: responseDeadlineRuleId,
+    response_date: responseDate,
+    response_status: responseStatus || null,
+    deemed_approved_due_to_no_timely_response: !!noTimelyResponse,
+    vacation_pay_policy: {
+      paid_as_if_worked: true,
+      source_rule_ids: ['CAO-PB-2024-R1031', 'CAO-PB-2024-R1072']
+    },
+    entitlements,
+    violations,
+    manual_review_items: manualItems,
+    warnings,
+    manual_review_required: manualItems.length > 0 || violations.some(item => item.manual_review_required === true),
+    payroll_final_allowed: violations.filter(item => item.severity === 'high').length === 0 && manualItems.length === 0
+  };
+}
+
+function holidayDatesFromInput(input, caoConfig) {
+  const explicitDates = normalizeArray(input.holiday_dates || input.holidays || input.holiday_date || input.date)
+    .map(item => asIsoDate(item?.date || item))
+    .filter(Boolean);
+  if (explicitDates.length > 0) return [...new Set(explicitDates)].sort();
+  const start = asIsoDate(input.period_start || input.start_date);
+  const end = asIsoDate(input.period_end || input.end_date || start);
+  return normalizeArray(caoConfig?.holidays)
+    .map(item => asIsoDate(item?.date || item))
+    .filter(date => date && (!start || date >= start) && (!end || date <= end))
+    .sort();
+}
+
+function calculateHolidayCredit(input, caoConfig, parameters = resolveLeaveSicknessParameters(null)) {
+  const holidayDates = holidayDatesFromInput(input, caoConfig).filter(isWeekdayIso);
+  const rows = [];
+  const manualItems = [];
+  const sourceRuleIds = parameters.holiday_credit.source_rule_ids;
+  const isFulltime = booleanOrNull(input.is_fulltime ?? input.fulltime) === true ||
+    (numberOrNull(input.contract_hours_per_pay_period) ?? 0) >= parameters.standard_vacation.fulltimePeriodHours;
+  const weeklyHours = numberOrNull(input.weekly_hours ?? input.contract_hours_per_week) ?? parameters.standard_vacation.fulltimeWeeklyHours;
+  const workedByDate = input.holiday_worked_hours_by_date || {};
+  const scheduledByDate = input.holiday_scheduled_hours_by_date || {};
+  const rosterFreeDates = new Set(normalizeArray(input.roster_free_holiday_dates || input.roster_free_dates).map(asIsoDate).filter(Boolean));
+
+  for (const date of holidayDates) {
+    const workedHours = numberOrNull(workedByDate[date]) ?? numberOrNull(input.worked_hours_on_holiday);
+    const scheduledHours = numberOrNull(scheduledByDate[date]) ?? numberOrNull(input.scheduled_hours_on_holiday);
+    const rosterFree = rosterFreeDates.has(date) || booleanOrNull(input.holiday_is_roster_free_day) === true;
+    let creditHours = 0;
+    let policy = null;
+    if (isFulltime) {
+      creditHours = parameters.holiday_credit.fulltime_credit_hours;
+      policy = workedHours && workedHours > 0 ? 'fulltime_worked_holiday_credit_later' : rosterFree ? 'fulltime_roster_free_weekday_holiday_credit' : 'fulltime_non_worked_weekday_holiday_marked_vacation_day';
+    } else if (workedHours !== null && workedHours > 0) {
+      creditHours = Math.min(workedHours, parameters.holiday_credit.credit_cap_hours);
+      policy = 'parttime_worked_holiday_actual_hours_capped';
+    } else if (!rosterFree && scheduledHours !== null) {
+      creditHours = Math.min(scheduledHours, parameters.holiday_credit.credit_cap_hours);
+      policy = 'parttime_non_worked_scheduled_holiday_hours_capped';
+    } else if (rosterFree) {
+      creditHours = weeklyHours * (parameters.holiday_credit.roster_free_weekly_percentage / 100);
+      policy = 'parttime_roster_free_holiday_20_percent_weekly_hours';
+    } else {
+      manualItems.push({
+        rule_id: 'CAO-PB-2024-R1057',
+        domain: 'holiday_credit',
+        field: 'holiday_scheduled_hours_by_date/roster_free_holiday_dates/worked_hours_on_holiday',
+        message: `Feestdag ${date}: parttime roostercontext ontbreekt; extra vakantietegoed kan niet definitief worden berekend.`
+      });
+    }
+    rows.push({
+      date,
+      is_weekday_holiday: true,
+      is_fulltime: isFulltime,
+      worked_hours: workedHours,
+      scheduled_hours: scheduledHours,
+      roster_free_day: rosterFree,
+      credit_hours: round2(creditHours),
+      policy,
+      holiday_marked_as_vacation_day: isFulltime && !rosterFree && !(workedHours > 0),
+      source_rule_ids: sourceRuleIds
+    });
+  }
+
+  if (holidayDates.length === 0) {
+    manualItems.push({
+      rule_id: 'CAO-PB-2024-R1052',
+      domain: 'holiday_credit',
+      field: 'holiday_date/holiday_dates/CAOConfiguration.holidays',
+      message: 'Geen doordeweekse feestdag gevonden in input of CAOConfiguration.holidays.'
+    });
+  }
+
+  return {
+    rule_ids: sourceRuleIds,
+    holiday_credit_rows: rows,
+    total_holiday_credit_hours: round2(rows.reduce((sum, row) => sum + row.credit_hours, 0)),
+    manual_review_items: manualItems,
+    manual_review_required: manualItems.length > 0,
+    payroll_final_allowed: manualItems.length === 0,
+    parameter_provenance: {
+      holiday_credit_hours: parameters.provenance.holiday_credit_hours
+    }
+  };
+}
+
+function calculateVacationAllowance(input, parameters = resolveLeaveSicknessParameters(null)) {
+  const baseSalary = numberOrNull(input.base_salary_amount ?? input.base_salary ?? input.basis_salaris) ?? 0;
+  const periodicIncreases = numberOrNull(input.periodic_increase_amount ?? input.periodieken_amount) ?? 0;
+  const specialHoursAllowance = numberOrNull(input.special_hours_allowance_amount ?? input.ort_amount) ?? 0;
+  const holidayAllowance = numberOrNull(input.holiday_surcharge_amount ?? input.feestdagentoeslag_amount) ?? 0;
+  const structuralOvertime = numberOrNull(input.structural_overtime_amount) ?? 0;
+  const fixedAllowances = numberOrNull(input.fixed_allowances_amount ?? input.other_fixed_allowances_amount) ?? 0;
+  const basis = baseSalary + periodicIncreases + specialHoursAllowance + holidayAllowance + structuralOvertime + fixedAllowances;
+  const percentage = parameters.vacation_allowance.percentage;
+  const termination = booleanOrNull(input.employment_terminated ?? input.contract_ended) === true;
+  return {
+    rule_ids: parameters.vacation_allowance.source_rule_ids,
+    vacation_allowance_percentage: percentage,
+    basis_components: {
+      base_salary: round2(baseSalary),
+      periodic_increases: round2(periodicIncreases),
+      special_hours_allowance_including_sickness_leave: round2(specialHoursAllowance),
+      holiday_surcharge: round2(holidayAllowance),
+      structural_overtime_including_surcharge: round2(structuralOvertime),
+      other_fixed_allowances: round2(fixedAllowances)
+    },
+    vacation_allowance_basis_amount: round2(basis),
+    vacation_allowance_amount: round2(basis * (percentage / 100)),
+    regular_payment_due_month: parameters.vacation_allowance.latest_regular_payment_month,
+    termination_payout_required: termination,
+    parameter_provenance: {
+      vacation_allowance_percentage: parameters.provenance.vacation_allowance_percentage
+    },
+    manual_review_required: false,
+    payroll_final_allowed: true
+  };
+}
+
+function calculateExtraordinaryLeave(input, parameters = resolveLeaveSicknessParameters(null)) {
+  const reason = String(input.extraordinary_leave_reason || input.leave_reason || '').toLowerCase();
+  const requestedHours = numberOrNull(input.requested_leave_hours ?? input.absence_hours);
+  const requestedDays = numberOrNull(input.requested_leave_days ?? input.absence_days);
+  const averageWeeklyHours = numberOrNull(input.average_weekly_hours ?? input.contract_hours_per_week) ?? parameters.standard_vacation.fulltimeWeeklyHours;
+  const baseHourlyRate = numberOrNull(input.base_hourly_rate ?? input.hourly_rate);
+  const manualItems = [];
+  const violations = [];
+  const entitlements = [];
+  let maxDays = null;
+  let maxHours = null;
+  let policy = 'manual_review_required';
+  let paidPercentage = parameters.extraordinary_leave.paid_percentage;
+  let reimbursementAllowed = null;
+  const ruleIds = [...parameters.extraordinary_leave.source_rule_ids];
+
+  if (!reason) {
+    manualItems.push({
+      rule_id: 'CAO-PB-2024-R1070',
+      domain: 'extraordinary_leave',
+      field: 'extraordinary_leave_reason',
+      message: 'Reden buitengewoon verlof ontbreekt; CAO-matrix kan niet worden toegepast.'
+    });
+  } else if (reason.includes('death') || reason.includes('overlijden') || reason.includes('funeral') || reason.includes('begrafenis') || reason.includes('crematie')) {
+    const deathDate = asIsoDate(input.death_date);
+    const funeralDate = asIsoDate(input.funeral_or_cremation_date);
+    if (reason.includes('partner') || reason.includes('child_household') || reason.includes('echtgenoot') || reason.includes('levenspartner') || booleanOrNull(input.arranges_funeral_or_cremation) === true) {
+      maxDays = daysBetweenInclusive(deathDate, funeralDate);
+      policy = 'death_leave_from_death_until_funeral';
+      if (maxDays === null) {
+        manualItems.push({
+          rule_id: 'CAO-PB-2024-R1076',
+          domain: 'extraordinary_leave_death',
+          field: 'death_date/funeral_or_cremation_date',
+          message: 'Overlijdensverlof vanaf dag van overlijden tot en met begrafenis/crematie vereist beide datums.'
+        });
+      }
+    } else if (reason.includes('parent') || reason.includes('ouder') || reason.includes('schoonouder')) {
+      maxDays = 2;
+      policy = 'death_leave_two_days';
+    } else {
+      maxDays = 1;
+      policy = 'funeral_or_cremation_day_one_day';
+    }
+    ruleIds.push('CAO-PB-2024-R1075', 'CAO-PB-2024-R1076', 'CAO-PB-2024-R1079');
+  } else if (reason.includes('mourning') || reason.includes('rouw')) {
+    policy = 'mourning_leave_paid_by_agreement';
+    manualItems.push({
+      rule_id: 'CAO-PB-2024-R1083',
+      domain: 'extraordinary_leave_mourning',
+      field: 'employer_agreement_confirmed',
+      message: 'Rouwverlof met behoud van loon vereist overleg/afspraak met werkgever.'
+    });
+  } else if (reason.includes('marriage') || reason.includes('trouw') || reason.includes('registered_partner')) {
+    maxDays = reason.includes('own') || reason.includes('zelf') || reason.includes('registered_partner') ? 2 : 1;
+    policy = maxDays === 2 ? 'own_marriage_two_consecutive_days' : 'family_marriage_one_day';
+    ruleIds.push('CAO-PB-2024-R1086');
+  } else if (reason.includes('doctor') || reason.includes('dokter') || reason.includes('specialist') || reason.includes('dentist') || reason.includes('tandarts') || reason.includes('therap')) {
+    policy = reason.includes('specialist') ? 'specialist_hours_with_referral' : 'doctor_dentist_therapist_if_impossible_free_time';
+    maxHours = requestedHours;
+    if (reason.includes('specialist') && booleanOrNull(input.referral_present) !== true) {
+      manualItems.push({
+        rule_id: 'CAO-PB-2024-R1090',
+        domain: 'extraordinary_leave_medical',
+        field: 'referral_present',
+        message: 'Specialistenbezoek vereist verwijsbrief.'
+      });
+    }
+    if (!reason.includes('specialist') && booleanOrNull(input.impossible_outside_work_time) !== true) {
+      manualItems.push({
+        rule_id: 'CAO-PB-2024-R1091',
+        domain: 'extraordinary_leave_medical',
+        field: 'impossible_outside_work_time',
+        message: 'Huisarts/tandarts/therapeut geldt alleen als afspraak onmogelijk in vrije tijd kan.'
+      });
+    }
+  } else if (reason.includes('moving') || reason.includes('verhuis')) {
+    maxDays = booleanOrNull(input.employer_requested_move) === true ? 2 : 1;
+    policy = booleanOrNull(input.employer_requested_move) === true ? 'employer_requested_move_two_days' : 'move_once_per_two_years_one_day';
+    if (maxDays === 1 && booleanOrNull(input.moved_within_last_two_years) === true) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R1093',
+        severity: 'medium',
+        message: 'Verhuisverlof van 1 dag geldt maximaal 1 keer per 2 jaar.',
+        manual_review_required: true,
+        payroll_impact: true
+      });
+    }
+    ruleIds.push('CAO-PB-2024-R1093', 'CAO-PB-2024-R1094');
+  } else if (reason.includes('exam') || reason.includes('examen')) {
+    maxHours = requestedHours;
+    policy = 'exam_absence_hours';
+    ruleIds.push('CAO-PB-2024-R1095', 'CAO-PB-2024-R1096', 'CAO-PB-2024-R1099', 'CAO-PB-2024-R1102');
+    if (!(reason.includes('svpb') || booleanOrNull(input.course_reported_and_employer_approved) === true)) {
+      manualItems.push({
+        rule_id: 'CAO-PB-2024-R1099',
+        domain: 'extraordinary_leave_exam',
+        field: 'course_reported_and_employer_approved',
+        message: 'Niet-SVPB examen vereist gemelde en door werkgever goedgekeurde cursus.'
+      });
+    }
+    entitlements.push({
+      rule_id: 'CAO-PB-2024-R1102',
+      type: 'post_exam_work_planning_constraint',
+      message: 'Na examen kan werken alleen binnen maximale arbeidstijd en met voldoende reistijd van examenlocatie naar werklocatie.'
+    });
+  } else if (reason.includes('pension') || reason.includes('pensioen')) {
+    maxDays = parameters.extraordinary_leave.pension_course_max_days;
+    policy = 'pension_course_max_five_days';
+    if (booleanOrNull(input.within_three_years_before_pension_age) !== true) {
+      manualItems.push({
+        rule_id: 'CAO-PB-2024-R1104',
+        domain: 'extraordinary_leave_pension_course',
+        field: 'within_three_years_before_pension_age',
+        message: 'Pensioencursusverlof geldt in de 3 jaar voor pensioenleeftijd.'
+      });
+    }
+  } else if (reason.includes('vote') || reason.includes('stem')) {
+    maxHours = parameters.extraordinary_leave.voting_max_hours;
+    policy = 'voting_max_two_hours_if_not_outside_work';
+    if (booleanOrNull(input.impossible_outside_work_time) !== true || booleanOrNull(input.has_voting_right) !== true) {
+      manualItems.push({
+        rule_id: 'CAO-PB-2024-R1109',
+        domain: 'extraordinary_leave_voting',
+        field: 'has_voting_right/impossible_outside_work_time',
+        message: 'Stemverlof vereist stemrecht en onmogelijkheid om buiten werktijd te stemmen.'
+      });
+    }
+  } else if (reason.includes('union') || reason.includes('vakbond')) {
+    const usedDays = numberOrNull(input.union_leave_days_used_this_year) ?? 0;
+    const timely = booleanOrNull(input.union_request_timely_submitted) === true;
+    maxDays = reason.includes('course') || reason.includes('cursus') || reason.includes('stud') ? parameters.extraordinary_leave.union_training_max_days_per_year : parameters.extraordinary_leave.union_meeting_max_days_per_year;
+    policy = reason.includes('negotiation') || reason.includes('cao_onderhandeling') ? 'union_cao_negotiation_max_three_cadres_per_union' : 'union_leave_annual_cap';
+    if (!timely || booleanOrNull(input.union_member) !== true) {
+      manualItems.push({
+        rule_id: 'CAO-PB-2024-R1112',
+        domain: 'extraordinary_leave_union',
+        field: 'union_member/union_request_timely_submitted',
+        message: 'Vakbondsverlof vereist vakbondslidmaatschap en tijdig ingediende aanvraag.'
+      });
+    }
+    if (usedDays + (requestedDays || 0) > maxDays) {
+      violations.push({
+        rule_id: reason.includes('course') || reason.includes('cursus') ? 'CAO-PB-2024-R1115' : 'CAO-PB-2024-R1112',
+        severity: 'medium',
+        message: `Vakbondsverlof overschrijdt jaarmaximum van ${maxDays} dagen.`,
+        manual_review_required: true,
+        payroll_impact: true
+      });
+    }
+    if (policy.includes('negotiation') && numberOrNull(input.union_cadres_for_negotiation_count) > 3) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R1118',
+        severity: 'medium',
+        message: 'Maximaal 3 kaderleden per vakbond kunnen buitengewoon verlof krijgen voor cao-onderhandelingen.',
+        manual_review_required: true,
+        payroll_impact: true
+      });
+    }
+  } else if (reason.includes('legal') || reason.includes('wettelijke') || reason.includes('overheid')) {
+    maxDays = parameters.extraordinary_leave.legal_obligation_max_days;
+    policy = 'legal_obligation_max_one_day_no_reimbursement';
+    reimbursementAllowed = false;
+    if (booleanOrNull(input.personal_legal_obligation) !== true || booleanOrNull(input.impossible_outside_work_time) !== true || booleanOrNull(input.excluded_legal_obligation_context) === true) {
+      manualItems.push({
+        rule_id: 'CAO-PB-2024-R1122',
+        domain: 'extraordinary_leave_legal_obligation',
+        field: 'personal_legal_obligation/impossible_outside_work_time/excluded_legal_obligation_context',
+        message: 'Wettelijke verplichting moet persoonlijk zijn, niet in vrije tijd kunnen en mag geen uitgesloten context zijn.'
+      });
+    }
+  } else if (reason.includes('care') || reason.includes('zorgverlof')) {
+    maxHours = averageWeeklyHours * parameters.extraordinary_leave.short_term_care_weekly_hours_multiplier;
+    policy = 'short_term_care_leave_top_up_to_100_percent';
+    paidPercentage = 100;
+    ruleIds.push('CAO-PB-2024-R1130');
+  } else {
+    manualItems.push({
+      rule_id: 'CAO-PB-2024-R1129',
+      domain: 'extraordinary_leave_other',
+      field: 'employer_agreement_confirmed',
+      message: 'Andere bijzondere situaties vereisen overleg met werkgever.'
+    });
+  }
+
+  const payableHours = requestedHours !== null
+    ? Math.min(requestedHours, maxHours ?? (maxDays !== null ? maxDays * parameters.standard_vacation.vacationDayHours : requestedHours))
+    : requestedDays !== null
+    ? Math.min(requestedDays, maxDays ?? requestedDays) * parameters.standard_vacation.vacationDayHours
+    : null;
+  const paymentAmount = payableHours !== null && baseHourlyRate !== null
+    ? payableHours * baseHourlyRate * (paidPercentage / 100)
+    : null;
+  if (payableHours === null) {
+    manualItems.push({
+      rule_id: 'CAO-PB-2024-R1072',
+      domain: 'extraordinary_leave_payment',
+      field: 'requested_leave_hours/requested_leave_days',
+      message: 'Verzuimuren/-dagen ontbreken; doorbetaling kan niet worden berekend.'
+    });
+  }
+
+  return {
+    rule_ids: [...new Set(ruleIds)],
+    reason,
+    policy,
+    max_days: maxDays,
+    max_hours: maxHours !== null ? round2(maxHours) : null,
+    requested_days: requestedDays,
+    requested_hours: requestedHours,
+    payable_hours: payableHours !== null ? round2(payableHours) : null,
+    paid_percentage: paidPercentage,
+    base_hourly_rate: baseHourlyRate,
+    payment_amount: paymentAmount !== null ? round2(paymentAmount) : null,
+    reimbursement_allowed: reimbursementAllowed,
+    entitlements,
+    violations,
+    manual_review_items: manualItems,
+    manual_review_required: manualItems.length > 0 || violations.some(item => item.manual_review_required === true),
+    payroll_final_allowed: manualItems.length === 0 && violations.filter(item => item.severity === 'high').length === 0
   };
 }
 
@@ -1087,12 +1722,144 @@ Deno.serve(async (req) => {
       });
     }
 
+    if (action === 'assess_vacation_request') {
+      const result = calculateVacationRequestPolicy(body, leaveSicknessParameters);
+      const manualReviewRequired = isUnknownOrMixed || result.manual_review_required === true;
+      return Response.json({
+        success: true,
+        cao_sync_status: caoSyncStatus,
+        cao_key: targetCaoKey,
+        cao_configuration_id: caoConfig.id || null,
+        cao_version_label: caoConfig.version_label || caoConfig.name || null,
+        cao_valid_from: caoConfig.valid_from || null,
+        cao_valid_until: caoConfig.valid_until || null,
+        cao_payroll_readiness: caoPayrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_leave_sickness_parameters: leaveSicknessParameters,
+        contract_id: contract_id || contract?.id || null,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
+        cao_runtime_support: leaveSicknessRuntimeSupport,
+        calculation_warnings: syncWarnings,
+        scope_warnings: scopeWarnings,
+        cao_scope_profile: caoScope?.cao_scope_profile || null,
+        ...result,
+        manual_review_required: manualReviewRequired || contractCaoResolution.manual_review_required === true,
+        payroll_final_allowed: !manualReviewRequired && contractCaoResolution.manual_review_required !== true && result.payroll_final_allowed !== false
+      });
+    }
+
+    if (action === 'calculate_holiday_credit') {
+      const result = calculateHolidayCredit(body, caoConfig, leaveSicknessParameters);
+      const manualReviewRequired = isUnknownOrMixed || result.manual_review_required === true;
+      return Response.json({
+        success: true,
+        cao_sync_status: caoSyncStatus,
+        cao_key: targetCaoKey,
+        cao_configuration_id: caoConfig.id || null,
+        cao_version_label: caoConfig.version_label || caoConfig.name || null,
+        cao_valid_from: caoConfig.valid_from || null,
+        cao_valid_until: caoConfig.valid_until || null,
+        cao_payroll_readiness: caoPayrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_leave_sickness_parameters: leaveSicknessParameters,
+        contract_id: contract_id || contract?.id || null,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
+        cao_runtime_support: leaveSicknessRuntimeSupport,
+        calculation_warnings: syncWarnings,
+        scope_warnings: scopeWarnings,
+        cao_scope_profile: caoScope?.cao_scope_profile || null,
+        ...result,
+        manual_review_required: manualReviewRequired || contractCaoResolution.manual_review_required === true,
+        payroll_final_allowed: !manualReviewRequired && contractCaoResolution.manual_review_required !== true && result.payroll_final_allowed !== false
+      });
+    }
+
+    if (action === 'calculate_vacation_allowance') {
+      const result = calculateVacationAllowance(body, leaveSicknessParameters);
+      const manualReviewRequired = isUnknownOrMixed || result.manual_review_required === true;
+      return Response.json({
+        success: true,
+        cao_sync_status: caoSyncStatus,
+        cao_key: targetCaoKey,
+        cao_configuration_id: caoConfig.id || null,
+        cao_version_label: caoConfig.version_label || caoConfig.name || null,
+        cao_valid_from: caoConfig.valid_from || null,
+        cao_valid_until: caoConfig.valid_until || null,
+        cao_payroll_readiness: caoPayrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_leave_sickness_parameters: leaveSicknessParameters,
+        contract_id: contract_id || contract?.id || null,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
+        cao_runtime_support: leaveSicknessRuntimeSupport,
+        calculation_warnings: syncWarnings,
+        scope_warnings: scopeWarnings,
+        cao_scope_profile: caoScope?.cao_scope_profile || null,
+        ...result,
+        manual_review_required: manualReviewRequired || contractCaoResolution.manual_review_required === true,
+        payroll_final_allowed: !manualReviewRequired && contractCaoResolution.manual_review_required !== true && result.payroll_final_allowed !== false
+      });
+    }
+
+    if (action === 'calculate_extraordinary_leave') {
+      const result = calculateExtraordinaryLeave(body, leaveSicknessParameters);
+      const manualReviewRequired = isUnknownOrMixed || result.manual_review_required === true;
+      return Response.json({
+        success: true,
+        cao_sync_status: caoSyncStatus,
+        cao_key: targetCaoKey,
+        cao_configuration_id: caoConfig.id || null,
+        cao_version_label: caoConfig.version_label || caoConfig.name || null,
+        cao_valid_from: caoConfig.valid_from || null,
+        cao_valid_until: caoConfig.valid_until || null,
+        cao_payroll_readiness: caoPayrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_leave_sickness_parameters: leaveSicknessParameters,
+        contract_id: contract_id || contract?.id || null,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
+        cao_runtime_support: leaveSicknessRuntimeSupport,
+        calculation_warnings: syncWarnings,
+        scope_warnings: scopeWarnings,
+        cao_scope_profile: caoScope?.cao_scope_profile || null,
+        ...result,
+        manual_review_required: manualReviewRequired || contractCaoResolution.manual_review_required === true,
+        payroll_final_allowed: !manualReviewRequired && contractCaoResolution.manual_review_required !== true && result.payroll_final_allowed !== false
+      });
+    }
+
     // Default: bereken beide
     const vacation = calculateVacationAccrual(vacationInput, leaveSicknessParameters);
     const sickness = body.sickness_start_date ? calculateSicknessPayment(body, leaveSicknessParameters) : null;
+    const vacationRequest = body.vacation_request_date || body.requested_start_date
+      ? calculateVacationRequestPolicy(body, leaveSicknessParameters)
+      : null;
+    const holidayCredit = body.holiday_date || body.holiday_dates
+      ? calculateHolidayCredit(body, caoConfig, leaveSicknessParameters)
+      : null;
+    const vacationAllowance = body.vacation_allowance_basis_amount || body.base_salary_amount
+      ? calculateVacationAllowance(body, leaveSicknessParameters)
+      : null;
+    const extraordinaryLeave = body.extraordinary_leave_reason || body.leave_reason
+      ? calculateExtraordinaryLeave(body, leaveSicknessParameters)
+      : null;
     const manualReviewRequired = isUnknownOrMixed ||
       vacation.manual_review_required === true ||
-      sickness?.manual_review_required === true;
+      sickness?.manual_review_required === true ||
+      vacationRequest?.manual_review_required === true ||
+      holidayCredit?.manual_review_required === true ||
+      vacationAllowance?.manual_review_required === true ||
+      extraordinaryLeave?.manual_review_required === true;
 
     return Response.json({
       success: true,
@@ -1121,7 +1888,11 @@ Deno.serve(async (req) => {
         (sickness ? sickness.payroll_final_allowed !== false : true),
       apply_ort_vacation: applyOrtVacation,
       vacation_accrual: vacation,
-      sickness_payment: sickness
+      sickness_payment: sickness,
+      vacation_request: vacationRequest,
+      holiday_credit: holidayCredit,
+      vacation_allowance: vacationAllowance,
+      extraordinary_leave: extraordinaryLeave
     });
 
   } catch (error) {

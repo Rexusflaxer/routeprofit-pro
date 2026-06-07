@@ -698,13 +698,14 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'calculateCaoLeaveAndSickness.articles_59_65_66_67': {
     functions: ['calculateCaoLeaveAndSickness'],
     rule_ids: [
+      'CAO-PB-2024-R0998',
       'CAO-PB-2024-R0999', 'CAO-PB-2024-R1000', 'CAO-PB-2024-R1001',
       'CAO-PB-2024-R1002', 'CAO-PB-2024-R1003', 'CAO-PB-2024-R1004',
       'CAO-PB-2024-R1005', 'CAO-PB-2024-R1006', 'CAO-PB-2024-R1008',
       'CAO-PB-2024-R1009', 'CAO-PB-2024-R1010', 'CAO-PB-2024-R1011',
       'CAO-PB-2024-R1012', 'CAO-PB-2024-R1013', 'CAO-PB-2024-R1014',
       'CAO-PB-2024-R1015', 'CAO-PB-2024-R1016', 'CAO-PB-2024-R1017',
-      'CAO-PB-2024-R1019', 'CAO-PB-2024-R1022',
+      'CAO-PB-2024-R1007', 'CAO-PB-2024-R1018', 'CAO-PB-2024-R1019', 'CAO-PB-2024-R1022',
       'CAO-PB-2024-R1148', 'CAO-PB-2024-R1149', 'CAO-PB-2024-R1150',
       'CAO-PB-2024-R1151', 'CAO-PB-2024-R1152', 'CAO-PB-2024-R1153',
       'CAO-PB-2024-R1154', 'CAO-PB-2024-R1155', 'CAO-PB-2024-R1157',
@@ -722,6 +723,62 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
     functions: ['calculateCaoLeaveAndSickness', 'calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
     rule_ids: [
       'CAO-PB-2024-R1021', 'CAO-PB-2024-R1601', 'CAO-PB-2024-R1602'
+    ]
+  },
+  'calculateCaoLeaveAndSickness.article_60_vacation_requests': {
+    functions: ['calculateCaoLeaveAndSickness', 'validateCaoScheduleRules'],
+    rule_ids: [
+      'CAO-PB-2024-R0993', 'CAO-PB-2024-R1031', 'CAO-PB-2024-R1032',
+      'CAO-PB-2024-R1033', 'CAO-PB-2024-R1034', 'CAO-PB-2024-R1035',
+      'CAO-PB-2024-R1036', 'CAO-PB-2024-R1037', 'CAO-PB-2024-R1038',
+      'CAO-PB-2024-R1039', 'CAO-PB-2024-R1040', 'CAO-PB-2024-R1041',
+      'CAO-PB-2024-R1042', 'CAO-PB-2024-R1043', 'CAO-PB-2024-R1044',
+      'CAO-PB-2024-R1045', 'CAO-PB-2024-R1046', 'CAO-PB-2024-R1047',
+      'CAO-PB-2024-R1049'
+    ]
+  },
+  'calculateCaoLeaveAndSickness.article_61_holiday_credit': {
+    functions: ['calculateCaoLeaveAndSickness', 'validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R0994', 'CAO-PB-2024-R1050',
+      'CAO-PB-2024-R1052', 'CAO-PB-2024-R1053', 'CAO-PB-2024-R1054',
+      'CAO-PB-2024-R1056', 'CAO-PB-2024-R1057', 'CAO-PB-2024-R1058'
+    ]
+  },
+  'calculateCaoLeaveAndSickness.article_62_vacation_allowance': {
+    functions: ['calculateCaoLeaveAndSickness', 'calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R0995', 'CAO-PB-2024-R1059', 'CAO-PB-2024-R1060',
+      'CAO-PB-2024-R1061', 'CAO-PB-2024-R1062', 'CAO-PB-2024-R1064',
+      'CAO-PB-2024-R1065', 'CAO-PB-2024-R1066', 'CAO-PB-2024-R1067',
+      'CAO-PB-2024-R1068'
+    ]
+  },
+  'calculateCaoLeaveAndSickness.article_63_extraordinary_leave': {
+    functions: ['calculateCaoLeaveAndSickness', 'validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R0997',
+      'CAO-PB-2024-R1070', 'CAO-PB-2024-R1071', 'CAO-PB-2024-R1072',
+      'CAO-PB-2024-R1073', 'CAO-PB-2024-R1074', 'CAO-PB-2024-R1075',
+      'CAO-PB-2024-R1076', 'CAO-PB-2024-R1077', 'CAO-PB-2024-R1078',
+      'CAO-PB-2024-R1079', 'CAO-PB-2024-R1080', 'CAO-PB-2024-R1081',
+      'CAO-PB-2024-R1082', 'CAO-PB-2024-R1083', 'CAO-PB-2024-R1084',
+      'CAO-PB-2024-R1085', 'CAO-PB-2024-R1086', 'CAO-PB-2024-R1087',
+      'CAO-PB-2024-R1088', 'CAO-PB-2024-R1089', 'CAO-PB-2024-R1090',
+      'CAO-PB-2024-R1091', 'CAO-PB-2024-R1092', 'CAO-PB-2024-R1093',
+      'CAO-PB-2024-R1094', 'CAO-PB-2024-R1095', 'CAO-PB-2024-R1096',
+      'CAO-PB-2024-R1097', 'CAO-PB-2024-R1098', 'CAO-PB-2024-R1099',
+      'CAO-PB-2024-R1100', 'CAO-PB-2024-R1101', 'CAO-PB-2024-R1102',
+      'CAO-PB-2024-R1103', 'CAO-PB-2024-R1104', 'CAO-PB-2024-R1105',
+      'CAO-PB-2024-R1106', 'CAO-PB-2024-R1107', 'CAO-PB-2024-R1108',
+      'CAO-PB-2024-R1109', 'CAO-PB-2024-R1110', 'CAO-PB-2024-R1111',
+      'CAO-PB-2024-R1112', 'CAO-PB-2024-R1113', 'CAO-PB-2024-R1114',
+      'CAO-PB-2024-R1115', 'CAO-PB-2024-R1116', 'CAO-PB-2024-R1117',
+      'CAO-PB-2024-R1118', 'CAO-PB-2024-R1119', 'CAO-PB-2024-R1120',
+      'CAO-PB-2024-R1121', 'CAO-PB-2024-R1122', 'CAO-PB-2024-R1123',
+      'CAO-PB-2024-R1124', 'CAO-PB-2024-R1125', 'CAO-PB-2024-R1126',
+      'CAO-PB-2024-R1127', 'CAO-PB-2024-R1128', 'CAO-PB-2024-R1129',
+      'CAO-PB-2024-R1130'
     ]
   },
   'calculatePersonnelCosts.article_71_72_pension_80_90_100': {

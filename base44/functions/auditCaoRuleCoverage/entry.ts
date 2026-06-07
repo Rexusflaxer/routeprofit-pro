@@ -368,9 +368,11 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'calculateCaoLeaveAndSickness.articles_59_65_66_67': {
     functions: ['calculateCaoLeaveAndSickness'],
     rule_ids: [
+      ...ruleIds(998),
       ...ruleRange(999, 1006),
+      ...ruleIds(1007),
       ...ruleRange(1008, 1017),
-      ...ruleIds(1019, 1022),
+      ...ruleIds(1018, 1019, 1022),
       ...ruleRange(1148, 1155),
       ...ruleRange(1157, 1163),
       ...ruleRange(1165, 1167),
@@ -380,6 +382,29 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'calculateCaoLeaveAndSickness.article_59_reference_and_protocol_ii_vacation': {
     functions: ['calculateCaoLeaveAndSickness', 'calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
     rule_ids: ruleIds(1021, 1601, 1602)
+  },
+  'calculateCaoLeaveAndSickness.article_60_vacation_requests': {
+    functions: ['calculateCaoLeaveAndSickness', 'validateCaoScheduleRules'],
+    rule_ids: [
+      ...ruleIds(993, 1031, 1032),
+      ...ruleRange(1033, 1047),
+      ...ruleIds(1049)
+    ]
+  },
+  'calculateCaoLeaveAndSickness.article_61_holiday_credit': {
+    functions: ['calculateCaoLeaveAndSickness', 'validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: ruleIds(994, 1050, 1052, 1053, 1054, 1056, 1057, 1058)
+  },
+  'calculateCaoLeaveAndSickness.article_62_vacation_allowance': {
+    functions: ['calculateCaoLeaveAndSickness', 'calculatePersonnelCosts'],
+    rule_ids: ruleIds(995, 1059, 1060, 1061, 1062, 1064, 1065, 1066, 1067, 1068)
+  },
+  'calculateCaoLeaveAndSickness.article_63_extraordinary_leave': {
+    functions: ['calculateCaoLeaveAndSickness', 'validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: [
+      ...ruleIds(997),
+      ...ruleRange(1070, 1130)
+    ]
   },
   'calculatePersonnelCosts.article_71_72_pension_80_90_100': {
     functions: ['calculatePersonnelCosts'],
