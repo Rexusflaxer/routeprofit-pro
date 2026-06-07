@@ -2045,6 +2045,118 @@ function buildShiftContractServiceContext({ body, shift }) {
   };
 }
 
+async function validateShiftTaskPlanningContexts(base44, { periodShifts, body }) {
+  const shouldValidate = body.enforce_task_planning_context === true ||
+    isFinalScheduleValidation(body);
+  if (!shouldValidate) {
+    return {
+      task_planning_context_required: false,
+      task_planning_context_results: [],
+      task_planning_context_violations: [],
+      task_planning_context_warnings: [],
+      task_planning_context_manual_review_required: false,
+      task_planning_context_ready: false
+    };
+  }
+
+  const results = await Promise.all(periodShifts.map(async (shift, index) => {
+    const serviceContext = buildShiftContractServiceContext({ body, shift });
+    try {
+      const res = await base44.asServiceRole.functions.invoke('validateTaskPlanningContext', {
+        task_id: serviceContext.task_id || null,
+        object_id: serviceContext.object_id || null,
+        route_id: serviceContext.route_id || null,
+        company_id: serviceContext.company_id || null,
+        service_date: serviceContext.service_date || shift.date || null,
+        cao_key: serviceContext.cao_key || null,
+        cao: serviceContext.cao || null,
+        service_context: serviceContext,
+        save: false
+      });
+      return {
+        shift_index: index,
+        shift_id: shift.id || null,
+        date: shift.date,
+        ...(res?.data || {
+          success: false,
+          service_context_readiness: {
+            status: 'blocked',
+            ready: false,
+            blocking_reasons: ['Taakcontext-validator gaf geen data terug.'],
+            manual_review_reasons: [],
+            missing_fields: []
+          }
+        })
+      };
+    } catch (error) {
+      return {
+        shift_index: index,
+        shift_id: shift.id || null,
+        date: shift.date,
+        success: false,
+        service_context_readiness: {
+          status: 'blocked',
+          ready: false,
+          blocking_reasons: [`Taakcontext-validator fout: ${error.message}`],
+          manual_review_reasons: [],
+          missing_fields: []
+        }
+      };
+    }
+  }));
+
+  const violations = [];
+  const warnings = [];
+  for (const result of results) {
+    const readiness = result.service_context_readiness || {};
+    const affected = result.shift_id ? [result.shift_id] : [];
+    if (readiness.status === 'blocked') {
+      violations.push({
+        rule_id: 'APP-TASK-PLANNING-CONTEXT',
+        severity: 'high',
+        message: `Dienst ${result.date || result.shift_index} mist blokkerende CAO-/functiecontext: ${(readiness.blocking_reasons || []).join(' ') || readiness.status}`,
+        affected_shift_ids: affected,
+        shift_index: result.shift_index,
+        payroll_impact: true,
+        manual_review_required: true,
+        task_planning_context: result
+      });
+    } else if (readiness.status === 'missing_context' || readiness.status === 'manual_review_required') {
+      violations.push({
+        rule_id: 'APP-TASK-PLANNING-CONTEXT',
+        severity: 'medium',
+        message: `Dienst ${result.date || result.shift_index} is niet planning-context-ready: ${(readiness.manual_review_reasons || []).join(' ') || (readiness.missing_fields || []).join(', ') || readiness.status}`,
+        affected_shift_ids: affected,
+        shift_index: result.shift_index,
+        payroll_impact: true,
+        manual_review_required: true,
+        task_planning_context: result
+      });
+    }
+    for (const warning of readiness.warnings || []) {
+      warnings.push({
+        rule_id: 'APP-TASK-PLANNING-CONTEXT',
+        severity: 'medium',
+        message: warning,
+        affected_shift_ids: affected,
+        shift_index: result.shift_index,
+        payroll_impact: true,
+        manual_review_required: false,
+        task_planning_context: result
+      });
+    }
+  }
+
+  return {
+    task_planning_context_required: true,
+    task_planning_context_results: results,
+    task_planning_context_violations: violations,
+    task_planning_context_warnings: warnings,
+    task_planning_context_manual_review_required: violations.some(v => v.manual_review_required === true),
+    task_planning_context_ready: results.length > 0 && results.every(result => result.service_context_readiness?.ready === true)
+  };
+}
+
 function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const violations = [];
   const warnings = [];
@@ -4206,26 +4318,41 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
       contract_manual_review_required: false,
       contract_payroll_final_allowed: false,
       contract_resolution_note: 'Contractresolutie is niet uitgevoerd; roostercontrole is concept en niet payroll-final.',
-      contract_hours_summary: []
+      contract_hours_summary: [],
+      task_planning_context_required: false,
+      task_planning_context_results: [],
+      task_planning_context_violations: [],
+      task_planning_context_warnings: [],
+      task_planning_context_manual_review_required: false,
+      task_planning_context_ready: false
     };
   }
+
+  const taskPlanningContextValidation = await validateShiftTaskPlanningContexts(base44, {
+    periodShifts,
+    body
+  });
 
   if (!personnel_id) {
     return {
       contract_resolution_required: true,
       contract_resolution_results: [],
-      contract_violations: [{
-        rule_id: 'APP-CONTRACT-SERVICE-MATCH',
-        severity: 'high',
-        message: 'personnel_id is verplicht voor contractbewuste roostercontrole.',
-        affected_shift_ids: periodShifts.map(s => s.id).filter(Boolean),
-        payroll_impact: true,
-        manual_review_required: true
-      }],
-      contract_warnings: [],
+      contract_violations: [
+        ...taskPlanningContextValidation.task_planning_context_violations,
+        {
+          rule_id: 'APP-CONTRACT-SERVICE-MATCH',
+          severity: 'high',
+          message: 'personnel_id is verplicht voor contractbewuste roostercontrole.',
+          affected_shift_ids: periodShifts.map(s => s.id).filter(Boolean),
+          payroll_impact: true,
+          manual_review_required: true
+        }
+      ],
+      contract_warnings: taskPlanningContextValidation.task_planning_context_warnings,
       contract_manual_review_required: true,
       contract_payroll_final_allowed: false,
-      contract_hours_summary: []
+      contract_hours_summary: [],
+      ...taskPlanningContextValidation
     };
   }
 
@@ -4265,8 +4392,8 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
     }
   }));
 
-  const contractViolations = [];
-  const contractWarnings = [];
+  const contractViolations = [...taskPlanningContextValidation.task_planning_context_violations];
+  const contractWarnings = [...taskPlanningContextValidation.task_planning_context_warnings];
   for (const result of contractResults) {
     const affected = result.shift_id ? [result.shift_id] : [];
     if (result.planning_allowed === false || result.status === 'blocked') {
@@ -4350,10 +4477,16 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
     contract_warnings: contractWarnings,
     contract_manual_review_required: contractResults.some(r => r.manual_review_required === true) ||
       contractViolations.some(v => v.manual_review_required === true) ||
-      contractWarnings.some(w => w.manual_review_required === true),
+      contractWarnings.some(w => w.manual_review_required === true) ||
+      taskPlanningContextValidation.task_planning_context_manual_review_required === true,
     contract_payroll_final_allowed: contractResults.every(r => r.payroll_final_allowed === true) &&
-      contractViolations.filter(v => v.severity === 'high').length === 0,
-    contract_hours_summary: contractHoursSummary
+      contractViolations.filter(v => v.severity === 'high').length === 0 &&
+      (
+        taskPlanningContextValidation.task_planning_context_required !== true ||
+        taskPlanningContextValidation.task_planning_context_ready === true
+      ),
+    contract_hours_summary: contractHoursSummary,
+    ...taskPlanningContextValidation
   };
 }
 
