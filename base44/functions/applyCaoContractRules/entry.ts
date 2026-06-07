@@ -1060,6 +1060,345 @@ function booleanOrNull(value) {
   return null;
 }
 
+function getCaoRuleRegistrySnapshot(caoConfig) {
+  const gateSnapshot = caoConfig?.payroll_readiness_gate?.persisted_rule_registry || null;
+  const configuredSnapshot = caoConfig?.rule_registry_snapshot || null;
+  const snapshot = configuredSnapshot || gateSnapshot || null;
+  const fingerprint = caoConfig?.rule_registry_fingerprint ||
+    snapshot?.fingerprint ||
+    null;
+  const ruleCount = caoConfig?.rule_registry_rule_count ??
+    snapshot?.persisted_unique_rule_count ??
+    snapshot?.fingerprint_rule_count ??
+    null;
+  const verifiedAt = caoConfig?.rule_registry_verified_at ||
+    snapshot?.verified_at ||
+    null;
+
+  return {
+    fingerprint,
+    fingerprint_algorithm: snapshot?.fingerprint_algorithm || (fingerprint ? 'sha256' : null),
+    rule_count: ruleCount,
+    verified_at: verifiedAt,
+    expected_unique_rule_count: snapshot?.expected_unique_rule_count ?? null,
+    persisted_unique_rule_count: snapshot?.persisted_unique_rule_count ?? ruleCount,
+    source_coverage_passed: snapshot?.source_coverage?.passed ?? null,
+    missing_rule_ids_truncated: snapshot?.missing_rule_ids_truncated ?? false
+  };
+}
+
+function getCaoPayrollReadiness(caoConfig) {
+  const gate = caoConfig?.payroll_readiness_gate || null;
+  const status = caoConfig?.payroll_readiness_status || null;
+  const registrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
+  const registryReady = !!registrySnapshot.fingerprint && Number(registrySnapshot.rule_count || 0) > 0;
+  const ready = caoConfig?.is_payroll_ready === true &&
+    status === 'ready' &&
+    gate?.passed === true &&
+    registryReady;
+
+  return {
+    ready,
+    status: ready ? 'ready' : !registryReady ? 'blocked_missing_rule_registry_fingerprint' : (status || 'unknown'),
+    is_payroll_ready: caoConfig?.is_payroll_ready === true,
+    gate_present: !!gate,
+    rule_registry_fingerprint_present: !!registrySnapshot.fingerprint,
+    rule_registry_rule_count: registrySnapshot.rule_count,
+    blocking_findings: registryReady
+      ? gate?.blocking_findings || []
+      : [
+        {
+          code: 'missing_rule_registry_fingerprint',
+          severity: 'critical',
+          message: 'CAOConfiguration mist rule_registry_fingerprint; contractfinalisatie is niet audit-proof.'
+        },
+        ...(gate?.blocking_findings || [])
+      ],
+    open_payroll_critical_rules: gate?.open_payroll_critical_rules || [],
+    counts: gate?.counts || null
+  };
+}
+
+function isWithinDateRange(record, date, startField = 'valid_from', endField = 'valid_until') {
+  if (!record || !date) return false;
+  if (record[startField] && record[startField] > date) return false;
+  if (record[endField] && record[endField] < date) return false;
+  return true;
+}
+
+function hasAnyValue(...values) {
+  return values.some(value => {
+    if (Array.isArray(value)) return value.filter(Boolean).length > 0;
+    return value !== null && value !== undefined && value !== '';
+  });
+}
+
+function caoConfigSummary(config) {
+  return {
+    id: config?.id || null,
+    name: config?.name || config?.version_label || null,
+    cao_key: config?.cao_key || null,
+    cloudflare_revision: config?.cloudflare_revision || null,
+    valid_from: config?.valid_from || null,
+    valid_until: config?.valid_until || null
+  };
+}
+
+async function resolveContractCaoConfiguration(base44, { caoKey, caoConfigurationId, referenceDate }) {
+  if (!referenceDate) {
+    return {
+      config: null,
+      status: 'blocked_missing_contract_reference_date',
+      candidates: [],
+      message: 'Contract mist startdatum; CAO-configuratie kan niet datumgeldig worden bepaald.'
+    };
+  }
+
+  if (caoConfigurationId) {
+    try {
+      const config = await base44.asServiceRole.entities.CAOConfiguration.get(caoConfigurationId);
+      if (!config) throw new Error('not_found');
+      if (config.cao_key && caoKey && config.cao_key !== caoKey) {
+        return {
+          config: null,
+          status: 'blocked_contract_cao_configuration_key_mismatch',
+          candidates: [caoConfigSummary(config)],
+          message: `CAO-configuratie ${caoConfigurationId} hoort bij ${config.cao_key}, maar contract gebruikt ${caoKey}.`
+        };
+      }
+      if (!isWithinDateRange(config, referenceDate, 'valid_from', 'valid_until')) {
+        return {
+          config: null,
+          status: 'blocked_contract_cao_configuration_not_valid_on_start_date',
+          candidates: [caoConfigSummary(config)],
+          message: `CAO-configuratie ${caoConfigurationId} is niet geldig op contractstartdatum ${referenceDate}.`
+        };
+      }
+      return {
+        config,
+        status: 'resolved_explicit_cao_configuration',
+        candidates: [caoConfigSummary(config)],
+        message: null
+      };
+    } catch {
+      return {
+        config: null,
+        status: 'blocked_contract_cao_configuration_not_found',
+        candidates: [],
+        message: `CAO-configuratie ${caoConfigurationId} kon niet worden opgehaald.`
+      };
+    }
+  }
+
+  const configs = await base44.asServiceRole.entities.CAOConfiguration.filter({
+    status: 'active',
+    cao_key: caoKey
+  });
+  const eligible = (configs || [])
+    .filter(config => isWithinDateRange(config, referenceDate, 'valid_from', 'valid_until'))
+    .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')));
+
+  if (eligible.length === 0) {
+    return {
+      config: null,
+      status: 'blocked_missing_active_contract_cao_configuration',
+      candidates: [],
+      message: `Geen actieve CAO-configuratie gevonden voor ${caoKey} op contractstartdatum ${referenceDate}.`
+    };
+  }
+  if (eligible.length > 1) {
+    return {
+      config: null,
+      status: 'blocked_ambiguous_contract_cao_configuration',
+      candidates: eligible.map(caoConfigSummary),
+      message: `Meerdere actieve CAO-configuraties gevonden voor ${caoKey} op contractstartdatum ${referenceDate}.`
+    };
+  }
+  return {
+    config: eligible[0],
+    status: 'resolved_active_cao_by_key_and_start_date',
+    candidates: eligible.map(caoConfigSummary),
+    message: null
+  };
+}
+
+async function evaluateContractBasis(base44, { body, personnel, contract, targetCaoKey }) {
+  const violations = [];
+  const warnings = [];
+  const missingEvidence = [];
+  const recommendedContractUpdate = {};
+
+  const explicitCompanyId = pickFirst(body.company_id, contract?.company_id, null);
+  const personnelPrimaryCompanyId = pickFirst(personnel?.primary_company_id, null);
+  const explicitCaoKey = pickFirst(body.cao_key, contract?.cao_key, null);
+  const contractStartDate = asIsoDate(pickFirst(body.contract_start_date, contract?.contract_start_date, null));
+  const contractEndDate = asIsoDate(pickFirst(body.contract_end_date, contract?.contract_end_date, null));
+  const caoConfigurationId = pickFirst(body.cao_configuration_id, contract?.cao_configuration_id, null);
+  const functionContextPresent = hasAnyValue(
+    body.function_type,
+    contract?.function_type,
+    body.cao_function_group,
+    contract?.cao_function_group,
+    body.cao_function_level,
+    contract?.cao_function_level,
+    body.security_role_status,
+    contract?.security_role_status,
+    normalizeArray(body.allowed_function_types),
+    normalizeArray(contract?.allowed_function_types),
+    normalizeArray(body.allowed_cao_function_groups),
+    normalizeArray(contract?.allowed_cao_function_groups),
+    normalizeArray(body.allowed_security_role_statuses),
+    normalizeArray(contract?.allowed_security_role_statuses)
+  );
+
+  if (!explicitCompanyId) {
+    violations.push({
+      rule_id: 'APP-CONTRACT-BASIS-COMPANY',
+      severity: 'high',
+      message: 'Arbeidscontract mist company_id. Een contract moet juridisch aan een werkgever/bedrijf gekoppeld zijn voordat planning/payroll definitief mag zijn.',
+      payroll_impact: true,
+      manual_review_required: true,
+      field: 'company_id'
+    });
+    missingEvidence.push({
+      rule_id: 'APP-CONTRACT-BASIS-COMPANY',
+      field: 'company_id',
+      message: 'Leg company_id vast op PersonnelContract.'
+    });
+    if (personnelPrimaryCompanyId) {
+      recommendedContractUpdate.company_id = personnelPrimaryCompanyId;
+      warnings.push(`Medewerker heeft primary_company_id ${personnelPrimaryCompanyId}, maar contract.company_id moet expliciet worden opgeslagen.`);
+    }
+  }
+
+  if (!explicitCaoKey) {
+    violations.push({
+      rule_id: 'APP-CONTRACT-BASIS-CAO',
+      severity: 'high',
+      message: 'Arbeidscontract mist expliciete cao_key. De toepasselijke CAO moet op contractniveau gekozen zijn.',
+      payroll_impact: true,
+      manual_review_required: true,
+      field: 'cao_key'
+    });
+    missingEvidence.push({
+      rule_id: 'APP-CONTRACT-BASIS-CAO',
+      field: 'cao_key',
+      message: 'Leg cao_key vast op PersonnelContract.'
+    });
+    if (targetCaoKey) recommendedContractUpdate.cao_key = targetCaoKey;
+  }
+
+  if (!contractStartDate) {
+    violations.push({
+      rule_id: 'APP-CONTRACT-BASIS-DATE',
+      severity: 'high',
+      message: 'Arbeidscontract mist contract_start_date. CAO-configuratie en proeftijdregels kunnen niet datumvast worden toegepast.',
+      payroll_impact: true,
+      manual_review_required: true,
+      field: 'contract_start_date'
+    });
+    missingEvidence.push({
+      rule_id: 'APP-CONTRACT-BASIS-DATE',
+      field: 'contract_start_date',
+      message: 'Leg contract_start_date vast op PersonnelContract.'
+    });
+  }
+  if (contractStartDate && contractEndDate && contractEndDate < contractStartDate) {
+    violations.push({
+      rule_id: 'APP-CONTRACT-BASIS-DATE',
+      severity: 'high',
+      message: 'Arbeidscontract heeft een einddatum vóór de startdatum.',
+      payroll_impact: true,
+      manual_review_required: true,
+      field: 'contract_end_date'
+    });
+  }
+
+  if (!functionContextPresent) {
+    violations.push({
+      rule_id: 'APP-CONTRACT-BASIS-FUNCTION',
+      severity: 'high',
+      message: 'Arbeidscontract mist functie-/CAO-scopevelden. Leg vast welke functies/diensten dit contract mag dragen.',
+      payroll_impact: true,
+      manual_review_required: true,
+      field: 'function_type/cao_function_group/security_role_status/allowed_*'
+    });
+    missingEvidence.push({
+      rule_id: 'APP-CONTRACT-BASIS-FUNCTION',
+      field: 'function_type/cao_function_group/security_role_status/allowed_*',
+      message: 'Leg minimaal een functieprofiel of allowed_* scope op het contract vast.'
+    });
+  }
+
+  let caoConfigurationResolution = {
+    config: null,
+    status: 'not_attempted',
+    candidates: [],
+    message: null
+  };
+  let caoPayrollReadiness = null;
+  let caoRuleRegistrySnapshot = null;
+  if (targetCaoKey && contractStartDate && !(contractStartDate && contractEndDate && contractEndDate < contractStartDate)) {
+    caoConfigurationResolution = await resolveContractCaoConfiguration(base44, {
+      caoKey: targetCaoKey,
+      caoConfigurationId,
+      referenceDate: contractStartDate
+    });
+    if (!caoConfigurationResolution.config) {
+      violations.push({
+        rule_id: 'APP-CONTRACT-BASIS-CAO-CONFIG',
+        severity: 'high',
+        message: caoConfigurationResolution.message,
+        payroll_impact: true,
+        manual_review_required: true,
+        field: 'cao_configuration_id/cao_key/contract_start_date'
+      });
+    } else {
+      caoPayrollReadiness = getCaoPayrollReadiness(caoConfigurationResolution.config);
+      caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoConfigurationResolution.config);
+      if (!caoPayrollReadiness.ready) {
+        violations.push({
+          rule_id: 'APP-CONTRACT-BASIS-CAO-READINESS',
+          severity: 'high',
+          message: `CAO-configuratie is niet payroll-ready (${caoPayrollReadiness.status}); contractfinalisatie is geblokkeerd totdat de CAO coverage-gate slaagt.`,
+          payroll_impact: true,
+          manual_review_required: true,
+          field: 'cao_configuration.payroll_readiness'
+        });
+      }
+      if (!caoConfigurationId) {
+        recommendedContractUpdate.cao_configuration_id = caoConfigurationResolution.config.id;
+      }
+    }
+  }
+
+  const hasBlocking = violations.some(violation => ['high', 'critical'].includes(violation.severity));
+  const manualReviewRequired = hasBlocking || missingEvidence.length > 0;
+  return {
+    status: hasBlocking ? 'blocked' : manualReviewRequired ? 'manual_review_required' : 'compliant',
+    contract_final_allowed: !hasBlocking && !manualReviewRequired,
+    payroll_final_allowed: !hasBlocking && !manualReviewRequired,
+    manual_review_required: manualReviewRequired,
+    company_id: explicitCompanyId || null,
+    cao_key: explicitCaoKey || targetCaoKey || null,
+    contract_start_date: contractStartDate,
+    contract_end_date: contractEndDate,
+    function_context_present: functionContextPresent,
+    missing_evidence: missingEvidence,
+    violations,
+    warnings,
+    recommended_contract_update: recommendedContractUpdate,
+    cao_configuration_resolution: {
+      status: caoConfigurationResolution.status,
+      message: caoConfigurationResolution.message,
+      selected_configuration_id: caoConfigurationResolution.config?.id || null,
+      candidates: caoConfigurationResolution.candidates || []
+    },
+    cao_payroll_readiness: caoPayrollReadiness,
+    cao_rule_registry_snapshot: caoRuleRegistrySnapshot
+  };
+}
+
 function hasFixedPayPeriodHours(input) {
   return numberOrNull(input.contract_hours_per_pay_period) !== null ||
     numberOrNull(input.fixed_hours_per_pay_period) !== null;
@@ -3898,18 +4237,63 @@ Deno.serve(async (req) => {
 
     // Default: volledige contractregel-evaluatie
     const ruleInput = buildContractRuleInput(body, personnel, contract);
+    const contractBasis = await evaluateContractBasis(base44, {
+      body,
+      personnel,
+      contract,
+      targetCaoKey
+    });
     const result = buildFullContractRuleResult(ruleInput, caoScope);
+    const combinedViolations = [
+      ...(contractBasis.violations || []),
+      ...(result.contract_rule_violations || [])
+    ];
+    const combinedWarnings = [
+      ...(syncWarnings || []),
+      ...(contractBasis.warnings || []),
+      ...(result.warnings || [])
+    ];
+    const combinedManualReviewRequired = contractBasis.manual_review_required === true ||
+      result.manual_review_required === true ||
+      isUnknownOrMixed === true;
+    const combinedStatus = contractBasis.status === 'blocked' ||
+      result.contract_rule_status === 'blocked' ||
+      combinedViolations.some(violation => ['high', 'critical'].includes(violation.severity))
+      ? 'blocked'
+      : combinedManualReviewRequired
+      ? 'manual_review_required'
+      : result.contract_rule_status === 'compliant' && contractBasis.status === 'compliant'
+      ? 'compliant'
+      : result.contract_rule_status;
+    const contractFinalAllowed = combinedStatus === 'compliant' &&
+      contractBasis.contract_final_allowed === true &&
+      !combinedManualReviewRequired;
+
     return Response.json({
-      success: result.contract_rule_status !== 'blocked',
+      success: combinedStatus !== 'blocked',
       cao_sync_status: caoSyncStatus,
       cao_key: targetCaoKey,
       cao_runtime_support: contractRuntimeSupport,
-      calculation_warnings: syncWarnings,
       contract_id: contract_id || contract?.id || null,
       personnel_id: personnel_id || null,
       cao_scope_profile: caoScope?.cao_scope_profile || null,
-      manual_review_required: result.manual_review_required || isUnknownOrMixed,
-      ...result
+      ...result,
+      contract_basis: contractBasis,
+      calculation_warnings: combinedWarnings,
+      warnings: [...new Set(combinedWarnings.map(String))],
+      contract_rule_violations: combinedViolations,
+      missing_evidence: [
+        ...(contractBasis.missing_evidence || []),
+        ...(result.missing_evidence || [])
+      ],
+      manual_review_required: combinedManualReviewRequired,
+      contract_rule_status: combinedStatus,
+      contract_final_allowed: contractFinalAllowed,
+      payroll_final_allowed: contractFinalAllowed,
+      recommended_contract_update: {
+        ...(contractBasis.recommended_contract_update || {}),
+        ...(result.recommended_contract_update || {})
+      }
     });
 
   } catch (error) {
