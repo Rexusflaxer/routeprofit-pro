@@ -4,17 +4,19 @@ const CAO_PB_KEY = 'cao_particuliere_beveiliging';
 const SUPPORTED_YEAR_END_BONUS_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
 
 function getCaoRuntimeSupport(caoKey, functionName) {
-  const key = caoKey || CAO_PB_KEY;
+  const key = caoKey || null;
   const supported = SUPPORTED_YEAR_END_BONUS_RUNTIME_CAO_KEYS.includes(key);
   return {
     supported,
-    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    status: supported ? 'supported' : key ? 'blocked_unsupported_cao_runtime' : 'blocked_missing_cao_key',
     cao_key: key,
     function_name: functionName,
     supported_cao_keys: SUPPORTED_YEAR_END_BONUS_RUNTIME_CAO_KEYS,
     message: supported
       ? `Runtime ${functionName} ondersteunt CAO ${key}.`
-      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Eindejaarsuitkering is geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+      : key
+      ? `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Eindejaarsuitkering is geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+      : `Runtime ${functionName} mist cao_key. Eindejaarsuitkering is geblokkeerd zodat geen PB-default wordt toegepast.`
   };
 }
 
@@ -85,9 +87,17 @@ function resolveContractCaoForDate({ explicitCaoKey, contracts = [], referenceDa
   if (!explicitCaoKey && contractCaoKeys.length === 0 && relevantContracts.length > 0) {
     return {
       ...resolution,
-      status: 'manual_review_missing_contract_cao_key',
+      status: 'blocked_missing_contract_cao_key',
       manual_review_required: true,
-      warning: `Contract actief op ${date}, maar cao_key ontbreekt op het contract.`
+      blocking_reason: `Contract actief op ${date}, maar cao_key ontbreekt op het contract.`
+    };
+  }
+  if (!explicitCaoKey && contractCaoKeys.length === 0) {
+    return {
+      ...resolution,
+      status: 'blocked_missing_contract_or_explicit_cao_key',
+      manual_review_required: true,
+      blocking_reason: 'Eindejaarsuitkering vereist een expliciete cao_key of een actief arbeidscontract met cao_key. Medewerkerstamdata of PB-default mag niet als bron worden gebruikt.'
     };
   }
 
@@ -398,8 +408,7 @@ Deno.serve(async (req) => {
 
     const targetCaoKey = explicitCaoKey ||
       contractCaoResolution.cao_key ||
-      personnel.cao ||
-      CAO_PB_KEY;
+      null;
     const yearEndBonusRuntimeSupport = getCaoRuntimeSupport(targetCaoKey, 'calculateCaoYearEndBonus');
     if (!yearEndBonusRuntimeSupport.supported) {
       return Response.json({
