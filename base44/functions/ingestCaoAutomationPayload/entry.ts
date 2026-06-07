@@ -724,6 +724,51 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R1021', 'CAO-PB-2024-R1601', 'CAO-PB-2024-R1602'
     ]
   },
+  'calculatePersonnelCosts.article_71_72_pension_80_90_100': {
+    functions: ['calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R1210', 'CAO-PB-2024-R1211',
+      'CAO-PB-2024-R1214', 'CAO-PB-2024-R1215',
+      'CAO-PB-2024-R1217', 'CAO-PB-2024-R1218',
+      'CAO-PB-2024-R1221', 'CAO-PB-2024-R1222',
+      'CAO-PB-2024-R1223', 'CAO-PB-2024-R1224',
+      'CAO-PB-2024-R1225', 'CAO-PB-2024-R1226',
+      'CAO-PB-2024-R1227', 'CAO-PB-2024-R1229',
+      'CAO-PB-2024-R1230', 'CAO-PB-2024-R1231',
+      'CAO-PB-2024-R1232', 'CAO-PB-2024-R1233',
+      'CAO-PB-2024-R1234', 'CAO-PB-2024-R1235',
+      'CAO-PB-2024-R1237'
+    ]
+  },
+  'validateCaoScheduleRules.article_73_older_workers': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R1242', 'CAO-PB-2024-R1244',
+      'CAO-PB-2024-R1245', 'CAO-PB-2024-R1246',
+      'CAO-PB-2024-R1248', 'CAO-PB-2024-R1253',
+      'CAO-PB-2024-R1254', 'CAO-PB-2024-R1255',
+      'CAO-PB-2024-R1256', 'CAO-PB-2024-R1257',
+      'CAO-PB-2024-R1258', 'CAO-PB-2024-R1259',
+      'CAO-PB-2024-R1260', 'CAO-PB-2024-R1261',
+      'CAO-PB-2024-R1262', 'CAO-PB-2024-R1263',
+      'CAO-PB-2024-R1264', 'CAO-PB-2024-R1265',
+      'CAO-PB-2024-R1266', 'CAO-PB-2024-R1267',
+      'CAO-PB-2024-R1268', 'CAO-PB-2024-R1270',
+      'CAO-PB-2024-R1271', 'CAO-PB-2024-R1272',
+      'CAO-PB-2024-R1273', 'CAO-PB-2024-R1274',
+      'CAO-PB-2024-R1275', 'CAO-PB-2024-R1276',
+      'CAO-PB-2024-R1277', 'CAO-PB-2024-R1278',
+      'CAO-PB-2024-R1279', 'CAO-PB-2024-R1280',
+      'CAO-PB-2024-R1281', 'CAO-PB-2024-R1282',
+      'CAO-PB-2024-R1283', 'CAO-PB-2024-R1284',
+      'CAO-PB-2024-R1285', 'CAO-PB-2024-R1286',
+      'CAO-PB-2024-R1287', 'CAO-PB-2024-R1288',
+      'CAO-PB-2024-R1289', 'CAO-PB-2024-R1290',
+      'CAO-PB-2024-R1291', 'CAO-PB-2024-R1292',
+      'CAO-PB-2024-R1293', 'CAO-PB-2024-R1294',
+      'CAO-PB-2024-R1296'
+    ]
+  },
   'calculatePersonnelCosts.protocol_ii_cash_value_notice_article_103': {
     functions: ['calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
     rule_ids: [

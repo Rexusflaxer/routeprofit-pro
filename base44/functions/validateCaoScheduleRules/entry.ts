@@ -735,6 +735,228 @@ function resolveYouthWorkerArticle30(body, periodStart) {
   };
 }
 
+function resolveOlderWorkerArticle73({ body, serviceShifts, weeklyHourRows, periodStart, serviceNightShiftDetails }) {
+  const violations = [];
+  const manualReviewItems = [];
+  const entitlements = [];
+  const explicitAge = numberOrNull(body.employee_age ?? body.personnel_age ?? body.age);
+  const dateOfBirth = asIsoDate(body.date_of_birth ?? body.employee_date_of_birth ?? body.personnel_date_of_birth);
+  const ageAtPeriodStart = explicitAge !== null ? explicitAge : calculateAgeAt(dateOfBirth, periodStart);
+  const explicit55Plus = booleanOrNull(body.employee_55_or_older ?? body.is_55_plus ?? body.is_older_worker_55_plus);
+  const explicit60Plus = booleanOrNull(body.employee_60_or_older ?? body.is_60_plus ?? body.is_older_worker_60_plus);
+  const is55Plus = explicit55Plus === true || explicit60Plus === true || (ageAtPeriodStart !== null && ageAtPeriodStart >= 55);
+  const is60Plus = explicit60Plus === true || (ageAtPeriodStart !== null && ageAtPeriodStart >= 60);
+  const activeEightyNinetyHundred = booleanOrNull(body.eighty_ninety_hundred_active ?? body['80_90_100_active']) === true;
+  const fulltimeHoursPerPayPeriod = numberOrNull(body.fulltime_hours_per_pay_period ?? body.cao_fulltime_hours_per_pay_period) ?? 144;
+  const industryServiceYears = numberOrNull(
+    body.security_industry_service_years ??
+    body.industry_service_years ??
+    body.continuous_security_industry_service_years ??
+    body.older_worker_industry_service_years
+  );
+  const sourceRuleIds = [
+    'CAO-PB-2024-R1242', 'CAO-PB-2024-R1244', 'CAO-PB-2024-R1245', 'CAO-PB-2024-R1246',
+    'CAO-PB-2024-R1248', 'CAO-PB-2024-R1253', 'CAO-PB-2024-R1254', 'CAO-PB-2024-R1255',
+    'CAO-PB-2024-R1256', 'CAO-PB-2024-R1257', 'CAO-PB-2024-R1258', 'CAO-PB-2024-R1259',
+    'CAO-PB-2024-R1260', 'CAO-PB-2024-R1261', 'CAO-PB-2024-R1262', 'CAO-PB-2024-R1263',
+    'CAO-PB-2024-R1264', 'CAO-PB-2024-R1265', 'CAO-PB-2024-R1266', 'CAO-PB-2024-R1267',
+    'CAO-PB-2024-R1268', 'CAO-PB-2024-R1270', 'CAO-PB-2024-R1271', 'CAO-PB-2024-R1272',
+    'CAO-PB-2024-R1273', 'CAO-PB-2024-R1274', 'CAO-PB-2024-R1275', 'CAO-PB-2024-R1276',
+    'CAO-PB-2024-R1277', 'CAO-PB-2024-R1278', 'CAO-PB-2024-R1279', 'CAO-PB-2024-R1280',
+    'CAO-PB-2024-R1281', 'CAO-PB-2024-R1282', 'CAO-PB-2024-R1283', 'CAO-PB-2024-R1284',
+    'CAO-PB-2024-R1285', 'CAO-PB-2024-R1286', 'CAO-PB-2024-R1287', 'CAO-PB-2024-R1288',
+    'CAO-PB-2024-R1289', 'CAO-PB-2024-R1290', 'CAO-PB-2024-R1291', 'CAO-PB-2024-R1292',
+    'CAO-PB-2024-R1293', 'CAO-PB-2024-R1294', 'CAO-PB-2024-R1296'
+  ];
+
+  if (!is55Plus && !is60Plus) {
+    return {
+      applies: false,
+      age_at_period_start: ageAtPeriodStart,
+      date_of_birth: dateOfBirth,
+      violations,
+      manual_review_items: manualReviewItems,
+      entitlements,
+      source_rule_ids: sourceRuleIds
+    };
+  }
+
+  if (is55Plus) {
+    const dailyVoluntaryConfirmed = booleanOrNull(body.older_worker_over_8_hours_voluntary_confirmed ?? body.worker_55_plus_daily_hours_voluntary_confirmed) === true;
+    const weeklyVoluntaryConfirmed = booleanOrNull(body.older_worker_over_36_hours_voluntary_confirmed ?? body.worker_55_plus_weekly_hours_voluntary_confirmed) === true;
+    for (const shift of serviceShifts) {
+      const hours = calculateShiftHours(shift);
+      const shiftVoluntary = booleanOrNull(shift.older_worker_over_8_hours_voluntary_confirmed ?? shift.worker_55_plus_daily_hours_voluntary_confirmed) === true;
+      if (hours > 8 && !dailyVoluntaryConfirmed && !shiftVoluntary) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R1244',
+          severity: 'high',
+          message: `Werknemer van 55 jaar of ouder mag niet verplicht meer dan 8 uur per dag werken; dienst ${shift.date} duurt ${round2(hours)} uur.`,
+          affected_shift_ids: shift.id ? [shift.id] : [],
+          payroll_impact: false,
+          shift_hours: round2(hours),
+          max_daily_hours_without_voluntary_consent: 8,
+          manual_review_required: true,
+          related_rule_ids: ['CAO-PB-2024-R1245', 'CAO-PB-2024-R1246']
+        });
+      }
+    }
+    for (const row of weeklyHourRows) {
+      if (row.hours > 36 && !weeklyVoluntaryConfirmed) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R1244',
+          severity: 'high',
+          message: `Werknemer van 55 jaar of ouder mag niet verplicht meer dan 36 uur per week werken; ${row.week_key} bevat ${row.hours} uur.`,
+          payroll_impact: false,
+          week_key: row.week_key,
+          week_hours: row.hours,
+          max_week_hours_without_voluntary_consent: 36,
+          manual_review_required: true,
+          related_rule_ids: ['CAO-PB-2024-R1245', 'CAO-PB-2024-R1246']
+        });
+      }
+    }
+
+    const fixedFreeDays = uniqueSortedIsoDates([
+      ...normalizeArray(body.older_worker_fixed_free_days),
+      ...normalizeArray(body.older_worker_preestablished_free_days),
+      ...normalizeArray(body.fixed_free_days),
+      ...normalizeArray(body.preestablished_free_days)
+    ]);
+    if (fixedFreeDays.length === 0 && booleanOrNull(body.older_worker_fixed_free_days_not_applicable) !== true) {
+      manualReviewItems.push({
+        rule_id: 'CAO-PB-2024-R1248',
+        domain: 'older_worker_fixed_free_day',
+        message: 'Werknemer is 55 jaar of ouder; lever vastgestelde/vooraf bepaalde vrije dagen aan om verplichte inzet daarop te blokkeren.',
+        field: 'older_worker_fixed_free_days/preestablished_free_days',
+        manual_review_required: true
+      });
+    }
+    const fixedFreeDaySet = new Set(fixedFreeDays);
+    for (const shift of serviceShifts) {
+      const date = asIsoDate(shift.date || shift.service_date);
+      const fixedFreeShift = fixedFreeDaySet.has(date) ||
+        booleanOrNull(shift.older_worker_fixed_free_day ?? shift.preestablished_free_day ?? shift.fixed_free_day) === true;
+      const voluntaryOnFreeDay = booleanOrNull(shift.older_worker_free_day_voluntary_confirmed ?? body.older_worker_free_day_voluntary_confirmed) === true;
+      if (fixedFreeShift && !voluntaryOnFreeDay) {
+        violations.push({
+          rule_id: 'CAO-PB-2024-R1248',
+          severity: 'high',
+          message: `Werknemer van 55 jaar of ouder mag niet verplicht werken op een vastgestelde/vooraf bepaalde vrije dag (${date}).`,
+          affected_shift_ids: shift.id ? [shift.id] : [],
+          payroll_impact: false,
+          date,
+          manual_review_required: true
+        });
+      }
+    }
+  }
+
+  if (is60Plus) {
+    const noNightShiftRequested = booleanOrNull(
+      body.older_worker_no_night_shifts_requested ??
+      body.night_shift_opt_out_requested ??
+      body.worker_60_plus_no_night_shifts_requested
+    ) === true;
+    const noNightShiftWritten = booleanOrNull(
+      body.older_worker_no_night_shifts_written_request ??
+      body.night_shift_opt_out_written ??
+      body.worker_60_plus_no_night_shifts_written
+    ) === true;
+    if (noNightShiftRequested && !noNightShiftWritten) {
+      manualReviewItems.push({
+        rule_id: 'CAO-PB-2024-R1253',
+        domain: 'older_worker_night_shift_opt_out',
+        message: '60-plus nachtdienstvrijstelling is aangevraagd, maar schriftelijk verzoek ontbreekt.',
+        field: 'night_shift_opt_out_written',
+        manual_review_required: true
+      });
+    }
+    if (noNightShiftRequested && serviceNightShiftDetails.length > 0) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R1253',
+        severity: 'high',
+        message: 'Werknemer van 60 jaar of ouder heeft schriftelijk/expliciet nachtdienstvrijstelling gevraagd, maar is in nachtdiensten ingepland.',
+        affected_shift_ids: serviceNightShiftDetails.map(detail => detail.shift_id).filter(Boolean),
+        payroll_impact: false,
+        night_shift_count: serviceNightShiftDetails.length,
+        manual_review_required: !noNightShiftWritten,
+        related_rule_ids: ['CAO-PB-2024-R1254']
+      });
+    }
+  }
+
+  let atvDaysAnnual = 0;
+  let atvProfile = 'none';
+  if (activeEightyNinetyHundred) {
+    atvProfile = 'excluded_by_article_72_80_90_100';
+  } else if (is60Plus) {
+    if (industryServiceYears === null) {
+      manualReviewItems.push({
+        rule_id: 'CAO-PB-2024-R1267',
+        domain: 'older_worker_atv_service_years',
+        message: 'ATV-recht oudere werknemer vereist minimaal 10 branchejaren; dienstjaren ontbreken.',
+        field: 'security_industry_service_years',
+        manual_review_required: true
+      });
+    } else if (industryServiceYears >= 10) {
+      if (ageAtPeriodStart >= 66) atvDaysAnnual = 5;
+      else if (ageAtPeriodStart >= 65) atvDaysAnnual = 4;
+      else if (ageAtPeriodStart >= 62) atvDaysAnnual = 3;
+      else if (ageAtPeriodStart >= 61) atvDaysAnnual = 2;
+      else if (ageAtPeriodStart >= 60) atvDaysAnnual = 1;
+      atvProfile = 'standard_60_plus_10_years';
+    } else {
+      atvProfile = 'not_enough_industry_service_years';
+    }
+  }
+
+  const transitionRight = booleanOrNull(body.older_worker_transition_atv_right_2021 ?? body.article_73_transition_atv_right_2021) === true;
+  const transitionFulltime = booleanOrNull(body.fulltime_on_2021_01_01 ?? body.older_worker_fulltime_on_2021_01_01) === true;
+  const ageOn2021 = numberOrNull(body.age_on_2021_01_01) ?? calculateAgeAt(dateOfBirth, '2021-01-01');
+  if (!activeEightyNinetyHundred && transitionRight && transitionFulltime && ageOn2021 !== null && ageOn2021 >= 57) {
+    const transitionDays = Math.min(8, Math.max(1, ageOn2021 - 56));
+    if (transitionDays > atvDaysAnnual) {
+      atvDaysAnnual = transitionDays;
+      atvProfile = 'transition_2021_fulltime_prior_right';
+    }
+  }
+
+  const atvHoursAnnual = atvDaysAnnual * 7.2;
+  const atvHoursPerPayPeriod = atvHoursAnnual / 13;
+  if (atvDaysAnnual > 0) {
+    entitlements.push({
+      rule_id: atvProfile === 'transition_2021_fulltime_prior_right' ? 'CAO-PB-2024-R1276' : 'CAO-PB-2024-R1270',
+      type: 'older_worker_atv_entitlement',
+      annual_days: atvDaysAnnual,
+      annual_hours: round2(atvHoursAnnual),
+      hours_per_pay_period: round2(atvHoursPerPayPeriod),
+      profile: atvProfile,
+      message: 'Artikel 73 oudere werknemer: extra ATV-recht vastgesteld voor planning/verlofregistratie.',
+      source_rule_ids: sourceRuleIds
+    });
+  }
+
+  return {
+    applies: true,
+    age_at_period_start: ageAtPeriodStart,
+    date_of_birth: dateOfBirth,
+    is_55_plus: is55Plus,
+    is_60_plus: is60Plus,
+    industry_service_years: industryServiceYears,
+    eighty_ninety_hundred_active: activeEightyNinetyHundred,
+    atv_profile: atvProfile,
+    annual_atv_days: atvDaysAnnual,
+    annual_atv_hours: round2(atvHoursAnnual),
+    atv_hours_per_pay_period: round2(atvHoursPerPayPeriod),
+    fulltime_hours_per_pay_period: fulltimeHoursPerPayPeriod,
+    violations,
+    manual_review_items: manualReviewItems,
+    entitlements,
+    source_rule_ids: sourceRuleIds
+  };
+}
+
 function isArticle30ExcludedRuleId(ruleId) {
   return ARTICLE_30_EXCLUDED_RULE_IDS.has(ruleId);
 }
@@ -3941,6 +4163,17 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     }
   }
 
+  const olderWorkerArticle73Summary = resolveOlderWorkerArticle73({
+    body,
+    serviceShifts,
+    weeklyHourRows,
+    periodStart,
+    serviceNightShiftDetails
+  });
+  violations.push(...olderWorkerArticle73Summary.violations);
+  manualReviewItems.push(...olderWorkerArticle73Summary.manual_review_items);
+  payrollEntitlements.push(...olderWorkerArticle73Summary.entitlements);
+
   const specialHolidayCategories = new Set();
   if (!isGeneralReserve) {
     for (const shift of serviceShifts) {
@@ -4261,6 +4494,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
         'CAO-PB-2024-R0667'
       ]
     },
+    older_worker_article_73_summary: olderWorkerArticle73Summary,
     break_summary: {
       shift_breaks: breakSummaryRows,
       no_break_exception_applied: noBreakExceptionApplied,

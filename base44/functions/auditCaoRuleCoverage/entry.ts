@@ -381,6 +381,24 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
     functions: ['calculateCaoLeaveAndSickness', 'calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
     rule_ids: ruleIds(1021, 1601, 1602)
   },
+  'calculatePersonnelCosts.article_71_72_pension_80_90_100': {
+    functions: ['calculatePersonnelCosts'],
+    rule_ids: [
+      ...ruleIds(1210, 1211, 1214, 1215, 1217, 1218),
+      ...ruleRange(1221, 1227),
+      ...ruleRange(1229, 1235),
+      ...ruleIds(1237)
+    ]
+  },
+  'validateCaoScheduleRules.article_73_older_workers': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: [
+      ...ruleIds(1242, 1244, 1245, 1246, 1248),
+      ...ruleRange(1253, 1268),
+      ...ruleRange(1270, 1294),
+      ...ruleIds(1296)
+    ]
+  },
   'calculatePersonnelCosts.protocol_ii_cash_value_notice_article_103': {
     functions: ['calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
     rule_ids: ruleIds(1613, 1617, 1618)

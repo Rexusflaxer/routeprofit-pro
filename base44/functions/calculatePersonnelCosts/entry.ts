@@ -400,6 +400,12 @@ function numberOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function booleanOrNull(value) {
+  if (value === true || value === 'true' || value === 'yes' || value === 'ja' || value === 1 || value === '1') return true;
+  if (value === false || value === 'false' || value === 'no' || value === 'nee' || value === 0 || value === '0') return false;
+  return null;
+}
+
 function firstNumber(...values) {
   for (const value of values) {
     const n = numberOrNull(value);
@@ -426,6 +432,8 @@ function resolvePayrollCaoParameters(caoConfig) {
   const leaveRules = caoConfig?.leave_rules || {};
   const allowances = caoConfig?.allowances || {};
   const cashValueRules = caoConfig?.cash_value_logistics_rules || {};
+  const pensionRules = caoConfig?.pension_rules || {};
+  const fundRules = caoConfig?.fund_rules || {};
   const standardVacation = firstObject(
     leaveRules.standard_vacation,
     leaveRules.article_59,
@@ -450,6 +458,20 @@ function resolvePayrollCaoParameters(caoConfig) {
     allowances.cash_value_early_shift,
     allowances.article_103
   );
+  const pensionScheme = firstObject(
+    pensionRules.scheme,
+    pensionRules.pension_scheme,
+    pensionRules.article_71,
+    pensionRules.pension
+  );
+  const eightyNinetyHundredRules = firstObject(
+    pensionRules.eighty_ninety_hundred,
+    pensionRules.article_72,
+    pensionRules.older_worker_80_90_100,
+    caoConfig?.older_worker_rules?.eighty_ninety_hundred
+  );
+  const sfpbRules = firstObject(fundRules.sfpb, fundRules.security_fund, pensionRules.sfpb);
+  const pawwRules = firstObject(fundRules.paww, pensionRules.paww);
 
   const standardAnnualHours = firstNumber(standardVacation.fulltime_annual_hours, standardVacation.annual_hours, leaveRules.fulltime_annual_vacation_hours);
   const standardAnnualDays = firstNumber(standardVacation.fulltime_annual_days, standardVacation.annual_days, leaveRules.fulltime_annual_vacation_days);
@@ -470,6 +492,35 @@ function resolvePayrollCaoParameters(caoConfig) {
   const cashValueFulltimePeriodHours = firstNumber(cashValueVacation.fulltime_period_hours, cashValueVacation.fulltime_hours_per_pay_period, standardFulltimePeriodHours);
   const cashValueVacationDayHours = firstNumber(cashValueVacation.vacation_day_hours, standardVacationDayHours);
   const earlyShiftAmount = firstNumber(valueServices.amount, valueServices.rate_per_shift, valueServices.value_services_early_shift);
+  const pensionFranchiseAnnual = firstNumber(
+    pensionScheme.franchise_annual,
+    pensionScheme.annual_franchise,
+    pensionScheme.pension_base_salary_threshold,
+    pensionRules.pension_base_salary_threshold,
+    caoConfig?.pension_base_salary_threshold
+  );
+  const pensionPremiumTotal = firstNumber(
+    pensionScheme.premium_rate_total,
+    pensionScheme.total_premium_percentage,
+    pensionRules.premium_rate_total,
+    caoConfig?.pension_premium_rate_total
+  );
+  const pensionEmployerShare = firstNumber(
+    pensionScheme.employer_share_percentage,
+    pensionScheme.employer_percentage,
+    pensionRules.employer_share_percentage,
+    caoConfig?.pension_premium_employer
+  );
+  const pensionEmployeeShare = firstNumber(
+    pensionScheme.employee_share_percentage,
+    pensionScheme.employee_percentage,
+    pensionRules.employee_share_percentage,
+    caoConfig?.pension_premium_employee
+  );
+  const payPeriodsPerYear = firstNumber(pensionScheme.pay_periods_per_year, pensionRules.pay_periods_per_year, caoConfig?.pay_periods_per_year);
+  const sfpbEmployeePercentage = firstNumber(sfpbRules.employee_percentage, sfpbRules.premium_employee_percentage, fundRules.premium_sfpb, caoConfig?.premium_sfpb);
+  const pawwEmployeePercentage = firstNumber(pawwRules.employee_percentage, pawwRules.premium_employee_percentage, fundRules.premium_paww_employee, caoConfig?.premium_paww_employee);
+  const wgaEmployeePercentage = firstNumber(fundRules.wga_employee_percentage, fundRules.premium_wga_employee, caoConfig?.premium_wga_employee);
 
   return {
     standard_vacation: {
@@ -496,12 +547,54 @@ function resolvePayrollCaoParameters(caoConfig) {
     call_worker_vacation_max_hours_per_period: callWorkerMaxHoursPerPeriod ?? 144,
     value_services_early_shift_amount: earlyShiftAmount ?? 7.50,
     value_services_early_shift_source_rule_ids: valueServices.source_rule_ids || ['CAO-PB-2024-R1609'],
+    pension: {
+      profile: 'article_71_pension',
+      franchiseAnnual: pensionFranchiseAnnual ?? 16164,
+      premiumRateTotalPercentage: pensionPremiumTotal ?? 24.1,
+      employerSharePercentage: pensionEmployerShare ?? 60,
+      employeeSharePercentage: pensionEmployeeShare ?? 40,
+      payPeriodsPerYear: payPeriodsPerYear ?? 13,
+      fulltimeHoursPerPayPeriod: standardFulltimePeriodHours ?? 144,
+      source_rule_ids: pensionScheme.source_rule_ids || ['CAO-PB-2024-R1210', 'CAO-PB-2024-R1211']
+    },
+    funds: {
+      profile: 'article_71_related_funds',
+      sfpbEmployeePercentage: sfpbEmployeePercentage ?? 0.061,
+      pawwEmployeePercentage: pawwEmployeePercentage ?? 0.1,
+      wgaEmployeePercentage: wgaEmployeePercentage ?? 0.81,
+      source_rule_ids: [
+        ...(sfpbRules.source_rule_ids || []),
+        ...(pawwRules.source_rule_ids || [])
+      ]
+    },
+    eighty_ninety_hundred: {
+      profile: 'article_72_80_90_100',
+      minimumIndustryServiceYears: firstNumber(eightyNinetyHundredRules.minimum_industry_service_years, eightyNinetyHundredRules.minimum_service_years) ?? 5,
+      applicationNoticeMonths: firstNumber(eightyNinetyHundredRules.application_notice_months, eightyNinetyHundredRules.notice_months) ?? 3,
+      hoursPercentage: firstNumber(eightyNinetyHundredRules.hours_percentage, eightyNinetyHundredRules.work_percentage) ?? 80,
+      salaryPercentage: firstNumber(eightyNinetyHundredRules.salary_percentage, eightyNinetyHundredRules.pay_percentage) ?? 90,
+      pensionPercentage: firstNumber(eightyNinetyHundredRules.pension_percentage, eightyNinetyHundredRules.pension_build_up_percentage) ?? 100,
+      minimumParttimePercentageAfterStart: firstNumber(eightyNinetyHundredRules.minimum_parttime_percentage_after_start, eightyNinetyHundredRules.minimum_parttime_percentage) ?? 55,
+      source_rule_ids: eightyNinetyHundredRules.source_rule_ids || [
+        'CAO-PB-2024-R1214', 'CAO-PB-2024-R1215', 'CAO-PB-2024-R1217', 'CAO-PB-2024-R1218',
+        'CAO-PB-2024-R1221', 'CAO-PB-2024-R1222', 'CAO-PB-2024-R1223', 'CAO-PB-2024-R1224',
+        'CAO-PB-2024-R1225', 'CAO-PB-2024-R1226', 'CAO-PB-2024-R1227', 'CAO-PB-2024-R1229',
+        'CAO-PB-2024-R1230', 'CAO-PB-2024-R1231', 'CAO-PB-2024-R1232', 'CAO-PB-2024-R1233',
+        'CAO-PB-2024-R1234', 'CAO-PB-2024-R1235', 'CAO-PB-2024-R1237'
+      ]
+    },
     provenance: {
       standard_vacation_annual_hours: parameterSource('leave_rules.standard_vacation.fulltime_annual_hours', standardAnnualHours, 172.8, ['CAO-PB-2024-R0999']),
       standard_vacation_per_period_hours: parameterSource('leave_rules.standard_vacation.fulltime_per_period_hours', standardPerPeriodHours, 13.3, ['CAO-PB-2024-R0999']),
       call_worker_vacation_payout_percentage: parameterSource('leave_rules.call_worker_vacation.payout_percentage', callWorkerPayoutPercentage, 9.24, ['CAO-PB-2024-R1016']),
       call_worker_vacation_max_hours_per_period: parameterSource('leave_rules.call_worker_vacation.max_hours_per_period', callWorkerMaxHoursPerPeriod, 144, ['CAO-PB-2024-R1016']),
-      value_services_early_shift_amount: parameterSource('cash_value_logistics_rules.value_services_early_shift_allowance.amount', earlyShiftAmount, 7.50, ['CAO-PB-2024-R1609'])
+      value_services_early_shift_amount: parameterSource('cash_value_logistics_rules.value_services_early_shift_allowance.amount', earlyShiftAmount, 7.50, ['CAO-PB-2024-R1609']),
+      pension_franchise_annual: parameterSource('pension_rules.scheme.franchise_annual', pensionFranchiseAnnual, 16164, ['CAO-PB-2024-R1210']),
+      pension_premium_rate_total: parameterSource('pension_rules.scheme.premium_rate_total', pensionPremiumTotal, 24.1, ['CAO-PB-2024-R1210']),
+      pension_employer_share_percentage: parameterSource('pension_rules.scheme.employer_share_percentage', pensionEmployerShare, 60, ['CAO-PB-2024-R1210']),
+      pension_employee_share_percentage: parameterSource('pension_rules.scheme.employee_share_percentage', pensionEmployeeShare, 40, ['CAO-PB-2024-R1210']),
+      premium_sfpb_employee_percentage: parameterSource('fund_rules.sfpb.employee_percentage', sfpbEmployeePercentage, 0.061, ['CAO-PB-2024-R1211']),
+      premium_paww_employee_percentage: parameterSource('fund_rules.paww.employee_percentage', pawwEmployeePercentage, 0.1, ['CAO-PB-2024-R1211'])
     }
   };
 }
@@ -764,6 +857,316 @@ function buildVacationServiceContext({ personnel, body, contractResolutionResult
     reference_date: isoDate(referenceDate),
     manual_review_required: true,
     source_rule_ids: ['CAO-PB-2024-R1019', 'CAO-PB-2024-R1021', 'CAO-PB-2024-R1022']
+  };
+}
+
+function dateOrNull(value) {
+  const iso = isoDate(value);
+  if (!iso) return null;
+  const date = new Date(`${iso}T00:00:00`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function ageYearsAt(dateOfBirth, referenceDate) {
+  const birth = dateOrNull(dateOfBirth);
+  const reference = dateOrNull(referenceDate);
+  if (!birth || !reference) return null;
+  let years = reference.getFullYear() - birth.getFullYear();
+  const monthDiff = reference.getMonth() - birth.getMonth();
+  if (monthDiff < 0 || (monthDiff === 0 && reference.getDate() < birth.getDate())) years -= 1;
+  return years;
+}
+
+function ageMonthsAt(dateOfBirth, referenceDate) {
+  const birth = dateOrNull(dateOfBirth);
+  const reference = dateOrNull(referenceDate);
+  if (!birth || !reference) return null;
+  let months = (reference.getFullYear() - birth.getFullYear()) * 12 + (reference.getMonth() - birth.getMonth());
+  if (reference.getDate() < birth.getDate()) months -= 1;
+  return Math.max(0, months);
+}
+
+function monthsUntilDate(fromDate, toDate) {
+  const from = dateOrNull(fromDate);
+  const to = dateOrNull(toDate);
+  if (!from || !to || to < from) return null;
+  let months = (to.getFullYear() - from.getFullYear()) * 12 + (to.getMonth() - from.getMonth());
+  if (to.getDate() < from.getDate()) months -= 1;
+  return Math.max(0, months);
+}
+
+function addMonthsIso(dateValue, months) {
+  const date = dateOrNull(dateValue);
+  if (!date) return null;
+  const target = new Date(date.getTime());
+  target.setMonth(target.getMonth() + months);
+  return isoDate(target.toISOString());
+}
+
+function resolve80_90_100AgeEligibility({ dateOfBirth, aowDate, referenceDate, explicitEligible }) {
+  if (explicitEligible === true) {
+    return { eligible: true, method: 'explicit_eligibility_confirmed', manual_review_required: false };
+  }
+  const refIso = isoDate(referenceDate);
+  const refYear = refIso ? Number(refIso.slice(0, 4)) : null;
+  const monthsToAow = monthsUntilDate(referenceDate, aowDate);
+  if (refYear !== null && refYear >= 2023 && monthsToAow !== null) {
+    return {
+      eligible: monthsToAow <= 60,
+      method: 'within_5_years_before_aow',
+      months_to_aow: monthsToAow,
+      manual_review_required: false
+    };
+  }
+  const ageMonths = ageMonthsAt(dateOfBirth, referenceDate);
+  if (ageMonths !== null) {
+    if (refYear === 2021) {
+      return {
+        eligible: ageMonths >= (64 * 12 + 4),
+        method: '2021_transition_age_64y4m',
+        age_months: ageMonths,
+        manual_review_required: false
+      };
+    }
+    if (refYear === 2022) {
+      return {
+        eligible: ageMonths >= (62 * 12 + 7),
+        method: '2022_transition_age_62y7m',
+        age_months: ageMonths,
+        manual_review_required: false
+      };
+    }
+  }
+  return {
+    eligible: false,
+    method: refYear !== null && refYear >= 2023 ? 'missing_aow_date' : 'missing_birth_date_or_aow_date',
+    manual_review_required: true
+  };
+}
+
+function buildEightyNinetyHundredArrangement({
+  personnel,
+  body,
+  contractResolutionResults,
+  referenceDate,
+  payrollCaoParameters
+}) {
+  const selectedContract = selectedContractsFromResolutionResults(contractResolutionResults)[0] || {};
+  const params = payrollCaoParameters.eighty_ninety_hundred || resolvePayrollCaoParameters(null).eighty_ninety_hundred;
+  const active = booleanOrNull(pickFirstNonEmpty(
+    body.eighty_ninety_hundred_active,
+    body['80_90_100_active'],
+    selectedContract.eighty_ninety_hundred_active,
+    selectedContract['80_90_100_active'],
+    personnel.eighty_ninety_hundred_active,
+    personnel['80_90_100_active']
+  )) === true;
+  const requested = active || booleanOrNull(pickFirstNonEmpty(
+    body.eighty_ninety_hundred_requested,
+    body['80_90_100_requested'],
+    selectedContract.eighty_ninety_hundred_requested,
+    personnel.eighty_ninety_hundred_requested
+  )) === true;
+
+  const sourceRuleIds = params.source_rule_ids || [];
+  if (!active && !requested) {
+    return {
+      applies: false,
+      active: false,
+      requested: false,
+      source_rule_ids: sourceRuleIds
+    };
+  }
+
+  const manualReviewItems = [];
+  const blockingReasons = [];
+  const dateOfBirth = pickFirstNonEmpty(
+    body.date_of_birth,
+    body.employee_date_of_birth,
+    selectedContract.date_of_birth,
+    personnel.date_of_birth
+  );
+  const aowDate = pickFirstNonEmpty(
+    body.aow_date,
+    body.statutory_pension_date,
+    selectedContract.aow_date,
+    personnel.aow_date,
+    personnel.statutory_pension_date
+  );
+  const explicitEligible = booleanOrNull(pickFirstNonEmpty(
+    body.eighty_ninety_hundred_eligibility_confirmed,
+    body['80_90_100_eligibility_confirmed'],
+    selectedContract.eighty_ninety_hundred_eligibility_confirmed,
+    personnel.eighty_ninety_hundred_eligibility_confirmed
+  ));
+  const ageEligibility = resolve80_90_100AgeEligibility({
+    dateOfBirth,
+    aowDate,
+    referenceDate,
+    explicitEligible
+  });
+  if (ageEligibility.manual_review_required) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R1218',
+      domain: 'eighty_ninety_hundred_age_eligibility',
+      field: 'aow_date/date_of_birth',
+      message: '80-90-100 leeftijds-/AOW-venster kan niet automatisch worden vastgesteld.'
+    });
+  } else if (!ageEligibility.eligible) {
+    blockingReasons.push('80-90-100 leeftijds-/AOW-venster is nog niet bereikt.');
+  }
+
+  const industryServiceYears = firstNumber(
+    body.security_industry_service_years,
+    body.industry_service_years,
+    body.continuous_security_industry_service_years,
+    selectedContract.security_industry_service_years,
+    selectedContract.industry_service_years,
+    personnel.security_industry_service_years,
+    personnel.industry_service_years
+  );
+  if (industryServiceYears === null) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R1215',
+      domain: 'eighty_ninety_hundred_service_years',
+      field: 'security_industry_service_years',
+      message: '80-90-100 vereist minimaal 5 aaneengesloten jaren in de branche; dienstjaren ontbreken.'
+    });
+  } else if (industryServiceYears < params.minimumIndustryServiceYears) {
+    blockingReasons.push(`80-90-100 vereist minimaal ${params.minimumIndustryServiceYears} branchejaren; vastgelegd is ${industryServiceYears}.`);
+  }
+
+  const applicationDate = pickFirstNonEmpty(
+    body.eighty_ninety_hundred_application_date,
+    body['80_90_100_application_date'],
+    selectedContract.eighty_ninety_hundred_application_date,
+    personnel.eighty_ninety_hundred_application_date
+  );
+  const startDate = pickFirstNonEmpty(
+    body.eighty_ninety_hundred_start_date,
+    body['80_90_100_start_date'],
+    selectedContract.eighty_ninety_hundred_start_date,
+    personnel.eighty_ninety_hundred_start_date
+  );
+  const earliestStartDate = addMonthsIso(applicationDate, params.applicationNoticeMonths);
+  if (!applicationDate || !startDate) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R1221',
+      domain: 'eighty_ninety_hundred_application_notice',
+      field: 'eighty_ninety_hundred_application_date/start_date',
+      message: '80-90-100 aanvraagdatum en ingangsdatum ontbreken of zijn onvolledig; aanvraag moet 3 maanden vooraf worden gedaan.'
+    });
+  } else if (earliestStartDate && isoDate(startDate) < earliestStartDate) {
+    blockingReasons.push(`80-90-100 aanvraag is minder dan ${params.applicationNoticeMonths} maanden voor ingang gedaan.`);
+  }
+
+  const preSchemeHours = firstNumber(
+    body.pre_80_90_100_hours_per_pay_period,
+    body.eighty_ninety_hundred_previous_hours_per_pay_period,
+    selectedContract.pre_80_90_100_hours_per_pay_period,
+    personnel.pre_80_90_100_hours_per_pay_period
+  );
+  const currentHours = firstNumber(
+    body.contract_hours_per_pay_period,
+    body.hours_per_pay_period,
+    selectedContract.contract_hours_per_pay_period,
+    selectedContract.hours_per_pay_period,
+    selectedContract.min_hours_per_pay_period,
+    personnel.contract_hours_per_pay_period
+  );
+  const preSchemeBaseSalary = firstNumber(
+    body.pre_80_90_100_base_salary_per_pay_period,
+    body.pre_80_90_100_salary_per_pay_period,
+    selectedContract.pre_80_90_100_base_salary_per_pay_period,
+    personnel.pre_80_90_100_base_salary_per_pay_period
+  );
+  const preSchemePensionBase = firstNumber(
+    body.pre_80_90_100_pension_base_amount_per_period,
+    body.eighty_ninety_hundred_pension_base_amount_per_period,
+    selectedContract.pre_80_90_100_pension_base_amount_per_period,
+    personnel.pre_80_90_100_pension_base_amount_per_period,
+    preSchemeBaseSalary
+  );
+  const expectedCurrentHours = preSchemeHours !== null ? preSchemeHours * (params.hoursPercentage / 100) : null;
+  const expectedPaidSalary = preSchemeBaseSalary !== null ? preSchemeBaseSalary * (params.salaryPercentage / 100) : null;
+  if (active && preSchemeHours === null) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R1230',
+      domain: 'eighty_ninety_hundred_hours',
+      field: 'pre_80_90_100_hours_per_pay_period',
+      message: '80-90-100 is actief, maar de oorspronkelijke arbeidsduur ontbreekt; 80%-arbeidsduur kan niet worden getoetst.'
+    });
+  }
+  if (active && preSchemePensionBase === null) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R1233',
+      domain: 'eighty_ninety_hundred_pension',
+      field: 'pre_80_90_100_pension_base_amount_per_period',
+      message: '80-90-100 is actief, maar de oorspronkelijke pensioengrondslag ontbreekt; 100% pensioenopbouw kan niet definitief worden berekend.'
+    });
+  }
+  if (active && currentHours !== null && expectedCurrentHours !== null && Math.abs(currentHours - expectedCurrentHours) > 0.25) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R1230',
+      domain: 'eighty_ninety_hundred_hours',
+      field: 'contract_hours_per_pay_period',
+      message: `80-90-100 verwacht ${r2(expectedCurrentHours)} uur per loonperiode, maar contractcontext bevat ${r2(currentHours)} uur.`
+    });
+  }
+  const minimumParttimeHours = (payrollCaoParameters.pension?.fulltimeHoursPerPayPeriod || 144) * (params.minimumParttimePercentageAfterStart / 100);
+  if (active && currentHours !== null && currentHours < minimumParttimeHours) {
+    blockingReasons.push(`80-90-100 parttime-omvang na ingang is ${r2(currentHours)} uur; minimum is ${r2(minimumParttimeHours)} uur per loonperiode.`);
+  }
+  const sideWorkAfterStart = booleanOrNull(pickFirstNonEmpty(
+    body.eighty_ninety_hundred_paid_side_work_after_start,
+    body.paid_side_work_after_80_90_100_start,
+    selectedContract.eighty_ninety_hundred_paid_side_work_after_start,
+    personnel.eighty_ninety_hundred_paid_side_work_after_start
+  )) === true;
+  const sideWorkExisting = booleanOrNull(pickFirstNonEmpty(
+    body.eighty_ninety_hundred_side_work_existing_before_start,
+    body.paid_side_work_existing_before_80_90_100,
+    selectedContract.eighty_ninety_hundred_side_work_existing_before_start,
+    personnel.eighty_ninety_hundred_side_work_existing_before_start
+  )) === true;
+  if (active && sideWorkAfterStart && !sideWorkExisting) {
+    blockingReasons.push('80-90-100 staat nieuwe betaalde nevenwerkzaamheden na ingang niet toe.');
+  }
+  if (booleanOrNull(body.eighty_ninety_hundred_denied_for_business_interest) === true && !body.eighty_ninety_hundred_denial_written_reason) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R1225',
+      domain: 'eighty_ninety_hundred_denial',
+      field: 'eighty_ninety_hundred_denial_written_reason',
+      message: 'Afwijzing 80-90-100 wegens zwaarwegend bedrijfsbelang mist schriftelijke motivering.'
+    });
+  }
+
+  return {
+    applies: true,
+    active,
+    requested,
+    reference_date: isoDate(referenceDate),
+    application_date: isoDate(applicationDate),
+    start_date: isoDate(startDate),
+    age_at_reference_date: ageYearsAt(dateOfBirth, referenceDate),
+    aow_date: isoDate(aowDate),
+    age_eligibility: ageEligibility,
+    industry_service_years: industryServiceYears,
+    pre_scheme_hours_per_pay_period: preSchemeHours !== null ? r2(preSchemeHours) : null,
+    expected_hours_per_pay_period: expectedCurrentHours !== null ? r2(expectedCurrentHours) : null,
+    current_contract_hours_per_pay_period: currentHours !== null ? r2(currentHours) : null,
+    pre_scheme_base_salary_per_pay_period: preSchemeBaseSalary !== null ? r2(preSchemeBaseSalary) : null,
+    expected_paid_base_salary_per_pay_period: expectedPaidSalary !== null ? r2(expectedPaidSalary) : null,
+    pension_base_override_amount_per_period: active && preSchemePensionBase !== null ? r2(preSchemePensionBase) : null,
+    hours_percentage: params.hoursPercentage,
+    salary_percentage: params.salaryPercentage,
+    pension_build_up_percentage: params.pensionPercentage,
+    minimum_parttime_hours_per_pay_period_after_start: r2(minimumParttimeHours),
+    atv_article_73_excluded: active,
+    blocking_reasons: blockingReasons,
+    manual_review_items: manualReviewItems,
+    manual_review_required: manualReviewItems.length > 0 || blockingReasons.length > 0,
+    source_rule_ids: sourceRuleIds
   };
 }
 
@@ -3210,7 +3613,9 @@ Deno.serve(async (req) => {
       shift_details: [],
       
       // Metadata
-      is_call_worker: isCallWorker
+      is_call_worker: isCallWorker,
+      older_worker_arrangements: null,
+      pension_calculation: null
     };
 
     // ── Bepaal loonbasis via CAO-scope + functieclassificatie ──
@@ -3731,14 +4136,47 @@ Deno.serve(async (req) => {
         payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount;
       }
       
-      // Bereken pensioengrondslag (bruto loon - vakantiegeld/eindejaarsuitkering - franchise)
-      // Voor oproepkrachten: basis + toeslagen (zonder vakantiegeld/eindejaarsuitkering)
-      const pensionBaseAmount = isCallWorker 
+      const olderWorkerArrangements = {
+        eighty_ninety_hundred: buildEightyNinetyHundredArrangement({
+          personnel,
+          body,
+          contractResolutionResults,
+          referenceDate: payrollPeriod.period_start,
+          payrollCaoParameters
+        })
+      };
+      payslip.older_worker_arrangements = olderWorkerArrangements;
+      for (const item of olderWorkerArrangements.eighty_ninety_hundred.manual_review_items || []) {
+        payrollRuntimeReviewItems.push(item);
+      }
+      for (const reason of olderWorkerArrangements.eighty_ninety_hundred.blocking_reasons || []) {
+        payrollRuntimeReviewItems.push({
+          rule_id: 'CAO-PB-2024-R1214',
+          domain: 'eighty_ninety_hundred',
+          message: reason,
+          manual_review_required: true
+        });
+      }
+      if (olderWorkerArrangements.eighty_ninety_hundred.manual_review_required) {
+        runtimePayrollFinalAllowed = false;
+        runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+      }
+
+      const pensionParameters = payrollCaoParameters.pension;
+      const fundParameters = payrollCaoParameters.funds;
+      const eightyNinetyHundredPensionBase = numberOrNull(
+        olderWorkerArrangements.eighty_ninety_hundred.pension_base_override_amount_per_period
+      );
+
+      // Bereken pensioengrondslag. Bij actieve 80-90-100 blijft de pensioenopbouw 100% op de oude grondslag.
+      const pensionBaseAmount = eightyNinetyHundredPensionBase !== null
+        ? eightyNinetyHundredPensionBase
+        : isCallWorker
         ? (payslip.base_salary + totalSurcharges + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount)
         : payslip.total_gross;
       
       // Franchise op jaarbasis, hier naar periode omrekenen (4-wekelijks = 13 periodes)
-      const franchiseThisPeriod = (caoConfig.pension_base_salary_threshold || 16164) / 13;
+      const franchiseThisPeriod = pensionParameters.franchiseAnnual / pensionParameters.payPeriodsPerYear;
       let pensionBase = Math.max(0, pensionBaseAmount - franchiseThisPeriod);
       
       // Voor lage inkomens: zorg dat er altijd minimaal pensioen wordt opgebouwd
@@ -3752,14 +4190,37 @@ Deno.serve(async (req) => {
       // Werknemersbijdragen - basis is altijd bruto loon exclusief vakantiegeld/eindejaarsuitkering voor oproepkrachten
       const basisForPremiums = isCallWorker ? (payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount) : payslip.total_gross;
       
-      payslip.employee_deductions.premium_sfpb = basisForPremiums * ((caoConfig.premium_sfpb || 0.061) / 100);
-      payslip.employee_deductions.premium_paww = basisForPremiums * ((caoConfig.premium_paww_employee || 0.1) / 100);
+      payslip.employee_deductions.premium_sfpb = basisForPremiums * (fundParameters.sfpbEmployeePercentage / 100);
+      payslip.employee_deductions.premium_paww = basisForPremiums * (fundParameters.pawwEmployeePercentage / 100);
       
       // Pensioenpremie werknemer (40% van totaal)
-      const totalPensionPremium = pensionBase * ((caoConfig.pension_premium_rate_total || 24.1) / 100);
-      payslip.employee_deductions.pension_premium = totalPensionPremium * ((caoConfig.pension_premium_employee || 40) / 100);
+      const totalPensionPremium = pensionBase * (pensionParameters.premiumRateTotalPercentage / 100);
+      payslip.employee_deductions.pension_premium = totalPensionPremium * (pensionParameters.employeeSharePercentage / 100);
       
-      payslip.employee_deductions.premium_wga = basisForPremiums * ((caoConfig.premium_wga_employee || 0.81) / 100);
+      payslip.employee_deductions.premium_wga = basisForPremiums * (fundParameters.wgaEmployeePercentage / 100);
+      payslip.pension_calculation = {
+        pensionable_wage_amount_per_period: r2(pensionBaseAmount),
+        pension_base_override_applied: eightyNinetyHundredPensionBase !== null,
+        pension_base_override_reason: eightyNinetyHundredPensionBase !== null ? 'article_72_80_90_100_100_percent_pension_build_up' : null,
+        franchise_per_pay_period: r2(franchiseThisPeriod),
+        pension_base_after_franchise: r2(pensionBase),
+        total_pension_premium: r2(totalPensionPremium),
+        employee_share_percentage: pensionParameters.employeeSharePercentage,
+        employer_share_percentage: pensionParameters.employerSharePercentage,
+        premium_rate_total_percentage: pensionParameters.premiumRateTotalPercentage,
+        parameter_provenance: {
+          pension_franchise_annual: payrollCaoParameters.provenance.pension_franchise_annual,
+          pension_premium_rate_total: payrollCaoParameters.provenance.pension_premium_rate_total,
+          pension_employee_share_percentage: payrollCaoParameters.provenance.pension_employee_share_percentage,
+          pension_employer_share_percentage: payrollCaoParameters.provenance.pension_employer_share_percentage,
+          premium_sfpb_employee_percentage: payrollCaoParameters.provenance.premium_sfpb_employee_percentage,
+          premium_paww_employee_percentage: payrollCaoParameters.provenance.premium_paww_employee_percentage
+        },
+        source_rule_ids: [
+          ...(pensionParameters.source_rule_ids || []),
+          ...(olderWorkerArrangements.eighty_ninety_hundred.active ? ['CAO-PB-2024-R1232', 'CAO-PB-2024-R1233'] : [])
+        ]
+      };
       
       // Belastingberekening
       const taxableIncome = payslip.total_gross - payslip.employee_deductions.pension_premium;
@@ -3851,7 +4312,7 @@ Deno.serve(async (req) => {
       payslip.net_salary = payslip.total_gross - payslip.employee_deductions.total;
       
       // Werkgeverslasten - basis is altijd exclusief vakantiegeld/eindejaarsuitkering
-      payslip.employer_costs.pension_premium = totalPensionPremium * ((caoConfig.pension_premium_employer || 60) / 100);
+      payslip.employer_costs.pension_premium = totalPensionPremium * (pensionParameters.employerSharePercentage / 100);
       payslip.employer_costs.premium_awf = basisForPremiums * ((caoConfig.premium_awf_employer || 2.64) / 100);
       payslip.employer_costs.premium_ww = basisForPremiums * (((caoConfig.premium_ww_employer_fixed || 0) + (caoConfig.premium_ww_employer_variable || 1.5)) / 100);
       payslip.employer_costs.premium_wia = basisForPremiums * ((caoConfig.premium_wia_employer || 0.72) / 100);
@@ -4051,6 +4512,8 @@ Deno.serve(async (req) => {
         },
         
         pension_base: Math.round(payslip.pension_base * 100) / 100,
+        pension_calculation: payslip.pension_calculation,
+        older_worker_arrangements: payslip.older_worker_arrangements,
         
         // Reserveringen
         accruals: {
