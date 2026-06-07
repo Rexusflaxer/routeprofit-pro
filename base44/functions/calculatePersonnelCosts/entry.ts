@@ -1272,6 +1272,7 @@ function shiftHasContractResolutionContext(shift) {
 
 function shouldEnforceContractResolution({ body, workSchedule }) {
   if (body.enforce_contract_resolution === true) return true;
+  if (body.record_payroll_run === true) return true;
   if (
     body.contract_id ||
     body.company_id ||
@@ -1337,7 +1338,7 @@ async function collectObjectCaoKeys(base44, workSchedule, body = {}) {
   return keys;
 }
 
-function buildShiftContractServiceContext({ body, personnel, shift }) {
+function buildShiftContractServiceContext({ body, shift }) {
   const bodyContext = body.service_context || {};
   const shiftContext = shift.service_context || {};
   const companyId = shift.company_id || body.company_id || shiftContext.company_id || bodyContext.company_id || null;
@@ -1363,25 +1364,21 @@ function buildShiftContractServiceContext({ body, personnel, shift }) {
       shift.required_function_type ||
       shiftContext.function_type ||
       bodyContext.function_type ||
-      personnel.function_type ||
       null,
     cao_function_group: shift.cao_function_group ||
       shift.required_cao_function_group ||
       shiftContext.cao_function_group ||
       bodyContext.cao_function_group ||
-      personnel.cao_function_group ||
       null,
     cao_function_level: shift.cao_function_level ||
       shift.required_cao_function_level ||
       shiftContext.cao_function_level ||
       bodyContext.cao_function_level ||
-      personnel.cao_function_level ||
       null,
     security_role_status: shift.required_security_role_status ||
       shift.security_role_status ||
       shiftContext.security_role_status ||
       bodyContext.security_role_status ||
-      personnel.security_role_status ||
       null,
     performs_security_work: shift.performs_security_work ??
       shiftContext.performs_security_work ??
@@ -1418,7 +1415,7 @@ async function resolvePayrollContractContexts(base44, { body, personnel, personn
   const results = [];
   const cache = {};
   for (const [index, shift] of (workSchedule || []).entries()) {
-    const serviceContext = buildShiftContractServiceContext({ body, personnel, shift });
+    const serviceContext = buildShiftContractServiceContext({ body, shift });
     const payload = {
       personnel_id: personnelId,
       contract_id: shift.contract_id || body.contract_id || null,
@@ -3218,6 +3215,12 @@ Deno.serve(async (req) => {
     };
 
     if (record_payroll_run === true) {
+      if (responsePayload.payroll_final_allowed !== true) {
+        return Response.json({
+          error: 'Definitieve loonrun geblokkeerd: berekening is niet payroll-final en mag niet als PayrollCalculationRun worden vastgelegd.',
+          calculation: responsePayload
+        }, { status: 400 });
+      }
       if (!responsePayload.pay_period_number) {
         return Response.json({
           error: 'pay_period_number is verplicht als record_payroll_run=true.',
