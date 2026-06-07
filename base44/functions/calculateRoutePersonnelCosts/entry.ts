@@ -5,16 +5,18 @@ const CAO_EVENT_HOSPITALITY_SECURITY_KEY = 'cao_evenementen_horecabeveiliging';
 const SUPPORTED_PAYROLL_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
 
 function getCaoRuntimeSupport(caoKey, functionName) {
-  const key = caoKey || CAO_PB_KEY;
+  const key = caoKey || null;
   const supported = SUPPORTED_PAYROLL_RUNTIME_CAO_KEYS.includes(key);
   return {
     supported,
-    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    status: supported ? 'supported' : key ? 'blocked_unsupported_cao_runtime' : 'blocked_missing_cao_key',
     cao_key: key,
     function_name: functionName,
     supported_cao_keys: SUPPORTED_PAYROLL_RUNTIME_CAO_KEYS,
     message: supported
       ? `Runtime ${functionName} ondersteunt CAO ${key}.`
+      : !key
+      ? `Runtime ${functionName} mist cao_key. Routekosten voor payrollbasis zijn geblokkeerd zodat geen PB-default wordt toegepast.`
       : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Routekosten voor payrollbasis zijn geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
   };
 }
@@ -148,7 +150,15 @@ function buildExternalCaoScopeGate({ targetCaoKey, signals }) {
   };
 }
 
-async function lazySyncCao(base44, forceCaoSync = false, caoKey = CAO_PB_KEY) {
+async function lazySyncCao(base44, forceCaoSync = false, caoKey = null) {
+  if (!caoKey) {
+    return {
+      changed: false,
+      reason: 'skipped_missing_cao_key',
+      cao_key: null,
+      note: 'Lazy Cloudflare sync overgeslagen: cao_key ontbreekt.'
+    };
+  }
   if (caoKey !== CAO_PB_KEY) {
     return {
       changed: false,
