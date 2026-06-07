@@ -180,6 +180,33 @@ function normalizeScope(caoScope) {
   };
 }
 
+function resolveAspirantSecurityStatus(input) {
+  const detectionSources = [];
+  const explicitAspirant = booleanOrNull(
+    input.is_aspirant_beveiliger ??
+    input.aspirant_beveiliger ??
+    input.aspirant_security_worker
+  );
+  const securityRole = String(input.security_role_status || '').toLowerCase();
+  const functionLevel = String(input.cao_function_level || '').toLowerCase();
+  const functionGroup = String(input.cao_function_group || '').toLowerCase();
+  const functionType = String(input.function_type || '').toLowerCase();
+  const caoScale = numberOrNull(input.cao_scale);
+
+  if (explicitAspirant === true) detectionSources.push('explicit_aspirant_flag');
+  if (securityRole === 'aspirant_beveiliger') detectionSources.push('security_role_status');
+  if (functionLevel === 'aspirant') detectionSources.push('cao_function_level');
+  if (functionGroup.includes('aspirant')) detectionSources.push('cao_function_group');
+  if (functionType.includes('aspirant')) detectionSources.push('function_type');
+  if (caoScale === 2) detectionSources.push('cao_scale_2');
+
+  return {
+    is_aspirant_beveiliger: detectionSources.length > 0,
+    detection_sources: detectionSources,
+    inferred_from_scale_only: detectionSources.length === 1 && detectionSources[0] === 'cao_scale_2'
+  };
+}
+
 function validateRequestedProbation(requiredMonths, requestedMonths, sourceRuleIds) {
   if (requiredMonths === null || requiredMonths === undefined) {
     return {
@@ -244,6 +271,7 @@ function validateRequestedProbation(requiredMonths, requestedMonths, sourceRuleI
 }
 
 function finalizeProbationResult(input, partial, duration, normalizedScope, extraWarnings = []) {
+  const aspirantStatus = resolveAspirantSecurityStatus(input);
   const warnings = [
     ...(partial.warnings || []),
     ...(duration.warning ? [duration.warning] : []),
@@ -290,6 +318,8 @@ function finalizeProbationResult(input, partial, duration, normalizedScope, extr
     probation_contract_form: partial.probation_contract_form || input.contract_form || null,
     underlying_contract_form: partial.underlying_contract_form || input.underlying_contract_form || null,
     call_agreement_type: partial.call_agreement_type || null,
+    aspirant_beveiliger_detected: partial.aspirant_beveiliger_detected ?? aspirantStatus.is_aspirant_beveiliger,
+    aspirant_detection_sources: partial.aspirant_detection_sources ?? aspirantStatus.detection_sources,
     rule_engine_notes: partial.rule_engine_notes || []
   };
 }
@@ -363,12 +393,7 @@ function resolveProbationContractForm(input) {
 }
 
 function calculateProbationPeriod(input, caoScope) {
-  const {
-    contract_form,
-    contract_start_date,
-    contract_end_date,
-    security_role_status
-  } = input;
+  const { contract_form, contract_start_date, contract_end_date } = input;
 
   const warnings = [];
   const source_rule_ids = [];
@@ -379,6 +404,7 @@ function calculateProbationPeriod(input, caoScope) {
   const scopeBlocksAspirant = normalizedScope.applies_full_security_rules === false;
   const duration = calculateContractDurationBoundary(contract_start_date, contract_end_date);
   const probationContract = resolveProbationContractForm(input);
+  const aspirantStatus = resolveAspirantSecurityStatus(input);
   warnings.push(...(probationContract.warnings || []));
 
   if (probationContract.manual_review_required) {
@@ -391,6 +417,8 @@ function calculateProbationPeriod(input, caoScope) {
       probation_contract_form: probationContract.probation_contract_form,
       underlying_contract_form: probationContract.underlying_contract_form,
       call_agreement_type: probationContract.call_agreement_type,
+      aspirant_beveiliger_detected: aspirantStatus.is_aspirant_beveiliger,
+      aspirant_detection_sources: aspirantStatus.detection_sources,
       rule_engine_notes: probationContract.rule_engine_notes || []
     }, duration, normalizedScope);
   }
@@ -398,16 +426,19 @@ function calculateProbationPeriod(input, caoScope) {
   const effectiveContractForm = probationContract.probation_contract_form || contract_form;
 
   // Aspirant-beveiliger regel (CAO-PB-2024-R0317): ALLEEN als full-security scope
-  if (security_role_status === 'aspirant_beveiliger') {
+  if (aspirantStatus.is_aspirant_beveiliger) {
     if (scopeBlocksAspirant) {
       scope_warnings.push({
         rule_id: 'CAO-PB-2024-R0317',
-        message: `Aspirant-beveiliger proeftijdregel (R0317) NIET toegepast: medewerker valt onder artikel 3 lid 2 of scope is onbekend/gemengd (profiel: ${normalizedScope.cao_scope_profile}). Reguliere proeftijdregels gelden.`
+        message: `Aspirant-beveiliger proeftijdregel (R0317) NIET toegepast: medewerker valt onder artikel 3 lid 2 of scope is onbekend/gemengd (profiel: ${normalizedScope.cao_scope_profile}). Reguliere proeftijdregels gelden. Detectie: ${aspirantStatus.detection_sources.join(', ')}.`
       });
       // Doorgaan met reguliere berekening hieronder
     } else if (normalizedScope.cao_scope_profile !== 'unknown_manual_review' && normalizedScope.applies_full_security_rules) {
       // Full-security scope: aspirant-regel mag worden toegepast
       if (duration.longer_than_six_months === true) {
+        const aspirantRuleNotes = aspirantStatus.inferred_from_scale_only
+          ? ['Aspirant-beveiligerstatus is afgeleid uit cao_scale=2; controleer dat schaal 2 inderdaad aspirantfunctie betreft.']
+          : [];
         source_rule_ids.push('CAO-PB-2024-R0317');
         return finalizeProbationResult(input, {
           probation_period_months: 2,
@@ -418,7 +449,9 @@ function calculateProbationPeriod(input, caoScope) {
           probation_contract_form: effectiveContractForm,
           underlying_contract_form: probationContract.underlying_contract_form,
           call_agreement_type: probationContract.call_agreement_type,
-          rule_engine_notes: probationContract.rule_engine_notes || []
+          aspirant_beveiliger_detected: true,
+          aspirant_detection_sources: aspirantStatus.detection_sources,
+          rule_engine_notes: [...(probationContract.rule_engine_notes || []), ...aspirantRuleNotes]
         }, duration, normalizedScope);
       }
     }
