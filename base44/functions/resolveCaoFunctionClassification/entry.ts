@@ -18,6 +18,59 @@ function getCaoRuntimeSupport(caoKey, functionName) {
   };
 }
 
+function resolveScopedCaoRequest({ explicitCaoKey, contract, workContext, personnel }) {
+  const contractCaoKey = contract?.cao_key || null;
+  const workContextCaoKey = workContext?.cao_key || workContext?.cao || null;
+  const personnelCaoKey = personnel?.cao || null;
+  const resolution = {
+    explicit_cao_key: explicitCaoKey || null,
+    contract_cao_key: contractCaoKey,
+    work_context_cao_key: workContextCaoKey,
+    personnel_cao_key: personnelCaoKey,
+    cao_key: explicitCaoKey || contractCaoKey || workContextCaoKey || personnelCaoKey || CAO_PB_KEY,
+    status: 'resolved',
+    manual_review_required: false
+  };
+
+  if (explicitCaoKey && contractCaoKey && explicitCaoKey !== contractCaoKey) {
+    return {
+      ...resolution,
+      status: 'blocked_explicit_cao_contract_mismatch',
+      blocking_reason: `Expliciete cao_key ${explicitCaoKey} botst met contract-CAO ${contractCaoKey}.`,
+      manual_review_required: true
+    };
+  }
+
+  if (explicitCaoKey && workContextCaoKey && explicitCaoKey !== workContextCaoKey) {
+    return {
+      ...resolution,
+      status: 'blocked_explicit_cao_work_context_mismatch',
+      blocking_reason: `Expliciete cao_key ${explicitCaoKey} botst met werkcontext-CAO ${workContextCaoKey}.`,
+      manual_review_required: true
+    };
+  }
+
+  if (contractCaoKey && workContextCaoKey && contractCaoKey !== workContextCaoKey) {
+    return {
+      ...resolution,
+      status: 'blocked_contract_work_context_cao_mismatch',
+      blocking_reason: `Contract-CAO ${contractCaoKey} botst met werkcontext-CAO ${workContextCaoKey}.`,
+      manual_review_required: true
+    };
+  }
+
+  if (contract && !explicitCaoKey && !contractCaoKey) {
+    return {
+      ...resolution,
+      status: 'blocked_missing_contract_cao_key',
+      blocking_reason: 'Arbeidscontract mist cao_key; functie-indeling kan niet audit-proof vanuit medewerkerstamdata worden bepaald.',
+      manual_review_required: true
+    };
+  }
+
+  return resolution;
+}
+
 /**
  * resolveCaoFunctionClassification
  * Bepaalt CAO PB functie-indeling, loonschaal en periodiek-validatie op basis van artikel 34/35 en bijlage 2.
@@ -700,21 +753,35 @@ Deno.serve(async (req) => {
     }
     if (!personnel) return Response.json({ error: 'personnel of personnel_id is verplicht' }, { status: 400 });
 
+    const scopedCaoResolution = resolveScopedCaoRequest({
+      explicitCaoKey: body.cao_key || null,
+      contract,
+      workContext: work_context,
+      personnel
+    });
+    if (scopedCaoResolution.status.startsWith('blocked_')) {
+      return Response.json({
+        error: scopedCaoResolution.blocking_reason,
+        personnel_id: personnel_id || null,
+        cao_key: scopedCaoResolution.cao_key,
+        scoped_cao_resolution: scopedCaoResolution,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        classification_status: scopedCaoResolution.status
+      }, { status: 400 });
+    }
+
     const classificationSubject = buildClassificationSubject(personnel, contract);
     const effectivePersonnel = classificationSubject.subject;
 
-    const targetCaoKey = body.cao_key ||
-      contract?.cao_key ||
-      work_context?.cao_key ||
-      work_context?.cao ||
-      effectivePersonnel.cao ||
-      CAO_PB_KEY;
+    const targetCaoKey = scopedCaoResolution.cao_key;
     const functionClassificationRuntimeSupport = getCaoRuntimeSupport(targetCaoKey, 'resolveCaoFunctionClassification');
     if (!functionClassificationRuntimeSupport.supported) {
       return Response.json({
         error: functionClassificationRuntimeSupport.message,
         personnel_id: personnel_id || null,
         cao_key: targetCaoKey,
+        scoped_cao_resolution: scopedCaoResolution,
         cao_runtime_support: functionClassificationRuntimeSupport,
         manual_review_required: true,
         payroll_final_allowed: false,
@@ -785,6 +852,7 @@ Deno.serve(async (req) => {
     return Response.json({
       success: true,
       cao_key: targetCaoKey,
+      scoped_cao_resolution: scopedCaoResolution,
       cao_runtime_support: functionClassificationRuntimeSupport,
       cao_sync_status: {
         changed: syncResult?.changed ?? false,
