@@ -100,6 +100,19 @@ function indexById(records) {
   }, {});
 }
 
+function indexLatestConfigByCaoKey(records) {
+  const result = {};
+  for (const config of records || []) {
+    const caoKey = config?.cao_key || null;
+    if (!caoKey) continue;
+    const current = result[caoKey];
+    const currentDate = current?.valid_from || '0000-00-00';
+    const nextDate = config?.valid_from || '0000-00-00';
+    if (!current || nextDate >= currentDate) result[caoKey] = config;
+  }
+  return result;
+}
+
 function resolveReviewCaoKey(review, configById) {
   return review?.cao_key ||
     configById[review?.cao_configuration_id]?.cao_key ||
@@ -117,11 +130,204 @@ function runMatchesReviewCao(run, reviewCaoKey, configById) {
   return !!reviewCaoKey && !!runCaoKey && runCaoKey === reviewCaoKey;
 }
 
+function resolveReviewConfig(review, reviewCaoKey, configById, configByCaoKey) {
+  return configById[review?.cao_configuration_id] ||
+    configByCaoKey[reviewCaoKey] ||
+    null;
+}
+
+function flattenPayPeriods(config) {
+  const payPeriods = config?.pay_periods;
+  if (!payPeriods || typeof payPeriods !== 'object') return [];
+  return Object.entries(payPeriods)
+    .flatMap(([year, periods]) => Array.isArray(periods)
+      ? periods.map(period => ({
+        pay_period_year: Number(period.year ?? period.pay_period_year ?? year),
+        pay_period_number: Number(period.period_number ?? period.pay_period_number ?? period.number),
+        pay_period_start: isoDate(period.start_date || period.period_start || period.pay_period_start),
+        pay_period_end: isoDate(period.end_date || period.period_end || period.pay_period_end),
+        is_extra_period: period.is_extra_period === true
+      }))
+      : []
+    )
+    .filter(period =>
+      Number.isFinite(period.pay_period_year) &&
+      Number.isFinite(period.pay_period_number) &&
+      period.pay_period_start &&
+      period.pay_period_end
+    )
+    .sort((a, b) =>
+      a.pay_period_start.localeCompare(b.pay_period_start) ||
+      a.pay_period_number - b.pay_period_number
+    );
+}
+
+function normalizeRequestedQueueTarget(body) {
+  const year = Number(
+    body.queued_for_pay_period_year ??
+    body.queue_for_pay_period_year ??
+    body.target_pay_period_year
+  );
+  const number = Number(
+    body.queued_for_pay_period_number ??
+    body.queue_for_pay_period_number ??
+    body.target_pay_period_number
+  );
+  if (!Number.isFinite(year) || !Number.isFinite(number)) return null;
+  return { pay_period_year: year, pay_period_number: number };
+}
+
+function samePayPeriod(run, period) {
+  return Number(run?.pay_period_year) === Number(period?.pay_period_year) &&
+    Number(run?.pay_period_number) === Number(period?.pay_period_number);
+}
+
+function hasFinalizedPayrollForPeriod(payrollRuns, period, reviewCaoKey, configById) {
+  return payrollRuns.some(candidate =>
+    samePayPeriod(candidate, period) &&
+    runMatchesReviewCao(candidate, reviewCaoKey, configById) &&
+    isFinalizedPayrollRun(candidate)
+  );
+}
+
+function periodPayload(period) {
+  return {
+    pay_period_year: period.pay_period_year,
+    pay_period_number: period.pay_period_number,
+    pay_period_start: period.pay_period_start,
+    pay_period_end: period.pay_period_end
+  };
+}
+
+function resolveCorrectionQueueTarget({
+  review,
+  run,
+  reviewCaoKey,
+  config,
+  payrollRuns,
+  configById,
+  queueReferenceDate,
+  requestedTarget
+}) {
+  const payPeriods = flattenPayPeriods(config);
+  const referenceDate = isoDate(queueReferenceDate) || isoDate(nowIso());
+
+  if (payPeriods.length === 0) {
+    return {
+      manual_review_required: true,
+      match_type: 'manual_review_missing_pay_periods',
+      warnings: [
+        'Eerstvolgende correctie-loonperiode kon niet worden bepaald: CAOConfiguration.pay_periods ontbreekt of is leeg.'
+      ],
+      evidence: {
+        strategy: 'manual_review_missing_pay_periods',
+        cao_configuration_id: config?.id || review?.cao_configuration_id || run?.cao_configuration_id || null,
+        cao_key: reviewCaoKey,
+        queue_reference_date: referenceDate
+      }
+    };
+  }
+
+  if (requestedTarget) {
+    const explicitPeriod = payPeriods.find(period =>
+      period.pay_period_year === requestedTarget.pay_period_year &&
+      period.pay_period_number === requestedTarget.pay_period_number
+    );
+    if (explicitPeriod) {
+      if (hasFinalizedPayrollForPeriod(payrollRuns, explicitPeriod, reviewCaoKey, configById)) {
+        return {
+          manual_review_required: true,
+          match_type: 'manual_review_no_open_pay_period',
+          warnings: [
+            `Aangevraagde correctie-loonperiode ${requestedTarget.pay_period_year}-${requestedTarget.pay_period_number} is al definitief voor CAO ${reviewCaoKey}.`
+          ],
+          evidence: {
+            strategy: 'explicit_request_finalized',
+            cao_key: reviewCaoKey,
+            requested_target: requestedTarget,
+            selected_pay_period: periodPayload(explicitPeriod)
+          }
+        };
+      }
+      return {
+        ...periodPayload(explicitPeriod),
+        manual_review_required: false,
+        match_type: 'explicit_request',
+        warnings: [],
+        evidence: {
+          strategy: 'explicit_request',
+          cao_key: reviewCaoKey,
+          requested_target: requestedTarget,
+          selected_pay_period: periodPayload(explicitPeriod)
+        }
+      };
+    }
+    return {
+      manual_review_required: true,
+      match_type: 'manual_review_no_open_pay_period',
+      warnings: [
+        `Aangevraagde correctie-loonperiode ${requestedTarget.pay_period_year}-${requestedTarget.pay_period_number} staat niet in CAOConfiguration.pay_periods.`
+      ],
+      evidence: {
+        strategy: 'explicit_request_not_found',
+        cao_key: reviewCaoKey,
+        requested_target: requestedTarget,
+        configured_pay_period_count: payPeriods.length
+      }
+    };
+  }
+
+  const selectablePeriods = payPeriods.filter(period =>
+    period.is_extra_period !== true &&
+    period.pay_period_end >= referenceDate &&
+    !hasFinalizedPayrollForPeriod(payrollRuns, period, reviewCaoKey, configById)
+  );
+  const selectedPeriod = selectablePeriods[0] || null;
+
+  if (!selectedPeriod) {
+    return {
+      manual_review_required: true,
+      match_type: 'manual_review_no_open_pay_period',
+      warnings: [
+        'Eerstvolgende open loonperiode voor CAO-correctie kon niet audit-proof worden bepaald; alle bekende actuele/toekomstige perioden ontbreken of zijn al definitief.'
+      ],
+      evidence: {
+        strategy: 'manual_review_no_open_pay_period',
+        cao_key: reviewCaoKey,
+        queue_reference_date: referenceDate,
+        configured_pay_period_count: payPeriods.length,
+        affected_payroll_run_id: run?.id || null
+      }
+    };
+  }
+
+  return {
+    ...periodPayload(selectedPeriod),
+    manual_review_required: false,
+    match_type: 'next_open_pay_period',
+    warnings: [],
+    evidence: {
+      strategy: 'next_open_pay_period',
+      cao_key: reviewCaoKey,
+      queue_reference_date: referenceDate,
+      affected_payroll_run_id: run?.id || null,
+      selected_pay_period: periodPayload(selectedPeriod),
+      skipped_finalized_periods: payPeriods
+        .filter(period =>
+          period.is_extra_period !== true &&
+          period.pay_period_end >= referenceDate &&
+          hasFinalizedPayrollForPeriod(payrollRuns, period, reviewCaoKey, configById)
+        )
+        .map(periodPayload)
+    }
+  };
+}
+
 function buildCorrectionKey(review, run) {
   return `${review.id}::${run?.id || 'unmatched'}`;
 }
 
-function buildCorrectionData(review, run, status, reason, caoKey = null, match = {}) {
+function buildCorrectionData(review, run, status, reason, caoKey = null, match = {}, queueTarget = {}) {
   return {
     correction_key: buildCorrectionKey(review, run),
     cao_change_review_id: review.id,
@@ -158,8 +364,14 @@ function buildCorrectionData(review, run, status, reason, caoKey = null, match =
     delta_snapshot: null,
     created_at: nowIso(),
     created_by_function: 'queueCaoPayrollCorrections',
-    queued_for_pay_period_year: null,
-    queued_for_pay_period_number: null,
+    queued_for_pay_period_year: queueTarget.pay_period_year ?? null,
+    queued_for_pay_period_number: queueTarget.pay_period_number ?? null,
+    queued_for_pay_period_start: queueTarget.pay_period_start || null,
+    queued_for_pay_period_end: queueTarget.pay_period_end || null,
+    queue_target_match_type: queueTarget.match_type || null,
+    queue_target_manual_review_required: queueTarget.manual_review_required === true,
+    queue_target_warnings: normalizeArray(queueTarget.warnings),
+    queue_target_evidence: queueTarget.evidence || null,
     applied_payroll_run_id: null,
     notes: run
       ? `Retroactieve CAO-wijziging ${review.rule_key || review.field_path || review.id} raakt payrollrun ${run.id}.`
@@ -234,6 +446,8 @@ Deno.serve(async (req) => {
     const reviewIds = Array.isArray(body.review_ids) ? body.review_ids.filter(Boolean) : [];
     const importRunId = body.import_run_id || null;
     const idempotencyKey = body.idempotency_key || null;
+    const queueReferenceDate = isoDate(body.queue_reference_date) || isoDate(nowIso());
+    const requestedQueueTarget = normalizeRequestedQueueTarget(body);
 
     let reviews = [];
     if (reviewIds.length > 0) {
@@ -264,14 +478,17 @@ Deno.serve(async (req) => {
       base44.asServiceRole.entities.CAOConfiguration.list()
     ]);
     const configById = indexById(caoConfigs || []);
+    const configByCaoKey = indexLatestConfigByCaoKey(caoConfigs || []);
     const createdCorrectionIds = [];
     const updatedCorrectionIds = [];
     const unmatchedReviewIds = [];
     const unverifiableReviewIds = [];
     const markedPayrollRunIds = [];
     const legacyManualReviewRunIds = [];
+    const queueTargetManualReviewRunIds = [];
 
     for (const review of correctionReviews) {
+      let reviewHasQueueTargetManualReview = false;
       const reviewCaoKey = resolveReviewCaoKey(review, configById);
       if (!reviewCaoKey) {
         const data = buildCorrectionData(
@@ -398,20 +615,39 @@ Deno.serve(async (req) => {
 
       for (const run of exactAffectedRuns) {
         const finalized = isFinalizedPayrollRun(run);
+        const queueTarget = finalized
+          ? resolveCorrectionQueueTarget({
+            review,
+            run,
+            reviewCaoKey,
+            config: resolveReviewConfig(review, reviewCaoKey, configById, configByCaoKey),
+            payrollRuns,
+            configById,
+            queueReferenceDate,
+            requestedTarget: requestedQueueTarget
+          })
+          : {};
         const status = finalized
-          ? 'queued'
+          ? queueTarget.manual_review_required === true ? 'manual_review_required' : 'queued'
           : 'candidate';
         const reason = finalized
-          ? 'Payrollrun is al goedgekeurd/geëxporteerd/betaald; correctie moet in een volgende loonrun worden verwerkt.'
+          ? queueTarget.manual_review_required === true
+            ? `Payrollrun is al goedgekeurd/geëxporteerd/betaald, maar de eerstvolgende correctie-loonperiode kon niet audit-proof worden bepaald: ${normalizeArray(queueTarget.warnings).join(' ')}`
+            : `Payrollrun is al goedgekeurd/geëxporteerd/betaald; correctie moet worden verwerkt in loonperiode ${queueTarget.pay_period_year}-${queueTarget.pay_period_number}.`
           : 'Payrollrun valt binnen retroactieve CAO-periode; herberekening vereist voordat deze definitief wordt.';
 
-        const data = buildCorrectionData(review, run, status, reason, reviewCaoKey, exactOverlapEvidence(run, review));
+        const data = buildCorrectionData(review, run, status, reason, reviewCaoKey, exactOverlapEvidence(run, review), queueTarget);
         const saved = await upsertCorrection(base44, data);
         if (saved.created) createdCorrectionIds.push(saved.id);
         else updatedCorrectionIds.push(saved.id);
 
         await markPayrollRunForRecalculation(base44, run, review.id);
         markedPayrollRunIds.push(run.id);
+        if (queueTarget.manual_review_required === true) {
+          reviewHasQueueTargetManualReview = true;
+          queueTargetManualReviewRunIds.push(run.id);
+          unverifiableReviewIds.push(review.id);
+        }
       }
 
       for (const run of legacyPossibleRuns) {
@@ -441,11 +677,11 @@ Deno.serve(async (req) => {
       }
 
       const hasLegacyRunsWithoutExactDates = legacyPossibleRuns.length > 0;
-      if (hasLegacyRunsWithoutExactDates) {
+      if (hasLegacyRunsWithoutExactDates || reviewHasQueueTargetManualReview) {
         unverifiableReviewIds.push(review.id);
       }
       await base44.asServiceRole.entities.CAOChangeReview.update(review.id, {
-        correction_status: hasLegacyRunsWithoutExactDates
+        correction_status: hasLegacyRunsWithoutExactDates || reviewHasQueueTargetManualReview
           ? 'manual_review_required'
           : exactAffectedRuns.some(isFinalizedPayrollRun)
           ? 'queued'
@@ -463,8 +699,9 @@ Deno.serve(async (req) => {
       updated_correction_ids: updatedCorrectionIds,
       marked_payroll_run_ids: [...new Set(markedPayrollRunIds)],
       legacy_manual_review_run_ids: [...new Set(legacyManualReviewRunIds)],
+      queue_target_manual_review_run_ids: [...new Set(queueTargetManualReviewRunIds)],
       unmatched_review_ids: unmatchedReviewIds,
-      unverifiable_review_ids: unverifiableReviewIds
+      unverifiable_review_ids: [...new Set(unverifiableReviewIds)]
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });

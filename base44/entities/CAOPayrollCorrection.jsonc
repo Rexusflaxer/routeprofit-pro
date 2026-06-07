@@ -243,6 +243,56 @@
         "null"
       ]
     },
+    "queued_for_pay_period_start": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Startdatum van de loonperiode waarin deze correctie moet worden meegenomen."
+    },
+    "queued_for_pay_period_end": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Einddatum van de loonperiode waarin deze correctie moet worden meegenomen."
+    },
+    "queue_target_match_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "explicit_request",
+        "next_open_pay_period",
+        "manual_review_missing_pay_periods",
+        "manual_review_no_open_pay_period",
+        null
+      ],
+      "description": "Hoe de loonperiode voor verwerking van deze correctie is bepaald."
+    },
+    "queue_target_manual_review_required": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als niet audit-proof bepaald kon worden in welke volgende loonrun de correctie moet landen."
+    },
+    "queue_target_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Auditnotities over het bepalen van de correctie-doelloonperiode."
+    },
+    "queue_target_evidence": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Auditbewijs voor de gekozen doelloonperiode."
+    },
     "applied_payroll_run_id": {
       "type": [
         "string",
