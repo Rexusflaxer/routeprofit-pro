@@ -4125,6 +4125,7 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
 
   const contractResults = await Promise.all(periodShifts.map(async (shift, index) => {
     const serviceContext = shift.service_context || {};
+    const serviceObjectId = shift.object_id || body.object_id || serviceContext.object_id || null;
     try {
       const res = await base44.asServiceRole.functions.invoke('resolvePersonnelContractForService', {
         personnel_id,
@@ -4132,9 +4133,11 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
         company_id: shift.company_id || body.company_id || null,
         route_id: shift.route_id || body.route_id || null,
         task_id: shift.task_id || body.task_id || null,
+        object_id: serviceObjectId,
         service_date: shift.date,
         service_context: {
           ...serviceContext,
+          object_id: serviceObjectId,
           cao_key: serviceContext.cao_key || shift.cao_key || body.cao_key || null,
           cao: serviceContext.cao || shift.cao || body.cao || null,
           task_type: serviceContext.task_type || shift.task_type || null,
@@ -4289,6 +4292,37 @@ function findContractResolutionScope(contractResults, profile) {
     if (scope?.cao_scope_profile === profile) return scope;
   }
   return null;
+}
+
+function collectContractCaoConsistencyIssues(contractResults, { expectedCaoKey, expectedCaoConfigurationId }) {
+  const issues = [];
+  for (const result of contractResults || []) {
+    const resultCaoKey = result?.cao_key || result?.selected_contract?.cao_key || null;
+    const resultConfigId = result?.cao_configuration_id || result?.selected_contract?.cao_configuration_id || null;
+    if (expectedCaoKey && resultCaoKey && resultCaoKey !== expectedCaoKey) {
+      issues.push({
+        shift_index: result.shift_index ?? null,
+        shift_id: result.shift_id || null,
+        date: result.date || null,
+        issue: 'contract_cao_key_mismatch',
+        expected_cao_key: expectedCaoKey,
+        resolved_cao_key: resultCaoKey,
+        contract_id: result.contract_id || result.selected_contract?.id || null
+      });
+    }
+    if (expectedCaoConfigurationId && resultConfigId && resultConfigId !== expectedCaoConfigurationId) {
+      issues.push({
+        shift_index: result.shift_index ?? null,
+        shift_id: result.shift_id || null,
+        date: result.date || null,
+        issue: 'contract_cao_configuration_mismatch',
+        expected_cao_configuration_id: expectedCaoConfigurationId,
+        resolved_cao_configuration_id: resultConfigId,
+        contract_id: result.contract_id || result.selected_contract?.id || null
+      });
+    }
+  }
+  return issues;
 }
 
 Deno.serve(async (req) => {
@@ -4511,6 +4545,35 @@ Deno.serve(async (req) => {
       personnel_id,
       body: scheduleBody
     });
+    const contractCaoConsistencyIssues = collectContractCaoConsistencyIssues(contractValidation.contract_resolution_results, {
+      expectedCaoKey: caoConfig.cao_key || targetCaoKey,
+      expectedCaoConfigurationId: caoConfig.id
+    });
+    if (contractCaoConsistencyIssues.length > 0) {
+      return Response.json({
+        error: 'Roostercontrole geblokkeerd: contractresolver en roostercontrole gebruiken niet dezelfde CAO-configuratie.',
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          'Splits de roostercontrole per CAO-configuratie of herstel de contract-/dienstcontext voordat planning definitief mag zijn.'
+        ],
+        period_start: pStart,
+        period_end: pEnd,
+        personnel_id: personnel_id || null,
+        cao_key: caoConfig.cao_key || targetCaoKey,
+        cao_configuration_id: caoConfig.id,
+        task_cao_key: taskCaoKey || null,
+        object_cao_keys: objectCaoKeys,
+        cao_runtime_support: scheduleRuntimeSupport,
+        contract_resolution_required: contractValidation.contract_resolution_required,
+        contract_resolution_results: contractValidation.contract_resolution_results,
+        contract_cao_consistency_issues: contractCaoConsistencyIssues,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        planning_allowed: false,
+        calculation_status: 'blocked_contract_cao_configuration_mismatch'
+      }, { status: 400 });
+    }
     const resolvedScopeProfiles = collectContractResolutionScopeProfiles(contractValidation.contract_resolution_results);
     const scopeSelectionWarnings = [];
     if (resolvedScopeProfiles.length > 1) {
