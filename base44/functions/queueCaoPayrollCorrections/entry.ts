@@ -27,14 +27,19 @@ function runTouchesReview(run, review) {
   if (run.pay_period_start && run.pay_period_end && review.effective_from) {
     return rangesOverlap(run.pay_period_start, run.pay_period_end, review.effective_from, review.effective_until);
   }
-
-  // Legacy fallback: old PayrollCalculationRun records may not yet have period dates.
-  // Keep this conservative and require manual review instead of pretending certainty.
-  if (review.effective_from && run.pay_period_year) {
-    const effectiveYear = Number(String(review.effective_from).slice(0, 4));
-    return Number(run.pay_period_year) >= effectiveYear;
-  }
   return false;
+}
+
+function legacyRunMayTouchReview(run, review) {
+  if (run.pay_period_start && run.pay_period_end) return false;
+  if (!review.effective_from || !run.pay_period_year) return false;
+  const effectiveYear = Number(String(review.effective_from).slice(0, 4));
+  const effectiveUntilYear = review.effective_until
+    ? Number(String(review.effective_until).slice(0, 4))
+    : 9999;
+  const runYear = Number(run.pay_period_year);
+  if (!Number.isFinite(effectiveYear) || !Number.isFinite(effectiveUntilYear) || !Number.isFinite(runYear)) return false;
+  return runYear >= effectiveYear && runYear <= effectiveUntilYear;
 }
 
 function isFinalizedPayrollRun(run) {
@@ -215,6 +220,7 @@ Deno.serve(async (req) => {
     const unmatchedReviewIds = [];
     const unverifiableReviewIds = [];
     const markedPayrollRunIds = [];
+    const legacyManualReviewRunIds = [];
 
     for (const review of correctionReviews) {
       const reviewCaoKey = resolveReviewCaoKey(review, configById);
@@ -275,12 +281,16 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      const affectedRuns = payrollRuns.filter(run =>
+      const exactAffectedRuns = payrollRuns.filter(run =>
         runMatchesReviewCao(run, reviewCaoKey, configById) &&
         runTouchesReview(run, review)
       );
+      const legacyPossibleRuns = payrollRuns.filter(run =>
+        runMatchesReviewCao(run, reviewCaoKey, configById) &&
+        legacyRunMayTouchReview(run, review)
+      );
 
-      if (affectedRuns.length === 0) {
+      if (exactAffectedRuns.length === 0 && legacyPossibleRuns.length === 0) {
         const data = buildCorrectionData(
           review,
           null,
@@ -298,17 +308,12 @@ Deno.serve(async (req) => {
         continue;
       }
 
-      for (const run of affectedRuns) {
+      for (const run of exactAffectedRuns) {
         const finalized = isFinalizedPayrollRun(run);
-        const hasExactDates = !!(run.pay_period_start && run.pay_period_end);
-        const status = !hasExactDates
-          ? 'manual_review_required'
-          : finalized
+        const status = finalized
           ? 'queued'
           : 'candidate';
-        const reason = !hasExactDates
-          ? 'Legacy payrollrun mist pay_period_start/pay_period_end; handmatige review vereist om overlap exact te bepalen.'
-          : finalized
+        const reason = finalized
           ? 'Payrollrun is al goedgekeurd/geëxporteerd/betaald; correctie moet in een volgende loonrun worden verwerkt.'
           : 'Payrollrun valt binnen retroactieve CAO-periode; herberekening vereist voordat deze definitief wordt.';
 
@@ -321,11 +326,28 @@ Deno.serve(async (req) => {
         markedPayrollRunIds.push(run.id);
       }
 
-      const hasLegacyRunsWithoutExactDates = affectedRuns.some(run => !(run.pay_period_start && run.pay_period_end));
+      for (const run of legacyPossibleRuns) {
+        const data = buildCorrectionData(
+          review,
+          run,
+          'manual_review_required',
+          'Legacy payrollrun mist pay_period_start/pay_period_end; handmatige review vereist om overlap exact te bepalen. Deze run wordt niet automatisch als geraakt gemarkeerd.',
+          reviewCaoKey
+        );
+        const saved = await upsertCorrection(base44, data);
+        if (saved.created) createdCorrectionIds.push(saved.id);
+        else updatedCorrectionIds.push(saved.id);
+        legacyManualReviewRunIds.push(run.id);
+      }
+
+      const hasLegacyRunsWithoutExactDates = legacyPossibleRuns.length > 0;
+      if (hasLegacyRunsWithoutExactDates) {
+        unverifiableReviewIds.push(review.id);
+      }
       await base44.asServiceRole.entities.CAOChangeReview.update(review.id, {
         correction_status: hasLegacyRunsWithoutExactDates
           ? 'manual_review_required'
-          : affectedRuns.some(isFinalizedPayrollRun)
+          : exactAffectedRuns.some(isFinalizedPayrollRun)
           ? 'queued'
           : 'candidate'
       });
@@ -340,6 +362,7 @@ Deno.serve(async (req) => {
       created_correction_ids: createdCorrectionIds,
       updated_correction_ids: updatedCorrectionIds,
       marked_payroll_run_ids: [...new Set(markedPayrollRunIds)],
+      legacy_manual_review_run_ids: [...new Set(legacyManualReviewRunIds)],
       unmatched_review_ids: unmatchedReviewIds,
       unverifiable_review_ids: unverifiableReviewIds
     });
