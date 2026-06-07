@@ -664,6 +664,68 @@ function evaluateHiredWorkerServiceConstraints(contract) {
   };
 }
 
+function evaluateStoredContractReadiness(contract) {
+  if (!contract) {
+    return {
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      warnings: [],
+      contract_context_status: null,
+      cao_contract_rule_status: null,
+      planning_allowed: false,
+      payroll_final_allowed: false,
+      contract_final_allowed: false
+    };
+  }
+
+  const blockingReasons = [];
+  const manualReviewReasons = [];
+  const warnings = [];
+  const contextStatus = contract.contract_context_status || 'unknown';
+  const ruleStatus = contract.cao_contract_rule_status || 'unknown';
+
+  if (['draft_missing_context', 'blocked'].includes(contextStatus)) {
+    blockingReasons.push(`Geselecteerd contract heeft contract_context_status=${contextStatus}; contractbasis moet eerst worden aangevuld voordat planning/payroll definitief mag zijn.`);
+  } else if (contextStatus === 'manual_review_required') {
+    manualReviewReasons.push('Geselecteerd contract heeft contract_context_status=manual_review_required. Rond contractreview af voordat planning/payroll definitief mag zijn.');
+  } else if (contextStatus !== 'compliant') {
+    manualReviewReasons.push(`Geselecteerd contract is nog niet contract-final beoordeeld (contract_context_status=${contextStatus}). Voer applyCaoContractRules met save uit voordat planning/payroll definitief mag zijn.`);
+  }
+
+  if (ruleStatus === 'blocked') {
+    blockingReasons.push('Geselecteerd contract heeft cao_contract_rule_status=blocked; CAO-contractregels blokkeren definitieve inzet.');
+  } else if (ruleStatus === 'manual_review_required') {
+    manualReviewReasons.push('Geselecteerd contract heeft cao_contract_rule_status=manual_review_required. Rond CAO-contractreview af voordat planning/payroll definitief mag zijn.');
+  } else if (ruleStatus !== 'compliant') {
+    manualReviewReasons.push(`Geselecteerd contract heeft cao_contract_rule_status=${ruleStatus}. Contractregels moeten compliant zijn voordat planning/payroll definitief mag zijn.`);
+  }
+
+  if (contract.contract_final_allowed !== true) {
+    manualReviewReasons.push('Geselecteerd contract heeft contract_final_allowed niet op true. Finaliseer het contract voordat het als geldige CAO-basis wordt gebruikt.');
+  }
+  if (contract.planning_allowed !== true) {
+    manualReviewReasons.push('Geselecteerd contract heeft planning_allowed niet op true. Planning blijft geblokkeerd of vereist review.');
+  }
+  if (contract.payroll_final_allowed !== true) {
+    manualReviewReasons.push('Geselecteerd contract heeft payroll_final_allowed niet op true. Payroll-final blijft geblokkeerd.');
+  }
+  if (Array.isArray(contract.contract_context_missing_fields) && contract.contract_context_missing_fields.length > 0) {
+    blockingReasons.push(`Geselecteerd contract mist contractbasisvelden: ${contract.contract_context_missing_fields.join(', ')}.`);
+  }
+
+  return {
+    blocking_reasons: [...new Set(blockingReasons)],
+    manual_review_reasons: [...new Set(manualReviewReasons)],
+    warnings,
+    contract_context_status: contextStatus,
+    cao_contract_rule_status: ruleStatus,
+    planning_allowed: contract.planning_allowed === true,
+    payroll_final_allowed: contract.payroll_final_allowed === true,
+    contract_final_allowed: contract.contract_final_allowed === true,
+    contract_context_missing_fields: contract.contract_context_missing_fields || []
+  };
+}
+
 async function getCaoConfigForContract(base44, { contract, companyAssignment, company, companyCaoAssignments, serviceDate, requestedCaoKey, serviceContext }) {
   const explicitId = contract?.cao_configuration_id ||
     companyAssignment?.default_cao_configuration_id ||
@@ -1009,6 +1071,15 @@ Deno.serve(async (req) => {
       manualReviewReasons.push('Geselecteerd contract mist cao_key. Leg de toepasselijke CAO expliciet vast op het arbeidscontract voordat planning/payroll definitief mag zijn.');
     }
 
+    const selectedContractReadiness = selectedContract
+      ? evaluateStoredContractReadiness(selectedContract)
+      : null;
+    if (selectedContractReadiness) {
+      blockingReasons.push(...selectedContractReadiness.blocking_reasons);
+      manualReviewReasons.push(...selectedContractReadiness.manual_review_reasons);
+      warnings.push(...selectedContractReadiness.warnings);
+    }
+
     const internshipServiceCheck = selectedContract
       ? evaluateInternshipServiceConstraints(selectedContract, serviceContext)
       : null;
@@ -1135,6 +1206,12 @@ Deno.serve(async (req) => {
         contract_end_date: selectedContract.contract_end_date || null,
         cao_key: selectedContract.cao_key || null,
         cao_configuration_id: selectedContract.cao_configuration_id || null,
+        contract_context_status: selectedContract.contract_context_status || null,
+        contract_context_missing_fields: selectedContract.contract_context_missing_fields || [],
+        cao_contract_rule_status: selectedContract.cao_contract_rule_status || null,
+        planning_allowed: selectedContract.planning_allowed === true,
+        contract_final_allowed: selectedContract.contract_final_allowed === true,
+        payroll_final_allowed: selectedContract.payroll_final_allowed === true,
         function_type: selectedContract.function_type || null,
         allowed_function_types: selectedContract.allowed_function_types || [],
         security_role_status: selectedContract.security_role_status || null,
@@ -1164,6 +1241,7 @@ Deno.serve(async (req) => {
       service_context: serviceContext,
       internship_service_check: internshipServiceCheck,
       hired_worker_service_check: hiredWorkerServiceCheck,
+      selected_contract_readiness: selectedContractReadiness,
       cao_applicability: caoApplicability,
       function_match: selectedItem?.function_match || null,
       evaluated_contracts: evaluatedContracts.map(item => ({
@@ -1175,8 +1253,14 @@ Deno.serve(async (req) => {
         is_call_agreement: item.contract.is_call_agreement === true,
         call_agreement_type: item.contract.call_agreement_type || null,
         cao_key: item.contract.cao_key || null,
+        contract_context_status: item.contract.contract_context_status || null,
+        cao_contract_rule_status: item.contract.cao_contract_rule_status || null,
+        planning_allowed: item.contract.planning_allowed === true,
+        contract_final_allowed: item.contract.contract_final_allowed === true,
+        payroll_final_allowed: item.contract.payroll_final_allowed === true,
         security_role_status: item.contract.security_role_status || null,
         allowed_security_role_statuses: item.contract.allowed_security_role_statuses || [],
+        stored_contract_readiness: evaluateStoredContractReadiness(item.contract),
         function_match: item.function_match
       })),
       cao_configuration_id: caoResolution.config?.id || null,
