@@ -315,6 +315,9 @@ function summarizeRule(rule, extra = {}) {
 
 function evaluateCoverageGate(config, rules, options = {}) {
   const maxOpenRules = Math.max(1, Number(options.max_open_rules || 100));
+  const activeConfigurationCandidates = Array.isArray(options.active_configuration_candidates)
+    ? options.active_configuration_candidates
+    : [];
   const sourceCoverage = evaluateSourceCoverageCompleteness(config, rules);
   const counts = {
     total: rules.length,
@@ -415,6 +418,21 @@ function evaluateCoverageGate(config, rules, options = {}) {
       message: 'Active CAOConfiguration.valid_from ontbreekt; payroll kan zonder ingangsdatum niet veilig historisch rekenen.'
     });
   }
+  if (config?.valid_from && config?.valid_until && config.valid_until < config.valid_from) {
+    blockingFindings.push({
+      code: 'invalid_cao_validity_range',
+      severity: 'critical',
+      message: `Active CAOConfiguration heeft een ongeldig geldigheidsbereik: valid_until (${config.valid_until}) ligt voor valid_from (${config.valid_from}).`
+    });
+  }
+  if (activeConfigurationCandidates.length > 1) {
+    blockingFindings.push({
+      code: 'ambiguous_active_cao_configurations',
+      severity: 'critical',
+      message: `${activeConfigurationCandidates.length} actieve CAO-configuraties overlappen op de referentiedatum; payroll mag niet gokken welke configuratie geldt.`,
+      candidate_configuration_ids: activeConfigurationCandidates.map(candidate => candidate.id).filter(Boolean)
+    });
+  }
   if (rules.length === 0) {
     blockingFindings.push({
       code: 'missing_rules',
@@ -467,6 +485,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
 
   let status = 'ready';
   if (blockingFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
+  else if (blockingFindings.some(f => f.code === 'invalid_cao_validity_range' || f.code === 'ambiguous_active_cao_configurations')) status = 'blocked_ambiguous_effective_date';
   else if (blockingFindings.some(f => f.code === 'missing_rules')) status = 'blocked_missing_rules';
   else if (blockingFindings.some(f => String(f.code || '').startsWith('incomplete_'))) status = 'blocked_incomplete_source_coverage';
   else if (blockingFindings.some(f => f.code === 'missing_wage_scales' || f.code === 'missing_pay_periods')) status = 'blocked_missing_payroll_parameters';
@@ -497,14 +516,17 @@ function evaluateCoverageGate(config, rules, options = {}) {
   };
 }
 
-function chooseActiveConfiguration(configs, referenceDate) {
+function activeConfigurationCandidates(configs, referenceDate) {
   const ref = normalizeDate(referenceDate || new Date().toISOString());
-  const active = configs
+  return configs
     .filter(config => config.status === 'active' || config.is_active === true)
     .filter(config => !config.valid_from || config.valid_from <= ref)
     .filter(config => !config.valid_until || config.valid_until >= ref)
     .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')));
-  return active[0] || null;
+}
+
+function chooseActiveConfiguration(configs, referenceDate) {
+  return activeConfigurationCandidates(configs, referenceDate)[0] || null;
 }
 
 async function loadRulesForConfiguration(base44, caoKey, config) {
@@ -563,10 +585,14 @@ Deno.serve(async (req) => {
     const maxOpenRules = Math.min(500, Math.max(25, Number(body.max_open_rules || 100)));
 
     const configs = await base44.asServiceRole.entities.CAOConfiguration.filter({ cao_key: caoKey });
-    const activeConfig = chooseActiveConfiguration(configs || [], referenceDate);
+    const activeCandidates = activeConfigurationCandidates(configs || [], referenceDate);
+    const activeConfig = activeCandidates[0] || null;
     const ruleLoad = await loadRulesForConfiguration(base44, caoKey, activeConfig);
     const rules = ruleLoad.rules;
-    const runtimeGate = evaluateCoverageGate(activeConfig || {}, rules || [], { max_open_rules: maxOpenRules });
+    const runtimeGate = evaluateCoverageGate(activeConfig || {}, rules || [], {
+      max_open_rules: maxOpenRules,
+      active_configuration_candidates: activeCandidates
+    });
     const registrySnapshot = await buildRuleRegistrySnapshot(activeConfig || {}, rules || []);
     const gate = mergeRegistrySnapshotIntoGate(runtimeGate, registrySnapshot);
 
@@ -621,6 +647,7 @@ Deno.serve(async (req) => {
       reference_date: referenceDate,
       active_configuration_id: activeConfig?.id || null,
       active_configuration_revision: activeConfig?.cloudflare_revision || null,
+      active_configuration_candidate_ids: activeCandidates.map(config => config.id).filter(Boolean),
       requested_payroll_ready: requestedPayrollReady,
       is_payroll_ready: isPayrollReady,
       payroll_readiness_status: payrollReadinessStatus,

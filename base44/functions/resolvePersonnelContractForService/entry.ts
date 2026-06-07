@@ -477,6 +477,16 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
     .filter(c => isWithinDateRange(c, serviceDate, 'valid_from', 'valid_until'))
     .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')));
 
+  if (eligible.length > 1) {
+    return {
+      config: null,
+      source: 'ambiguous_active_cao_configurations',
+      cao_key: caoKey,
+      candidate_configuration_ids: eligible.map(config => config.id).filter(Boolean),
+      warning: `Meerdere actieve CAO-configuraties gevonden voor ${caoKey} op ${serviceDate}; planning/payroll is geblokkeerd totdat geldigheidsperiodes zijn opgeschoond.`
+    };
+  }
+
   return {
     config: eligible[0] || null,
     source: eligible[0] ? 'active_cao_by_key_and_date' : 'not_found',
@@ -787,6 +797,7 @@ Deno.serve(async (req) => {
       cao_configuration_id: caoResolution.config?.id || null,
       cao_key: caoResolution.config?.cao_key || selectedContract?.cao_key || personnel.cao || null,
       cao_resolution_source: caoResolution.source,
+      cao_resolution_candidate_configuration_ids: caoResolution.candidate_configuration_ids || [],
       cao_version_label: caoResolution.config?.version_label || caoResolution.config?.name || null,
       cao_valid_from: caoResolution.config?.valid_from || null,
       cao_valid_until: caoResolution.config?.valid_until || null,

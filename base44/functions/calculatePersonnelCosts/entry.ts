@@ -1867,6 +1867,28 @@ Deno.serve(async (req) => {
       return db - da;
     });
 
+    if (eligibleCaos.length > 1) {
+      return Response.json({
+        error: `Meerdere actieve CAO-configuraties gevonden voor ${targetCaoKey} op datum ${firstShiftDate}; definitieve loonberekening is geblokkeerd om historische CAO-keuze niet te gokken.`,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...calculationWarnings,
+          `Ambigue actieve CAO-configuraties voor ${targetCaoKey} op ${firstShiftDate}: ${eligibleCaos.map(c => c.id).join(', ')}`
+        ],
+        cao_key: targetCaoKey,
+        active_cao_configuration_candidates: eligibleCaos.map(c => ({
+          id: c.id,
+          name: c.name || c.version_label || null,
+          cloudflare_revision: c.cloudflare_revision || null,
+          valid_from: c.valid_from || null,
+          valid_until: c.valid_until || null
+        })),
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_ambiguous_active_cao_config'
+      }, { status: 400 });
+    }
+
     const caoConfig = eligibleCaos[0];
     if (!caoConfig) {
       return Response.json({
