@@ -607,6 +607,59 @@ function getUnpaidBreakHours(shift) {
   return found ? total : 0;
 }
 
+function isCashValueLogisticsShift(shift, caoScope) {
+  const serviceContext = shift?.service_context || {};
+  return caoScope?.cao_scope_profile === 'cash_value_logistics' ||
+    shift?.works_cash_value_logistics === true ||
+    serviceContext.works_cash_value_logistics === true;
+}
+
+function atwReferencePaidRestHours(shiftHours) {
+  if (shiftHours > 10) return 0.75;
+  if (shiftHours > 5.5) return 0.5;
+  return 0;
+}
+
+function explicitPaidRestHours(shift) {
+  const explicitHours = numberOrNull(
+    shift.cash_value_planned_paid_rest_hours ??
+    shift.planned_paid_rest_hours ??
+    shift.paid_rest_hours ??
+    shift.cash_value_paid_rest_hours
+  );
+  if (explicitHours !== null) return explicitHours;
+  const explicitMinutes = numberOrNull(
+    shift.cash_value_planned_paid_rest_minutes ??
+    shift.planned_paid_rest_minutes ??
+    shift.paid_rest_minutes ??
+    shift.cash_value_paid_rest_minutes
+  );
+  return explicitMinutes !== null ? explicitMinutes / 60 : null;
+}
+
+function paidRestHoursFromBreaks(shiftBreaks) {
+  const paidBreaks = shiftBreaks.filter(item => item.paid === true && item.duration_hours !== null);
+  if (!paidBreaks.length) return null;
+  return paidBreaks.reduce((sum, item) => sum + item.duration_hours, 0);
+}
+
+function resolveCashValuePaidRest(shift, caoScope, shiftHours, shiftBreaks) {
+  const applies = isCashValueLogisticsShift(shift, caoScope);
+  const explicit = explicitPaidRestHours(shift);
+  const fromBreaks = explicit === null ? paidRestHoursFromBreaks(shiftBreaks) : null;
+  const plannedPaidRestHours = explicit !== null ? explicit : fromBreaks;
+  const atwReferenceHours = atwReferencePaidRestHours(shiftHours);
+  return {
+    applies,
+    planned_paid_rest_hours: plannedPaidRestHours,
+    planned_paid_rest_source: explicit !== null ? 'explicit_paid_rest_hours' : fromBreaks !== null ? 'paid_breaks' : 'missing',
+    atw_reference_paid_rest_hours: atwReferenceHours,
+    manual_review_required: applies && atwReferenceHours > 0 && plannedPaidRestHours === null,
+    exceeds_atw_reference: applies && plannedPaidRestHours !== null && plannedPaidRestHours > atwReferenceHours,
+    source_rule_ids: ['CAO-PB-2024-R1635', 'CAO-PB-2024-R1636', 'CAO-PB-2024-R1637', 'CAO-PB-2024-R1638', 'CAO-PB-2024-R1639', 'CAO-PB-2024-R1640', 'CAO-PB-2024-R1641', 'CAO-PB-2024-R1642']
+  };
+}
+
 function breakIntervalWithinShift(shift, breakItem) {
   const shiftInterval = shiftDateTime(shift);
   const date = asIsoDate(shift.date || shift.service_date);
@@ -1510,6 +1563,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const breakSummaryRows = [];
   let noBreakExceptionApplied = false;
   let noBreakSixteenWeekAverage = null;
+  let cashValuePaidRestApplied = false;
 
   if (isGeneralReserve) {
     skippedRules.push({
@@ -2544,22 +2598,72 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
       const unpaidBreakHours = getUnpaidBreakHours(shift);
       const objectGuardOrReceptionist = shiftLooksObjectGuardOrReceptionist(shift, body);
       const noBreakException = shiftHasNoBreakException(shift, body);
-      noBreakExceptionApplied = noBreakExceptionApplied || noBreakException;
+      const cashValuePaidRest = resolveCashValuePaidRest(shift, caoScope, shiftHours, shiftBreaks);
+      cashValuePaidRestApplied = cashValuePaidRestApplied || cashValuePaidRest.applies;
+      noBreakExceptionApplied = noBreakExceptionApplied || (!cashValuePaidRest.applies && noBreakException);
 
       const row = {
         shift_id: shift.id || null,
         date: asIsoDate(shift.date || shift.service_date),
         shift_hours: round2(shiftHours),
+        break_rule_profile: cashValuePaidRest.applies ? 'cash_value_logistics_paid_rest_article_107' : 'standard_article_29_break',
         break_count: shiftBreaks.length,
         qualifying_break_count: qualifyingBreaks.length,
         qualifying_break_hours: round2(qualifyingBreakHours),
         longest_qualifying_break_hours: round2(longestQualifyingBreakHours),
         unpaid_break_hours: round2(unpaidBreakHours),
-        paid_work_hours_after_unpaid_breaks: round2(Math.max(0, shiftHours - unpaidBreakHours)),
+        paid_work_hours_after_unpaid_breaks: cashValuePaidRest.applies ? round2(shiftHours) : round2(Math.max(0, shiftHours - unpaidBreakHours)),
         object_guard_or_receptionist: objectGuardOrReceptionist,
-        no_break_exception: noBreakException
+        no_break_exception: noBreakException,
+        cash_value_paid_rest: cashValuePaidRest.applies
+          ? {
+            planned_paid_rest_hours: cashValuePaidRest.planned_paid_rest_hours !== null ? round2(cashValuePaidRest.planned_paid_rest_hours) : null,
+            planned_paid_rest_source: cashValuePaidRest.planned_paid_rest_source,
+            atw_reference_paid_rest_hours: round2(cashValuePaidRest.atw_reference_paid_rest_hours),
+            manual_review_required: cashValuePaidRest.manual_review_required,
+            exceeds_atw_reference: cashValuePaidRest.exceeds_atw_reference,
+            source_rule_ids: cashValuePaidRest.source_rule_ids
+          }
+          : null
       };
       breakSummaryRows.push(row);
+
+      if (cashValuePaidRest.applies) {
+        if (unpaidBreakHours > 0) {
+          violations.push({
+            rule_id: 'CAO-PB-2024-R1636',
+            severity: 'high',
+            message: `Geld- en waardelogistiek dienst ${row.date} heeft ${round2(unpaidBreakHours)} uur onbetaalde pauze geregistreerd; artikel 107 geeft geen CAO-pauzerecht maar wel betaalde rust.`,
+            affected_shift_ids: shift.id ? [shift.id] : [],
+            payroll_impact: true,
+            unpaid_break_hours: round2(unpaidBreakHours),
+            manual_review_required: false,
+            related_rule_ids: ['CAO-PB-2024-R1635', 'CAO-PB-2024-R1636']
+          });
+        }
+        if (cashValuePaidRest.manual_review_required) {
+          addManualReview(
+            manualReviewItems,
+            'CAO-PB-2024-R1642',
+            'cash_value_paid_rest',
+            'Geld- en waardelogistiek dienst mist geplande betaalde rust; artikel 107 vereist betaalde rust en planning moet rekening houden met ATW-gerelateerde rustlengte.',
+            'cash_value_planned_paid_rest_hours/breaks[paid=true]'
+          );
+        }
+        if (cashValuePaidRest.exceeds_atw_reference) {
+          violations.push({
+            rule_id: 'CAO-PB-2024-R1642',
+            severity: 'medium',
+            message: `Geld- en waardelogistiek dienst ${row.date} plant ${round2(cashValuePaidRest.planned_paid_rest_hours)} uur betaalde rust; dit is meer dan de ATW-referentie van ${round2(cashValuePaidRest.atw_reference_paid_rest_hours)} uur.`,
+            affected_shift_ids: shift.id ? [shift.id] : [],
+            payroll_impact: false,
+            planned_paid_rest_hours: round2(cashValuePaidRest.planned_paid_rest_hours),
+            atw_reference_paid_rest_hours: round2(cashValuePaidRest.atw_reference_paid_rest_hours),
+            manual_review_required: false
+          });
+        }
+        continue;
+      }
 
       if (unpaidBreakHours > 0) {
         payrollAdjustments.push({
@@ -3380,6 +3484,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     break_summary: {
       shift_breaks: breakSummaryRows,
       no_break_exception_applied: noBreakExceptionApplied,
+      cash_value_paid_rest_applied: cashValuePaidRestApplied,
       no_break_sixteen_week_average: noBreakSixteenWeekAverage,
       source_rule_ids: [
         'CAO-PB-2024-R0669',
@@ -3388,7 +3493,17 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
         'CAO-PB-2024-R0673',
         'CAO-PB-2024-R0674',
         'CAO-PB-2024-R0676',
-        'CAO-PB-2024-R0677'
+        'CAO-PB-2024-R0677',
+        ...(cashValuePaidRestApplied ? [
+          'CAO-PB-2024-R1635',
+          'CAO-PB-2024-R1636',
+          'CAO-PB-2024-R1637',
+          'CAO-PB-2024-R1638',
+          'CAO-PB-2024-R1639',
+          'CAO-PB-2024-R1640',
+          'CAO-PB-2024-R1641',
+          'CAO-PB-2024-R1642'
+        ] : [])
       ]
     },
     rest_time_summary: {
