@@ -3405,7 +3405,7 @@ function isOpenCaoPayrollCorrection(correction) {
     !correction?.applied_payroll_run_id;
 }
 
-function firstNumber(...values) {
+function firstCorrectionDeltaNumber(...values) {
   for (const value of values) {
     const n = numberOrNull(value);
     if (n !== null) return n;
@@ -3414,38 +3414,38 @@ function firstNumber(...values) {
 }
 
 function extractCaoCorrectionDeltaAmounts(delta = {}) {
-  const grossDelta = firstNumber(
+  const grossDelta = firstCorrectionDeltaNumber(
     delta.total_gross_delta,
     delta.gross_delta,
     delta.gross_pay_delta,
     delta.bruto_delta,
     delta.bruto_loon_delta
   );
-  const employeeDeductionsDelta = firstNumber(
+  const employeeDeductionsDelta = firstCorrectionDeltaNumber(
     delta.employee_deductions_delta,
     delta.employee_deductions_total_delta,
     delta.inhoudingen_delta
   );
-  const employerCostsDelta = firstNumber(
+  const employerCostsDelta = firstCorrectionDeltaNumber(
     delta.employer_costs_delta,
     delta.employer_costs_total_delta,
     delta.werkgeverslasten_delta
   );
-  const vacationAllowanceDelta = firstNumber(
+  const vacationAllowanceDelta = firstCorrectionDeltaNumber(
     delta.vacation_allowance_delta,
     delta.vakantiegeld_delta
   );
-  const yearEndBonusDelta = firstNumber(
+  const yearEndBonusDelta = firstCorrectionDeltaNumber(
     delta.year_end_bonus_delta,
     delta.eindejaarsuitkering_delta
   );
-  const netSalaryDelta = firstNumber(
+  const netSalaryDelta = firstCorrectionDeltaNumber(
     delta.net_salary_delta,
     delta.net_delta,
     delta.netto_delta,
     delta.netto_loon_delta
   );
-  const totalCostEmployerDelta = firstNumber(
+  const totalCostEmployerDelta = firstCorrectionDeltaNumber(
     delta.total_cost_employer_delta,
     delta.employer_total_delta,
     delta.totale_werkgeverskosten_delta

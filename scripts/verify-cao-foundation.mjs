@@ -23,9 +23,17 @@ const taskContext = loadFunctionModule('base44/functions/validateTaskPlanningCon
 const contractResolver = loadFunctionModule('base44/functions/resolvePersonnelContractForService/entry.ts');
 const contractRules = loadFunctionModule('base44/functions/applyCaoContractRules/entry.ts');
 const correctionQueue = loadFunctionModule('base44/functions/queueCaoPayrollCorrections/entry.ts');
+const reimbursements = loadFunctionModule('base44/functions/calculateCaoReimbursements/entry.ts');
+const leaveSickness = loadFunctionModule('base44/functions/calculateCaoLeaveAndSickness/entry.ts');
+const yearEndBonus = loadFunctionModule('base44/functions/calculateCaoYearEndBonus/entry.ts');
+const personnelCosts = loadFunctionModule('base44/functions/calculatePersonnelCosts/entry.ts');
 
 function assertIncludes(values, expected, message) {
   assert.ok(values.includes(expected), `${message}: expected ${expected} in ${JSON.stringify(values)}`);
+}
+
+function assertAlmostEqual(actual, expected, message) {
+  assert.equal(Math.round(Number(actual) * 100) / 100, expected, message);
 }
 
 function assertCleanBooleanField(value, expected, field) {
@@ -347,6 +355,243 @@ function runEffectiveDateCorrectionScenarios() {
   );
 }
 
+function runReimbursementScenarios() {
+  const params = reimbursements.resolveReimbursementParameters(null);
+  assert.equal(params.travel_cost_per_km, 0.23);
+  assert.equal(params.travel_min_km, 9);
+  assert.equal(params.travel_above_40_threshold_km, 40);
+  assert.equal(params.travel_above_40_rate_per_km, 0.16);
+  assert.equal(params.work_work_travel_rate_per_km, 0.27);
+  assert.equal(params.meal_allowance_max, 11.91);
+  assert.equal(params.break_availability_per_half_hour, 0.43);
+  assert.equal(params.consignment_per_hour, 1.43);
+  assert.equal(params.consignment_weekend_holiday_per_hour, 2.87);
+  assert.equal(params.reachability_per_pay_period, 71.73);
+
+  const shortCommute = reimbursements.calculateTravelCost(8, null, params);
+  assert.equal(shortCommute.eligible, false, 'Commute below 9 km one-way must not receive regular travel allowance');
+  assert.equal(shortCommute.amount, 0);
+
+  const longCommute = reimbursements.calculateTravelCost(45, null, params);
+  assert.equal(longCommute.eligible, true);
+  assert.equal(longCommute.km_total, 90);
+  assertAlmostEqual(longCommute.base_amount, 20.7, 'Base commute amount must use EUR 0.23/km over return trip');
+  assertAlmostEqual(longCommute.above_40_amount, 1.6, 'Above-40km supplement must use EUR 0.16/km over excess return km');
+  assertAlmostEqual(longCommute.amount, 22.3, 'Total commute reimbursement mismatch');
+
+  const workWorkTravel = reimbursements.calculateWorkWorkTravelCost(10, params);
+  assertAlmostEqual(workWorkTravel.amount, 2.7, 'Work-work travel must use EUR 0.27/km');
+
+  const meal = reimbursements.calculateMealAllowance({
+    start_time: '12:00',
+    end_time: '20:00',
+    meal_declared_costs: 20
+  }, params);
+  assert.equal(meal.eligible, true);
+  assertAlmostEqual(meal.amount, 11.91, 'Meal allowance must be capped at CAO maximum');
+  assert.equal(meal.manual_review_required, false);
+
+  const breakAvailability = reimbursements.calculateBreakAvailabilityAllowance({
+    cao_function_group: 'mobiel_surveillant',
+    break_availability_half_hours: 3,
+    unpaid_break_available_required: true
+  }, params);
+  assert.equal(breakAvailability.eligible, true);
+  assertAlmostEqual(breakAvailability.amount, 1.29, 'Break availability allowance must use EUR 0.43 per half hour');
+
+  const invalidBreakAvailability = reimbursements.calculateBreakAvailabilityAllowance({
+    cao_function_group: 'objectbeveiliger_receptionist',
+    break_availability_half_hours: 2,
+    unpaid_break_available_required: true
+  }, params);
+  assert.equal(invalidBreakAvailability.eligible, false);
+  assert.equal(invalidBreakAvailability.manual_review_required, true, 'Break availability outside mobile/retail surveillance must require review');
+
+  const consignment = reimbursements.calculateConsignmentAndReachability({
+    consignment_hours: 10,
+    consignment_weekend_holiday_hours: 4,
+    reachability_phone_followup_required: true
+  }, params);
+  assertAlmostEqual(consignment.amount, 91.79, 'Consignment and reachability amount mismatch');
+
+  const dogAllowance = reimbursements.calculateDogAllowance({
+    works_with_dog: true,
+    dog_owner: 'employee',
+    contract_hours_per_pay_period: 72
+  }, params);
+  assertAlmostEqual(dogAllowance.parttime_ratio, 0.5, 'Dog allowance must be prorated for part-time work');
+  assertAlmostEqual(dogAllowance.amount_gross, 57.62, 'Dog service allowance gross amount mismatch');
+  assertAlmostEqual(dogAllowance.amount_net, 72.02, 'Dog owner cost allowance net amount mismatch');
+}
+
+function runLeaveSicknessScenarios() {
+  const params = leaveSickness.resolveLeaveSicknessParameters(null);
+  assert.equal(params.standard_vacation.fulltimeAnnualHours, 172.8);
+  assert.equal(params.standard_vacation.fulltimeAnnualDays, 24);
+  assert.equal(params.standard_vacation.fulltimePerPeriodHours, 13.3);
+  assert.equal(params.call_worker_vacation_payout_percentage, 9.24);
+  assert.equal(params.call_worker_vacation_max_hours_per_period, 144);
+  assert.equal(params.sickness.waiting_day_seniority_periods, 13);
+  assert.equal(params.sickness.short_seniority_payment_percentage, 70);
+  assert.equal(params.sickness.first_six_months_percentage, 100);
+  assert.equal(params.sickness.second_six_months_percentage, 90);
+
+  const fulltimeVacation = leaveSickness.calculateVacationAccrual({
+    paid_hours_per_pay_period: 144,
+    continuous_service_years: 10
+  }, params);
+  assertAlmostEqual(fulltimeVacation.vacation_hours_accrued_per_period, 13.3, 'Full-time vacation accrual per period mismatch');
+  assert.equal(fulltimeVacation.extra_vacation_days_annual_fulltime_basis, 2);
+  assertAlmostEqual(fulltimeVacation.vacation_hours_annual_total, 187.2, 'Vacation total with 10 service years must include 2 extra days');
+  assert.equal(fulltimeVacation.manual_review_required, false);
+
+  const callWorkerVacation = leaveSickness.calculateVacationAccrual({
+    contract_form: 'oproep',
+    worked_hours: 160,
+    base_hourly_rate: 20
+  }, params);
+  assert.equal(callWorkerVacation.vacation_accrual_type, 'call_worker_paid_in_money');
+  assert.equal(callWorkerVacation.capped_at_144_hours_per_pay_period, true);
+  assertAlmostEqual(callWorkerVacation.vacation_payout_amount, 266.11, 'Call-worker vacation payout must be capped at 144 hours and use 9.24%');
+
+  const holidayCredit = leaveSickness.calculateHolidayCredit({
+    holiday_dates: ['2026-12-25'],
+    is_fulltime: true
+  }, {}, params);
+  assertAlmostEqual(holidayCredit.total_holiday_credit_hours, 7.2, 'Full-time weekday holiday must create 7.2 hours credit');
+  assert.equal(holidayCredit.manual_review_required, false);
+
+  const vacationAllowance = leaveSickness.calculateVacationAllowance({
+    base_salary_amount: 1000,
+    periodic_increase_amount: 50,
+    special_hours_allowance_amount: 100,
+    holiday_surcharge_amount: 20,
+    structural_overtime_amount: 30,
+    fixed_allowances_amount: 10
+  }, params);
+  assertAlmostEqual(vacationAllowance.vacation_allowance_basis_amount, 1210, 'Vacation allowance basis mismatch');
+  assertAlmostEqual(vacationAllowance.vacation_allowance_amount, 96.8, 'Vacation allowance must be 8% over eligible basis');
+
+  const shortSenioritySickness = leaveSickness.calculateSicknessPayment({
+    sickness_start_date: '2026-01-01',
+    sickness_end_date: '2026-01-10',
+    sickness_payable_days: 10,
+    industry_seniority_periods: 12,
+    base_gross_salary: 2000,
+    payable_days_per_pay_period: 20
+  }, params);
+  assert.equal(shortSenioritySickness.has_waiting_day, true);
+  assert.equal(shortSenioritySickness.payment_percentage, 70);
+  assertAlmostEqual(shortSenioritySickness.total_sickness_payment, 630, 'Short-seniority sickness must apply 1 waiting day and 70% payment');
+
+  const regularSickness = leaveSickness.calculateSicknessPayment({
+    sickness_start_date: '2026-01-01',
+    sickness_end_date: '2026-01-10',
+    sickness_payable_days: 10,
+    industry_seniority_periods: 13,
+    base_gross_salary: 2000,
+    payable_days_per_pay_period: 20
+  }, params);
+  assert.equal(regularSickness.has_waiting_day, false);
+  assert.equal(regularSickness.days_first_six_months_100_percent, 10);
+  assertAlmostEqual(regularSickness.total_sickness_payment, 1000, 'First six months sickness payment must be 100% for >=13 pay periods seniority');
+}
+
+function runPayrollPolicyScenarios() {
+  const params = personnelCosts.resolvePayrollCaoParameters(null);
+  assert.equal(params.standard_vacation.fulltimeAnnualHours, 172.8);
+  assert.equal(params.standard_vacation.fulltimeVacationHoursPerPeriod, 13.3);
+  assert.equal(params.call_worker_vacation_payout_percentage, 9.24);
+  assert.equal(params.pension.franchiseAnnual, 16164);
+  assert.equal(params.pension.premiumRateTotalPercentage, 24.1);
+  assert.equal(params.pension.employerSharePercentage, 60);
+  assert.equal(params.funds.sfpbEmployeePercentage, 0.061);
+  assert.equal(params.funds.pawwEmployeePercentage, 0.1);
+
+  const regularSurcharges = personnelCosts.resolveArticle40And41SurchargeMatrix({
+    caoConfig: {},
+    isCallWorker: false,
+    applySpecialHours: true,
+    applyHolidays: true
+  });
+  assert.equal(regularSurcharges.special_hours.evening_18_00_24_00_monday_friday_percentage, 10);
+  assert.equal(regularSurcharges.special_hours.night_00_00_07_00_monday_friday_percentage, 20);
+  assert.equal(regularSurcharges.special_hours.weekend_saturday_sunday_percentage, 35);
+  assert.equal(regularSurcharges.special_hours.new_years_eve_after_16_00_percentage, 100);
+  assert.equal(regularSurcharges.holidays.applied_holiday_percentage, 50);
+  assert.equal(regularSurcharges.holidays.article_40_stacks_with_article_41_for_this_employee, true);
+
+  const callWorkerSurcharges = personnelCosts.resolveArticle40And41SurchargeMatrix({
+    caoConfig: {},
+    isCallWorker: true,
+    applySpecialHours: true,
+    applyHolidays: true
+  });
+  assert.equal(callWorkerSurcharges.holidays.applied_holiday_percentage, 100);
+  assert.equal(callWorkerSurcharges.holidays.article_40_stacks_with_article_41_for_this_employee, false);
+
+  const callWorkerVacation = personnelCosts.calculateCallWorkerVacationPayoutArticle59({
+    baseWageAmount: 4000,
+    minimumServiceAmount: 0,
+    baseHourlyRate: 20,
+    paidBaseHours: 160
+  });
+  assert.equal(callWorkerVacation.capped_at_144_hours_per_pay_period, true);
+  assertAlmostEqual(callWorkerVacation.payout_base_amount, 2880, 'Call-worker vacation basis must cap at 144 hours');
+  assertAlmostEqual(callWorkerVacation.amount, 266.11, 'Call-worker vacation amount must use 9.24%');
+
+  const yearEndBasis = yearEndBonus.extractYearEndBonusBasisFromRun({
+    id: 'run-1',
+    pay_period_year: 2026,
+    pay_period_number: 5,
+    calculation_output: {
+      payslip: {
+        base_salary: 1000,
+        minimum_service_compensation: { amount: 50 },
+        overtime_50: { amount: 200 }
+      }
+    }
+  }, 8);
+  assert.equal(yearEndBasis.basis_source, 'fallback_base_salary_plus_minimum_service');
+  assertAlmostEqual(yearEndBasis.eligible_base_wage, 1050, 'Year-end bonus basis must include base salary and minimum service compensation');
+  assertAlmostEqual(yearEndBasis.vacation_allowance_on_eligible_base_wage, 84, 'Year-end bonus basis must include 8% vacation allowance');
+  assertAlmostEqual(yearEndBasis.eligible_amount_including_vacation_allowance, 1134, 'Year-end bonus eligible amount mismatch');
+  assertAlmostEqual(yearEndBasis.excluded_overtime_amount, 200, 'Year-end bonus basis must keep overtime excluded');
+
+  const correctionApplication = personnelCosts.buildCaoCorrectionApplication([
+    { id: 'corr-1', status: 'queued', cao_change_review_id: 'review-1' }
+  ], {
+    'corr-1': {
+      delta_snapshot: {
+        gross_delta: 100,
+        employee_deductions_delta: 20,
+        employer_costs_delta: 30,
+        vacation_allowance_delta: 8,
+        year_end_bonus_delta: 2
+      }
+    }
+  }, true);
+  assert.equal(correctionApplication.ready_to_apply, true);
+
+  const correctionComponent = personnelCosts.buildCaoCorrectionPayrollComponent([
+    { id: 'corr-1', status: 'queued', cao_change_review_id: 'review-1' }
+  ], {
+    'corr-1': {
+      delta_snapshot: {
+        gross_delta: 100,
+        employee_deductions_delta: 20,
+        employer_costs_delta: 30,
+        vacation_allowance_delta: 8,
+        year_end_bonus_delta: 2
+      }
+    }
+  });
+  assert.equal(correctionComponent.applied, true);
+  assertAlmostEqual(correctionComponent.total_gross_delta, 100, 'Correction gross delta mismatch');
+  assertAlmostEqual(correctionComponent.net_salary_delta, 80, 'Correction net delta should default to gross minus employee deductions');
+  assertAlmostEqual(correctionComponent.total_cost_employer_delta, 140, 'Correction employer total should default to gross plus employer/vacation/year-end deltas');
+}
+
 async function main() {
   const scenarios = [
     ['external CAO gates', () => runExternalCaoGateScenarios()],
@@ -354,7 +599,10 @@ async function main() {
     ['contract resolver scope', () => runContractResolverScenarios()],
     ['contract scope persistence', () => runContractScopePersistenceScenarios()],
     ['probation rules', () => runProbationScenarios()],
-    ['effective-date correction queue', () => runEffectiveDateCorrectionScenarios()]
+    ['effective-date correction queue', () => runEffectiveDateCorrectionScenarios()],
+    ['reimbursements', () => runReimbursementScenarios()],
+    ['leave and sickness', () => runLeaveSicknessScenarios()],
+    ['payroll policy and corrections', () => runPayrollPolicyScenarios()]
   ];
 
   for (const [name, fn] of scenarios) {
