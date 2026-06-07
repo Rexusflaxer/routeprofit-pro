@@ -45,6 +45,22 @@
       ],
       "description": "Default beveiligingsstatus voor diensten op dit object, bijvoorbeeld aspirant_beveiliger of beveiliger"
     },
+    "default_required_qualification_types": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Default kwalificatie-/diplomatypes voor diensten op dit object."
+    },
+    "default_required_qualification_groups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Default kwalificatiegroepen voor diensten op dit object, bijvoorbeeld base_security, advanced_security, ehbo_or_bhv of centralist_basic."
+    },
     "default_performs_security_work": {
       "type": [
         "boolean",

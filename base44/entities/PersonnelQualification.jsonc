@@ -16,11 +16,32 @@
       "enum": [
         "beveiliger_2",
         "beveiliger_3",
+        "mbo_beveiliger",
+        "mbo_beveiliger_in_opleiding",
+        "coordinator_beveiliging",
+        "svpb_basisdiploma_beveiliging",
+        "svpb_vakdiploma_beveiliging",
+        "svpb_kaderdiploma_beveiliging",
+        "permanente_ontheffing_minister",
         "horecaportier",
         "voetbalsteward",
         "verkeersregelaar",
+        "ehbo",
         "bhv",
         "brandwacht",
+        "rijksdiploma_brandwacht",
+        "rijksdiploma_brandwacht_1e_klas",
+        "rijksdiploma_hoofdbrandwacht",
+        "rijbewijs_c",
+        "detailhandel",
+        "certificaat_winkelsurveillance",
+        "certificaat_beveiliging_b",
+        "certificaat_beveiliging_c",
+        "centralist_boca",
+        "centralist_boca_in_opleiding",
+        "centralist_voca",
+        "leidinggeven_pb",
+        "branchediploma_coordinator_beveiliging",
         "alarminstallateur",
         "particulier_onderzoeker",
         "other"
@@ -54,6 +75,14 @@
         "null"
       ],
       "format": "date"
+    },
+    "cao_source_rule_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "CAO-regel-id's waarop deze kwalificatie/diplomakoppeling is gebaseerd, bijvoorbeeld bijlage 3."
     },
     "document_id": {
       "type": [

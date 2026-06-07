@@ -59,6 +59,22 @@
       ],
       "description": "Benodigde beveiligingsstatus voor deze dienst."
     },
+    "required_qualification_types": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Expliciete kwalificatie-/diplomatypes die voor deze dienst vereist zijn, naast automatisch afgeleide CAO PB bijlage-2/bijlage-3 eisen."
+    },
+    "required_qualification_groups": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Expliciete kwalificatiegroepen voor deze dienst, bijvoorbeeld base_security, advanced_security, ehbo_or_bhv, brandwacht_base of centralist_basic."
+    },
     "contract_assignment_policy": {
       "type": "string",
       "enum": [
