@@ -352,7 +352,18 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   },
   'calculateCaoReimbursements.article_47_48_49_50': {
     functions: ['calculateCaoReimbursements'],
-    rule_ids: ruleIds(855, 878, 880, 885, 890, 895, 900, 905, 1609)
+    rule_ids: [
+      ...ruleRange(838, 845),
+      ...ruleIds(847, 849, 853, 854, 855, 856, 857, 858, 861, 862, 864, 868),
+      ...ruleRange(877, 885),
+      ...ruleRange(887, 896),
+      ...ruleRange(897, 910),
+      ...ruleRange(911, 928),
+      ...ruleRange(930, 932),
+      ...ruleIds(937, 938, 939, 940),
+      ...ruleRange(941, 947),
+      ...ruleIds(1609)
+    ]
   },
   'calculateCaoLeaveAndSickness.articles_59_65_66_67': {
     functions: ['calculateCaoLeaveAndSickness'],

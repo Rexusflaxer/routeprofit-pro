@@ -52,10 +52,20 @@ async function lazySyncCao(base44, forceCaoSync = false, caoKey = null) {
 const REIMBURSEMENT_RATES = {
   travel_cost_per_km: 0.23,          // art. 47 + Bijlage 6: EUR 0,23/km netto
   travel_min_km: 9,                   // minimaal 9 km voor reiskosten
+  travel_above_40_rate_per_km: 0.16,  // aanvullende vergoeding boven 40 km enkele reis
+  travel_above_40_threshold_km: 40,
+  work_work_travel_rate_per_km: 0.27,
+  public_transport_class: '2e_klas',
   meal_allowance_max: 11.91,          // art. 48: max EUR 11,91
+  break_availability_per_half_hour: 0.43,
+  consignment_per_hour: 1.43,
+  consignment_weekend_holiday_per_hour: 2.87,
+  reachability_per_pay_period: 71.73,
+  dog_service_allowance_per_period: 115.24,
+  dog_cost_owner_per_period: 144.04,
+  dog_cost_employer_owner_per_period: 86.43,
+  fulltime_hours_per_pay_period: 144,
   value_services_early_shift: 7.50,   // R1609: 02:00-04:00 = EUR 7,50 bruto
-  consignment_per_hour: null,         // manual_review_required
-  dog_allowance: null,                // manual_review_required
   dry_cleaning_per_period: null,      // manual_review_required
   accommodation_per_night: null,      // manual_review_required
 };
@@ -76,6 +86,13 @@ function firstNumber(...values) {
 
 function firstObject(...values) {
   return values.find(value => value && typeof value === 'object' && !Array.isArray(value)) || {};
+}
+
+function firstString(...values) {
+  for (const value of values) {
+    if (value !== null && value !== undefined && value !== '') return String(value);
+  }
+  return null;
 }
 
 function parameterSource(field, configuredValue, fallbackValue, fallbackSourceRuleIds) {
@@ -111,6 +128,24 @@ function resolveReimbursementParameters(caoConfig) {
     allowances.cash_value_early_shift,
     allowances.article_103
   );
+  const breakAvailability = firstObject(
+    allowances.break_availability,
+    allowances.pause_availability,
+    allowances.pauzetoeslag,
+    allowances.article_49
+  );
+  const consignment = firstObject(
+    allowances.consignment,
+    allowances.consignment_reachability,
+    allowances.bereikbaarheidsvergoeding,
+    allowances.article_50
+  );
+  const dog = firstObject(
+    allowances.dog,
+    allowances.dog_allowance,
+    allowances.hondenvergoeding,
+    allowances.article_51
+  );
 
   const configuredTravelRate = firstNumber(
     travel.rate_per_km,
@@ -124,6 +159,21 @@ function resolveReimbursementParameters(caoConfig) {
     travel.travel_min_km,
     allowances.travel_min_km
   );
+  const configuredTravelAbove40Rate = firstNumber(
+    travel.above_40_rate_per_km,
+    travel.additional_rate_per_km,
+    allowances.travel_above_40_rate_per_km
+  );
+  const configuredTravelAbove40Threshold = firstNumber(
+    travel.above_40_threshold_km,
+    travel.additional_threshold_km,
+    allowances.travel_above_40_threshold_km
+  );
+  const configuredWorkWorkTravelRate = firstNumber(
+    travel.work_work_rate_per_km,
+    travel.business_rate_per_km,
+    allowances.work_work_travel_rate_per_km
+  );
   const configuredMealMax = firstNumber(
     meal.max_amount,
     meal.meal_allowance_max,
@@ -136,6 +186,45 @@ function resolveReimbursementParameters(caoConfig) {
     meal.eligible_from_hours,
     allowances.meal_allowance_min_hours
   );
+  const configuredBreakAvailabilityRate = firstNumber(
+    breakAvailability.rate_per_half_hour,
+    breakAvailability.amount_per_half_hour,
+    allowances.break_availability_per_half_hour
+  );
+  const configuredConsignmentRate = firstNumber(
+    consignment.rate_per_hour,
+    consignment.consignment_per_hour,
+    allowances.consignment_per_hour
+  );
+  const configuredConsignmentWeekendRate = firstNumber(
+    consignment.weekend_holiday_rate_per_hour,
+    consignment.weekend_or_holiday_per_hour,
+    allowances.consignment_weekend_holiday_per_hour
+  );
+  const configuredReachabilityPerPeriod = firstNumber(
+    consignment.reachability_per_pay_period,
+    consignment.piket_per_pay_period,
+    allowances.reachability_per_pay_period
+  );
+  const configuredDogServiceAllowance = firstNumber(
+    dog.service_allowance_per_period,
+    dog.dog_service_allowance_per_period,
+    allowances.dog_service_allowance_per_period
+  );
+  const configuredDogOwnerCosts = firstNumber(
+    dog.owner_cost_per_period,
+    dog.dog_cost_owner_per_period,
+    allowances.dog_cost_owner_per_period
+  );
+  const configuredDogEmployerOwnerCosts = firstNumber(
+    dog.employer_owner_cost_per_period,
+    dog.dog_cost_employer_owner_per_period,
+    allowances.dog_cost_employer_owner_per_period
+  );
+  const configuredFulltimeHours = firstNumber(
+    allowances.fulltime_hours_per_pay_period,
+    caoConfig?.leave_rules?.standard_vacation?.fulltime_period_hours
+  );
   const configuredEarlyShiftAmount = firstNumber(
     valueServices.amount,
     valueServices.rate_per_shift,
@@ -146,20 +235,48 @@ function resolveReimbursementParameters(caoConfig) {
   return {
     travel_cost_per_km: configuredTravelRate ?? REIMBURSEMENT_RATES.travel_cost_per_km,
     travel_min_km: configuredTravelMinKm ?? REIMBURSEMENT_RATES.travel_min_km,
+    travel_above_40_rate_per_km: configuredTravelAbove40Rate ?? REIMBURSEMENT_RATES.travel_above_40_rate_per_km,
+    travel_above_40_threshold_km: configuredTravelAbove40Threshold ?? REIMBURSEMENT_RATES.travel_above_40_threshold_km,
+    work_work_travel_rate_per_km: configuredWorkWorkTravelRate ?? REIMBURSEMENT_RATES.work_work_travel_rate_per_km,
+    public_transport_class: firstString(travel.public_transport_class, REIMBURSEMENT_RATES.public_transport_class),
     meal_allowance_max: configuredMealMax ?? REIMBURSEMENT_RATES.meal_allowance_max,
     meal_allowance_min_hours: configuredMealMinHours ?? 10,
+    break_availability_per_half_hour: configuredBreakAvailabilityRate ?? REIMBURSEMENT_RATES.break_availability_per_half_hour,
+    consignment_per_hour: configuredConsignmentRate ?? REIMBURSEMENT_RATES.consignment_per_hour,
+    consignment_weekend_holiday_per_hour: configuredConsignmentWeekendRate ?? REIMBURSEMENT_RATES.consignment_weekend_holiday_per_hour,
+    reachability_per_pay_period: configuredReachabilityPerPeriod ?? REIMBURSEMENT_RATES.reachability_per_pay_period,
+    dog_service_allowance_per_period: configuredDogServiceAllowance ?? REIMBURSEMENT_RATES.dog_service_allowance_per_period,
+    dog_cost_owner_per_period: configuredDogOwnerCosts ?? REIMBURSEMENT_RATES.dog_cost_owner_per_period,
+    dog_cost_employer_owner_per_period: configuredDogEmployerOwnerCosts ?? REIMBURSEMENT_RATES.dog_cost_employer_owner_per_period,
+    fulltime_hours_per_pay_period: configuredFulltimeHours ?? REIMBURSEMENT_RATES.fulltime_hours_per_pay_period,
     value_services_early_shift: configuredEarlyShiftAmount ?? REIMBURSEMENT_RATES.value_services_early_shift,
     value_services_early_shift_amount: configuredEarlyShiftAmount ?? REIMBURSEMENT_RATES.value_services_early_shift,
     source_rule_ids: {
-      travel: travel.source_rule_ids || ['CAO-PB-2024-R0855'],
-      meal: meal.source_rule_ids || ['CAO-PB-2024-R0878'],
+      travel: travel.source_rule_ids || ['CAO-PB-2024-R0847', 'CAO-PB-2024-R0855', 'CAO-PB-2024-R0857', 'CAO-PB-2024-R0858'],
+      meal: meal.source_rule_ids || ['CAO-PB-2024-R0878', 'CAO-PB-2024-R0880', 'CAO-PB-2024-R0881', 'CAO-PB-2024-R0882'],
+      break_availability: breakAvailability.source_rule_ids || ['CAO-PB-2024-R0888', 'CAO-PB-2024-R0891', 'CAO-PB-2024-R0892', 'CAO-PB-2024-R0896'],
+      consignment: consignment.source_rule_ids || ['CAO-PB-2024-R0898', 'CAO-PB-2024-R0900', 'CAO-PB-2024-R0901', 'CAO-PB-2024-R0906'],
+      dog: dog.source_rule_ids || ['CAO-PB-2024-R0911', 'CAO-PB-2024-R0912', 'CAO-PB-2024-R0920', 'CAO-PB-2024-R0921', 'CAO-PB-2024-R0923'],
+      dry_cleaning: ['CAO-PB-2024-R0938'],
+      accommodation: ['CAO-PB-2024-R0940'],
+      jubilee: ['CAO-PB-2024-R0942', 'CAO-PB-2024-R0943', 'CAO-PB-2024-R0944', 'CAO-PB-2024-R0946'],
       value_services_early_shift: valueServices.source_rule_ids || ['CAO-PB-2024-R1609']
     },
     provenance: {
       travel_cost_per_km: parameterSource('allowances.travel.rate_per_km', configuredTravelRate, REIMBURSEMENT_RATES.travel_cost_per_km, ['CAO-PB-2024-R0855']),
       travel_min_km: parameterSource('allowances.travel.min_km', configuredTravelMinKm, REIMBURSEMENT_RATES.travel_min_km, ['CAO-PB-2024-R0855']),
+      travel_above_40_rate_per_km: parameterSource('allowances.travel.above_40_rate_per_km', configuredTravelAbove40Rate, REIMBURSEMENT_RATES.travel_above_40_rate_per_km, ['CAO-PB-2024-R0857']),
+      travel_above_40_threshold_km: parameterSource('allowances.travel.above_40_threshold_km', configuredTravelAbove40Threshold, REIMBURSEMENT_RATES.travel_above_40_threshold_km, ['CAO-PB-2024-R0857']),
+      work_work_travel_rate_per_km: parameterSource('allowances.travel.work_work_rate_per_km', configuredWorkWorkTravelRate, REIMBURSEMENT_RATES.work_work_travel_rate_per_km, ['CAO-PB-2024-R0858']),
       meal_allowance_max: parameterSource('allowances.meal.max_amount', configuredMealMax, REIMBURSEMENT_RATES.meal_allowance_max, ['CAO-PB-2024-R0878']),
       meal_allowance_min_hours: parameterSource('allowances.meal.minimum_shift_hours', configuredMealMinHours, 10, ['CAO-PB-2024-R0878']),
+      break_availability_per_half_hour: parameterSource('allowances.break_availability.rate_per_half_hour', configuredBreakAvailabilityRate, REIMBURSEMENT_RATES.break_availability_per_half_hour, ['CAO-PB-2024-R0892']),
+      consignment_per_hour: parameterSource('allowances.consignment.rate_per_hour', configuredConsignmentRate, REIMBURSEMENT_RATES.consignment_per_hour, ['CAO-PB-2024-R0900']),
+      consignment_weekend_holiday_per_hour: parameterSource('allowances.consignment.weekend_holiday_rate_per_hour', configuredConsignmentWeekendRate, REIMBURSEMENT_RATES.consignment_weekend_holiday_per_hour, ['CAO-PB-2024-R0901']),
+      reachability_per_pay_period: parameterSource('allowances.consignment.reachability_per_pay_period', configuredReachabilityPerPeriod, REIMBURSEMENT_RATES.reachability_per_pay_period, ['CAO-PB-2024-R0906']),
+      dog_service_allowance_per_period: parameterSource('allowances.dog.service_allowance_per_period', configuredDogServiceAllowance, REIMBURSEMENT_RATES.dog_service_allowance_per_period, ['CAO-PB-2024-R0912']),
+      dog_cost_owner_per_period: parameterSource('allowances.dog.owner_cost_per_period', configuredDogOwnerCosts, REIMBURSEMENT_RATES.dog_cost_owner_per_period, ['CAO-PB-2024-R0920']),
+      dog_cost_employer_owner_per_period: parameterSource('allowances.dog.employer_owner_cost_per_period', configuredDogEmployerOwnerCosts, REIMBURSEMENT_RATES.dog_cost_employer_owner_per_period, ['CAO-PB-2024-R0921']),
       value_services_early_shift: parameterSource('cash_value_logistics_rules.value_services_early_shift_allowance.amount', configuredEarlyShiftAmount, REIMBURSEMENT_RATES.value_services_early_shift, ['CAO-PB-2024-R1609'])
     }
   };
@@ -181,6 +298,76 @@ function contractCoversDate(contract, referenceDate) {
 
 function uniqueNonEmpty(values) {
   return [...new Set((values || []).filter(value => value !== null && value !== undefined && value !== ''))];
+}
+
+function round2(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function booleanOrNull(value) {
+  if (value === true || value === false) return value;
+  const normalized = String(value ?? '').trim().toLowerCase();
+  if (['true', 'yes', 'ja', '1'].includes(normalized)) return true;
+  if (['false', 'no', 'nee', '0'].includes(normalized)) return false;
+  return null;
+}
+
+function clockMinutes(value) {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{1,2}):(\d{2})/);
+  if (!match) return null;
+  const hours = Number(match[1]);
+  const minutes = Number(match[2]);
+  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return null;
+  return (hours * 60) + minutes;
+}
+
+function minutesBetween(startTime, endTime) {
+  const start = clockMinutes(startTime);
+  const end = clockMinutes(endTime);
+  if (start === null || end === null) return null;
+  return end >= start ? end - start : (24 * 60 - start) + end;
+}
+
+function isWeekendDate(value) {
+  const iso = isoDate(value);
+  if (!iso) return false;
+  const day = new Date(`${iso}T00:00:00Z`).getUTCDay();
+  return day === 0 || day === 6;
+}
+
+function manualReview(ruleId, domain, message, extra = {}) {
+  return {
+    rule_id: ruleId,
+    domain,
+    message,
+    manual_review_required: true,
+    ...extra
+  };
+}
+
+function collectManualReviewItems(value) {
+  const items = [];
+  function walk(node) {
+    if (!node || typeof node !== 'object') return;
+    if (node.manual_review_required === true && node.rule_id && node.domain && node.message) {
+      items.push(node);
+    }
+    if (Array.isArray(node.manual_review_items)) {
+      for (const item of node.manual_review_items) items.push(item);
+    }
+    for (const child of Object.values(node)) {
+      if (child && typeof child === 'object') walk(child);
+    }
+  }
+  walk(value);
+  const seen = new Set();
+  return items.filter(item => {
+    const key = `${item.rule_id}|${item.domain}|${item.message}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 function reimbursementReferenceDate(body) {
@@ -353,59 +540,165 @@ function getCaoPayrollReadiness(caoConfig) {
 
 function calculateTravelCost(km_one_way, km_driven = null, parameters = resolveReimbursementParameters(null)) {
   // R0855: eigen vervoer v.a. 9 km, EUR 0,23/km over alle kilometers
-  if (km_one_way < parameters.travel_min_km) {
+  const oneWayKm = numberOrNull(km_one_way) ?? 0;
+  if (oneWayKm < parameters.travel_min_km) {
     return {
       rule_id: parameters.source_rule_ids.travel[0] || 'CAO-PB-2024-R0855',
       source_rule_ids: parameters.source_rule_ids.travel,
       eligible: false,
-      reason: `Afstand ${km_one_way} km is minder dan ${parameters.travel_min_km} km; geen reiskosten.`,
+      reason: `Afstand ${oneWayKm} km is minder dan ${parameters.travel_min_km} km; geen reiskosten.`,
       amount: 0,
-      km_used: km_one_way,
+      km_used: oneWayKm,
       parameter_provenance: {
         travel_min_km: parameters.provenance.travel_min_km
       }
     };
   }
 
-  const km = km_driven !== null ? km_driven : km_one_way * 2; // heen en terug
-  const amount = km * parameters.travel_cost_per_km;
+  const km = numberOrNull(km_driven) !== null ? numberOrNull(km_driven) : oneWayKm * 2; // heen en terug
+  const baseAmount = km * parameters.travel_cost_per_km;
+  const aboveThresholdOneWayKm = Math.max(0, oneWayKm - parameters.travel_above_40_threshold_km);
+  const additionalKm = aboveThresholdOneWayKm * 2;
+  const additionalAmount = additionalKm * parameters.travel_above_40_rate_per_km;
 
   return {
     rule_id: parameters.source_rule_ids.travel[0] || 'CAO-PB-2024-R0855',
     source_rule_ids: parameters.source_rule_ids.travel,
     eligible: true,
-    km_one_way,
+    km_one_way: oneWayKm,
     km_total: km,
     rate_per_km: parameters.travel_cost_per_km,
-    amount: Math.round(amount * 100) / 100,
+    base_amount: round2(baseAmount),
+    above_40_km_one_way: aboveThresholdOneWayKm,
+    above_40_km_total: additionalKm,
+    above_40_rate_per_km: parameters.travel_above_40_rate_per_km,
+    above_40_amount: round2(additionalAmount),
+    amount: round2(baseAmount + additionalAmount),
     tax_treatment: 'netto',
     parameter_provenance: {
       travel_cost_per_km: parameters.provenance.travel_cost_per_km,
-      travel_min_km: parameters.provenance.travel_min_km
+      travel_min_km: parameters.provenance.travel_min_km,
+      travel_above_40_rate_per_km: parameters.provenance.travel_above_40_rate_per_km,
+      travel_above_40_threshold_km: parameters.provenance.travel_above_40_threshold_km
     },
-    note: `EUR ${parameters.travel_cost_per_km}/km netto over alle gereden kilometers bij minimaal ${parameters.travel_min_km} km enkele reis.`
+    note: `EUR ${parameters.travel_cost_per_km}/km netto over alle gereden kilometers bij minimaal ${parameters.travel_min_km} km enkele reis; boven ${parameters.travel_above_40_threshold_km} km aanvullend EUR ${parameters.travel_above_40_rate_per_km}/km.`
   };
 }
 
-function calculateMealAllowance(hours_worked, start_time = null, parameters = resolveReimbursementParameters(null)) {
-  // R0878: maaltijdvergoeding bij diensten van bepaalde duur
-  // Exacte drempel: manual_review_required conform CAO art. 48
+function calculateWorkWorkTravelCost(km, parameters = resolveReimbursementParameters(null)) {
+  const workWorkKm = Math.max(0, numberOrNull(km) ?? 0);
+  return {
+    rule_id: 'CAO-PB-2024-R0858',
+    source_rule_ids: ['CAO-PB-2024-R0858'],
+    eligible: workWorkKm > 0,
+    km_total: workWorkKm,
+    rate_per_km: parameters.work_work_travel_rate_per_km,
+    amount: round2(workWorkKm * parameters.work_work_travel_rate_per_km),
+    tax_treatment: 'netto',
+    parameter_provenance: {
+      work_work_travel_rate_per_km: parameters.provenance.work_work_travel_rate_per_km
+    },
+    note: 'Werk-werkverkeer wordt vergoed op basis van enkele reisafstand tussen locaties.'
+  };
+}
+
+function calculatePublicTransportReimbursement(amount, proofProvided, parameters = resolveReimbursementParameters(null)) {
+  const costs = Math.max(0, numberOrNull(amount) ?? 0);
+  const proof = booleanOrNull(proofProvided);
+  return {
+    rule_id: 'CAO-PB-2024-R0856',
+    source_rule_ids: ['CAO-PB-2024-R0856'],
+    eligible: costs > 0,
+    amount: round2(costs),
+    public_transport_class: parameters.public_transport_class,
+    tax_treatment: 'netto',
+    manual_review_required: proof !== true,
+    manual_review_items: proof === true ? [] : [
+      manualReview('CAO-PB-2024-R0856', 'public_transport', 'OV-vergoeding vereist bewijs van 2e klas vervoersbewijzen.', { field: 'public_transport_proof_provided' })
+    ],
+    note: `Openbaar vervoer: kosten ${parameters.public_transport_class} vergoed; bewijs moet toonbaar zijn.`
+  };
+}
+
+function calculateDeclaredTravelExpenses(body) {
+  const parkingCosts = numberOrNull(body.parking_costs);
+  const tollCosts = numberOrNull(body.toll_costs);
+  const ferryCosts = numberOrNull(body.ferry_costs);
+  const total = round2((parkingCosts ?? 0) + (tollCosts ?? 0) + (ferryCosts ?? 0));
+  const publicTransportUnavailable = booleanOrNull(body.parking_no_hourly_public_transport_within_1_5km);
+  const noFreeParking = booleanOrNull(body.no_free_parking_within_1_5km);
+  const proofProvided = booleanOrNull(body.travel_expense_receipts_provided);
+  const manualItems = [];
+  if (parkingCosts !== null && (publicTransportUnavailable !== true || noFreeParking !== true)) {
+    manualItems.push(manualReview('CAO-PB-2024-R0862', 'parking', 'Parkeerkosten alleen declarabel als geen gratis parkeren en geen passend OV binnen 1,5 km beschikbaar is.', { field: 'parking_conditions' }));
+  }
+  if (total > 0 && proofProvided !== true) {
+    manualItems.push(manualReview('CAO-PB-2024-R0861', 'travel_expenses', 'Tol/veerpont/parkeeronkosten vereisen declaratiebewijs volgens werkgeversregels.', { field: 'travel_expense_receipts_provided' }));
+  }
+  return {
+    rule_id: 'CAO-PB-2024-R0861',
+    source_rule_ids: ['CAO-PB-2024-R0861', 'CAO-PB-2024-R0862', 'CAO-PB-2024-R0864'],
+    eligible: total > 0,
+    parking_costs: round2(parkingCosts ?? 0),
+    toll_costs: round2(tollCosts ?? 0),
+    ferry_costs: round2(ferryCosts ?? 0),
+    amount: total,
+    tax_treatment: 'netto',
+    manual_review_required: manualItems.length > 0,
+    manual_review_items: manualItems
+  };
+}
+
+function calculateMealAllowance(input, startTimeOrParameters = null, maybeParameters = null) {
+  const parameters = maybeParameters || (startTimeOrParameters && typeof startTimeOrParameters === 'object'
+    ? startTimeOrParameters
+    : resolveReimbursementParameters(null));
+  const hours_worked = typeof input === 'object' ? input.hours_worked : input;
+  const start_time = typeof input === 'object' ? input.start_time : startTimeOrParameters;
+  const end_time = typeof input === 'object' ? input.end_time : null;
+  const planned_end_time = typeof input === 'object' ? input.planned_end_time : null;
+  const declaredCost = typeof input === 'object' ? numberOrNull(input.meal_declared_costs ?? input.declared_meal_cost) : null;
+  // R0878-R0885: maximaal bedrag, declaratiebasis, start < 13:00 en eind > 19:00 of minimaal 2 uur langer dan vastgesteld.
   const max = parameters.meal_allowance_max;
   const minimumHours = parameters.meal_allowance_min_hours;
+  const startMinutes = clockMinutes(start_time);
+  const endMinutes = clockMinutes(end_time);
+  const plannedEndMinutes = clockMinutes(planned_end_time);
+  const crossesMealWindow = startMinutes !== null && endMinutes !== null &&
+    startMinutes < (13 * 60) &&
+    (endMinutes > (19 * 60) || endMinutes < startMinutes);
+  const extendedAtLeastTwoHours = endMinutes !== null && plannedEndMinutes !== null &&
+    ((endMinutes - plannedEndMinutes + (24 * 60)) % (24 * 60)) >= 120;
+  const fallbackEligible = numberOrNull(hours_worked) !== null && Number(hours_worked) >= minimumHours;
+  const eligible = crossesMealWindow || extendedAtLeastTwoHours || fallbackEligible;
+  const amount = eligible ? Math.min(max, declaredCost ?? max) : 0;
+  const manualItems = [];
+  if (eligible && declaredCost === null) {
+    manualItems.push(manualReview('CAO-PB-2024-R0882', 'meal_allowance', 'Maaltijdvergoeding is op declaratiebasis; werkelijk gedeclareerde kosten ontbreken.', { field: 'meal_declared_costs' }));
+  }
+  if (!crossesMealWindow && !extendedAtLeastTwoHours && fallbackEligible) {
+    manualItems.push(manualReview('CAO-PB-2024-R0880', 'meal_allowance', 'Maaltijdvergoeding is voorlopig toegekend op urendrempel; start/eindtijd of verlenging moet worden bevestigd.', { field: 'start_time/end_time/planned_end_time' }));
+  }
 
-  if (hours_worked >= minimumHours) {
+  if (eligible) {
     return {
       rule_id: parameters.source_rule_ids.meal[0] || 'CAO-PB-2024-R0878',
       source_rule_ids: parameters.source_rule_ids.meal,
       eligible: true,
-      amount: max,
+      amount: round2(amount),
       max_amount: max,
       minimum_shift_hours: minimumHours,
+      declared_costs: declaredCost,
+      starts_before_13_and_ends_after_19: crossesMealWindow,
+      extended_at_least_two_hours_after_start: extendedAtLeastTwoHours,
+      declaration_basis: true,
+      manual_review_required: manualItems.length > 0,
+      manual_review_items: manualItems,
       parameter_provenance: {
         meal_allowance_max: parameters.provenance.meal_allowance_max,
         meal_allowance_min_hours: parameters.provenance.meal_allowance_min_hours
       },
-      note: `Maaltijdvergoeding max EUR ${max} bij dienst >= ${minimumHours} uur.`
+      note: `Maaltijdvergoeding max EUR ${max}; op declaratiebasis.`
     };
   }
 
@@ -421,7 +714,183 @@ function calculateMealAllowance(hours_worked, start_time = null, parameters = re
       meal_allowance_max: parameters.provenance.meal_allowance_max,
       meal_allowance_min_hours: parameters.provenance.meal_allowance_min_hours
     },
-    note: 'Controleer CAO art. 48 voor exacte toepassingsdrempel maaltijdvergoeding.'
+    note: 'Geen maaltijdvergoeding op basis van de aangeleverde tijden/uren.'
+  };
+}
+
+function calculateBreakAvailabilityAllowance(input, parameters = resolveReimbursementParameters(null)) {
+  const halfHours = numberOrNull(input.break_availability_half_hours) ??
+    (numberOrNull(input.break_availability_minutes) !== null ? Math.ceil(numberOrNull(input.break_availability_minutes) / 30) : null);
+  const group = String(input.cao_function_group || input.function_group || '').toLowerCase();
+  const eligibleFunction = ['mobiel_surveillant', 'winkelsurveillant'].includes(group) ||
+    input.is_mobile_or_retail_surveillance === true;
+  const available = booleanOrNull(input.unpaid_break_available_required ?? input.break_availability_required) === true;
+  const workedDuringPause = booleanOrNull(input.worked_during_unpaid_break) === true;
+  const eligible = eligibleFunction && available && Number(halfHours || 0) > 0;
+  const manualItems = [];
+  if ((available || Number(halfHours || 0) > 0) && !eligibleFunction) {
+    manualItems.push(manualReview('CAO-PB-2024-R0890', 'break_availability', 'Pauzetoeslag geldt alleen voor mobiele surveillant of winkelsurveillant.', { field: 'cao_function_group' }));
+  }
+  if (workedDuringPause) {
+    manualItems.push(manualReview('CAO-PB-2024-R0896', 'break_availability', 'Als tijdens de pauze gewerkt is, moet pauze verschuiven of arbeidstijd worden; verwerk dit in planning/payroll.', { field: 'worked_during_unpaid_break' }));
+  }
+  return {
+    rule_id: 'CAO-PB-2024-R0888',
+    source_rule_ids: parameters.source_rule_ids.break_availability,
+    eligible,
+    half_hours: halfHours ?? 0,
+    rate_per_half_hour: parameters.break_availability_per_half_hour,
+    amount: eligible ? round2(halfHours * parameters.break_availability_per_half_hour) : 0,
+    tax_treatment: 'bruto',
+    manual_review_required: manualItems.length > 0,
+    manual_review_items: manualItems,
+    parameter_provenance: {
+      break_availability_per_half_hour: parameters.provenance.break_availability_per_half_hour
+    }
+  };
+}
+
+function calculateConsignmentAndReachability(input, parameters = resolveReimbursementParameters(null)) {
+  const hours = Math.max(0, numberOrNull(input.consignment_hours) ?? 0);
+  const weekendHolidayHours = Math.max(0, numberOrNull(input.consignment_weekend_holiday_hours) ?? 0);
+  const regularHours = Math.max(0, hours - weekendHolidayHours);
+  const reachabilityRequired = booleanOrNull(input.reachability_phone_followup_required ?? input.piket_required) === true;
+  const amount = (regularHours * parameters.consignment_per_hour) +
+    (weekendHolidayHours * parameters.consignment_weekend_holiday_per_hour) +
+    (reachabilityRequired ? parameters.reachability_per_pay_period : 0);
+  return {
+    rule_id: 'CAO-PB-2024-R0898',
+    source_rule_ids: parameters.source_rule_ids.consignment,
+    eligible: hours > 0 || reachabilityRequired,
+    consignment_hours: hours,
+    consignment_regular_hours: regularHours,
+    consignment_weekend_holiday_hours: weekendHolidayHours,
+    rate_per_hour: parameters.consignment_per_hour,
+    weekend_holiday_rate_per_hour: parameters.consignment_weekend_holiday_per_hour,
+    reachability_phone_followup_required: reachabilityRequired,
+    reachability_per_pay_period: parameters.reachability_per_pay_period,
+    amount: round2(amount),
+    tax_treatment: 'bruto',
+    parameter_provenance: {
+      consignment_per_hour: parameters.provenance.consignment_per_hour,
+      consignment_weekend_holiday_per_hour: parameters.provenance.consignment_weekend_holiday_per_hour,
+      reachability_per_pay_period: parameters.provenance.reachability_per_pay_period
+    }
+  };
+}
+
+function parttimeRatio(input, parameters) {
+  const hours = numberOrNull(input.contract_hours_per_pay_period ?? input.paid_hours_per_pay_period ?? input.period_hours);
+  if (hours === null) return 1;
+  return Math.min(1, Math.max(0, hours / parameters.fulltime_hours_per_pay_period));
+}
+
+function calculateDogAllowance(input, parameters = resolveReimbursementParameters(null)) {
+  const worksWithDog = booleanOrNull(input.works_with_dog ?? input.dog_service_performed) === true;
+  const dogOwner = input.dog_owner || input.dog_ownership || null; // employee | employer
+  const employerChoosesDeclarationOnly = booleanOrNull(input.dog_costs_declaration_only) === true;
+  const ratio = parttimeRatio(input, parameters);
+  const manualItems = [];
+  if (worksWithDog && !dogOwner) {
+    manualItems.push(manualReview('CAO-PB-2024-R0920', 'dog_allowance', 'Hondeneigendom ontbreekt; kies employee of employer voor de kostenvergoeding.', { field: 'dog_owner' }));
+  }
+  if (employerChoosesDeclarationOnly) {
+    manualItems.push(manualReview('CAO-PB-2024-R0924', 'dog_allowance', 'Werkgever kiest declaratie van werkelijke hondenkosten; forfaitaire kostenvergoeding niet automatisch definitief.', { field: 'dog_costs_declaration_only' }));
+  }
+  const serviceAllowance = worksWithDog ? parameters.dog_service_allowance_per_period * ratio : 0;
+  let dogCostAllowance = 0;
+  if (worksWithDog && !employerChoosesDeclarationOnly) {
+    if (dogOwner === 'employee') dogCostAllowance = parameters.dog_cost_owner_per_period * ratio;
+    if (dogOwner === 'employer') dogCostAllowance = parameters.dog_cost_employer_owner_per_period * ratio;
+  }
+  const dogTransportCosts = numberOrNull(input.dog_transport_costs);
+  const dogTrainingHours = numberOrNull(input.mandatory_dog_training_hours_per_pay_period);
+  if (dogTrainingHours !== null && dogTrainingHours >= 11) {
+    manualItems.push(manualReview('CAO-PB-2024-R0932', 'dog_training', 'Noodzakelijke/verplichte hondentraining vanaf gemiddeld 11 uur per loonperiode telt als arbeidstijd en kosten moeten worden vergoed.', { field: 'mandatory_dog_training_hours_per_pay_period' }));
+  }
+  return {
+    rule_id: 'CAO-PB-2024-R0911',
+    source_rule_ids: parameters.source_rule_ids.dog,
+    eligible: worksWithDog,
+    parttime_ratio: round2(ratio),
+    service_allowance_gross: round2(serviceAllowance),
+    dog_cost_allowance_net: round2(dogCostAllowance),
+    dog_transport_costs_declared: round2(dogTransportCosts ?? 0),
+    amount_gross: round2(serviceAllowance),
+    amount_net: round2(dogCostAllowance + (dogTransportCosts ?? 0)),
+    manual_review_required: manualItems.length > 0,
+    manual_review_items: manualItems,
+    parameter_provenance: {
+      dog_service_allowance_per_period: parameters.provenance.dog_service_allowance_per_period,
+      dog_cost_owner_per_period: parameters.provenance.dog_cost_owner_per_period,
+      dog_cost_employer_owner_per_period: parameters.provenance.dog_cost_employer_owner_per_period
+    }
+  };
+}
+
+function calculateDryCleaningAllowance(input) {
+  const costs = numberOrNull(input.dry_cleaning_costs);
+  const receipt = booleanOrNull(input.dry_cleaning_receipt_provided);
+  return {
+    rule_id: 'CAO-PB-2024-R0938',
+    source_rule_ids: ['CAO-PB-2024-R0938'],
+    eligible: costs !== null && costs > 0,
+    amount: round2(costs ?? 0),
+    tax_treatment: 'netto',
+    minimum_frequency: 'minimaal_1_keer_per_4_weken',
+    manual_review_required: costs !== null && receipt !== true,
+    manual_review_items: costs !== null && receipt !== true
+      ? [manualReview('CAO-PB-2024-R0938', 'dry_cleaning', 'Stomerijkosten zijn declaratiekosten; bon/bewijs ontbreekt.', { field: 'dry_cleaning_receipt_provided' })]
+      : []
+  };
+}
+
+function calculateAccommodationAllowance(input) {
+  const required = booleanOrNull(input.overnight_required_by_employer) === true;
+  const accommodationCosts = numberOrNull(input.accommodation_costs);
+  const mealCosts = numberOrNull(input.overnight_meal_costs);
+  const amount = round2((accommodationCosts ?? 0) + (mealCosts ?? 0));
+  const manualItems = [];
+  if ((accommodationCosts !== null || mealCosts !== null) && !required) {
+    manualItems.push(manualReview('CAO-PB-2024-R0940', 'accommodation', 'Verblijfskosten gelden als werkgever overnachting voor werk vraagt; bevestiging ontbreekt.', { field: 'overnight_required_by_employer' }));
+  }
+  return {
+    rule_id: 'CAO-PB-2024-R0940',
+    source_rule_ids: ['CAO-PB-2024-R0940'],
+    eligible: required && amount > 0,
+    accommodation_costs: round2(accommodationCosts ?? 0),
+    meal_costs: round2(mealCosts ?? 0),
+    amount,
+    tax_treatment: 'netto',
+    manual_review_required: manualItems.length > 0,
+    manual_review_items: manualItems
+  };
+}
+
+function calculateJubileeAllowance(input) {
+  const serviceYears = numberOrNull(input.service_years ?? input.continuous_service_years);
+  const periodSalary = numberOrNull(input.period_salary ?? input.base_period_salary);
+  const contractTransferYearsIncluded = booleanOrNull(input.contract_transfer_service_years_included) === true;
+  const factor = serviceYears !== null && serviceYears >= 40 ? 1 : serviceYears !== null && serviceYears >= 25 ? 0.5 : 0;
+  const manualItems = [];
+  if (factor > 0 && periodSalary === null) {
+    manualItems.push(manualReview('CAO-PB-2024-R0943', 'jubilee', 'Jubileumvergoeding vereist periodeloon als berekeningsbasis.', { field: 'period_salary' }));
+  }
+  if (factor > 0 && input.contract_change_history_present === true && !contractTransferYearsIncluded) {
+    manualItems.push(manualReview('CAO-PB-2024-R0947', 'jubilee', 'Dienstjaren uit contractwissel moeten meetellen voor jubileumdatum.', { field: 'contract_transfer_service_years_included' }));
+  }
+  return {
+    rule_id: 'CAO-PB-2024-R0942',
+    source_rule_ids: ['CAO-PB-2024-R0942', 'CAO-PB-2024-R0943', 'CAO-PB-2024-R0944', 'CAO-PB-2024-R0946', 'CAO-PB-2024-R0947'],
+    eligible: factor > 0,
+    service_years: serviceYears,
+    period_salary: periodSalary,
+    factor_period_salary: factor,
+    amount: periodSalary !== null ? round2(periodSalary * factor) : null,
+    pay_in_next_pay_period: factor > 0,
+    tax_treatment: 'netto_if_fiscally_allowed',
+    manual_review_required: manualItems.length > 0,
+    manual_review_items: manualItems
   };
 }
 
@@ -682,6 +1151,7 @@ Deno.serve(async (req) => {
           selected_contract: undefined
         },
         cao_runtime_support: reimbursementRuntimeSupport,
+        cao_reimbursement_parameters: reimbursementParameters,
         calculation_warnings: [...syncWarnings],
         scope_warnings: scopeWarnings,
         cao_scope_profile: caoScope.cao_scope_profile,
@@ -695,11 +1165,65 @@ Deno.serve(async (req) => {
       if (km_one_way !== undefined) {
         result.travel_cost = calculateTravelCost(km_one_way, km_driven, reimbursementParameters);
       }
+      if (body.work_work_km !== undefined || body.business_km !== undefined) {
+        result.work_work_travel_cost = calculateWorkWorkTravelCost(body.work_work_km ?? body.business_km, reimbursementParameters);
+      }
+      if (body.public_transport_costs !== undefined) {
+        result.public_transport = calculatePublicTransportReimbursement(body.public_transport_costs, body.public_transport_proof_provided, reimbursementParameters);
+      }
+      if (body.parking_costs !== undefined || body.toll_costs !== undefined || body.ferry_costs !== undefined) {
+        result.declared_travel_expenses = calculateDeclaredTravelExpenses(body);
+      }
     }
 
     if (!action || action === 'meal_allowance') {
       if (hours_worked !== undefined) {
-        result.meal_allowance = calculateMealAllowance(hours_worked, start_time, reimbursementParameters);
+        result.meal_allowance = calculateMealAllowance({
+          hours_worked,
+          start_time,
+          end_time: body.end_time,
+          planned_end_time: body.planned_end_time,
+          meal_declared_costs: body.meal_declared_costs ?? body.declared_meal_cost
+        }, reimbursementParameters);
+      }
+    }
+
+    if (!action || action === 'break_availability') {
+      if (body.break_availability_half_hours !== undefined || body.break_availability_minutes !== undefined || body.unpaid_break_available_required !== undefined) {
+        result.break_availability_allowance = calculateBreakAvailabilityAllowance({
+          ...body,
+          cao_function_group: body.cao_function_group || caoScope?.function_classification?.cao_function_group || personnel?.cao_function_group || contract?.cao_function_group || null
+        }, reimbursementParameters);
+      }
+    }
+
+    if (!action || action === 'consignment' || action === 'reachability') {
+      if (body.consignment_hours !== undefined || body.consignment_weekend_holiday_hours !== undefined || body.reachability_phone_followup_required !== undefined || body.piket_required !== undefined) {
+        result.consignment_and_reachability = calculateConsignmentAndReachability(body, reimbursementParameters);
+      }
+    }
+
+    if (!action || action === 'dog_allowance') {
+      if (body.works_with_dog !== undefined || body.dog_service_performed !== undefined || body.dog_owner !== undefined || body.dog_transport_costs !== undefined) {
+        result.dog_allowance = calculateDogAllowance(body, reimbursementParameters);
+      }
+    }
+
+    if (!action || action === 'dry_cleaning') {
+      if (body.dry_cleaning_costs !== undefined) {
+        result.dry_cleaning = calculateDryCleaningAllowance(body);
+      }
+    }
+
+    if (!action || action === 'accommodation') {
+      if (body.overnight_required_by_employer !== undefined || body.accommodation_costs !== undefined || body.overnight_meal_costs !== undefined) {
+        result.accommodation = calculateAccommodationAllowance(body);
+      }
+    }
+
+    if (!action || action === 'jubilee') {
+      if (body.service_years !== undefined || body.continuous_service_years !== undefined) {
+        result.jubilee = calculateJubileeAllowance(body);
       }
     }
 
@@ -709,15 +1233,26 @@ Deno.serve(async (req) => {
       }
     }
 
-    // Manual review items
-    result.manual_review_items = [
-      { rule_id: 'CAO-PB-2024-R0880', domain: 'pauze', message: 'Pauze/beschikbaarheidsvergoeding: handmatige review vereist (CAO art. 49)', manual_review_required: true },
-      { rule_id: 'CAO-PB-2024-R0885', domain: 'consignatie', message: 'Consignatie/bereikbaarheidsvergoeding: handmatige review vereist (CAO art. 50)', manual_review_required: true },
-      { rule_id: 'CAO-PB-2024-R0890', domain: 'hond', message: 'Hondenvergoeding: handmatige review vereist (CAO art. 51)', manual_review_required: true },
-      { rule_id: 'CAO-PB-2024-R0895', domain: 'stomerij', message: 'Stomerij/kledingvergoeding: handmatige review vereist (CAO art. 52)', manual_review_required: true },
-      { rule_id: 'CAO-PB-2024-R0900', domain: 'verblijf', message: 'Verblijfsvergoeding: handmatige review vereist (CAO art. 53)', manual_review_required: true },
-      { rule_id: 'CAO-PB-2024-R0905', domain: 'jubileum', message: 'Jubileumvergoeding: handmatige review vereist (CAO art. 54)', manual_review_required: true }
-    ];
+    result.manual_review_items = collectManualReviewItems(result);
+    result.reimbursement_totals = {
+      gross_amount: round2(
+        (result.break_availability_allowance?.amount || 0) +
+        (result.consignment_and_reachability?.amount || 0) +
+        (result.dog_allowance?.amount_gross || 0) +
+        (result.value_services?.total_amount || 0)
+      ),
+      net_amount: round2(
+        (result.travel_cost?.amount || 0) +
+        (result.work_work_travel_cost?.amount || 0) +
+        (result.public_transport?.amount || 0) +
+        (result.declared_travel_expenses?.amount || 0) +
+        (result.meal_allowance?.amount || 0) +
+        (result.dog_allowance?.amount_net || 0) +
+        (result.dry_cleaning?.amount || 0) +
+        (result.accommodation?.amount || 0)
+      ),
+      jubilee_amount: result.jubilee?.amount ?? null
+    };
 
     return Response.json({
       success: true,
