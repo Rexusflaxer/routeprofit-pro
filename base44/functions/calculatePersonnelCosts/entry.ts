@@ -329,6 +329,14 @@ function selectedContractsFromResolutionResults(contractResolutionResults) {
     .filter(Boolean);
 }
 
+function uniqueSelectedContractsFromResolutionResults(contractResolutionResults) {
+  const unique = new Map();
+  selectedContractsFromResolutionResults(contractResolutionResults).forEach((contract, index) => {
+    unique.set(getContractIdentity(contract, index), contract);
+  });
+  return [...unique.values()];
+}
+
 function getContractIdentity(contract, index) {
   return contract.id ||
     [
@@ -367,6 +375,76 @@ function buildCallAgreementContractMix(contractResolutionResults) {
     has_call_agreement_contract: hasCallAgreement,
     has_non_call_agreement_contract: hasNonCallAgreement,
     contracts
+  };
+}
+
+function buildSingleContractClassificationContext(contractResolutionResults) {
+  const contracts = uniqueSelectedContractsFromResolutionResults(contractResolutionResults);
+  const warnings = [];
+  if (contracts.length === 0) {
+    return {
+      contract: null,
+      work_context: {},
+      warnings,
+      blocking_reason: null
+    };
+  }
+  if (contracts.length > 1) {
+    return {
+      contract: null,
+      work_context: {},
+      warnings,
+      blocking_reason: 'Deze loonrun bevat meerdere geselecteerde contracten. De loonbasis moet per contract worden gesplitst voordat payroll definitief mag zijn.'
+    };
+  }
+
+  const contexts = (contractResolutionResults || [])
+    .map(item => item?.contract_resolution?.service_context)
+    .filter(context => context && typeof context === 'object');
+  const contextFields = [
+    'function_type',
+    'cao_function_group',
+    'cao_function_level',
+    'security_role_status',
+    'performs_security_work',
+    'security_work_percentage',
+    'works_airport_schiphol',
+    'works_cash_value_logistics',
+    'works_event_or_hospitality_security',
+    'event_hospitality_cao_applies',
+    'cao_key',
+    'cao'
+  ];
+  const workContext = {};
+  const conflicts = [];
+
+  for (const field of contextFields) {
+    const values = [...new Set(contexts
+      .map(context => context[field])
+      .filter(value => value !== null && value !== undefined && value !== '')
+      .map(value => String(value)))];
+    if (values.length === 1) {
+      workContext[field] = values[0];
+    } else if (values.length > 1) {
+      conflicts.push({ field, values });
+    }
+  }
+
+  if (conflicts.length > 0) {
+    return {
+      contract: contracts[0],
+      work_context: workContext,
+      warnings,
+      blocking_reason: `Deze loonrun bevat conflicterende dienstcontext voor loonbasisvelden: ${conflicts.map(item => item.field).join(', ')}. Splits de loonrun of bereken per dienst/contract.`
+    };
+  }
+
+  warnings.push('Loonbasis/functieclassificatie gebruikt contractscope uit de contractresolver.');
+  return {
+    contract: contracts[0],
+    work_context: workContext,
+    warnings,
+    blocking_reason: null
   };
 }
 
@@ -1015,7 +1093,7 @@ function resolveGeneralReserveAllowance(shift, personnel, paidHoursForShift, bas
   };
 }
 
-async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, caoScope }) {
+async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, caoScope, contractResolutionResults = [] }) {
   if (personnel.employee_type !== 'loondienst') {
     return {
       base_hourly_rate: null,
@@ -1056,11 +1134,27 @@ async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, cao
     };
   }
 
+  const contractClassificationContext = buildSingleContractClassificationContext(contractResolutionResults);
+  if (contractClassificationContext.blocking_reason) {
+    return {
+      base_hourly_rate: null,
+      wage_basis_type: 'manual_review',
+      appendix_2_applies: null,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      calculation_status: 'blocked_contract_wage_basis_scope',
+      warnings: contractClassificationContext.warnings,
+      error: contractClassificationContext.blocking_reason,
+      cao_function_classification: null
+    };
+  }
+
   let classification = null;
   try {
     const classRes = await base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', {
       personnel_id,
-      work_context: {}
+      contract: contractClassificationContext.contract || undefined,
+      work_context: contractClassificationContext.work_context || {}
     });
     classification = classRes?.data || null;
   } catch {
@@ -1083,6 +1177,7 @@ async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, cao
         manual_review_required: true,
         calculation_status: 'blocked_missing_wage_basis',
         warnings: [
+          ...contractClassificationContext.warnings,
           ...(classification?.warnings || []),
           'CAO-schaal/periodiek wordt niet gebruikt omdat bijlage 2 niet van toepassing is.'
         ],
@@ -1100,6 +1195,7 @@ async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, cao
       manual_review_required: manualReview,
       calculation_status: manualReview ? 'concept_manual_review' : 'final',
       warnings: [
+        ...contractClassificationContext.warnings,
         ...(classification?.warnings || []),
         ...(personnel.cao_scale != null || personnel.cao_period != null
           ? ['CAO-schaal/periodiek genegeerd: bijlage 2 is niet van toepassing op dit toepassingsprofiel.']
@@ -1117,7 +1213,7 @@ async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, cao
       payroll_final_allowed: false,
       manual_review_required: true,
       calculation_status: 'blocked_manual_review',
-      warnings: [],
+      warnings: contractClassificationContext.warnings,
       error: 'Functie-indeling kon niet worden bepaald. Loonberekening is geblokkeerd totdat bijlage-2 schaal en periodiek zijn gevalideerd.',
       cao_function_classification: null
     };
@@ -1138,7 +1234,10 @@ async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, cao
       payroll_final_allowed: false,
       manual_review_required: true,
       calculation_status: 'blocked_manual_review',
-      warnings: classification.warnings || [],
+      warnings: [
+        ...contractClassificationContext.warnings,
+        ...(classification.warnings || [])
+      ],
       error: `Functie-indeling/loonschaal niet definitief gevalideerd voor ${personnel.name}. Loonberekening is geblokkeerd totdat bijlage-2 schaal en periodiek kloppen.`,
       cao_function_classification: classification
     };
@@ -1151,7 +1250,10 @@ async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, cao
     payroll_final_allowed: true,
     manual_review_required: false,
     calculation_status: 'final',
-    warnings: classification.warnings || [],
+    warnings: [
+      ...contractClassificationContext.warnings,
+      ...(classification.warnings || [])
+    ],
     cao_function_classification: classification
   };
 }
@@ -2487,7 +2589,13 @@ Deno.serve(async (req) => {
     };
 
     // ── Bepaal loonbasis via CAO-scope + functieclassificatie ──
-    const wageBasis = await resolveLoondienstWageBasis({ base44, personnel_id, personnel, caoScope });
+    const wageBasis = await resolveLoondienstWageBasis({
+      base44,
+      personnel_id,
+      personnel,
+      caoScope,
+      contractResolutionResults
+    });
     const functionClassificationResult = wageBasis.cao_function_classification;
     const payrollFinalAllowed = wageBasis.payroll_final_allowed;
     const wageBasisType = wageBasis.wage_basis_type;

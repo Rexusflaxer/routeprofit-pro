@@ -164,6 +164,63 @@ function addWorkflowReview(items, ruleId, domain, message, field) {
   });
 }
 
+const CONTRACT_CLASSIFICATION_FIELDS = [
+  'function_type',
+  'cao_function_group',
+  'cao_function_level',
+  'security_role_status',
+  'performs_security_work',
+  'security_work_percentage',
+  'works_airport_schiphol',
+  'works_cash_value_logistics',
+  'works_event_or_hospitality_security',
+  'event_hospitality_cao_applies',
+  'cao_scale',
+  'cao_period',
+  'written_classification_notice_confirmed',
+  'written_function_classification_notice_confirmed',
+  'written_scale_period_notice_confirmed',
+  'wage_scale_period_notice_confirmed',
+  'periodic_increase_due_confirmed',
+  'periodiek_verhoging_bevestigd'
+];
+
+function hasValue(value) {
+  return value !== undefined && value !== null && value !== '';
+}
+
+function buildClassificationSubject(personnel, contract) {
+  const subject = { ...(personnel || {}) };
+  const fieldSources = {};
+  const overrides = [];
+
+  for (const field of CONTRACT_CLASSIFICATION_FIELDS) {
+    if (hasValue(contract?.[field])) {
+      if (hasValue(subject[field]) && String(subject[field]) !== String(contract[field])) {
+        overrides.push({
+          field,
+          personnel_value: subject[field],
+          contract_value: contract[field],
+          reason: 'contract_classification_overrides_personnel_default'
+        });
+      }
+      subject[field] = contract[field];
+      fieldSources[field] = 'contract';
+    } else if (hasValue(subject[field])) {
+      fieldSources[field] = 'personnel';
+    }
+  }
+
+  return {
+    subject,
+    classification_scope: {
+      contract_scope_used: !!contract?.id || CONTRACT_CLASSIFICATION_FIELDS.some(field => hasValue(contract?.[field])),
+      field_sources: fieldSources,
+      contract_overrides_personnel_defaults: overrides
+    }
+  };
+}
+
 function inferFunctionGroup(p, wc) {
   const explicit = p.cao_function_group && p.cao_function_group !== 'unknown' ? p.cao_function_group : null;
   if (explicit) return { group: explicit, source: 'explicit', matched_alias: null };
@@ -633,7 +690,7 @@ Deno.serve(async (req) => {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const { personnel_id, personnel: personnelInput, work_context, reference_date, save = false, force_cao_sync = false } = body;
+    const { personnel_id, personnel: personnelInput, contract = null, work_context, reference_date, save = false, force_cao_sync = false } = body;
 
     // Haal medewerker op
     let personnel = personnelInput || null;
@@ -643,10 +700,14 @@ Deno.serve(async (req) => {
     }
     if (!personnel) return Response.json({ error: 'personnel of personnel_id is verplicht' }, { status: 400 });
 
+    const classificationSubject = buildClassificationSubject(personnel, contract);
+    const effectivePersonnel = classificationSubject.subject;
+
     const targetCaoKey = body.cao_key ||
+      contract?.cao_key ||
       work_context?.cao_key ||
       work_context?.cao ||
-      personnel.cao ||
+      effectivePersonnel.cao ||
       CAO_PB_KEY;
     const functionClassificationRuntimeSupport = getCaoRuntimeSupport(targetCaoKey, 'resolveCaoFunctionClassification');
     if (!functionClassificationRuntimeSupport.supported) {
@@ -672,7 +733,8 @@ Deno.serve(async (req) => {
     try {
       const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
         personnel_id: personnel_id || undefined,
-        personnel: personnel_id ? undefined : personnel,
+        personnel: personnel_id ? undefined : effectivePersonnel,
+        contract: contract || undefined,
         work_context: work_context || {},
         cao_key: targetCaoKey
       });
@@ -689,10 +751,15 @@ Deno.serve(async (req) => {
       };
     }
 
-    const result = classify(personnel, work_context, caoScope, caoConfig, reference_date);
+    const result = classify(effectivePersonnel, work_context, caoScope, caoConfig, reference_date);
 
-    // Sla classificatiestatus op als save=true
-    if (save && personnel_id) {
+    // Sla alleen globale personeelsclassificatie op als er geen contractscope is gebruikt.
+    if (save && personnel_id && classificationSubject.classification_scope.contract_scope_used) {
+      result.warnings = [
+        ...(result.warnings || []),
+        'Contractspecifieke functieclassificatie is niet opgeslagen op de algemene personeelskaart.'
+      ];
+    } else if (save && personnel_id) {
       await base44.entities.Personnel.update(personnel_id, {
         cao_function_classification_status: result.classification_status,
         cao_function_manual_review_reasons: result.manual_review_reasons || [],
@@ -724,6 +791,7 @@ Deno.serve(async (req) => {
         reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
         revision: syncResult?.revision || null
       },
+      classification_scope: classificationSubject.classification_scope,
       ...result
     });
 
