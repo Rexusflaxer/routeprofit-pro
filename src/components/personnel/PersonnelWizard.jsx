@@ -85,6 +85,7 @@ export default function PersonnelWizard({ person, onClose }) {
           const caoFunctionGroup = data.personnel.cao_function_group || null;
           const caoFunctionLevel = data.personnel.cao_function_level || null;
           const securityRoleStatus = data.personnel.security_role_status || "unknown";
+          const caoScopeProfile = data.personnel.cao_scope_profile || null;
           await base44.entities.PersonnelContract.create({
             personnel_id: personnelId,
             company_id: companyId,
@@ -98,6 +99,12 @@ export default function PersonnelWizard({ person, onClose }) {
             probation_override_reason: data.personnel.probation_override_reason || null,
             security_role_status: securityRoleStatus,
             allowed_security_role_statuses: securityRoleStatus && securityRoleStatus !== "unknown" ? [securityRoleStatus] : [],
+            performs_security_work: data.personnel.performs_security_work ?? null,
+            security_work_percentage: data.personnel.security_work_percentage ?? null,
+            works_airport_schiphol: data.personnel.works_airport_schiphol ?? null,
+            works_cash_value_logistics: data.personnel.works_cash_value_logistics ?? null,
+            works_event_or_hospitality_security: data.personnel.works_event_or_hospitality_security ?? null,
+            event_hospitality_cao_applies: data.personnel.event_hospitality_cao_applies ?? null,
             function_type: functionType,
             allowed_function_types: functionType ? [functionType] : [],
             cao_function_group: caoFunctionGroup,
@@ -105,6 +112,14 @@ export default function PersonnelWizard({ person, onClose }) {
             cao_function_level: caoFunctionLevel,
             allowed_cao_function_levels: caoFunctionLevel ? [caoFunctionLevel] : [],
             allowed_task_types: [],
+            cao_scope_profile: caoScopeProfile,
+            cao_applicability_manual_review_required: data.personnel.cao_applicability_manual_review_required ?? null,
+            cao_applicable_rule_profile: data.personnel.cao_applicable_rule_profile || null,
+            cao_applicability_source_rule_ids: data.personnel.cao_applicability_source_rule_ids || [],
+            cao_applicability_warnings: data.personnel.cao_applicability_warnings || [],
+            cao_excluded_rule_ids: data.personnel.cao_excluded_rule_ids || [],
+            cao_excluded_articles: data.personnel.cao_excluded_articles || [],
+            cao_excluded_chapters: data.personnel.cao_excluded_chapters || [],
             contract_hours_per_week: data.personnel.parttime_hours || null,
             contract_hours_per_pay_period: null,
             min_hours_per_week: data.personnel.min_hours || null,

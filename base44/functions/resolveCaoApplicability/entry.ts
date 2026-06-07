@@ -148,7 +148,7 @@ function functionText(p, wc = {}) {
     p.position_title,
     p.function_name,
     p.function_type,
-    p.cao_function_group,
+    p.cao_function_group === 'non_security_staff' ? null : p.cao_function_group,
     p.cao_function_level
   ].filter(hasValue).map(normalizeText).join(' ');
 }

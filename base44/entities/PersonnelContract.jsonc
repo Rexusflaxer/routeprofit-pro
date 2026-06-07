@@ -603,6 +603,48 @@
       "default": [],
       "description": "Beveiligingsstatussen waarvoor dit contract in planning/payroll inzetbaar is. Leeg betekent niet bewezen als de dienst een specifieke beveiligingsstatus vereist."
     },
+    "performs_security_work": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Contractspecifieke vastlegging of de werknemer normaal beveiligingswerk uitvoert. Overschrijft medewerkerstamdata bij contract-/dienstresolutie."
+    },
+    "security_work_percentage": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Contractspecifiek percentage beveiligingswerk. Nodig voor CAO PB artikel 3 lid 2 en mixed-scope review."
+    },
+    "works_airport_schiphol": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Contractspecifieke Schiphol/airport-scope."
+    },
+    "works_cash_value_logistics": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Contractspecifieke geld- en waardelogistiek-scope."
+    },
+    "works_event_or_hospitality_security": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Contractspecifiek of de werknemer normaal evenementen-/horecabeveiliging uitvoert."
+    },
+    "event_hospitality_cao_applies": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Contractspecifiek of de eigen evenementen-/horecabeveiligings-CAO geldt in plaats van CAO PB."
+    },
     "function_type": {
       "type": [
         "string",
@@ -651,6 +693,86 @@
         "type": "string"
       },
       "description": "Optionele taaktypes/dienstlabels die onder dit contract gepland mogen worden."
+    },
+    "cao_scope_profile": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "full_security_worker",
+        "non_security_work_article_3_exception",
+        "excluded_event_hospitality_security",
+        "cash_value_logistics",
+        "airport_schiphol",
+        "mixed_security_work_manual_review",
+        "unknown_manual_review",
+        null
+      ],
+      "description": "Snapshot van het bij contractaanmaak bepaalde CAO PB toepassingsprofiel. Beslissingen worden opnieuw uit contractscopevelden berekend, maar dit ondersteunt audit en review."
+    },
+    "cao_applicability_manual_review_required": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Snapshot of de CAO-toepassing bij contractaanmaak handmatige review vereiste."
+    },
+    "cao_applicable_rule_profile": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Snapshot van welke CAO PB regelgroepen bij dit contractprofiel automatisch toegepast mogen worden."
+    },
+    "cao_applicability_source_rule_ids": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "description": "Bronregel-ids waarop de contractscope-snapshot is gebaseerd."
+    },
+    "cao_applicability_warnings": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "description": "Warnings bij de contractscope-snapshot."
+    },
+    "cao_excluded_rule_ids": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "description": "CAO PB regel-ids die volgens de contractscope-snapshot niet automatisch toegepast mogen worden."
+    },
+    "cao_excluded_articles": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "cao_excluded_chapters": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
     },
     "contract_hours_per_week": {
       "type": [
