@@ -449,6 +449,91 @@ function evaluateFunctionMatch(contract, serviceContext) {
   };
 }
 
+function evaluateServiceContextReadiness(serviceContext) {
+  const missingFields = [];
+  const blockingReasons = [];
+  const manualReviewReasons = [];
+  const warnings = [];
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0227', 'CAO-PB-2024-R0228', 'CAO-PB-2024-R0229',
+    'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232',
+    'CAO-PB-2024-R0233'
+  ];
+  const hasFunctionContext = !!(
+    serviceContext.function_type ||
+    serviceContext.cao_function_group ||
+    serviceContext.cao_function_level ||
+    serviceContext.task_type
+  );
+  const hasCaoResolutionContext = !!(
+    serviceContext.cao_key ||
+    serviceContext.cao ||
+    serviceContext.company_id ||
+    serviceContext.suggested_cao_keys?.length > 0
+  );
+  const hasSecurityScopeEvidence = (
+    serviceContext.performs_security_work !== null &&
+    serviceContext.performs_security_work !== undefined
+  ) ||
+    (
+      serviceContext.security_work_percentage !== null &&
+      serviceContext.security_work_percentage !== undefined
+    ) ||
+    !!serviceContext.security_role_status ||
+    !!serviceContext.cao_function_group;
+
+  if (!hasCaoResolutionContext) {
+    missingFields.push('cao_key_or_company_id');
+    manualReviewReasons.push('Dienst mist CAO-context: leg cao_key vast of koppel de dienst aan een bedrijf met geldige CompanyCaoAssignment voordat planning/payroll definitief mag zijn.');
+  }
+
+  if (!hasFunctionContext && serviceContext.contract_assignment_policy === 'strict_contract_match') {
+    missingFields.push('service_function_type_or_cao_function_group_or_task_type');
+    blockingReasons.push('Dienst mist functiecontext. Stel service_function_type, required_cao_function_group of task_type in voordat contractmatching definitief mag zijn.');
+  } else if (!hasFunctionContext && serviceContext.contract_assignment_policy === 'allow_manual_review') {
+    missingFields.push('service_function_type_or_cao_function_group_or_task_type');
+    manualReviewReasons.push('Dienst mist functiecontext. Handmatige review vereist om te bepalen welk contract bij deze dienst hoort.');
+  }
+
+  if (!hasSecurityScopeEvidence) {
+    missingFields.push('performs_security_work_or_security_scope');
+    manualReviewReasons.push('Dienst mist expliciete beveiligingsscope. Leg performs_security_work, security_work_percentage, security_role_status of cao_function_group vast zodat CAO artikel 3 correct kan worden toegepast.');
+  }
+
+  if (serviceContext.cao_key_resolution_warning) {
+    warnings.push(serviceContext.cao_key_resolution_warning);
+  }
+  if (serviceContext.cao_key_manual_review_required) {
+    manualReviewReasons.push('Dienstcontext wijst op een mogelijke andere CAO, maar cao_key is niet definitief vastgesteld. Kies expliciet de juiste CAO voordat planning/payroll definitief mag zijn.');
+  }
+
+  const uniqueBlocking = [...new Set(blockingReasons)];
+  const uniqueManual = [...new Set(manualReviewReasons)];
+  const status = uniqueBlocking.length > 0
+    ? 'blocked'
+    : missingFields.length > 0
+    ? 'missing_context'
+    : uniqueManual.length > 0
+    ? 'manual_review_required'
+    : 'planning_context_ready';
+
+  return {
+    status,
+    ready: status === 'planning_context_ready',
+    missing_fields: [...new Set(missingFields)],
+    blocking_reasons: uniqueBlocking,
+    manual_review_reasons: uniqueManual,
+    warnings: [...new Set(warnings)],
+    source_rule_ids: sourceRuleIds,
+    checked_at: new Date().toISOString(),
+    has_function_context: hasFunctionContext,
+    has_cao_resolution_context: hasCaoResolutionContext,
+    has_security_scope_evidence: hasSecurityScopeEvidence,
+    contract_assignment_policy: serviceContext.contract_assignment_policy || null,
+    cao_key_source: serviceContext.cao_key_source || null
+  };
+}
+
 function getCaoPayrollReadiness(caoConfig) {
   const gate = caoConfig?.payroll_readiness_gate || null;
   const status = caoConfig?.payroll_readiness_status || null;
@@ -953,25 +1038,11 @@ Deno.serve(async (req) => {
     const warnings = [];
     const manualReviewReasons = [];
     const blockingReasons = [];
+    const serviceContextReadiness = evaluateServiceContextReadiness(serviceContext);
 
-    if (serviceContext.cao_key_resolution_warning) {
-      warnings.push(serviceContext.cao_key_resolution_warning);
-    }
-    if (serviceContext.cao_key_manual_review_required) {
-      manualReviewReasons.push('Dienstcontext wijst op een mogelijke andere CAO, maar cao_key is niet definitief vastgesteld. Kies expliciet de juiste CAO voordat planning/payroll definitief mag zijn.');
-    }
-
-    const hasServiceFunctionContext = !!(
-      serviceContext.function_type ||
-      serviceContext.cao_function_group ||
-      serviceContext.cao_function_level ||
-      serviceContext.task_type
-    );
-    if (!hasServiceFunctionContext && serviceContext.contract_assignment_policy === 'strict_contract_match') {
-      blockingReasons.push('Dienst mist functiecontext. Stel service_function_type, required_cao_function_group of task_type in voordat contractmatching definitief mag zijn.');
-    } else if (!hasServiceFunctionContext && serviceContext.contract_assignment_policy === 'allow_manual_review') {
-      manualReviewReasons.push('Dienst mist functiecontext. Handmatige review vereist om te bepalen welk contract bij deze dienst hoort.');
-    }
+    warnings.push(...serviceContextReadiness.warnings);
+    manualReviewReasons.push(...serviceContextReadiness.manual_review_reasons);
+    blockingReasons.push(...serviceContextReadiness.blocking_reasons);
 
     const [contracts, assignments] = await Promise.all([
       base44.asServiceRole.entities.PersonnelContract.filter({ personnel_id }),
@@ -1250,6 +1321,7 @@ Deno.serve(async (req) => {
       } : null,
       contract_source: selectedContract?.company_id ? 'company_contract' : selectedContract ? 'legacy_companyless_contract' : null,
       service_context: serviceContext,
+      service_context_readiness: serviceContextReadiness,
       internship_service_check: internshipServiceCheck,
       hired_worker_service_check: hiredWorkerServiceCheck,
       selected_contract_readiness: selectedContractReadiness,

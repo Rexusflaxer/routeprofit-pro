@@ -312,6 +312,69 @@
       ],
       "additionalProperties": true,
       "description": "Snapshot/context voor toekomstige planner: benodigde functie, CAO-scope en contractmatch-regels."
+    },
+    "planning_context_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "planning_context_ready",
+        "missing_context",
+        "manual_review_required",
+        "blocked",
+        "unknown",
+        null
+      ],
+      "default": "unknown",
+      "description": "Auditstatus van de dienstcontext voordat een medewerker wordt ingepland. Niet ready betekent geen definitieve planning/payroll zonder review."
+    },
+    "planning_context_missing_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Ontbrekende dienstcontextvelden, bijv. cao_key_or_company_assignment, service_function_type, required_cao_function_group of performs_security_work."
+    },
+    "planning_context_manual_review_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Redenen waarom deze taak/dienstcontext handmatige CAO- of contractreview vereist."
+    },
+    "planning_context_blocking_reasons": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Blokkerende redenen waarom deze taak niet definitief gepland/payroll-final gebruikt mag worden."
+    },
+    "planning_context_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Niet-blokkerende waarschuwingen over CAO-/contractcontext van deze taak."
+    },
+    "planning_context_checked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datetime waarop de dienstcontext-readiness voor het laatst is vastgesteld."
+    },
+    "planning_context_source_rule_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "CAO-rule ids waarop de dienstcontextbeoordeling is gebaseerd."
     }
   },
   "required": [
