@@ -58,6 +58,78 @@ const REIMBURSEMENT_RATES = {
   accommodation_per_night: null,      // manual_review_required
 };
 
+function isoDate(value) {
+  if (!value) return null;
+  return String(value).slice(0, 10);
+}
+
+function contractCoversDate(contract, referenceDate) {
+  const date = isoDate(referenceDate);
+  if (!contract || !date) return false;
+  const start = isoDate(contract.contract_start_date || contract.start_date || contract.employment_start_date);
+  const end = isoDate(contract.contract_end_date || contract.end_date || contract.employment_end_date) || '9999-12-31';
+  if (!start) return false;
+  return start <= date && date <= end;
+}
+
+function uniqueNonEmpty(values) {
+  return [...new Set((values || []).filter(value => value !== null && value !== undefined && value !== ''))];
+}
+
+function reimbursementReferenceDate(body) {
+  return isoDate(
+    body.reference_date ||
+    body.service_date ||
+    body.shift_date ||
+    body.date ||
+    body.period_end_date ||
+    body.service_context?.service_date ||
+    body.service_context?.date ||
+    (Array.isArray(body.shifts) ? body.shifts.find(shift => shift?.date || shift?.service_date)?.date : null) ||
+    (Array.isArray(body.shifts) ? body.shifts.find(shift => shift?.date || shift?.service_date)?.service_date : null) ||
+    new Date().toISOString()
+  );
+}
+
+function resolveContractCaoForDate({ explicitCaoKey, contract, contracts = [], referenceDate }) {
+  const date = isoDate(referenceDate);
+  const sourceContracts = contract ? [contract] : (contracts || []).filter(item => contractCoversDate(item, date));
+  const contractCaoKeys = uniqueNonEmpty(sourceContracts.map(item => item.cao_key));
+  const resolution = {
+    reference_date: date,
+    selected_contract_ids: sourceContracts.map(item => item.id).filter(Boolean),
+    selected_contract_cao_keys: contractCaoKeys,
+    cao_key: contractCaoKeys.length === 1 ? contractCaoKeys[0] : null,
+    selected_contract: sourceContracts.length === 1 ? sourceContracts[0] : null,
+    status: 'resolved'
+  };
+
+  if (explicitCaoKey && contractCaoKeys.length === 1 && contractCaoKeys[0] !== explicitCaoKey) {
+    return {
+      ...resolution,
+      status: 'blocked_explicit_cao_contract_mismatch',
+      blocking_reason: `Expliciete cao_key ${explicitCaoKey} botst met contract-CAO ${contractCaoKeys[0]} op ${date}.`
+    };
+  }
+  if (!explicitCaoKey && contractCaoKeys.length > 1) {
+    return {
+      ...resolution,
+      status: 'blocked_ambiguous_contract_cao_key',
+      blocking_reason: `Meerdere contract-CAO's actief op ${date}: ${contractCaoKeys.join(', ')}.`
+    };
+  }
+  if (!explicitCaoKey && contractCaoKeys.length === 0 && sourceContracts.length > 0) {
+    return {
+      ...resolution,
+      status: 'manual_review_missing_contract_cao_key',
+      manual_review_required: true,
+      warning: `Contract actief op ${date}, maar cao_key ontbreekt op het contract.`
+    };
+  }
+
+  return resolution;
+}
+
 function calculateTravelCost(km_one_way, km_driven = null) {
   // R0855: eigen vervoer v.a. 9 km, EUR 0,23/km over alle kilometers
   if (km_one_way < REIMBURSEMENT_RATES.travel_min_km) {
@@ -143,7 +215,7 @@ Deno.serve(async (req) => {
     if (!user) return Response.json({ error: 'Unauthorized' }, { status: 401 });
 
     const body = await req.json().catch(() => ({}));
-    const { action, km_one_way, km_driven, hours_worked, start_time, shifts, force_cao_sync, personnel_id } = body;
+    const { action, km_one_way, km_driven, hours_worked, start_time, shifts, force_cao_sync, personnel_id, contract_id } = body;
 
     let personnel = body.personnel || null;
     if (personnel_id && !personnel) {
@@ -151,8 +223,41 @@ Deno.serve(async (req) => {
       if (!personnel) return Response.json({ error: `Medewerker niet gevonden: ${personnel_id}` }, { status: 404 });
     }
 
-    const targetCaoKey = body.cao_key ||
-      body.service_context?.cao_key ||
+    let contract = body.contract || null;
+    if (contract_id && !contract) {
+      contract = await base44.entities.PersonnelContract.get(contract_id).catch(() => null);
+      if (!contract) return Response.json({ error: `Arbeidscontract niet gevonden: ${contract_id}` }, { status: 404 });
+    }
+    const contracts = personnel_id
+      ? await base44.asServiceRole.entities.PersonnelContract.filter({ personnel_id }).catch(() => [])
+      : [];
+    const referenceDate = reimbursementReferenceDate(body);
+    const explicitCaoKey = body.cao_key || body.service_context?.cao_key || null;
+    const contractCaoResolution = resolveContractCaoForDate({
+      explicitCaoKey,
+      contract,
+      contracts,
+      referenceDate
+    });
+    if (String(contractCaoResolution.status || '').startsWith('blocked_')) {
+      return Response.json({
+        error: contractCaoResolution.blocking_reason,
+        action: action || 'calculate_reimbursements',
+        personnel_id: personnel_id || null,
+        contract_id: contract_id || contract?.id || null,
+        reference_date: referenceDate,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: contractCaoResolution.status
+      }, { status: 400 });
+    }
+
+    const targetCaoKey = explicitCaoKey ||
+      contractCaoResolution.cao_key ||
       personnel?.cao ||
       CAO_PB_KEY;
 
@@ -181,6 +286,11 @@ Deno.serve(async (req) => {
           'Vergoedingencalculator geblokkeerd: CAO-runtime voor deze cao_key is nog niet lokaal geimplementeerd en geverifieerd.'
         ],
         personnel_id: personnel_id || null,
+        contract_id: contract_id || contract?.id || null,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
         cao_key: targetCaoKey,
         cao_runtime_support: reimbursementRuntimeSupport,
         manual_review_required: true,
@@ -218,7 +328,12 @@ Deno.serve(async (req) => {
     const scopeWarnings = [];
     if (targetCaoKey === CAO_PB_KEY && personnel_id) {
       try {
-        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
+          personnel_id,
+          cao_key: targetCaoKey,
+          contract: contractCaoResolution.selected_contract || contract || null,
+          work_context: body.service_context || null
+        });
         rawScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
     }
@@ -243,10 +358,16 @@ Deno.serve(async (req) => {
         chapter_5_skipped: true,
         cao_sync_status: caoSyncStatus,
         cao_key: targetCaoKey,
+        contract_id: contract_id || contract?.id || null,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
         cao_runtime_support: reimbursementRuntimeSupport,
         calculation_warnings: [...syncWarnings],
         scope_warnings: scopeWarnings,
-        cao_scope_profile: caoScope.cao_scope_profile
+        cao_scope_profile: caoScope.cao_scope_profile,
+        payroll_final_allowed: false
       });
     }
 
@@ -271,7 +392,7 @@ Deno.serve(async (req) => {
     }
 
     // Manual review items
-    result.manual_review_required = [
+    result.manual_review_items = [
       { rule_id: 'CAO-PB-2024-R0880', domain: 'pauze', message: 'Pauze/beschikbaarheidsvergoeding: handmatige review vereist (CAO art. 49)', manual_review_required: true },
       { rule_id: 'CAO-PB-2024-R0885', domain: 'consignatie', message: 'Consignatie/bereikbaarheidsvergoeding: handmatige review vereist (CAO art. 50)', manual_review_required: true },
       { rule_id: 'CAO-PB-2024-R0890', domain: 'hond', message: 'Hondenvergoeding: handmatige review vereist (CAO art. 51)', manual_review_required: true },
@@ -284,11 +405,18 @@ Deno.serve(async (req) => {
       success: true,
       cao_sync_status: caoSyncStatus,
       cao_key: targetCaoKey,
+      contract_id: contract_id || contract?.id || null,
+      contract_cao_resolution: {
+        ...contractCaoResolution,
+        selected_contract: undefined
+      },
       cao_runtime_support: reimbursementRuntimeSupport,
       calculation_warnings: syncWarnings,
       scope_warnings: scopeWarnings,
       cao_scope_profile: caoScope?.cao_scope_profile || null,
-      ...result
+      ...result,
+      manual_review_required: contractCaoResolution.manual_review_required === true || result.manual_review_items.length > 0,
+      payroll_final_allowed: contractCaoResolution.manual_review_required !== true && result.manual_review_items.length === 0
     });
 
   } catch (error) {

@@ -42,6 +42,58 @@ function rangesOverlap(startA, endA, startB, endB) {
   return isoDate(startA) <= isoDate(endB) && isoDate(startB) <= isoDate(endA);
 }
 
+function contractCoversDate(contract, referenceDate) {
+  const date = isoDate(referenceDate);
+  if (!contract || !date) return false;
+  const start = isoDate(contract.contract_start_date || contract.start_date || contract.employment_start_date);
+  const end = isoDate(contract.contract_end_date || contract.end_date || contract.employment_end_date) || '9999-12-31';
+  if (!start) return false;
+  return start <= date && date <= end;
+}
+
+function uniqueNonEmpty(values) {
+  return [...new Set((values || []).filter(value => value !== null && value !== undefined && value !== ''))];
+}
+
+function resolveContractCaoForDate({ explicitCaoKey, contracts = [], referenceDate }) {
+  const date = isoDate(referenceDate);
+  const relevantContracts = (contracts || []).filter(contract => contractCoversDate(contract, date));
+  const contractCaoKeys = uniqueNonEmpty(relevantContracts.map(contract => contract.cao_key));
+  const resolution = {
+    reference_date: date,
+    selected_contract_ids: relevantContracts.map(contract => contract.id).filter(Boolean),
+    selected_contract_cao_keys: contractCaoKeys,
+    cao_key: contractCaoKeys.length === 1 ? contractCaoKeys[0] : null,
+    selected_contract: relevantContracts.length === 1 ? relevantContracts[0] : null,
+    status: 'resolved'
+  };
+
+  if (explicitCaoKey && contractCaoKeys.length === 1 && contractCaoKeys[0] !== explicitCaoKey) {
+    return {
+      ...resolution,
+      status: 'blocked_explicit_cao_contract_mismatch',
+      blocking_reason: `Expliciete cao_key ${explicitCaoKey} botst met contract-CAO ${contractCaoKeys[0]} op ${date}.`
+    };
+  }
+  if (!explicitCaoKey && contractCaoKeys.length > 1) {
+    return {
+      ...resolution,
+      status: 'blocked_ambiguous_contract_cao_key',
+      blocking_reason: `Meerdere contract-CAO's actief op ${date}: ${contractCaoKeys.join(', ')}.`
+    };
+  }
+  if (!explicitCaoKey && contractCaoKeys.length === 0 && relevantContracts.length > 0) {
+    return {
+      ...resolution,
+      status: 'manual_review_missing_contract_cao_key',
+      manual_review_required: true,
+      warning: `Contract actief op ${date}, maar cao_key ontbreekt op het contract.`
+    };
+  }
+
+  return resolution;
+}
+
 function flattenPayPeriods(payPeriods) {
   if (!payPeriods) return [];
   const rows = Array.isArray(payPeriods)
@@ -321,8 +373,31 @@ Deno.serve(async (req) => {
     ]);
     if (!personnel) return Response.json({ error: `Medewerker niet gevonden: ${personnelId}` }, { status: 404 });
 
-    const targetCaoKey = body.cao_key ||
-      body.service_context?.cao_key ||
+    const referenceDate = body.reference_date || findPeriod(flattenPayPeriods(body.pay_periods), payoutYear, payoutPeriodNumber)?.end_date || `${payoutYear}-12-01`;
+    const explicitCaoKey = body.cao_key || body.service_context?.cao_key || null;
+    const contractCaoResolution = resolveContractCaoForDate({
+      explicitCaoKey,
+      contracts,
+      referenceDate
+    });
+    if (String(contractCaoResolution.status || '').startsWith('blocked_')) {
+      return Response.json({
+        error: contractCaoResolution.blocking_reason,
+        personnel_id: personnelId,
+        reference_date: referenceDate,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: contractCaoResolution.status,
+        source_rule_ids: ARTICLE_38_RULE_IDS
+      }, { status: 400 });
+    }
+
+    const targetCaoKey = explicitCaoKey ||
+      contractCaoResolution.cao_key ||
       personnel.cao ||
       CAO_PB_KEY;
     const yearEndBonusRuntimeSupport = getCaoRuntimeSupport(targetCaoKey, 'calculateCaoYearEndBonus');
@@ -331,6 +406,10 @@ Deno.serve(async (req) => {
         error: yearEndBonusRuntimeSupport.message,
         personnel_id: personnelId,
         cao_key: targetCaoKey,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
         cao_runtime_support: yearEndBonusRuntimeSupport,
         manual_review_required: true,
         payroll_final_allowed: false,
@@ -346,6 +425,10 @@ Deno.serve(async (req) => {
         reason: 'Artikel 38 CAO PB is alleen automatisch ingericht voor werknemers in loondienst.',
         personnel_id: personnelId,
         cao_key: targetCaoKey,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
         cao_runtime_support: yearEndBonusRuntimeSupport,
         payroll_final_allowed: true,
         manual_review_required: false,
@@ -353,13 +436,16 @@ Deno.serve(async (req) => {
       });
     }
 
-    const referenceDate = body.reference_date || findPeriod(flattenPayPeriods(body.pay_periods), payoutYear, payoutPeriodNumber)?.end_date || `${payoutYear}-12-01`;
     const caoConfig = body.cao_config || await getActiveCaoConfig(base44, referenceDate, targetCaoKey);
     if (!caoConfig) {
       return Response.json({
         error: `Geen actieve CAO-configuratie gevonden voor ${targetCaoKey} op ${referenceDate}.`,
         personnel_id: personnelId,
         cao_key: targetCaoKey,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
         cao_runtime_support: yearEndBonusRuntimeSupport,
         manual_review_required: true,
         payroll_final_allowed: false,
@@ -372,6 +458,10 @@ Deno.serve(async (req) => {
         personnel_id: personnelId,
         cao_configuration_id: caoConfig.id || null,
         cao_key: targetCaoKey,
+        contract_cao_resolution: {
+          ...contractCaoResolution,
+          selected_contract: undefined
+        },
         cao_runtime_support: yearEndBonusRuntimeSupport,
         manual_review_required: true,
         payroll_final_allowed: false,
@@ -395,9 +485,15 @@ Deno.serve(async (req) => {
       personnel_name: personnel.name || null,
       cao_configuration_id: caoConfig.id || null,
       cao_key: caoConfig.cao_key || targetCaoKey,
+      contract_cao_resolution: {
+        ...contractCaoResolution,
+        selected_contract: undefined
+      },
       cao_runtime_support: yearEndBonusRuntimeSupport,
       cao_version_label: caoConfig.version_label || caoConfig.name || null,
-      ...result
+      ...result,
+      manual_review_required: result.manual_review_required === true || contractCaoResolution.manual_review_required === true,
+      payroll_final_allowed: result.payroll_final_allowed !== false && contractCaoResolution.manual_review_required !== true
     });
   } catch (error) {
     return Response.json({ error: error.message }, { status: 500 });
