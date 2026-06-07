@@ -299,6 +299,86 @@ function calculateCallWorkerVacationPayoutArticle59({ baseWageAmount, minimumSer
   };
 }
 
+function isCallAgreementContext(input) {
+  if (!input) return false;
+  const contractType = input.contract_type || input.employment_contract_type || null;
+  const contractForm = input.contract_form || input.employment_contract_form || null;
+  const contractModel = input.contract_model || input.employment_contract_model || null;
+  const callAgreementType = input.call_agreement_type || input.call_contract_type || null;
+
+  if (input.is_call_agreement === true) return true;
+  if (['0_uren', 'oproep', 'min_max'].includes(contractType)) return true;
+  if (['oproep', 'zero_hours', 'min_max', 'call'].includes(contractForm)) return true;
+  if (['oproep', 'zero_hours', 'min_max', 'call'].includes(contractModel)) return true;
+  if (['zero_hours', 'min_max', 'pre_agreement', 'annualized_bandwidth', 'no_work_no_pay_first_6_months'].includes(callAgreementType)) return true;
+
+  const minPayPeriod = numberOrNull(input.min_hours_per_pay_period);
+  const maxPayPeriod = numberOrNull(input.max_hours_per_pay_period);
+  const minWeek = numberOrNull(input.min_hours_per_week);
+  const maxWeek = numberOrNull(input.max_hours_per_week);
+  if ((minPayPeriod !== null && maxPayPeriod !== null) || (minWeek !== null && maxWeek !== null)) return true;
+  if (input.annualized_hours_with_bandwidth === true || numberOrNull(input.annual_contract_hours) !== null) return true;
+  if (input.no_work_no_pay_first_6_months === true) return true;
+
+  return false;
+}
+
+function selectedContractsFromResolutionResults(contractResolutionResults) {
+  return (contractResolutionResults || [])
+    .map(item => item?.contract_resolution?.selected_contract || item?.selected_contract || null)
+    .filter(Boolean);
+}
+
+function getContractIdentity(contract, index) {
+  return contract.id ||
+    [
+      contract.contract_form || '',
+      contract.call_agreement_type || '',
+      contract.contract_start_date || '',
+      contract.contract_end_date || '',
+      contract.min_hours_per_week ?? '',
+      contract.max_hours_per_week ?? '',
+      contract.min_hours_per_pay_period ?? '',
+      contract.max_hours_per_pay_period ?? '',
+      index
+    ].join('|');
+}
+
+function buildCallAgreementContractMix(contractResolutionResults) {
+  const uniqueContracts = new Map();
+  selectedContractsFromResolutionResults(contractResolutionResults).forEach((contract, index) => {
+    uniqueContracts.set(getContractIdentity(contract, index), {
+      contract_id: contract.id || null,
+      contract_form: contract.contract_form || null,
+      contract_type: contract.contract_type || null,
+      is_call_agreement: isCallAgreementContext(contract),
+      call_agreement_type: contract.call_agreement_type || contract.call_contract_type || null,
+      min_hours_per_week: contract.min_hours_per_week ?? null,
+      max_hours_per_week: contract.max_hours_per_week ?? null,
+      min_hours_per_pay_period: contract.min_hours_per_pay_period ?? null,
+      max_hours_per_pay_period: contract.max_hours_per_pay_period ?? null
+    });
+  });
+  const contracts = [...uniqueContracts.values()];
+  const hasCallAgreement = contracts.some(contract => contract.is_call_agreement);
+  const hasNonCallAgreement = contracts.some(contract => !contract.is_call_agreement);
+  return {
+    has_mixed_call_agreement_treatment: hasCallAgreement && hasNonCallAgreement,
+    has_call_agreement_contract: hasCallAgreement,
+    has_non_call_agreement_contract: hasNonCallAgreement,
+    contracts
+  };
+}
+
+function isCallWorkerForPayroll({ personnel, body, workSchedule, contractResolutionResults }) {
+  if (isCallAgreementContext(personnel) || isCallAgreementContext(body)) return true;
+  if (selectedContractsFromResolutionResults(contractResolutionResults).some(isCallAgreementContext)) return true;
+  return (workSchedule || []).some(shift =>
+    isCallAgreementContext(shift) ||
+    isCallAgreementContext(shift?.service_context)
+  );
+}
+
 function getOvertimeRules(caoConfig) {
   const rules = caoConfig?.overtime_rules || {};
   return {
@@ -565,8 +645,9 @@ function resolveShiftChangeAllowance(shift, personnel, hoursWorked, baseHourlyRa
     source_rule_ids: []
   };
 
-  const isOnCall = ['0_uren', 'oproep', 'min_max'].includes(personnel.contract_type) ||
-    ['oproep', 'zero_hours', 'min_max', 'call'].includes(shift.contract_model);
+  const isOnCall = isCallAgreementContext(personnel) ||
+    isCallAgreementContext(shift) ||
+    isCallAgreementContext(shift?.service_context);
   if (isOnCall || shift.shift_change_allowance_excluded === true) {
     result.source_rule_ids.push(isOnCall ? 'CAO-PB-2024-R0586' : 'CAO-PB-2024-R0806');
     return result;
@@ -1642,6 +1723,7 @@ Deno.serve(async (req) => {
 
     const contractResolutionRequired = shouldEnforceContractResolution({ body, workSchedule: work_schedule });
     let contractResolutionResults = [];
+    let callAgreementContractMix = buildCallAgreementContractMix(contractResolutionResults);
     if (contractResolutionRequired) {
       contractResolutionResults = await resolvePayrollContractContexts(base44, {
         body: {
@@ -1731,9 +1813,30 @@ Deno.serve(async (req) => {
             resolved_contract_cao_scope_profiles: resolvedScopeProfiles,
             manual_review_required: true,
             payroll_final_allowed: false,
-            calculation_status: 'blocked_contract_scope_mismatch'
-          }, { status: 400 });
-        }
+          calculation_status: 'blocked_contract_scope_mismatch'
+        }, { status: 400 });
+      }
+      callAgreementContractMix = buildCallAgreementContractMix(contractResolutionResults);
+      if (callAgreementContractMix.has_mixed_call_agreement_treatment) {
+        return Response.json({
+          error: 'Definitieve loonberekening geblokkeerd: deze loonrun bevat zowel oproepovereenkomst-diensten als normale contractdiensten.',
+          cao_sync_status: caoSyncStatus,
+          calculation_warnings: [
+            ...calculationWarnings,
+            'Splits de loonrun per contract/payoutbehandeling. Artikel 59 oproepkracht-uitbetaling mag niet worden gemengd met normale reserveringsregels in één berekening.'
+          ],
+          personnel_id,
+          cao_configuration_id: caoConfig.id,
+          cao_version_label: caoConfig.version_label || caoConfig.name,
+          cao_valid_from: caoConfig.valid_from,
+          cao_payroll_readiness: payrollReadiness,
+          contract_resolution_required: true,
+          contract_resolution_results: contractResolutionResults,
+          call_agreement_contract_mix: callAgreementContractMix,
+          manual_review_required: true,
+          payroll_final_allowed: false,
+          calculation_status: 'blocked_mixed_call_agreement_contracts'
+        }, { status: 400 });
       }
     }
 
@@ -1747,8 +1850,8 @@ Deno.serve(async (req) => {
       new_years_eve: 0
     };
 
-    // Check of dit een oproepkracht is
-    const isCallWorker = personnel.contract_type === '0_uren' || personnel.contract_type === 'oproep';
+    // Check of dit een oproepkracht is, inclusief min-max en contractresolver-context.
+    const isCallWorker = isCallWorkerForPayroll({ personnel, body, workSchedule: work_schedule, contractResolutionResults });
     
     // Breakdown zoals op loonstrook
     let payslip = {
@@ -2406,6 +2509,7 @@ Deno.serve(async (req) => {
       cao_rule_application: caoRuleApplication,
       contract_resolution_required: contractResolutionRequired,
       contract_resolution_results: contractResolutionResults,
+      call_agreement_contract_mix: callAgreementContractMix,
       cao_payroll_corrections: caoCorrectionApplication,
       payroll_runtime_review_items: payrollRuntimeReviewItems,
       employee_type: personnel.employee_type,

@@ -207,6 +207,68 @@ function getNextDateForWeekday(routeWeekday) {
 }
 
 function r2(n) { return Math.round(n * 100) / 100; }
+function numberOrZero(value) {
+  const n = Number(value);
+  return Number.isFinite(n) ? n : 0;
+}
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+function isCallAgreementContext(input) {
+  if (!input) return false;
+  const contractType = input.contract_type || input.employment_contract_type || null;
+  const contractForm = input.contract_form || input.employment_contract_form || null;
+  const contractModel = input.contract_model || input.employment_contract_model || null;
+  const callAgreementType = input.call_agreement_type || input.call_contract_type || null;
+
+  if (input.is_call_agreement === true) return true;
+  if (['0_uren', 'oproep', 'min_max'].includes(contractType)) return true;
+  if (['oproep', 'zero_hours', 'min_max', 'call'].includes(contractForm)) return true;
+  if (['oproep', 'zero_hours', 'min_max', 'call'].includes(contractModel)) return true;
+  if (['zero_hours', 'min_max', 'pre_agreement', 'annualized_bandwidth', 'no_work_no_pay_first_6_months'].includes(callAgreementType)) return true;
+
+  const minPayPeriod = numberOrNull(input.min_hours_per_pay_period);
+  const maxPayPeriod = numberOrNull(input.max_hours_per_pay_period);
+  const minWeek = numberOrNull(input.min_hours_per_week);
+  const maxWeek = numberOrNull(input.max_hours_per_week);
+  if ((minPayPeriod !== null && maxPayPeriod !== null) || (minWeek !== null && maxWeek !== null)) return true;
+  if (input.annualized_hours_with_bandwidth === true || numberOrNull(input.annual_contract_hours) !== null) return true;
+  if (input.no_work_no_pay_first_6_months === true) return true;
+
+  return false;
+}
+function isCallWorkerForRouteCost(personnel, contractResolution) {
+  return isCallAgreementContext(personnel) ||
+    isCallAgreementContext(contractResolution?.selected_contract) ||
+    isCallAgreementContext(contractResolution?.contract);
+}
+function calculateCallWorkerVacationPayoutArticle59({ baseWageAmount, minimumServiceAmount, baseHourlyRate, paidBaseHours }) {
+  const maxHoursPerPayPeriod = 144;
+  const percentage = 9.24;
+  const paidHours = Math.max(0, numberOrZero(paidBaseHours));
+  const uncappedBaseAmount = Math.max(0, numberOrZero(baseWageAmount) + numberOrZero(minimumServiceAmount));
+  const hourlyRate = numberOrNull(baseHourlyRate);
+  const capped = paidHours > maxHoursPerPayPeriod;
+  const cappedBaseAmount = capped && hourlyRate !== null
+    ? Math.min(uncappedBaseAmount, hourlyRate * maxHoursPerPayPeriod)
+    : uncappedBaseAmount;
+  const manualReviewRequired = capped && hourlyRate === null;
+
+  return {
+    amount: r2(cappedBaseAmount * (percentage / 100)),
+    percentage,
+    payout_base_amount: r2(cappedBaseAmount),
+    uncapped_payout_base_amount: r2(uncappedBaseAmount),
+    payout_base_hours: r2(Math.min(paidHours, maxHoursPerPayPeriod)),
+    uncapped_paid_base_hours: r2(paidHours),
+    max_hours_per_pay_period: maxHoursPerPayPeriod,
+    capped_at_144_hours_per_pay_period: capped,
+    manual_review_required: manualReviewRequired,
+    source_rule_ids: ['CAO-PB-2024-R1014', 'CAO-PB-2024-R1015', 'CAO-PB-2024-R1016', 'CAO-PB-2024-R1017']
+  };
+}
 function timeToMinutes(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
 function minutesToTime(m) {
   const total = ((m % (24 * 60)) + (24 * 60)) % (24 * 60);
@@ -576,6 +638,14 @@ function buildRouteCostCacheFingerprint({ route, weekday, caoConfig, personnelLi
         scope_resolved_at: p.cao_applicability_resolved_at || null,
         scale: p.cao_scale || null,
         period: p.cao_period || null,
+        contract_type: p.contract_type || null,
+        contract_form: p.contract_form || null,
+        is_call_agreement: p.is_call_agreement === true,
+        call_agreement_type: p.call_agreement_type || null,
+        min_hours_per_week: p.min_hours_per_week ?? p.min_hours ?? null,
+        max_hours_per_week: p.max_hours_per_week ?? p.max_hours ?? null,
+        min_hours_per_pay_period: p.min_hours_per_pay_period ?? null,
+        max_hours_per_pay_period: p.max_hours_per_pay_period ?? null,
         custom_rate: p.custom_hourly_rate || null,
         function_group: p.cao_function_group || null,
         function_level: p.cao_function_level || null,
@@ -588,7 +658,7 @@ function buildRouteCostCacheFingerprint({ route, weekday, caoConfig, personnelLi
   });
 }
 
-function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawScope, rawClassification) {
+function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawScope, rawClassification, contractResolution = null) {
   const caoScope = normalizeCaoScope(rawScope);
   const classification = rawClassification || null;
   const shiftInterval = buildCaoShiftInterval(date, startTime, endTime, true);
@@ -750,28 +820,61 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
     .filter(([, amount]) => amount > 0)
     .map(([type, amount]) => ({ label: surchargeLabels[type], amount: r2(amount) }));
   const surchargesTotal = Object.values(surchargeAmounts).reduce((a, b) => a + b, 0);
-  const totalGross = baseSalary + surchargesTotal;
+  const isCallWorker = isCallWorkerForRouteCost(personnel, contractResolution);
+  const grossBeforeDirectPayouts = baseSalary + surchargesTotal;
+  const callWorkerVacationPayout = isCallWorker
+    ? calculateCallWorkerVacationPayoutArticle59({
+      baseWageAmount: baseSalary,
+      minimumServiceAmount: 0,
+      baseHourlyRate,
+      paidBaseHours: totalHours
+    })
+    : {
+      amount: 0,
+      percentage: 9.24,
+      payout_base_amount: 0,
+      uncapped_payout_base_amount: 0,
+      payout_base_hours: 0,
+      uncapped_paid_base_hours: 0,
+      max_hours_per_pay_period: 144,
+      capped_at_144_hours_per_pay_period: false,
+      manual_review_required: false,
+      source_rule_ids: ['CAO-PB-2024-R1014', 'CAO-PB-2024-R1015', 'CAO-PB-2024-R1016', 'CAO-PB-2024-R1017']
+    };
+  const vacationAllowance = grossBeforeDirectPayouts * ((caoConfig.vacation_allowance || 8) / 100);
+  const yearEndBonusEligibleBaseWage = baseSalary;
+  const yearEndBonusEligibleVacationAllowance = yearEndBonusEligibleBaseWage * ((caoConfig.vacation_allowance || 8) / 100);
+  const yearEndBonusBasisAmount = yearEndBonusEligibleBaseWage + yearEndBonusEligibleVacationAllowance;
+  const yearEndBonus = yearEndBonusBasisAmount * ((caoConfig.year_end_bonus || 2.01) / 100);
+  const directCallWorkerAllowancePayouts = isCallWorker ? vacationAllowance + yearEndBonus : 0;
+  const totalGross = grossBeforeDirectPayouts + callWorkerVacationPayout.amount + directCallWorkerAllowancePayouts;
+  const premiumBasis = isCallWorker
+    ? grossBeforeDirectPayouts + callWorkerVacationPayout.amount
+    : totalGross;
 
   const franchisePerPeriod = (caoConfig.pension_base_salary_threshold || 16164) / 13;
-  const pensionBase = Math.max(0, totalGross - franchisePerPeriod);
+  const pensionBaseAmount = isCallWorker ? grossBeforeDirectPayouts : totalGross;
+  const pensionBase = Math.max(0, pensionBaseAmount - franchisePerPeriod);
   const totalPensionPremium = pensionBase * ((caoConfig.pension_premium_rate_total || 24.1) / 100);
   const employerPension = totalPensionPremium * ((caoConfig.pension_premium_employer || 60) / 100);
-  const premiumAWF = totalGross * ((caoConfig.premium_awf_employer || 2.64) / 100);
-  const premiumWW = totalGross * (((caoConfig.premium_ww_employer_fixed || 0) + (caoConfig.premium_ww_employer_variable || 1.5)) / 100);
-  const premiumWIA = totalGross * ((caoConfig.premium_wia_employer || 0.72) / 100);
-  const premiumWGA = totalGross * ((caoConfig.premium_wga_employer || 1.5) / 100);
+  const premiumAWF = premiumBasis * ((caoConfig.premium_awf_employer || 2.64) / 100);
+  const premiumWW = premiumBasis * (((caoConfig.premium_ww_employer_fixed || 0) + (caoConfig.premium_ww_employer_variable || 1.5)) / 100);
+  const premiumWIA = premiumBasis * ((caoConfig.premium_wia_employer || 0.72) / 100);
+  const premiumWGA = premiumBasis * ((caoConfig.premium_wga_employer || 1.5) / 100);
   const employerCostsTotal = employerPension + premiumAWF + premiumWW + premiumWIA + premiumWGA;
 
-  const vacationAllowance = totalGross * ((caoConfig.vacation_allowance || 8) / 100);
-  const yearEndBonus = totalGross * ((caoConfig.year_end_bonus || 2.01) / 100);
   // ORT-vakantie-reservering: 0 als geen toeslagen toegepast zijn
   const avgOrtPerHour = (totalHours > 0 && surchargesTotal > 0) ? surchargesTotal / totalHours : 0;
   const estimatedAnnualVacationHours = 200;
-  const ortVacationReservation = applySpecialHours
+  const ortVacationReservation = !isCallWorker && applySpecialHours
     ? (estimatedAnnualVacationHours / 13) * avgOrtPerHour
     : 0;
-  const accrualsTotal = vacationAllowance + yearEndBonus + ortVacationReservation;
+  const accrualsTotal = isCallWorker ? 0 : vacationAllowance + yearEndBonus + ortVacationReservation;
   const totalCostEmployer = totalGross + employerCostsTotal + accrualsTotal;
+  const callWorkerManualReview = callWorkerVacationPayout.manual_review_required === true;
+  if (callWorkerManualReview) {
+    scopeWarnings.push('Oproepkracht-vakantiedagenuitbetaling art. 59 vereist handmatige review: 144-uurscap kon niet definitief worden berekend.');
+  }
 
   return {
     base_hourly_rate: baseHourlyRate, total_hours: totalHours,
@@ -786,16 +889,27 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
     accruals: {
       vacation_allowance: r2(vacationAllowance),
       year_end_bonus: r2(yearEndBonus),
-      ort_vacation_reservation: r2(ortVacationReservation)
+      year_end_bonus_basis: {
+        eligible_base_wage: r2(yearEndBonusEligibleBaseWage),
+        vacation_allowance_on_eligible_base_wage: r2(yearEndBonusEligibleVacationAllowance),
+        eligible_amount_including_vacation_allowance: r2(yearEndBonusBasisAmount),
+        excluded_special_hours_allowances: r2(surchargesTotal),
+        source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
+      },
+      ort_vacation_reservation: r2(ortVacationReservation),
+      direct_payout_total: r2(isCallWorker ? directCallWorkerAllowancePayouts : 0),
+      reserved_total: r2(accrualsTotal)
     },
+    vacation_pay_call_worker_article_59: callWorkerVacationPayout,
+    is_call_worker: isCallWorker,
     total_cost_employer: r2(totalCostEmployer),
     cost_per_hour: r2(totalHours > 0 ? totalCostEmployer / totalHours : 0),
     cao_scope_profile: caoScope?.cao_scope_profile || null,
     scope_warnings: [...scopeWarnings, ...(wageBasis.warnings || [])],
     wage_basis_type: wageBasis.wage_basis_type,
-    payroll_final_allowed: wageBasis.payroll_final_allowed && !dstCalculationInfo?.manual_review_required,
-    manual_review_required: wageBasis.manual_review_required || !!dstCalculationInfo?.manual_review_required,
-    calculation_status: dstCalculationInfo?.manual_review_required && wageBasis.calculation_status === 'final'
+    payroll_final_allowed: wageBasis.payroll_final_allowed && !dstCalculationInfo?.manual_review_required && !callWorkerManualReview,
+    manual_review_required: wageBasis.manual_review_required || !!dstCalculationInfo?.manual_review_required || callWorkerManualReview,
+    calculation_status: (dstCalculationInfo?.manual_review_required || callWorkerManualReview) && wageBasis.calculation_status === 'final'
       ? 'concept_manual_review'
       : wageBasis.calculation_status,
     cao_function_classification: classification,
@@ -1025,7 +1139,7 @@ Deno.serve(async (req) => {
           ...blockedCost
         };
       }
-      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification);
+      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification, contractResolution);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
@@ -1143,7 +1257,7 @@ Deno.serve(async (req) => {
           ...blockedCost
         };
       }
-      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification);
+      const cost = calculateShiftCost(p, shiftDate, startTime, endTime, caoConfig, effectiveScope, classification, contractResolution);
       return {
         personnel_id: p.id, name: p.name,
         employee_type: p.employee_type, contract_type: p.contract_type,
