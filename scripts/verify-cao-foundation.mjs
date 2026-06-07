@@ -2017,6 +2017,16 @@ function runCaoStaticGovernanceScenarios() {
     syncSource.includes("approval_status: 'owner_approved'"),
     'syncCaoFromCloudflare must only create active synced configs with owner-approved status'
   );
+  assert.ok(
+    syncSource.includes("body.rule_import_mode || body.caorule_import_mode || 'manifest_only'") &&
+      syncSource.includes("ruleImportMode === 'full_backfill'"),
+    'syncCaoFromCloudflare must default to manifest-only sync and require explicit full_backfill for CAORule imports'
+  );
+  assert.ok(
+    syncSource.includes('buildPayloadManifestRuleRegistrySnapshot') &&
+      syncSource.includes('base44_caorule_import_required_for_payroll_ready: false'),
+    'syncCaoFromCloudflare must store a compact CAORule manifest registry for payroll-ready sync'
+  );
 
   const personnelContractsSource = fs.readFileSync(path.join(repoRoot, 'src/components/personnel/PersonnelContractsTab.jsx'), 'utf8');
   assert.ok(

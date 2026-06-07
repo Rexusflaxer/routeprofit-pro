@@ -17,6 +17,10 @@ const checks = [
   {
     name: 'CAO runtime readiness',
     script: 'scripts/audit-cao-runtime-readiness.mjs'
+  },
+  {
+    name: 'CAO planner readiness',
+    script: 'scripts/audit-cao-planner-readiness.mjs'
   }
 ];
 

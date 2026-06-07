@@ -3,8 +3,9 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 /**
  * syncCaoFromCloudflare
  * Haalt de owner-approved CAO op uit Cloudflare en synchroniseert naar Base44.
- * Ondersteunt batching van CAORule records om rate limits te voorkomen.
- * Hervatbaar: een half-afgemaakte import met dezelfde idempotency_key wordt voortgezet.
+ * Standaard wordt alleen de payroll-ready configuratie plus een gehashte
+ * CAORule-manifest registry opgeslagen. Volledige CAORule backfill blijft
+ * optioneel voor audit/zoekschermen, maar blokkeert payroll niet.
  */
 
 const PAYROLL_CRITICAL_DOMAINS = [
@@ -1668,6 +1669,42 @@ async function verifyPersistedRuleRegistry(base44, { caoKey, configId, candidate
   };
 }
 
+async function buildPayloadManifestRuleRegistrySnapshot({ candidateCfg, candidateRules, payload, cloudflareRevision, ruleImportMode }) {
+  const expectedRuleIds = uniqueRuleIds(candidateRules);
+  const sourceCoverage = evaluateSourceCoverageCompleteness(candidateCfg, candidateRules || []);
+  const fingerprint = await buildRuleRegistryFingerprint(candidateRules || []);
+  const blockingFindings = [...(sourceCoverage.blocking_findings || [])];
+  const verifiedAt = new Date().toISOString();
+
+  if (expectedRuleIds.size === 0) {
+    blockingFindings.push({
+      code: 'empty_payload_rule_manifest',
+      severity: 'critical',
+      message: 'Cloudflare-payload bevat geen CAO-regels; manifest-only sync mag geen payroll-ready configuratie activeren.'
+    });
+  }
+
+  return {
+    passed: blockingFindings.length === 0,
+    mode: ruleImportMode,
+    registry_source: 'cloudflare_payload_manifest',
+    persisted_rule_registry_required: false,
+    base44_caorule_import_required_for_payroll_ready: false,
+    expected_unique_rule_count: expectedRuleIds.size,
+    manifest_unique_rule_count: expectedRuleIds.size,
+    persisted_unique_rule_count: null,
+    fingerprint: fingerprint.fingerprint,
+    fingerprint_algorithm: fingerprint.algorithm,
+    fingerprint_rule_count: fingerprint.canonical_rule_count,
+    verified_at: verifiedAt,
+    payload_revision: payload?.revision || null,
+    cloudflare_revision: cloudflareRevision || null,
+    idempotency_key: payload?.idempotency_key || null,
+    source_coverage: sourceCoverage,
+    blocking_findings: blockingFindings
+  };
+}
+
 function hasWageScales(candidateCfg) {
   return Object.keys(candidateCfg?.wage_scales || {}).length > 0 ||
     Object.keys(candidateCfg?.wage_scales_detailed || {}).length > 0;
@@ -2571,12 +2608,26 @@ Deno.serve(async (req) => {
     }
 
     const { force = false, trigger_source = 'manual' } = body;
+    const requestedRuleImportMode = String(body.rule_import_mode || body.caorule_import_mode || 'manifest_only').trim();
+    const normalizedRuleImportMode = requestedRuleImportMode === 'batch'
+      ? 'full_backfill'
+      : requestedRuleImportMode;
+    const allowedRuleImportModes = new Set(['manifest_only', 'full_backfill']);
+    if (!allowedRuleImportModes.has(normalizedRuleImportMode)) {
+      return Response.json({
+        success: false,
+        error: `Onbekende rule_import_mode: ${requestedRuleImportMode}`,
+        allowed_rule_import_modes: [...allowedRuleImportModes]
+      }, { status: 422 });
+    }
+    const ruleImportMode = normalizedRuleImportMode;
+    const importCaoRulesToBase44 = ruleImportMode === 'full_backfill';
 
     // Batch parameters
     const ruleBatchOffset = Math.max(0, Number(body.rule_batch_offset ?? 0));
     const ruleBatchSize = Math.min(Math.max(1, Number(body.rule_batch_size ?? 75)), 150);
 
-    console.log(`[syncCaoFromCloudflare] trigger_source=${trigger_source} force=${force} offset=${ruleBatchOffset} batchSize=${ruleBatchSize}`);
+    console.log(`[syncCaoFromCloudflare] trigger_source=${trigger_source} force=${force} ruleImportMode=${ruleImportMode} offset=${ruleBatchOffset} batchSize=${ruleBatchSize}`);
 
     const apiKey = Deno.env.get('BASE44_CAO_API_KEY');
     const statusUrl = Deno.env.get('CAO_CLOUDFLARE_STATUS_URL');
@@ -2789,6 +2840,7 @@ Deno.serve(async (req) => {
 
     // ── Stap 7: Archiveer alleen exacte duplicaten (zelfde revision of idempotency_key) ──
     const duplicateConfigs = activeConfigs.filter(cfg =>
+      cfg.cloudflare_revision === cloudflareRevision ||
       cfg.cloudflare_revision === payload.revision ||
       cfg.idempotency_key === payload.idempotency_key
     );
@@ -2827,13 +2879,29 @@ Deno.serve(async (req) => {
     const candidateRules = normalizeCaoRulesInput(payload.candidate_rules || [], payloadCaoKey)
       .map(rule => withLocalRuntimeBindingMetadata(rule));
     const payrollReadiness = await resolvePayrollReadiness(candidateCfg, candidateRules);
+    const manifestRegistry = await buildPayloadManifestRuleRegistrySnapshot({
+      candidateCfg,
+      candidateRules,
+      payload,
+      cloudflareRevision,
+      ruleImportMode
+    });
     const caoDefaults = getCaoDisplayDefaults(payloadCaoKey);
     const initialProcessedRuleCount = Math.min(ruleBatchOffset, candidateRules.length);
-    const inProgressReadinessGate = buildIncompleteRuleImportGate(
-      payrollReadiness.gate,
-      initialProcessedRuleCount,
-      candidateRules.length
-    );
+    const inProgressReadinessGate = importCaoRulesToBase44
+      ? buildIncompleteRuleImportGate(
+        payrollReadiness.gate,
+        initialProcessedRuleCount,
+        candidateRules.length
+      )
+      : {
+        ...payrollReadiness.gate,
+        payload_rule_registry: manifestRegistry,
+        rule_import_mode: ruleImportMode
+      };
+    const initialPayrollReadinessStatus = importCaoRulesToBase44
+      ? 'blocked_incomplete_source_coverage'
+      : payrollReadiness.status;
     const configData = {
       name: candidateCfg.name || `${caoDefaults.name} - ${payload.revision}`,
       cao_key: payloadCaoKey,
@@ -2844,7 +2912,7 @@ Deno.serve(async (req) => {
       valid_until: candidateCfg.valid_until || null,
       is_active: false,
       is_payroll_ready: false,
-      payroll_readiness_status: 'blocked_incomplete_source_coverage',
+      payroll_readiness_status: initialPayrollReadinessStatus,
       payroll_readiness_checked_at: inProgressReadinessGate.checked_at || payrollReadiness.gate.checked_at,
       payroll_readiness_gate: inProgressReadinessGate,
       status: 'draft',
@@ -2865,7 +2933,15 @@ Deno.serve(async (req) => {
       cash_value_logistics_rules: candidateCfg.cash_value_logistics_rules || null,
       contract_change_rules: candidateCfg.contract_change_rules || null,
       function_classification_rules: candidateCfg.function_classification_rules || null,
-      rule_engine_metadata: candidateCfg.rule_engine_metadata || payload.rule_engine_metadata || null,
+      rule_engine_metadata: {
+        ...((payload.rule_engine_metadata || {})),
+        ...((candidateCfg.rule_engine_metadata || {})),
+        rule_import_mode: ruleImportMode,
+        rule_registry_source: 'cloudflare_payload_manifest',
+        cloudflare_status_revision: cloudflareRevision,
+        cloudflare_payload_revision: payload.revision,
+        idempotency_key: payload.idempotency_key
+      },
       source_documents_snapshot: sourceDocumentSnapshots.length > 0
         ? sourceDocumentSnapshots
         : (candidateCfg.source_documents_snapshot || null),
@@ -2873,11 +2949,19 @@ Deno.serve(async (req) => {
         ...(payload.coverage_summary || {}),
         ...(candidateCfg.coverage_summary || {}),
         payroll_readiness: {
-          status: 'blocked_incomplete_source_coverage',
+          status: initialPayrollReadinessStatus,
           requested_payroll_ready: payrollReadiness.requested_payroll_ready,
-          passed: false,
+          passed: importCaoRulesToBase44 ? false : payrollReadiness.gate.passed,
           counts: inProgressReadinessGate.counts,
-          blocking_findings: inProgressReadinessGate.blocking_findings
+          blocking_findings: inProgressReadinessGate.blocking_findings,
+          rule_import_mode: ruleImportMode,
+          payload_rule_registry: {
+            expected_unique_rule_count: manifestRegistry.expected_unique_rule_count,
+            manifest_unique_rule_count: manifestRegistry.manifest_unique_rule_count,
+            fingerprint: manifestRegistry.fingerprint,
+            fingerprint_algorithm: manifestRegistry.fingerprint_algorithm,
+            verified_at: manifestRegistry.verified_at
+          }
         }
       },
       surcharge_weekend: candidateCfg.surcharge_weekend ?? 35,
@@ -2911,7 +2995,7 @@ Deno.serve(async (req) => {
       approved_at: payload.approval?.approved_at || null,
       codex_thread_id: payload.approval?.codex_thread_id || null,
       codex_approval_message: payload.approval?.approval_message || null,
-      cloudflare_revision: payload.revision,
+      cloudflare_revision: cloudflareRevision || payload.revision,
       idempotency_key: payload.idempotency_key,
       automation_version: payload.automation_version || null,
       notes: `Automatisch gesynchroniseerd via Cloudflare (${trigger_source}) op ${new Date().toISOString()}`
@@ -2925,146 +3009,164 @@ Deno.serve(async (req) => {
       newConfig = await base44.asServiceRole.entities.CAOConfiguration.create(configData);
     }
 
-    // ── Stap 10: Verwerk één batch CAORules ──
-    const batchRules = candidateRules.slice(ruleBatchOffset, ruleBatchOffset + ruleBatchSize);
+    // ── Stap 10: Verwerk optionele CAORule backfill ──
     let rulesUpserted = 0;
+    let nextRuleBatchOffset = ruleBatchOffset;
+    let rulesComplete = true;
+    let registrySnapshot = manifestRegistry;
+    let registryGateProperty = 'payload_rule_registry';
 
-    for (const rule of batchRules) {
-      if (!rule.rule_id) continue;
-      const existing = await findExistingCaoRule(base44, {
-        ruleId: rule.rule_id,
-        caoKey: payloadCaoKey,
-        configId: newConfig.id
-      });
-      const ruleData = {
-        ...rule,
-        cao_key: rule.cao_key || payloadCaoKey,
-        cao_configuration_id: newConfig.id,
-        status: 'active',
-        last_verified_at: new Date().toISOString()
-      };
-      if (existing) {
-        await base44.asServiceRole.entities.CAORule.update(existing.id, ruleData);
-      } else {
-        await base44.asServiceRole.entities.CAORule.create(ruleData);
+    if (importCaoRulesToBase44) {
+      const batchRules = candidateRules.slice(ruleBatchOffset, ruleBatchOffset + ruleBatchSize);
+
+      for (const rule of batchRules) {
+        if (!rule.rule_id) continue;
+        const existing = await findExistingCaoRule(base44, {
+          ruleId: rule.rule_id,
+          caoKey: payloadCaoKey,
+          configId: newConfig.id
+        });
+        const ruleData = {
+          ...rule,
+          cao_key: rule.cao_key || payloadCaoKey,
+          cao_configuration_id: newConfig.id,
+          status: 'active',
+          last_verified_at: new Date().toISOString()
+        };
+        if (existing) {
+          await base44.asServiceRole.entities.CAORule.update(existing.id, ruleData);
+        } else {
+          await base44.asServiceRole.entities.CAORule.create(ruleData);
+        }
+        rulesUpserted++;
       }
-      rulesUpserted++;
+
+      nextRuleBatchOffset = ruleBatchOffset + batchRules.length;
+      rulesComplete = nextRuleBatchOffset >= candidateRules.length;
+
+      // ── Stap 11: Gedeeltelijke backfill — nog niet klaar ──
+      if (!rulesComplete) {
+        const partialReadinessGate = buildIncompleteRuleImportGate(
+          payrollReadiness.gate,
+          nextRuleBatchOffset,
+          candidateRules.length
+        );
+        await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, {
+          status: 'running',
+          payroll_readiness_status: 'blocked_incomplete_source_coverage',
+          coverage_gate: partialReadinessGate,
+          summary: `Cloudflare CAORule backfill: regels ${ruleBatchOffset}-${nextRuleBatchOffset - 1} van ${candidateRules.length} verwerkt. Volgende offset: ${nextRuleBatchOffset}`
+        });
+        await base44.asServiceRole.entities.CAOConfiguration.update(newConfig.id, {
+          is_active: false,
+          is_payroll_ready: false,
+          status: 'draft',
+          payroll_readiness_status: 'blocked_incomplete_source_coverage',
+          payroll_readiness_checked_at: partialReadinessGate.checked_at || new Date().toISOString(),
+          payroll_readiness_gate: partialReadinessGate
+        });
+        newConfig = {
+          ...newConfig,
+          is_active: false,
+          is_payroll_ready: false,
+          status: 'draft',
+          payroll_readiness_status: 'blocked_incomplete_source_coverage',
+          payroll_readiness_gate: partialReadinessGate
+        };
+
+        return Response.json({
+          success: true,
+          changed: true,
+          partial: true,
+          reason: 'rule_backfill_batch_processed',
+          revision: payload.revision,
+          cloudflare_revision: cloudflareRevision,
+          idempotency_key: payload.idempotency_key,
+          cao_configuration_id: newConfig.id,
+          import_run_id: importRun.id,
+          rule_import_mode: ruleImportMode,
+          rules_upserted: rulesUpserted,
+          rules_total: candidateRules.length,
+          rule_batch_offset: ruleBatchOffset,
+          next_rule_batch_offset: nextRuleBatchOffset,
+          rule_batch_size: ruleBatchSize,
+          rules_complete: false,
+          is_payroll_ready: false,
+          payroll_readiness_status: 'blocked_incomplete_source_coverage',
+          coverage_gate: partialReadinessGate
+        });
+      }
+
+      const persistedRegistry = await verifyPersistedRuleRegistry(base44, {
+        caoKey: payloadCaoKey,
+        configId: newConfig.id,
+        candidateCfg,
+        candidateRules
+      });
+      if (!persistedRegistry.passed) {
+        const registryBlockedGate = {
+          ...payrollReadiness.gate,
+          passed: false,
+          status: 'blocked_incomplete_source_coverage',
+          persisted_rule_registry: persistedRegistry,
+          rule_import_mode: ruleImportMode,
+          blocking_findings: [
+            ...persistedRegistry.blocking_findings,
+            ...(payrollReadiness.gate.blocking_findings || [])
+          ]
+        };
+        await base44.asServiceRole.entities.CAOConfiguration.update(newConfig.id, {
+          is_active: false,
+          is_payroll_ready: false,
+          status: 'draft',
+          payroll_readiness_status: 'blocked_incomplete_source_coverage',
+          payroll_readiness_checked_at: registryBlockedGate.checked_at || new Date().toISOString(),
+          payroll_readiness_gate: registryBlockedGate
+        });
+        await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, {
+          finished_at: new Date().toISOString(),
+          status: 'failed',
+          payroll_readiness_status: 'blocked_incomplete_source_coverage',
+          coverage_gate: registryBlockedGate,
+          error_message: 'CAO-registry backfill incompleet; configuratie niet geactiveerd.',
+          summary: `Cloudflare sync geblokkeerd: ${persistedRegistry.persisted_unique_rule_count}/${persistedRegistry.expected_unique_rule_count} regels opgeslagen voor config ${newConfig.id}.`
+        });
+        return Response.json({
+          success: false,
+          changed: false,
+          reason: 'persisted_rule_registry_incomplete',
+          revision: payload.revision,
+          cloudflare_revision: cloudflareRevision,
+          idempotency_key: payload.idempotency_key,
+          cao_configuration_id: newConfig.id,
+          import_run_id: importRun.id,
+          rule_import_mode: ruleImportMode,
+          payroll_readiness_status: 'blocked_incomplete_source_coverage',
+          persisted_rule_registry: persistedRegistry,
+          coverage_gate: registryBlockedGate
+        }, { status: 422 });
+      }
+
+      registrySnapshot = persistedRegistry;
+      registryGateProperty = 'persisted_rule_registry';
     }
 
-    const nextRuleBatchOffset = ruleBatchOffset + batchRules.length;
-    const rulesComplete = nextRuleBatchOffset >= candidateRules.length;
-
-    // ── Stap 11: Gedeeltelijke batch — nog niet klaar ──
-    if (!rulesComplete) {
-      const partialReadinessGate = buildIncompleteRuleImportGate(
-        payrollReadiness.gate,
-        nextRuleBatchOffset,
-        candidateRules.length
-      );
-      await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, {
-        status: 'running',
-        payroll_readiness_status: 'blocked_incomplete_source_coverage',
-        coverage_gate: partialReadinessGate,
-        summary: `Cloudflare sync batch: regels ${ruleBatchOffset}-${nextRuleBatchOffset - 1} van ${candidateRules.length} verwerkt. Volgende offset: ${nextRuleBatchOffset}`
-      });
-      await base44.asServiceRole.entities.CAOConfiguration.update(newConfig.id, {
-        is_active: false,
-        is_payroll_ready: false,
-        status: 'draft',
-        payroll_readiness_status: 'blocked_incomplete_source_coverage',
-        payroll_readiness_checked_at: partialReadinessGate.checked_at || new Date().toISOString(),
-        payroll_readiness_gate: partialReadinessGate
-      });
-      newConfig = {
-        ...newConfig,
-        is_active: false,
-        is_payroll_ready: false,
-        status: 'draft',
-        payroll_readiness_status: 'blocked_incomplete_source_coverage',
-        payroll_readiness_gate: partialReadinessGate
-      };
-
-      return Response.json({
-        success: true,
-        changed: true,
-        partial: true,
-        reason: 'rule_batch_processed',
-        revision: payload.revision,
-        idempotency_key: payload.idempotency_key,
-        cao_configuration_id: newConfig.id,
-        import_run_id: importRun.id,
-        rules_upserted: rulesUpserted,
-        rules_total: candidateRules.length,
-        rule_batch_offset: ruleBatchOffset,
-        next_rule_batch_offset: nextRuleBatchOffset,
-        rule_batch_size: ruleBatchSize,
-        rules_complete: false,
-        is_payroll_ready: false,
-        payroll_readiness_status: 'blocked_incomplete_source_coverage',
-        coverage_gate: partialReadinessGate
-      });
-    }
-
-    const persistedRegistry = await verifyPersistedRuleRegistry(base44, {
-      caoKey: payloadCaoKey,
-      configId: newConfig.id,
-      candidateCfg,
-      candidateRules
-    });
-    if (!persistedRegistry.passed) {
-      const registryBlockedGate = {
-        ...payrollReadiness.gate,
-        passed: false,
-        status: 'blocked_incomplete_source_coverage',
-        persisted_rule_registry: persistedRegistry,
-        blocking_findings: [
-          ...persistedRegistry.blocking_findings,
-          ...(payrollReadiness.gate.blocking_findings || [])
-        ]
-      };
-      await base44.asServiceRole.entities.CAOConfiguration.update(newConfig.id, {
-        is_active: false,
-        is_payroll_ready: false,
-        status: 'draft',
-        payroll_readiness_status: 'blocked_incomplete_source_coverage',
-        payroll_readiness_checked_at: registryBlockedGate.checked_at || new Date().toISOString(),
-        payroll_readiness_gate: registryBlockedGate
-      });
-      await base44.asServiceRole.entities.CAOImportRun.update(importRun.id, {
-        finished_at: new Date().toISOString(),
-        status: 'failed',
-        payroll_readiness_status: 'blocked_incomplete_source_coverage',
-        coverage_gate: registryBlockedGate,
-        error_message: 'CAO-registry import incompleet; configuratie niet geactiveerd.',
-        summary: `Cloudflare sync geblokkeerd: ${persistedRegistry.persisted_unique_rule_count}/${persistedRegistry.expected_unique_rule_count} regels opgeslagen voor config ${newConfig.id}.`
-      });
-      return Response.json({
-        success: false,
-        changed: false,
-        reason: 'persisted_rule_registry_incomplete',
-        revision: payload.revision,
-        idempotency_key: payload.idempotency_key,
-        cao_configuration_id: newConfig.id,
-        import_run_id: importRun.id,
-        payroll_readiness_status: 'blocked_incomplete_source_coverage',
-        persisted_rule_registry: persistedRegistry,
-        coverage_gate: registryBlockedGate
-      }, { status: 422 });
-    }
+    const finalCoverageGate = {
+      ...payrollReadiness.gate,
+      [registryGateProperty]: registrySnapshot,
+      rule_import_mode: ruleImportMode
+    };
 
     const activationData = {
       is_active: true,
       is_payroll_ready: payrollReadiness.is_payroll_ready,
       payroll_readiness_status: payrollReadiness.status,
       payroll_readiness_checked_at: payrollReadiness.gate.checked_at,
-      payroll_readiness_gate: {
-        ...payrollReadiness.gate,
-        persisted_rule_registry: persistedRegistry
-      },
-      rule_registry_fingerprint: persistedRegistry.fingerprint,
-      rule_registry_rule_count: persistedRegistry.persisted_unique_rule_count,
-      rule_registry_verified_at: persistedRegistry.verified_at,
-      rule_registry_snapshot: persistedRegistry,
+      payroll_readiness_gate: finalCoverageGate,
+      rule_registry_fingerprint: registrySnapshot.fingerprint,
+      rule_registry_rule_count: registrySnapshot.persisted_unique_rule_count ?? registrySnapshot.manifest_unique_rule_count ?? registrySnapshot.fingerprint_rule_count,
+      rule_registry_verified_at: registrySnapshot.verified_at,
+      rule_registry_snapshot: registrySnapshot,
       status: 'active',
       coverage_summary: {
         ...(newConfig.coverage_summary || {}),
@@ -3074,12 +3176,14 @@ Deno.serve(async (req) => {
           passed: payrollReadiness.gate.passed,
           counts: payrollReadiness.gate.counts,
           blocking_findings: payrollReadiness.gate.blocking_findings,
-          persisted_rule_registry: {
-            expected_unique_rule_count: persistedRegistry.expected_unique_rule_count,
-            persisted_unique_rule_count: persistedRegistry.persisted_unique_rule_count,
-            fingerprint: persistedRegistry.fingerprint,
-            fingerprint_algorithm: persistedRegistry.fingerprint_algorithm,
-            verified_at: persistedRegistry.verified_at
+          rule_import_mode: ruleImportMode,
+          [registryGateProperty]: {
+            expected_unique_rule_count: registrySnapshot.expected_unique_rule_count,
+            persisted_unique_rule_count: registrySnapshot.persisted_unique_rule_count ?? null,
+            manifest_unique_rule_count: registrySnapshot.manifest_unique_rule_count ?? null,
+            fingerprint: registrySnapshot.fingerprint,
+            fingerprint_algorithm: registrySnapshot.fingerprint_algorithm,
+            verified_at: registrySnapshot.verified_at
           }
         }
       }
@@ -3150,8 +3254,8 @@ Deno.serve(async (req) => {
       source_document_ids: sourceDocIds,
       detected_changes: detectedChanges,
       payroll_readiness_status: payrollReadiness.status,
-      coverage_gate: payrollReadiness.gate,
-      summary: `Cloudflare sync voltooid: ${candidateRules.length} regels, ${sourceDocs.length} brondocumenten, ${reviewIds.length} wijzigingen, ${correctionQueueSummary?.corrections_created || 0} payrollcorrecties nieuw, ${correctionQueueSummary?.corrections_updated || 0} payrollcorrecties bijgewerkt. Payroll-ready: ${newConfig.is_payroll_ready ? 'ja' : 'nee'} (${payrollReadiness.status}). Revision: ${payload.revision}`
+      coverage_gate: finalCoverageGate,
+      summary: `Cloudflare sync voltooid (${ruleImportMode}): ${candidateRules.length} regels gevalideerd, ${rulesUpserted} CAORule records geupsert, ${sourceDocs.length} brondocumenten, ${reviewIds.length} wijzigingen, ${correctionQueueSummary?.corrections_created || 0} payrollcorrecties nieuw, ${correctionQueueSummary?.corrections_updated || 0} payrollcorrecties bijgewerkt. Payroll-ready: ${newConfig.is_payroll_ready ? 'ja' : 'nee'} (${payrollReadiness.status}). Revision: ${payload.revision}`
     });
 
     return Response.json({
@@ -3159,9 +3263,11 @@ Deno.serve(async (req) => {
       changed: true,
       partial: false,
       revision: payload.revision,
+      cloudflare_revision: cloudflareRevision,
       idempotency_key: payload.idempotency_key,
       cao_configuration_id: newConfig.id,
       import_run_id: importRun.id,
+      rule_import_mode: ruleImportMode,
       rules_upserted: rulesUpserted,
       rules_total: candidateRules.length,
       rule_batch_offset: ruleBatchOffset,
@@ -3173,7 +3279,7 @@ Deno.serve(async (req) => {
       correction_queue_summary: correctionQueueSummary,
       is_payroll_ready: newConfig.is_payroll_ready,
       payroll_readiness_status: payrollReadiness.status,
-      coverage_gate: payrollReadiness.gate,
+      coverage_gate: finalCoverageGate,
       coverage_summary: newConfig.coverage_summary || null
     });
 
