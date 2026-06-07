@@ -766,24 +766,50 @@ function isPayrollImpactChange(change) {
   );
 }
 
+function normalizeEffectiveDate(value) {
+  if (!value) return null;
+  const match = String(value).match(/^(\d{4}-\d{2}-\d{2})/);
+  return match ? match[1] : null;
+}
+
 function buildChangeEffectiveMetadata(change, fallbackValidFrom, approvedAt) {
-  const effectiveFrom = change.effective_from || change.valid_from || change.applies_from || fallbackValidFrom || null;
-  const effectiveUntil = change.effective_until || change.valid_until || null;
+  const explicitEffectiveFrom = normalizeEffectiveDate(change.effective_from || change.valid_from || change.applies_from);
+  const fallbackEffectiveFrom = normalizeEffectiveDate(fallbackValidFrom);
+  const effectiveFrom = explicitEffectiveFrom || fallbackEffectiveFrom || null;
+  const effectiveUntil = normalizeEffectiveDate(change.effective_until || change.valid_until);
+  const effectiveFromSource = explicitEffectiveFrom
+    ? change.effective_from ? 'change.effective_from' : change.valid_from ? 'change.valid_from' : 'change.applies_from'
+    : fallbackEffectiveFrom
+    ? 'candidate_configuration.valid_from'
+    : null;
+  const effectiveFromInferred = !!effectiveFrom && !explicitEffectiveFrom;
   const payrollImpact = isPayrollImpactChange(change);
   const approvedDate = approvedAt ? new Date(approvedAt) : new Date();
   const approvedDay = approvedDate.toISOString().slice(0, 10);
   const retroactive = change.retroactive === true ||
     (!!effectiveFrom && effectiveFrom < approvedDay);
   const missingEffectiveDate = payrollImpact && !effectiveFrom;
-  const correctionRequired = payrollImpact && (retroactive || missingEffectiveDate);
+  const invalidEffectiveRange = !!(effectiveFrom && effectiveUntil && effectiveUntil < effectiveFrom);
+  const inferredPayrollEffectiveDate = payrollImpact && effectiveFromInferred;
+  const effectiveDateManualReviewRequired = missingEffectiveDate || invalidEffectiveRange || inferredPayrollEffectiveDate;
+  const effectiveDateWarnings = [
+    ...(missingEffectiveDate ? ['Payrollkritische wijziging mist een expliciete ingangsdatum.'] : []),
+    ...(inferredPayrollEffectiveDate ? ['Payrollkritische wijziging gebruikt candidate_configuration.valid_from als fallback; bevestig de wijzigingsspecifieke ingangsdatum voordat historische loonruns worden gematcht.'] : []),
+    ...(invalidEffectiveRange ? ['effective_until ligt voor effective_from; datumbereik is ongeldig.'] : [])
+  ];
+  const correctionRequired = payrollImpact && (retroactive || effectiveDateManualReviewRequired);
 
   return {
     effective_from: effectiveFrom,
     effective_until: effectiveUntil,
+    effective_from_source: effectiveFromSource,
+    effective_from_inferred: effectiveFromInferred,
+    effective_date_manual_review_required: effectiveDateManualReviewRequired,
+    effective_date_warnings: effectiveDateWarnings,
     payroll_impact: payrollImpact,
     retroactive,
     correction_required: correctionRequired,
-    correction_status: missingEffectiveDate
+    correction_status: effectiveDateManualReviewRequired
       ? 'manual_review_required'
       : correctionRequired
       ? 'candidate'

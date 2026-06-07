@@ -9,6 +9,11 @@ function isoDate(value) {
   return String(value).slice(0, 10);
 }
 
+function normalizeArray(value) {
+  if (!value) return [];
+  return Array.isArray(value) ? value.filter(Boolean) : [value].filter(Boolean);
+}
+
 function rangesOverlap(startA, endA, startB, endB) {
   if (!startA || !endA || !startB) return false;
   const aStart = isoDate(startA);
@@ -83,6 +88,10 @@ function buildCorrectionData(review, run, status, reason, caoKey = null) {
     field_path: review.field_path || null,
     effective_from: review.effective_from || null,
     effective_until: review.effective_until || null,
+    effective_from_source: review.effective_from_source || null,
+    effective_from_inferred: review.effective_from_inferred === true,
+    effective_date_manual_review_required: review.effective_date_manual_review_required === true,
+    effective_date_warnings: normalizeArray(review.effective_date_warnings),
     pay_period_year: run?.pay_period_year ?? null,
     pay_period_number: run?.pay_period_number ?? null,
     pay_period_start: run?.pay_period_start || null,
@@ -102,6 +111,22 @@ function buildCorrectionData(review, run, status, reason, caoKey = null) {
       ? `Retroactieve CAO-wijziging ${review.rule_key || review.field_path || review.id} raakt payrollrun ${run.id}.`
       : `Retroactieve CAO-wijziging ${review.rule_key || review.field_path || review.id} heeft payroll-impact, maar er is nog geen concrete payrollrun gematcht.`
   };
+}
+
+function effectiveDateManualReviewReason(review) {
+  const warnings = normalizeArray(review.effective_date_warnings).map(String);
+  if (review.effective_date_manual_review_required === true) {
+    return warnings.length > 0
+      ? warnings.join(' ')
+      : 'CAO-wijziging vereist handmatige review van de ingangsdatum voordat payrollruns automatisch gematcht mogen worden.';
+  }
+  if (review.effective_from_inferred === true) {
+    return 'CAO-wijziging gebruikt een afgeleide ingangsdatum uit de CAO-configuratie; bevestig de wijzigingsspecifieke ingangsdatum voordat payrollruns automatisch gematcht mogen worden.';
+  }
+  if (review.effective_from && review.effective_until && review.effective_until < review.effective_from) {
+    return 'CAO-wijziging heeft een ongeldig datumbereik: effective_until ligt voor effective_from.';
+  }
+  return null;
 }
 
 async function upsertCorrection(base44, data) {
@@ -199,6 +224,26 @@ Deno.serve(async (req) => {
           null,
           'manual_review_required',
           'CAO-wijziging mist cao_key en gekoppelde CAOConfiguration kon niet worden herleid; automatische correctiematching is geblokkeerd om cross-CAO fouten te voorkomen.'
+        );
+        const saved = await upsertCorrection(base44, data);
+        if (saved.created) createdCorrectionIds.push(saved.id);
+        else updatedCorrectionIds.push(saved.id);
+        unmatchedReviewIds.push(review.id);
+        unverifiableReviewIds.push(review.id);
+        await base44.asServiceRole.entities.CAOChangeReview.update(review.id, {
+          correction_status: 'manual_review_required'
+        });
+        continue;
+      }
+
+      const effectiveDateReviewReason = effectiveDateManualReviewReason(review);
+      if (effectiveDateReviewReason) {
+        const data = buildCorrectionData(
+          review,
+          null,
+          'manual_review_required',
+          effectiveDateReviewReason,
+          reviewCaoKey
         );
         const saved = await upsertCorrection(base44, data);
         if (saved.created) createdCorrectionIds.push(saved.id);
