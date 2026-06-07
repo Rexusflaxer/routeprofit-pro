@@ -191,16 +191,18 @@ function serviceRequiresSecurityScope(serviceContext) {
 }
 
 function getContractResolutionRuntimeSupport(caoKey) {
-  const key = caoKey || CAO_PB_KEY;
+  const key = caoKey || null;
   const supported = SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS.includes(key);
   return {
     supported,
-    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    status: supported ? 'supported' : key ? 'blocked_unsupported_cao_runtime' : 'blocked_missing_cao_key',
     cao_key: key,
     supported_cao_keys: SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS,
     message: supported
       ? `Contractresolver ondersteunt CAO ${key}.`
-      : `Contractresolver ondersteunt CAO ${key} nog niet volledig. Definitieve planning/payroll is geblokkeerd totdat deze CAO-runtime lokaal is geimplementeerd en geverifieerd.`
+      : key
+      ? `Contractresolver ondersteunt CAO ${key} nog niet volledig. Definitieve planning/payroll is geblokkeerd totdat deze CAO-runtime lokaal is geimplementeerd en geverifieerd.`
+      : 'Contractresolver mist cao_key. Definitieve planning/payroll is geblokkeerd zodat geen PB-default wordt toegepast.'
   };
 }
 
@@ -212,6 +214,56 @@ function listAllowsValue(list, value) {
   return {
     matched: values.includes(value),
     reason: values.includes(value) ? 'explicit_match' : 'not_allowed'
+  };
+}
+
+const CAO_FUNCTION_LEVEL_RANK = {
+  aspirant: 0,
+  a: 1,
+  b: 2,
+  c: 3,
+  d: 4,
+  e: 5
+};
+
+function normalizeCaoFunctionLevel(value) {
+  const normalized = normalizeToken(value);
+  if (normalized === 'aspirant_beveiliger') return 'aspirant';
+  if (normalized === 'leidinggevend' || normalized === 'leidinggevende') return null;
+  return CAO_FUNCTION_LEVEL_RANK[normalized] !== undefined ? normalized : null;
+}
+
+function listAllowsCaoFunctionLevel(list, requestedLevel) {
+  if (!requestedLevel) return { matched: true, reason: 'no_requested_value' };
+  const values = normalizeArray(list);
+  if (values.includes('all')) return { matched: true, reason: 'all' };
+  if (values.length === 0) return { matched: false, reason: 'contract_has_no_allowed_values' };
+  if (values.includes(requestedLevel)) return { matched: true, reason: 'explicit_match' };
+
+  const requested = normalizeCaoFunctionLevel(requestedLevel);
+  const rankedAllowed = values
+    .map(value => ({ value, level: normalizeCaoFunctionLevel(value) }))
+    .filter(item => item.level && CAO_FUNCTION_LEVEL_RANK[item.level] !== undefined);
+
+  if (requested && rankedAllowed.length > 0) {
+    const requestedRank = CAO_FUNCTION_LEVEL_RANK[requested];
+    const higherOrEqual = rankedAllowed
+      .filter(item => CAO_FUNCTION_LEVEL_RANK[item.level] >= requestedRank)
+      .sort((a, b) => CAO_FUNCTION_LEVEL_RANK[a.level] - CAO_FUNCTION_LEVEL_RANK[b.level]);
+    if (higherOrEqual.length > 0) {
+      return {
+        matched: true,
+        reason: 'hierarchical_minimum_match',
+        matched_allowed_value: higherOrEqual[0].value,
+        requested_rank: requestedRank,
+        matched_allowed_rank: CAO_FUNCTION_LEVEL_RANK[higherOrEqual[0].level]
+      };
+    }
+  }
+
+  return {
+    matched: false,
+    reason: requested ? 'below_required_cao_function_level' : 'not_allowed'
   };
 }
 
@@ -365,7 +417,7 @@ function evaluateFunctionMatch(contract, serviceContext) {
   const groupCheck = listAllowsValue(groups, requestedGroup);
   checks.push({ field: 'cao_function_group', requested: requestedGroup, allowed: groups, ...groupCheck });
 
-  const levelCheck = listAllowsValue(levels, requestedLevel);
+  const levelCheck = listAllowsCaoFunctionLevel(levels, requestedLevel);
   checks.push({ field: 'cao_function_level', requested: requestedLevel, allowed: levels, ...levelCheck });
 
   const taskTypeCheck = listAllowsValue(taskTypes, requestedTaskType);
@@ -374,7 +426,10 @@ function evaluateFunctionMatch(contract, serviceContext) {
   const securityRoleCheck = listAllowsValue(securityRoleStatuses, requestedSecurityRoleStatus);
   checks.push({ field: 'security_role_status', requested: requestedSecurityRoleStatus, allowed: securityRoleStatuses, ...securityRoleCheck });
 
-  const blocking = checks.filter(check => check.reason === 'not_allowed');
+  const blocking = checks.filter(check =>
+    check.matched === false &&
+    check.reason !== 'contract_has_no_allowed_values'
+  );
   const missingProof = checks.filter(check =>
     check.requested &&
     check.reason === 'contract_has_no_allowed_values'

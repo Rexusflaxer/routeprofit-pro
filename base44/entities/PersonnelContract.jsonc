@@ -685,7 +685,7 @@
       "items": {
         "type": "string"
       },
-      "description": "CAO-functieniveaus waarvoor dit contract inzetbaar is."
+      "description": "CAO-functieniveaus waarvoor dit contract inzetbaar is. Bij CAO PB bijlage 2 geldt hiërarchisch: een hoger niveau (bijv. D/E) mag ook een lager vereist niveau binnen dezelfde functiegroep uitvoeren; een lager niveau mag geen hoger vereist niveau uitvoeren."
     },
     "allowed_task_types": {
       "type": "array",
