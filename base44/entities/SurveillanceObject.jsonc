@@ -124,6 +124,13 @@
       ],
       "description": "Default contractmatchingbeleid voor diensten op dit object"
     },
+    "default_operating_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Default werkgever/bedrijf dat diensten op dit object uitvoert wanneer taak/route geen specifieker bedrijf meegeeft."
+    },
     "name": {
       "type": "string",
       "description": "Naam van het object/locatie"

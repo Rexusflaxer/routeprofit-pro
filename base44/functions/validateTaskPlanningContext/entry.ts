@@ -67,6 +67,24 @@ function inferServiceCaoKey({ explicitCaoKey, explicitCao, worksEventOrHospitali
   };
 }
 
+function resolveOperatingCompanyContext({ body, input, task, object, route }) {
+  const candidates = [
+    { source: 'body.company_id', value: body.company_id },
+    { source: 'service_context.company_id', value: input.company_id },
+    { source: 'body.operating_company_id', value: body.operating_company_id },
+    { source: 'service_context.operating_company_id', value: input.operating_company_id },
+    { source: 'task.operating_company_id', value: task?.operating_company_id },
+    { source: 'object.default_operating_company_id', value: object?.default_operating_company_id },
+    { source: 'object.operating_company_id', value: object?.operating_company_id },
+    { source: 'route.operating_company_id', value: route?.operating_company_id }
+  ];
+  const match = candidates.find(candidate => candidate.value);
+  return {
+    company_id: match?.value || null,
+    company_id_source: match?.source || 'not_provided'
+  };
+}
+
 function buildServiceContext({ body, task, object, route }) {
   const input = body.service_context || {};
   const taskType = input.task_type || body.task_type || task?.task_type || null;
@@ -122,6 +140,7 @@ function buildServiceContext({ body, task, object, route }) {
     worksEventOrHospitalitySecurity,
     eventHospitalityCaoApplies
   });
+  const operatingCompany = resolveOperatingCompanyContext({ body, input, task, object, route });
 
   return {
     service_date: body.service_date || input.service_date || new Date().toISOString().slice(0, 10),
@@ -132,7 +151,8 @@ function buildServiceContext({ body, task, object, route }) {
     cao_key_manual_review_required: caoKeyResolution.manual_review_required === true,
     cao_key_resolution_warning: caoKeyResolution.warning || null,
     cao: explicitCao,
-    company_id: body.company_id || input.company_id || route?.operating_company_id || null,
+    company_id: operatingCompany.company_id,
+    company_id_source: operatingCompany.company_id_source,
     route_id: body.route_id || input.route_id || null,
     task_id: body.task_id || input.task_id || task?.id || null,
     object_id: body.object_id || input.object_id || task?.object_id || object?.id || null,
@@ -225,6 +245,15 @@ function evaluateServiceContextReadiness(serviceContext) {
     manualReviewReasons.push('Dienst mist CAO-context: leg cao_key vast of koppel de dienst aan een bedrijf met geldige CompanyCaoAssignment voordat planning/payroll definitief mag zijn.');
   }
 
+  if (!serviceContext.company_id) {
+    missingFields.push('operating_company_id');
+    if (serviceContext.contract_assignment_policy === 'strict_contract_match') {
+      blockingReasons.push('Dienst mist uitvoerende werkgever/bedrijf. Stel operating_company_id/company_id in op taak, route of object-default voordat een arbeidscontract audit-proof gekoppeld kan worden.');
+    } else {
+      manualReviewReasons.push('Dienst mist uitvoerende werkgever/bedrijf. Handmatige review vereist voordat de juiste bedrijf-CAO en het juiste arbeidscontract gekozen kunnen worden.');
+    }
+  }
+
   if (!hasFunctionContext && serviceContext.contract_assignment_policy === 'strict_contract_match') {
     missingFields.push('service_function_type_or_cao_function_group_or_task_type');
     blockingReasons.push('Dienst mist functiecontext. Stel service_function_type, required_cao_function_group of task_type in voordat contractmatching definitief mag zijn.');
@@ -271,7 +300,8 @@ function evaluateServiceContextReadiness(serviceContext) {
     has_cao_resolution_context: hasCaoResolutionContext,
     has_security_scope_evidence: hasSecurityScopeEvidence,
     contract_assignment_policy: serviceContext.contract_assignment_policy || null,
-    cao_key_source: serviceContext.cao_key_source || null
+    cao_key_source: serviceContext.cao_key_source || null,
+    company_id_source: serviceContext.company_id_source || null
   };
 }
 

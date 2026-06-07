@@ -85,6 +85,13 @@
       "default": "strict_contract_match",
       "description": "Bepaalt hoe streng de planning deze taak aan een arbeidscontract moet koppelen."
     },
+    "operating_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Werkgever/bedrijf dat deze dienst uitvoert. Nodig om bij meerdere werkgevers het juiste arbeidscontract en de juiste CAO te kiezen."
+    },
     "cao_key": {
       "type": [
         "string",
@@ -351,7 +358,7 @@
         "type": "string"
       },
       "default": [],
-      "description": "Ontbrekende dienstcontextvelden, bijv. cao_key_or_company_assignment, service_function_type, required_cao_function_group of performs_security_work."
+      "description": "Ontbrekende dienstcontextvelden, bijv. operating_company_id, cao_key_or_company_assignment, service_function_type, required_cao_function_group of performs_security_work."
     },
     "planning_context_manual_review_reasons": {
       "type": "array",
