@@ -92,6 +92,7 @@ const SOURCE_MONITORING_CONTRACT_BY_CAO_KEY = {
       family_key: 'wage_tables',
       label: 'CAO PB loontabellen en loonstijgingen',
       primary_urls: [
+        'https://www.beveiligingsbranche.nl/wp-content/uploads/Salarisschaal-per-loonperiode-1-2025-per-uur-en-per-4-weken-1.pdf',
         'https://www.beveiligingsbranche.nl/wp-content/uploads/Salarisschaal-per-loonperiode-1-2026-per-uur-en-per-4-weken.pdf',
         'https://www.beveiligingsbranche.nl/loonstijging-per-loonperiode-1-2026-bekend/'
       ],
@@ -99,7 +100,7 @@ const SOURCE_MONITORING_CONTRACT_BY_CAO_KEY = {
       official_hosts: ['beveiligingsbranche.nl', 'www.beveiligingsbranche.nl'],
       payroll_relevance: 'critical',
       change_detection: ['content_hash', 'pdf_table_hash', 'numeric_parameter_hash'],
-      watch_for_keywords: ['loontabel', 'salarisschaal', 'loonperiode 1 2026', '3,8%', 'indexatie'],
+      watch_for_keywords: ['loontabel', 'salarisschaal', 'loonperiode 1 2025', 'loonperiode 1 2026', '4,5%', '3,8%', 'indexatie'],
       effective_date_fields: ['effective_from', 'pay_period_effective_from', 'wage_period']
     },
     {

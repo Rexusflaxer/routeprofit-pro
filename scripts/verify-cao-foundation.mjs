@@ -94,6 +94,16 @@ function runExternalCaoGateScenarios() {
     'https://www.beveiligingsbranche.nl/cao/',
     'PB source monitoring must include the official CAO landing page'
   );
+  assertIncludes(
+    pbReadiness.source_monitoring_summary.primary_urls,
+    'https://www.beveiligingsbranche.nl/wp-content/uploads/Salarisschaal-per-loonperiode-1-2025-per-uur-en-per-4-weken-1.pdf',
+    'PB source monitoring must include the official 2025 wage table'
+  );
+  assertIncludes(
+    pbReadiness.source_monitoring_summary.primary_urls,
+    'https://www.beveiligingsbranche.nl/wp-content/uploads/Salarisschaal-per-loonperiode-1-2026-per-uur-en-per-4-weken.pdf',
+    'PB source monitoring must include the official 2026 wage table'
+  );
   const ehbReadiness = caoRuntimeReadiness.buildCaoRuntimeReadinessForKey('cao_evenementen_horecabeveiliging');
   assertIncludes(
     ehbReadiness.source_monitoring_summary.primary_urls,
