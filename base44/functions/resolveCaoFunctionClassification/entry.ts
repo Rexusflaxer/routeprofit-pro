@@ -181,7 +181,7 @@ const FUNCTION_TYPE_ALIASES = [
   }
 ];
 
-const NON_SECURITY_FUNCTION_TYPES = ['binnendienst', 'planner', 'installateur', 'host', 'other'];
+const NON_SECURITY_FUNCTION_TYPES = ['klantrelatie', 'binnendienst', 'planner', 'installateur', 'host', 'other'];
 
 // ── Infereer niveau op basis van security_role_status (R0728) ──
 const ROLE_STATUS_TO_LEVEL = {

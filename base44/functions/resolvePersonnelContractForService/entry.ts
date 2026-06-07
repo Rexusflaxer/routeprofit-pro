@@ -177,7 +177,10 @@ const SECURITY_FUNCTION_GROUPS = [
   'objectbeveiliger_receptionist', 'mobiel_surveillant', 'winkelsurveillant',
   'brandwacht', 'geld_waardetransporteur', 'centralist'
 ];
-const SECURITY_FUNCTION_TYPES = ['surveillant', 'centralist', 'verkeersregelaar', 'brandwacht', 'rechercheur'];
+const SECURITY_FUNCTION_TYPES = [
+  'objectbeveiliger', 'receptie', 'receptionist',
+  'surveillant', 'centralist', 'verkeersregelaar', 'brandwacht', 'rechercheur'
+];
 const SECURITY_ROLE_STATUSES = ['aspirant_beveiliger', 'beveiliger', 'leidinggevende'];
 
 function unwrapFunctionData(response) {
@@ -185,9 +188,10 @@ function unwrapFunctionData(response) {
 }
 
 function serviceRequiresSecurityScope(serviceContext) {
-  return SECURITY_ROLE_STATUSES.includes(serviceContext.security_role_status) ||
+  return serviceContext?.performs_security_work === true ||
+    SECURITY_ROLE_STATUSES.includes(serviceContext.security_role_status) ||
     SECURITY_FUNCTION_GROUPS.includes(serviceContext.cao_function_group) ||
-    SECURITY_FUNCTION_TYPES.includes(serviceContext.function_type);
+    SECURITY_FUNCTION_TYPES.includes(normalizeToken(serviceContext.function_type));
 }
 
 function getContractResolutionRuntimeSupport(caoKey) {

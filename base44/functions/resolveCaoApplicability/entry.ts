@@ -93,11 +93,15 @@ const SECURITY_FUNCTION_GROUPS = [
   'objectbeveiliger_receptionist', 'mobiel_surveillant', 'winkelsurveillant',
   'brandwacht', 'geld_waardetransporteur', 'centralist'
 ];
-const SECURITY_FUNCTION_TYPES = ['surveillant', 'centralist', 'verkeersregelaar', 'brandwacht', 'rechercheur'];
+const SECURITY_FUNCTION_TYPES = [
+  'objectbeveiliger', 'receptie', 'receptionist',
+  'surveillant', 'centralist', 'verkeersregelaar', 'brandwacht', 'rechercheur'
+];
 const SECURITY_ROLE_STATUSES = ['aspirant_beveiliger', 'beveiliger', 'leidinggevende'];
-const NON_SECURITY_FUNCTION_TYPES = ['binnendienst', 'planner', 'installateur', 'host', 'other'];
+const NON_SECURITY_FUNCTION_TYPES = ['klantrelatie', 'binnendienst', 'planner', 'installateur', 'host', 'other'];
 const SECURITY_FUNCTION_TEXT_KEYWORDS = [
   'beveiliger', 'beveiliging', 'surveillant', 'security', 'objectbeveiliger',
+  'objectbeveiliging', 'receptie', 'receptionist', 'receptiedienst',
   'mobiel surveillant', 'winkelsurveillant', 'brandwacht', 'centralist',
   'geldtransport', 'waardetransport', 'geld- en waardelogistiek', 'rechercheur'
 ];
