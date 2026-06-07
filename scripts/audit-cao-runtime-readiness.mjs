@@ -21,6 +21,16 @@ function loadFunctionModule(relativePath) {
 const runtimeReadiness = loadFunctionModule('base44/functions/resolveCaoRuntimeReadiness/entry.ts');
 const ingestCaoAutomation = loadFunctionModule('base44/functions/ingestCaoAutomationPayload/entry.ts');
 const syncCaoFromCloudflare = loadFunctionModule('base44/functions/syncCaoFromCloudflare/entry.ts');
+const scheduleRules = loadFunctionModule('base44/functions/validateCaoScheduleRules/entry.ts');
+const personnelCosts = loadFunctionModule('base44/functions/calculatePersonnelCosts/entry.ts');
+const routePersonnelCosts = loadFunctionModule('base44/functions/calculateRoutePersonnelCosts/entry.ts');
+const contractRules = loadFunctionModule('base44/functions/applyCaoContractRules/entry.ts');
+const functionClassification = loadFunctionModule('base44/functions/resolveCaoFunctionClassification/entry.ts');
+const reimbursements = loadFunctionModule('base44/functions/calculateCaoReimbursements/entry.ts');
+const leaveSickness = loadFunctionModule('base44/functions/calculateCaoLeaveAndSickness/entry.ts');
+const yearEndBonus = loadFunctionModule('base44/functions/calculateCaoYearEndBonus/entry.ts');
+const policyReferenceContext = loadFunctionModule('base44/functions/resolveCaoPolicyReferenceContext/entry.ts');
+const planningAssignment = loadFunctionModule('base44/functions/resolveCaoPlanningAssignmentDecision/entry.ts');
 
 const expectedKnownKeys = [
   'cao_particuliere_beveiliging',
@@ -83,6 +93,102 @@ for (const key of matrix.known_source_monitoring_only_cao_keys) {
   assert.ok(
     readiness.runtime_surfaces.some(surface => surface.required_for_payroll_final && !surface.supported),
     `${key} must have at least one unsupported payroll-final surface`
+  );
+}
+
+const payrollRuntimeModules = [
+  ['validateCaoScheduleRules', scheduleRules],
+  ['calculatePersonnelCosts', personnelCosts],
+  ['calculateRoutePersonnelCosts', routePersonnelCosts],
+  ['applyCaoContractRules', contractRules],
+  ['resolveCaoFunctionClassification', functionClassification],
+  ['calculateCaoReimbursements', reimbursements],
+  ['calculateCaoLeaveAndSickness', leaveSickness],
+  ['calculateCaoYearEndBonus', yearEndBonus],
+  ['resolveCaoPolicyReferenceContext', policyReferenceContext]
+];
+
+for (const [functionName, module] of payrollRuntimeModules) {
+  assert.equal(typeof module.getCaoRuntimeSupport, 'function', `${functionName} must expose getCaoRuntimeSupport for fail-closed audits`);
+  const pbSupport = module.getCaoRuntimeSupport('cao_particuliere_beveiliging', functionName);
+  assert.equal(pbSupport.supported, true, `${functionName} must support PB runtime`);
+  assertSameValues(pbSupport.supported_cao_keys, ['cao_particuliere_beveiliging'], `${functionName} must not add external CAOs before verified runtime exists`);
+
+  for (const externalKey of matrix.known_source_monitoring_only_cao_keys) {
+    const support = module.getCaoRuntimeSupport(externalKey, functionName);
+    assert.equal(support.supported, false, `${functionName} must fail closed for ${externalKey}`);
+    assert.equal(support.status, 'blocked_unsupported_cao_runtime', `${functionName}/${externalKey} wrong unsupported status`);
+    assert.equal(support.cao_key, externalKey, `${functionName}/${externalKey} must report the attempted cao_key`);
+    assert.ok(
+      support.message.includes('geen PB-regels') || support.message.includes('nog niet'),
+      `${functionName}/${externalKey} must explain that PB rules cannot be reused for this CAO`
+    );
+  }
+
+  const missingSupport = module.getCaoRuntimeSupport(null, functionName);
+  assert.equal(missingSupport.supported, false, `${functionName} must fail closed when cao_key is missing`);
+  assert.equal(missingSupport.status, 'blocked_missing_cao_key', `${functionName} must report missing cao_key`);
+}
+
+for (const externalKey of matrix.known_source_monitoring_only_cao_keys) {
+  const readinessGate = {
+    cao_readiness: [{
+      cao_key: externalKey,
+      status: 'known_cao_runtime_not_implemented',
+      payroll_final_allowed_by_static_runtime: false,
+      planning_final_allowed_by_static_runtime: false,
+      manual_review_required: true,
+      blocking_reasons: [`CAO ${externalKey} is bekend voor bronbewaking, maar mist geverifieerde lokale runtime.`]
+    }]
+  };
+  const assignment = planningAssignment.buildCaoPlanningAssignmentDecision({
+    body: { personnel_id: `person-${externalKey}`, service_context: { cao_key: externalKey } },
+    serviceContextValidation: {
+      service_context: {
+        company_id: 'company-1',
+        cao_key: externalKey,
+        service_function_type: 'external-cao-service'
+      },
+      service_context_readiness: {
+        status: 'planning_context_ready',
+        ready: true,
+        source_rule_ids: [],
+        blocking_reasons: [],
+        manual_review_reasons: [],
+        warnings: []
+      }
+    },
+    contractResolution: {
+      status: 'resolved',
+      cao_key: externalKey,
+      service_context: { company_id: 'company-1', cao_key: externalKey },
+      selected_contract: { id: `contract-${externalKey}`, company_id: 'company-1', cao_key: externalKey },
+      contract_id: `contract-${externalKey}`,
+      planning_allowed: true,
+      payroll_final_allowed: true,
+      manual_review_required: false,
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      source_rule_ids: []
+    },
+    caoRuntimeReadiness: readinessGate,
+    scheduleValidation: {
+      planning_allowed: true,
+      payroll_final_allowed: true,
+      calculation_status: 'valid',
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      warnings: [],
+      source_rule_ids: []
+    },
+    requireScheduleValidation: true
+  });
+  assert.equal(assignment.decision_status, 'blocked', `Planning assignment must block ${externalKey}`);
+  assert.equal(assignment.planning_assignment_allowed, false, `Planning assignment must not allow final planning for ${externalKey}`);
+  assert.equal(assignment.payroll_final_allowed, false, `Planning assignment must not allow payroll-final for ${externalKey}`);
+  assert.ok(
+    assignment.blocking_reasons.some(reason => reason.includes(externalKey)),
+    `Planning assignment block for ${externalKey} must cite the unsupported CAO`
   );
 }
 
