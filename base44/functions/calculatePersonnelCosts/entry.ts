@@ -1306,6 +1306,115 @@ function resolvePayrollWageAllowancePolicy({
   };
 }
 
+function resolveCaoTrainingEducationPolicy({ body, workSchedule }) {
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0950', 'CAO-PB-2024-R0953', 'CAO-PB-2024-R0956',
+    'CAO-PB-2024-R0957', 'CAO-PB-2024-R0958', 'CAO-PB-2024-R0959',
+    'CAO-PB-2024-R0962', 'CAO-PB-2024-R0966', 'CAO-PB-2024-R0968',
+    'CAO-PB-2024-R0971', 'CAO-PB-2024-R0976', 'CAO-PB-2024-R0979',
+    'CAO-PB-2024-R0980', 'CAO-PB-2024-R0981', 'CAO-PB-2024-R0982',
+    'CAO-PB-2024-R0991'
+  ];
+  const manualReviewItems = [];
+  const shiftPolicies = (workSchedule || []).map((shift, index) => {
+    const serviceType = normalizePolicyText(shift.service_type || shift.task_type || shift.training_type || '');
+    const mandatoryTraining = booleanOrNull(pickPolicyValue(
+      ['mandatory_training', 'is_mandatory_training', 'required_training', 'verplichte_opleiding', 'mandatory_training_article_55_3'],
+      shift,
+      shift.service_context || {}
+    )) === true || serviceType.includes('mandatory_training') || serviceType.includes('verplichte_opleiding');
+    const practiceAgreement = booleanOrNull(pickPolicyValue(
+      ['practice_agreement_training', 'web_practice_agreement', 'mbo_practice_agreement', 'praktijkovereenkomst'],
+      shift,
+      shift.service_context || {},
+      body
+    )) === true;
+    const ehboBhv = booleanOrNull(pickPolicyValue(
+      ['ehbo_bhv_training', 'first_aid_bhv_training'],
+      shift,
+      shift.service_context || {}
+    )) === true || serviceType.includes('ehbo') || serviceType.includes('bhv');
+    const employerRequiredEhboBhv = booleanOrNull(pickPolicyValue(
+      ['employer_required_ehbo_bhv', 'mandatory_ehbo_bhv', 'bhv_required_by_employer'],
+      shift,
+      shift.service_context || {},
+      body
+    )) === true;
+    const voluntaryEhbo = ehboBhv && !employerRequiredEhboBhv && booleanOrNull(pickPolicyValue(
+      ['voluntary_ehbo_bhv', 'voluntary_ehbo_training'],
+      shift,
+      shift.service_context || {},
+      body
+    )) !== false;
+    const practiceWeek = firstNumber(
+      shift.practice_training_week_number,
+      shift.training_week_number,
+      shift.service_context?.practice_training_week_number,
+      body.practice_training_week_number
+    );
+    let baseWagePercentage = mandatoryTraining || employerRequiredEhboBhv ? 100 : null;
+    let paidWorkTime = mandatoryTraining || employerRequiredEhboBhv;
+    if (practiceAgreement) {
+      if (practiceWeek === null) {
+        manualReviewItems.push({
+          rule_id: 'CAO-PB-2024-R0957',
+          domain: 'training_education',
+          field: `work_schedule[${index}].practice_training_week_number`,
+          message: 'Praktijkovereenkomst/WEB-opleiding mist opleidingsweek; 50% eerste 4 weken of 100% daarna kan niet definitief worden toegepast.'
+        });
+      }
+      baseWagePercentage = practiceWeek !== null && practiceWeek <= 4 ? 50 : 100;
+      paidWorkTime = true;
+    }
+    if (voluntaryEhbo) {
+      baseWagePercentage = 0;
+      paidWorkTime = false;
+    }
+    const hasTrainingSignal = mandatoryTraining || practiceAgreement || ehboBhv;
+    return {
+      shift_index: index,
+      date: shift.date || null,
+      has_training_signal: hasTrainingSignal,
+      mandatory_training: mandatoryTraining,
+      practice_agreement_training: practiceAgreement,
+      practice_training_week_number: practiceWeek,
+      ehbo_bhv_training: ehboBhv,
+      employer_required_ehbo_bhv: employerRequiredEhboBhv,
+      voluntary_ehbo_bhv: voluntaryEhbo,
+      paid_work_time: paidWorkTime,
+      roster_and_rest_rules_apply: mandatoryTraining || practiceAgreement || employerRequiredEhboBhv,
+      employer_pays_mandatory_training_costs: mandatoryTraining || employerRequiredEhboBhv,
+      base_wage_percentage: baseWagePercentage,
+      nonstandard_payroll_multiplier_requires_review: hasTrainingSignal && baseWagePercentage !== null && baseWagePercentage !== 100,
+      source_rule_ids: hasTrainingSignal ? sourceRuleIds : []
+    };
+  });
+  const nonstandardPolicies = shiftPolicies.filter(item => item.nonstandard_payroll_multiplier_requires_review);
+  if (nonstandardPolicies.length > 0 && booleanOrNull(body.training_payroll_adjustment_applied) !== true) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R0957',
+      domain: 'training_education',
+      field: 'training_payroll_adjustment_applied',
+      message: 'Opleiding/EHBO-BHV bevat 50% of 0% loonbeleid; bevestig training_payroll_adjustment_applied=true nadat de looncomponent is gesplitst/toegepast.'
+    });
+  }
+  return {
+    applies: shiftPolicies.some(item => item.has_training_signal) ||
+      booleanOrNull(body.voluntary_training_requested) === true,
+    voluntary_training_request_policy: {
+      requested: booleanOrNull(body.voluntary_training_requested) === true,
+      employer_response_deadline_months: 1,
+      written_denial_reason_required: booleanOrNull(body.voluntary_training_denied) === true,
+      study_cost_repayment_agreement_manual_review_required: booleanOrNull(body.study_cost_repayment_agreement_present) === true,
+      source_rule_ids: ['CAO-PB-2024-R0971', 'CAO-PB-2024-R0976']
+    },
+    shift_policies: shiftPolicies,
+    manual_review_required: manualReviewItems.length > 0,
+    manual_review_items: manualReviewItems,
+    source_rule_ids: sourceRuleIds
+  };
+}
+
 function yearsAtReferenceDate(startDate, referenceDate) {
   const startIso = isoDate(startDate);
   const refIso = isoDate(referenceDate);
@@ -4140,6 +4249,7 @@ Deno.serve(async (req) => {
       // Metadata
       is_call_worker: isCallWorker,
       payroll_wage_allowance_policy: null,
+      training_education_policy: null,
       older_worker_arrangements: null,
       pension_calculation: null
     };
@@ -4176,6 +4286,18 @@ Deno.serve(async (req) => {
     let runtimeCalculationStatus = calculationStatus;
     const payrollRuntimeReviewItems = [];
     let minimumServiceTopUpHoursForOvertime = 0;
+    const trainingEducationPolicy = resolveCaoTrainingEducationPolicy({
+      body,
+      workSchedule: work_schedule
+    });
+    payslip.training_education_policy = trainingEducationPolicy;
+    for (const item of trainingEducationPolicy.manual_review_items || []) {
+      payrollRuntimeReviewItems.push(item);
+    }
+    if (trainingEducationPolicy.manual_review_required) {
+      runtimePayrollFinalAllowed = false;
+      runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+    }
     const payrollWageAllowancePolicy = resolvePayrollWageAllowancePolicy({
       body,
       personnel,
@@ -4940,6 +5062,7 @@ Deno.serve(async (req) => {
       cao_runtime_support: payrollRuntimeSupport,
       cao_payroll_parameters: payrollCaoParameters,
       payroll_wage_allowance_policy: payrollWageAllowancePolicy,
+      training_education_policy: trainingEducationPolicy,
       pay_period_year: pay_period_year || refDate.getFullYear(),
       pay_period_number: pay_period_number || null,
       pay_period_start: payrollPeriod.period_start,
@@ -5076,6 +5199,7 @@ Deno.serve(async (req) => {
         pension_base: Math.round(payslip.pension_base * 100) / 100,
         pension_calculation: payslip.pension_calculation,
         payroll_wage_allowance_policy: payslip.payroll_wage_allowance_policy,
+        training_education_policy: payslip.training_education_policy,
         older_worker_arrangements: payslip.older_worker_arrangements,
         
         // Reserveringen

@@ -752,6 +752,17 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0900', 'CAO-PB-2024-R0905', 'CAO-PB-2024-R1609'
     ]
   },
+  'calculatePersonnelCosts.articles_55_58_training_education': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts', 'applyCaoContractRules'],
+    rule_ids: [
+      'CAO-PB-2024-R0950', 'CAO-PB-2024-R0953', 'CAO-PB-2024-R0956',
+      'CAO-PB-2024-R0957', 'CAO-PB-2024-R0958', 'CAO-PB-2024-R0959',
+      'CAO-PB-2024-R0962', 'CAO-PB-2024-R0966', 'CAO-PB-2024-R0968',
+      'CAO-PB-2024-R0971', 'CAO-PB-2024-R0976', 'CAO-PB-2024-R0979',
+      'CAO-PB-2024-R0980', 'CAO-PB-2024-R0981', 'CAO-PB-2024-R0982',
+      'CAO-PB-2024-R0991'
+    ]
+  },
   'calculateCaoLeaveAndSickness.articles_59_65_66_67': {
     functions: ['calculateCaoLeaveAndSickness'],
     rule_ids: [

@@ -387,6 +387,10 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       ...ruleIds(1609)
     ]
   },
+  'calculatePersonnelCosts.articles_55_58_training_education': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts', 'applyCaoContractRules'],
+    rule_ids: ruleIds(950, 953, 956, 957, 958, 959, 962, 966, 968, 971, 976, 979, 980, 981, 982, 991)
+  },
   'calculateCaoLeaveAndSickness.articles_59_65_66_67': {
     functions: ['calculateCaoLeaveAndSickness'],
     rule_ids: [
