@@ -349,15 +349,20 @@
       "type": "number"
     },
     "cao": {
-      "type": "string",
+      "type": [
+        "string",
+        "null"
+      ],
       "enum": [
         "cao_particuliere_beveiliging",
         "cao_evenementen_horecabeveiliging",
         "cao_verkeersregelaars",
         "cao_veiligheidsdomein",
-        "eigen_tarief"
+        "eigen_tarief",
+        null
       ],
-      "default": "cao_particuliere_beveiliging"
+      "default": null,
+      "description": "Expliciet gekozen contract-CAO. Geen default: planning/payroll mag niet stilzwijgend naar CAO PB vallen."
     },
     "cao_scale": {
       "type": [

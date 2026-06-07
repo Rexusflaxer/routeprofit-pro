@@ -22,6 +22,22 @@ const CAO_OPTIONS = [
   { value: "eigen_tarief", label: "Eigen uurtarief", payrollRuntimeReady: true },
 ];
 
+const FUNCTION_TYPES = [
+  { value: "objectbeveiliger", label: "Objectbeveiliger" },
+  { value: "receptie", label: "Receptie" },
+  { value: "surveillant", label: "Surveillant" },
+  { value: "binnendienst", label: "Binnendienst" },
+  { value: "klantrelatie", label: "Klantrelatie" },
+  { value: "planner", label: "Planner" },
+  { value: "centralist", label: "Centralist" },
+  { value: "verkeersregelaar", label: "Verkeersregelaar" },
+  { value: "brandwacht", label: "Brandwacht" },
+  { value: "installateur", label: "Installateur" },
+  { value: "rechercheur", label: "Rechercheur" },
+  { value: "host", label: "Host / Hostess" },
+  { value: "other", label: "Overig" },
+];
+
 const VALID_PERIODS_PER_SCALE = {
   2: { min: 0, max: 1 },
   3: { min: 1, max: 10 },
@@ -88,16 +104,12 @@ function CostOwnerToggle({ label, value, onChange }) {
  * Voeg hier GEEN CAO-flow toe die afwijkt van de wizard.
  */
 export default function PersonnelForm({ person, onSave, onCancel }) {
-  // Binnendienst valt ook onder CAO PB (artikel 3 lid 2). Alleen eigen_tarief als gebruiker dat expliciet kiest.
-  // Niet automatisch eigen_tarief toewijzen op basis van function_type.
-  const getDefaultCao = (_functionType) => "cao_particuliere_beveiliging";
-
   const [form, setForm] = useState(person || {
     name: "",
-    function_type: "surveillant",
+    function_type: null,
     employee_type: "loondienst",
     contract_type: "fulltime",
-    cao: "cao_particuliere_beveiliging",
+    cao: null,
     cao_scale: null,
     cao_period: null,
     is_active: true,
@@ -115,8 +127,7 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
   const handleFunctionTypeChange = (v) => {
     setForm(prev => ({
       ...prev,
-      function_type: v,
-      cao: prev.employee_type === "loondienst" ? getDefaultCao(v) : prev.cao,
+      function_type: v === "unknown" ? null : v,
     }));
   };
 
@@ -124,6 +135,14 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
 
   const handleSubmit = (e) => {
     e.preventDefault();
+    if (form.employee_type === 'loondienst' && !form.function_type) {
+      alert('Kies expliciet een functietype. Gebruik bij voorkeur de personeelswizard voor CAO-toepassing en functie-indeling.');
+      return;
+    }
+    if (form.employee_type === 'loondienst' && !form.cao) {
+      alert('Kies expliciet een contract-CAO. Er wordt geen standaard CAO toegepast.');
+      return;
+    }
     if (form.employee_type === 'loondienst' && form.cao === 'cao_particuliere_beveiliging') {
       if (form.cao_scale == null || form.cao_period == null) {
         alert('CAO-schaal en periodiek ontbreken. Gebruik de personeelswizard om CAO-toepassing en functie-indeling te bepalen.');
@@ -195,11 +214,13 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
               </div>
               <div className="space-y-2">
                 <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Functie</Label>
-                <Select value={form.function_type} onValueChange={handleFunctionTypeChange}>
+                <Select value={form.function_type || "unknown"} onValueChange={handleFunctionTypeChange}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
-                    <SelectItem value="surveillant">Surveillant</SelectItem>
-                    <SelectItem value="binnendienst">Binnendienst</SelectItem>
+                    <SelectItem value="unknown">Kies expliciet een functie</SelectItem>
+                    {FUNCTION_TYPES.map(f => (
+                      <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>
+                    ))}
                   </SelectContent>
                 </Select>
               </div>
@@ -283,9 +304,10 @@ export default function PersonnelForm({ person, onSave, onCancel }) {
               <div className="bg-slate-50 rounded-xl p-4 space-y-4">
                 <div className="space-y-2">
                   <Label className="text-xs font-semibold uppercase tracking-wider text-slate-500">Tariefbepaling</Label>
-                  <Select value={form.cao} onValueChange={(v) => handleChange("cao", v)}>
+                  <Select value={form.cao || "unknown"} onValueChange={(v) => handleChange("cao", v === "unknown" ? null : v)}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
+                      <SelectItem value="unknown">Kies expliciet een CAO/tarief</SelectItem>
                       {CAO_OPTIONS.map(option => (
                         <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                       ))}

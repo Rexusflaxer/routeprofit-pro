@@ -25,6 +25,31 @@ const BASE_STEPS = [
   { label: "Controle" },
 ];
 
+const NON_PROOF_SECURITY_ROLE_STATUSES = new Set(["unknown", "not_applicable"]);
+
+function hasMeaningfulSecurityRoleStatus(value) {
+  return !!value && !NON_PROOF_SECURITY_ROLE_STATUSES.has(value);
+}
+
+function getInitialContractMissingFields({
+  companyId,
+  caoKey,
+  contractStartDate,
+  functionType,
+  caoFunctionGroup,
+  caoFunctionLevel,
+  securityRoleStatus
+}) {
+  const missing = [];
+  if (!companyId) missing.push("company_id");
+  if (!caoKey) missing.push("cao_key");
+  if (!contractStartDate) missing.push("contract_start_date");
+  if (!functionType && !caoFunctionGroup && !caoFunctionLevel && !hasMeaningfulSecurityRoleStatus(securityRoleStatus)) {
+    missing.push("function_type/cao_function_group/cao_function_level/security_role_status");
+  }
+  return missing;
+}
+
 export default function PersonnelWizard({ person, onClose }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(0);
@@ -86,13 +111,25 @@ export default function PersonnelWizard({ person, onClose }) {
           const caoFunctionLevel = data.personnel.cao_function_level || null;
           const securityRoleStatus = data.personnel.security_role_status || "unknown";
           const caoScopeProfile = data.personnel.cao_scope_profile || null;
+          const caoKey = data.personnel.cao || null;
+          const contractStartDate = data.personnel.contract_start_date || null;
+          const missingContractContextFields = getInitialContractMissingFields({
+            companyId,
+            caoKey,
+            contractStartDate,
+            functionType,
+            caoFunctionGroup,
+            caoFunctionLevel,
+            securityRoleStatus
+          });
+          const contractContextReady = missingContractContextFields.length === 0;
           await base44.entities.PersonnelContract.create({
             personnel_id: personnelId,
             company_id: companyId,
-            cao_key: data.personnel.cao || null,
+            cao_key: caoKey,
             cao_configuration_id: data.personnel.cao_configuration_id || null,
             contract_form: data.personnel.contract_form || "unknown",
-            contract_start_date: data.personnel.contract_start_date || null,
+            contract_start_date: contractStartDate,
             contract_end_date: data.personnel.contract_end_date || null,
             probation_period_months: data.personnel.probation_period_months ?? null,
             probation_period_source_rule_id: data.personnel.probation_period_source_rule_id || null,
@@ -126,8 +163,17 @@ export default function PersonnelWizard({ person, onClose }) {
             max_hours_per_week: data.personnel.max_hours || null,
             industry_seniority_pay_periods: data.personnel.industry_seniority_pay_periods ?? null,
             industry_start_date: data.personnel.industry_start_date || null,
-            is_current: true,
-            notes: "Automatisch aangemaakt vanuit personeelswizard als initiële contractfundering."
+            contract_context_status: contractContextReady ? "context_ready" : "draft_missing_context",
+            contract_context_missing_fields: missingContractContextFields,
+            contract_context_checked_at: new Date().toISOString(),
+            cao_contract_rule_status: contractContextReady ? "unknown" : "blocked",
+            planning_allowed: false,
+            contract_final_allowed: false,
+            payroll_final_allowed: false,
+            is_current: contractContextReady,
+            notes: contractContextReady
+              ? "Automatisch aangemaakt vanuit personeelswizard als initiële contractfundering."
+              : `Automatisch aangemaakt vanuit personeelswizard als conceptfundering. Ontbrekende contractcontext: ${missingContractContextFields.join(", ")}.`
           });
         }
       }

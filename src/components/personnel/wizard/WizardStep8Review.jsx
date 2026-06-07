@@ -60,6 +60,8 @@ export default function WizardStep8Review({ form, sensitiveData, idDoc, bankAcco
     { label: "Functietype gekozen", ok: !!form.function_type },
     ...(isLoondienst ? [
       { label: "Contract-CAO gekozen", ok: !!form.cao },
+      { label: "Contractvorm gekozen", ok: !!form.contract_form && form.contract_form !== "unknown" },
+      { label: "Contractstartdatum", ok: !!form.contract_start_date },
       { label: "BSN (beveiligd)", ok: !!sensitiveData.bsn },
       { label: "Loonheffingsverklaring", ok: !!(form.payroll_tax_statement_file_url || form.payroll_tax_credit_applies !== undefined) },
       { label: "Identiteitsdocument", ok: !!(idDoc.document_type && (idDoc.front_file_url || idDoc.document_number)) },

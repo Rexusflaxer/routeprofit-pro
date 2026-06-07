@@ -1278,6 +1278,12 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
   const contractStartDate = asIsoDate(pickFirst(body.contract_start_date, contract?.contract_start_date, null));
   const contractEndDate = asIsoDate(pickFirst(body.contract_end_date, contract?.contract_end_date, null));
   const caoConfigurationId = pickFirst(body.cao_configuration_id, contract?.cao_configuration_id, null);
+  const securityRoleProofValues = normalizeArray([
+    body.security_role_status,
+    contract?.security_role_status,
+    ...normalizeArray(body.allowed_security_role_statuses),
+    ...normalizeArray(contract?.allowed_security_role_statuses)
+  ]).filter(value => !['unknown', 'not_applicable'].includes(value));
   const functionContextPresent = hasAnyValue(
     body.function_type,
     contract?.function_type,
@@ -1285,14 +1291,15 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
     contract?.cao_function_group,
     body.cao_function_level,
     contract?.cao_function_level,
-    body.security_role_status,
-    contract?.security_role_status,
     normalizeArray(body.allowed_function_types),
     normalizeArray(contract?.allowed_function_types),
     normalizeArray(body.allowed_cao_function_groups),
     normalizeArray(contract?.allowed_cao_function_groups),
-    normalizeArray(body.allowed_security_role_statuses),
-    normalizeArray(contract?.allowed_security_role_statuses)
+    normalizeArray(body.allowed_cao_function_levels),
+    normalizeArray(contract?.allowed_cao_function_levels),
+    normalizeArray(body.allowed_task_types),
+    normalizeArray(contract?.allowed_task_types),
+    securityRoleProofValues
   );
 
   if (!explicitCompanyId) {
@@ -3858,7 +3865,17 @@ function buildContractRuleInput(body, personnel, contract) {
 
 function buildContractRulePersistence(result) {
   const recommendedContractUpdate = result.recommended_contract_update || {};
+  const contractBasis = result.contract_basis || null;
+  const contractContextMissingFields = contractBasis
+    ? (contractBasis.missing_evidence || []).map(item => item.field || item.rule_id).filter(Boolean)
+    : undefined;
   return {
+    contract_context_status: contractBasis?.status ?? undefined,
+    contract_context_missing_fields: contractContextMissingFields,
+    contract_context_checked_at: contractBasis ? new Date().toISOString() : undefined,
+    planning_allowed: contractBasis ? result.contract_final_allowed === true : undefined,
+    contract_final_allowed: result.contract_final_allowed ?? undefined,
+    payroll_final_allowed: result.payroll_final_allowed ?? undefined,
     employment_contract_model: recommendedContractUpdate.employment_contract_model ?? result.employment_contract_model?.employment_contract_model ?? undefined,
     parttime_contract_model: recommendedContractUpdate.parttime_contract_model ?? result.employment_contract_model?.parttime_contract_model ?? undefined,
     employment_contract_model_rule_status: result.employment_contract_model?.employment_contract_model_status ?? undefined,
@@ -4138,26 +4155,73 @@ Deno.serve(async (req) => {
 
     if (action === 'validate_contract' || action === 'evaluate_contract_rules') {
       const ruleInput = buildContractRuleInput(body, personnel, contract);
+      const contractBasis = await evaluateContractBasis(base44, {
+        body,
+        personnel,
+        contract,
+        targetCaoKey
+      });
       const result = buildFullContractRuleResult(ruleInput, caoScope);
-
-      const shouldPersistContract = contract_id && body.save === true;
-      if (shouldPersistContract) {
-        await base44.entities.PersonnelContract.update(contract_id, buildContractRulePersistence(result));
-      }
-
-      return Response.json({
-        success: result.contract_rule_status !== 'blocked',
+      const combinedViolations = [
+        ...(contractBasis.violations || []),
+        ...(result.contract_rule_violations || [])
+      ];
+      const combinedWarnings = [
+        ...(syncWarnings || []),
+        ...(contractBasis.warnings || []),
+        ...(result.warnings || [])
+      ];
+      const combinedManualReviewRequired = contractBasis.manual_review_required === true ||
+        result.manual_review_required === true ||
+        isUnknownOrMixed === true;
+      const combinedStatus = contractBasis.status === 'blocked' ||
+        result.contract_rule_status === 'blocked' ||
+        combinedViolations.some(violation => ['high', 'critical'].includes(violation.severity))
+        ? 'blocked'
+        : combinedManualReviewRequired
+        ? 'manual_review_required'
+        : result.contract_rule_status === 'compliant' && contractBasis.status === 'compliant'
+        ? 'compliant'
+        : result.contract_rule_status;
+      const contractFinalAllowed = combinedStatus === 'compliant' &&
+        contractBasis.contract_final_allowed === true &&
+        !combinedManualReviewRequired;
+      const responsePayload = {
+        success: combinedStatus !== 'blocked',
         cao_sync_status: caoSyncStatus,
         cao_key: targetCaoKey,
         cao_runtime_support: contractRuntimeSupport,
-        calculation_warnings: syncWarnings,
+        calculation_warnings: combinedWarnings,
         contract_id: contract_id || contract?.id || null,
         personnel_id: personnel_id || null,
         contract_cao_resolution: contractCaoResolution,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
-        manual_review_required: result.manual_review_required || isUnknownOrMixed,
+        ...result,
+        contract_basis: contractBasis,
+        warnings: [...new Set(combinedWarnings.map(String))],
+        contract_rule_violations: combinedViolations,
+        missing_evidence: [
+          ...(contractBasis.missing_evidence || []),
+          ...(result.missing_evidence || [])
+        ],
+        manual_review_required: combinedManualReviewRequired,
+        contract_rule_status: combinedStatus,
+        contract_final_allowed: contractFinalAllowed,
+        payroll_final_allowed: contractFinalAllowed,
+        recommended_contract_update: {
+          ...(contractBasis.recommended_contract_update || {}),
+          ...(result.recommended_contract_update || {})
+        }
+      };
+
+      const shouldPersistContract = contract_id && body.save === true;
+      if (shouldPersistContract) {
+        await base44.entities.PersonnelContract.update(contract_id, buildContractRulePersistence(responsePayload));
+      }
+
+      return Response.json({
         persisted_to_contract: !!shouldPersistContract,
-        ...result
+        ...responsePayload
       });
     }
 
@@ -4363,7 +4427,7 @@ Deno.serve(async (req) => {
       contractBasis.contract_final_allowed === true &&
       !combinedManualReviewRequired;
 
-    return Response.json({
+    const responsePayload = {
       success: combinedStatus !== 'blocked',
       cao_sync_status: caoSyncStatus,
       cao_key: targetCaoKey,
@@ -4389,6 +4453,16 @@ Deno.serve(async (req) => {
         ...(contractBasis.recommended_contract_update || {}),
         ...(result.recommended_contract_update || {})
       }
+    };
+
+    const shouldPersistContract = contract_id && body.save === true;
+    if (shouldPersistContract) {
+      await base44.entities.PersonnelContract.update(contract_id, buildContractRulePersistence(responsePayload));
+    }
+
+    return Response.json({
+      persisted_to_contract: !!shouldPersistContract,
+      ...responsePayload
     });
 
   } catch (error) {

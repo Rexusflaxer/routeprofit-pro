@@ -575,6 +575,53 @@
       "additionalProperties": true,
       "description": "Snapshot van toegepaste contractregels, o.a. proeftijd, grensdatums, warnings en violations."
     },
+    "contract_context_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "draft_missing_context",
+        "context_ready",
+        "blocked",
+        "manual_review_required",
+        "compliant",
+        "unknown",
+        null
+      ],
+      "default": "unknown",
+      "description": "Auditstatus van de minimale contractbasis: company_id, cao_key, contract_start_date en functie-/CAO-scope. draft_missing_context mag niet automatisch planning/payroll dragen."
+    },
+    "contract_context_missing_fields": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Ontbrekende contractbasisvelden die eerst moeten worden aangevuld voordat het contract definitief kan worden gebruikt."
+    },
+    "contract_context_checked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datetime waarop de minimale contractcontext voor het laatst is beoordeeld."
+    },
+    "planning_allowed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als deze contractsnapshot volgens de contractcontext en contractregels planmatig gebruikt mag worden. Dienstspecifieke roosterregels blijven apart gelden."
+    },
+    "contract_final_allowed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als dit arbeidscontract CAO-contractregelmatig definitief is beoordeeld zonder blokkades of handmatige review."
+    },
+    "payroll_final_allowed": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als dit contract als payroll-final basis mag dienen. Berekening per dienst/loonperiode controleert daarna nog dienstspecifieke regels."
+    },
     "security_role_status": {
       "type": "string",
       "enum": [
