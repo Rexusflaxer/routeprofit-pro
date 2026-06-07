@@ -748,12 +748,49 @@ function countByAutomationLevel(rules) {
   }, {});
 }
 
+function hasRuleSourceLocator(rule) {
+  return Boolean(
+    rule?.source_document_id ||
+    rule?.source_pdf ||
+    rule?.source_url ||
+    rule?.source_reference ||
+    rule?.document_url
+  );
+}
+
+function hasRuleSourceHash(rule) {
+  return Boolean(
+    rule?.sha1 ||
+    rule?.sha256 ||
+    rule?.source_hash ||
+    rule?.rule_hash ||
+    rule?.rule_text_hash
+  );
+}
+
+function summarizeSourceEvidenceGap(rule, message) {
+  return {
+    rule_id: rule.rule_id || 'unknown',
+    domain: rule.domain || null,
+    article: rule.article || null,
+    automation_level: rule.automation_level || null,
+    implementation_status: rule.implementation_status || 'MISSING',
+    source_document_id: rule.source_document_id || null,
+    source_pdf: rule.source_pdf || null,
+    pdf_page_start: rule.pdf_page_start ?? null,
+    pdf_page_end: rule.pdf_page_end ?? null,
+    message
+  };
+}
+
 function evaluateSourceCoverageCompleteness(candidateCfg, rules) {
   const caoKey = normalizeCaoKey(candidateCfg?.cao_key) || CAO_PB_KEY;
   const minimums = getSourceCoverageMinimums(candidateCfg);
   const uniqueRuleIds = new Set(rules.map(rule => rule.rule_id).filter(Boolean));
   const byAutomationLevel = countByAutomationLevel(rules);
   const blockingFindings = [];
+  const payrollCriticalMissingSourceLocator = [];
+  const payrollCriticalMissingSourceHash = [];
 
   if (uniqueRuleIds.size < minimums.total) {
     blockingFindings.push({
@@ -777,11 +814,50 @@ function evaluateSourceCoverageCompleteness(candidateCfg, rules) {
     }
   }
 
+  for (const rule of rules) {
+    if (!isPayrollCriticalRule(rule)) continue;
+    if (!hasRuleSourceLocator(rule)) {
+      payrollCriticalMissingSourceLocator.push(summarizeSourceEvidenceGap(
+        rule,
+        'Payrollkritische regel mist source_document_id/source_pdf/source_url/source_reference; bronherkomst is niet audit-proof.'
+      ));
+    }
+    if (!hasRuleSourceHash(rule)) {
+      payrollCriticalMissingSourceHash.push(summarizeSourceEvidenceGap(
+        rule,
+        'Payrollkritische regel mist regelhash; wijzigingen in brontekst kunnen niet deterministisch worden bewezen.'
+      ));
+    }
+  }
+
+  if (payrollCriticalMissingSourceLocator.length > 0) {
+    blockingFindings.push({
+      code: 'incomplete_payroll_critical_source_locator',
+      severity: 'critical',
+      message: `${payrollCriticalMissingSourceLocator.length} payrollkritische CAO-regels missen een bronlocator; payroll-ready wordt geblokkeerd.`
+    });
+  }
+  if (payrollCriticalMissingSourceHash.length > 0) {
+    blockingFindings.push({
+      code: 'incomplete_payroll_critical_source_hash',
+      severity: 'critical',
+      message: `${payrollCriticalMissingSourceHash.length} payrollkritische CAO-regels missen een regelhash; payroll-ready wordt geblokkeerd.`
+    });
+  }
+
   return {
     passed: blockingFindings.length === 0,
     unique_rule_ids: uniqueRuleIds.size,
     by_automation_level: byAutomationLevel,
     minimums,
+    payroll_critical_source_evidence: {
+      missing_source_locator_count: payrollCriticalMissingSourceLocator.length,
+      missing_source_hash_count: payrollCriticalMissingSourceHash.length,
+      missing_source_locator_rules: payrollCriticalMissingSourceLocator.slice(0, 100),
+      missing_source_locator_truncated: payrollCriticalMissingSourceLocator.length > 100,
+      missing_source_hash_rules: payrollCriticalMissingSourceHash.slice(0, 100),
+      missing_source_hash_truncated: payrollCriticalMissingSourceHash.length > 100
+    },
     blocking_findings: blockingFindings
   };
 }
