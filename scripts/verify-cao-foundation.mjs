@@ -1254,13 +1254,50 @@ function relativeRepoPath(absolutePath) {
 
 function runCaoStaticGovernanceScenarios() {
   const srcFiles = listFilesRecursive(path.join(repoRoot, 'src'), ['.js', '.jsx', '.ts', '.tsx']);
+  const sensitiveCaoEntities = [
+    'CAOConfiguration',
+    'CAORule',
+    'CAOChangeReview',
+    'CAOSourceDocument',
+    'CAOImportRun',
+    'CAOPayrollCorrection'
+  ];
   const frontendSensitiveEntityReads = srcFiles
-    .filter(file => fs.readFileSync(file, 'utf8').includes('base44.entities.CAOConfiguration.list('))
+    .filter(file => {
+      const source = fs.readFileSync(file, 'utf8');
+      return sensitiveCaoEntities.some(name => source.includes(`base44.entities.${name}`));
+    })
     .map(relativeRepoPath);
   assert.deepEqual(
     frontendSensitiveEntityReads,
     [],
-    'Customer UI must not read raw CAOConfiguration records; use listCaoConfigurationOptions instead'
+    'Customer UI must not read raw internal CAO entities; use sanitized functions such as listCaoConfigurationOptions instead'
+  );
+
+  const appSource = fs.readFileSync(path.join(repoRoot, 'src/App.jsx'), 'utf8');
+  const layoutSource = fs.readFileSync(path.join(repoRoot, 'src/Layout.jsx'), 'utf8');
+  const pagesConfigSource = fs.readFileSync(path.join(repoRoot, 'src/pages.config.js'), 'utf8');
+  assert.equal(
+    fs.existsSync(path.join(repoRoot, 'src/pages/CAOBeheer.jsx')),
+    false,
+    'Customer app must not contain a CAOBeheer page; CAO governance stays owner-only via Codex/Cloudflare'
+  );
+  assert.equal(
+    /import\s+CAOBeheer\b/.test(appSource) ||
+      /path=["']\/CAOBeheer["']/.test(appSource) ||
+      /createPageUrl\(["']CAOBeheer["']\)/.test(appSource),
+    false,
+    'Customer app routes must not expose CAOBeheer'
+  );
+  assert.equal(
+    layoutSource.includes('CAOBeheer') || layoutSource.includes('CAO beheer') || layoutSource.includes('CAO-beheer'),
+    false,
+    'Customer navigation must not expose CAO beheer'
+  );
+  assert.equal(
+    pagesConfigSource.includes('CAOBeheer'),
+    false,
+    'Auto page config must not register CAOBeheer'
   );
 
   const sensitiveOwnerFunctions = [
