@@ -583,17 +583,20 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
     runtime_missing: 0,
     implemented_without_runtime_binding: 0,
     implemented_without_test_evidence: 0,
-    partial_without_manual_review: 0
+    partial_without_manual_review: 0,
+    payroll_critical_missing_rule_text: 0
   };
   const openCriticalRules = [];
   const implementedWithoutRuntimeBinding = [];
   const implementedWithoutTestEvidence = [];
   const partialWithoutManualReview = [];
+  const payrollCriticalMissingRuleText = [];
   const missingTextRules = [];
 
   for (const rule of rules) {
     const status = String(rule.implementation_status || 'MISSING').toUpperCase();
     const runtimeBinding = getLocalRuntimeBinding(rule);
+    const missingText = !rule.rule_text && !rule.rule_text_summary;
     if (status === 'IMPLEMENTED') counts.implemented++;
     else if (status === 'PARTIAL') counts.partial++;
     else if (status === 'MISSING') counts.missing++;
@@ -601,7 +604,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
     else counts.unknown++;
 
     if (rule.manual_review_required === true) counts.manual_review_required++;
-    if (!rule.rule_text && !rule.rule_text_summary) missingTextRules.push(rule.rule_id || 'unknown');
+    if (missingText) missingTextRules.push(rule.rule_id || 'unknown');
 
     if (isPayrollCriticalRule(rule)) {
       counts.payroll_critical++;
@@ -613,6 +616,18 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
         (!rule.tests || (Array.isArray(rule.tests) && rule.tests.length === 0) ||
           (typeof rule.tests === 'object' && !Array.isArray(rule.tests) && Object.keys(rule.tests).length === 0));
       const partialWithoutReview = status === 'PARTIAL' && rule.manual_review_required !== true;
+      const payrollCriticalNoText = missingText;
+      if (payrollCriticalNoText) {
+        counts.payroll_critical_missing_rule_text++;
+        payrollCriticalMissingRuleText.push({
+          rule_id: rule.rule_id || 'unknown',
+          domain: rule.domain || null,
+          implementation_status: rule.implementation_status || 'MISSING',
+          automation_level: rule.automation_level || null,
+          calculation_policy: rule.calculation_policy || null,
+          message: 'Payrollkritische regel mist zowel rule_text als rule_text_summary; CAO-broninterpretatie kan niet worden bewezen.'
+        });
+      }
       if (lacksRuntimeBinding) {
         counts.implemented_without_runtime_binding++;
         implementedWithoutRuntimeBinding.push({
@@ -643,7 +658,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
         });
       }
 
-      if (status !== 'IMPLEMENTED' || rule.manual_review_required === true || lacksRuntimeBinding || lacksTestEvidence || partialWithoutReview) {
+      if (status !== 'IMPLEMENTED' || rule.manual_review_required === true || lacksRuntimeBinding || lacksTestEvidence || partialWithoutReview || payrollCriticalNoText) {
         counts.payroll_critical_open++;
         openCriticalRules.push({
           rule_id: rule.rule_id || 'unknown',
@@ -654,7 +669,8 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
           calculation_policy: rule.calculation_policy || null,
           runtime_binding_status: runtimeBinding ? 'verified_local_runtime' : 'missing_local_runtime',
           runtime_binding_key: runtimeBinding?.key || null,
-          runtime_binding_functions: runtimeBinding?.functions || []
+          runtime_binding_functions: runtimeBinding?.functions || [],
+          has_rule_text: !payrollCriticalNoText
         });
       }
     }
@@ -718,6 +734,13 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
       message: `${partialWithoutManualReview.length} payrollkritische PARTIAL-regels missen manual_review_required=true.`
     });
   }
+  if (payrollCriticalMissingRuleText.length > 0) {
+    blockingFindings.push({
+      code: 'incomplete_payroll_critical_rule_text',
+      severity: 'critical',
+      message: `${payrollCriticalMissingRuleText.length} payrollkritische CAO-regels missen rule_text en rule_text_summary; broninterpretatie is niet audit-proof.`
+    });
+  }
 
   let status = 'ready';
   if (blockingFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
@@ -742,6 +765,8 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
     implemented_without_test_evidence_truncated: implementedWithoutTestEvidence.length > 100,
     partial_without_manual_review_rules: partialWithoutManualReview.slice(0, 100),
     partial_without_manual_review_truncated: partialWithoutManualReview.length > 100,
+    payroll_critical_missing_rule_text_rules: payrollCriticalMissingRuleText.slice(0, 100),
+    payroll_critical_missing_rule_text_truncated: payrollCriticalMissingRuleText.length > 100,
     local_runtime_binding_keys: Object.keys(LOCAL_RUNTIME_RULE_BINDINGS),
     missing_rule_text_rule_ids: missingTextRules.slice(0, 100),
     missing_rule_text_truncated: missingTextRules.length > 100

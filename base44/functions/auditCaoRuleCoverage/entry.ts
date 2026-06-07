@@ -276,9 +276,19 @@ function isPayrollCriticalRule(rule) {
 }
 
 function hasRuntimeBinding(rule) {
-  return rule.runtime_binding_status === 'verified_local_runtime' ||
+  return rule.runtime_binding_status === 'verified_local_runtime';
+}
+
+function hasRuntimeBindingMetadata(rule) {
+  return hasRuntimeBinding(rule) ||
     !!rule.runtime_binding_key ||
     (Array.isArray(rule.runtime_binding_functions) && rule.runtime_binding_functions.length > 0);
+}
+
+function runtimeBindingStatusForSummary(rule) {
+  if (hasRuntimeBinding(rule)) return 'verified_local_runtime';
+  if (hasRuntimeBindingMetadata(rule)) return rule.runtime_binding_status || 'unverified_runtime_metadata';
+  return rule.runtime_binding_status || 'missing_local_runtime';
 }
 
 function hasTestEvidence(rule) {
@@ -338,6 +348,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
     implemented_without_runtime_binding: 0,
     implemented_without_test_evidence: 0,
     partial_without_manual_review: 0,
+    payroll_critical_missing_rule_text: 0,
     missing_rule_text: 0
   };
 
@@ -345,13 +356,16 @@ function evaluateCoverageGate(config, rules, options = {}) {
   const implementedWithoutRuntimeBinding = [];
   const implementedWithoutTestEvidence = [];
   const partialWithoutManualReview = [];
+  const payrollCriticalMissingRuleText = [];
   const missingRuleText = [];
 
   for (const rule of rules) {
     const status = String(rule.implementation_status || 'MISSING').toUpperCase();
     const runtimeBound = hasRuntimeBinding(rule);
+    const runtimeMetadataPresent = hasRuntimeBindingMetadata(rule);
     const testEvidence = hasTestEvidence(rule);
     const payrollCritical = isPayrollCriticalRule(rule);
+    const missingText = !rule.rule_text && !rule.rule_text_summary;
 
     if (status === 'IMPLEMENTED') counts.implemented++;
     else if (status === 'PARTIAL') counts.partial++;
@@ -360,7 +374,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
     else counts.unknown++;
 
     if (rule.manual_review_required === true) counts.manual_review_required++;
-    if (!rule.rule_text && !rule.rule_text_summary) {
+    if (missingText) {
       counts.missing_rule_text++;
       missingRuleText.push(rule.rule_id || 'unknown');
     }
@@ -374,10 +388,19 @@ function evaluateCoverageGate(config, rules, options = {}) {
     const implementedNoRuntime = status === 'IMPLEMENTED' && !runtimeBound;
     const implementedNoTests = status === 'IMPLEMENTED' && !testEvidence;
     const partialNoManualReview = status === 'PARTIAL' && rule.manual_review_required !== true;
+    const payrollCriticalNoText = missingText;
+
+    if (payrollCriticalNoText) {
+      counts.payroll_critical_missing_rule_text++;
+      payrollCriticalMissingRuleText.push(summarizeRule(rule, {
+        message: 'Payrollkritische regel mist zowel rule_text als rule_text_summary; CAO-broninterpretatie kan niet worden bewezen.'
+      }));
+    }
 
     if (implementedNoRuntime) {
       counts.implemented_without_runtime_binding++;
       implementedWithoutRuntimeBinding.push(summarizeRule(rule, {
+        has_runtime_binding_metadata: runtimeMetadataPresent,
         message: 'Rule claims IMPLEMENTED but has no verified local Base44 runtime binding.'
       }));
     }
@@ -399,11 +422,13 @@ function evaluateCoverageGate(config, rules, options = {}) {
       rule.manual_review_required === true ||
       implementedNoRuntime ||
       implementedNoTests ||
-      partialNoManualReview
+      partialNoManualReview ||
+      payrollCriticalNoText
     ) {
       counts.payroll_critical_open++;
       openCriticalRules.push(summarizeRule(rule, {
         has_runtime_binding: runtimeBound,
+        has_runtime_binding_metadata: runtimeMetadataPresent,
         has_test_evidence: testEvidence
       }));
     }
@@ -482,6 +507,13 @@ function evaluateCoverageGate(config, rules, options = {}) {
       message: `${partialWithoutManualReview.length} payrollkritische PARTIAL-regels missen manual_review_required=true.`
     });
   }
+  if (payrollCriticalMissingRuleText.length > 0) {
+    blockingFindings.push({
+      code: 'incomplete_payroll_critical_rule_text',
+      severity: 'critical',
+      message: `${payrollCriticalMissingRuleText.length} payrollkritische CAO-regels missen rule_text en rule_text_summary; broninterpretatie is niet audit-proof.`
+    });
+  }
 
   let status = 'ready';
   if (blockingFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
@@ -501,7 +533,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
     by_domain: countBy(rules, rule => rule.domain),
     by_automation_level: countBy(rules, rule => rule.automation_level),
     by_implementation_status: countBy(rules, rule => String(rule.implementation_status || 'MISSING').toUpperCase()),
-    by_runtime_binding_status: countBy(rules, rule => rule.runtime_binding_status || (hasRuntimeBinding(rule) ? 'verified_local_runtime' : 'unknown')),
+    by_runtime_binding_status: countBy(rules, rule => runtimeBindingStatusForSummary(rule)),
     blocking_findings: blockingFindings,
     open_payroll_critical_rules: openCriticalRules.slice(0, maxOpenRules),
     open_payroll_critical_rules_truncated: openCriticalRules.length > maxOpenRules,
@@ -511,6 +543,8 @@ function evaluateCoverageGate(config, rules, options = {}) {
     implemented_without_test_evidence_truncated: implementedWithoutTestEvidence.length > maxOpenRules,
     partial_without_manual_review_rules: partialWithoutManualReview.slice(0, maxOpenRules),
     partial_without_manual_review_truncated: partialWithoutManualReview.length > maxOpenRules,
+    payroll_critical_missing_rule_text_rules: payrollCriticalMissingRuleText.slice(0, maxOpenRules),
+    payroll_critical_missing_rule_text_truncated: payrollCriticalMissingRuleText.length > maxOpenRules,
     missing_rule_text_rule_ids: missingRuleText.slice(0, maxOpenRules),
     missing_rule_text_truncated: missingRuleText.length > maxOpenRules
   };
