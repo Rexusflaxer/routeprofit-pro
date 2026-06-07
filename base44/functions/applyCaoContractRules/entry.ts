@@ -4994,6 +4994,10 @@ Deno.serve(async (req) => {
         ...(contractBasis.warnings || []),
         ...(result.warnings || [])
       ];
+      const combinedSourceRuleIds = uniqueValues([
+        ...(result.source_rule_ids || []),
+        ...(contractBasis.source_rule_ids || [])
+      ]);
       const combinedManualReviewRequired = contractBasis.manual_review_required === true ||
         result.manual_review_required === true ||
         isUnknownOrMixed === true;
