@@ -10,7 +10,6 @@ import { Plus, Edit, Trash2, Building2, AlertCircle } from "lucide-react";
 import CompanyForm from "@/components/companies/CompanyForm";
 import HoldingStructureTab from "@/components/companies/HoldingStructureTab";
 import LocationsTab from "@/components/companies/LocationsTab";
-import CaoCatalogTab from "@/components/companies/CaoCatalogTab";
 import CompanyBankTab from "@/components/companies/CompanyBankTab";
 
 const ROLE_LABELS = {
@@ -133,7 +132,6 @@ export default function Companies() {
           <TabsTrigger value="companies">Bedrijven</TabsTrigger>
           <TabsTrigger value="holding">Holdingstructuur</TabsTrigger>
           <TabsTrigger value="locations">Vestigingen</TabsTrigger>
-          <TabsTrigger value="cao">CAO-catalogus</TabsTrigger>
           <TabsTrigger value="bank">Bank / G-rekeningen</TabsTrigger>
         </TabsList>
 
@@ -216,10 +214,6 @@ export default function Companies() {
 
         <TabsContent value="locations" className="pt-4">
           <LocationsTab companies={companies} />
-        </TabsContent>
-
-        <TabsContent value="cao" className="pt-4">
-          <CaoCatalogTab />
         </TabsContent>
 
         <TabsContent value="bank" className="pt-4">

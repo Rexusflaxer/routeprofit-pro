@@ -379,7 +379,6 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
               </SelectContent>
             </Select>
           </div>
-          <p className="text-xs text-muted-foreground">Gedetailleerde CAO-koppelingen per activiteit en periode zijn beschikbaar via het tabblad CAO-catalogus op de Bedrijven-pagina.</p>
         </TabsContent>
       </Tabs>
 
