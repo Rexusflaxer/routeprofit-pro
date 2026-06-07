@@ -826,6 +826,50 @@
       "default": false,
       "description": "True als de functie-ervaring is gecontroleerd en audit-proof is vastgelegd."
     },
+    "cao_function_qualification_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "default": "unknown",
+      "description": "Status van CAO PB bijlage-2/bijlage-3 diploma-, certificaat- en ervaringseisen voor de contractfunctie."
+    },
+    "cao_function_qualification_manual_review_required": {
+      "type": "boolean",
+      "default": true,
+      "description": "True als functiekwalificatie of ervaring nog handmatig beoordeeld moet worden."
+    },
+    "cao_function_qualification_checked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO datetime waarop functiekwalificatie-eisen voor dit contract zijn gecontroleerd."
+    },
+    "cao_function_qualification_source_rule_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "CAO-regel-id's waarop de functiekwalificatie-uitkomst is gebaseerd."
+    },
+    "cao_function_qualification_results": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Snapshot van CAO PB diploma-, certificaat-, ervaring- en bevorderingseisen voor de contractfunctie."
+    },
     "cao_function_promotion_confirmed": {
       "type": "boolean",
       "default": false,

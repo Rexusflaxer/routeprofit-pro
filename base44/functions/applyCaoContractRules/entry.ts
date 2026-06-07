@@ -54,6 +54,23 @@ function asIsoDate(value) {
   return String(value).slice(0, 10);
 }
 
+function todayIsoDate() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function normalizeToken(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_\s-]+/g, '_')
+    .trim();
+}
+
+function uniqueValues(values) {
+  return [...new Set((values || []).filter(Boolean))];
+}
+
 function resolveContractCaoRequest({ explicitCaoKey, contract, personnel }) {
   const contractCaoKey = contract?.cao_key || null;
   const personnelCaoKey = personnel?.cao || null;
@@ -1339,6 +1356,469 @@ function hasAnyValue(...values) {
   });
 }
 
+const CAO_PB_SECURITY_FUNCTION_GROUPS = [
+  'objectbeveiliger_receptionist',
+  'mobiel_surveillant',
+  'winkelsurveillant',
+  'brandwacht',
+  'geld_waardetransporteur',
+  'centralist'
+];
+
+const CAO_PB_SECURITY_ROLE_STATUSES = ['aspirant_beveiliger', 'beveiliger', 'leidinggevende'];
+const CAO_PB_NON_SECURITY_FUNCTION_GROUPS = ['non_security_staff'];
+const CAO_PB_QUALIFICATION_BASE_SOURCE_RULE_IDS = [
+  'CAO-PB-2024-R0730',
+  'CAO-PB-2024-R1752',
+  'CAO-PB-2024-R1761',
+  'CAO-PB-2024-R1763',
+  'CAO-PB-2024-R1815',
+  'CAO-PB-2024-R1816'
+];
+
+const CAO_FUNCTION_LEVEL_RANK = {
+  aspirant: 0,
+  a: 1,
+  b: 2,
+  c: 3,
+  d: 4,
+  e: 5
+};
+
+const QUALIFICATION_GROUP_DEFINITIONS = {
+  security_study_in_progress: {
+    label: 'Aantoonbaar studerend voor mbo diploma Beveiliger',
+    accepted_types: ['mbo_beveiliger_in_opleiding'],
+    source_rule_ids: ['CAO-PB-2024-R1765', 'CAO-PB-2024-R1772', 'CAO-PB-2024-R1779', 'CAO-PB-2024-R1794', 'CAO-PB-2024-R1795']
+  },
+  centralist_training_in_progress: {
+    label: 'Aantoonbaar studerend voor mbo Beveiliger of BOCA',
+    accepted_types: ['mbo_beveiliger_in_opleiding', 'centralist_boca_in_opleiding'],
+    source_rule_ids: ['CAO-PB-2024-R1801']
+  },
+  base_security: {
+    label: 'Mbo Beveiliger 2, gelijkgesteld diploma of permanente ontheffing',
+    accepted_types: [
+      'mbo_beveiliger',
+      'beveiliger_2',
+      'svpb_basisdiploma_beveiliging',
+      'beveiliger_3',
+      'coordinator_beveiliging',
+      'branchediploma_coordinator_beveiliging',
+      'svpb_vakdiploma_beveiliging',
+      'svpb_kaderdiploma_beveiliging',
+      'permanente_ontheffing_minister'
+    ],
+    source_rule_ids: ['CAO-PB-2024-R1766', 'CAO-PB-2024-R1773', 'CAO-PB-2024-R1780', 'CAO-PB-2024-R1796', 'CAO-PB-2024-R1817', 'CAO-PB-2024-R1819']
+  },
+  advanced_security: {
+    label: 'Coordinator Beveiliging 3, SVPB Vakdiploma of gelijkgesteld hoger beveiligingsdiploma',
+    accepted_types: [
+      'beveiliger_3',
+      'coordinator_beveiliging',
+      'branchediploma_coordinator_beveiliging',
+      'svpb_vakdiploma_beveiliging',
+      'svpb_kaderdiploma_beveiliging'
+    ],
+    source_rule_ids: ['CAO-PB-2024-R1767', 'CAO-PB-2024-R1774', 'CAO-PB-2024-R1790', 'CAO-PB-2024-R1804', 'CAO-PB-2024-R1818', 'CAO-PB-2024-R1820', 'CAO-PB-2024-R1821', 'CAO-PB-2024-R1836']
+  },
+  ehbo_or_bhv: {
+    label: 'Geldig EHBO- of BHV-diploma',
+    accepted_types: ['ehbo', 'bhv'],
+    source_rule_ids: ['CAO-PB-2024-R1767', 'CAO-PB-2024-R1774', 'CAO-PB-2024-R1781', 'CAO-PB-2024-R1787', 'CAO-PB-2024-R1789', 'CAO-PB-2024-R1790', 'CAO-PB-2024-R1822', 'CAO-PB-2024-R1823']
+  },
+  winkel_specific: {
+    label: 'SVPB certificaat Detailhandel of Winkelsurveillance',
+    accepted_types: ['detailhandel', 'certificaat_winkelsurveillance'],
+    source_rule_ids: ['CAO-PB-2024-R1781', 'CAO-PB-2024-R1824', 'CAO-PB-2024-R1832']
+  },
+  brandwacht_base: {
+    label: 'Rijksdiploma brandwacht',
+    accepted_types: ['brandwacht', 'rijksdiploma_brandwacht', 'rijksdiploma_brandwacht_1e_klas', 'rijksdiploma_hoofdbrandwacht'],
+    source_rule_ids: ['CAO-PB-2024-R1756', 'CAO-PB-2024-R1786', 'CAO-PB-2024-R1787', 'CAO-PB-2024-R1789', 'CAO-PB-2024-R1790', 'CAO-PB-2024-R1825', 'CAO-PB-2024-R1826', 'CAO-PB-2024-R1827']
+  },
+  brandwacht_hoofd: {
+    label: 'Rijksdiploma hoofdbrandwacht',
+    accepted_types: ['rijksdiploma_hoofdbrandwacht'],
+    source_rule_ids: ['CAO-PB-2024-R1791', 'CAO-PB-2024-R1827']
+  },
+  rijbewijs_c: {
+    label: 'Groot rijbewijs / rijbewijs C',
+    accepted_types: ['rijbewijs_c'],
+    source_rule_ids: ['CAO-PB-2024-R1797', 'CAO-PB-2024-R1828']
+  },
+  centralist_basic: {
+    label: 'Mbo Beveiliger, BOCA of permanente ontheffing',
+    accepted_types: [
+      'mbo_beveiliger',
+      'beveiliger_2',
+      'beveiliger_3',
+      'svpb_basisdiploma_beveiliging',
+      'centralist_boca',
+      'permanente_ontheffing_minister'
+    ],
+    source_rule_ids: ['CAO-PB-2024-R1802', 'CAO-PB-2024-R1817', 'CAO-PB-2024-R1819', 'CAO-PB-2024-R1831']
+  },
+  centralist_advanced: {
+    label: 'VOCA, Coordinator Beveiliging of SVPB Vakdiploma',
+    accepted_types: [
+      'centralist_voca',
+      'beveiliger_3',
+      'coordinator_beveiliging',
+      'branchediploma_coordinator_beveiliging',
+      'svpb_vakdiploma_beveiliging',
+      'svpb_kaderdiploma_beveiliging'
+    ],
+    source_rule_ids: ['CAO-PB-2024-R1804', 'CAO-PB-2024-R1834', 'CAO-PB-2024-R1818', 'CAO-PB-2024-R1820']
+  }
+};
+
+const CAO_PB_FUNCTION_QUALIFICATION_REQUIREMENTS = {
+  objectbeveiliger_receptionist: {
+    aspirant: { source_rule_ids: ['CAO-PB-2024-R1765'], evidence_groups: ['security_study_in_progress'] },
+    a: { source_rule_ids: ['CAO-PB-2024-R1766'], evidence_groups: ['base_security'] },
+    b: { source_rule_ids: ['CAO-PB-2024-R1767'], evidence_groups: ['advanced_security', 'ehbo_or_bhv'], minimum_experience_months: 24 },
+    c: { source_rule_ids: ['CAO-PB-2024-R1768'], evidence_groups: ['advanced_security', 'ehbo_or_bhv'], minimum_experience_months: 24, discretionary_promotion_required: true },
+    d: { source_rule_ids: ['CAO-PB-2024-R1769'], evidence_groups: ['advanced_security', 'ehbo_or_bhv'], minimum_experience_months: 24, discretionary_promotion_required: true },
+    e: { source_rule_ids: ['CAO-PB-2024-R1770'], evidence_groups: ['advanced_security', 'ehbo_or_bhv'], minimum_experience_months: 24, discretionary_promotion_required: true }
+  },
+  mobiel_surveillant: {
+    aspirant: { source_rule_ids: ['CAO-PB-2024-R1772'], evidence_groups: ['security_study_in_progress'] },
+    a: { source_rule_ids: ['CAO-PB-2024-R1773'], evidence_groups: ['base_security'] },
+    b: { source_rule_ids: ['CAO-PB-2024-R1774'], evidence_groups: ['advanced_security', 'ehbo_or_bhv'], minimum_experience_months: 24 },
+    c: { source_rule_ids: ['CAO-PB-2024-R1775'], evidence_groups: ['advanced_security', 'ehbo_or_bhv'], minimum_experience_months: 24, discretionary_promotion_required: true },
+    d: { source_rule_ids: ['CAO-PB-2024-R1776'], evidence_groups: ['advanced_security', 'ehbo_or_bhv'], minimum_experience_months: 24, discretionary_promotion_required: true },
+    e: { source_rule_ids: ['CAO-PB-2024-R1777'], evidence_groups: ['advanced_security', 'ehbo_or_bhv'], minimum_experience_months: 24, discretionary_promotion_required: true }
+  },
+  winkelsurveillant: {
+    aspirant: { source_rule_ids: ['CAO-PB-2024-R1779'], evidence_groups: ['security_study_in_progress'] },
+    a: { source_rule_ids: ['CAO-PB-2024-R1780'], evidence_groups: ['base_security'] },
+    b: { source_rule_ids: ['CAO-PB-2024-R1781'], evidence_groups: ['base_security', 'winkel_specific', 'ehbo_or_bhv'], minimum_experience_months: 12 },
+    c: { source_rule_ids: ['CAO-PB-2024-R1782'], evidence_groups: ['base_security', 'winkel_specific', 'ehbo_or_bhv'], minimum_experience_months: 12, discretionary_promotion_required: true },
+    d: { source_rule_ids: ['CAO-PB-2024-R1783'], evidence_groups: ['advanced_security', 'winkel_specific', 'ehbo_or_bhv'], minimum_experience_months: 12, discretionary_promotion_required: true },
+    e: { source_rule_ids: ['CAO-PB-2024-R1784'], evidence_groups: ['advanced_security', 'winkel_specific', 'ehbo_or_bhv'], minimum_experience_months: 12, discretionary_promotion_required: true }
+  },
+  brandwacht: {
+    aspirant: { source_rule_ids: ['CAO-PB-2024-R1786'], evidence_groups: ['brandwacht_base'] },
+    a: { source_rule_ids: ['CAO-PB-2024-R1787'], evidence_groups: ['security_study_in_progress', 'brandwacht_base', 'ehbo_or_bhv'] },
+    b: { source_rule_ids: ['CAO-PB-2024-R1789'], evidence_groups: ['base_security', 'brandwacht_base', 'ehbo_or_bhv'] },
+    c: { source_rule_ids: ['CAO-PB-2024-R1790'], evidence_groups: ['advanced_security', 'brandwacht_base', 'ehbo_or_bhv'], minimum_experience_months: 36 },
+    d: { source_rule_ids: ['CAO-PB-2024-R1791'], evidence_groups: ['advanced_security', 'brandwacht_hoofd'], minimum_experience_months: 36, discretionary_promotion_required: true },
+    e: { source_rule_ids: ['CAO-PB-2024-R1792'], evidence_groups: ['advanced_security'], minimum_experience_months: 36, discretionary_promotion_required: true }
+  },
+  geld_waardetransporteur: {
+    aspirant: { source_rule_ids: ['CAO-PB-2024-R1794'], evidence_groups: ['security_study_in_progress'] },
+    a: { source_rule_ids: ['CAO-PB-2024-R1795'], evidence_groups: ['security_study_in_progress'] },
+    b: { source_rule_ids: ['CAO-PB-2024-R1796'], evidence_groups: ['base_security'] },
+    c: { source_rule_ids: ['CAO-PB-2024-R1797'], evidence_groups: ['base_security', 'rijbewijs_c'], minimum_experience_months: 36 },
+    d: { source_rule_ids: ['CAO-PB-2024-R1798'], evidence_groups: ['base_security', 'rijbewijs_c'], minimum_experience_months: 36, discretionary_promotion_required: true },
+    e: { source_rule_ids: ['CAO-PB-2024-R1799'], evidence_groups: ['base_security', 'rijbewijs_c'], minimum_experience_months: 36, discretionary_promotion_required: true }
+  },
+  centralist: {
+    aspirant: { source_rule_ids: ['CAO-PB-2024-R1801'], evidence_groups: ['centralist_training_in_progress'] },
+    a: { source_rule_ids: ['CAO-PB-2024-R1802'], evidence_groups: ['centralist_basic'] },
+    b: { source_rule_ids: ['CAO-PB-2024-R1803'], evidence_groups: ['centralist_basic'], minimum_experience_months: 24 },
+    c: { source_rule_ids: ['CAO-PB-2024-R1804'], evidence_groups: ['centralist_advanced'], minimum_experience_months: 12 },
+    d: { source_rule_ids: ['CAO-PB-2024-R1805'], evidence_groups: ['centralist_advanced'], minimum_experience_months: 24 },
+    e: { source_rule_ids: ['CAO-PB-2024-R1806'], evidence_groups: ['centralist_advanced'], minimum_experience_months: 24, discretionary_promotion_required: true }
+  }
+};
+
+function normalizeCaoFunctionLevel(value) {
+  const normalized = normalizeToken(value);
+  if (normalized === 'aspirant_beveiliger') return 'aspirant';
+  if (normalized === 'leidinggevend' || normalized === 'leidinggevende') return null;
+  return CAO_FUNCTION_LEVEL_RANK[normalized] !== undefined ? normalized : null;
+}
+
+function contractRequiresSecurityQualification(context) {
+  const securityRoleStatus = normalizeToken(context.security_role_status);
+  const caoFunctionGroup = normalizeToken(context.cao_function_group);
+  const performsSecurityWork = booleanOrNull(context.performs_security_work);
+  const securityWorkPercentage = numberOrNull(context.security_work_percentage);
+  if (performsSecurityWork === false && securityWorkPercentage === 0 && CAO_PB_NON_SECURITY_FUNCTION_GROUPS.includes(caoFunctionGroup)) return false;
+  return performsSecurityWork === true ||
+    (securityWorkPercentage !== null && securityWorkPercentage > 0) ||
+    CAO_PB_SECURITY_ROLE_STATUSES.includes(securityRoleStatus) ||
+    CAO_PB_SECURITY_FUNCTION_GROUPS.includes(caoFunctionGroup);
+}
+
+function inferQualificationTypesFromText(value) {
+  const text = normalizeToken(value);
+  const matches = [];
+  if (!text) return matches;
+  if (text.includes('in_opleiding') || text.includes('studerend') || text.includes('opleiding_beveiliger')) matches.push('mbo_beveiliger_in_opleiding');
+  if (text.includes('beveiliger_2') || text.includes('mbo_beveiliger') || text.includes('algemeen_beveiligingsmedewerker')) matches.push('mbo_beveiliger');
+  if (text.includes('coordinator_beveiliging') || text.includes('beveiliger_3')) matches.push('coordinator_beveiliging', 'beveiliger_3');
+  if (text.includes('basisdiploma_beveiliging')) matches.push('svpb_basisdiploma_beveiliging');
+  if (text.includes('vakdiploma_beveiliging')) matches.push('svpb_vakdiploma_beveiliging');
+  if (text.includes('kaderdiploma_beveiliging')) matches.push('svpb_kaderdiploma_beveiliging');
+  if (text.includes('ontheffing')) matches.push('permanente_ontheffing_minister');
+  if (text.includes('ehbo') || text.includes('eerste_hulp')) matches.push('ehbo');
+  if (text.includes('bhv')) matches.push('bhv');
+  if (text.includes('detailhandel')) matches.push('detailhandel');
+  if (text.includes('winkelsurveillance')) matches.push('certificaat_winkelsurveillance');
+  if (text.includes('hoofdbrandwacht')) matches.push('rijksdiploma_hoofdbrandwacht');
+  else if (text.includes('brandwacht_1e_klas')) matches.push('rijksdiploma_brandwacht_1e_klas');
+  else if (text.includes('brandwacht')) matches.push('rijksdiploma_brandwacht', 'brandwacht');
+  if (text.includes('rijbewijs_c') || text.includes('groot_rijbewijs')) matches.push('rijbewijs_c');
+  if (text.includes('boca') || text.includes('basisopleiding_centralist')) matches.push('centralist_boca');
+  if (text.includes('voca') || text.includes('vakopleiding_centralist')) matches.push('centralist_voca');
+  if (text.includes('leidinggeven')) matches.push('leidinggeven_pb');
+  return matches;
+}
+
+function qualificationTypeTokens(qualification) {
+  return uniqueValues([
+    normalizeToken(qualification?.qualification_type),
+    ...inferQualificationTypesFromText(qualification?.name),
+    ...inferQualificationTypesFromText(qualification?.notes),
+    ...inferQualificationTypesFromText(qualification?.certificate_number)
+  ]);
+}
+
+function qualificationIsVerifiedForDate(qualification, referenceDate, companyId) {
+  if (!qualification) return false;
+  if (companyId && qualification.company_id && qualification.company_id !== companyId) return false;
+  if (qualification.verification_status !== 'verified') return false;
+  return isWithinDateRange(qualification, referenceDate);
+}
+
+function buildQualificationRequirement(groupKey, sourceRuleIds = []) {
+  const definition = QUALIFICATION_GROUP_DEFINITIONS[groupKey];
+  if (!definition) return null;
+  return {
+    requirement_key: groupKey,
+    label: definition.label,
+    accepted_types: definition.accepted_types,
+    source_rule_ids: uniqueValues([...(definition.source_rule_ids || []), ...(sourceRuleIds || [])])
+  };
+}
+
+function getCaoPbContractQualificationRequirementSet(context) {
+  const sourceRuleIds = [...CAO_PB_QUALIFICATION_BASE_SOURCE_RULE_IDS];
+  const manualReviewReasons = [];
+  const warnings = [];
+  const group = normalizeToken(context.cao_function_group);
+  const level = normalizeCaoFunctionLevel(context.cao_function_level) ||
+    (normalizeToken(context.security_role_status) === 'aspirant_beveiliger' ? 'aspirant' : null);
+
+  if (context.cao_key !== CAO_PB_KEY) {
+    return {
+      required: false,
+      status: 'not_applicable',
+      requirements: [],
+      source_rule_ids: [],
+      manual_review_reasons: [],
+      warnings,
+      inferred_from: 'not_cao_pb'
+    };
+  }
+  if (!contractRequiresSecurityQualification(context)) {
+    return {
+      required: false,
+      status: 'not_applicable',
+      requirements: [],
+      source_rule_ids: [],
+      manual_review_reasons: [],
+      warnings,
+      inferred_from: 'non_security_scope'
+    };
+  }
+  if (!group || !CAO_PB_FUNCTION_QUALIFICATION_REQUIREMENTS[group]) {
+    manualReviewReasons.push('CAO PB bijlage 2/3: contract mist herkenbare functiegroep; diploma- en certificaateisen kunnen niet audit-proof worden bepaald.');
+    return {
+      required: true,
+      status: 'manual_review_required',
+      requirements: [],
+      source_rule_ids: sourceRuleIds,
+      manual_review_reasons: manualReviewReasons,
+      warnings,
+      inferred_from: 'missing_or_unknown_cao_function_group'
+    };
+  }
+  if (!level) {
+    manualReviewReasons.push('CAO PB bijlage 2/3: contract mist functieniveau; diploma-, ervaring- en schaalvoorwaarden kunnen niet audit-proof worden bepaald.');
+    return {
+      required: true,
+      status: 'manual_review_required',
+      requirements: [],
+      source_rule_ids: sourceRuleIds,
+      manual_review_reasons: manualReviewReasons,
+      warnings,
+      inferred_from: 'missing_cao_function_level'
+    };
+  }
+  const rule = CAO_PB_FUNCTION_QUALIFICATION_REQUIREMENTS[group][level];
+  if (!rule) {
+    manualReviewReasons.push(`CAO PB bijlage 2/3: geen automatische kwalificatiematrix gevonden voor functiegroep ${group} niveau ${level}.`);
+    return {
+      required: true,
+      status: 'manual_review_required',
+      requirements: [],
+      source_rule_ids: sourceRuleIds,
+      manual_review_reasons: manualReviewReasons,
+      warnings,
+      inferred_from: 'unsupported_group_level_combination'
+    };
+  }
+  const requirements = (rule.evidence_groups || [])
+    .map(groupKey => buildQualificationRequirement(groupKey, rule.source_rule_ids || []))
+    .filter(Boolean);
+  return {
+    required: requirements.length > 0 || !!rule.minimum_experience_months || rule.discretionary_promotion_required === true,
+    status: 'required',
+    requirements,
+    minimum_experience_months: rule.minimum_experience_months || null,
+    discretionary_promotion_required: rule.discretionary_promotion_required === true,
+    source_rule_ids: uniqueValues([...sourceRuleIds, ...(rule.source_rule_ids || []), ...requirements.flatMap(item => item.source_rule_ids || [])]),
+    manual_review_reasons: [],
+    warnings,
+    inferred_from: `cao_pb_${group}_${level}`,
+    cao_function_group: group,
+    cao_function_level: level
+  };
+}
+
+function evaluateQualificationRequirement(requirement, qualifications, referenceDate, companyId) {
+  const acceptedTypes = (requirement.accepted_types || []).map(normalizeToken);
+  const candidates = (qualifications || [])
+    .map(qualification => ({ qualification, tokens: qualificationTypeTokens(qualification) }))
+    .filter(item => !companyId || !item.qualification.company_id || item.qualification.company_id === companyId)
+    .filter(item => item.tokens.some(token => acceptedTypes.includes(token)));
+  const verifiedMatches = candidates.filter(item =>
+    qualificationIsVerifiedForDate(item.qualification, referenceDate, companyId)
+  );
+  const expiredMatches = candidates.filter(item =>
+    item.qualification.verification_status === 'verified' &&
+    !isWithinDateRange(item.qualification, referenceDate)
+  );
+  const unverifiedMatches = candidates.filter(item =>
+    item.qualification.verification_status !== 'verified'
+  );
+  return {
+    ...requirement,
+    matched: verifiedMatches.length > 0,
+    matched_qualification_ids: verifiedMatches.map(item => item.qualification.id).filter(Boolean),
+    expired_candidate_ids: expiredMatches.map(item => item.qualification.id).filter(Boolean),
+    unverified_candidate_ids: unverifiedMatches.map(item => item.qualification.id).filter(Boolean),
+    candidate_count: candidates.length
+  };
+}
+
+function evaluateFunctionExperienceRequirement(context, minimumMonths) {
+  if (!minimumMonths) return null;
+  const group = normalizeToken(context.cao_function_group);
+  const experienceGroup = normalizeToken(context.cao_function_experience_group || context.cao_function_group);
+  const months = numberOrNull(context.cao_function_experience_months);
+  const verified = context.cao_function_experience_verified === true;
+  const blockingReasons = [];
+  const manualReviewReasons = [];
+  if (experienceGroup && group && experienceGroup !== group) {
+    manualReviewReasons.push(`CAO PB bijlage 2: functie-ervaring is vastgelegd voor ${experienceGroup}, maar contractfunctie is ${group}.`);
+  }
+  if (months === null) {
+    manualReviewReasons.push(`CAO PB bijlage 2: minimaal ${minimumMonths} maanden functie-ervaring vereist, maar cao_function_experience_months ontbreekt.`);
+  } else if (!verified) {
+    manualReviewReasons.push(`CAO PB bijlage 2: ${months} maanden functie-ervaring is vastgelegd maar nog niet geverifieerd.`);
+  } else if (months < minimumMonths) {
+    blockingReasons.push(`CAO PB bijlage 2: minimaal ${minimumMonths} maanden functie-ervaring vereist; contract heeft ${months} geverifieerde maanden.`);
+  }
+  return {
+    required: true,
+    minimum_months: minimumMonths,
+    recorded_months: months,
+    experience_group: experienceGroup || null,
+    verified,
+    matched: blockingReasons.length === 0 && manualReviewReasons.length === 0,
+    blocking_reasons: blockingReasons,
+    manual_review_reasons: manualReviewReasons
+  };
+}
+
+function evaluateCaoPbContractQualificationEvidence(context, qualifications, qualificationFetchError = null) {
+  const referenceDate = asIsoDate(context.reference_date || context.contract_start_date || todayIsoDate());
+  const requirementSet = getCaoPbContractQualificationRequirementSet(context);
+  const blockingReasons = [];
+  const manualReviewReasons = [...(requirementSet.manual_review_reasons || [])];
+  const warnings = [...(requirementSet.warnings || [])];
+
+  if (!requirementSet.required) {
+    return {
+      required: false,
+      status: 'not_applicable',
+      compliant: true,
+      manual_review_required: false,
+      reference_date: referenceDate,
+      source_rule_ids: requirementSet.source_rule_ids || [],
+      inferred_from: requirementSet.inferred_from,
+      required_qualification_checks: [],
+      experience_check: null,
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      warnings
+    };
+  }
+
+  if (qualificationFetchError) {
+    manualReviewReasons.push(`Personeelskwalificaties konden niet worden opgehaald: ${qualificationFetchError.message || String(qualificationFetchError)}.`);
+  }
+
+  const requirementChecks = (requirementSet.requirements || [])
+    .map(requirement => evaluateQualificationRequirement(requirement, qualifications, referenceDate, context.company_id));
+  for (const check of requirementChecks) {
+    if (!check.matched) {
+      if (check.expired_candidate_ids.length > 0) {
+        blockingReasons.push(`CAO PB bijlage 2/3: ${check.label} is aanwezig maar niet geldig op ${referenceDate}.`);
+      } else if (check.unverified_candidate_ids.length > 0) {
+        manualReviewReasons.push(`CAO PB bijlage 2/3: ${check.label} is gevonden maar nog niet verified/geldig op ${referenceDate}.`);
+      } else {
+        blockingReasons.push(`CAO PB bijlage 2/3: vereist bewijs ontbreekt voor ${check.label}.`);
+      }
+    }
+  }
+
+  const experienceCheck = evaluateFunctionExperienceRequirement(context, requirementSet.minimum_experience_months);
+  if (experienceCheck) {
+    blockingReasons.push(...experienceCheck.blocking_reasons);
+    manualReviewReasons.push(...experienceCheck.manual_review_reasons);
+  }
+
+  const promotionConfirmed = context.cao_function_promotion_confirmed === true ||
+    context.cao_equivalent_knowledge_experience_confirmed === true;
+  if (requirementSet.discretionary_promotion_required && !promotionConfirmed) {
+    manualReviewReasons.push('CAO PB bijlage 2: hogere functie/keuzebevordering of gelijkgestelde kennis/ervaring is vereist maar niet bevestigd op het contract.');
+  }
+
+  const manualReviewRequired = manualReviewReasons.length > 0;
+  const status = blockingReasons.length > 0
+    ? 'blocked'
+    : manualReviewRequired
+    ? 'manual_review_required'
+    : 'compliant';
+  return {
+    required: true,
+    status,
+    compliant: status === 'compliant',
+    manual_review_required: manualReviewRequired,
+    reference_date: referenceDate,
+    source_rule_ids: uniqueValues([
+      ...(requirementSet.source_rule_ids || []),
+      ...requirementChecks.flatMap(check => check.source_rule_ids || [])
+    ]),
+    inferred_from: requirementSet.inferred_from,
+    cao_function_group: requirementSet.cao_function_group || null,
+    cao_function_level: requirementSet.cao_function_level || null,
+    required_qualification_checks: requirementChecks,
+    experience_check: experienceCheck,
+    discretionary_promotion_required: requirementSet.discretionary_promotion_required,
+    promotion_or_equivalent_confirmed: promotionConfirmed,
+    blocking_reasons: uniqueValues(blockingReasons),
+    manual_review_reasons: uniqueValues(manualReviewReasons),
+    warnings: uniqueValues(warnings)
+  };
+}
+
 function caoConfigSummary(config) {
   return {
     id: config?.id || null,
@@ -1626,8 +2106,76 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
     }
   }
 
+  const personnelIdForQualifications = pickFirst(body.personnel_id, contract?.personnel_id, personnel?.id, null);
+  const providedQualifications = normalizeArray(
+    pickFirst(body.personnel_qualifications, body.qualifications, personnel?.qualifications, [])
+  );
+  let fetchedQualifications = [];
+  let qualificationFetchError = null;
+  if (personnelIdForQualifications) {
+    try {
+      fetchedQualifications = await base44.asServiceRole.entities.PersonnelQualification.filter({
+        personnel_id: personnelIdForQualifications
+      });
+    } catch (error) {
+      qualificationFetchError = error;
+    }
+  }
+  const qualificationContext = {
+    personnel_id: personnelIdForQualifications,
+    company_id: explicitCompanyId || null,
+    cao_key: explicitCaoKey || targetCaoKey || null,
+    reference_date: contractStartDate || todayIsoDate(),
+    contract_start_date: contractStartDate,
+    security_role_status: pickFirst(body.security_role_status, contract?.security_role_status, personnel?.security_role_status, null),
+    performs_security_work: pickFirst(body.performs_security_work, contract?.performs_security_work, personnel?.performs_security_work, null),
+    security_work_percentage: pickFirst(body.security_work_percentage, contract?.security_work_percentage, personnel?.security_work_percentage, null),
+    cao_function_group: pickFirst(body.cao_function_group, contract?.cao_function_group, personnel?.cao_function_group, null),
+    cao_function_level: pickFirst(body.cao_function_level, contract?.cao_function_level, personnel?.cao_function_level, null),
+    cao_function_experience_months: pickFirst(body.cao_function_experience_months, contract?.cao_function_experience_months, null),
+    cao_function_experience_group: pickFirst(body.cao_function_experience_group, contract?.cao_function_experience_group, contract?.cao_function_group, null),
+    cao_function_experience_verified: pickFirst(body.cao_function_experience_verified, contract?.cao_function_experience_verified, false),
+    cao_function_promotion_confirmed: pickFirst(body.cao_function_promotion_confirmed, contract?.cao_function_promotion_confirmed, false),
+    cao_equivalent_knowledge_experience_confirmed: pickFirst(body.cao_equivalent_knowledge_experience_confirmed, contract?.cao_equivalent_knowledge_experience_confirmed, false)
+  };
+  const caoFunctionQualification = evaluateCaoPbContractQualificationEvidence(
+    qualificationContext,
+    [...providedQualifications, ...fetchedQualifications],
+    qualificationFetchError
+  );
+  warnings.push(...(caoFunctionQualification.warnings || []));
+  for (const reason of caoFunctionQualification.blocking_reasons || []) {
+    violations.push({
+      rule_id: 'APP-CONTRACT-BASIS-FUNCTION-QUALIFICATION',
+      source_rule_ids: caoFunctionQualification.source_rule_ids || [],
+      severity: 'high',
+      message: reason,
+      payroll_impact: true,
+      manual_review_required: true,
+      field: 'personnel_qualifications/cao_function_*'
+    });
+  }
+  for (const reason of caoFunctionQualification.manual_review_reasons || []) {
+    missingEvidence.push({
+      rule_id: 'APP-CONTRACT-BASIS-FUNCTION-QUALIFICATION',
+      source_rule_ids: caoFunctionQualification.source_rule_ids || [],
+      field: 'personnel_qualifications/cao_function_*',
+      message: reason
+    });
+  }
+  recommendedContractUpdate.cao_function_qualification_status = caoFunctionQualification.status;
+  recommendedContractUpdate.cao_function_qualification_manual_review_required = caoFunctionQualification.manual_review_required === true;
+  recommendedContractUpdate.cao_function_qualification_checked_at = new Date().toISOString();
+  recommendedContractUpdate.cao_function_qualification_source_rule_ids = caoFunctionQualification.source_rule_ids || [];
+  recommendedContractUpdate.cao_function_qualification_results = caoFunctionQualification;
+
   const hasBlocking = violations.some(violation => ['high', 'critical'].includes(violation.severity));
   const manualReviewRequired = hasBlocking || missingEvidence.length > 0;
+  const basisSourceRuleIds = uniqueValues([
+    ...violations.flatMap(violation => [violation.rule_id, ...(violation.source_rule_ids || [])]),
+    ...missingEvidence.flatMap(item => [item.rule_id, ...(item.source_rule_ids || [])]),
+    ...(caoFunctionQualification.source_rule_ids || [])
+  ]);
   return {
     status: hasBlocking ? 'blocked' : manualReviewRequired ? 'manual_review_required' : 'compliant',
     contract_final_allowed: !hasBlocking && !manualReviewRequired,
@@ -1640,9 +2188,11 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
     contract_start_date: contractStartDate,
     contract_end_date: contractEndDate,
     function_context_present: functionContextPresent,
+    cao_function_qualification: caoFunctionQualification,
     missing_evidence: missingEvidence,
     violations,
-    warnings,
+    warnings: uniqueValues(warnings.map(String)),
+    source_rule_ids: basisSourceRuleIds,
     recommended_contract_update: recommendedContractUpdate,
     cao_configuration_resolution: {
       status: caoConfigurationResolution.status,
@@ -3979,6 +4529,11 @@ function buildContractRuleInput(body, personnel, contract) {
     cao_excluded_chapters: pickFirst(body.cao_excluded_chapters, contract?.cao_excluded_chapters, personnel?.cao_excluded_chapters, []),
     cao_function_group: pickFirst(body.cao_function_group, contract?.cao_function_group, personnel?.cao_function_group, null),
     cao_function_level: pickFirst(body.cao_function_level, contract?.cao_function_level, personnel?.cao_function_level, null),
+    cao_function_experience_months: pickFirst(body.cao_function_experience_months, contract?.cao_function_experience_months, null),
+    cao_function_experience_group: pickFirst(body.cao_function_experience_group, contract?.cao_function_experience_group, contract?.cao_function_group, null),
+    cao_function_experience_verified: pickFirst(body.cao_function_experience_verified, contract?.cao_function_experience_verified, false),
+    cao_function_promotion_confirmed: pickFirst(body.cao_function_promotion_confirmed, contract?.cao_function_promotion_confirmed, false),
+    cao_equivalent_knowledge_experience_confirmed: pickFirst(body.cao_equivalent_knowledge_experience_confirmed, contract?.cao_equivalent_knowledge_experience_confirmed, false),
     cao_scale: pickFirst(body.cao_scale, contract?.cao_scale, personnel?.cao_scale, null),
     cao_period: pickFirst(body.cao_period, contract?.cao_period, personnel?.cao_period, null),
     employment_contract_model: pickFirst(body.employment_contract_model, contract?.employment_contract_model, null),
@@ -4085,6 +4640,12 @@ function buildContractRuleInput(body, personnel, contract) {
 function buildContractRulePersistence(result) {
   const recommendedContractUpdate = result.recommended_contract_update || {};
   const contractBasis = result.contract_basis || null;
+  const caoFunctionQualification = contractBasis?.cao_function_qualification || recommendedContractUpdate.cao_function_qualification_results || null;
+  const combinedSourceRuleIds = uniqueValues([
+    ...(result.source_rule_ids || []),
+    ...(contractBasis?.source_rule_ids || []),
+    ...(caoFunctionQualification?.source_rule_ids || [])
+  ]);
   const contractContextMissingFields = contractBasis
     ? (contractBasis.missing_evidence || []).map(item => item.field || item.rule_id).filter(Boolean)
     : undefined;
@@ -4095,6 +4656,11 @@ function buildContractRulePersistence(result) {
     contract_context_status: contractBasis?.status ?? undefined,
     contract_context_missing_fields: contractContextMissingFields,
     contract_context_checked_at: contractBasis ? new Date().toISOString() : undefined,
+    cao_function_qualification_status: caoFunctionQualification?.status ?? undefined,
+    cao_function_qualification_manual_review_required: caoFunctionQualification ? caoFunctionQualification.manual_review_required === true : undefined,
+    cao_function_qualification_checked_at: caoFunctionQualification ? new Date().toISOString() : undefined,
+    cao_function_qualification_source_rule_ids: caoFunctionQualification?.source_rule_ids ?? undefined,
+    cao_function_qualification_results: caoFunctionQualification ?? undefined,
     planning_allowed: contractBasis ? result.contract_final_allowed === true : undefined,
     contract_final_allowed: result.contract_final_allowed ?? undefined,
     payroll_final_allowed: result.payroll_final_allowed ?? undefined,
@@ -4202,8 +4768,10 @@ function buildContractRulePersistence(result) {
     hired_worker_hirer_must_verify_payment: result.hired_worker?.hired_worker_rule_profile?.hirer_must_verify_compliance === true,
     cao_contract_rule_status: result.contract_rule_status,
     cao_contract_rule_checked_at: new Date().toISOString(),
-    cao_contract_rule_source_rule_ids: result.source_rule_ids,
+    cao_contract_rule_source_rule_ids: combinedSourceRuleIds,
     cao_contract_rule_results: {
+      contract_basis: contractBasis,
+      cao_function_qualification: caoFunctionQualification,
       probation: result.probation_rule_result || {
         probation_period_months: result.probation_period_months,
         requested_probation_period_months: result.requested_probation_period_months,
@@ -4348,6 +4916,10 @@ Deno.serve(async (req) => {
         ...(contractBasis.warnings || []),
         ...(result.warnings || [])
       ];
+      const combinedSourceRuleIds = uniqueValues([
+        ...(result.source_rule_ids || []),
+        ...(contractBasis.source_rule_ids || [])
+      ]);
       const combinedManualReviewRequired = contractBasis.manual_review_required === true ||
         result.manual_review_required === true ||
         isUnknownOrMixed === true;
@@ -4448,6 +5020,7 @@ Deno.serve(async (req) => {
         contract_cao_resolution: contractCaoResolution,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
         ...result,
+        source_rule_ids: combinedSourceRuleIds,
         contract_basis: contractBasis,
         warnings: [...new Set(combinedWarnings.map(String))],
         contract_rule_violations: combinedViolations,
@@ -4657,14 +5230,18 @@ Deno.serve(async (req) => {
       ...(contractBasis.violations || []),
       ...(result.contract_rule_violations || [])
     ];
-    const combinedWarnings = [
-      ...(syncWarnings || []),
-      ...(contractBasis.warnings || []),
-      ...(result.warnings || [])
-    ];
-    const combinedManualReviewRequired = contractBasis.manual_review_required === true ||
-      result.manual_review_required === true ||
-      isUnknownOrMixed === true;
+      const combinedWarnings = [
+        ...(syncWarnings || []),
+        ...(contractBasis.warnings || []),
+        ...(result.warnings || [])
+      ];
+      const combinedSourceRuleIds = uniqueValues([
+        ...(result.source_rule_ids || []),
+        ...(contractBasis.source_rule_ids || [])
+      ]);
+      const combinedManualReviewRequired = contractBasis.manual_review_required === true ||
+        result.manual_review_required === true ||
+        isUnknownOrMixed === true;
     const combinedStatus = contractBasis.status === 'blocked' ||
       result.contract_rule_status === 'blocked' ||
       combinedViolations.some(violation => ['high', 'critical'].includes(violation.severity))
@@ -4688,6 +5265,7 @@ Deno.serve(async (req) => {
       contract_cao_resolution: contractCaoResolution,
       cao_scope_profile: caoScope?.cao_scope_profile || null,
       ...result,
+      source_rule_ids: combinedSourceRuleIds,
       contract_basis: contractBasis,
       calculation_warnings: combinedWarnings,
       warnings: [...new Set(combinedWarnings.map(String))],
