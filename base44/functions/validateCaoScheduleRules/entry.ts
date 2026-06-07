@@ -4325,6 +4325,28 @@ function collectContractCaoConsistencyIssues(contractResults, { expectedCaoKey, 
   return issues;
 }
 
+function collectContractCaoReferences(contractResults) {
+  return (contractResults || [])
+    .map(result => ({
+      shift_index: result?.shift_index ?? null,
+      shift_id: result?.shift_id || null,
+      date: result?.date || null,
+      contract_id: result?.contract_id || result?.selected_contract?.id || null,
+      cao_key: result?.cao_key || result?.selected_contract?.cao_key || null,
+      cao_configuration_id: result?.cao_configuration_id || result?.selected_contract?.cao_configuration_id || null,
+      cao_resolution_source: result?.cao_resolution_source || null,
+      candidate_configuration_ids: result?.cao_resolution_candidate_configuration_ids || [],
+      candidate_company_cao_assignment_ids: result?.cao_resolution_candidate_company_cao_assignment_ids || []
+    }))
+    .filter(ref =>
+      ref.cao_key ||
+      ref.cao_configuration_id ||
+      ref.cao_resolution_source ||
+      ref.candidate_configuration_ids.length > 0 ||
+      ref.candidate_company_cao_assignment_ids.length > 0
+    );
+}
+
 Deno.serve(async (req) => {
   try {
     const base44 = createClientFromRequest(req);
@@ -4352,6 +4374,16 @@ Deno.serve(async (req) => {
       } catch { /* geboortedatum is optioneel voor oudere payloads */ }
     }
 
+    const scheduleBody = { ...body };
+    if (
+      personnelContext?.date_of_birth &&
+      !scheduleBody.date_of_birth &&
+      !scheduleBody.employee_date_of_birth &&
+      !scheduleBody.personnel_date_of_birth
+    ) {
+      scheduleBody.personnel_date_of_birth = personnelContext.date_of_birth;
+    }
+
     const taskCaoKey = await firstTaskCaoKey(base44, shifts, body);
     const objectCaoKeys = await collectObjectCaoKeys(base44, shifts, body);
     const objectCaoKey = objectCaoKeys[0] || null;
@@ -4362,14 +4394,102 @@ Deno.serve(async (req) => {
     const inferredExternalCaoKeys = [...new Set(externalCaoSignals.map(signal => signal.cao_key).filter(Boolean))];
     const inferredExternalCaoKey = inferredExternalCaoKeys.length === 1 ? inferredExternalCaoKeys[0] : null;
 
-    const targetCaoKey = body.cao_key ||
+    const caoSelectionWarnings = [];
+    let contractValidation = null;
+    let targetCaoKey = body.cao_key ||
       body.service_context?.cao_key ||
       firstShiftCaoKey(shifts) ||
       taskCaoKey ||
       objectCaoKey ||
       inferredExternalCaoKey ||
-      personnelContext?.cao ||
-      CAO_PB_KEY;
+      null;
+
+    if (!targetCaoKey) {
+      contractValidation = await validateShiftContractResolution(base44, {
+        shifts,
+        periodStart: pStart,
+        periodEnd: pEnd,
+        personnel_id,
+        body: scheduleBody
+      });
+
+      if (contractValidation.contract_resolution_required) {
+        if ((contractValidation.contract_violations || []).length > 0 || contractValidation.contract_manual_review_required === true) {
+          return Response.json({
+            error: 'Roostercontrole geblokkeerd: cao_key kan niet uit contracten worden afgeleid omdat niet alle diensten een geldige contract-/bedrijf-/CAO-koppeling hebben.',
+            calculation_warnings: [
+              'Planning geblokkeerd: geef expliciet cao_key mee of herstel contract/bedrijf/functie-koppelingen voordat deze planning definitief mag zijn.'
+            ],
+            period_start: pStart,
+            period_end: pEnd,
+            personnel_id: personnel_id || null,
+            contract_resolution_required: true,
+            contract_resolution_results: contractValidation.contract_resolution_results,
+            contract_violations: contractValidation.contract_violations,
+            contract_warnings: contractValidation.contract_warnings,
+            manual_review_required: true,
+            payroll_final_allowed: false,
+            planning_allowed: false,
+            calculation_status: 'blocked_contract_resolution_before_cao_selection'
+          }, { status: 400 });
+        }
+
+        const contractCaoReferences = collectContractCaoReferences(contractValidation.contract_resolution_results);
+        const resolvedCaoKeys = [...new Set(contractCaoReferences
+          .map(ref => ref.cao_key)
+          .filter(Boolean))];
+        if (resolvedCaoKeys.length !== 1) {
+          return Response.json({
+            error: 'Roostercontrole geblokkeerd: cao_key kan niet eenduidig uit contractresolutie worden afgeleid.',
+            calculation_warnings: [
+              'Planning mag niet standaard naar CAO PB vallen. Geef cao_key expliciet mee of splits/herstel de contracten zodat elke dienst dezelfde cao_key bewijst.'
+            ],
+            period_start: pStart,
+            period_end: pEnd,
+            personnel_id: personnel_id || null,
+            contract_resolution_required: true,
+            contract_resolution_results: contractValidation.contract_resolution_results,
+            contract_cao_references: contractCaoReferences,
+            resolved_cao_keys: resolvedCaoKeys,
+            manual_review_required: true,
+            payroll_final_allowed: false,
+            planning_allowed: false,
+            calculation_status: resolvedCaoKeys.length > 1
+              ? 'blocked_mixed_contract_cao_keys_before_cao_selection'
+              : 'blocked_missing_contract_cao_key_before_cao_selection'
+          }, { status: 400 });
+        }
+
+        targetCaoKey = resolvedCaoKeys[0];
+        caoSelectionWarnings.push(`Rooster cao_key ${targetCaoKey} is afgeleid uit contractresolutie; geen PB-default toegepast.`);
+      }
+    }
+
+    if (!targetCaoKey) {
+      return Response.json({
+        error: 'Roostercontrole geblokkeerd: cao_key ontbreekt.',
+        calculation_warnings: [
+          'Geef cao_key mee op rooster/dienst/taak/object of zorg dat contractresolutie verplicht is en exact een cao_key oplevert.'
+        ],
+        period_start: pStart,
+        period_end: pEnd,
+        personnel_id: personnel_id || null,
+        task_cao_key: taskCaoKey || null,
+        object_cao_keys: objectCaoKeys,
+        schedule_cao_keys: collectShiftCaoKeys(shifts, body),
+        external_cao_scope_gate: {
+          passed: false,
+          status: 'blocked_missing_cao_key',
+          signals: externalCaoSignals
+        },
+        contract_resolution_required: contractValidation?.contract_resolution_required === true,
+        contract_resolution_results: contractValidation?.contract_resolution_results || [],
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        planning_allowed: false,
+        calculation_status: 'blocked_missing_cao_key'
+      }, { status: 400 });
+    }
 
     const externalCaoScopeGate = buildExternalCaoScopeGate({
       targetCaoKey,
@@ -4423,6 +4543,7 @@ Deno.serve(async (req) => {
     const syncResult = await lazySyncCao(base44, !!force_cao_sync, targetCaoKey);
 
     const syncWarnings = [];
+    syncWarnings.push(...caoSelectionWarnings);
     if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
     if (syncResult?.reason === 'skipped_unsupported_cao_sync') syncWarnings.push('CAO Cloudflare lazy-sync overgeslagen: deze runtime ondersteunt alleen CAO Particuliere Beveiliging.');
     if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
@@ -4528,23 +4649,15 @@ Deno.serve(async (req) => {
     let caoScope = normalizeCaoScope(rawCaoScope);
     const globalCaoScopeProfile = caoScope?.cao_scope_profile || null;
 
-    const scheduleBody = { ...body };
-    if (
-      personnelContext?.date_of_birth &&
-      !scheduleBody.date_of_birth &&
-      !scheduleBody.employee_date_of_birth &&
-      !scheduleBody.personnel_date_of_birth
-    ) {
-      scheduleBody.personnel_date_of_birth = personnelContext.date_of_birth;
+    if (!contractValidation) {
+      contractValidation = await validateShiftContractResolution(base44, {
+        shifts,
+        periodStart: pStart,
+        periodEnd: pEnd,
+        personnel_id,
+        body: scheduleBody
+      });
     }
-
-    const contractValidation = await validateShiftContractResolution(base44, {
-      shifts,
-      periodStart: pStart,
-      periodEnd: pEnd,
-      personnel_id,
-      body: scheduleBody
-    });
     const contractCaoConsistencyIssues = collectContractCaoConsistencyIssues(contractValidation.contract_resolution_results, {
       expectedCaoKey: caoConfig.cao_key || targetCaoKey,
       expectedCaoConfigurationId: caoConfig.id
