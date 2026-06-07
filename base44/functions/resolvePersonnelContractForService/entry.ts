@@ -997,12 +997,17 @@ Deno.serve(async (req) => {
     }
 
     let caoApplicability = null;
-    if (selectedContract && (caoResolution.config?.cao_key || selectedContract?.cao_key || 'cao_particuliere_beveiliging') === 'cao_particuliere_beveiliging') {
+    const selectedCaoKeyForApplicability = caoResolution.config?.cao_key ||
+      selectedContract?.cao_key ||
+      serviceContext.cao_key ||
+      null;
+    if (selectedContract && selectedCaoKeyForApplicability === CAO_PB_KEY) {
       try {
         const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
           personnel_id,
           contract: selectedContract,
-          work_context: serviceContext
+          work_context: serviceContext,
+          cao_key: selectedCaoKeyForApplicability
         });
         caoApplicability = unwrapFunctionData(scopeRes);
       } catch (error) {
