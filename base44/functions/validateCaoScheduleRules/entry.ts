@@ -1939,6 +1939,112 @@ function shiftHasContractContext(shift) {
   );
 }
 
+function buildShiftContractServiceContext({ body, shift }) {
+  const bodyContext = body.service_context || {};
+  const shiftContext = shift.service_context || {};
+  const companyId = shift.company_id || body.company_id || shiftContext.company_id || bodyContext.company_id || null;
+  const routeId = shift.route_id || shiftContext.route_id || body.route_id || bodyContext.route_id || null;
+  const taskId = shift.task_id || shiftContext.task_id || body.task_id || bodyContext.task_id || null;
+  const objectId = shift.object_id || body.object_id || shiftContext.object_id || bodyContext.object_id || null;
+  return {
+    ...bodyContext,
+    ...shiftContext,
+    service_date: shift.date || shift.service_date || shiftContext.service_date || bodyContext.service_date || null,
+    cao_key: shift.cao_key ||
+      shiftContext.cao_key ||
+      bodyContext.cao_key ||
+      body.cao_key ||
+      null,
+    cao: shift.cao ||
+      shiftContext.cao ||
+      bodyContext.cao ||
+      body.cao ||
+      null,
+    company_id: companyId,
+    route_id: routeId,
+    task_id: taskId,
+    object_id: objectId,
+    task_type: shift.task_type ||
+      shiftContext.task_type ||
+      bodyContext.task_type ||
+      null,
+    function_type: shift.function_type ||
+      shift.service_function_type ||
+      shift.required_function_type ||
+      shiftContext.function_type ||
+      bodyContext.function_type ||
+      null,
+    cao_function_group: shift.cao_function_group ||
+      shift.required_cao_function_group ||
+      shiftContext.cao_function_group ||
+      bodyContext.cao_function_group ||
+      null,
+    cao_function_level: shift.cao_function_level ||
+      shift.required_cao_function_level ||
+      shiftContext.cao_function_level ||
+      bodyContext.cao_function_level ||
+      null,
+    security_role_status: shift.required_security_role_status ||
+      shift.security_role_status ||
+      shiftContext.security_role_status ||
+      bodyContext.security_role_status ||
+      null,
+    performs_security_work: shift.performs_security_work ??
+      shiftContext.performs_security_work ??
+      bodyContext.performs_security_work ??
+      null,
+    security_work_percentage: shift.security_work_percentage ??
+      shiftContext.security_work_percentage ??
+      bodyContext.security_work_percentage ??
+      null,
+    works_airport_schiphol: shift.works_airport_schiphol ??
+      shiftContext.works_airport_schiphol ??
+      bodyContext.works_airport_schiphol ??
+      null,
+    works_cash_value_logistics: shift.works_cash_value_logistics ??
+      shiftContext.works_cash_value_logistics ??
+      bodyContext.works_cash_value_logistics ??
+      null,
+    works_event_or_hospitality_security: shift.works_event_or_hospitality_security ??
+      shiftContext.works_event_or_hospitality_security ??
+      bodyContext.works_event_or_hospitality_security ??
+      null,
+    event_hospitality_cao_applies: shift.event_hospitality_cao_applies ??
+      shiftContext.event_hospitality_cao_applies ??
+      bodyContext.event_hospitality_cao_applies ??
+      null,
+    customer_billable: shift.customer_billable ??
+      shiftContext.customer_billable ??
+      bodyContext.customer_billable ??
+      null,
+    counts_toward_required_staffing: shift.counts_toward_required_staffing ??
+      shiftContext.counts_toward_required_staffing ??
+      bodyContext.counts_toward_required_staffing ??
+      null,
+    internship_practice_trainer_personnel_id: shift.internship_practice_trainer_personnel_id ||
+      shiftContext.internship_practice_trainer_personnel_id ||
+      bodyContext.internship_practice_trainer_personnel_id ||
+      null,
+    internship_mentor_personnel_id: shift.internship_mentor_personnel_id ||
+      shiftContext.internship_mentor_personnel_id ||
+      bodyContext.internship_mentor_personnel_id ||
+      null,
+    internship_one_to_one_guidance_confirmed: shift.internship_one_to_one_guidance_confirmed ??
+      shiftContext.internship_one_to_one_guidance_confirmed ??
+      bodyContext.internship_one_to_one_guidance_confirmed ??
+      null,
+    internship_uniform_label_confirmed: shift.internship_uniform_label_confirmed ??
+      shiftContext.internship_uniform_label_confirmed ??
+      bodyContext.internship_uniform_label_confirmed ??
+      null,
+    contract_assignment_policy: shift.contract_assignment_policy ||
+      shiftContext.contract_assignment_policy ||
+      bodyContext.contract_assignment_policy ||
+      body.contract_assignment_policy ||
+      'strict_contract_match'
+  };
+}
+
 function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
   const violations = [];
   const warnings = [];
@@ -4124,41 +4230,17 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
   }
 
   const contractResults = await Promise.all(periodShifts.map(async (shift, index) => {
-    const serviceContext = shift.service_context || {};
-    const serviceObjectId = shift.object_id || body.object_id || serviceContext.object_id || null;
+    const serviceContext = buildShiftContractServiceContext({ body, shift });
     try {
       const res = await base44.asServiceRole.functions.invoke('resolvePersonnelContractForService', {
         personnel_id,
         contract_id: shift.contract_id || body.contract_id || null,
-        company_id: shift.company_id || body.company_id || null,
-        route_id: shift.route_id || body.route_id || null,
-        task_id: shift.task_id || body.task_id || null,
-        object_id: serviceObjectId,
-        service_date: shift.date,
-        service_context: {
-          ...serviceContext,
-          object_id: serviceObjectId,
-          cao_key: serviceContext.cao_key || shift.cao_key || body.cao_key || null,
-          cao: serviceContext.cao || shift.cao || body.cao || null,
-          task_type: serviceContext.task_type || shift.task_type || null,
-          function_type: serviceContext.function_type || shift.service_function_type || shift.required_function_type || null,
-          cao_function_group: serviceContext.cao_function_group || shift.required_cao_function_group || shift.cao_function_group || null,
-          cao_function_level: serviceContext.cao_function_level || shift.required_cao_function_level || shift.cao_function_level || null,
-          security_role_status: serviceContext.security_role_status || shift.required_security_role_status || shift.security_role_status || null,
-          performs_security_work: serviceContext.performs_security_work ?? shift.performs_security_work ?? null,
-          security_work_percentage: serviceContext.security_work_percentage ?? shift.security_work_percentage ?? null,
-          works_airport_schiphol: serviceContext.works_airport_schiphol ?? shift.works_airport_schiphol ?? null,
-          works_cash_value_logistics: serviceContext.works_cash_value_logistics ?? shift.works_cash_value_logistics ?? null,
-          works_event_or_hospitality_security: serviceContext.works_event_or_hospitality_security ?? shift.works_event_or_hospitality_security ?? null,
-          event_hospitality_cao_applies: serviceContext.event_hospitality_cao_applies ?? shift.event_hospitality_cao_applies ?? null,
-          customer_billable: serviceContext.customer_billable ?? shift.customer_billable ?? null,
-          counts_toward_required_staffing: serviceContext.counts_toward_required_staffing ?? shift.counts_toward_required_staffing ?? null,
-          internship_practice_trainer_personnel_id: serviceContext.internship_practice_trainer_personnel_id || shift.internship_practice_trainer_personnel_id || null,
-          internship_mentor_personnel_id: serviceContext.internship_mentor_personnel_id || shift.internship_mentor_personnel_id || null,
-          internship_one_to_one_guidance_confirmed: serviceContext.internship_one_to_one_guidance_confirmed ?? shift.internship_one_to_one_guidance_confirmed ?? null,
-          internship_uniform_label_confirmed: serviceContext.internship_uniform_label_confirmed ?? shift.internship_uniform_label_confirmed ?? null,
-          contract_assignment_policy: serviceContext.contract_assignment_policy || shift.contract_assignment_policy || body.contract_assignment_policy || 'strict_contract_match'
-        }
+        company_id: serviceContext.company_id || null,
+        route_id: serviceContext.route_id || null,
+        task_id: serviceContext.task_id || null,
+        object_id: serviceContext.object_id || null,
+        service_date: serviceContext.service_date || shift.date,
+        service_context: serviceContext
       });
       return {
         shift_index: index,
