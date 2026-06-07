@@ -111,8 +111,9 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'applyCaoContractRules.call_agreement_article_13': {
     functions: ['applyCaoContractRules'],
     rule_ids: [
+      ...ruleIds(371),
       ...ruleRange(372, 374),
-      ...ruleIds(377, 378, 380),
+      ...ruleIds(376, 377, 378, 380),
       ...ruleRange(387, 394),
       ...ruleRange(396, 399)
     ]
@@ -192,6 +193,22 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       ...ruleRange(1157, 1163),
       ...ruleRange(1165, 1167),
       ...ruleRange(1172, 1184)
+    ]
+  },
+  'calculateCaoLeaveAndSickness.article_59_reference_and_protocol_ii_vacation': {
+    functions: ['calculateCaoLeaveAndSickness', 'calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
+    rule_ids: ruleIds(1021, 1601, 1602)
+  },
+  'calculatePersonnelCosts.protocol_ii_cash_value_notice_article_103': {
+    functions: ['calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
+    rule_ids: ruleIds(1613, 1617, 1618)
+  },
+  'validateCaoScheduleRules.protocol_ii_cash_value_schedule_articles_104_107': {
+    functions: ['validateCaoScheduleRules'],
+    rule_ids: [
+      ...ruleRange(1619, 1624),
+      ...ruleRange(1626, 1633),
+      ...ruleRange(1635, 1642)
     ]
   }
 };

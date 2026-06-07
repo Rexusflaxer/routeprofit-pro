@@ -288,8 +288,9 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'applyCaoContractRules.call_agreement_article_13': {
     functions: ['applyCaoContractRules'],
     rule_ids: [
+      'CAO-PB-2024-R0371',
       'CAO-PB-2024-R0372', 'CAO-PB-2024-R0373', 'CAO-PB-2024-R0374',
-      'CAO-PB-2024-R0377', 'CAO-PB-2024-R0378', 'CAO-PB-2024-R0380',
+      'CAO-PB-2024-R0376', 'CAO-PB-2024-R0377', 'CAO-PB-2024-R0378', 'CAO-PB-2024-R0380',
       'CAO-PB-2024-R0387', 'CAO-PB-2024-R0388', 'CAO-PB-2024-R0389',
       'CAO-PB-2024-R0390', 'CAO-PB-2024-R0391', 'CAO-PB-2024-R0392',
       'CAO-PB-2024-R0393', 'CAO-PB-2024-R0394', 'CAO-PB-2024-R0396',
@@ -499,6 +500,31 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R1178', 'CAO-PB-2024-R1179', 'CAO-PB-2024-R1180',
       'CAO-PB-2024-R1181', 'CAO-PB-2024-R1182', 'CAO-PB-2024-R1183',
       'CAO-PB-2024-R1184'
+    ]
+  },
+  'calculateCaoLeaveAndSickness.article_59_reference_and_protocol_ii_vacation': {
+    functions: ['calculateCaoLeaveAndSickness', 'calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R1021', 'CAO-PB-2024-R1601', 'CAO-PB-2024-R1602'
+    ]
+  },
+  'calculatePersonnelCosts.protocol_ii_cash_value_notice_article_103': {
+    functions: ['calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R1613', 'CAO-PB-2024-R1617', 'CAO-PB-2024-R1618'
+    ]
+  },
+  'validateCaoScheduleRules.protocol_ii_cash_value_schedule_articles_104_107': {
+    functions: ['validateCaoScheduleRules'],
+    rule_ids: [
+      'CAO-PB-2024-R1619', 'CAO-PB-2024-R1620', 'CAO-PB-2024-R1621',
+      'CAO-PB-2024-R1622', 'CAO-PB-2024-R1623', 'CAO-PB-2024-R1624',
+      'CAO-PB-2024-R1626', 'CAO-PB-2024-R1627', 'CAO-PB-2024-R1628',
+      'CAO-PB-2024-R1629', 'CAO-PB-2024-R1630', 'CAO-PB-2024-R1631',
+      'CAO-PB-2024-R1632', 'CAO-PB-2024-R1633',
+      'CAO-PB-2024-R1635', 'CAO-PB-2024-R1636', 'CAO-PB-2024-R1637',
+      'CAO-PB-2024-R1638', 'CAO-PB-2024-R1639', 'CAO-PB-2024-R1640',
+      'CAO-PB-2024-R1641', 'CAO-PB-2024-R1642'
     ]
   }
 };
