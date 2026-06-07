@@ -965,6 +965,52 @@ function runPayrollPolicyScenarios() {
   assertAlmostEqual(correctionComponent.total_gross_delta, 100, 'Correction gross delta mismatch');
   assertAlmostEqual(correctionComponent.net_salary_delta, 80, 'Correction net delta should default to gross minus employee deductions');
   assertAlmostEqual(correctionComponent.total_cost_employer_delta, 140, 'Correction employer total should default to gross plus employer/vacation/year-end deltas');
+
+  assert.equal(
+    personnelCosts.shouldRequirePayrollScheduleValidation({ body: {}, recordPayrollRun: false }),
+    false,
+    'Concept payroll should not require schedule validation'
+  );
+  assert.equal(
+    personnelCosts.shouldRequirePayrollScheduleValidation({ body: {}, recordPayrollRun: true }),
+    true,
+    'Recorded payroll run must require schedule validation'
+  );
+  assert.equal(
+    personnelCosts.shouldRequirePayrollScheduleValidation({ body: { require_payroll_final: true }, recordPayrollRun: false }),
+    true,
+    'Explicit payroll-final request must require schedule validation'
+  );
+
+  const conceptScheduleGate = personnelCosts.buildPayrollScheduleValidationGate(null, { required: false });
+  assert.equal(conceptScheduleGate.status, 'not_required_for_concept_payroll');
+  assert.equal(conceptScheduleGate.payroll_final_allowed, null);
+
+  const blockedScheduleGate = personnelCosts.buildPayrollScheduleValidationGate({
+    planning_allowed: true,
+    payroll_final_allowed: false,
+    manual_review_required: true,
+    calculation_status: 'manual_review_required',
+    manual_review_reasons: ['Roosterregel vereist handmatige review.'],
+    violations: [{ severity: 'high', message: 'Rusttijd wordt overtreden.' }]
+  }, { required: true });
+  assert.equal(blockedScheduleGate.status, 'blocked');
+  assert.equal(blockedScheduleGate.payroll_final_allowed, false);
+  assertIncludes(blockedScheduleGate.blocking_reasons, 'Rusttijd wordt overtreden.', 'High severity roster violation must block payroll-final');
+
+  const validScheduleGate = personnelCosts.buildPayrollScheduleValidationGate({
+    planning_allowed: true,
+    payroll_final_allowed: true,
+    manual_review_required: false,
+    calculation_status: 'final',
+    period_start: '2026-01-01',
+    period_end: '2026-01-28',
+    cao_key: 'cao_particuliere_beveiliging',
+    cao_configuration_id: 'cao-config-1'
+  }, { required: true });
+  assert.equal(validScheduleGate.status, 'validated');
+  assert.equal(validScheduleGate.payroll_final_allowed, true);
+  assert.equal(validScheduleGate.cao_key, 'cao_particuliere_beveiliging');
 }
 
 function runFunctionClassificationScenarios() {

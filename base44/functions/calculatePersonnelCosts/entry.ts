@@ -3320,6 +3320,157 @@ function collectContractResolutionCaoReferences(results) {
     );
 }
 
+function normalizeArray(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (value === null || value === undefined || value === '') return [];
+  return [value].filter(Boolean);
+}
+
+function appendUnique(target, values) {
+  for (const value of normalizeArray(values)) {
+    if (value && !target.includes(value)) target.push(value);
+  }
+}
+
+function shouldRequirePayrollScheduleValidation({ body = {}, recordPayrollRun = false }) {
+  return recordPayrollRun === true ||
+    body.require_schedule_validation === true ||
+    body.require_payroll_final === true ||
+    body.payroll_final === true ||
+    body.final_validation === true ||
+    body.final_planning === true ||
+    body.finalize_planning === true ||
+    body.approve_planning === true ||
+    body.approve_schedule === true;
+}
+
+function buildPayrollScheduleValidationGate(scheduleValidation, { required = false } = {}) {
+  if (!required) {
+    return {
+      required: false,
+      status: 'not_required_for_concept_payroll',
+      planning_allowed: null,
+      payroll_final_allowed: null,
+      manual_review_required: false,
+      blocking_reasons: [],
+      manual_review_reasons: [],
+      warnings: []
+    };
+  }
+
+  if (!scheduleValidation) {
+    return {
+      required: true,
+      status: 'blocked_missing_schedule_validation',
+      planning_allowed: false,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      blocking_reasons: ['Definitieve loonrun mist roosterregelvalidatie. Voer validateCaoScheduleRules uit voordat payroll-final wordt toegestaan.'],
+      manual_review_reasons: [],
+      warnings: []
+    };
+  }
+
+  const blockingReasons = [];
+  const manualReviewReasons = [];
+  const warnings = [];
+  const highSeverityViolations = normalizeArray(scheduleValidation.violations)
+    .filter(item => item?.severity === 'high')
+    .map(item => item.message || String(item));
+  const contractViolations = normalizeArray(scheduleValidation.contract_violations)
+    .map(item => item.message || String(item));
+
+  if (scheduleValidation.planning_allowed !== true || scheduleValidation.payroll_final_allowed !== true) {
+    blockingReasons.push('Roosterregelvalidatie staat payroll-final niet toe.');
+  }
+  appendUnique(blockingReasons, highSeverityViolations);
+  appendUnique(blockingReasons, contractViolations);
+  appendUnique(blockingReasons, scheduleValidation.blocking_reasons);
+  appendUnique(manualReviewReasons, scheduleValidation.manual_review_reasons);
+  appendUnique(warnings, scheduleValidation.warnings);
+  appendUnique(warnings, scheduleValidation.calculation_warnings);
+  appendUnique(warnings, normalizeArray(scheduleValidation.contract_warnings).map(item => item.message || String(item)));
+
+  return {
+    required: true,
+    status: blockingReasons.length > 0
+      ? 'blocked'
+      : manualReviewReasons.length > 0 || scheduleValidation.manual_review_required === true
+      ? 'manual_review_required'
+      : 'validated',
+    planning_allowed: scheduleValidation.planning_allowed === true,
+    payroll_final_allowed: scheduleValidation.payroll_final_allowed === true &&
+      blockingReasons.length === 0 &&
+      manualReviewReasons.length === 0 &&
+      scheduleValidation.manual_review_required !== true,
+    manual_review_required: blockingReasons.length > 0 ||
+      manualReviewReasons.length > 0 ||
+      scheduleValidation.manual_review_required === true,
+    blocking_reasons: [...new Set(blockingReasons)],
+    manual_review_reasons: [...new Set(manualReviewReasons)],
+    warnings: [...new Set(warnings)],
+    calculation_status: scheduleValidation.calculation_status || scheduleValidation.status || null,
+    period_start: scheduleValidation.period_start || null,
+    period_end: scheduleValidation.period_end || null,
+    cao_key: scheduleValidation.cao_key || null,
+    cao_configuration_id: scheduleValidation.cao_configuration_id || null,
+    source_rule_ids: scheduleValidation.source_rule_ids || []
+  };
+}
+
+async function validatePayrollScheduleGate(base44, {
+  body,
+  personnelId,
+  workSchedule,
+  payrollPeriod,
+  targetCaoKey,
+  forceCaoSync,
+  contractResolutionRequired,
+  recordPayrollRun
+}) {
+  const required = shouldRequirePayrollScheduleValidation({ body, recordPayrollRun });
+  if (!required) {
+    return {
+      gate: buildPayrollScheduleValidationGate(null, { required: false }),
+      schedule_validation: null
+    };
+  }
+
+  try {
+    const res = await base44.asServiceRole.functions.invoke('validateCaoScheduleRules', {
+      ...body,
+      personnel_id: personnelId,
+      cao_key: targetCaoKey,
+      shifts: workSchedule,
+      period_start: payrollPeriod.period_start,
+      period_end: payrollPeriod.period_end,
+      force_cao_sync: !!forceCaoSync,
+      enforce_contract_resolution: contractResolutionRequired === true,
+      enforce_task_planning_context: true,
+      require_payroll_final: true,
+      payroll_final: true,
+      record_payroll_run: recordPayrollRun === true
+    });
+    const scheduleValidation = res?.data || res || null;
+    return {
+      gate: buildPayrollScheduleValidationGate(scheduleValidation, { required: true }),
+      schedule_validation: scheduleValidation
+    };
+  } catch (error) {
+    const scheduleValidation = {
+      planning_allowed: false,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      calculation_status: 'blocked_schedule_validation_error',
+      blocking_reasons: [`Roosterregelvalidatie fout: ${error.message || String(error)}`]
+    };
+    return {
+      gate: buildPayrollScheduleValidationGate(scheduleValidation, { required: true }),
+      schedule_validation: scheduleValidation
+    };
+  }
+}
+
 function collectPayrollRunRouteIds(workSchedule, body = {}) {
   const ids = [];
   addUnique(ids, body.route_id);
@@ -4081,6 +4232,44 @@ Deno.serve(async (req) => {
         manual_review_required: true,
         payroll_final_allowed: false,
         calculation_status: 'blocked_cao_not_payroll_ready'
+      }, { status: 400 });
+    }
+
+    const payrollScheduleValidationResult = await validatePayrollScheduleGate(base44, {
+      body,
+      personnelId: personnel_id,
+      workSchedule: work_schedule,
+      payrollPeriod,
+      targetCaoKey: caoConfig.cao_key || targetCaoKey,
+      forceCaoSync: false,
+      contractResolutionRequired,
+      recordPayrollRun: record_payroll_run === true
+    });
+    const payrollScheduleValidationGate = payrollScheduleValidationResult.gate;
+    const payrollScheduleValidation = payrollScheduleValidationResult.schedule_validation;
+    calculationWarnings.push(...(payrollScheduleValidationGate.warnings || []));
+    if (payrollScheduleValidationGate.required && payrollScheduleValidationGate.payroll_final_allowed !== true) {
+      return Response.json({
+        error: 'Definitieve loonrun geblokkeerd: roosterregelvalidatie is niet payroll-final toegestaan.',
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...calculationWarnings,
+          'Payroll-final vereist een geslaagde validateCaoScheduleRules-controle over de volledige loon-/roosterperiode.'
+        ],
+        personnel_id,
+        cao_configuration_id: caoConfig.id,
+        cao_key: caoConfig.cao_key || targetCaoKey,
+        cao_version_label: caoConfig.version_label || caoConfig.name,
+        cao_valid_from: caoConfig.valid_from,
+        cao_payroll_readiness: payrollReadiness,
+        cao_runtime_support: payrollRuntimeSupport,
+        payroll_schedule_validation_gate: payrollScheduleValidationGate,
+        payroll_schedule_validation: payrollScheduleValidation,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: payrollScheduleValidationGate.status === 'manual_review_required'
+          ? 'blocked_schedule_manual_review'
+          : 'blocked_schedule_validation'
       }, { status: 400 });
     }
 
@@ -5443,6 +5632,8 @@ Deno.serve(async (req) => {
       cao_rule_application: caoRuleApplication,
       contract_resolution_required: contractResolutionRequired,
       contract_resolution_results: contractResolutionResults,
+      payroll_schedule_validation_gate: payrollScheduleValidationGate,
+      payroll_schedule_validation: payrollScheduleValidation,
       call_agreement_contract_mix: callAgreementContractMix,
       cao_payroll_corrections: caoCorrectionApplication,
       payroll_runtime_review_items: payrollRuntimeReviewItems,
