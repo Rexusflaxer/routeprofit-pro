@@ -1275,6 +1275,15 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
   const explicitCompanyId = pickFirst(body.company_id, contract?.company_id, null);
   const personnelPrimaryCompanyId = pickFirst(personnel?.primary_company_id, null);
   const explicitCaoKey = pickFirst(body.cao_key, contract?.cao_key, null);
+  const contractForm = pickFirst(body.contract_form, contract?.contract_form, personnel?.contract_form, null);
+  const underlyingContractForm = pickFirst(
+    body.underlying_contract_form,
+    body.call_underlying_contract_form,
+    contract?.underlying_contract_form,
+    contract?.call_underlying_contract_form,
+    personnel?.underlying_contract_form,
+    null
+  );
   const contractStartDate = asIsoDate(pickFirst(body.contract_start_date, contract?.contract_start_date, null));
   const contractEndDate = asIsoDate(pickFirst(body.contract_end_date, contract?.contract_end_date, null));
   const caoConfigurationId = pickFirst(body.cao_configuration_id, contract?.cao_configuration_id, null);
@@ -1337,6 +1346,38 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
       message: 'Leg cao_key vast op PersonnelContract.'
     });
     if (targetCaoKey) recommendedContractUpdate.cao_key = targetCaoKey;
+  }
+
+  if (!contractForm || contractForm === 'unknown') {
+    violations.push({
+      rule_id: 'APP-CONTRACT-BASIS-FORM',
+      severity: 'high',
+      message: 'Arbeidscontract mist contract_form. Contractvorm is nodig voor proeftijd, oproep-, stage-, inhuur- en contractmodelregels.',
+      payroll_impact: true,
+      manual_review_required: true,
+      field: 'contract_form'
+    });
+    missingEvidence.push({
+      rule_id: 'APP-CONTRACT-BASIS-FORM',
+      field: 'contract_form',
+      message: 'Leg contract_form vast op PersonnelContract.'
+    });
+  }
+
+  if (contractForm === 'oproep' && (!underlyingContractForm || underlyingContractForm === 'unknown')) {
+    violations.push({
+      rule_id: 'APP-CONTRACT-BASIS-CALL-UNDERLYING-FORM',
+      severity: 'high',
+      message: 'Oproepovereenkomst mist onderliggende duurvorm. Leg vast of deze bepaalde tijd of onbepaalde tijd is voordat proeftijd en contractregels definitief mogen zijn.',
+      payroll_impact: true,
+      manual_review_required: true,
+      field: 'underlying_contract_form'
+    });
+    missingEvidence.push({
+      rule_id: 'APP-CONTRACT-BASIS-CALL-UNDERLYING-FORM',
+      field: 'underlying_contract_form',
+      message: 'Leg underlying_contract_form vast voor oproepovereenkomsten.'
+    });
   }
 
   if (!contractStartDate) {
@@ -1432,6 +1473,8 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
     manual_review_required: manualReviewRequired,
     company_id: explicitCompanyId || null,
     cao_key: explicitCaoKey || targetCaoKey || null,
+    contract_form: contractForm || null,
+    underlying_contract_form: underlyingContractForm || null,
     contract_start_date: contractStartDate,
     contract_end_date: contractEndDate,
     function_context_present: functionContextPresent,
@@ -4105,11 +4148,30 @@ Deno.serve(async (req) => {
 
     if (action === 'calculate_probation') {
       const ruleInput = buildContractRuleInput(body, personnel, contract);
+      const contractBasis = await evaluateContractBasis(base44, {
+        body,
+        personnel,
+        contract,
+        targetCaoKey
+      });
       const result = calculateProbationPeriod(ruleInput, caoScope);
+      const combinedWarnings = [
+        ...(syncWarnings || []),
+        ...(contractBasis.warnings || []),
+        ...(result.warnings || [])
+      ];
+      const combinedManualReviewRequired = contractBasis.manual_review_required === true ||
+        result.manual_review_required === true ||
+        isUnknownOrMixed === true;
 
       const shouldPersistContract = contract_id && body.save === true && result.probation_period_months !== null;
       if (shouldPersistContract) {
-        await base44.entities.PersonnelContract.update(contract_id, buildContractRulePersistence(result));
+        await base44.entities.PersonnelContract.update(contract_id, {
+          ...buildContractRulePersistence(result),
+          contract_context_status: contractBasis.status,
+          contract_context_missing_fields: (contractBasis.missing_evidence || []).map(item => item.field || item.rule_id).filter(Boolean),
+          contract_context_checked_at: new Date().toISOString()
+        });
       }
 
       // Backwards compatible: oude medewerkerkaart alleen bij legacy-aanroep automatisch vullen.
@@ -4125,14 +4187,15 @@ Deno.serve(async (req) => {
         cao_sync_status: caoSyncStatus,
         cao_key: targetCaoKey,
         cao_runtime_support: contractRuntimeSupport,
-        calculation_warnings: syncWarnings,
+        calculation_warnings: combinedWarnings,
         contract_id: contract_id || contract?.id || null,
         personnel_id: personnel_id || null,
         contract_cao_resolution: contractCaoResolution,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
-        manual_review_required: result.manual_review_required || isUnknownOrMixed,
+        contract_basis: contractBasis,
         persisted_to_contract: !!shouldPersistContract,
-        ...result
+        ...result,
+        manual_review_required: combinedManualReviewRequired
       });
     }
 

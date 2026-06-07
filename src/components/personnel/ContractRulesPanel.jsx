@@ -18,10 +18,35 @@ export default function ContractRulesPanel({ form, onChange, personnelId }) {
   const probationMutation = useMutation({
     mutationFn: () => base44.functions.invoke("applyCaoContractRules", {
       action: "calculate_probation",
+      cao_key: form.cao || null,
+      company_id: form.primary_company_id || null,
       contract_form: form.contract_form,
+      underlying_contract_form: form.underlying_contract_form || null,
       contract_start_date: form.contract_start_date,
       contract_end_date: form.contract_end_date,
       security_role_status: form.security_role_status,
+      function_type: form.function_type || null,
+      cao_function_group: form.cao_function_group || null,
+      cao_function_level: form.cao_function_level || null,
+      personnel: personnelId ? null : form,
+      contract: {
+        company_id: form.primary_company_id || null,
+        cao_key: form.cao || null,
+        contract_form: form.contract_form || "unknown",
+        underlying_contract_form: form.underlying_contract_form || null,
+        contract_start_date: form.contract_start_date || null,
+        contract_end_date: form.contract_end_date || null,
+        security_role_status: form.security_role_status || "unknown",
+        function_type: form.function_type || null,
+        cao_function_group: form.cao_function_group || null,
+        cao_function_level: form.cao_function_level || null,
+        performs_security_work: form.performs_security_work ?? null,
+        security_work_percentage: form.security_work_percentage ?? null,
+        works_airport_schiphol: form.works_airport_schiphol ?? null,
+        works_cash_value_logistics: form.works_cash_value_logistics ?? null,
+        works_event_or_hospitality_security: form.works_event_or_hospitality_security ?? null,
+        event_hospitality_cao_applies: form.event_hospitality_cao_applies ?? null
+      },
       personnel_id: personnelId || null
     }),
     onSuccess: (res) => {
@@ -48,7 +73,11 @@ export default function ContractRulesPanel({ form, onChange, personnelId }) {
           <Label>Contractvorm</Label>
           <Select
             value={form.contract_form || "unknown"}
-            onValueChange={v => { onChange("contract_form", v); setProbationResult(null); }}
+            onValueChange={v => {
+              onChange("contract_form", v);
+              if (v !== "oproep") onChange("underlying_contract_form", null);
+              setProbationResult(null);
+            }}
           >
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
@@ -57,11 +86,29 @@ export default function ContractRulesPanel({ form, onChange, personnelId }) {
               <SelectItem value="oproep">Oproep / 0-uren</SelectItem>
               <SelectItem value="stage">Stage</SelectItem>
               <SelectItem value="uitzend">Uitzend</SelectItem>
+              <SelectItem value="payroll">Payroll</SelectItem>
               <SelectItem value="zzp">ZZP</SelectItem>
               <SelectItem value="unknown">Onbekend</SelectItem>
             </SelectContent>
           </Select>
         </div>
+
+        {form.contract_form === "oproep" && (
+          <div className="space-y-1">
+            <Label>Onderliggende duurvorm oproepcontract</Label>
+            <Select
+              value={form.underlying_contract_form || "unknown"}
+              onValueChange={v => { onChange("underlying_contract_form", v); setProbationResult(null); }}
+            >
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="bepaalde_tijd">Bepaalde tijd</SelectItem>
+                <SelectItem value="onbepaalde_tijd">Onbepaalde tijd</SelectItem>
+                <SelectItem value="unknown">Onbekend</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+        )}
 
         <div className="space-y-1">
           <Label>Beveiligingsfunctie-status</Label>
@@ -110,13 +157,22 @@ export default function ContractRulesPanel({ form, onChange, personnelId }) {
             variant="outline"
             size="sm"
             onClick={() => probationMutation.mutate()}
-            disabled={probationMutation.isPending || !form.contract_form || form.contract_form === "unknown"}
+            disabled={probationMutation.isPending || !form.cao || !form.contract_form || form.contract_form === "unknown"}
             className="gap-1.5"
           >
             <Calculator className="w-3.5 h-3.5" />
             {probationMutation.isPending ? "Berekenen..." : "Bereken CAO-proeftijd"}
           </Button>
         </div>
+
+        {probationMutation.isError && (
+          <p className="text-xs text-red-600 flex items-center gap-1">
+            <AlertTriangle className="w-3 h-3" />
+            {probationMutation.error?.response?.data?.error ||
+              probationMutation.error?.message ||
+              "CAO-proeftijd kon niet worden berekend. Controleer contract-CAO en contractgegevens."}
+          </p>
+        )}
 
         {probationResult && (
           <div className="space-y-2">

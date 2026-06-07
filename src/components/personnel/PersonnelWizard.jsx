@@ -34,6 +34,8 @@ function hasMeaningfulSecurityRoleStatus(value) {
 function getInitialContractMissingFields({
   companyId,
   caoKey,
+  contractForm,
+  underlyingContractForm,
   contractStartDate,
   functionType,
   caoFunctionGroup,
@@ -43,6 +45,10 @@ function getInitialContractMissingFields({
   const missing = [];
   if (!companyId) missing.push("company_id");
   if (!caoKey) missing.push("cao_key");
+  if (!contractForm || contractForm === "unknown") missing.push("contract_form");
+  if (contractForm === "oproep" && (!underlyingContractForm || underlyingContractForm === "unknown")) {
+    missing.push("underlying_contract_form");
+  }
   if (!contractStartDate) missing.push("contract_start_date");
   if (!functionType && !caoFunctionGroup && !caoFunctionLevel && !hasMeaningfulSecurityRoleStatus(securityRoleStatus)) {
     missing.push("function_type/cao_function_group/cao_function_level/security_role_status");
@@ -112,10 +118,14 @@ export default function PersonnelWizard({ person, onClose }) {
           const securityRoleStatus = data.personnel.security_role_status || "unknown";
           const caoScopeProfile = data.personnel.cao_scope_profile || null;
           const caoKey = data.personnel.cao || null;
+          const contractForm = data.personnel.contract_form || "unknown";
+          const underlyingContractForm = data.personnel.underlying_contract_form || null;
           const contractStartDate = data.personnel.contract_start_date || null;
           const missingContractContextFields = getInitialContractMissingFields({
             companyId,
             caoKey,
+            contractForm,
+            underlyingContractForm,
             contractStartDate,
             functionType,
             caoFunctionGroup,
@@ -128,7 +138,8 @@ export default function PersonnelWizard({ person, onClose }) {
             company_id: companyId,
             cao_key: caoKey,
             cao_configuration_id: data.personnel.cao_configuration_id || null,
-            contract_form: data.personnel.contract_form || "unknown",
+            contract_form: contractForm,
+            underlying_contract_form: contractForm === "oproep" ? underlyingContractForm : null,
             contract_start_date: contractStartDate,
             contract_end_date: data.personnel.contract_end_date || null,
             probation_period_months: data.personnel.probation_period_months ?? null,

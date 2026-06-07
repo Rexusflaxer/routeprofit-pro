@@ -417,6 +417,19 @@
         null
       ]
     },
+    "underlying_contract_form": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "bepaalde_tijd",
+        "onbepaalde_tijd",
+        "unknown",
+        null
+      ],
+      "description": "Onderliggende duurvorm voor oproepovereenkomsten. Nodig om proeftijd- en contractregels datumvast te kunnen beoordelen."
+    },
     "contract_start_date": {
       "type": [
         "string",

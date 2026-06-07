@@ -61,6 +61,9 @@ export default function WizardStep8Review({ form, sensitiveData, idDoc, bankAcco
     ...(isLoondienst ? [
       { label: "Contract-CAO gekozen", ok: !!form.cao },
       { label: "Contractvorm gekozen", ok: !!form.contract_form && form.contract_form !== "unknown" },
+      ...(form.contract_form === "oproep" ? [
+        { label: "Onderliggende oproep-duurvorm", ok: !!form.underlying_contract_form && form.underlying_contract_form !== "unknown" },
+      ] : []),
       { label: "Contractstartdatum", ok: !!form.contract_start_date },
       { label: "BSN (beveiligd)", ok: !!sensitiveData.bsn },
       { label: "Loonheffingsverklaring", ok: !!(form.payroll_tax_statement_file_url || form.payroll_tax_credit_applies !== undefined) },
