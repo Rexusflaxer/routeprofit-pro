@@ -4,7 +4,8 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Calculator, Plus, X } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
+import { AlertTriangle, Calculator, Plus, X } from "lucide-react";
 
 function getTodayDate() {
   const today = new Date();
@@ -14,6 +15,16 @@ function getTodayDate() {
 
 function formatNumber(value) {
   return Number.isFinite(value) ? value.toFixed(2) : "0.00";
+}
+
+function previewWarnings(result) {
+  return [
+    ...(Array.isArray(result?.calculation_warnings) ? result.calculation_warnings : []),
+    ...(Array.isArray(result?.warnings) ? result.warnings : []),
+    ...(Array.isArray(result?.scope_warnings) ? result.scope_warnings : []),
+    ...(Array.isArray(result?.payroll_final_blocking_reasons) ? result.payroll_final_blocking_reasons : [])
+  ].map(item => typeof item === "string" ? item : item?.message || item?.reason || "")
+    .filter(Boolean);
 }
 
 export default function CostCalculator({ personnel }) {
@@ -49,7 +60,11 @@ export default function CostCalculator({ personnel }) {
     try {
       const { data } = await base44.functions.invoke('calculatePersonnelCosts', {
         personnel_id: personnel.id,
-        work_schedule: schedule
+        work_schedule: schedule,
+        record_payroll_run: false,
+        require_payroll_final: false,
+        payroll_final: false,
+        calculation_context: "concept_cost_preview"
       });
       if (data?.error || !Number.isFinite(data?.total_hours)) {
         throw new Error(data?.error || "Ongeldige berekening");
@@ -69,10 +84,14 @@ export default function CostCalculator({ personnel }) {
       <CardHeader>
         <CardTitle className="text-base flex items-center gap-2">
           <Calculator className="w-4 h-4" />
-          Kostencalculator
+          Concept kostensimulatie
         </CardTitle>
       </CardHeader>
       <CardContent className="space-y-4">
+        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+          Deze berekening is alleen een kostenpreview. Definitieve loonbetaling vereist een gefinaliseerd arbeidscontract, rooster-/planningvalidatie en een payroll-final loonrun.
+        </div>
+
         <div className="space-y-3">
           {schedule.map((shift, idx) => (
             <div key={idx} className="flex gap-2 items-end">
@@ -102,7 +121,7 @@ export default function CostCalculator({ personnel }) {
             <Plus className="w-3.5 h-3.5 mr-1" /> Dienst toevoegen
           </Button>
           <Button type="button" onClick={calculate} disabled={loading} size="sm" className="bg-slate-900 hover:bg-slate-800">
-            <Calculator className="w-3.5 h-3.5 mr-1" /> Bereken kosten
+            <Calculator className="w-3.5 h-3.5 mr-1" /> Bereken conceptkosten
           </Button>
         </div>
 
@@ -114,6 +133,24 @@ export default function CostCalculator({ personnel }) {
 
         {result && (
           <div className="mt-6 p-4 bg-slate-50 rounded-lg space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <div className="flex items-center gap-2">
+                <AlertTriangle className="w-4 h-4 text-amber-600" />
+                <span className="text-sm font-semibold text-slate-800">Conceptpreview</span>
+              </div>
+              <Badge className="bg-amber-100 text-amber-800">
+                Niet payroll-final
+              </Badge>
+            </div>
+
+            {previewWarnings(result).length > 0 && (
+              <div className="rounded-lg border border-amber-200 bg-white px-3 py-2 text-xs text-amber-800">
+                {previewWarnings(result).slice(0, 3).map((warning, index) => (
+                  <p key={index}>{warning}</p>
+                ))}
+              </div>
+            )}
+
             <div className="flex justify-between items-center">
               <span className="text-sm font-semibold text-slate-700">Totaal uren</span>
               <span className="text-sm font-bold text-slate-900">{formatNumber(result.total_hours)}u</span>
@@ -189,7 +226,7 @@ export default function CostCalculator({ personnel }) {
                 )}
                 
                 <div className="pt-2 border-t border-slate-300 flex justify-between items-center text-sm">
-                  <span className="text-slate-600 font-semibold">Bruto totaal</span>
+                  <span className="text-slate-600 font-semibold">Indicatief bruto totaal</span>
                   <span className="font-semibold">€{result.payslip.total_gross.toFixed(2)}</span>
                 </div>
                 
@@ -199,7 +236,7 @@ export default function CostCalculator({ personnel }) {
                 </div>
                 
                 <div className="flex justify-between items-center text-sm">
-                  <span className="text-slate-600 font-semibold">Netto salaris</span>
+                  <span className="text-slate-600 font-semibold">Indicatief netto</span>
                   <span className="font-semibold text-green-600">€{result.payslip.net_salary.toFixed(2)}</span>
                 </div>
                 
@@ -231,7 +268,7 @@ export default function CostCalculator({ personnel }) {
             )}
 
             <div className="pt-3 border-t border-slate-200 flex justify-between items-center">
-              <span className="font-semibold text-slate-900">Totale kosten werkgever</span>
+              <span className="font-semibold text-slate-900">Indicatieve totale werkgeverskosten</span>
               <span className="text-lg font-bold text-slate-900">€{result.payslip.total_cost_employer.toFixed(2)}</span>
             </div>
             

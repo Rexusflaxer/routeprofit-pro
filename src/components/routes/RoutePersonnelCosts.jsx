@@ -281,7 +281,11 @@ export default function RoutePersonnelCosts({ route }) {
       const response = await base44.functions.invoke('calculateRoutePersonnelCosts', {
         route_id: route.id,
         weekday: weekday || activeWeekday,
-        force_recalculate: force
+        force_recalculate: force,
+        record_payroll_run: false,
+        require_payroll_final: false,
+        payroll_final: false,
+        calculation_context: "route_concept_cost_preview"
       });
       setData(response.data);
     } catch (err) {
@@ -299,6 +303,10 @@ export default function RoutePersonnelCosts({ route }) {
 
   return (
     <div className="space-y-6">
+      <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        Routekosten zijn een conceptpreview voor planning en prijsinschatting. Definitieve payroll vereist een gekozen medewerker, gefinaliseerd contract en rooster-/payrollvalidatie.
+      </div>
+
       {/* Dag selectie + dienst info */}
       <Card>
         <CardContent className="pt-5 pb-4">

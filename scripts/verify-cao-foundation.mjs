@@ -1330,6 +1330,47 @@ function runCaoStaticGovernanceScenarios() {
     false,
     'Initial contract snapshot must not copy cao_configuration_id from personnel master data'
   );
+
+  const costCalculatorSource = fs.readFileSync(path.join(repoRoot, 'src/components/personnel/CostCalculator.jsx'), 'utf8');
+  assert.ok(
+    costCalculatorSource.includes('record_payroll_run: false'),
+    'Personnel cost calculator must never record PayrollCalculationRun records'
+  );
+  assert.ok(
+    costCalculatorSource.includes('require_payroll_final: false'),
+    'Personnel cost calculator must explicitly stay out of payroll-final mode'
+  );
+  assert.ok(
+    costCalculatorSource.includes('calculation_context: "concept_cost_preview"'),
+    'Personnel cost calculator must identify itself as a concept preview'
+  );
+  assert.ok(
+    costCalculatorSource.includes('Conceptpreview'),
+    'Personnel cost calculator must visibly label results as concept preview'
+  );
+  assert.equal(
+    costCalculatorSource.includes('Netto salaris'),
+    false,
+    'Personnel cost calculator must not present concept preview as definitive net salary'
+  );
+
+  const routePersonnelCostsSource = fs.readFileSync(path.join(repoRoot, 'src/components/routes/RoutePersonnelCosts.jsx'), 'utf8');
+  assert.ok(
+    routePersonnelCostsSource.includes('record_payroll_run: false'),
+    'Route personnel cost preview must never record PayrollCalculationRun records'
+  );
+  assert.ok(
+    routePersonnelCostsSource.includes('require_payroll_final: false'),
+    'Route personnel cost preview must explicitly stay out of payroll-final mode'
+  );
+  assert.ok(
+    routePersonnelCostsSource.includes('calculation_context: "route_concept_cost_preview"'),
+    'Route personnel cost preview must identify itself as concept preview'
+  );
+  assert.ok(
+    routePersonnelCostsSource.includes('Routekosten zijn een conceptpreview'),
+    'Route personnel cost UI must visibly label route costs as concept preview'
+  );
 }
 
 async function main() {
