@@ -13,6 +13,7 @@ import WizardStep6Mobility from "./wizard/WizardStep6Mobility";
 import WizardStep7ICE from "./wizard/WizardStep7ICE";
 import WizardStep8Review from "./wizard/WizardStep8Review";
 import PersonnelAccessTab from "./PersonnelAccessTab";
+import PersonnelContractsTab from "./PersonnelContractsTab";
 
 const BASE_STEPS = [
   { label: "Bedrijf & rol" },
@@ -60,7 +61,7 @@ export default function PersonnelWizard({ person, onClose }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(0);
 
-  const STEPS = person ? [...BASE_STEPS, { label: "App-toegang" }] : BASE_STEPS;
+  const STEPS = person ? [...BASE_STEPS, { label: "Contracten" }, { label: "App-toegang" }] : BASE_STEPS;
   const { data: companies = [] } = useQuery({ queryKey: ["companies"], queryFn: () => base44.entities.Company.list() });
 
   const [form, setForm] = useState(person || {
@@ -260,7 +261,10 @@ export default function PersonnelWizard({ person, onClose }) {
       cvDoc={cvDoc} onCvChange={(f, v) => setCvDoc(d => ({ ...d, [f]: v }))}
     />,
     <WizardStep8Review form={form} sensitiveData={sensitiveData} idDoc={idDoc} bankAccount={bankAccount} iceContacts={iceContacts} vogDoc={vogDoc} />,
-    ...(person ? [<PersonnelAccessTab personnel={person} />] : []),
+    ...(person ? [
+      <PersonnelContractsTab personnel={person} companies={companies} />,
+      <PersonnelAccessTab personnel={person} />
+    ] : []),
     ];
 
   return (

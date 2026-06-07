@@ -3913,12 +3913,16 @@ function buildContractRulePersistence(result) {
     ? (contractBasis.missing_evidence || []).map(item => item.field || item.rule_id).filter(Boolean)
     : undefined;
   return {
+    company_id: recommendedContractUpdate.company_id ?? undefined,
+    cao_key: recommendedContractUpdate.cao_key ?? undefined,
+    cao_configuration_id: recommendedContractUpdate.cao_configuration_id ?? undefined,
     contract_context_status: contractBasis?.status ?? undefined,
     contract_context_missing_fields: contractContextMissingFields,
     contract_context_checked_at: contractBasis ? new Date().toISOString() : undefined,
     planning_allowed: contractBasis ? result.contract_final_allowed === true : undefined,
     contract_final_allowed: result.contract_final_allowed ?? undefined,
     payroll_final_allowed: result.payroll_final_allowed ?? undefined,
+    is_current: contractBasis ? result.contract_final_allowed === true : undefined,
     employment_contract_model: recommendedContractUpdate.employment_contract_model ?? result.employment_contract_model?.employment_contract_model ?? undefined,
     parttime_contract_model: recommendedContractUpdate.parttime_contract_model ?? result.employment_contract_model?.parttime_contract_model ?? undefined,
     employment_contract_model_rule_status: result.employment_contract_model?.employment_contract_model_status ?? undefined,
