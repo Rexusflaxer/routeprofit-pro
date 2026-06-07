@@ -550,6 +550,228 @@ function runPlanningAssignmentDecisionScenarios() {
   assert.equal(scheduleRequired.payroll_final_allowed, false);
 }
 
+function runIntegratedMultiCompanyPlanningContractScenarios() {
+  const object = {
+    id: 'object-factory',
+    default_operating_company_id: 'company-security-bv',
+    cao_key: 'cao_particuliere_beveiliging',
+    default_service_function_type: 'objectbeveiliger',
+    default_cao_function_group: 'objectbeveiliger_receptionist',
+    default_cao_function_level: 'a',
+    default_security_role_status: 'beveiliger',
+    default_performs_security_work: true,
+    default_security_work_percentage: 100
+  };
+  const task = {
+    id: 'task-factory-reception-weekday',
+    object_id: 'object-factory',
+    cao_key: 'cao_particuliere_beveiliging',
+    service_function_type: 'objectbeveiliger',
+    required_cao_function_group: 'objectbeveiliger_receptionist',
+    required_cao_function_level: 'a',
+    required_security_role_status: 'beveiliger',
+    performs_security_work: true,
+    security_work_percentage: 100,
+    contract_assignment_policy: 'strict_contract_match',
+    customer_billable: true,
+    counts_toward_required_staffing: true
+  };
+  const serviceContext = contractResolver.inferServiceContext({
+    body: {
+      service_date: '2026-01-15',
+      task_id: task.id,
+      object_id: object.id
+    },
+    task,
+    object,
+    route: null
+  });
+  const serviceReadiness = contractResolver.evaluateServiceContextReadiness(serviceContext);
+  assert.equal(serviceContext.company_id, 'company-security-bv');
+  assert.equal(serviceContext.company_id_source, 'object.default_operating_company_id');
+  assert.equal(serviceContext.cao_key, 'cao_particuliere_beveiliging');
+  assert.equal(serviceContext.function_type, 'objectbeveiliger');
+  assert.equal(serviceContext.cao_function_group, 'objectbeveiliger_receptionist');
+  assert.equal(serviceReadiness.status, 'planning_context_ready');
+
+  const securityContract = {
+    id: 'contract-security-company',
+    personnel_id: 'person-security',
+    company_id: 'company-security-bv',
+    cao_key: 'cao_particuliere_beveiliging',
+    cao_configuration_id: 'cao-config-pb-2026',
+    contract_start_date: '2026-01-01',
+    contract_end_date: '2026-12-31',
+    function_type: 'objectbeveiliger',
+    allowed_function_types: ['objectbeveiliger', 'receptie'],
+    cao_function_group: 'objectbeveiliger_receptionist',
+    allowed_cao_function_groups: ['objectbeveiliger_receptionist'],
+    cao_function_level: 'a',
+    allowed_cao_function_levels: ['a', 'b', 'c'],
+    security_role_status: 'beveiliger',
+    allowed_security_role_statuses: ['beveiliger'],
+    performs_security_work: true,
+    security_work_percentage: 100,
+    cao_scope_profile: 'full_security_worker',
+    planning_allowed: true,
+    payroll_final_allowed: true
+  };
+  const nonSecuritySameCompanyContract = {
+    id: 'contract-customer-relations',
+    personnel_id: 'person-customer-relations',
+    company_id: 'company-security-bv',
+    cao_key: 'cao_particuliere_beveiliging',
+    cao_configuration_id: 'cao-config-pb-2026',
+    contract_start_date: '2026-01-01',
+    contract_end_date: '2026-12-31',
+    function_type: 'klantrelatie',
+    allowed_function_types: ['klantrelatie'],
+    cao_function_group: 'non_security_staff',
+    allowed_cao_function_groups: ['non_security_staff'],
+    cao_function_level: 'not_applicable',
+    allowed_cao_function_levels: ['not_applicable'],
+    security_role_status: 'not_applicable',
+    allowed_security_role_statuses: ['not_applicable'],
+    performs_security_work: false,
+    security_work_percentage: 0,
+    cao_scope_profile: 'non_security_work_article_3_exception',
+    planning_allowed: true,
+    payroll_final_allowed: true
+  };
+  const otherCompanySecurityContract = {
+    ...securityContract,
+    id: 'contract-other-company',
+    personnel_id: 'person-other-company',
+    company_id: 'company-other-bv'
+  };
+
+  const candidates = contractResolver.resolveCompanyScopedContractCandidates({
+    activeContracts: [securityContract, nonSecuritySameCompanyContract, otherCompanySecurityContract],
+    companyId: serviceContext.company_id,
+    serviceDate: serviceContext.service_date
+  });
+  assert.deepEqual(
+    candidates.contract_candidates.map(contract => contract.id).sort(),
+    ['contract-customer-relations', 'contract-security-company'],
+    'Only contracts of the operating company may be considered for this object service'
+  );
+  assertIncludes(candidates.ignored_other_company_contract_ids, 'contract-other-company', 'Contract from another employer must be ignored');
+
+  const securityFunctionMatch = contractResolver.evaluateFunctionMatch(securityContract, serviceContext);
+  const securityScopeMatch = contractResolver.evaluateSecurityScopeMatch(securityContract, serviceContext);
+  assert.equal(securityFunctionMatch.matched, true);
+  assert.equal(securityScopeMatch.matched, true);
+
+  const nonSecurityFunctionMatch = contractResolver.evaluateFunctionMatch(nonSecuritySameCompanyContract, serviceContext);
+  const nonSecurityScopeMatch = contractResolver.evaluateSecurityScopeMatch(nonSecuritySameCompanyContract, serviceContext);
+  assert.equal(nonSecurityFunctionMatch.matched, false, 'Klantrelatie contract must not match objectbeveiliger/receptiedienst');
+  assert.equal(nonSecurityScopeMatch.matched, false, 'Non-security article 3 contract must not match a security object service');
+  assert.ok(nonSecurityScopeMatch.blocking_checks.length > 0);
+
+  const runtimeReadiness = {
+    cao_readiness: [{
+      cao_key: 'cao_particuliere_beveiliging',
+      status: 'local_payroll_runtime_supported',
+      payroll_final_allowed_by_static_runtime: true,
+      planning_final_allowed_by_static_runtime: true,
+      manual_review_required: false,
+      blocking_reasons: []
+    }]
+  };
+  const serviceContextValidation = {
+    service_context: serviceContext,
+    service_context_readiness: serviceReadiness
+  };
+  const contractResolution = {
+    status: 'resolved',
+    planning_allowed: true,
+    payroll_final_allowed: true,
+    manual_review_required: false,
+    personnel_id: securityContract.personnel_id,
+    company_id: serviceContext.company_id,
+    contract_id: securityContract.id,
+    cao_key: securityContract.cao_key,
+    cao_configuration_id: securityContract.cao_configuration_id,
+    selected_contract: securityContract,
+    service_context: serviceContext,
+    service_context_readiness: serviceReadiness,
+    function_match: securityFunctionMatch,
+    security_scope_match: securityScopeMatch,
+    blocking_reasons: [],
+    manual_review_reasons: [],
+    warnings: candidates.warnings
+  };
+  const scheduleValidation = {
+    planning_allowed: true,
+    payroll_final_allowed: true,
+    calculation_status: 'final',
+    blocking_reasons: [],
+    manual_review_reasons: [],
+    warnings: [],
+    source_rule_ids: ['CAO-PB-2024-R0560', 'CAO-PB-2024-R0590']
+  };
+  const decision = planningAssignment.buildCaoPlanningAssignmentDecision({
+    body: { personnel_id: securityContract.personnel_id },
+    serviceContextValidation,
+    contractResolution,
+    scheduleValidation,
+    caoRuntimeReadiness: runtimeReadiness,
+    requireScheduleValidation: true
+  });
+  assert.equal(decision.decision_status, 'assignable');
+  assert.equal(decision.planning_assignment_allowed, true);
+  assert.equal(decision.payroll_final_allowed, true);
+  assert.equal(decision.company_id, 'company-security-bv');
+  assert.equal(decision.contract_id, 'contract-security-company');
+  assert.equal(decision.cao_configuration_id, 'cao-config-pb-2026');
+  assert.equal(decision.task_id, 'task-factory-reception-weekday');
+  assert.equal(decision.object_id, 'object-factory');
+
+  const blockedNonSecurityDecision = planningAssignment.buildCaoPlanningAssignmentDecision({
+    body: { personnel_id: nonSecuritySameCompanyContract.personnel_id },
+    serviceContextValidation,
+    contractResolution: {
+      ...contractResolution,
+      status: 'blocked',
+      planning_allowed: false,
+      payroll_final_allowed: false,
+      manual_review_required: true,
+      personnel_id: nonSecuritySameCompanyContract.personnel_id,
+      contract_id: nonSecuritySameCompanyContract.id,
+      selected_contract: nonSecuritySameCompanyContract,
+      function_match: nonSecurityFunctionMatch,
+      security_scope_match: nonSecurityScopeMatch,
+      blocking_reasons: [
+        'Arbeidscontractfunctie klantrelatie/non_security_staff matcht niet met objectbeveiliger_receptionist.',
+        'Arbeidscontract valt onder artikel 3 niet-beveiligingswerk en mag niet op beveiligingsdienst worden gepland.'
+      ],
+      manual_review_reasons: []
+    },
+    scheduleValidation,
+    caoRuntimeReadiness: runtimeReadiness,
+    requireScheduleValidation: true
+  });
+  assert.equal(blockedNonSecurityDecision.decision_status, 'blocked');
+  assert.equal(blockedNonSecurityDecision.planning_assignment_allowed, false);
+  assert.equal(blockedNonSecurityDecision.payroll_final_allowed, false);
+  assert.ok(
+    blockedNonSecurityDecision.blocking_reasons.some(reason => reason.includes('niet-beveiligingswerk')),
+    'Security service assigned to non-security contract must block with article 3 scope reason'
+  );
+
+  const wrongCompanyCandidates = contractResolver.resolveCompanyScopedContractCandidates({
+    activeContracts: [otherCompanySecurityContract],
+    companyId: serviceContext.company_id,
+    serviceDate: serviceContext.service_date
+  });
+  assert.equal(wrongCompanyCandidates.contract_candidates.length, 0);
+  assert.equal(wrongCompanyCandidates.contract_selection_policy, 'no_company_scoped_contract_candidates');
+  assert.ok(
+    wrongCompanyCandidates.blocking_reasons.some(reason => reason.includes('bedrijf company-security-bv')),
+    'A valid-looking security contract from another operating company must still be unusable'
+  );
+}
+
 async function runContractScopePersistenceScenarios() {
   const result = await contractRules.evaluateContractBasis({ asServiceRole: { entities: {} } }, {
     body: {
@@ -1468,6 +1690,7 @@ async function main() {
     ['policy reference context', () => runPolicyReferenceContextScenarios()],
     ['contract resolver scope', () => runContractResolverScenarios()],
     ['planning assignment decision', () => runPlanningAssignmentDecisionScenarios()],
+    ['integrated multi-company planning contract flow', () => runIntegratedMultiCompanyPlanningContractScenarios()],
     ['contract scope persistence', () => runContractScopePersistenceScenarios()],
     ['probation rules', () => runProbationScenarios()],
     ['effective-date correction queue', () => runEffectiveDateCorrectionScenarios()],
