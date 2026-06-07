@@ -86,7 +86,7 @@ function resolveScopedCaoRequest({ explicitCaoKey, contract, workContext, person
  * resolveCaoApplicability
  * Bepaalt per medewerker welke CAO PB-regels van toepassing zijn.
  * Juridisch conservatief: bij twijfel altijd manual_review_required=true.
- * Bronregels: CAO-PB-2024-R0227 t/m R0233 (artikel 3 lid 2 uitzonderingen)
+ * Bronregels: CAO-PB-2024-R0164, R0227 t/m R0234 (artikel 3/4 scope en rechten)
  */
 
 const SECURITY_FUNCTION_GROUPS = [
@@ -417,7 +417,7 @@ function buildPayrollProfile(mode) {
 
 function resolveApplicability(personnel, contract, work_context) {
   const warnings = [];
-  const source_rule_ids = [];
+  const source_rule_ids = ['CAO-PB-2024-R0164', 'CAO-PB-2024-R0234'];
   const scopeSubject = buildRuleSubject(personnel || {}, contract || {}, work_context || {});
   const p = scopeSubject.subject;
   const wc = work_context || {};

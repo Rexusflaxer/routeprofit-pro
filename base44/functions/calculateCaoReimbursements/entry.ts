@@ -256,7 +256,7 @@ function resolveReimbursementParameters(caoConfig) {
       meal: meal.source_rule_ids || ['CAO-PB-2024-R0838', 'CAO-PB-2024-R0877', 'CAO-PB-2024-R0878', 'CAO-PB-2024-R0879', 'CAO-PB-2024-R0880', 'CAO-PB-2024-R0881', 'CAO-PB-2024-R0882', 'CAO-PB-2024-R0883', 'CAO-PB-2024-R0884'],
       break_availability: breakAvailability.source_rule_ids || ['CAO-PB-2024-R0839', 'CAO-PB-2024-R0887', 'CAO-PB-2024-R0888', 'CAO-PB-2024-R0889', 'CAO-PB-2024-R0891', 'CAO-PB-2024-R0892', 'CAO-PB-2024-R0893', 'CAO-PB-2024-R0894', 'CAO-PB-2024-R0896'],
       consignment: consignment.source_rule_ids || ['CAO-PB-2024-R0840', 'CAO-PB-2024-R0897', 'CAO-PB-2024-R0898', 'CAO-PB-2024-R0899', 'CAO-PB-2024-R0900', 'CAO-PB-2024-R0901', 'CAO-PB-2024-R0902', 'CAO-PB-2024-R0903', 'CAO-PB-2024-R0904', 'CAO-PB-2024-R0906', 'CAO-PB-2024-R0907', 'CAO-PB-2024-R0908', 'CAO-PB-2024-R0909'],
-      dog: dog.source_rule_ids || ['CAO-PB-2024-R0841', 'CAO-PB-2024-R0910', 'CAO-PB-2024-R0911', 'CAO-PB-2024-R0912', 'CAO-PB-2024-R0913', 'CAO-PB-2024-R0914', 'CAO-PB-2024-R0915', 'CAO-PB-2024-R0916', 'CAO-PB-2024-R0917', 'CAO-PB-2024-R0919', 'CAO-PB-2024-R0920', 'CAO-PB-2024-R0921', 'CAO-PB-2024-R0923', 'CAO-PB-2024-R0925', 'CAO-PB-2024-R0926', 'CAO-PB-2024-R0927', 'CAO-PB-2024-R0928', 'CAO-PB-2024-R0931'],
+      dog: dog.source_rule_ids || ['CAO-PB-2024-R0841', 'CAO-PB-2024-R0910', 'CAO-PB-2024-R0911', 'CAO-PB-2024-R0912', 'CAO-PB-2024-R0913', 'CAO-PB-2024-R0914', 'CAO-PB-2024-R0915', 'CAO-PB-2024-R0916', 'CAO-PB-2024-R0917', 'CAO-PB-2024-R0919', 'CAO-PB-2024-R0920', 'CAO-PB-2024-R0921', 'CAO-PB-2024-R0922', 'CAO-PB-2024-R0923', 'CAO-PB-2024-R0925', 'CAO-PB-2024-R0926', 'CAO-PB-2024-R0927', 'CAO-PB-2024-R0928', 'CAO-PB-2024-R0930', 'CAO-PB-2024-R0931'],
       dry_cleaning: ['CAO-PB-2024-R0842', 'CAO-PB-2024-R0937', 'CAO-PB-2024-R0938'],
       accommodation: ['CAO-PB-2024-R0843', 'CAO-PB-2024-R0939', 'CAO-PB-2024-R0940', 'CAO-PB-2024-R0945'],
       jubilee: ['CAO-PB-2024-R0844', 'CAO-PB-2024-R0941', 'CAO-PB-2024-R0942', 'CAO-PB-2024-R0943', 'CAO-PB-2024-R0944', 'CAO-PB-2024-R0946', 'CAO-PB-2024-R0947'],
@@ -1003,6 +1003,10 @@ function calculateDogAllowance(input, parameters = resolveReimbursementParameter
   const worksWithDog = booleanOrNull(input.works_with_dog ?? input.dog_service_performed) === true;
   const dogOwner = input.dog_owner || input.dog_ownership || null; // employee | employer
   const employerChoosesDeclarationOnly = booleanOrNull(input.dog_costs_declaration_only) === true;
+  const dogCostsProofRequested = booleanOrNull(input.dog_costs_proof_requested ?? input.employer_requested_dog_costs_proof) === true;
+  const dogCostsProofProvided = booleanOrNull(input.dog_costs_proof_provided ?? input.dog_costs_evidence_provided);
+  const dogTrainingRequiredForWork = booleanOrNull(input.dog_training_required_for_work ?? input.mandatory_dog_training_required) === true;
+  const dogTrainingArrangedOrReimbursed = booleanOrNull(input.dog_training_employer_arranged_or_reimbursed ?? input.dog_training_costs_reimbursed);
   const ratio = parttimeRatio(input, parameters);
   const manualItems = [];
   if (worksWithDog && !dogOwner) {
@@ -1010,6 +1014,12 @@ function calculateDogAllowance(input, parameters = resolveReimbursementParameter
   }
   if (employerChoosesDeclarationOnly) {
     manualItems.push(manualReview('CAO-PB-2024-R0924', 'dog_allowance', 'Werkgever kiest declaratie van werkelijke hondenkosten; forfaitaire kostenvergoeding niet automatisch definitief.', { field: 'dog_costs_declaration_only' }));
+  }
+  if (dogCostsProofRequested && dogCostsProofProvided !== true) {
+    manualItems.push(manualReview('CAO-PB-2024-R0922', 'dog_allowance', 'Werkgever vraagt bewijs van gemaakte hondenkosten; bewijs moet worden vastgelegd voordat de kostenvergoeding audit-proof definitief is.', { field: 'dog_costs_proof_provided' }));
+  }
+  if (dogTrainingRequiredForWork && dogTrainingArrangedOrReimbursed !== true) {
+    manualItems.push(manualReview('CAO-PB-2024-R0930', 'dog_training', 'Noodzakelijke werktraining met de hond vereist vastlegging dat werkgever training regelt of kosten vergoedt.', { field: 'dog_training_employer_arranged_or_reimbursed' }));
   }
   const serviceAllowance = worksWithDog ? parameters.dog_service_allowance_per_period * ratio : 0;
   let dogCostAllowance = 0;

@@ -10,6 +10,7 @@
     "lint:fix": "eslint . --fix",
     "typecheck": "tsc -p ./jsconfig.json",
     "verify:cao-foundation": "node scripts/verify-cao-foundation.mjs",
+    "audit:cao-coverage": "node scripts/audit-cao-coverage.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

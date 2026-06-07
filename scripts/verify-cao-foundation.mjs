@@ -28,6 +28,7 @@ const leaveSickness = loadFunctionModule('base44/functions/calculateCaoLeaveAndS
 const yearEndBonus = loadFunctionModule('base44/functions/calculateCaoYearEndBonus/entry.ts');
 const personnelCosts = loadFunctionModule('base44/functions/calculatePersonnelCosts/entry.ts');
 const functionClassification = loadFunctionModule('base44/functions/resolveCaoFunctionClassification/entry.ts');
+const caoApplicability = loadFunctionModule('base44/functions/resolveCaoApplicability/entry.ts');
 
 function assertIncludes(values, expected, message) {
   assert.ok(values.includes(expected), `${message}: expected ${expected} in ${JSON.stringify(values)}`);
@@ -105,6 +106,22 @@ function runPlanningContextScenarios() {
     trafficReadiness.manual_review_reasons.some(reason => reason.includes('cao_verkeersregelaars')),
     'Unsupported inferred traffic-controller CAO must force manual review'
   );
+}
+
+function runCaoApplicabilityScenarios() {
+  const nonSecurityApplicability = caoApplicability.resolveApplicability({
+    function_type: 'klantrelatie',
+    performs_security_work: false,
+    security_work_percentage: 0,
+    security_role_status: 'not_applicable'
+  }, {}, {});
+  assert.equal(nonSecurityApplicability.cao_scope_profile, 'non_security_work_article_3_exception');
+  assert.equal(nonSecurityApplicability.applies_cao_pb, true);
+  assert.equal(nonSecurityApplicability.applies_full_security_rules, false);
+  assert.equal(nonSecurityApplicability.manual_review_required, false);
+  assertIncludes(nonSecurityApplicability.source_rule_ids, 'CAO-PB-2024-R0164', 'Article 4 rights source rule must be retained in applicability output');
+  assertIncludes(nonSecurityApplicability.source_rule_ids, 'CAO-PB-2024-R0234', 'Article 4 rights source rule must be retained in applicability output');
+  assertIncludes(nonSecurityApplicability.source_rule_ids, 'CAO-PB-2024-R0233', 'Appendix 2 exclusion source rule must be retained for non-security work');
 }
 
 function runContractResolverScenarios() {
@@ -423,6 +440,22 @@ function runReimbursementScenarios() {
   assertAlmostEqual(dogAllowance.parttime_ratio, 0.5, 'Dog allowance must be prorated for part-time work');
   assertAlmostEqual(dogAllowance.amount_gross, 57.62, 'Dog service allowance gross amount mismatch');
   assertAlmostEqual(dogAllowance.amount_net, 72.02, 'Dog owner cost allowance net amount mismatch');
+
+  const dogProofReview = reimbursements.calculateDogAllowance({
+    works_with_dog: true,
+    dog_owner: 'employee',
+    dog_costs_proof_requested: true,
+    dog_training_required_for_work: true
+  }, params);
+  assert.equal(dogProofReview.manual_review_required, true);
+  assert.ok(
+    dogProofReview.manual_review_items.some(item => item.rule_id === 'CAO-PB-2024-R0922'),
+    'Dog cost proof request must require evidence review'
+  );
+  assert.ok(
+    dogProofReview.manual_review_items.some(item => item.rule_id === 'CAO-PB-2024-R0930'),
+    'Required dog training must require employer arrangement/reimbursement evidence'
+  );
 }
 
 function runLeaveSicknessScenarios() {
@@ -648,12 +681,15 @@ function runFunctionClassificationScenarios() {
   assert.equal(security.payroll_final_allowed, true);
   assertIncludes(security.source_rule_ids, 'CAO-PB-2024-R1812', 'Function-to-salary-scale mapping source missing');
   assertIncludes(security.source_rule_ids, 'CAO-PB-2024-R1838', 'Appendix 4 wage-scale source missing');
+  assertIncludes(security.source_rule_ids, 'CAO-PB-2024-R1753', 'Objectbeveiliger/receptionist function description source missing');
+  assertIncludes(security.source_rule_ids, 'CAO-PB-2024-R1755', 'Winkelsurveillant function description source missing');
 }
 
 async function main() {
   const scenarios = [
     ['external CAO gates', () => runExternalCaoGateScenarios()],
     ['planning context', () => runPlanningContextScenarios()],
+    ['CAO applicability', () => runCaoApplicabilityScenarios()],
     ['contract resolver scope', () => runContractResolverScenarios()],
     ['contract scope persistence', () => runContractScopePersistenceScenarios()],
     ['probation rules', () => runProbationScenarios()],

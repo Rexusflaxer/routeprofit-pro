@@ -92,7 +92,9 @@ function resolveScopedCaoRequest({ explicitCaoKey, contract, workContext, person
  */
 
 const APPENDIX_2_FUNCTION_CLASSIFICATION_SOURCE_RULE_IDS = [
+  'CAO-PB-2024-R1753',
   'CAO-PB-2024-R1754',
+  'CAO-PB-2024-R1755',
   'CAO-PB-2024-R1757',
   'CAO-PB-2024-R1758',
   'CAO-PB-2024-R1760',
