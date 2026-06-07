@@ -1513,11 +1513,121 @@ function buildSemanticBacklog({
   };
 }
 
+function isActionableRuntimeRule(rule) {
+  const automationLevel = String(rule?.automation_level || '').toLowerCase();
+  const calculationPolicy = String(rule?.calculation_policy || '').toLowerCase();
+  return calculationPolicy === 'automatic' ||
+    ['automatic_or_calculation', 'validation_or_policy', 'workflow_or_documentation'].includes(automationLevel);
+}
+
+function createRuntimeCoverageBucket(key) {
+  return {
+    key: key || 'unknown',
+    total_rules: 0,
+    actionable_rules: 0,
+    runtime_bound_rules: 0,
+    actionable_runtime_bound_rules: 0,
+    actionable_runtime_missing_rules: 0,
+    implemented_rules: 0,
+    partial_rules: 0,
+    missing_rules: 0,
+    reference_rules: 0,
+    manual_review_required_rules: 0,
+    missing_actionable_rule_ids: [],
+    missing_actionable_rule_ids_truncated: false
+  };
+}
+
+function updateRuntimeCoverageBucket(bucket, rule, runtimeBound, maxRuleIds) {
+  const actionable = isActionableRuntimeRule(rule);
+  const status = String(rule?.implementation_status || 'MISSING').toUpperCase();
+  bucket.total_rules++;
+  if (actionable) bucket.actionable_rules++;
+  if (runtimeBound) bucket.runtime_bound_rules++;
+  if (actionable && runtimeBound) bucket.actionable_runtime_bound_rules++;
+  if (actionable && !runtimeBound) {
+    bucket.actionable_runtime_missing_rules++;
+    if (bucket.missing_actionable_rule_ids.length < maxRuleIds) {
+      bucket.missing_actionable_rule_ids.push(rule.rule_id || 'unknown');
+    } else {
+      bucket.missing_actionable_rule_ids_truncated = true;
+    }
+  }
+  if (status === 'IMPLEMENTED') bucket.implemented_rules++;
+  else if (status === 'PARTIAL') bucket.partial_rules++;
+  else if (status === 'MISSING') bucket.missing_rules++;
+  else if (status === 'REFERENCE') bucket.reference_rules++;
+  if (rule?.manual_review_required === true) bucket.manual_review_required_rules++;
+}
+
+function finalizeRuntimeCoverageBucket(bucket) {
+  return {
+    ...bucket,
+    runtime_bound_pct: bucket.total_rules > 0
+      ? Number(((bucket.runtime_bound_rules / bucket.total_rules) * 100).toFixed(1))
+      : 0,
+    actionable_runtime_bound_pct: bucket.actionable_rules > 0
+      ? Number(((bucket.actionable_runtime_bound_rules / bucket.actionable_rules) * 100).toFixed(1))
+      : null
+  };
+}
+
+function sortedRuntimeCoverageBuckets(map, maxGroups) {
+  return [...map.values()]
+    .map(finalizeRuntimeCoverageBucket)
+    .sort((a, b) =>
+      b.actionable_runtime_missing_rules - a.actionable_runtime_missing_rules ||
+      b.actionable_rules - a.actionable_rules ||
+      b.total_rules - a.total_rules ||
+      a.key.localeCompare(b.key)
+    )
+    .slice(0, maxGroups);
+}
+
+function buildRuntimeCoverageRollup(rules, maxGroups = 100, maxRuleIds = 25) {
+  const total = createRuntimeCoverageBucket('all');
+  const byDomain = new Map();
+  const byChapter = new Map();
+  const byArticle = new Map();
+  const byAutomationLevel = new Map();
+
+  for (const rule of Array.isArray(rules) ? rules : []) {
+    const runtimeBound = Boolean(getLocalRuntimeBinding(rule));
+    const keys = {
+      domain: rule.domain || 'unknown',
+      chapter: rule.chapter || 'unknown',
+      article: rule.article || 'unknown',
+      automation_level: rule.automation_level || 'unknown'
+    };
+    updateRuntimeCoverageBucket(total, rule, runtimeBound, maxRuleIds);
+    for (const [map, key] of [
+      [byDomain, keys.domain],
+      [byChapter, keys.chapter],
+      [byArticle, keys.article],
+      [byAutomationLevel, keys.automation_level]
+    ]) {
+      if (!map.has(key)) map.set(key, createRuntimeCoverageBucket(key));
+      updateRuntimeCoverageBucket(map.get(key), rule, runtimeBound, maxRuleIds);
+    }
+  }
+
+  return {
+    total: finalizeRuntimeCoverageBucket(total),
+    by_domain: sortedRuntimeCoverageBuckets(byDomain, maxGroups),
+    by_chapter: sortedRuntimeCoverageBuckets(byChapter, maxGroups),
+    by_article: sortedRuntimeCoverageBuckets(byArticle, maxGroups),
+    by_automation_level: sortedRuntimeCoverageBuckets(byAutomationLevel, maxGroups),
+    sort_order: 'highest actionable_runtime_missing_rules first',
+    generation_note: 'Owner/internal CAO runtime coverage rollup. Gebruik dit om implementatiebatches te prioriteren; niet tonen aan eindgebruikers.'
+  };
+}
+
 async function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
   const rules = Array.isArray(candidateRules) ? candidateRules : [];
   const caoKey = normalizeCaoKey(candidateCfg?.cao_key) || CAO_PB_KEY;
   const sourceCoverage = evaluateSourceCoverageCompleteness(candidateCfg, rules);
   const localRuntimeRegistry = await buildLocalRuntimeBindingRegistrySnapshot();
+  const runtimeCoverage = buildRuntimeCoverageRollup(rules);
   const counts = {
     total: rules.length,
     unique_rule_ids: sourceCoverage.unique_rule_ids,
@@ -1792,6 +1902,7 @@ async function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
     counts,
     source_coverage: sourceCoverage,
     local_runtime_registry: localRuntimeRegistry,
+    runtime_coverage: runtimeCoverage,
     semantic_backlog: semanticBacklog,
     blocking_findings: blockingFindings,
     open_payroll_critical_rules: openCriticalRules.slice(0, 100),
