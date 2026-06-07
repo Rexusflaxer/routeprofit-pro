@@ -6,8 +6,11 @@ import { Button } from "@/components/ui/button";
 import { Plus, X } from "lucide-react";
 
 const FUNCTION_TYPES = [
+  { value: "objectbeveiliger", label: "Objectbeveiliger" },
+  { value: "receptie", label: "Receptie" },
   { value: "surveillant", label: "Surveillant" },
   { value: "binnendienst", label: "Binnendienst" },
+  { value: "klantrelatie", label: "Klantrelatie" },
   { value: "planner", label: "Planner" },
   { value: "centralist", label: "Centralist" },
   { value: "verkeersregelaar", label: "Verkeersregelaar" },
@@ -34,9 +37,12 @@ export default function WizardStep1Company({ form, onChange, companies, assignme
         </div>
         <div className="space-y-1">
           <Label>Functietype</Label>
-          <Select value={form.function_type || "surveillant"} onValueChange={v => onChange("function_type", v)}>
+          <Select value={form.function_type || "unknown"} onValueChange={v => onChange("function_type", v === "unknown" ? null : v)}>
             <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>{FUNCTION_TYPES.map(f => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}</SelectContent>
+            <SelectContent>
+              <SelectItem value="unknown">Kies functietype</SelectItem>
+              {FUNCTION_TYPES.map(f => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
+            </SelectContent>
           </Select>
         </div>
         <div className="space-y-1">

@@ -47,9 +47,11 @@ export default function CaoApplicabilityPanel({ form, onChange, personnelId }) {
     setResolveResult(null);
     try {
       const res = await base44.functions.invoke('resolveCaoApplicability', {
+        cao_key: form.cao || null,
         personnel_id: personnelId || undefined,
         personnel: personnelId ? undefined : form,
         work_context: {
+          cao_key: form.cao || null,
           performs_security_work: form.performs_security_work,
           security_work_percentage: form.security_work_percentage,
           works_airport_schiphol: form.works_airport_schiphol,

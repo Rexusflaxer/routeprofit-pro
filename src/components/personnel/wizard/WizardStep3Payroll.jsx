@@ -8,6 +8,13 @@ import { base44 } from "@/api/base44Client";
 import ContractRulesPanel from "@/components/personnel/ContractRulesPanel";
 import CaoApplicabilityPanel from "@/components/personnel/CaoApplicabilityPanel";
 
+const CAO_OPTIONS = [
+  { value: "cao_particuliere_beveiliging", label: "CAO Particuliere Beveiliging" },
+  { value: "cao_evenementen_horecabeveiliging", label: "CAO Evenementen- en Horecabeveiliging" },
+  { value: "cao_verkeersregelaars", label: "CAO Verkeersregelaars" },
+  { value: "cao_veiligheidsdomein", label: "CAO Veiligheidsdomein" }
+];
+
 export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSensitiveChange, personnelId }) {
   const [showBsn, setShowBsn] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
@@ -21,6 +28,24 @@ export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSe
 
   return (
     <div className="space-y-6">
+      <div className="rounded-xl border border-border p-4 space-y-3">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contract-CAO</p>
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+          <div className="space-y-1">
+            <Label>Toepasselijke CAO</Label>
+            <Select value={form.cao || "unknown"} onValueChange={v => onChange("cao", v === "unknown" ? null : v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unknown">Kies expliciet een CAO</SelectItem>
+                {CAO_OPTIONS.map(option => (
+                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+        </div>
+      </div>
+
       {/* CAO PB toepassingsprofiel */}
       <div className="rounded-xl border border-border p-4">
         <CaoApplicabilityPanel form={form} onChange={onChange} personnelId={personnelId} />

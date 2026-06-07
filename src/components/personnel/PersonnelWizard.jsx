@@ -33,8 +33,8 @@ export default function PersonnelWizard({ person, onClose }) {
   const { data: companies = [] } = useQuery({ queryKey: ["companies"], queryFn: () => base44.entities.Company.list() });
 
   const [form, setForm] = useState(person || {
-    name: "", status: "draft", function_type: "surveillant", employee_type: "loondienst",
-    cao: "cao_particuliere_beveiliging", cao_scale: null, cao_period: null, payroll_final_allowed: false, is_active: true,
+    name: "", status: "draft", function_type: null, employee_type: "loondienst",
+    cao: null, cao_scale: null, cao_period: null, payroll_final_allowed: false, is_active: true,
     country: "Nederland", wpbr_required: false,
   });
   const [sensitiveData, setSensitiveData] = useState({ bsn: "", identity_verified_at_hire: false, payroll_notes: "" });
@@ -89,7 +89,7 @@ export default function PersonnelWizard({ person, onClose }) {
           await base44.entities.PersonnelContract.create({
             personnel_id: personnelId,
             company_id: companyId,
-            cao_key: data.personnel.cao || "cao_particuliere_beveiliging",
+            cao_key: data.personnel.cao || null,
             cao_configuration_id: data.personnel.cao_configuration_id || null,
             contract_form: data.personnel.contract_form || "unknown",
             contract_start_date: data.personnel.contract_start_date || null,
