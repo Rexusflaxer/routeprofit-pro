@@ -28,6 +28,37 @@ const CAO_PB_2024_2026_SOURCE_COVERAGE_MINIMUMS = {
   workflow_or_documentation: 84
 };
 
+const EMPTY_SOURCE_COVERAGE_MINIMUMS = {
+  total: 0,
+  automatic_or_calculation: 0,
+  validation_or_policy: 0,
+  workflow_or_documentation: 0
+};
+
+const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const CAO_EVENT_HOSPITALITY_SECURITY_KEY = 'cao_evenementen_horecabeveiliging';
+const CAO_TRAFFIC_CONTROLLERS_KEY = 'cao_verkeersregelaars';
+const CAO_SAFETY_DOMAIN_KEY = 'cao_veiligheidsdomein';
+const KNOWN_SECURITY_CAO_KEYS = [
+  CAO_PB_KEY,
+  CAO_EVENT_HOSPITALITY_SECURITY_KEY,
+  CAO_TRAFFIC_CONTROLLERS_KEY,
+  CAO_SAFETY_DOMAIN_KEY
+];
+const LOCAL_PAYROLL_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+
+function normalizeCaoKey(value) {
+  return String(value || '').trim();
+}
+
+function isKnownSecurityCaoKey(caoKey) {
+  return KNOWN_SECURITY_CAO_KEYS.includes(normalizeCaoKey(caoKey));
+}
+
+function hasLocalPayrollRuntime(caoKey) {
+  return LOCAL_PAYROLL_RUNTIME_CAO_KEYS.includes(normalizeCaoKey(caoKey));
+}
+
 function normalizeDate(value) {
   return value ? String(value).slice(0, 10) : null;
 }
@@ -63,8 +94,11 @@ function getDeclaredCoverageSummary(config) {
 }
 
 function getSourceCoverageMinimums(config) {
+  const caoKey = normalizeCaoKey(config?.cao_key) || CAO_PB_KEY;
   const summary = getDeclaredCoverageSummary(config);
-  const minimums = { ...CAO_PB_2024_2026_SOURCE_COVERAGE_MINIMUMS };
+  const minimums = caoKey === CAO_PB_KEY
+    ? { ...CAO_PB_2024_2026_SOURCE_COVERAGE_MINIMUMS }
+    : { ...EMPTY_SOURCE_COVERAGE_MINIMUMS };
   const declaredTotal = numberOrNull(
     summary.expected_total_rules ??
     summary.total_atomic_rules ??
@@ -108,6 +142,7 @@ function duplicateRuleIds(rules) {
 }
 
 function evaluateSourceCoverageCompleteness(config, rules) {
+  const caoKey = normalizeCaoKey(config?.cao_key) || CAO_PB_KEY;
   const minimums = getSourceCoverageMinimums(config);
   const ruleIds = uniqueRuleIds(rules);
   const byAutomationLevel = countRulesByAutomationLevel(rules);
@@ -117,7 +152,9 @@ function evaluateSourceCoverageCompleteness(config, rules) {
     blockingFindings.push({
       code: 'incomplete_source_rule_coverage',
       severity: 'critical',
-      message: `CAO-broncoverage is incompleet: ${ruleIds.size} unieke regels aanwezig, minimaal ${minimums.total} verwacht voor CAO PB 2024-2026.`
+      message: caoKey === CAO_PB_KEY
+        ? `CAO-broncoverage is incompleet: ${ruleIds.size} unieke regels aanwezig, minimaal ${minimums.total} verwacht voor CAO PB 2024-2026.`
+        : `CAO-broncoverage is incompleet: ${ruleIds.size} unieke regels aanwezig, minimaal ${minimums.total} verwacht voor ${caoKey}.`
     });
   }
 
@@ -237,7 +274,8 @@ function mergeRegistrySnapshotIntoGate(gate, registrySnapshot) {
   const passed = gate.passed === true && registrySnapshot.passed === true;
   let status = gate.status;
   if (!passed) {
-    if (dedupedFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
+    if (dedupedFindings.some(f => f.code === 'unsupported_cao_runtime')) status = 'blocked_unsupported_cao_runtime';
+    else if (dedupedFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
     else if (dedupedFindings.some(f => f.code === 'missing_rules')) status = 'blocked_missing_rules';
     else if (
       dedupedFindings.some(f => String(f.code || '').startsWith('incomplete_')) ||
@@ -328,6 +366,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
   const activeConfigurationCandidates = Array.isArray(options.active_configuration_candidates)
     ? options.active_configuration_candidates
     : [];
+  const caoKey = normalizeCaoKey(config?.cao_key) || CAO_PB_KEY;
   const sourceCoverage = evaluateSourceCoverageCompleteness(config, rules);
   const counts = {
     total: rules.length,
@@ -435,6 +474,13 @@ function evaluateCoverageGate(config, rules, options = {}) {
   }
 
   const blockingFindings = [];
+  if (!hasLocalPayrollRuntime(caoKey)) {
+    blockingFindings.push({
+      code: 'unsupported_cao_runtime',
+      severity: 'critical',
+      message: `CAO ${caoKey} kan worden opgeslagen als owner-approved bronconfiguratie, maar payroll/planning runtime is lokaal nog niet geimplementeerd en geverifieerd.`
+    });
+  }
   blockingFindings.push(...sourceCoverage.blocking_findings);
   if (!config?.valid_from) {
     blockingFindings.push({
@@ -516,7 +562,8 @@ function evaluateCoverageGate(config, rules, options = {}) {
   }
 
   let status = 'ready';
-  if (blockingFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
+  if (blockingFindings.some(f => f.code === 'unsupported_cao_runtime')) status = 'blocked_unsupported_cao_runtime';
+  else if (blockingFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
   else if (blockingFindings.some(f => f.code === 'invalid_cao_validity_range' || f.code === 'ambiguous_active_cao_configurations')) status = 'blocked_ambiguous_effective_date';
   else if (blockingFindings.some(f => f.code === 'missing_rules')) status = 'blocked_missing_rules';
   else if (blockingFindings.some(f => String(f.code || '').startsWith('incomplete_'))) status = 'blocked_incomplete_source_coverage';
@@ -534,6 +581,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
     by_automation_level: countBy(rules, rule => rule.automation_level),
     by_implementation_status: countBy(rules, rule => String(rule.implementation_status || 'MISSING').toUpperCase()),
     by_runtime_binding_status: countBy(rules, rule => runtimeBindingStatusForSummary(rule)),
+    has_local_payroll_runtime: hasLocalPayrollRuntime(caoKey),
     blocking_findings: blockingFindings,
     open_payroll_critical_rules: openCriticalRules.slice(0, maxOpenRules),
     open_payroll_critical_rules_truncated: openCriticalRules.length > maxOpenRules,
@@ -613,7 +661,15 @@ Deno.serve(async (req) => {
       return Response.json({ success: false, error: secretCheck.error }, { status: secretCheck.status });
     }
 
-    const caoKey = body.cao_key || 'cao_particuliere_beveiliging';
+    const caoKey = normalizeCaoKey(body.cao_key || CAO_PB_KEY);
+    if (!isKnownSecurityCaoKey(caoKey)) {
+      return Response.json({
+        success: false,
+        error: `Onbekende CAO sleutel: ${caoKey || '(leeg)'}.`,
+        known_cao_keys: KNOWN_SECURITY_CAO_KEYS
+      }, { status: 400 });
+    }
+
     const referenceDate = normalizeDate(body.reference_date || new Date().toISOString());
     const persistResult = body.persist_result === true;
     const maxOpenRules = Math.min(500, Math.max(25, Number(body.max_open_rules || 100)));
@@ -621,13 +677,14 @@ Deno.serve(async (req) => {
     const configs = await base44.asServiceRole.entities.CAOConfiguration.filter({ cao_key: caoKey });
     const activeCandidates = activeConfigurationCandidates(configs || [], referenceDate);
     const activeConfig = activeCandidates[0] || null;
+    const auditConfig = activeConfig || { cao_key: caoKey };
     const ruleLoad = await loadRulesForConfiguration(base44, caoKey, activeConfig);
     const rules = ruleLoad.rules;
-    const runtimeGate = evaluateCoverageGate(activeConfig || {}, rules || [], {
+    const runtimeGate = evaluateCoverageGate(auditConfig, rules || [], {
       max_open_rules: maxOpenRules,
       active_configuration_candidates: activeCandidates
     });
-    const registrySnapshot = await buildRuleRegistrySnapshot(activeConfig || {}, rules || []);
+    const registrySnapshot = await buildRuleRegistrySnapshot(auditConfig, rules || []);
     const gate = mergeRegistrySnapshotIntoGate(runtimeGate, registrySnapshot);
 
     const requestedPayrollReady = activeConfig?.is_payroll_ready === true;
