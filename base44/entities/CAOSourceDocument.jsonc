@@ -10,15 +10,40 @@
       "type": "string",
       "enum": [
         "cao_page",
+        "official_webpage",
+        "news_page",
+        "news_update",
         "cao_pdf",
         "wage_table_pdf",
+        "wage_table_xlsx",
         "pay_periods_pdf",
+        "pay_periods_xlsx",
         "fonds_cao_pdf",
         "faq_page",
+        "question_answer_page",
+        "sociale_commissie_page",
         "sociale_commissie_pdf",
+        "sociale_commissie_decision_pdf",
+        "protocol_pdf",
+        "appendix_pdf",
+        "ministerial_registration",
         "other"
       ],
       "description": "Type brondocument"
+    },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "CAO sleutel waarvoor deze bron wordt bewaakt"
+    },
+    "source_category": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Vrije broncategorie uit de automation, bijv. hoofd-CAO, loontabel, vraagbaak of sociale commissie"
     },
     "url": {
       "type": "string",
@@ -30,12 +55,116 @@
         "null"
       ]
     },
+    "is_official_source": {
+      "type": "boolean",
+      "default": false,
+      "description": "Of de bron als officiele CAO-/branchebron is herkend of aangeleverd"
+    },
+    "official_source_confidence": {
+      "type": "string",
+      "enum": [
+        "high",
+        "medium",
+        "low",
+        "unknown"
+      ],
+      "default": "unknown"
+    },
+    "payroll_relevance": {
+      "type": "string",
+      "enum": [
+        "critical",
+        "supporting",
+        "reference",
+        "none",
+        "unknown"
+      ],
+      "default": "unknown",
+      "description": "Mate waarin deze bron loon-/planningregels kan beinvloeden"
+    },
+    "monitoring_required": {
+      "type": "boolean",
+      "default": true,
+      "description": "Of de maandelijkse CAO-monitor deze bron actief moet blijven controleren"
+    },
+    "monitoring_frequency": {
+      "type": "string",
+      "enum": [
+        "monthly",
+        "weekly",
+        "manual",
+        "on_change",
+        "none"
+      ],
+      "default": "monthly"
+    },
+    "source_priority": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Lagere waarde betekent hogere prioriteit bij tegenstrijdige bronnen"
+    },
+    "discovered_from_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Pagina of document waarvandaan deze bron is gevonden"
+    },
+    "published_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "retrieved_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
     "content_hash": {
       "type": [
         "string",
         "null"
       ],
       "description": "SHA-256 hash van de inhoud"
+    },
+    "hash_algorithm": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Hash-algoritme voor content_hash"
+    },
+    "previous_content_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Vorige bekende content hash wanneer een wijziging is gedetecteerd"
+    },
+    "extracted_text_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Hash van de geextraheerde tekst, los van de bestands-hash"
     },
     "etag": {
       "type": [
@@ -103,6 +232,31 @@
         "string",
         "null"
       ]
+    },
+    "parse_warnings": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "description": "Waarschuwingen uit PDF/HTML/parserextractie"
+    },
+    "coverage_scope": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Welke CAO-onderdelen/regeldomeinen deze bron dekt"
+    },
+    "source_revision": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Automation- of Cloudflare-revision waarin deze bron is gezien"
     }
   },
   "required": [

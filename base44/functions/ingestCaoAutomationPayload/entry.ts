@@ -41,6 +41,197 @@ function isKnownSecurityCaoKey(caoKey) {
   return KNOWN_SECURITY_CAO_KEYS.includes(normalizeCaoKey(caoKey));
 }
 
+const CAO_SOURCE_TYPES = [
+  'cao_page',
+  'official_webpage',
+  'news_page',
+  'news_update',
+  'cao_pdf',
+  'wage_table_pdf',
+  'wage_table_xlsx',
+  'pay_periods_pdf',
+  'pay_periods_xlsx',
+  'fonds_cao_pdf',
+  'faq_page',
+  'question_answer_page',
+  'sociale_commissie_page',
+  'sociale_commissie_pdf',
+  'sociale_commissie_decision_pdf',
+  'protocol_pdf',
+  'appendix_pdf',
+  'ministerial_registration',
+  'other'
+];
+
+const OFFICIAL_CAO_SOURCE_HOSTS = [
+  'beveiligingsbranche.nl',
+  'www.beveiligingsbranche.nl',
+  'sociaalfondsbeveiliging.nl',
+  'www.sociaalfondsbeveiliging.nl',
+  'sfpb.nl',
+  'www.sfpb.nl',
+  'cao.minszw.nl',
+  'www.uitvoeringarbeidsvoorwaardenwetgeving.nl'
+];
+
+function normalizeCaoSourceType(value, doc = {}, defaultSourceType = 'other') {
+  const raw = String(value || '').trim().toLowerCase();
+  const alias = {
+    page: 'cao_page',
+    cao: 'cao_pdf',
+    cao_document: 'cao_pdf',
+    cao_source: 'cao_pdf',
+    wage_table: 'wage_table_pdf',
+    wage_table_pdf: 'wage_table_pdf',
+    wage_table_xlsx: 'wage_table_xlsx',
+    loontabel: 'wage_table_pdf',
+    loongebouw: 'wage_table_pdf',
+    pay_periods: 'pay_periods_pdf',
+    pay_periods_pdf: 'pay_periods_pdf',
+    pay_periods_xlsx: 'pay_periods_xlsx',
+    loonperioden: 'pay_periods_pdf',
+    loonperiodes: 'pay_periods_pdf',
+    fonds_cao: 'fonds_cao_pdf',
+    faq: 'faq_page',
+    vraagbaak: 'question_answer_page',
+    social_committee: 'sociale_commissie_pdf',
+    sociale_commissie: 'sociale_commissie_pdf',
+    decision: 'sociale_commissie_decision_pdf',
+    uitspraak: 'sociale_commissie_decision_pdf',
+    news: 'news_page',
+    nieuws: 'news_page',
+    protocol: 'protocol_pdf',
+    appendix: 'appendix_pdf',
+    bijlage: 'appendix_pdf',
+    registration: 'ministerial_registration'
+  };
+  const candidate = alias[raw] || raw;
+  if (CAO_SOURCE_TYPES.includes(candidate)) return candidate;
+
+  const text = `${doc.title || ''} ${doc.url || ''} ${doc.source_category || ''}`.toLowerCase();
+  if (/loontabel|wage[-_ ]?table|loongebouw/.test(text)) return /\.xlsx?(\?|$)/.test(text) ? 'wage_table_xlsx' : 'wage_table_pdf';
+  if (/loonperiode|loonperioden|pay[-_ ]?period/.test(text)) return /\.xlsx?(\?|$)/.test(text) ? 'pay_periods_xlsx' : 'pay_periods_pdf';
+  if (/fonds[-_ ]?cao|sociaal[-_ ]?fonds|sfpb/.test(text)) return 'fonds_cao_pdf';
+  if (/vraagbaak|faq|veelgestelde/.test(text)) return 'question_answer_page';
+  if (/sociale[-_ ]?commissie|uitspraak/.test(text)) return /pdf/.test(text) ? 'sociale_commissie_decision_pdf' : 'sociale_commissie_page';
+  if (/nieuws|news|update/.test(text)) return 'news_page';
+  if (/cao/.test(text) && /pdf/.test(text)) return 'cao_pdf';
+  if (/cao/.test(text)) return 'cao_page';
+  return CAO_SOURCE_TYPES.includes(defaultSourceType) ? defaultSourceType : 'other';
+}
+
+function inferOfficialSource(url) {
+  try {
+    const host = typeof URL === 'function'
+      ? new URL(url).hostname.toLowerCase()
+      : String(url || '').replace(/^[a-z]+:\/\//i, '').split('/')[0].toLowerCase();
+    return OFFICIAL_CAO_SOURCE_HOSTS.some(officialHost => host === officialHost || host.endsWith(`.${officialHost}`));
+  } catch (_) {
+    return false;
+  }
+}
+
+function normalizeOfficialConfidence(value, official) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['high', 'medium', 'low', 'unknown'].includes(normalized)) return normalized;
+  return official ? 'high' : 'unknown';
+}
+
+function booleanOrNull(value) {
+  if (value === true || value === false) return value;
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['true', 'yes', 'ja', '1'].includes(normalized)) return true;
+  if (['false', 'no', 'nee', '0'].includes(normalized)) return false;
+  return null;
+}
+
+function normalizePayrollRelevance(value, sourceType) {
+  if (value === true) return 'critical';
+  if (value === false) return 'none';
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['critical', 'supporting', 'reference', 'none', 'unknown'].includes(normalized)) return normalized;
+  if (['cao_pdf', 'wage_table_pdf', 'wage_table_xlsx', 'pay_periods_pdf', 'pay_periods_xlsx', 'fonds_cao_pdf'].includes(sourceType)) return 'critical';
+  if (['faq_page', 'question_answer_page', 'sociale_commissie_page', 'sociale_commissie_pdf', 'sociale_commissie_decision_pdf', 'news_page', 'news_update'].includes(sourceType)) return 'supporting';
+  if (['cao_page', 'official_webpage', 'protocol_pdf', 'appendix_pdf', 'ministerial_registration'].includes(sourceType)) return 'reference';
+  return 'unknown';
+}
+
+function normalizeMonitoringFrequency(value, relevance) {
+  const normalized = String(value || '').trim().toLowerCase();
+  if (['monthly', 'weekly', 'manual', 'on_change', 'none'].includes(normalized)) return normalized;
+  return relevance === 'none' ? 'none' : 'monthly';
+}
+
+function normalizeExtractionStatus(value, fallback = 'ok') {
+  const normalized = String(value || fallback || '').trim().toLowerCase();
+  return ['pending', 'ok', 'failed', 'manual_review_required'].includes(normalized) ? normalized : fallback;
+}
+
+function buildCaoSourceDocumentData(doc, existingDoc, { now, caoKey, revision, defaultSourceType = 'other' }) {
+  const sourceType = normalizeCaoSourceType(
+    doc.source_type || doc.document_type || doc.type || doc.source_category,
+    doc,
+    defaultSourceType
+  );
+  const explicitOfficial = booleanOrNull(doc.is_official_source ?? doc.official_source);
+  const official = explicitOfficial ?? inferOfficialSource(doc.url);
+  const payrollRelevance = normalizePayrollRelevance(doc.payroll_relevance ?? doc.payroll_relevant, sourceType);
+  const contentHash = doc.content_hash || doc.source_hash || doc.sha256 || doc.content_sha256 || existingDoc?.content_hash || null;
+  const changed = doc.changed === true ||
+    Boolean(existingDoc?.content_hash && contentHash && existingDoc.content_hash !== contentHash);
+  const previousContentHash = changed && existingDoc?.content_hash && existingDoc.content_hash !== contentHash
+    ? existingDoc.content_hash
+    : (doc.previous_content_hash || existingDoc?.previous_content_hash || null);
+  const explicitMonitoringRequired = booleanOrNull(doc.monitoring_required);
+  const monitoringRequired = explicitMonitoringRequired !== null
+    ? explicitMonitoringRequired
+    : payrollRelevance !== 'none';
+  const extractionStatus = normalizeExtractionStatus(doc.extraction_status || doc.parse_status || existingDoc?.extraction_status || 'ok');
+  const extractionError = doc.extraction_error || doc.parse_error || (extractionStatus === 'ok' ? null : existingDoc?.extraction_error || null);
+
+  return {
+    title: doc.title || existingDoc?.title || doc.url,
+    url: doc.url,
+    canonical_url: doc.canonical_url || doc.canonicalUrl || existingDoc?.canonical_url || doc.url,
+    cao_key: normalizeCaoKey(doc.cao_key) || caoKey,
+    source_type: sourceType,
+    source_category: doc.source_category || doc.category || doc.document_category || sourceType,
+    status: 'active',
+    is_official_source: official === true,
+    official_source_confidence: normalizeOfficialConfidence(doc.official_source_confidence, official),
+    payroll_relevance: payrollRelevance,
+    monitoring_required: monitoringRequired,
+    monitoring_frequency: normalizeMonitoringFrequency(doc.monitoring_frequency, payrollRelevance),
+    source_priority: doc.source_priority ?? existingDoc?.source_priority ?? null,
+    discovered_from_url: doc.discovered_from_url || doc.parent_url || existingDoc?.discovered_from_url || null,
+    published_at: doc.published_at || existingDoc?.published_at || null,
+    retrieved_at: doc.retrieved_at || doc.fetched_at || now,
+    valid_from: doc.valid_from || existingDoc?.valid_from || null,
+    valid_until: doc.valid_until || existingDoc?.valid_until || null,
+    content_hash: contentHash,
+    hash_algorithm: doc.hash_algorithm || doc.content_hash_algorithm || existingDoc?.hash_algorithm || (contentHash ? 'sha256' : null),
+    previous_content_hash: previousContentHash,
+    extracted_text_hash: doc.extracted_text_hash || doc.text_hash || existingDoc?.extracted_text_hash || null,
+    etag: doc.etag || existingDoc?.etag || null,
+    last_modified: doc.last_modified || existingDoc?.last_modified || null,
+    first_seen_at: existingDoc?.first_seen_at || doc.first_seen_at || now,
+    last_checked_at: doc.last_checked_at || now,
+    last_changed_at: changed ? now : (doc.last_changed_at || existingDoc?.last_changed_at || null),
+    file_url: doc.file_url || existingDoc?.file_url || null,
+    extracted_text: doc.extracted_text ?? existingDoc?.extracted_text ?? null,
+    extraction_status: extractionStatus,
+    extraction_error: extractionError,
+    parse_warnings: doc.parse_warnings || doc.extraction_warnings || existingDoc?.parse_warnings || null,
+    coverage_scope: doc.coverage_scope || doc.rule_coverage_scope || existingDoc?.coverage_scope || null,
+    source_revision: revision || doc.source_revision || existingDoc?.source_revision || null
+  };
+}
+
+function buildCaoSourceDocumentSnapshot(docData, id) {
+  const { extracted_text, extraction_error, ...snapshot } = docData;
+  return { id, ...snapshot };
+}
+
 function hasLocalPayrollRuntime(caoKey) {
   return LOCAL_PAYROLL_RUNTIME_CAO_KEYS.includes(normalizeCaoKey(caoKey));
 }
@@ -1005,22 +1196,16 @@ Deno.serve(async (req) => {
 
     // Upsert source documents
     const sourceDocIds = [];
+    const sourceDocumentSnapshots = [];
     for (const doc of source_documents) {
       if (!doc.url) continue;
       const existing = await base44.asServiceRole.entities.CAOSourceDocument.filter({ url: doc.url });
-      const docData = {
-        title: doc.title || doc.url,
-        url: doc.url,
-        source_type: doc.source_type || 'other',
-        status: 'active',
-        content_hash: doc.content_hash || null,
-        etag: doc.etag || null,
-        last_modified: doc.last_modified || null,
-        first_seen_at: existing[0]?.first_seen_at || now,
-        last_checked_at: now,
-        last_changed_at: doc.changed ? now : (existing[0]?.last_changed_at || null),
-        extraction_status: 'ok'
-      };
+      const docData = buildCaoSourceDocumentData(doc, existing[0], {
+        now,
+        caoKey: normalizedCaoKey,
+        revision,
+        defaultSourceType: 'other'
+      });
       let savedDoc;
       if (existing.length > 0) {
         await base44.asServiceRole.entities.CAOSourceDocument.update(existing[0].id, docData);
@@ -1029,6 +1214,7 @@ Deno.serve(async (req) => {
         savedDoc = await base44.asServiceRole.entities.CAOSourceDocument.create(docData);
       }
       sourceDocIds.push(savedDoc.id);
+      sourceDocumentSnapshots.push(buildCaoSourceDocumentSnapshot(docData, savedDoc.id));
     }
 
     // Upsert / create CAOConfiguration
@@ -1052,6 +1238,9 @@ Deno.serve(async (req) => {
           ? (inProgressReadinessGate.checked_at || payrollReadiness.gate.checked_at)
           : payrollReadiness.gate.checked_at,
         payroll_readiness_gate: isOwnerApproved ? inProgressReadinessGate : payrollReadiness.gate,
+        source_documents_snapshot: sourceDocumentSnapshots.length > 0
+          ? sourceDocumentSnapshots
+          : (candidate_configuration.source_documents_snapshot || null),
         coverage_summary: {
           ...(candidate_configuration.coverage_summary || {}),
           payroll_readiness: {
