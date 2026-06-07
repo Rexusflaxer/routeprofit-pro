@@ -461,6 +461,22 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0233'
     ]
   },
+  'validateCaoScheduleRules.article_1_planning_payroll_definitions': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts', 'calculateCaoLeaveAndSickness'],
+    rule_ids: [
+      'CAO-PB-2024-R0171', 'CAO-PB-2024-R0172', 'CAO-PB-2024-R0174',
+      'CAO-PB-2024-R0175', 'CAO-PB-2024-R0177', 'CAO-PB-2024-R0182',
+      'CAO-PB-2024-R0184', 'CAO-PB-2024-R0185', 'CAO-PB-2024-R0186',
+      'CAO-PB-2024-R0187', 'CAO-PB-2024-R0188', 'CAO-PB-2024-R0189',
+      'CAO-PB-2024-R0190', 'CAO-PB-2024-R0191', 'CAO-PB-2024-R0192',
+      'CAO-PB-2024-R0193', 'CAO-PB-2024-R0194', 'CAO-PB-2024-R0195',
+      'CAO-PB-2024-R0196', 'CAO-PB-2024-R0197', 'CAO-PB-2024-R0198',
+      'CAO-PB-2024-R0199', 'CAO-PB-2024-R0200', 'CAO-PB-2024-R0201',
+      'CAO-PB-2024-R0202', 'CAO-PB-2024-R0203', 'CAO-PB-2024-R0204',
+      'CAO-PB-2024-R0205', 'CAO-PB-2024-R0206', 'CAO-PB-2024-R0208',
+      'CAO-PB-2024-R0209', 'CAO-PB-2024-R0210', 'CAO-PB-2024-R0211'
+    ]
+  },
   'applyCaoContractRules.probation_and_probation_dismissal': {
     functions: ['applyCaoContractRules'],
     rule_ids: [
@@ -660,7 +676,8 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
     functions: ['calculatePersonnelCosts', 'queueCaoPayrollCorrections'],
     rule_ids: [
       'CAO-PB-2024-R0760', 'CAO-PB-2024-R0761', 'CAO-PB-2024-R0762',
-      'CAO-PB-2024-R0764', 'CAO-PB-2024-R0765', 'CAO-PB-2024-R0766'
+      'CAO-PB-2024-R0764', 'CAO-PB-2024-R0765', 'CAO-PB-2024-R0766',
+      'CAO-PB-2024-R0767'
     ]
   },
   'calculatePersonnelCosts.article_39_acting_function_allowance': {
@@ -907,6 +924,14 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R1635', 'CAO-PB-2024-R1636', 'CAO-PB-2024-R1637',
       'CAO-PB-2024-R1638', 'CAO-PB-2024-R1639', 'CAO-PB-2024-R1640',
       'CAO-PB-2024-R1641', 'CAO-PB-2024-R1642'
+    ]
+  },
+  'calculatePersonnelCosts.payslip_template_compliance': {
+    functions: ['calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R1740', 'CAO-PB-2024-R1742', 'CAO-PB-2024-R1744',
+      'CAO-PB-2024-R1745', 'CAO-PB-2024-R1746', 'CAO-PB-2024-R1747',
+      'CAO-PB-2024-R1749', 'CAO-PB-2024-R1750'
     ]
   }
 };

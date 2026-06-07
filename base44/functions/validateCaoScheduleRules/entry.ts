@@ -2096,6 +2096,177 @@ function dailyHoursFromShifts(shifts) {
   return daily;
 }
 
+function sumBodyHours(body, fields) {
+  return fields.reduce((sum, field) => sum + (numberOrNull(body[field]) || 0), 0);
+}
+
+function isMandatoryTrainingShift(shift = {}) {
+  return booleanOrNull(
+    shift.mandatory_training ??
+    shift.is_mandatory_training ??
+    shift.required_training ??
+    shift.verplichte_opleiding ??
+    shift.mandatory_training_article_55_3
+  ) === true;
+}
+
+function isWorkMeetingShift(shift = {}) {
+  const serviceType = normalizeCaoSignalText(shift.service_type || shift.task_type || shift.work_type || '');
+  return booleanOrNull(
+    shift.work_meeting ??
+    shift.is_work_meeting ??
+    shift.werkoverleg
+  ) === true || serviceType.includes('work_meeting') || serviceType.includes('werkoverleg');
+}
+
+function classifyShiftDefinition(shift, breakRow = null) {
+  const start = parseClockMinutes(shift.start_time);
+  let end = parseClockMinutes(shift.end_time);
+  if (start !== null && end !== null && end <= start) end += 24 * 60;
+  const endsAfter2000 = end !== null && end > 20 * 60;
+  const endsNoLaterThan0200 = end !== null && end <= 26 * 60;
+  const startsAfterOrAt0600 = start !== null && start >= 6 * 60;
+  const endsNoLaterThan2000 = end !== null && end <= 20 * 60;
+  return {
+    shift_id: shift.id || null,
+    date: asIsoDate(shift.date || shift.service_date),
+    start_time: shift.start_time || null,
+    end_time: shift.end_time || null,
+    service_span_hours: round2(calculateShiftHours(shift)),
+    unpaid_break_hours: round2(breakRow?.unpaid_break_hours ?? getUnpaidBreakHours(shift)),
+    paid_work_time_hours_after_unpaid_breaks: round2(
+      breakRow?.paid_work_hours_after_unpaid_breaks ??
+      Math.max(0, calculateShiftHours(shift) - getUnpaidBreakHours(shift))
+    ),
+    day_shift_definition_match: startsAfterOrAt0600 && endsNoLaterThan2000,
+    evening_shift_definition_match: endsAfter2000 && endsNoLaterThan0200,
+    mandatory_training_counts_as_work_time: isMandatoryTrainingShift(shift),
+    work_meeting_counts_as_work_time: isWorkMeetingShift(shift),
+    service_definition: 'aaneengesloten_werkperiode_one_or_more_locations_max_one_hour_unpaid_interruption',
+    source_rule_ids: ['CAO-PB-2024-R0184', 'CAO-PB-2024-R0188', 'CAO-PB-2024-R0189', 'CAO-PB-2024-R0196']
+  };
+}
+
+function buildCaoArticle1DefinitionSummary({
+  body,
+  periodStart,
+  periodEnd,
+  serviceShifts,
+  timeWindows,
+  breakSummaryRows,
+  totalHours,
+  totalTimeWindowHours,
+  totalRosterBlockHours,
+  agreedPeriodHours,
+  freeDates,
+  overtimeHours,
+  minusHoursGenerated
+}) {
+  const breakRowsByShift = new Map((breakSummaryRows || []).map(row => [row.shift_id || `${row.date}|${row.start_time}|${row.end_time}`, row]));
+  const paidWorkTimeAfterBreaks = (breakSummaryRows || []).length > 0
+    ? breakSummaryRows.reduce((sum, row) => sum + numberOrNull(row.paid_work_hours_after_unpaid_breaks), 0)
+    : serviceShifts.reduce((sum, shift) => sum + Math.max(0, calculateShiftHours(shift) - getUnpaidBreakHours(shift)), 0);
+  const paidAbsenceHours = sumBodyHours(body, [
+    'paid_absence_hours',
+    'vacation_hours',
+    'extraordinary_leave_hours',
+    'sickness_hours',
+    'other_paid_work_time_hours'
+  ]);
+  const vacationPaidOutWithoutLeaveHours = sumBodyHours(body, [
+    'vacation_hours_paid_out_without_leave',
+    'paid_out_vacation_hours_without_leave',
+    'article_7_2_paid_out_vacation_hours'
+  ]);
+  const arbeidstijdHours = Math.max(0, paidWorkTimeAfterBreaks + paidAbsenceHours - vacationPaidOutWithoutLeaveHours);
+  const agreedHours = numberOrNull(agreedPeriodHours);
+  const meeruren = agreedHours !== null ? Math.max(0, Math.min(arbeidstijdHours, 152) - agreedHours) : null;
+  const minUren = agreedHours !== null ? Math.max(0, agreedHours - arbeidstijdHours) : minusHoursGenerated;
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0171', 'CAO-PB-2024-R0172', 'CAO-PB-2024-R0174',
+    'CAO-PB-2024-R0175', 'CAO-PB-2024-R0177', 'CAO-PB-2024-R0182',
+    'CAO-PB-2024-R0184', 'CAO-PB-2024-R0185', 'CAO-PB-2024-R0186',
+    'CAO-PB-2024-R0187', 'CAO-PB-2024-R0188', 'CAO-PB-2024-R0189',
+    'CAO-PB-2024-R0190', 'CAO-PB-2024-R0191', 'CAO-PB-2024-R0192',
+    'CAO-PB-2024-R0193', 'CAO-PB-2024-R0194', 'CAO-PB-2024-R0195',
+    'CAO-PB-2024-R0196', 'CAO-PB-2024-R0197', 'CAO-PB-2024-R0198',
+    'CAO-PB-2024-R0199', 'CAO-PB-2024-R0200', 'CAO-PB-2024-R0201',
+    'CAO-PB-2024-R0202', 'CAO-PB-2024-R0203', 'CAO-PB-2024-R0204',
+    'CAO-PB-2024-R0205', 'CAO-PB-2024-R0206', 'CAO-PB-2024-R0208',
+    'CAO-PB-2024-R0209', 'CAO-PB-2024-R0210', 'CAO-PB-2024-R0211'
+  ];
+
+  return {
+    source_rule_ids: sourceRuleIds,
+    time_zone: CAO_TIME_ZONE,
+    period: {
+      start_date: periodStart,
+      end_date: periodEnd,
+      loonperiode_definition: '4_aaneengesloten_weken',
+      week_definition: 'maandag_00_00_tot_zondag_24_00',
+      day_definition: 'kalenderdag_00_00_tot_24_00'
+    },
+    wage_basis_definitions: {
+      base_salary_definition_source: 'calculatePersonnelCosts/resolveCaoFunctionClassification',
+      base_hourly_wage_definition_source: 'calculatePersonnelCosts/resolveCaoFunctionClassification',
+      source_rule_ids: ['CAO-PB-2024-R0185', 'CAO-PB-2024-R0186']
+    },
+    arbeidstijd: {
+      paid_work_time_hours_after_unpaid_breaks: round2(paidWorkTimeAfterBreaks),
+      paid_absence_hours_included: round2(paidAbsenceHours),
+      vacation_hours_paid_out_without_leave_excluded: round2(vacationPaidOutWithoutLeaveHours),
+      calculated_arbeidstijd_hours: round2(arbeidstijdHours),
+      includes_worked_hours: true,
+      includes_mandatory_training_hours: true,
+      includes_paid_vacation_hours: true,
+      includes_sickness_hours_excluding_waiting_day: true,
+      includes_work_meeting_hours: true
+    },
+    arbeidsduur: {
+      agreed_hours_per_pay_period: agreedHours !== null ? round2(agreedHours) : null,
+      source: agreedHours !== null ? 'contract/body' : 'missing_contract_hours'
+    },
+    hours_classification: {
+      meeruren_hours: meeruren !== null ? round2(meeruren) : null,
+      min_uren_hours: minUren !== null ? round2(minUren) : null,
+      overuren_hours: round2(overtimeHours),
+      overuren_threshold_hours_per_pay_period: 152,
+      structural_overtime_requires_10_of_13_period_history: true
+    },
+    roster_definitions: {
+      time_window_count: timeWindows.length,
+      time_window_hours: round2(totalTimeWindowHours),
+      service_shift_count: serviceShifts.length,
+      service_span_hours: round2(totalHours),
+      roster_block_hours: round2(totalRosterBlockHours),
+      roster_period_definition: 'periode_van_4_weken_met_tijdvakken_en_of_arbeidstijd'
+    },
+    service_definitions: serviceShifts.map(shift => classifyShiftDefinition(
+      shift,
+      breakRowsByShift.get(shift.id || `${asIsoDate(shift.date || shift.service_date)}|${shift.start_time}|${shift.end_time}`)
+    )),
+    break_definition: {
+      min_break_hours: 0.25,
+      max_break_hours: 1,
+      qualifying_break_count: (breakSummaryRows || []).reduce((sum, row) => sum + (row.qualifying_break_count || 0), 0),
+      unpaid_break_hours_total: round2((breakSummaryRows || []).reduce((sum, row) => sum + (row.unpaid_break_hours || 0), 0))
+    },
+    free_day_definitions: {
+      roostervrije_dates: freeDates,
+      roostervrije_day_count: freeDates.length,
+      forward_rotating_after_night_requires_32h_without_work: true,
+      backward_rotating_requires_32h_without_work: true,
+      consecutive_free_days_after_first_require_24h_without_work: true,
+      weekend_definition: 'twee_aaneengesloten_roostervrije_dagen_uiterlijk_na_vrijdagavonddienst_tot_maandag_05_30'
+    },
+    vacation_day_definition: {
+      minimum_contiguous_hours: 24,
+      at_least_two_thirds_on_calendar_day: true,
+      previous_workday_must_end_before_22_00_unless_employee_requests_otherwise: true
+    }
+  };
+}
+
 function maxRollingWeeklyAverage(weeklyHours, windowSize) {
   const keys = Object.keys(weeklyHours).sort();
   if (keys.length < windowSize) return null;
@@ -4373,6 +4544,22 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     };
   }
 
+  const caoArticle1DefinitionSummary = buildCaoArticle1DefinitionSummary({
+    body,
+    periodStart,
+    periodEnd,
+    serviceShifts,
+    timeWindows,
+    breakSummaryRows,
+    totalHours,
+    totalTimeWindowHours,
+    totalRosterBlockHours: rosterBlockHours,
+    agreedPeriodHours,
+    freeDates,
+    overtimeHours,
+    minusHoursGenerated
+  });
+
   return {
     total_shifts: totalShifts,
     total_hours: Math.round(totalHours * 100) / 100,
@@ -4382,6 +4569,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     total_roster_block_hours: round2(rosterBlockHours),
     overtime_hours: Math.round(overtimeHours * 100) / 100,
     free_days_count: freeDaysCount,
+    cao_article_1_definition_summary: caoArticle1DefinitionSummary,
     cash_value_time_window_summary: cashValueTimeWindowSummary,
     general_reserve_summary: {
       is_general_reserve: isGeneralReserve,

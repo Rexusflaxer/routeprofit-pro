@@ -871,7 +871,8 @@ function defaultArticle37WageIncreaseSchedule(configured) {
       cpi_maximum_percentage: 4.5,
       total_minimum_percentage: 2.5,
       total_maximum_percentage: 5,
-      source_rule_ids: caoRuleIds(762, 764, 765, 766)
+      cpi_reference_period: '1_october_through_30_september_previous_year',
+      source_rule_ids: caoRuleIds(762, 764, 765, 766, 767)
     }
   ];
 }
@@ -898,7 +899,7 @@ function resolveArticle37WageIncrease({ body, selectedContract, personnel, caoCo
   const configured = caoConfig?.wage_increase_rules || caoConfig?.wage_increases || {};
   const schedule = defaultArticle37WageIncreaseSchedule(configured);
   const selected = selectApplicableWageIncrease(schedule, currentPeriod);
-  const sourceRuleIds = caoRuleIds(760, 761, 762, 764, 765, 766);
+  const sourceRuleIds = caoRuleIds(760, 761, 762, 764, 765, 766, 767);
   const result = {
     applies: !!selected,
     current_pay_period: formatPayrollPeriodRef(currentPeriod),
@@ -914,6 +915,7 @@ function resolveArticle37WageIncrease({ body, selectedContract, personnel, caoCo
       selectedContract.current_wage_before_article_37_increase,
       personnel.current_wage_before_article_37_increase
     ),
+    cpi_reference_period: selected?.cpi_reference_period || null,
     concept_wage_after_increase: null,
     cpi_year_mutation_percentage: null,
     manual_review_required: false,
@@ -1303,6 +1305,125 @@ function resolvePayrollWageAllowancePolicy({
       ...article40And41.source_rule_ids,
       ...article46.source_rule_ids
     ]
+  };
+}
+
+function buildCaoPayslipTemplateCompliance({
+  body,
+  personnel,
+  selectedContract,
+  payslip,
+  totalHours,
+  baseHourlyRate,
+  payrollPeriod,
+  caoConfig,
+  functionClassificationResult
+}) {
+  const sourceRuleIds = [
+    'CAO-PB-2024-R1740', 'CAO-PB-2024-R1742', 'CAO-PB-2024-R1744',
+    'CAO-PB-2024-R1745', 'CAO-PB-2024-R1746', 'CAO-PB-2024-R1747',
+    'CAO-PB-2024-R1749', 'CAO-PB-2024-R1750'
+  ];
+  const statutoryMinimumWagePeriodAmount = firstNumber(
+    body.statutory_minimum_wage_period_amount,
+    body.minimum_wage_period_amount,
+    selectedContract.statutory_minimum_wage_period_amount,
+    selectedContract.minimum_wage_period_amount,
+    personnel.statutory_minimum_wage_period_amount,
+    personnel.minimum_wage_period_amount,
+    caoConfig.statutory_minimum_wage_period_amount
+  );
+  const agreedArbeidsduur = firstNumber(
+    body.contract_hours_per_pay_period,
+    body.agreed_hours_per_pay_period,
+    selectedContract.contract_hours_per_pay_period,
+    selectedContract.hours_per_pay_period,
+    selectedContract.min_hours_per_pay_period,
+    personnel.contract_hours_per_pay_period,
+    personnel.hours_per_pay_period
+  );
+  const missingOrExternalFields = [];
+  if (statutoryMinimumWagePeriodAmount === null) {
+    missingOrExternalFields.push({
+      field: 'statutory_minimum_wage_period_amount',
+      rule_id: 'CAO-PB-2024-R1742',
+      message: 'Wettelijk minimumloon over de uitbetalingstermijn ontbreekt; koppel hiervoor een externe WML-parameterbron per peildatum.'
+    });
+  }
+
+  const wageComposition = {
+    base_wage: r2(payslip.base_salary),
+    overtime_surcharge: r2(payslip.overtime_50?.amount),
+    special_hours_surcharges: r2(
+      (payslip.surcharges?.evening_10?.amount || 0) +
+      (payslip.surcharges?.night_20?.amount || 0) +
+      (payslip.surcharges?.weekend_35?.amount || 0) +
+      (payslip.surcharges?.holiday_50?.amount || 0) +
+      (payslip.surcharges?.new_years_eve_100?.amount || 0)
+    ),
+    minimum_service_compensation: r2(payslip.minimum_service_compensation?.amount),
+    acting_function_allowance: r2(payslip.acting_function_allowance?.amount),
+    shift_change_allowance: r2(payslip.shift_change_allowance?.amount),
+    general_reserve_allowance: r2(payslip.general_reserve_allowance?.amount),
+    value_services_early_shift_allowance: r2(payslip.value_services_early_shift_allowance?.amount),
+    cash_value_late_next_day_notice_allowance: r2(payslip.cash_value_late_next_day_notice_allowance?.amount),
+    travel_and_other_reimbursements_external: true
+  };
+
+  return {
+    source_rule_ids: sourceRuleIds,
+    payroll_period: {
+      start_date: payrollPeriod?.period_start || null,
+      end_date: payrollPeriod?.period_end || null
+    },
+    required_fields: {
+      arbeidsduur: {
+        value_hours_per_pay_period: agreedArbeidsduur !== null ? r2(agreedArbeidsduur) : r2(totalHours),
+        source: agreedArbeidsduur !== null ? 'contract' : 'calculated_paid_hours_in_run',
+        rule_id: 'CAO-PB-2024-R1740'
+      },
+      statutory_minimum_wage_period_amount: {
+        amount: statutoryMinimumWagePeriodAmount !== null ? r2(statutoryMinimumWagePeriodAmount) : null,
+        rule_id: 'CAO-PB-2024-R1742'
+      },
+      vacation_hours_accrued: {
+        hours: payslip.vacation_entitlement?.vacation_hours_accrued_per_pay_period !== undefined
+          ? r2(payslip.vacation_entitlement.vacation_hours_accrued_per_pay_period)
+          : null,
+        rule_id: 'CAO-PB-2024-R1744'
+      },
+      vacation_allowance_accrued: {
+        amount: r2(payslip.accruals?.vacation_allowance),
+        rule_id: 'CAO-PB-2024-R1745'
+      },
+      gross_wage_amount: {
+        amount: r2(payslip.total_gross),
+        base_hourly_rate: r2(baseHourlyRate),
+        rule_id: 'CAO-PB-2024-R1746'
+      },
+      wage_composition: {
+        ...wageComposition,
+        rule_id: 'CAO-PB-2024-R1747'
+      },
+      employee_deductions: {
+        premium_sfpb: r2(payslip.employee_deductions?.premium_sfpb),
+        premium_paww: r2(payslip.employee_deductions?.premium_paww),
+        pension_premium: r2(payslip.employee_deductions?.pension_premium),
+        premium_wga: r2(payslip.employee_deductions?.premium_wga),
+        tax_withheld: r2(payslip.employee_deductions?.tax_withheld),
+        total: r2(payslip.employee_deductions?.total),
+        rule_id: 'CAO-PB-2024-R1749'
+      },
+      salary_scale: {
+        cao_scale: functionClassificationResult?.scale ?? personnel.cao_scale ?? selectedContract.cao_scale ?? null,
+        cao_period: functionClassificationResult?.period ?? personnel.cao_period ?? selectedContract.cao_period ?? null,
+        wage_basis_type: functionClassificationResult?.wage_basis_type || null,
+        rule_id: 'CAO-PB-2024-R1750'
+      }
+    },
+    missing_or_external_fields: missingOrExternalFields,
+    manual_review_required: missingOrExternalFields.length > 0,
+    export_control_ready: missingOrExternalFields.length === 0
   };
 }
 
@@ -5031,6 +5152,19 @@ Deno.serve(async (req) => {
       payslip.total_cost_employer += correctionComponent.total_cost_employer_delta;
     }
 
+    const selectedPayrollContract = selectedContractsFromResolutionResults(contractResolutionResults)[0] || {};
+    const payslipTemplateCompliance = buildCaoPayslipTemplateCompliance({
+      body,
+      personnel,
+      selectedContract: selectedPayrollContract,
+      payslip,
+      totalHours,
+      baseHourlyRate,
+      payrollPeriod,
+      caoConfig,
+      functionClassificationResult
+    });
+
     const responsePayload = {
       personnel_id,
       personnel_name: personnel.name,
@@ -5201,6 +5335,7 @@ Deno.serve(async (req) => {
         payroll_wage_allowance_policy: payslip.payroll_wage_allowance_policy,
         training_education_policy: payslip.training_education_policy,
         older_worker_arrangements: payslip.older_worker_arrangements,
+        payslip_template_compliance: payslipTemplateCompliance,
         
         // Reserveringen
         accruals: {

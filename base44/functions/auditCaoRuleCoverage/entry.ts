@@ -242,6 +242,14 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
     functions: ['resolveCaoApplicability', 'validateTaskPlanningContext', 'calculatePersonnelCosts', 'validateCaoScheduleRules'],
     rule_ids: ruleRange(227, 233)
   },
+  'validateCaoScheduleRules.article_1_planning_payroll_definitions': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts', 'calculateCaoLeaveAndSickness'],
+    rule_ids: [
+      ...ruleIds(171, 172, 174, 175, 177, 182),
+      ...ruleRange(184, 206),
+      ...ruleIds(208, 209, 210, 211)
+    ]
+  },
   'applyCaoContractRules.probation_and_probation_dismissal': {
     functions: ['applyCaoContractRules'],
     rule_ids: ruleIds(313, 314, 315, 316, 317, 318, 319, 320, 321, 322)
@@ -329,7 +337,7 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   },
   'calculatePersonnelCosts.article_37_wage_increases': {
     functions: ['calculatePersonnelCosts', 'queueCaoPayrollCorrections'],
-    rule_ids: ruleIds(760, 761, 762, 764, 765, 766)
+    rule_ids: ruleIds(760, 761, 762, 764, 765, 766, 767)
   },
   'calculatePersonnelCosts.article_39_acting_function_allowance': {
     functions: ['resolveCaoFunctionClassification', 'calculatePersonnelCosts'],
@@ -470,6 +478,10 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       ...ruleRange(1626, 1633),
       ...ruleRange(1635, 1642)
     ]
+  },
+  'calculatePersonnelCosts.payslip_template_compliance': {
+    functions: ['calculatePersonnelCosts'],
+    rule_ids: ruleIds(1740, 1742, 1744, 1745, 1746, 1747, 1749, 1750)
   }
 };
 
