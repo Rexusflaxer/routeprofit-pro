@@ -196,6 +196,57 @@ function isContractActive(contract, date) {
   return true;
 }
 
+function resolveCompanyScopedContractCandidates({ activeContracts, companyId, serviceDate }) {
+  const contracts = Array.isArray(activeContracts) ? activeContracts : [];
+  const blocking_reasons = [];
+  const manual_review_reasons = [];
+  const warnings = [];
+  const companyContracts = contracts.filter(contract => {
+    if (!companyId) return true;
+    return contract.company_id === companyId || !contract.company_id;
+  });
+  const exact_company_contracts = companyContracts.filter(contract => companyId && contract.company_id === companyId);
+  const legacy_companyless_contracts = companyContracts.filter(contract => !contract.company_id);
+  const ignored_other_company_contract_ids = contracts
+    .filter(contract => companyId && contract.company_id && contract.company_id !== companyId)
+    .map(contract => contract.id)
+    .filter(Boolean);
+  const contract_candidates = exact_company_contracts.length > 0
+    ? exact_company_contracts
+    : legacy_companyless_contracts;
+
+  if (contracts.length === 0) {
+    blocking_reasons.push(`Geen actief arbeidscontract gevonden op ${serviceDate}.`);
+  } else if (contract_candidates.length === 0) {
+    blocking_reasons.push(`Geen actief arbeidscontract gevonden voor bedrijf ${companyId || 'onbekend'} op ${serviceDate}.`);
+  }
+
+  if (exact_company_contracts.length === 0 && legacy_companyless_contracts.length > 0 && companyId) {
+    manual_review_reasons.push('Alleen legacy contract zonder company_id gevonden. Contract moet expliciet aan werkgever/bedrijf worden gekoppeld voor definitieve planning/payroll.');
+  }
+  if (exact_company_contracts.length > 0 && legacy_companyless_contracts.length > 0) {
+    warnings.push('Legacy contracten zonder company_id zijn genegeerd omdat exact bedrijfcontract beschikbaar is.');
+  }
+  if (ignored_other_company_contract_ids.length > 0) {
+    warnings.push(`Contracten van andere bedrijven zijn genegeerd voor deze dienst: ${ignored_other_company_contract_ids.join(', ')}.`);
+  }
+
+  return {
+    contract_candidates,
+    exact_company_contracts,
+    legacy_companyless_contracts,
+    ignored_other_company_contract_ids,
+    blocking_reasons,
+    manual_review_reasons,
+    warnings,
+    contract_selection_policy: exact_company_contracts.length > 0
+      ? 'exact_company_contracts_only'
+      : legacy_companyless_contracts.length > 0
+      ? 'legacy_companyless_contracts_manual_review'
+      : 'no_company_scoped_contract_candidates'
+  };
+}
+
 function uniq(values) {
   return [...new Set((values || []).filter(Boolean))];
 }
@@ -1976,21 +2027,15 @@ Deno.serve(async (req) => {
     }
 
     const activeContracts = contracts.filter(c => isContractActive(c, serviceContext.service_date));
-    const companyContracts = activeContracts.filter(c => {
-      if (!companyId) return true;
-      return c.company_id === companyId || !c.company_id;
+    const companyScopedContracts = resolveCompanyScopedContractCandidates({
+      activeContracts,
+      companyId,
+      serviceDate: serviceContext.service_date
     });
-
-    const exactCompanyContracts = companyContracts.filter(c => companyId && c.company_id === companyId);
-    const legacyCompanylessContracts = companyContracts.filter(c => !c.company_id);
-
-    let contractCandidates = exactCompanyContracts.length > 0 ? exactCompanyContracts : legacyCompanylessContracts;
-
-    if (activeContracts.length === 0) {
-      blockingReasons.push(`Geen actief arbeidscontract gevonden op ${serviceContext.service_date}.`);
-    } else if (contractCandidates.length === 0) {
-      blockingReasons.push(`Geen actief arbeidscontract gevonden voor bedrijf ${companyId || 'onbekend'} op ${serviceContext.service_date}.`);
-    }
+    let contractCandidates = companyScopedContracts.contract_candidates;
+    blockingReasons.push(...companyScopedContracts.blocking_reasons);
+    manualReviewReasons.push(...companyScopedContracts.manual_review_reasons);
+    warnings.push(...companyScopedContracts.warnings);
 
     if (serviceContext.cao_key && contractCandidates.length > 0) {
       const matchingCaoContracts = contractCandidates.filter(c => c.cao_key === serviceContext.cao_key);
@@ -2009,10 +2054,6 @@ Deno.serve(async (req) => {
       if (matchingCaoContracts.length > 0 && (mismatchingCaoContracts.length > 0 || unknownCaoContracts.length > 0)) {
         warnings.push(`Contracten zonder of met afwijkende cao_key zijn genegeerd voor deze dienst (${serviceContext.cao_key}).`);
       }
-    }
-
-    if (exactCompanyContracts.length === 0 && legacyCompanylessContracts.length > 0 && companyId) {
-      manualReviewReasons.push('Alleen legacy contract zonder company_id gevonden. Contract moet expliciet aan werkgever/bedrijf worden gekoppeld voor definitieve planning/payroll.');
     }
 
     const evaluatedContracts = contractCandidates.map(contract => {
@@ -2227,6 +2268,8 @@ Deno.serve(async (req) => {
       personnel_name: personnel.name || null,
       company_id: companyId || null,
       company_assignment_id: companyAssignment?.id || null,
+      contract_selection_policy: companyScopedContracts.contract_selection_policy,
+      ignored_other_company_contract_ids: companyScopedContracts.ignored_other_company_contract_ids,
       contract_id: selectedContract?.id || null,
       selected_contract: selectedContract ? {
         id: selectedContract.id,

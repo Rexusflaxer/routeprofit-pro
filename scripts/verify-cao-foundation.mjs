@@ -107,6 +107,21 @@ function runPlanningContextScenarios() {
     trafficReadiness.manual_review_reasons.some(reason => reason.includes('cao_verkeersregelaars')),
     'Unsupported inferred traffic-controller CAO must force manual review'
   );
+
+  const objectDefaultCompanyService = taskContext.buildServiceContext({
+    body: {
+      cao_key: 'cao_particuliere_beveiliging',
+      function_type: 'objectbeveiliger',
+      performs_security_work: true,
+      security_work_percentage: 100,
+      security_role_status: 'beveiliger'
+    },
+    task: null,
+    object: { default_operating_company_id: 'company-object-default' },
+    route: null
+  });
+  assert.equal(objectDefaultCompanyService.company_id, 'company-object-default');
+  assert.equal(objectDefaultCompanyService.company_id_source, 'object.default_operating_company_id');
 }
 
 function runCaoApplicabilityScenarios() {
@@ -205,6 +220,49 @@ function runContractResolverScenarios() {
   const blockedScope = contractResolver.evaluateSecurityScopeMatch(securityOnlyContract, serviceContext);
   assert.equal(blockedScope.matched, false, 'Non-security service must not match security-only contract');
   assert.ok(blockedScope.blocking_checks.length > 0, 'Security-only mismatch should be blocking, not merely advisory');
+
+  const activeContracts = [
+    { id: 'contract-company-a', company_id: 'company-a' },
+    { id: 'contract-company-b', company_id: 'company-b' },
+    { id: 'legacy-companyless-contract' }
+  ];
+  const companyBCandidates = contractResolver.resolveCompanyScopedContractCandidates({
+    activeContracts,
+    companyId: 'company-b',
+    serviceDate: '2026-01-15'
+  });
+  assert.deepEqual(
+    companyBCandidates.contract_candidates.map(contract => contract.id),
+    ['contract-company-b'],
+    'Exact company contract must take precedence over legacy/companyless contracts'
+  );
+  assert.equal(companyBCandidates.contract_selection_policy, 'exact_company_contracts_only');
+  assertIncludes(companyBCandidates.ignored_other_company_contract_ids, 'contract-company-a', 'Other company contract must be ignored');
+  assert.ok(companyBCandidates.warnings.some(message => message.includes('Legacy contracten zonder company_id zijn genegeerd')));
+
+  const legacyOnlyCandidates = contractResolver.resolveCompanyScopedContractCandidates({
+    activeContracts: [{ id: 'legacy-companyless-contract' }],
+    companyId: 'company-b',
+    serviceDate: '2026-01-15'
+  });
+  assert.deepEqual(legacyOnlyCandidates.contract_candidates.map(contract => contract.id), ['legacy-companyless-contract']);
+  assert.equal(legacyOnlyCandidates.contract_selection_policy, 'legacy_companyless_contracts_manual_review');
+  assert.ok(
+    legacyOnlyCandidates.manual_review_reasons.some(message => message.includes('legacy contract zonder company_id')),
+    'Legacy companyless contract must require manual review for definitive planning/payroll'
+  );
+
+  const wrongCompanyCandidates = contractResolver.resolveCompanyScopedContractCandidates({
+    activeContracts: [{ id: 'contract-company-a', company_id: 'company-a' }],
+    companyId: 'company-b',
+    serviceDate: '2026-01-15'
+  });
+  assert.equal(wrongCompanyCandidates.contract_candidates.length, 0);
+  assert.equal(wrongCompanyCandidates.contract_selection_policy, 'no_company_scoped_contract_candidates');
+  assert.ok(
+    wrongCompanyCandidates.blocking_reasons.some(message => message.includes('Geen actief arbeidscontract gevonden voor bedrijf company-b')),
+    'Contract belonging to another company must not be usable for the service company'
+  );
 }
 
 async function runContractScopePersistenceScenarios() {
