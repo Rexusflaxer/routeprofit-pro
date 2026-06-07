@@ -1271,7 +1271,11 @@ async function resolveLoondienstWageBasis({ base44, personnel_id, personnel, cao
     const classRes = await base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', {
       personnel_id,
       contract: contractClassificationContext.contract || undefined,
-      work_context: contractClassificationContext.work_context || {}
+      work_context: contractClassificationContext.work_context || {},
+      cao_key: contractClassificationContext.contract?.cao_key ||
+        contractClassificationContext.work_context?.cao_key ||
+        contractClassificationContext.work_context?.cao ||
+        null
     });
     classification = classRes?.data || null;
   } catch {
@@ -2364,7 +2368,10 @@ Deno.serve(async (req) => {
     let rawScope = null;
     if (targetCaoKey === CAO_PB_KEY && personnel_id) {
       try {
-        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
+          personnel_id,
+          cao_key: targetCaoKey
+        });
         rawScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
     }

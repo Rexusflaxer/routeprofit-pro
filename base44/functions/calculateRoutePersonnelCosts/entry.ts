@@ -1866,20 +1866,32 @@ Deno.serve(async (req) => {
 
     // Resolve CAO-scope per medewerker (parallel voor surveillanten)
     const scopePromises = surveillants.map(p =>
-      base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id: p.id })
+      base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
+        personnel_id: p.id,
+        cao_key: targetCaoKey,
+        work_context: routeServiceRequirement.service_context
+      })
         .then(r => ({ id: p.id, scope: r?.data || null }))
         .catch(() => ({ id: p.id, scope: null }))
     );
     const binnendienstScopePromises = binnendienst.map(p =>
-      base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id: p.id })
+      base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
+        personnel_id: p.id,
+        cao_key: targetCaoKey,
+        work_context: routeServiceRequirement.service_context
+      })
         .then(r => ({ id: p.id, scope: r?.data || null }))
         .catch(() => ({ id: p.id, scope: null }))
     );
     const classificationPromises = allPersonnelForCache.map(p => {
-      if (p.employee_type !== 'loondienst' || p.cao !== 'cao_particuliere_beveiliging') {
+      if (p.employee_type !== 'loondienst' || targetCaoKey !== CAO_PB_KEY) {
         return Promise.resolve({ id: p.id, classification: null });
       }
-      return base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', { personnel_id: p.id })
+      return base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', {
+        personnel_id: p.id,
+        cao_key: targetCaoKey,
+        work_context: routeServiceRequirement.service_context
+      })
         .then(r => ({ id: p.id, classification: r?.data || null }))
         .catch(() => ({ id: p.id, classification: null }));
     });

@@ -4,17 +4,19 @@ const CAO_PB_KEY = 'cao_particuliere_beveiliging';
 const SUPPORTED_APPLICABILITY_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
 
 function getCaoRuntimeSupport(caoKey, functionName) {
-  const key = caoKey || CAO_PB_KEY;
+  const key = caoKey || null;
   const supported = SUPPORTED_APPLICABILITY_RUNTIME_CAO_KEYS.includes(key);
   return {
     supported,
-    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    status: supported ? 'supported' : key ? 'blocked_unsupported_cao_runtime' : 'blocked_missing_cao_key',
     cao_key: key,
     function_name: functionName,
     supported_cao_keys: SUPPORTED_APPLICABILITY_RUNTIME_CAO_KEYS,
     message: supported
       ? `Runtime ${functionName} ondersteunt CAO ${key}.`
-      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. CAO-toepassingsscope is geblokkeerd zodat geen PB artikel-3 regels op een andere CAO worden toegepast.`
+      : key
+      ? `Runtime ${functionName} ondersteunt CAO ${key} nog niet. CAO-toepassingsscope is geblokkeerd zodat geen PB artikel-3 regels op een andere CAO worden toegepast.`
+      : `Runtime ${functionName} mist cao_key. CAO-toepassingsscope is geblokkeerd zodat geen PB-default wordt toegepast.`
   };
 }
 
@@ -27,7 +29,7 @@ function resolveScopedCaoRequest({ explicitCaoKey, contract, workContext, person
     contract_cao_key: contractCaoKey,
     work_context_cao_key: workContextCaoKey,
     personnel_cao_key: personnelCaoKey,
-    cao_key: explicitCaoKey || contractCaoKey || workContextCaoKey || personnelCaoKey || CAO_PB_KEY,
+    cao_key: explicitCaoKey || contractCaoKey || workContextCaoKey || null,
     status: 'resolved',
     manual_review_required: false
   };
@@ -64,6 +66,15 @@ function resolveScopedCaoRequest({ explicitCaoKey, contract, workContext, person
       ...resolution,
       status: 'blocked_missing_contract_cao_key',
       blocking_reason: 'Arbeidscontract mist cao_key; CAO-toepassingsscope kan niet audit-proof vanuit medewerkerstamdata worden bepaald.',
+      manual_review_required: true
+    };
+  }
+
+  if (!explicitCaoKey && !contractCaoKey && !workContextCaoKey) {
+    return {
+      ...resolution,
+      status: 'blocked_missing_cao_key',
+      blocking_reason: 'CAO-toepassingsscope vereist een expliciete cao_key, contract.cao_key of werkcontext.cao_key. Medewerkerstamdata of PB-default mag niet als bron worden gebruikt.',
       manual_review_required: true
     };
   }
