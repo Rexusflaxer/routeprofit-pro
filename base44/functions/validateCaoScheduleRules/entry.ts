@@ -130,6 +130,135 @@ async function lazySyncCao(base44, forceCaoSync = false, caoKey = CAO_PB_KEY) {
   }
 }
 
+function getCaoRuleRegistrySnapshot(caoConfig) {
+  const gateSnapshot = caoConfig?.payroll_readiness_gate?.persisted_rule_registry || null;
+  const configuredSnapshot = caoConfig?.rule_registry_snapshot || null;
+  const snapshot = configuredSnapshot || gateSnapshot || null;
+  const fingerprint = caoConfig?.rule_registry_fingerprint ||
+    snapshot?.fingerprint ||
+    null;
+  const ruleCount = caoConfig?.rule_registry_rule_count ??
+    snapshot?.persisted_unique_rule_count ??
+    snapshot?.fingerprint_rule_count ??
+    null;
+  const verifiedAt = caoConfig?.rule_registry_verified_at ||
+    snapshot?.verified_at ||
+    null;
+
+  return {
+    fingerprint,
+    fingerprint_algorithm: snapshot?.fingerprint_algorithm || (fingerprint ? 'sha256' : null),
+    rule_count: ruleCount,
+    verified_at: verifiedAt,
+    expected_unique_rule_count: snapshot?.expected_unique_rule_count ?? null,
+    persisted_unique_rule_count: snapshot?.persisted_unique_rule_count ?? ruleCount,
+    source_coverage_passed: snapshot?.source_coverage?.passed ?? null,
+    missing_rule_ids_truncated: snapshot?.missing_rule_ids_truncated ?? false
+  };
+}
+
+function getCaoPayrollReadiness(caoConfig) {
+  const gate = caoConfig?.payroll_readiness_gate || null;
+  const status = caoConfig?.payroll_readiness_status || null;
+  const registrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
+  const registryReady = !!registrySnapshot.fingerprint && Number(registrySnapshot.rule_count || 0) > 0;
+  const ready = caoConfig?.is_payroll_ready === true &&
+    status === 'ready' &&
+    gate?.passed === true &&
+    registryReady;
+  const blockingFindings = gate?.blocking_findings || [];
+
+  return {
+    ready,
+    status: ready ? 'ready' : !registryReady ? 'blocked_missing_rule_registry_fingerprint' : (status || 'unknown'),
+    is_payroll_ready: caoConfig?.is_payroll_ready === true,
+    gate_present: !!gate,
+    rule_registry_fingerprint_present: !!registrySnapshot.fingerprint,
+    rule_registry_rule_count: registrySnapshot.rule_count,
+    blocking_findings: registryReady
+      ? blockingFindings
+      : [
+        {
+          code: 'missing_rule_registry_fingerprint',
+          severity: 'critical',
+          message: 'CAOConfiguration mist rule_registry_fingerprint; definitieve roostercontrole is niet audit-proof.'
+        },
+        ...blockingFindings
+      ],
+    open_payroll_critical_rules: gate?.open_payroll_critical_rules || [],
+    counts: gate?.counts || null
+  };
+}
+
+function caoConfigSummary(config) {
+  return {
+    id: config?.id || null,
+    name: config?.name || config?.version_label || null,
+    cloudflare_revision: config?.cloudflare_revision || null,
+    valid_from: config?.valid_from || null,
+    valid_until: config?.valid_until || null
+  };
+}
+
+function caoConfigOverlapsPeriod(config, periodStart, periodEnd) {
+  if (!config) return false;
+  if (config.valid_from && config.valid_from > periodEnd) return false;
+  if (config.valid_until && config.valid_until < periodStart) return false;
+  return true;
+}
+
+function caoConfigCoversPeriod(config, periodStart, periodEnd) {
+  if (!config) return false;
+  if (config.valid_from && config.valid_from > periodStart) return false;
+  if (config.valid_until && config.valid_until < periodEnd) return false;
+  return true;
+}
+
+async function resolveScheduleCaoConfiguration(base44, { caoKey, periodStart, periodEnd }) {
+  const configs = await base44.asServiceRole.entities.CAOConfiguration.filter({
+    status: 'active',
+    cao_key: caoKey
+  });
+  const eligible = (configs || [])
+    .filter(config => caoConfigOverlapsPeriod(config, periodStart, periodEnd))
+    .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')));
+
+  if (eligible.length === 0) {
+    return {
+      config: null,
+      status: 'blocked_missing_active_cao_config',
+      candidates: [],
+      message: `Geen actieve CAO-configuratie gevonden voor ${caoKey} in roosterperiode ${periodStart} t/m ${periodEnd}.`
+    };
+  }
+
+  if (eligible.length > 1) {
+    return {
+      config: null,
+      status: 'blocked_schedule_period_spans_multiple_cao_configs',
+      candidates: eligible.map(caoConfigSummary),
+      message: `Roosterperiode ${periodStart} t/m ${periodEnd} raakt meerdere actieve CAO-configuraties voor ${caoKey}. Splits de roostercontrole per CAO-geldigheidsperiode.`
+    };
+  }
+
+  const config = eligible[0];
+  if (!caoConfigCoversPeriod(config, periodStart, periodEnd)) {
+    return {
+      config: null,
+      status: 'blocked_cao_config_not_covering_schedule_period',
+      candidates: [caoConfigSummary(config)],
+      message: `Actieve CAO-configuratie ${config.id} dekt roosterperiode ${periodStart} t/m ${periodEnd} niet volledig.`
+    };
+  }
+
+  return {
+    config,
+    status: 'resolved',
+    candidates: [caoConfigSummary(config)],
+    message: null
+  };
+}
+
 /**
  * CAO PB planning-validator
  * Bronregels: R0547-R0549 en R0560-R0713 (rooster, tijdvakken, roosterwijziging, overwerkbasis, minuren, algemene reserve, maximale arbeidstijd, rusttijd, nachtdienst, pauze, jeugdige werknemer, consignatie, dienstruil en zomer-/wintertijd)
@@ -4039,6 +4168,15 @@ Deno.serve(async (req) => {
 
     if (!Array.isArray(shifts)) return Response.json({ error: 'shifts array is verplicht' }, { status: 400 });
 
+    let pStart = period_start, pEnd = period_end;
+    if (!pStart || !pEnd) {
+      const now = new Date();
+      pStart = formatIsoDateLocal(now);
+      const fourWeeksLater = new Date(now);
+      fourWeeksLater.setDate(fourWeeksLater.getDate() + 27);
+      pEnd = formatIsoDateLocal(fourWeeksLater);
+    }
+
     let personnelContext = null;
     if (personnel_id) {
       try {
@@ -4068,8 +4206,8 @@ Deno.serve(async (req) => {
         calculation_warnings: [
           'Splits de roostercontrole per cao_key of geef een consistente cao_key mee op alle diensten, taken en objecten.'
         ],
-        period_start: period_start || null,
-        period_end: period_end || null,
+        period_start: pStart,
+        period_end: pEnd,
         personnel_id: personnel_id || null,
         cao_key: targetCaoKey,
         task_cao_key: taskCaoKey || null,
@@ -4105,8 +4243,8 @@ Deno.serve(async (req) => {
           ...syncWarnings,
           'Roostercontrole geblokkeerd: CAO-runtime voor deze cao_key is nog niet lokaal geimplementeerd en geverifieerd.'
         ],
-        period_start: period_start || null,
-        period_end: period_end || null,
+        period_start: pStart,
+        period_end: pEnd,
         personnel_id: personnel_id || null,
         cao_key: targetCaoKey,
         task_cao_key: taskCaoKey || null,
@@ -4117,6 +4255,63 @@ Deno.serve(async (req) => {
         planning_allowed: false,
         calculation_status: scheduleRuntimeSupport.status
       }, { status: 422 });
+    }
+
+    const caoConfigResolution = await resolveScheduleCaoConfiguration(base44, {
+      caoKey: targetCaoKey,
+      periodStart: pStart,
+      periodEnd: pEnd
+    });
+    if (!caoConfigResolution.config) {
+      return Response.json({
+        error: caoConfigResolution.message,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          caoConfigResolution.message
+        ],
+        period_start: pStart,
+        period_end: pEnd,
+        personnel_id: personnel_id || null,
+        cao_key: targetCaoKey,
+        task_cao_key: taskCaoKey || null,
+        object_cao_keys: objectCaoKeys,
+        cao_runtime_support: scheduleRuntimeSupport,
+        active_cao_configuration_candidates: caoConfigResolution.candidates,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        planning_allowed: false,
+        calculation_status: caoConfigResolution.status
+      }, { status: 400 });
+    }
+    const caoConfig = caoConfigResolution.config;
+    const caoPayrollReadiness = getCaoPayrollReadiness(caoConfig);
+    const caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
+    if (!caoPayrollReadiness.ready) {
+      return Response.json({
+        error: `Actieve CAO-configuratie is niet payroll-ready (${caoPayrollReadiness.status}). Definitieve roostercontrole is geblokkeerd totdat de CAO coverage-gate slaagt.`,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          'Roostercontrole geblokkeerd: CAO-regeldekking of payrollparameters zijn niet bewezen compleet.'
+        ],
+        period_start: pStart,
+        period_end: pEnd,
+        personnel_id: personnel_id || null,
+        cao_configuration_id: caoConfig.id,
+        cao_key: caoConfig.cao_key || targetCaoKey,
+        cao_version_label: caoConfig.version_label || caoConfig.name,
+        cao_revision: caoConfig.cloudflare_revision || null,
+        cao_valid_from: caoConfig.valid_from || null,
+        cao_valid_until: caoConfig.valid_until || null,
+        cao_payroll_readiness: caoPayrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_runtime_support: scheduleRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        planning_allowed: false,
+        calculation_status: 'blocked_cao_not_payroll_ready'
+      }, { status: 400 });
     }
 
     let rawCaoScope = null;
@@ -4132,15 +4327,6 @@ Deno.serve(async (req) => {
     }
     let caoScope = normalizeCaoScope(rawCaoScope);
     const globalCaoScopeProfile = caoScope?.cao_scope_profile || null;
-
-    let pStart = period_start, pEnd = period_end;
-    if (!pStart || !pEnd) {
-      const now = new Date();
-      pStart = formatIsoDateLocal(now);
-      const fourWeeksLater = new Date(now);
-      fourWeeksLater.setDate(fourWeeksLater.getDate() + 27);
-      pEnd = formatIsoDateLocal(fourWeeksLater);
-    }
 
     const scheduleBody = { ...body };
     if (
@@ -4255,6 +4441,13 @@ Deno.serve(async (req) => {
       personnel_id: personnel_id || null,
       cao_sync_status: caoSyncStatus,
       cao_key: targetCaoKey,
+      cao_configuration_id: caoConfig.id,
+      cao_version_label: caoConfig.version_label || caoConfig.name,
+      cao_revision: caoConfig.cloudflare_revision || null,
+      cao_valid_from: caoConfig.valid_from || null,
+      cao_valid_until: caoConfig.valid_until || null,
+      cao_payroll_readiness: caoPayrollReadiness,
+      cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
       task_cao_key: taskCaoKey || null,
       object_cao_keys: objectCaoKeys,
       cao_runtime_support: scheduleRuntimeSupport,
