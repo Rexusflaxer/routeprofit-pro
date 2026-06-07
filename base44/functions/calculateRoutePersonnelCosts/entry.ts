@@ -216,6 +216,28 @@ function numberOrNull(value) {
   const n = Number(value);
   return Number.isFinite(n) ? n : null;
 }
+function uniqueNonEmpty(values) {
+  return [...new Set((values || []).filter(value => value !== null && value !== undefined && value !== ''))];
+}
+function uniqueBooleanValues(values) {
+  return [...new Set((values || []).filter(value => value === true || value === false))];
+}
+function singleValueOrConflict(values, fieldLabel, blockingReasons) {
+  const unique = uniqueNonEmpty(values);
+  if (unique.length > 1) {
+    blockingReasons.push(`Route bevat meerdere waarden voor ${fieldLabel}: ${unique.join(', ')}. Splits de route of valideer per taaksegment.`);
+    return null;
+  }
+  return unique[0] ?? null;
+}
+function singleBooleanOrConflict(values, fieldLabel, blockingReasons) {
+  const unique = uniqueBooleanValues(values);
+  if (unique.length > 1) {
+    blockingReasons.push(`Route bevat zowel true als false voor ${fieldLabel}. Splits de route of valideer per taaksegment.`);
+    return null;
+  }
+  return unique.length === 1 ? unique[0] : null;
+}
 function isCallAgreementContext(input) {
   if (!input) return false;
   const contractType = input.contract_type || input.employment_contract_type || null;
@@ -771,7 +793,171 @@ function getRouteDstCalculationInfo(dateStr, startTime, endTime, actualHours) {
   };
 }
 
-async function resolveRouteContractContext(base44, personnel, route, shiftDate, functionType, options = {}) {
+function routeAssignedTaskIds(route) {
+  return uniqueNonEmpty((route?.assigned_tasks || []).map(item => item?.task_id));
+}
+
+async function loadRouteServiceSources(base44, route) {
+  const taskIds = routeAssignedTaskIds(route);
+  const taskResults = await Promise.all(taskIds.map(async taskId => {
+    try {
+      return await base44.asServiceRole.entities.Task.get(taskId);
+    } catch {
+      return null;
+    }
+  }));
+  const tasks = taskResults.filter(Boolean);
+  const missing_task_ids = taskIds.filter(taskId => !tasks.some(task => task.id === taskId));
+  const objectIds = uniqueNonEmpty(tasks.map(task => task.object_id));
+  const objectResults = await Promise.all(objectIds.map(async objectId => {
+    try {
+      return await base44.asServiceRole.entities.SurveillanceObject.get(objectId);
+    } catch {
+      return null;
+    }
+  }));
+  const objectById = {};
+  for (const object of objectResults.filter(Boolean)) objectById[object.id] = object;
+  const missing_object_ids = objectIds.filter(objectId => !objectById[objectId]);
+  return { task_ids: taskIds, tasks, objectById, missing_task_ids, missing_object_ids };
+}
+
+function buildRouteServiceRequirement({ route, serviceSources, targetCaoKey }) {
+  const tasks = serviceSources?.tasks || [];
+  const objectById = serviceSources?.objectById || {};
+  const blockingReasons = [];
+  const manualReviewReasons = [];
+  const warnings = [];
+
+  if ((serviceSources?.missing_task_ids || []).length > 0) {
+    blockingReasons.push(`Route verwijst naar ontbrekende taken: ${serviceSources.missing_task_ids.join(', ')}.`);
+  }
+  if ((serviceSources?.missing_object_ids || []).length > 0) {
+    manualReviewReasons.push(`Niet alle objectdefaults konden worden geladen: ${serviceSources.missing_object_ids.join(', ')}.`);
+  }
+  if (tasks.length === 0) {
+    manualReviewReasons.push('Route heeft geen geladen taken; dienstfunctie en CAO-context kunnen niet audit-proof uit route/object worden afgeleid.');
+  }
+
+  const entries = tasks.map(task => {
+    const object = objectById[task.object_id] || {};
+    return {
+      task,
+      object,
+      task_type: task.task_type || null,
+      cao_key: task.cao_key || object.cao_key || null,
+      function_type: task.service_function_type || object.default_service_function_type || null,
+      cao_function_group: task.required_cao_function_group || object.default_cao_function_group || null,
+      cao_function_level: task.required_cao_function_level || object.default_cao_function_level || null,
+      security_role_status: task.required_security_role_status || object.default_security_role_status || null,
+      performs_security_work: task.performs_security_work ?? object.default_performs_security_work ?? null,
+      security_work_percentage: task.security_work_percentage ?? object.default_security_work_percentage ?? null,
+      works_event_or_hospitality_security: task.works_event_or_hospitality_security ?? object.default_works_event_or_hospitality_security ?? null,
+      event_hospitality_cao_applies: task.event_hospitality_cao_applies ?? object.default_event_hospitality_cao_applies ?? null,
+      works_airport_schiphol: task.works_airport_schiphol ?? object.default_works_airport_schiphol ?? null,
+      works_cash_value_logistics: task.works_cash_value_logistics ?? object.default_works_cash_value_logistics ?? null,
+      customer_billable: task.customer_billable ?? object.default_customer_billable ?? null,
+      counts_toward_required_staffing: task.counts_toward_required_staffing ?? object.default_counts_toward_required_staffing ?? null,
+      contract_assignment_policy: task.contract_assignment_policy || object.contract_assignment_policy || null
+    };
+  });
+
+  const taskTypeValues = uniqueNonEmpty(entries.map(entry => entry.task_type));
+  if (taskTypeValues.length > 1) {
+    manualReviewReasons.push(`Route bevat meerdere taaktypes (${taskTypeValues.join(', ')}); definitieve planning moet per taak controleren of het contract alle taaktypes toestaat.`);
+  }
+
+  const serviceContext = {
+    cao_key: singleValueOrConflict([
+      route.cao_key,
+      route.cao,
+      targetCaoKey,
+      ...entries.map(entry => entry.cao_key)
+    ], 'cao_key', blockingReasons) || targetCaoKey || null,
+    cao: route.cao || null,
+    task_type: taskTypeValues.length === 1 ? taskTypeValues[0] : null,
+    function_type: singleValueOrConflict(entries.map(entry => entry.function_type), 'dienstfunctie/functietype', blockingReasons),
+    cao_function_group: singleValueOrConflict(entries.map(entry => entry.cao_function_group), 'CAO-functiegroep', blockingReasons),
+    cao_function_level: singleValueOrConflict(entries.map(entry => entry.cao_function_level), 'CAO-functieniveau', blockingReasons),
+    security_role_status: singleValueOrConflict(entries.map(entry => entry.security_role_status), 'beveiligingsstatus', blockingReasons),
+    performs_security_work: singleBooleanOrConflict(entries.map(entry => entry.performs_security_work), 'performs_security_work', blockingReasons),
+    works_event_or_hospitality_security: singleBooleanOrConflict(entries.map(entry => entry.works_event_or_hospitality_security), 'works_event_or_hospitality_security', blockingReasons),
+    event_hospitality_cao_applies: singleBooleanOrConflict(entries.map(entry => entry.event_hospitality_cao_applies), 'event_hospitality_cao_applies', blockingReasons),
+    works_airport_schiphol: singleBooleanOrConflict(entries.map(entry => entry.works_airport_schiphol), 'works_airport_schiphol', blockingReasons),
+    works_cash_value_logistics: singleBooleanOrConflict(entries.map(entry => entry.works_cash_value_logistics), 'works_cash_value_logistics', blockingReasons),
+    customer_billable: singleBooleanOrConflict(entries.map(entry => entry.customer_billable), 'customer_billable', blockingReasons),
+    counts_toward_required_staffing: singleBooleanOrConflict(entries.map(entry => entry.counts_toward_required_staffing), 'counts_toward_required_staffing', blockingReasons),
+    contract_assignment_policy: singleValueOrConflict(entries.map(entry => entry.contract_assignment_policy), 'contract_assignment_policy', blockingReasons) || 'strict_contract_match'
+  };
+
+  const securityWorkPercentages = uniqueNonEmpty(entries.map(entry => entry.security_work_percentage));
+  if (securityWorkPercentages.length > 1) {
+    blockingReasons.push(`Route bevat meerdere percentages beveiligingswerk (${securityWorkPercentages.join(', ')}). Splits de route of valideer per taaksegment.`);
+  } else if (securityWorkPercentages.length === 1) {
+    serviceContext.security_work_percentage = securityWorkPercentages[0];
+  }
+
+  const hasExplicitServiceFunctionContext = !!(
+    serviceContext.function_type ||
+    serviceContext.cao_function_group ||
+    serviceContext.cao_function_level ||
+    serviceContext.security_role_status ||
+    serviceContext.performs_security_work !== null ||
+    serviceContext.works_cash_value_logistics !== null ||
+    serviceContext.works_airport_schiphol !== null ||
+    serviceContext.works_event_or_hospitality_security !== null
+  );
+  if (!hasExplicitServiceFunctionContext) {
+    manualReviewReasons.push('Route mist expliciete dienstfunctie/CAO-scope op taak of object; payroll-final is geblokkeerd totdat de gevraagde functie vastligt.');
+  }
+
+  if (serviceContext.event_hospitality_cao_applies === true && serviceContext.cao_key === CAO_PB_KEY) {
+    blockingReasons.push('Dienstcontext geeft evenementen-/horecabeveiligings-CAO aan, maar cao_key staat nog op CAO PB.');
+  }
+
+  return {
+    service_context: serviceContext,
+    task_ids: serviceSources?.task_ids || [],
+    task_count: tasks.length,
+    object_ids: uniqueNonEmpty(tasks.map(task => task.object_id)),
+    blocking_reasons: blockingReasons,
+    manual_review_reasons: manualReviewReasons,
+    warnings,
+    manual_review_required: manualReviewReasons.length > 0 || blockingReasons.length > 0,
+    payroll_final_allowed: blockingReasons.length === 0 && manualReviewReasons.length === 0
+  };
+}
+
+function applyRouteServiceRequirementReview(contractResolution, routeServiceRequirement) {
+  const blockingReasons = routeServiceRequirement?.blocking_reasons || [];
+  const manualReviewReasons = routeServiceRequirement?.manual_review_reasons || [];
+  if (blockingReasons.length === 0 && manualReviewReasons.length === 0) {
+    return {
+      ...(contractResolution || {}),
+      route_service_requirement: routeServiceRequirement || null
+    };
+  }
+  return {
+    ...(contractResolution || {}),
+    status: blockingReasons.length > 0
+      ? 'blocked_route_service_context'
+      : (contractResolution?.status === 'resolved' ? 'manual_review_route_service_context' : contractResolution?.status || 'manual_review_route_service_context'),
+    planning_allowed: blockingReasons.length > 0 ? false : contractResolution?.planning_allowed !== false,
+    payroll_final_allowed: false,
+    manual_review_required: true,
+    blocking_reasons: [
+      ...((contractResolution && contractResolution.blocking_reasons) || []),
+      ...blockingReasons
+    ],
+    manual_review_reasons: [
+      ...((contractResolution && contractResolution.manual_review_reasons) || []),
+      ...manualReviewReasons
+    ],
+    route_service_requirement: routeServiceRequirement || null
+  };
+}
+
+async function resolveRouteContractContext(base44, personnel, route, shiftDate, routeServiceRequirement = {}, options = {}) {
   if (!route.operating_company_id) {
     if (options.allow_legacy_companyless_route_costing === true) {
       return {
@@ -797,36 +983,35 @@ async function resolveRouteContractContext(base44, personnel, route, shiftDate, 
   }
 
   try {
+    const serviceContext = routeServiceRequirement?.service_context || {};
     const res = await base44.asServiceRole.functions.invoke('resolvePersonnelContractForService', {
       personnel_id: personnel.id,
       route_id: route.id,
       company_id: route.operating_company_id,
       service_date: shiftDate,
       service_context: {
-        cao_key: route.cao_key || route.cao || null,
-        cao: route.cao || null,
-        function_type: functionType || personnel.function_type || null,
-        cao_function_group: personnel.cao_function_group || null,
-        cao_function_level: personnel.cao_function_level || null,
-        security_role_status: personnel.security_role_status || null,
-        contract_assignment_policy: 'strict_contract_match'
+        ...serviceContext,
+        cao_key: serviceContext.cao_key || route.cao_key || route.cao || null,
+        cao: serviceContext.cao || route.cao || null,
+        contract_assignment_policy: serviceContext.contract_assignment_policy || 'strict_contract_match'
       }
     });
-    return res?.data || {
+    const resolution = res?.data || {
       status: 'blocked_contract_resolution_empty',
       planning_allowed: false,
       payroll_final_allowed: false,
       manual_review_required: true,
       blocking_reasons: ['Contractresolver gaf geen resultaat terug.']
     };
+    return applyRouteServiceRequirementReview(resolution, routeServiceRequirement);
   } catch (error) {
-    return {
+    return applyRouteServiceRequirementReview({
       status: 'blocked_contract_resolution_error',
       planning_allowed: false,
       payroll_final_allowed: false,
       manual_review_required: true,
       blocking_reasons: [`Contractresolver fout: ${error.message}`]
-    };
+    }, routeServiceRequirement);
   }
 }
 
@@ -1458,6 +1643,13 @@ Deno.serve(async (req) => {
       }
     }
 
+    const routeServiceSources = await loadRouteServiceSources(base44, route);
+    const routeServiceRequirement = buildRouteServiceRequirement({
+      route,
+      serviceSources: routeServiceSources,
+      targetCaoKey
+    });
+
     // ── Fingerprint-gebaseerde cache check (na laden personeel) ──
     const allPersonnelForCache = [...surveillants, ...binnendienst];
     const fingerprint = buildRouteCostCacheFingerprint({
@@ -1492,7 +1684,7 @@ Deno.serve(async (req) => {
         .catch(() => ({ id: p.id, classification: null }));
     });
     const contractPromises = allPersonnelForCache.map(p =>
-      resolveRouteContractContext(base44, p, route, shiftDate, p.function_type, { allow_legacy_companyless_route_costing })
+      resolveRouteContractContext(base44, p, route, shiftDate, routeServiceRequirement, { allow_legacy_companyless_route_costing })
         .then(contractResolution => ({ id: p.id, contract_resolution: contractResolution }))
         .catch(error => ({
           id: p.id,
@@ -1677,6 +1869,7 @@ Deno.serve(async (req) => {
       alarm_standby: !!route.alarm_standby,
       operating_company_id: route.operating_company_id || null,
       contract_resolution_required: usesContractResolution,
+      route_service_requirement: routeServiceRequirement,
       contract_resolution_cao_references: contractResolutionCaoReferences,
       actual_shift_note: actualShiftNote,
       total_surveillants: results.length,
@@ -1701,6 +1894,8 @@ Deno.serve(async (req) => {
       cao_sync_status: caoSyncStatus,
       calculation_warnings: [
         ...syncWarnings,
+        ...(routeServiceRequirement.blocking_reasons || []),
+        ...(routeServiceRequirement.manual_review_reasons || []),
         ...blockedResults.map(r => `${r.name}: ${r.scope_warnings?.slice(-1)?.[0] || 'loonbasis/functie-indeling geblokkeerd'}`),
         ...manualReviewResults
           .filter(r => !blockedResults.includes(r))
