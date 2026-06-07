@@ -70,6 +70,7 @@
         "ready",
         "owner_not_marked_ready",
         "blocked_missing_effective_date",
+        "blocked_ambiguous_effective_date",
         "blocked_missing_rules",
         "blocked_incomplete_source_coverage",
         "blocked_missing_payroll_parameters",
