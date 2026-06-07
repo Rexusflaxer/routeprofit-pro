@@ -26,6 +26,7 @@ const personnelCosts = loadFunctionModule('base44/functions/calculatePersonnelCo
 const routePersonnelCosts = loadFunctionModule('base44/functions/calculateRoutePersonnelCosts/entry.ts');
 const contractRules = loadFunctionModule('base44/functions/applyCaoContractRules/entry.ts');
 const functionClassification = loadFunctionModule('base44/functions/resolveCaoFunctionClassification/entry.ts');
+const caoApplicability = loadFunctionModule('base44/functions/resolveCaoApplicability/entry.ts');
 const reimbursements = loadFunctionModule('base44/functions/calculateCaoReimbursements/entry.ts');
 const leaveSickness = loadFunctionModule('base44/functions/calculateCaoLeaveAndSickness/entry.ts');
 const yearEndBonus = loadFunctionModule('base44/functions/calculateCaoYearEndBonus/entry.ts');
@@ -103,12 +104,25 @@ const payrollRuntimeModules = [
   ['calculateRoutePersonnelCosts', routePersonnelCosts],
   ['applyCaoContractRules', contractRules],
   ['resolveCaoFunctionClassification', functionClassification],
+  ['resolveCaoApplicability', caoApplicability],
   ['calculateCaoReimbursements', reimbursements],
   ['calculateCaoLeaveAndSickness', leaveSickness],
   ['calculateCaoYearEndBonus', yearEndBonus],
   ['resolveCaoPolicyReferenceContext', policyReferenceContext],
   ['resolveCaoGovernanceCompliancePolicy', governanceCompliancePolicy]
 ];
+
+const pbRuntimeFunctionNames = new Set(
+  pb.runtime_surfaces
+    .filter(surface => surface.required_for_payroll_final)
+    .map(surface => surface.function_name)
+);
+for (const [functionName] of payrollRuntimeModules) {
+  assert.ok(
+    pbRuntimeFunctionNames.has(functionName),
+    `${functionName} must be declared in resolveCaoRuntimeReadiness PAYROLL_FINAL_RUNTIME_SURFACES`
+  );
+}
 
 for (const [functionName, module] of payrollRuntimeModules) {
   assert.equal(typeof module.getCaoRuntimeSupport, 'function', `${functionName} must expose getCaoRuntimeSupport for fail-closed audits`);

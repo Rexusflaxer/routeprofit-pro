@@ -361,6 +361,12 @@ const PAYROLL_FINAL_RUNTIME_SURFACES = [
     required_for_payroll_final: true
   },
   {
+    surface_key: 'cao_applicability',
+    function_name: 'resolveCaoApplicability',
+    supported_cao_keys: [CAO_PB_KEY],
+    required_for_payroll_final: true
+  },
+  {
     surface_key: 'schedule_validation',
     function_name: 'validateCaoScheduleRules',
     supported_cao_keys: [CAO_PB_KEY],
@@ -405,6 +411,12 @@ const PAYROLL_FINAL_RUNTIME_SURFACES = [
   {
     surface_key: 'policy_reference_context',
     function_name: 'resolveCaoPolicyReferenceContext',
+    supported_cao_keys: [CAO_PB_KEY],
+    required_for_payroll_final: true
+  },
+  {
+    surface_key: 'governance_compliance_policy',
+    function_name: 'resolveCaoGovernanceCompliancePolicy',
     supported_cao_keys: [CAO_PB_KEY],
     required_for_payroll_final: true
   }
