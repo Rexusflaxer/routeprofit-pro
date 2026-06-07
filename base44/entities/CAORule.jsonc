@@ -31,6 +31,27 @@
       ],
       "description": "Gekoppeld CAOSourceDocument ID"
     },
+    "source_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Canonieke URL van de bronregel wanneer geen CAOSourceDocument ID beschikbaar is"
+    },
+    "document_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Directe document-URL van de bron, bijvoorbeeld PDF/XLSX"
+    },
+    "source_reference": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Leesbare bronverwijzing, bijvoorbeeld artikel, bijlage, pagina, tabel of vraagbaak-item"
+    },
     "pdf_page_start": {
       "type": [
         "number",
@@ -42,6 +63,38 @@
         "number",
         "null"
       ]
+    },
+    "source_page_label": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Pagina- of tabel-label zoals in de bron vermeld"
+    },
+    "source_line_start": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "source_line_end": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "source_paragraph": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_anchor": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Stabiele anchor binnen bronextractie, bijvoorbeeld HTML id, tabelcel of tekstfragment-id"
     },
     "chapter": {
       "type": [
@@ -136,6 +189,63 @@
         "null"
       ],
       "description": "SHA1 hash van de bronregel"
+    },
+    "sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "SHA-256 hash van de bronregel"
+    },
+    "source_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Hash van het brondocument of bronfragment dat aan deze regel is gekoppeld"
+    },
+    "rule_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Hash van de genormaliseerde regelrepresentatie"
+    },
+    "rule_text_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Hash van rule_text of rule_text_summary"
+    },
+    "hash_algorithm": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Hash-algoritme voor de aangeleverde regelhashes"
+    },
+    "source_evidence": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Machineleesbare audit-evidence voor de herkomst van deze CAO-regel"
+    },
+    "source_evidence_confidence": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "high",
+        "medium",
+        "low",
+        "unknown",
+        null
+      ],
+      "description": "Betrouwbaarheid van de bronkoppeling"
     },
     "applies_when": {
       "type": [
