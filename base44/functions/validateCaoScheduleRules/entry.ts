@@ -618,6 +618,17 @@ function isCashValueLogisticsShift(shift, caoScope) {
     serviceContext.works_cash_value_logistics === true;
 }
 
+function isCashValueLogisticsSchedule(caoScope, body = {}) {
+  const serviceContext = body?.service_context || {};
+  const employee = body?.employee || body?.employee_profile || {};
+  return caoScope?.cao_scope_profile === 'cash_value_logistics' ||
+    body?.works_cash_value_logistics === true ||
+    serviceContext.works_cash_value_logistics === true ||
+    employee?.works_cash_value_logistics === true ||
+    body?.cao_scope_profile === 'cash_value_logistics' ||
+    body?.cao_profile === 'cash_value_logistics';
+}
+
 function atwReferencePaidRestHours(shiftHours) {
   if (shiftHours > 10) return 0.75;
   if (shiftHours > 5.5) return 0.5;
@@ -754,6 +765,55 @@ function resolveCashValueLongShiftContext(shift, caoScope, shiftHours, body = {}
     must_be_voluntary: mustBeVoluntary,
     manual_review_required: exceedsTenHours && !voluntaryConfirmed && !article106AllowedRunout,
     source_rule_ids: ['CAO-PB-2024-R1619', 'CAO-PB-2024-R1620', 'CAO-PB-2024-R1626', 'CAO-PB-2024-R1627', 'CAO-PB-2024-R1628', 'CAO-PB-2024-R1629', 'CAO-PB-2024-R1630', 'CAO-PB-2024-R1631', 'CAO-PB-2024-R1632', 'CAO-PB-2024-R1633']
+  };
+}
+
+function resolveCashValueTimeWindowChoice(caoScope, body = {}, periodStart = null, rosterBlockCount = 0) {
+  const applies = isCashValueLogisticsSchedule(caoScope, body);
+  const employee = body?.employee || body?.employee_profile || {};
+  const rawChoice = pickFirstNonEmpty(
+    body.cash_value_time_windows_per_period_choice,
+    body.cash_value_time_window_choice,
+    body.time_windows_per_period_choice,
+    body.preferred_time_windows_per_period,
+    employee.cash_value_time_windows_per_period_choice,
+    employee.cash_value_time_window_choice
+  );
+  const declaredChoice = numberOrNull(rawChoice);
+  const validChoice = declaredChoice === 19 || declaredChoice === 20;
+  const selectedChoice = applies ? (validChoice ? declaredChoice : 20) : null;
+  const submittedAt = asIsoDate(pickFirstNonEmpty(
+    body.cash_value_time_window_choice_submitted_at,
+    body.time_window_choice_submitted_at,
+    body.preference_submitted_at,
+    employee.cash_value_time_window_choice_submitted_at,
+    employee.time_window_choice_submitted_at
+  ));
+  const effectiveYear = numberOrNull(pickFirstNonEmpty(
+    body.cash_value_time_window_choice_effective_year,
+    body.time_window_choice_effective_year,
+    body.roster_year,
+    employee.cash_value_time_window_choice_effective_year
+  )) ?? (periodStart ? parseIsoDateParts(periodStart)?.year ?? null : null);
+  const submittedParts = submittedAt ? parseIsoDateParts(submittedAt) : null;
+  const submittedLateForFollowingYear = !!(submittedParts && effectiveYear && effectiveYear === submittedParts.year + 1 && submittedParts.month > 11);
+  const invalidChoice = applies && rawChoice !== null && !validChoice;
+  const defaultApplied = applies && rawChoice === null;
+  const maxRosterBlocks = selectedChoice;
+  return {
+    applies,
+    declared_choice: declaredChoice,
+    selected_time_windows_per_period: selectedChoice,
+    default_applied: defaultApplied,
+    submitted_at: submittedAt,
+    effective_year: effectiveYear,
+    submitted_late_for_following_year: submittedLateForFollowingYear,
+    max_roster_blocks: maxRosterBlocks,
+    roster_block_count: rosterBlockCount,
+    twentieth_day_free_time: applies && selectedChoice === 19,
+    exceeds_selected_max: applies && maxRosterBlocks !== null && rosterBlockCount > maxRosterBlocks,
+    manual_review_required: invalidChoice || submittedLateForFollowingYear,
+    source_rule_ids: ['CAO-PB-2024-R1621', 'CAO-PB-2024-R1622', 'CAO-PB-2024-R1623', 'CAO-PB-2024-R1624']
   };
 }
 
@@ -1806,8 +1866,36 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
 
   const rosterBlockCount = totalShifts + timeWindows.length;
   const rosterBlockHours = totalHours + totalTimeWindowHours;
+  const cashValueTimeWindowSummary = resolveCashValueTimeWindowChoice(caoScope, body, periodStart, rosterBlockCount);
 
-  if (!isGeneralReserve && isRuleApplicable('CAO-PB-2024-R0562', caoScope)) {
+  if (!isGeneralReserve && cashValueTimeWindowSummary.applies) {
+    if (cashValueTimeWindowSummary.manual_review_required) {
+      addManualReview(
+        manualReviewItems,
+        'CAO-PB-2024-R1622',
+        'cash_value_time_window_choice',
+        cashValueTimeWindowSummary.submitted_late_for_following_year
+          ? 'Geld- en waardelogistiek: tijdvakkenkeuze voor volgend jaar lijkt na november te zijn doorgegeven.'
+          : 'Geld- en waardelogistiek: tijdvakkenkeuze is ongeldig; alleen 19 of 20 tijdvakken per loonperiode zijn toegestaan.',
+        'cash_value_time_windows_per_period_choice'
+      );
+    }
+    if (cashValueTimeWindowSummary.exceeds_selected_max) {
+      violations.push({
+        rule_id: cashValueTimeWindowSummary.selected_time_windows_per_period === 19 ? 'CAO-PB-2024-R1624' : 'CAO-PB-2024-R1623',
+        severity: 'high',
+        message: cashValueTimeWindowSummary.selected_time_windows_per_period === 19
+          ? `${rosterBlockCount} tijdvakken en/of arbeidstijdblokken ingepland; werknemer koos 19, dus het 20e blok is vrije tijd.`
+          : `${rosterBlockCount} tijdvakken en/of arbeidstijdblokken ingepland; voor geld- en waardelogistiek geldt maximaal 20 per loonperiode bij default/keuze 20.`,
+        affected_shift_ids: [...shiftIds, ...timeWindowIds],
+        payroll_impact: true,
+        selected_time_windows_per_period: cashValueTimeWindowSummary.selected_time_windows_per_period,
+        roster_block_count: rosterBlockCount,
+        manual_review_required: cashValueTimeWindowSummary.manual_review_required,
+        related_rule_ids: cashValueTimeWindowSummary.source_rule_ids
+      });
+    }
+  } else if (!isGeneralReserve && isRuleApplicable('CAO-PB-2024-R0562', caoScope)) {
     if (rosterBlockCount > 20) {
       violations.push({
         rule_id: 'CAO-PB-2024-R0562', severity: 'high',
@@ -3534,6 +3622,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     total_roster_block_hours: round2(rosterBlockHours),
     overtime_hours: Math.round(overtimeHours * 100) / 100,
     free_days_count: freeDaysCount,
+    cash_value_time_window_summary: cashValueTimeWindowSummary,
     general_reserve_summary: {
       is_general_reserve: isGeneralReserve,
       article_21_skipped: isGeneralReserve,
