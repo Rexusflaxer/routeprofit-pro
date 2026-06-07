@@ -23,6 +23,50 @@ function rangesOverlap(startA, endA, startB, endB) {
   return aStart <= bEnd && bStart <= aEnd;
 }
 
+function daysInclusive(start, end) {
+  const startDate = new Date(`${start}T00:00:00Z`);
+  const endDate = new Date(`${end}T00:00:00Z`);
+  if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime()) || end < start) return null;
+  return Math.floor((endDate - startDate) / 86400000) + 1;
+}
+
+function exactOverlapEvidence(run, review) {
+  if (!run?.pay_period_start || !run?.pay_period_end || !review?.effective_from) {
+    return {
+      match_type: null,
+      overlap_start: null,
+      overlap_end: null,
+      overlap_days: null,
+      evidence: null
+    };
+  }
+  const payPeriodStart = isoDate(run.pay_period_start);
+  const payPeriodEnd = isoDate(run.pay_period_end);
+  const effectiveFrom = isoDate(review.effective_from);
+  const effectiveUntil = isoDate(review.effective_until) || '9999-12-31';
+  const overlapStart = payPeriodStart > effectiveFrom ? payPeriodStart : effectiveFrom;
+  const overlapEnd = payPeriodEnd < effectiveUntil ? payPeriodEnd : effectiveUntil;
+  const overlaps = overlapStart <= overlapEnd;
+
+  return {
+    match_type: overlaps ? 'exact_pay_period_overlap' : null,
+    overlap_start: overlaps ? overlapStart : null,
+    overlap_end: overlaps ? overlapEnd : null,
+    overlap_days: overlaps ? daysInclusive(overlapStart, overlapEnd) : null,
+    evidence: {
+      strategy: 'exact_pay_period_overlap',
+      payroll_period_start: payPeriodStart,
+      payroll_period_end: payPeriodEnd,
+      effective_from: effectiveFrom,
+      effective_until: review.effective_until ? effectiveUntil : null,
+      overlap_start: overlaps ? overlapStart : null,
+      overlap_end: overlaps ? overlapEnd : null,
+      overlap_days: overlaps ? daysInclusive(overlapStart, overlapEnd) : null,
+      overlaps
+    }
+  };
+}
+
 function runTouchesReview(run, review) {
   if (run.pay_period_start && run.pay_period_end && review.effective_from) {
     return rangesOverlap(run.pay_period_start, run.pay_period_end, review.effective_from, review.effective_until);
@@ -77,7 +121,7 @@ function buildCorrectionKey(review, run) {
   return `${review.id}::${run?.id || 'unmatched'}`;
 }
 
-function buildCorrectionData(review, run, status, reason, caoKey = null) {
+function buildCorrectionData(review, run, status, reason, caoKey = null, match = {}) {
   return {
     correction_key: buildCorrectionKey(review, run),
     cao_change_review_id: review.id,
@@ -97,6 +141,11 @@ function buildCorrectionData(review, run, status, reason, caoKey = null) {
     effective_from_inferred: review.effective_from_inferred === true,
     effective_date_manual_review_required: review.effective_date_manual_review_required === true,
     effective_date_warnings: normalizeArray(review.effective_date_warnings),
+    affected_overlap_start: match.overlap_start || null,
+    affected_overlap_end: match.overlap_end || null,
+    affected_overlap_days: match.overlap_days ?? null,
+    correction_match_type: match.match_type || null,
+    correction_match_evidence: match.evidence || null,
     pay_period_year: run?.pay_period_year ?? null,
     pay_period_number: run?.pay_period_number ?? null,
     pay_period_start: run?.pay_period_start || null,
@@ -229,7 +278,16 @@ Deno.serve(async (req) => {
           review,
           null,
           'manual_review_required',
-          'CAO-wijziging mist cao_key en gekoppelde CAOConfiguration kon niet worden herleid; automatische correctiematching is geblokkeerd om cross-CAO fouten te voorkomen.'
+          'CAO-wijziging mist cao_key en gekoppelde CAOConfiguration kon niet worden herleid; automatische correctiematching is geblokkeerd om cross-CAO fouten te voorkomen.',
+          null,
+          {
+            match_type: 'manual_review_missing_cao_key',
+            evidence: {
+              strategy: 'manual_review_missing_cao_key',
+              review_id: review.id,
+              cao_configuration_id: review.cao_configuration_id || null
+            }
+          }
         );
         const saved = await upsertCorrection(base44, data);
         if (saved.created) createdCorrectionIds.push(saved.id);
@@ -249,7 +307,19 @@ Deno.serve(async (req) => {
           null,
           'manual_review_required',
           effectiveDateReviewReason,
-          reviewCaoKey
+          reviewCaoKey,
+          {
+            match_type: 'manual_review_effective_date',
+            evidence: {
+              strategy: 'manual_review_effective_date',
+              effective_from: review.effective_from || null,
+              effective_until: review.effective_until || null,
+              effective_from_source: review.effective_from_source || null,
+              effective_from_inferred: review.effective_from_inferred === true,
+              effective_date_manual_review_required: review.effective_date_manual_review_required === true,
+              effective_date_warnings: normalizeArray(review.effective_date_warnings)
+            }
+          }
         );
         const saved = await upsertCorrection(base44, data);
         if (saved.created) createdCorrectionIds.push(saved.id);
@@ -268,7 +338,15 @@ Deno.serve(async (req) => {
           null,
           'manual_review_required',
           'CAO-wijziging heeft payroll-impact maar mist effective_from; automatische correctiematching is geblokkeerd omdat historische loonruns niet veilig kunnen worden afgebakend.',
-          reviewCaoKey
+          reviewCaoKey,
+          {
+            match_type: 'manual_review_effective_date',
+            evidence: {
+              strategy: 'manual_review_missing_effective_from',
+              effective_from: null,
+              effective_until: review.effective_until || null
+            }
+          }
         );
         const saved = await upsertCorrection(base44, data);
         if (saved.created) createdCorrectionIds.push(saved.id);
@@ -296,14 +374,24 @@ Deno.serve(async (req) => {
           null,
           'skipped_no_affected_run',
           `Geen bestaande PayrollCalculationRun voor CAO ${reviewCaoKey} gevonden die overlapt met de ingangsdatum van de CAO-wijziging.`,
-          reviewCaoKey
+          reviewCaoKey,
+          {
+            match_type: 'unmatched_no_existing_run',
+            evidence: {
+              strategy: 'unmatched_no_existing_run',
+              cao_key: reviewCaoKey,
+              effective_from: review.effective_from || null,
+              effective_until: review.effective_until || null,
+              checked_payroll_run_count: payrollRuns.length
+            }
+          }
         );
         const saved = await upsertCorrection(base44, data);
         if (saved.created) createdCorrectionIds.push(saved.id);
         else updatedCorrectionIds.push(saved.id);
         unmatchedReviewIds.push(review.id);
         await base44.asServiceRole.entities.CAOChangeReview.update(review.id, {
-          correction_status: 'manual_review_required'
+          correction_status: 'skipped_no_affected_run'
         });
         continue;
       }
@@ -317,7 +405,7 @@ Deno.serve(async (req) => {
           ? 'Payrollrun is al goedgekeurd/geëxporteerd/betaald; correctie moet in een volgende loonrun worden verwerkt.'
           : 'Payrollrun valt binnen retroactieve CAO-periode; herberekening vereist voordat deze definitief wordt.';
 
-        const data = buildCorrectionData(review, run, status, reason, reviewCaoKey);
+        const data = buildCorrectionData(review, run, status, reason, reviewCaoKey, exactOverlapEvidence(run, review));
         const saved = await upsertCorrection(base44, data);
         if (saved.created) createdCorrectionIds.push(saved.id);
         else updatedCorrectionIds.push(saved.id);
@@ -332,7 +420,19 @@ Deno.serve(async (req) => {
           run,
           'manual_review_required',
           'Legacy payrollrun mist pay_period_start/pay_period_end; handmatige review vereist om overlap exact te bepalen. Deze run wordt niet automatisch als geraakt gemarkeerd.',
-          reviewCaoKey
+          reviewCaoKey,
+          {
+            match_type: 'legacy_year_only_possible_overlap',
+            evidence: {
+              strategy: 'legacy_year_only_possible_overlap',
+              payroll_run_id: run.id || null,
+              pay_period_year: run.pay_period_year ?? null,
+              pay_period_number: run.pay_period_number ?? null,
+              effective_from: review.effective_from || null,
+              effective_until: review.effective_until || null,
+              reason: 'pay_period_start/pay_period_end ontbreken; exacte overlap kan niet automatisch worden bewezen.'
+            }
+          }
         );
         const saved = await upsertCorrection(base44, data);
         if (saved.created) createdCorrectionIds.push(saved.id);

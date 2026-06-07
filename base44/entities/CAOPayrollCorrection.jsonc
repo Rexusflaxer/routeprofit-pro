@@ -109,6 +109,52 @@
       },
       "description": "Auditnotities over ontbrekende, afgeleide of conflicterende ingangsdata."
     },
+    "affected_overlap_start": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Eerste datum binnen de payrollrun die door deze CAO-wijziging geraakt wordt."
+    },
+    "affected_overlap_end": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Laatste datum binnen de payrollrun die door deze CAO-wijziging geraakt wordt."
+    },
+    "affected_overlap_days": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Aantal kalenderdagen in de doorsnede tussen payrollperiode en CAO-wijzigingsperiode."
+    },
+    "correction_match_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "exact_pay_period_overlap",
+        "legacy_year_only_possible_overlap",
+        "unmatched_no_existing_run",
+        "manual_review_effective_date",
+        "manual_review_missing_cao_key",
+        null
+      ],
+      "description": "Hoe deze correctiekandidaat aan payroll is gekoppeld. Exacte overlap is automatisch afgebakend; legacy/year-only vereist review."
+    },
+    "correction_match_evidence": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Auditbewijs voor de match: payrollperiode, wijzigingsperiode, overlapsegment en gebruikte matchingstrategie."
+    },
     "pay_period_year": {
       "type": [
         "number",

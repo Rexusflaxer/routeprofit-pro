@@ -2041,6 +2041,11 @@ function buildCaoCorrectionApplication(corrections, adjustments, shouldApply) {
       field_path: correction.field_path || null,
       effective_from: correction.effective_from || null,
       effective_until: correction.effective_until || null,
+      affected_overlap_start: correction.affected_overlap_start || null,
+      affected_overlap_end: correction.affected_overlap_end || null,
+      affected_overlap_days: correction.affected_overlap_days ?? null,
+      correction_match_type: correction.correction_match_type || null,
+      correction_match_evidence: correction.correction_match_evidence || null,
       correction_reason: correction.correction_reason || null,
       pay_period_year: correction.pay_period_year ?? null,
       pay_period_number: correction.pay_period_number ?? null
@@ -2074,6 +2079,10 @@ function buildCaoCorrectionPayrollComponent(corrections, adjustments) {
       field_path: correction.field_path || null,
       effective_from: correction.effective_from || null,
       effective_until: correction.effective_until || null,
+      affected_overlap_start: correction.affected_overlap_start || null,
+      affected_overlap_end: correction.affected_overlap_end || null,
+      affected_overlap_days: correction.affected_overlap_days ?? null,
+      correction_match_type: correction.correction_match_type || null,
       ...amounts
     });
   }

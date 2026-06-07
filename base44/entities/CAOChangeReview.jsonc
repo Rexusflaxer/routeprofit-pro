@@ -118,6 +118,7 @@
         "queued",
         "applied",
         "manual_review_required",
+        "skipped_no_affected_run",
         null
       ],
       "default": "not_required"
