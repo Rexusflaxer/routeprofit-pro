@@ -17,6 +17,13 @@
       ],
       "description": "Werkgever/bedrijf dat deze route/dienst uitvoert. Nodig om personeelscontracten en CAO toe te passen."
     },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optionele CAO sleutel voor deze route/dienst. Als leeg wordt CAO afgeleid uit contract/bedrijf."
+    },
     "assigned_tasks": {
       "type": "array",
       "description": "Taken met hun toegewezen dagen en optionele route-pinning",

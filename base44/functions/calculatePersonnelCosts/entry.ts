@@ -891,6 +891,14 @@ function shiftHasContractResolutionContext(shift) {
     shift.security_role_status ||
     shift.required_security_role_status ||
     shift.contract_assignment_policy ||
+    shift.cao_key ||
+    shift.cao ||
+    shift.performs_security_work !== undefined ||
+    shift.security_work_percentage !== undefined ||
+    shift.works_event_or_hospitality_security !== undefined ||
+    shift.event_hospitality_cao_applies !== undefined ||
+    shift.works_airport_schiphol !== undefined ||
+    shift.works_cash_value_logistics !== undefined ||
     hasObjectValues(shift.service_context)
   );
 }
@@ -908,6 +916,33 @@ function shouldEnforceContractResolution({ body, workSchedule }) {
   return (workSchedule || []).some(shiftHasContractResolutionContext);
 }
 
+function firstScheduleCaoKey(workSchedule) {
+  for (const shift of workSchedule || []) {
+    const shiftContext = shift?.service_context || {};
+    const key = shift?.cao_key ||
+      shift?.cao ||
+      shiftContext.cao_key ||
+      shiftContext.cao ||
+      null;
+    if (key) return key;
+  }
+  return null;
+}
+
+function collectScheduleCaoKeys(workSchedule) {
+  const keys = [];
+  for (const shift of workSchedule || []) {
+    const shiftContext = shift?.service_context || {};
+    const key = shift?.cao_key ||
+      shift?.cao ||
+      shiftContext.cao_key ||
+      shiftContext.cao ||
+      null;
+    if (key && !keys.includes(key)) keys.push(key);
+  }
+  return keys;
+}
+
 function buildShiftContractServiceContext({ body, personnel, shift }) {
   const bodyContext = body.service_context || {};
   const shiftContext = shift.service_context || {};
@@ -917,6 +952,16 @@ function buildShiftContractServiceContext({ body, personnel, shift }) {
     ...bodyContext,
     ...shiftContext,
     service_date: shift.date || shiftContext.service_date || bodyContext.service_date || null,
+    cao_key: shift.cao_key ||
+      shiftContext.cao_key ||
+      bodyContext.cao_key ||
+      body.cao_key ||
+      null,
+    cao: shift.cao ||
+      shiftContext.cao ||
+      bodyContext.cao ||
+      body.cao ||
+      null,
     company_id: companyId,
     object_id: objectId,
     function_type: shift.function_type ||
@@ -943,6 +988,30 @@ function buildShiftContractServiceContext({ body, personnel, shift }) {
       shiftContext.security_role_status ||
       bodyContext.security_role_status ||
       personnel.security_role_status ||
+      null,
+    performs_security_work: shift.performs_security_work ??
+      shiftContext.performs_security_work ??
+      bodyContext.performs_security_work ??
+      null,
+    security_work_percentage: shift.security_work_percentage ??
+      shiftContext.security_work_percentage ??
+      bodyContext.security_work_percentage ??
+      null,
+    works_airport_schiphol: shift.works_airport_schiphol ??
+      shiftContext.works_airport_schiphol ??
+      bodyContext.works_airport_schiphol ??
+      null,
+    works_cash_value_logistics: shift.works_cash_value_logistics ??
+      shiftContext.works_cash_value_logistics ??
+      bodyContext.works_cash_value_logistics ??
+      null,
+    works_event_or_hospitality_security: shift.works_event_or_hospitality_security ??
+      shiftContext.works_event_or_hospitality_security ??
+      bodyContext.works_event_or_hospitality_security ??
+      null,
+    event_hospitality_cao_applies: shift.event_hospitality_cao_applies ??
+      shiftContext.event_hospitality_cao_applies ??
+      bodyContext.event_hospitality_cao_applies ??
       null,
     contract_assignment_policy: shift.contract_assignment_policy ||
       shiftContext.contract_assignment_policy ||
@@ -1326,10 +1395,28 @@ Deno.serve(async (req) => {
     const refDate = new Date(firstShiftDate);
     const targetCaoKey = body.cao_key ||
       service_context?.cao_key ||
+      firstScheduleCaoKey(work_schedule) ||
       personnel.cao ||
       CAO_PB_KEY;
 
     const calculationWarnings = [];
+    const explicitScheduleCaoKeys = collectScheduleCaoKeys(work_schedule);
+    const conflictingScheduleCaoKeys = explicitScheduleCaoKeys.filter(key => key !== targetCaoKey);
+    if (explicitScheduleCaoKeys.length > 1 || conflictingScheduleCaoKeys.length > 0) {
+      return Response.json({
+        error: 'Definitieve loonberekening geblokkeerd: deze loonrun bevat diensten met meerdere of afwijkende cao_key waarden.',
+        calculation_warnings: [
+          'Splits de loonrun per cao_key of geef een consistente cao_key mee op alle diensten.'
+        ],
+        personnel_id,
+        cao_key: targetCaoKey,
+        schedule_cao_keys: explicitScheduleCaoKeys,
+        cao_runtime_support: getCaoRuntimeSupport(targetCaoKey, 'calculatePersonnelCosts'),
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_mixed_schedule_cao_keys'
+      }, { status: 400 });
+    }
 
     // ── CAO-toepassingscheck ──
     // Deze resolver is PB-specifiek. Voor andere cao_key's blokkeert de runtime later fail-closed.

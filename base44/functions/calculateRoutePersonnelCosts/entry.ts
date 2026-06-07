@@ -486,6 +486,8 @@ async function resolveRouteContractContext(base44, personnel, route, shiftDate, 
       company_id: route.operating_company_id,
       service_date: shiftDate,
       service_context: {
+        cao_key: route.cao_key || route.cao || null,
+        cao: route.cao || null,
         function_type: functionType || personnel.function_type || null,
         cao_function_group: personnel.cao_function_group || null,
         cao_function_level: personnel.cao_function_level || null,

@@ -72,6 +72,8 @@ function inferServiceContext({ body, task, route }) {
   const securityRoleStatus = input.security_role_status || task?.required_security_role_status || null;
   const caoKey = input.cao_key ||
     body.cao_key ||
+    task?.cao_key ||
+    task?.cao ||
     route?.cao_key ||
     route?.cao ||
     null;
@@ -79,7 +81,7 @@ function inferServiceContext({ body, task, route }) {
   return {
     service_date: body.service_date || input.service_date || todayIsoDate(),
     cao_key: caoKey,
-    cao: input.cao || body.cao || route?.cao || null,
+    cao: input.cao || body.cao || task?.cao || route?.cao || null,
     company_id: body.company_id || input.company_id || route?.operating_company_id || null,
     route_id: body.route_id || null,
     task_id: body.task_id || null,
@@ -89,6 +91,12 @@ function inferServiceContext({ body, task, route }) {
     cao_function_group: caoFunctionGroup,
     cao_function_level: caoFunctionLevel,
     security_role_status: securityRoleStatus,
+    performs_security_work: input.performs_security_work ?? task?.performs_security_work ?? null,
+    security_work_percentage: input.security_work_percentage ?? task?.security_work_percentage ?? null,
+    works_airport_schiphol: input.works_airport_schiphol ?? task?.works_airport_schiphol ?? null,
+    works_cash_value_logistics: input.works_cash_value_logistics ?? task?.works_cash_value_logistics ?? null,
+    works_event_or_hospitality_security: input.works_event_or_hospitality_security ?? task?.works_event_or_hospitality_security ?? null,
+    event_hospitality_cao_applies: input.event_hospitality_cao_applies ?? task?.event_hospitality_cao_applies ?? null,
     customer_billable: input.customer_billable ?? task?.customer_billable ?? null,
     counts_toward_required_staffing: input.counts_toward_required_staffing ?? task?.counts_toward_required_staffing ?? null,
     internship_practice_trainer_personnel_id: input.internship_practice_trainer_personnel_id ?? task?.internship_practice_trainer_personnel_id ?? null,

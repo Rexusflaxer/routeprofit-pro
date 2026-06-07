@@ -69,6 +69,69 @@
       "default": "strict_contract_match",
       "description": "Bepaalt hoe streng de planning deze taak aan een arbeidscontract moet koppelen."
     },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "CAO sleutel die deze dienst vraagt, bijv. cao_particuliere_beveiliging. Leeg betekent afleiden uit route/bedrijf/contract."
+    },
+    "performs_security_work": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "True als deze dienst beveiligingswerk vraagt; false voor niet-beveiligingswerk zoals pure klantrelatie/binnendienst."
+    },
+    "security_work_percentage": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Percentage beveiligingswerk binnen deze dienst. Nodig voor art. 3 lid 2 en mixed-scope review."
+    },
+    "works_event_or_hospitality_security": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "True als deze dienst evenementen-/horecabeveiliging betreft."
+    },
+    "event_hospitality_cao_applies": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "True als voor deze dienst de evenementen-/horecabeveiligings-CAO geldt in plaats van CAO PB."
+    },
+    "works_airport_schiphol": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "True als deze dienst onder Schiphol-specifieke CAO PB regels kan vallen."
+    },
+    "works_cash_value_logistics": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "True als deze dienst geld- en waardelogistiek betreft."
+    },
+    "customer_billable": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "True als deze dienst aan de klant wordt gefactureerd; relevant voor stage-/inhuurregels en audit."
+    },
+    "counts_toward_required_staffing": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "True als deze dienst meetelt voor vereiste bezetting; relevant voor stage- en dienstcontextregels."
+    },
     "duration_minutes": {
       "type": "number",
       "description": "Totale taakduur in minuten (bij collectief: totaal voor alle items)"

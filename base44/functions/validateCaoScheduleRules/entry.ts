@@ -31,6 +31,38 @@ function firstShiftCaoKey(shifts) {
   return null;
 }
 
+function collectScheduleTaskIds(shifts, body = {}) {
+  const ids = [];
+  const bodyTaskIds = [body?.task_id, body?.service_context?.task_id].filter(Boolean);
+  for (const id of bodyTaskIds) {
+    if (!ids.includes(id)) ids.push(id);
+  }
+  if (Array.isArray(shifts)) {
+    for (const shift of shifts) {
+      if (shift?.task_id && !ids.includes(shift.task_id)) ids.push(shift.task_id);
+      const serviceTaskId = shift?.service_context?.task_id;
+      if (serviceTaskId && !ids.includes(serviceTaskId)) ids.push(serviceTaskId);
+    }
+  }
+  return ids;
+}
+
+async function firstTaskCaoKey(base44, shifts, body = {}) {
+  const taskIds = collectScheduleTaskIds(shifts, body);
+  for (const taskId of taskIds) {
+    try {
+      const task = await base44.asServiceRole.entities.Task.get(taskId);
+      const key = task?.cao_key ||
+        task?.cao ||
+        task?.planning_contract_context?.cao_key ||
+        task?.planning_contract_context?.cao ||
+        null;
+      if (key) return key;
+    } catch { /* taakcontext is optioneel */ }
+  }
+  return null;
+}
+
 async function lazySyncCao(base44, forceCaoSync = false, caoKey = CAO_PB_KEY) {
   if (caoKey !== CAO_PB_KEY) {
     return {
@@ -3407,6 +3439,12 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
           cao_function_group: serviceContext.cao_function_group || shift.required_cao_function_group || shift.cao_function_group || null,
           cao_function_level: serviceContext.cao_function_level || shift.required_cao_function_level || shift.cao_function_level || null,
           security_role_status: serviceContext.security_role_status || shift.required_security_role_status || shift.security_role_status || null,
+          performs_security_work: serviceContext.performs_security_work ?? shift.performs_security_work ?? null,
+          security_work_percentage: serviceContext.security_work_percentage ?? shift.security_work_percentage ?? null,
+          works_airport_schiphol: serviceContext.works_airport_schiphol ?? shift.works_airport_schiphol ?? null,
+          works_cash_value_logistics: serviceContext.works_cash_value_logistics ?? shift.works_cash_value_logistics ?? null,
+          works_event_or_hospitality_security: serviceContext.works_event_or_hospitality_security ?? shift.works_event_or_hospitality_security ?? null,
+          event_hospitality_cao_applies: serviceContext.event_hospitality_cao_applies ?? shift.event_hospitality_cao_applies ?? null,
           customer_billable: serviceContext.customer_billable ?? shift.customer_billable ?? null,
           counts_toward_required_staffing: serviceContext.counts_toward_required_staffing ?? shift.counts_toward_required_staffing ?? null,
           internship_practice_trainer_personnel_id: serviceContext.internship_practice_trainer_personnel_id || shift.internship_practice_trainer_personnel_id || null,
@@ -3549,9 +3587,12 @@ Deno.serve(async (req) => {
       } catch { /* geboortedatum is optioneel voor oudere payloads */ }
     }
 
+    const taskCaoKey = await firstTaskCaoKey(base44, shifts, body);
+
     const targetCaoKey = body.cao_key ||
       body.service_context?.cao_key ||
       firstShiftCaoKey(shifts) ||
+      taskCaoKey ||
       personnelContext?.cao ||
       CAO_PB_KEY;
 
@@ -3582,6 +3623,7 @@ Deno.serve(async (req) => {
         period_end: period_end || null,
         personnel_id: personnel_id || null,
         cao_key: targetCaoKey,
+        task_cao_key: taskCaoKey || null,
         cao_runtime_support: scheduleRuntimeSupport,
         manual_review_required: true,
         payroll_final_allowed: false,
@@ -3678,6 +3720,7 @@ Deno.serve(async (req) => {
       personnel_id: personnel_id || null,
       cao_sync_status: caoSyncStatus,
       cao_key: targetCaoKey,
+      task_cao_key: taskCaoKey || null,
       cao_runtime_support: scheduleRuntimeSupport,
       calculation_warnings: syncWarnings,
       scope_warnings: scopeWarnings,
