@@ -20,6 +20,7 @@ function loadFunctionModule(relativePath) {
 
 const runtimeReadiness = loadFunctionModule('base44/functions/resolveCaoRuntimeReadiness/entry.ts');
 const ingestCaoAutomation = loadFunctionModule('base44/functions/ingestCaoAutomationPayload/entry.ts');
+const syncCaoFromCloudflare = loadFunctionModule('base44/functions/syncCaoFromCloudflare/entry.ts');
 
 const expectedKnownKeys = [
   'cao_particuliere_beveiliging',
@@ -101,6 +102,42 @@ for (const key of expectedKnownKeys) {
     assert.ok(family.change_detection.includes('content_hash'), `${key}/${family.family_key} must include content_hash detection`);
     assert.ok(family.effective_date_fields.length > 0, `${key}/${family.family_key} missing effective_date_fields`);
   }
+}
+
+const pbMinimums = ingestCaoAutomation.getSourceCoverageMinimums({ cao_key: 'cao_particuliere_beveiliging' });
+assert.equal(pbMinimums.total, 2110, 'PB must retain fixed 2024-2026 source coverage minimum');
+assert.equal(pbMinimums.automatic_or_calculation, 852, 'PB automatic coverage minimum changed unexpectedly');
+
+for (const module of [ingestCaoAutomation, syncCaoFromCloudflare]) {
+  const missingExternalBaseline = module.evaluateSourceCoverageCompleteness(
+    {
+      cao_key: 'cao_evenementen_horecabeveiliging',
+      source_documents_snapshot: []
+    },
+    []
+  );
+  assert.equal(missingExternalBaseline.external_coverage_baseline.required, true);
+  assert.equal(missingExternalBaseline.external_coverage_baseline.present, false);
+  assert.ok(
+    missingExternalBaseline.blocking_findings.some(f => f.code === 'incomplete_external_cao_rule_coverage_baseline'),
+    'External CAO without declared coverage baseline must be blocked'
+  );
+
+  const declaredExternalMinimums = module.getSourceCoverageMinimums({
+    cao_key: 'cao_evenementen_horecabeveiliging',
+    coverage_summary: {
+      expected_total_rules: 123,
+      expected_automation_level_counts: {
+        automatic_or_calculation: 45,
+        validation_or_policy: 12,
+        workflow_or_documentation: 8
+      }
+    }
+  });
+  assert.equal(declaredExternalMinimums.total, 123);
+  assert.equal(declaredExternalMinimums.automatic_or_calculation, 45);
+  assert.equal(declaredExternalMinimums.validation_or_policy, 12);
+  assert.equal(declaredExternalMinimums.workflow_or_documentation, 8);
 }
 
 const unknown = runtimeReadiness.buildCaoRuntimeReadinessForKey('cao_onbekend');

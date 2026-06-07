@@ -32,6 +32,8 @@ const KNOWN_SECURITY_CAO_KEYS = [
   CAO_SAFETY_DOMAIN_KEY
 ];
 const LOCAL_PAYROLL_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+const EXTERNAL_SECURITY_CAO_KEYS_REQUIRING_DECLARED_COVERAGE_BASELINE = KNOWN_SECURITY_CAO_KEYS
+  .filter(key => key !== CAO_PB_KEY);
 
 function normalizeCaoKey(value) {
   return String(value || '').trim();
@@ -1705,6 +1707,31 @@ function getSourceCoverageMinimums(candidateCfg) {
   return minimums;
 }
 
+function getDeclaredExternalCoverageBaselineStatus(candidateCfg) {
+  const caoKey = normalizeCaoKey(candidateCfg?.cao_key) || CAO_PB_KEY;
+  const required = EXTERNAL_SECURITY_CAO_KEYS_REQUIRING_DECLARED_COVERAGE_BASELINE.includes(caoKey);
+  const summary = getDeclaredCoverageSummary(candidateCfg);
+  const declaredTotal = numberOrNull(
+    summary.expected_total_rules ??
+    summary.total_atomic_rules ??
+    summary.total_source_rules ??
+    summary.total
+  );
+  const byLevel = summary.expected_automation_level_counts ||
+    summary.by_automation_level ||
+    summary.automation_level_counts ||
+    {};
+  const declaredLevelKeys = ['automatic_or_calculation', 'validation_or_policy', 'workflow_or_documentation']
+    .filter(key => numberOrNull(byLevel[key]) !== null);
+  return {
+    cao_key: caoKey,
+    required,
+    present: !required || (declaredTotal !== null && declaredTotal > 0 && declaredLevelKeys.length > 0),
+    declared_total_rules: declaredTotal,
+    declared_automation_level_keys: declaredLevelKeys
+  };
+}
+
 function countByAutomationLevel(rules) {
   return rules.reduce((acc, rule) => {
     const key = rule.automation_level || 'unknown';
@@ -1751,12 +1778,21 @@ function summarizeSourceEvidenceGap(rule, message) {
 function evaluateSourceCoverageCompleteness(candidateCfg, rules) {
   const caoKey = normalizeCaoKey(candidateCfg?.cao_key) || CAO_PB_KEY;
   const minimums = getSourceCoverageMinimums(candidateCfg);
+  const externalCoverageBaseline = getDeclaredExternalCoverageBaselineStatus(candidateCfg);
   const uniqueRuleIds = new Set(rules.map(rule => rule.rule_id).filter(Boolean));
   const byAutomationLevel = countByAutomationLevel(rules);
   const sourceFamilyCoverage = evaluateRequiredSourceFamilyCoverage(candidateCfg);
   const blockingFindings = [];
   const payrollCriticalMissingSourceLocator = [];
   const payrollCriticalMissingSourceHash = [];
+
+  if (externalCoverageBaseline.required && !externalCoverageBaseline.present) {
+    blockingFindings.push({
+      code: 'incomplete_external_cao_rule_coverage_baseline',
+      severity: 'critical',
+      message: `CAO ${caoKey} mist een expliciete coverage_summary met expected_total_rules en automation-level aantallen. Externe CAO-runtime mag pas worden opgebouwd na een volledige regelcoverage baseline.`
+    });
+  }
 
   if (uniqueRuleIds.size < minimums.total) {
     blockingFindings.push({
@@ -1817,6 +1853,7 @@ function evaluateSourceCoverageCompleteness(candidateCfg, rules) {
     unique_rule_ids: uniqueRuleIds.size,
     by_automation_level: byAutomationLevel,
     minimums,
+    external_coverage_baseline: externalCoverageBaseline,
     source_family_coverage: sourceFamilyCoverage,
     payroll_critical_source_evidence: {
       missing_source_locator_count: payrollCriticalMissingSourceLocator.length,
