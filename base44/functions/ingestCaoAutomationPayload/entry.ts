@@ -1122,6 +1122,128 @@ function hasMachineReadableAction(rule) {
     ['automatic', 'manual_review_required', 'policy_only'].includes(calculationPolicy);
 }
 
+const SEMANTIC_GAP_DEFINITIONS = {
+  missing_rule_text: { priority: 100, label: 'Brontekst ontbreekt' },
+  missing_local_runtime: { priority: 95, label: 'Lokale runtime ontbreekt' },
+  missing_applicability_semantics: { priority: 90, label: 'applies_when ontbreekt' },
+  missing_action_semantics: { priority: 90, label: 'actie-/validatiesemantiek ontbreekt' },
+  missing_test_evidence: { priority: 80, label: 'Testbewijs ontbreekt' },
+  runtime_bound_status_unverified: { priority: 75, label: 'Runtimebinding aanwezig, implementatiestatus niet bewezen' },
+  partial_without_manual_review: { priority: 70, label: 'PARTIAL zonder verplichte review' },
+  manual_review_required: { priority: 60, label: 'Handmatige review vereist' },
+  not_implemented: { priority: 55, label: 'Niet volledig geimplementeerd' }
+};
+
+function hasRuntimeBindingSummary(rule) {
+  return rule?.has_runtime_binding === true ||
+    rule?.runtime_binding_status === 'verified_local_runtime' ||
+    Boolean(rule?.runtime_binding_key) ||
+    (Array.isArray(rule?.runtime_binding_functions) && rule.runtime_binding_functions.length > 0);
+}
+
+function addSemanticGap(backlogByRule, rule, gapType) {
+  if (!rule?.rule_id) return;
+  if (!backlogByRule.has(rule.rule_id)) {
+    backlogByRule.set(rule.rule_id, {
+      rule_id: rule.rule_id,
+      domain: rule.domain || null,
+      article: rule.article || null,
+      automation_level: rule.automation_level || null,
+      implementation_status: rule.implementation_status || 'MISSING',
+      manual_review_required: rule.manual_review_required === true,
+      runtime_binding_status: rule.runtime_binding_status || null,
+      runtime_binding_key: rule.runtime_binding_key || null,
+      gap_types: [],
+      priority: 0
+    });
+  }
+  const item = backlogByRule.get(rule.rule_id);
+  if (!item.gap_types.includes(gapType)) item.gap_types.push(gapType);
+  item.priority = Math.max(item.priority, SEMANTIC_GAP_DEFINITIONS[gapType]?.priority || 0);
+}
+
+function countGapTypes(items) {
+  const counts = {};
+  for (const item of items) {
+    for (const gapType of item.gap_types || []) {
+      counts[gapType] = (counts[gapType] || 0) + 1;
+    }
+  }
+  return counts;
+}
+
+function buildSemanticBacklogGroup(items, groupKey, maxRuleIds = 25) {
+  const sorted = [...items].sort((a, b) => b.priority - a.priority || a.rule_id.localeCompare(b.rule_id));
+  return {
+    key: groupKey || 'unknown',
+    open_rule_count: sorted.length,
+    highest_priority: sorted[0]?.priority || 0,
+    gap_types: countGapTypes(sorted),
+    sample_rule_ids: sorted.slice(0, maxRuleIds).map(item => item.rule_id),
+    sample_rule_ids_truncated: sorted.length > maxRuleIds
+  };
+}
+
+function groupSemanticBacklog(items, keyFn, maxGroups, maxRuleIds) {
+  const groups = new Map();
+  for (const item of items) {
+    const key = keyFn(item) || 'unknown';
+    if (!groups.has(key)) groups.set(key, []);
+    groups.get(key).push(item);
+  }
+  return [...groups.entries()]
+    .map(([key, groupItems]) => buildSemanticBacklogGroup(groupItems, key, maxRuleIds))
+    .sort((a, b) => b.highest_priority - a.highest_priority || b.open_rule_count - a.open_rule_count || a.key.localeCompare(b.key))
+    .slice(0, maxGroups);
+}
+
+function buildSemanticBacklog({
+  openCriticalRules,
+  implementedWithoutRuntimeBinding,
+  implementedWithoutTestEvidence,
+  partialWithoutManualReview,
+  payrollCriticalMissingRuleText,
+  payrollCriticalMissingApplicabilitySemantics,
+  payrollCriticalMissingActionSemantics,
+  maxGroups = 25,
+  maxRuleIds = 25
+}) {
+  const backlogByRule = new Map();
+
+  for (const rule of openCriticalRules) {
+    const status = String(rule.implementation_status || 'MISSING').toUpperCase();
+    const runtimeBound = hasRuntimeBindingSummary(rule);
+    if (!runtimeBound) addSemanticGap(backlogByRule, rule, 'missing_local_runtime');
+    if (status !== 'IMPLEMENTED') addSemanticGap(backlogByRule, rule, runtimeBound ? 'runtime_bound_status_unverified' : 'not_implemented');
+    if (rule.manual_review_required === true) addSemanticGap(backlogByRule, rule, 'manual_review_required');
+  }
+  for (const rule of implementedWithoutRuntimeBinding) addSemanticGap(backlogByRule, rule, 'missing_local_runtime');
+  for (const rule of implementedWithoutTestEvidence) addSemanticGap(backlogByRule, rule, 'missing_test_evidence');
+  for (const rule of partialWithoutManualReview) addSemanticGap(backlogByRule, rule, 'partial_without_manual_review');
+  for (const rule of payrollCriticalMissingRuleText) addSemanticGap(backlogByRule, rule, 'missing_rule_text');
+  for (const rule of payrollCriticalMissingApplicabilitySemantics) addSemanticGap(backlogByRule, rule, 'missing_applicability_semantics');
+  for (const rule of payrollCriticalMissingActionSemantics) addSemanticGap(backlogByRule, rule, 'missing_action_semantics');
+
+  const items = [...backlogByRule.values()]
+    .map(item => ({
+      ...item,
+      gap_types: item.gap_types.sort((a, b) => (SEMANTIC_GAP_DEFINITIONS[b]?.priority || 0) - (SEMANTIC_GAP_DEFINITIONS[a]?.priority || 0) || a.localeCompare(b))
+    }))
+    .sort((a, b) => b.priority - a.priority || a.rule_id.localeCompare(b.rule_id));
+
+  return {
+    open_rule_count: items.length,
+    gap_type_counts: countGapTypes(items),
+    gap_type_definitions: SEMANTIC_GAP_DEFINITIONS,
+    top_rules: items.slice(0, maxRuleIds),
+    top_rules_truncated: items.length > maxRuleIds,
+    by_domain: groupSemanticBacklog(items, item => item.domain, maxGroups, maxRuleIds),
+    by_article: groupSemanticBacklog(items, item => item.article, maxGroups, maxRuleIds),
+    by_runtime_binding_key: groupSemanticBacklog(items, item => item.runtime_binding_key || 'missing_local_runtime', maxGroups, maxRuleIds),
+    generation_note: 'Owner/internal backlog voor CAO-dekking. Gebruik dit als implementatievolgorde; niet tonen aan eindgebruikers.'
+  };
+}
+
 function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
   const rules = Array.isArray(candidateRules) ? candidateRules : [];
   const caoKey = normalizeCaoKey(candidateCfg?.cao_key) || CAO_PB_KEY;
@@ -1190,6 +1312,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
         payrollCriticalMissingRuleText.push({
           rule_id: rule.rule_id || 'unknown',
           domain: rule.domain || null,
+          article: rule.article || null,
           implementation_status: rule.implementation_status || 'MISSING',
           automation_level: rule.automation_level || null,
           calculation_policy: rule.calculation_policy || null,
@@ -1201,6 +1324,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
         payrollCriticalMissingApplicabilitySemantics.push({
           rule_id: rule.rule_id || 'unknown',
           domain: rule.domain || null,
+          article: rule.article || null,
           implementation_status: rule.implementation_status || 'MISSING',
           automation_level: rule.automation_level || null,
           calculation_policy: rule.calculation_policy || null,
@@ -1212,6 +1336,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
         payrollCriticalMissingActionSemantics.push({
           rule_id: rule.rule_id || 'unknown',
           domain: rule.domain || null,
+          article: rule.article || null,
           implementation_status: rule.implementation_status || 'MISSING',
           automation_level: rule.automation_level || null,
           calculation_policy: rule.calculation_policy || null,
@@ -1223,6 +1348,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
         implementedWithoutRuntimeBinding.push({
           rule_id: rule.rule_id || 'unknown',
           domain: rule.domain || null,
+          article: rule.article || null,
           implementation_status: rule.implementation_status || 'IMPLEMENTED',
           implemented_in: rule.implemented_in || [],
           message: 'Regel claimt IMPLEMENTED, maar heeft geen lokale runtime-binding in Base44.'
@@ -1233,6 +1359,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
         implementedWithoutTestEvidence.push({
           rule_id: rule.rule_id || 'unknown',
           domain: rule.domain || null,
+          article: rule.article || null,
           implementation_status: rule.implementation_status || 'IMPLEMENTED',
           implemented_in: rule.implemented_in || [],
           message: 'Regel claimt IMPLEMENTED, maar CAORule.tests bevat geen geverifieerd geslaagd testbewijs.'
@@ -1243,6 +1370,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
         partialWithoutManualReview.push({
           rule_id: rule.rule_id || 'unknown',
           domain: rule.domain || null,
+          article: rule.article || null,
           implementation_status: rule.implementation_status || 'PARTIAL',
           message: 'Regel is PARTIAL, maar manual_review_required is niet true.'
         });
@@ -1262,6 +1390,7 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
         openCriticalRules.push({
           rule_id: rule.rule_id || 'unknown',
           domain: rule.domain || null,
+          article: rule.article || null,
           implementation_status: rule.implementation_status || 'MISSING',
           manual_review_required: rule.manual_review_required === true,
           automation_level: rule.automation_level || null,
@@ -1374,12 +1503,25 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
   else if (openCriticalRules.length > 0 || implementedWithoutRuntimeBinding.length > 0) status = 'blocked_incomplete_runtime_rules';
   else if (counts.manual_review_required > 0) status = 'manual_review_required';
 
+  const semanticBacklog = buildSemanticBacklog({
+    openCriticalRules,
+    implementedWithoutRuntimeBinding,
+    implementedWithoutTestEvidence,
+    partialWithoutManualReview,
+    payrollCriticalMissingRuleText,
+    payrollCriticalMissingApplicabilitySemantics,
+    payrollCriticalMissingActionSemantics,
+    maxGroups: 100,
+    maxRuleIds: 100
+  });
+
   return {
     passed: blockingFindings.length === 0,
     status,
     checked_at: new Date().toISOString(),
     counts,
     source_coverage: sourceCoverage,
+    semantic_backlog: semanticBacklog,
     blocking_findings: blockingFindings,
     open_payroll_critical_rules: openCriticalRules.slice(0, 100),
     open_payroll_critical_rules_truncated: openCriticalRules.length > 100,
