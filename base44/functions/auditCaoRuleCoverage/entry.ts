@@ -59,6 +59,159 @@ function hasLocalPayrollRuntime(caoKey) {
   return LOCAL_PAYROLL_RUNTIME_CAO_KEYS.includes(normalizeCaoKey(caoKey));
 }
 
+function caoPbRuleId(number) {
+  return `CAO-PB-2024-R${String(number).padStart(4, '0')}`;
+}
+
+function ruleIds(...numbers) {
+  return numbers.map(number => caoPbRuleId(number));
+}
+
+function ruleRange(start, end, excluded = []) {
+  const excludedSet = new Set(excluded);
+  const ids = [];
+  for (let number = start; number <= end; number++) {
+    if (!excludedSet.has(number)) ids.push(caoPbRuleId(number));
+  }
+  return ids;
+}
+
+function uniqueSorted(values) {
+  return [...new Set((Array.isArray(values) ? values : []).filter(Boolean))].sort();
+}
+
+const LOCAL_RUNTIME_RULE_BINDINGS = {
+  'resolveCaoApplicability.article_3_scope': {
+    functions: ['resolveCaoApplicability', 'validateTaskPlanningContext', 'calculatePersonnelCosts', 'validateCaoScheduleRules'],
+    rule_ids: ruleRange(227, 233)
+  },
+  'applyCaoContractRules.probation_and_probation_dismissal': {
+    functions: ['applyCaoContractRules'],
+    rule_ids: ruleIds(315, 316, 317, 321, 322)
+  },
+  'applyCaoContractRules.fulltime_parttime_contract_model_articles_10_11': {
+    functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: ruleIds(309, 310, 337, 339, 342, 343, 345, 347, 358, 359)
+  },
+  'applyCaoContractRules.parttime_workload_change_articles_11_12': {
+    functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'validateCaoScheduleRules', 'calculatePersonnelCosts', 'queueCaoPayrollCorrections'],
+    rule_ids: [
+      ...ruleRange(349, 365),
+      ...ruleRange(367, 369),
+      ...ruleIds(358, 359)
+    ]
+  },
+  'applyCaoContractRules.contract_clauses_and_termination_article_9': {
+    functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'validateCaoScheduleRules', 'calculatePersonnelCosts', 'queueCaoPayrollCorrections'],
+    rule_ids: [
+      ...ruleIds(236, 311),
+      ...ruleRange(323, 335)
+    ]
+  },
+  'applyCaoContractRules.call_agreement_article_13': {
+    functions: ['applyCaoContractRules'],
+    rule_ids: [
+      ...ruleRange(372, 374),
+      ...ruleIds(377, 378, 380),
+      ...ruleRange(387, 394),
+      ...ruleRange(396, 399)
+    ]
+  },
+  'applyCaoContractRules.internship_article_14': {
+    functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'validateCaoScheduleRules'],
+    rule_ids: [
+      ...ruleRange(401, 405),
+      ...ruleRange(407, 412),
+      ...ruleIds(414, 415),
+      ...ruleRange(417, 422)
+    ]
+  },
+  'applyCaoContractRules.hired_worker_article_15': {
+    functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: ruleRange(423, 438)
+  },
+  'applyCaoContractRules.suspension_article_16': {
+    functions: ['applyCaoContractRules', 'calculatePersonnelCosts'],
+    rule_ids: [...ruleRange(445, 448), ...ruleIds(451)]
+  },
+  'applyCaoContractRules.contract_transfer_articles_18_20': {
+    functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'calculatePersonnelCosts'],
+    rule_ids: ruleRange(464, 545)
+  },
+  'validateCaoScheduleRules.roster_period_constraints': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
+    rule_ids: [...ruleRange(547, 549), ...ruleRange(560, 713)]
+  },
+  'resolveCaoFunctionClassification.appendix_2_wage_scales': {
+    functions: ['resolveCaoApplicability', 'resolveCaoFunctionClassification', 'calculatePersonnelCosts'],
+    rule_ids: [
+      ...ruleRange(714, 716),
+      ...ruleIds(728, 729, 731, 733, 734),
+      ...ruleRange(738, 747),
+      ...ruleIds(1751, 1813)
+    ]
+  },
+  'calculatePersonnelCosts.article_39_acting_function_allowance': {
+    functions: ['resolveCaoFunctionClassification', 'calculatePersonnelCosts'],
+    rule_ids: ruleRange(775, 783)
+  },
+  'calculateCaoYearEndBonus.article_38_year_end_bonus': {
+    functions: ['calculatePersonnelCosts', 'calculateCaoYearEndBonus', 'queueCaoPayrollCorrections'],
+    rule_ids: ruleRange(770, 773)
+  },
+  'calculatePersonnelCosts.article_25_general_reserve_allowance': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: ruleIds(605, 606)
+  },
+  'calculatePersonnelCosts.article_42_overtime_payroll': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: ruleIds(797)
+  },
+  'calculatePersonnelCosts.article_43_44_shift_change_allowance': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
+    rule_ids: [
+      ...ruleIds(576, 580, 585, 586, 606),
+      ...ruleRange(799, 807)
+    ]
+  },
+  'calculatePersonnelCosts.article_45_minimum_service_compensation': {
+    functions: ['calculatePersonnelCosts', 'validateCaoScheduleRules', 'calculateCaoReimbursements'],
+    rule_ids: ruleRange(810, 818)
+  },
+  'calculateCaoReimbursements.article_47_48_49_50': {
+    functions: ['calculateCaoReimbursements'],
+    rule_ids: ruleIds(855, 878, 880, 885, 890, 895, 900, 905, 1609)
+  },
+  'calculateCaoLeaveAndSickness.articles_59_65_66_67': {
+    functions: ['calculateCaoLeaveAndSickness'],
+    rule_ids: [
+      ...ruleRange(999, 1006),
+      ...ruleRange(1008, 1017),
+      ...ruleIds(1019, 1022),
+      ...ruleRange(1148, 1155),
+      ...ruleRange(1157, 1163),
+      ...ruleRange(1165, 1167),
+      ...ruleRange(1172, 1184)
+    ]
+  }
+};
+
+const LOCAL_RUNTIME_RULE_ID_INDEX = Object.entries(LOCAL_RUNTIME_RULE_BINDINGS)
+  .reduce((acc, [key, binding]) => {
+    for (const ruleId of uniqueSorted(binding.rule_ids)) {
+      acc[ruleId] = {
+        key,
+        functions: uniqueSorted(binding.functions),
+        rule_ids: uniqueSorted(binding.rule_ids)
+      };
+    }
+    return acc;
+  }, {});
+
+function getLocalRuntimeBinding(rule) {
+  return LOCAL_RUNTIME_RULE_ID_INDEX[rule?.rule_id] || null;
+}
+
 function normalizeDate(value) {
   return value ? String(value).slice(0, 10) : null;
 }
@@ -408,7 +561,7 @@ function isPayrollCriticalRule(rule) {
 }
 
 function hasRuntimeBinding(rule) {
-  return rule.runtime_binding_status === 'verified_local_runtime';
+  return Boolean(getLocalRuntimeBinding(rule));
 }
 
 function hasRuntimeBindingMetadata(rule) {
@@ -419,8 +572,22 @@ function hasRuntimeBindingMetadata(rule) {
 
 function runtimeBindingStatusForSummary(rule) {
   if (hasRuntimeBinding(rule)) return 'verified_local_runtime';
-  if (hasRuntimeBindingMetadata(rule)) return rule.runtime_binding_status || 'unverified_runtime_metadata';
+  if (hasRuntimeBindingMetadata(rule)) {
+    return rule.runtime_binding_status === 'verified_local_runtime'
+      ? 'persisted_verified_without_local_index'
+      : rule.runtime_binding_status || 'unverified_runtime_metadata';
+  }
   return rule.runtime_binding_status || 'missing_local_runtime';
+}
+
+function runtimeBindingKeyForSummary(rule) {
+  return getLocalRuntimeBinding(rule)?.key || rule.runtime_binding_key || null;
+}
+
+function runtimeBindingFunctionsForSummary(rule) {
+  const localBinding = getLocalRuntimeBinding(rule);
+  if (localBinding) return localBinding.functions || [];
+  return Array.isArray(rule.runtime_binding_functions) ? rule.runtime_binding_functions : [];
 }
 
 function isPositiveTestEvidence(value, key = '') {
@@ -464,6 +631,7 @@ function countBy(collection, keyFn) {
 }
 
 function summarizeRule(rule, extra = {}) {
+  const localBinding = getLocalRuntimeBinding(rule);
   return {
     rule_id: rule.rule_id || 'unknown',
     domain: rule.domain || null,
@@ -471,11 +639,50 @@ function summarizeRule(rule, extra = {}) {
     automation_level: rule.automation_level || null,
     implementation_status: rule.implementation_status || 'MISSING',
     manual_review_required: rule.manual_review_required === true,
-    runtime_binding_status: rule.runtime_binding_status || null,
-    runtime_binding_key: rule.runtime_binding_key || null,
+    runtime_binding_status: runtimeBindingStatusForSummary(rule),
+    runtime_binding_key: runtimeBindingKeyForSummary(rule),
+    runtime_binding_functions: runtimeBindingFunctionsForSummary(rule),
+    local_runtime_binding_source: localBinding ? 'audit_local_runtime_index' : null,
     implemented_in: rule.implemented_in || [],
     risk_level: rule.risk_level || null,
     ...extra
+  };
+}
+
+function evaluateLocalRuntimeBindingCoverage(rules, maxOpenRules) {
+  const persistedRuleIds = uniqueRuleIds(rules);
+  const bindingSummaries = [];
+  const allMissingRuleIds = [];
+  let boundRuleCount = 0;
+  let presentRuleCount = 0;
+
+  for (const [key, binding] of Object.entries(LOCAL_RUNTIME_RULE_BINDINGS)) {
+    const ruleIdsForBinding = uniqueSorted(binding.rule_ids);
+    const missingRuleIds = ruleIdsForBinding.filter(ruleId => !persistedRuleIds.has(ruleId));
+    boundRuleCount += ruleIdsForBinding.length;
+    presentRuleCount += ruleIdsForBinding.length - missingRuleIds.length;
+    allMissingRuleIds.push(...missingRuleIds);
+    bindingSummaries.push({
+      key,
+      functions: uniqueSorted(binding.functions),
+      bound_rule_count: ruleIdsForBinding.length,
+      present_rule_count: ruleIdsForBinding.length - missingRuleIds.length,
+      missing_rule_count: missingRuleIds.length,
+      missing_rule_ids: missingRuleIds.slice(0, maxOpenRules),
+      missing_rule_ids_truncated: missingRuleIds.length > maxOpenRules
+    });
+  }
+
+  const missingRuleIds = uniqueSorted(allMissingRuleIds);
+  return {
+    local_runtime_binding_keys: Object.keys(LOCAL_RUNTIME_RULE_BINDINGS).sort(),
+    local_runtime_binding_count: Object.keys(LOCAL_RUNTIME_RULE_BINDINGS).length,
+    local_runtime_bound_rule_count: boundRuleCount,
+    local_runtime_bound_rules_present_in_registry: presentRuleCount,
+    local_runtime_bound_rules_missing_from_registry_count: missingRuleIds.length,
+    local_runtime_bound_rules_missing_from_registry: missingRuleIds.slice(0, maxOpenRules),
+    local_runtime_bound_rules_missing_from_registry_truncated: missingRuleIds.length > maxOpenRules,
+    bindings: bindingSummaries
   };
 }
 
@@ -486,6 +693,7 @@ function evaluateCoverageGate(config, rules, options = {}) {
     : [];
   const caoKey = normalizeCaoKey(config?.cao_key) || CAO_PB_KEY;
   const sourceCoverage = evaluateSourceCoverageCompleteness(config, rules);
+  const localRuntimeCoverage = evaluateLocalRuntimeBindingCoverage(rules, maxOpenRules);
   const counts = {
     total: rules.length,
     unique_rule_ids: sourceCoverage.unique_rule_ids,
@@ -506,7 +714,11 @@ function evaluateCoverageGate(config, rules, options = {}) {
     implemented_without_test_evidence: 0,
     partial_without_manual_review: 0,
     payroll_critical_missing_rule_text: 0,
-    missing_rule_text: 0
+    missing_rule_text: 0,
+    local_runtime_binding_count: localRuntimeCoverage.local_runtime_binding_count,
+    local_runtime_bound_rule_count: localRuntimeCoverage.local_runtime_bound_rule_count,
+    local_runtime_bound_rules_present_in_registry: localRuntimeCoverage.local_runtime_bound_rules_present_in_registry,
+    local_runtime_bound_rules_missing_from_registry: localRuntimeCoverage.local_runtime_bound_rules_missing_from_registry_count
   };
 
   const openCriticalRules = [];
@@ -651,6 +863,13 @@ function evaluateCoverageGate(config, rules, options = {}) {
       message: `${counts.payroll_critical_open} payrollkritische CAO-regels zijn niet volledig runtime- en testgedekt.`
     });
   }
+  if (localRuntimeCoverage.local_runtime_bound_rules_missing_from_registry_count > 0) {
+    blockingFindings.push({
+      code: 'incomplete_local_runtime_binding_registry',
+      severity: 'critical',
+      message: `${localRuntimeCoverage.local_runtime_bound_rules_missing_from_registry_count} lokaal geimplementeerde CAO-regelbindingen ontbreken in de actieve CAORule registry; runtime-dekking kan niet audit-proof worden bewezen.`
+    });
+  }
   if (implementedWithoutRuntimeBinding.length > 0) {
     blockingFindings.push({
       code: 'implemented_rules_without_runtime_binding',
@@ -696,11 +915,14 @@ function evaluateCoverageGate(config, rules, options = {}) {
     checked_at: new Date().toISOString(),
     counts,
     source_coverage: sourceCoverage,
+    local_runtime_coverage: localRuntimeCoverage,
     by_domain: countBy(rules, rule => rule.domain),
     by_automation_level: countBy(rules, rule => rule.automation_level),
     by_implementation_status: countBy(rules, rule => String(rule.implementation_status || 'MISSING').toUpperCase()),
     by_runtime_binding_status: countBy(rules, rule => runtimeBindingStatusForSummary(rule)),
+    by_runtime_binding_key: countBy(rules, rule => runtimeBindingKeyForSummary(rule)),
     has_local_payroll_runtime: hasLocalPayrollRuntime(caoKey),
+    local_runtime_binding_keys: localRuntimeCoverage.local_runtime_binding_keys,
     blocking_findings: blockingFindings,
     open_payroll_critical_rules: openCriticalRules.slice(0, maxOpenRules),
     open_payroll_critical_rules_truncated: openCriticalRules.length > maxOpenRules,

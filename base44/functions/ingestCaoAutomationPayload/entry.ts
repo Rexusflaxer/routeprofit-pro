@@ -238,7 +238,7 @@ function hasLocalPayrollRuntime(caoKey) {
 
 const LOCAL_RUNTIME_RULE_BINDINGS = {
   'resolveCaoApplicability.article_3_scope': {
-    functions: ['resolveCaoApplicability', 'calculatePersonnelCosts', 'validateCaoScheduleRules'],
+    functions: ['resolveCaoApplicability', 'validateTaskPlanningContext', 'calculatePersonnelCosts', 'validateCaoScheduleRules'],
     rule_ids: [
       'CAO-PB-2024-R0227', 'CAO-PB-2024-R0228', 'CAO-PB-2024-R0229',
       'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232',
