@@ -2,7 +2,33 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
 // ── Revisie-gebaseerde lazy CAO-sync helper ──
 // Slaat sync over ALLEEN als cloudflare_revision al overeenkomt. Geen tijdgebaseerde skip.
-async function lazySyncCao(base44, forceCaoSync = false) {
+const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const SUPPORTED_PAYROLL_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+
+function getCaoRuntimeSupport(caoKey, functionName) {
+  const key = caoKey || CAO_PB_KEY;
+  const supported = SUPPORTED_PAYROLL_RUNTIME_CAO_KEYS.includes(key);
+  return {
+    supported,
+    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    cao_key: key,
+    function_name: functionName,
+    supported_cao_keys: SUPPORTED_PAYROLL_RUNTIME_CAO_KEYS,
+    message: supported
+      ? `Runtime ${functionName} ondersteunt CAO ${key}.`
+      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Payroll-final is geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+  };
+}
+
+async function lazySyncCao(base44, forceCaoSync = false, caoKey = CAO_PB_KEY) {
+  if (caoKey !== CAO_PB_KEY) {
+    return {
+      changed: false,
+      reason: 'skipped_unsupported_cao_sync',
+      cao_key: caoKey,
+      note: 'Lazy Cloudflare sync is alleen ingericht voor CAO Particuliere Beveiliging.'
+    };
+  }
   try {
     const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
       force: forceCaoSync,
@@ -1286,9 +1312,29 @@ Deno.serve(async (req) => {
       };
     }
 
+    // work_schedule format: [{ date: "2025-01-15", start_time: "08:00", end_time: "17:00" }, ...]
+
+    if (!personnel_id || !work_schedule || !Array.isArray(work_schedule)) {
+      return Response.json({ error: 'personnel_id en work_schedule zijn verplicht' }, { status: 400 });
+    }
+
+    // Haal medewerker op
+    const personnel = await base44.entities.Personnel.get(personnel_id);
+
+    // Bepaal referentiedatum op basis van de eerste dienst
+    const firstShiftDate = work_schedule[0]?.date || amsterdamInstantParts(new Date()).date;
+    const refDate = new Date(firstShiftDate);
+    const targetCaoKey = body.cao_key ||
+      service_context?.cao_key ||
+      personnel.cao ||
+      CAO_PB_KEY;
+
+    const calculationWarnings = [];
+
     // ── CAO-toepassingscheck ──
+    // Deze resolver is PB-specifiek. Voor andere cao_key's blokkeert de runtime later fail-closed.
     let rawScope = null;
-    if (personnel_id) {
+    if (targetCaoKey === CAO_PB_KEY && personnel_id) {
       try {
         const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
         rawScope = scopeRes?.data || null;
@@ -1297,11 +1343,13 @@ Deno.serve(async (req) => {
     let { caoScope, scopeWarnings, isUnknownOrMixedScope, caoRuleApplication } = buildCaoScopeRuntime(rawScope);
 
     // Lazy CAO-sync — bewaar resultaat voor cao_sync_status
-    const syncResult = await lazySyncCao(base44, !!force_cao_sync);
+    const syncResult = await lazySyncCao(base44, !!force_cao_sync, targetCaoKey);
 
-    const calculationWarnings = [];
     if (syncResult?.cloudflare_unavailable) {
       calculationWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
+    }
+    if (syncResult?.reason === 'skipped_unsupported_cao_sync') {
+      calculationWarnings.push('CAO Cloudflare lazy-sync overgeslagen: deze runtime ondersteunt alleen CAO Particuliere Beveiliging.');
     }
     if (syncResult?.reason === 'no_cloudflare_current') {
       calculationWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
@@ -1315,23 +1363,6 @@ Deno.serve(async (req) => {
       reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
       revision: syncResult?.revision || null
     };
-
-    // work_schedule format: [{ date: "2025-01-15", start_time: "08:00", end_time: "17:00" }, ...]
-
-    if (!personnel_id || !work_schedule || !Array.isArray(work_schedule)) {
-      return Response.json({ error: 'personnel_id en work_schedule zijn verplicht' }, { status: 400 });
-    }
-
-    // Haal medewerker op
-    const personnel = await base44.entities.Personnel.get(personnel_id);
-    
-    // Bepaal referentiedatum op basis van de eerste dienst
-    const firstShiftDate = work_schedule[0]?.date || amsterdamInstantParts(new Date()).date;
-    const refDate = new Date(firstShiftDate);
-    const targetCaoKey = body.cao_key ||
-      service_context?.cao_key ||
-      personnel.cao ||
-      'cao_particuliere_beveiliging';
 
     // Haal ACTIEVE CAO op basis van cao_key + datum (niet op created_date).
     // Zonder cao_key-filter kan een PB-loonrun per ongeluk een andere actieve CAO pakken.
@@ -1355,12 +1386,40 @@ Deno.serve(async (req) => {
       return Response.json({
         error: `Geen actieve CAO-configuratie gevonden voor ${targetCaoKey} op datum ${firstShiftDate}. Activeer eerst een passende CAO-configuratie.`,
         cao_sync_status: caoSyncStatus,
-        calculation_warnings: [...calculationWarnings, `Geen actieve CAO ${targetCaoKey} voor ${firstShiftDate}`]
+        calculation_warnings: [...calculationWarnings, `Geen actieve CAO ${targetCaoKey} voor ${firstShiftDate}`],
+        cao_key: targetCaoKey,
+        cao_runtime_support: getCaoRuntimeSupport(targetCaoKey, 'calculatePersonnelCosts'),
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_missing_active_cao_config'
       }, { status: 400 });
     }
 
     const payrollReadiness = getCaoPayrollReadiness(caoConfig);
     const caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
+    const payrollRuntimeSupport = getCaoRuntimeSupport(caoConfig.cao_key || targetCaoKey, 'calculatePersonnelCosts');
+    if (!payrollRuntimeSupport.supported) {
+      return Response.json({
+        error: payrollRuntimeSupport.message,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...calculationWarnings,
+          'Payroll geblokkeerd: CAO-runtime voor deze cao_key is nog niet lokaal geimplementeerd en geverifieerd.'
+        ],
+        personnel_id,
+        cao_configuration_id: caoConfig.id,
+        cao_key: caoConfig.cao_key || targetCaoKey,
+        cao_version_label: caoConfig.version_label || caoConfig.name,
+        cao_revision: caoConfig.cloudflare_revision || null,
+        cao_valid_from: caoConfig.valid_from,
+        cao_payroll_readiness: payrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_runtime_support: payrollRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: payrollRuntimeSupport.status
+      }, { status: 422 });
+    }
     if (!payrollReadiness.ready) {
       return Response.json({
         error: `Actieve CAO-configuratie is niet payroll-ready (${payrollReadiness.status}). Definitieve loonberekening is geblokkeerd totdat de CAO coverage-gate slaagt.`,
@@ -1374,6 +1433,7 @@ Deno.serve(async (req) => {
         cao_valid_from: caoConfig.valid_from,
         cao_payroll_readiness: payrollReadiness,
         cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_runtime_support: payrollRuntimeSupport,
         manual_review_required: true,
         payroll_final_allowed: false,
         calculation_status: 'blocked_cao_not_payroll_ready'
@@ -2195,6 +2255,7 @@ Deno.serve(async (req) => {
       cao_valid_from: caoConfig.valid_from,
       cao_payroll_readiness: payrollReadiness,
       cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+      cao_runtime_support: payrollRuntimeSupport,
       pay_period_year: pay_period_year || refDate.getFullYear(),
       pay_period_number: pay_period_number || null,
       pay_period_start: pay_period_start || work_schedule[0]?.date || null,

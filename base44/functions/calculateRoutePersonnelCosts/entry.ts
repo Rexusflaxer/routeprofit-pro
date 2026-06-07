@@ -1,6 +1,32 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
-async function lazySyncCao(base44, forceCaoSync = false) {
+const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const SUPPORTED_PAYROLL_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+
+function getCaoRuntimeSupport(caoKey, functionName) {
+  const key = caoKey || CAO_PB_KEY;
+  const supported = SUPPORTED_PAYROLL_RUNTIME_CAO_KEYS.includes(key);
+  return {
+    supported,
+    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    cao_key: key,
+    function_name: functionName,
+    supported_cao_keys: SUPPORTED_PAYROLL_RUNTIME_CAO_KEYS,
+    message: supported
+      ? `Runtime ${functionName} ondersteunt CAO ${key}.`
+      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Routekosten voor payrollbasis zijn geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+  };
+}
+
+async function lazySyncCao(base44, forceCaoSync = false, caoKey = CAO_PB_KEY) {
+  if (caoKey !== CAO_PB_KEY) {
+    return {
+      changed: false,
+      reason: 'skipped_unsupported_cao_sync',
+      cao_key: caoKey,
+      note: 'Lazy Cloudflare sync is alleen ingericht voor CAO Particuliere Beveiliging.'
+    };
+  }
   try {
     const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
       force: forceCaoSync,
@@ -791,18 +817,6 @@ Deno.serve(async (req) => {
       allow_legacy_companyless_route_costing = false
     } = body;
 
-    const syncResult = await lazySyncCao(base44, !!force_cao_sync);
-    const syncWarnings = [];
-    if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
-    if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
-    if (syncResult?.reason === 'cloudflare_unavailable' || syncResult?.reason === 'cloudflare_current_unavailable') syncWarnings.push('Cloudflare onbereikbaar; actieve Base44 CAO gebruikt.');
-
-    const caoSyncStatus = {
-      changed: syncResult?.changed ?? false,
-      reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
-      revision: syncResult?.revision || null
-    };
-
     if (!route_id) return Response.json({ error: 'route_id is required' }, { status: 400 });
 
     const routes = await base44.entities.Route.list();
@@ -814,7 +828,20 @@ Deno.serve(async (req) => {
     const targetCaoKey = body.cao_key ||
       route.cao_key ||
       route.cao ||
-      'cao_particuliere_beveiliging';
+      CAO_PB_KEY;
+
+    const syncResult = await lazySyncCao(base44, !!force_cao_sync, targetCaoKey);
+    const syncWarnings = [];
+    if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'skipped_unsupported_cao_sync') syncWarnings.push('CAO Cloudflare lazy-sync overgeslagen: deze runtime ondersteunt alleen CAO Particuliere Beveiliging.');
+    if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'cloudflare_unavailable' || syncResult?.reason === 'cloudflare_current_unavailable') syncWarnings.push('Cloudflare onbereikbaar; actieve Base44 CAO gebruikt.');
+
+    const caoSyncStatus = {
+      changed: syncResult?.changed ?? false,
+      reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
+      revision: syncResult?.revision || null
+    };
 
     const shiftDateRef = new Date(shiftDate);
     const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({
@@ -834,11 +861,39 @@ Deno.serve(async (req) => {
     const caoConfig = eligibleCaos[0];
     if (!caoConfig) {
       return Response.json({
-        error: `Geen actieve CAO-configuratie gevonden voor ${targetCaoKey} op datum ${shiftDate}. Activeer eerst een passende CAO-configuratie.`
+        error: `Geen actieve CAO-configuratie gevonden voor ${targetCaoKey} op datum ${shiftDate}. Activeer eerst een passende CAO-configuratie.`,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [...syncWarnings, `Geen actieve CAO ${targetCaoKey} voor ${shiftDate}`],
+        cao_key: targetCaoKey,
+        cao_runtime_support: getCaoRuntimeSupport(targetCaoKey, 'calculateRoutePersonnelCosts'),
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_missing_active_cao_config'
       }, { status: 400 });
     }
     const payrollReadiness = getCaoPayrollReadiness(caoConfig);
     const caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
+    const routeRuntimeSupport = getCaoRuntimeSupport(caoConfig.cao_key || targetCaoKey, 'calculateRoutePersonnelCosts');
+    if (!routeRuntimeSupport.supported) {
+      return Response.json({
+        error: routeRuntimeSupport.message,
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          'Routekosten geblokkeerd: CAO-runtime voor deze cao_key is nog niet lokaal geimplementeerd en geverifieerd.'
+        ],
+        cao_configuration_id: caoConfig.id,
+        cao_key: caoConfig.cao_key || targetCaoKey,
+        cao_version_label: caoConfig.version_label || caoConfig.name,
+        cao_revision: caoConfig.cloudflare_revision || null,
+        cao_payroll_readiness: payrollReadiness,
+        cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_runtime_support: routeRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: routeRuntimeSupport.status
+      }, { status: 422 });
+    }
     if (!payrollReadiness.ready) {
       return Response.json({
         error: `Actieve CAO-configuratie is niet payroll-ready (${payrollReadiness.status}). Route-loonkosten voor payrollbasis zijn geblokkeerd totdat de CAO coverage-gate slaagt.`,
@@ -853,6 +908,7 @@ Deno.serve(async (req) => {
         cao_revision: caoConfig.cloudflare_revision || null,
         cao_payroll_readiness: payrollReadiness,
         cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+        cao_runtime_support: routeRuntimeSupport,
         manual_review_required: true,
         payroll_final_allowed: false,
         calculation_status: 'blocked_cao_not_payroll_ready'
@@ -1125,6 +1181,7 @@ Deno.serve(async (req) => {
       cao_revision: caoConfig.cloudflare_revision || null,
       cao_payroll_readiness: payrollReadiness,
       cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
+      cao_runtime_support: routeRuntimeSupport,
       cao_sync_status: caoSyncStatus,
       calculation_warnings: [
         ...syncWarnings,
