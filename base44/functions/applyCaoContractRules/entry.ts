@@ -1,6 +1,32 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
-async function lazySyncCao(base44, forceCaoSync = false) {
+const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const SUPPORTED_CONTRACT_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+
+function getCaoRuntimeSupport(caoKey, functionName) {
+  const key = caoKey || CAO_PB_KEY;
+  const supported = SUPPORTED_CONTRACT_RUNTIME_CAO_KEYS.includes(key);
+  return {
+    supported,
+    status: supported ? 'supported' : 'blocked_unsupported_cao_runtime',
+    cao_key: key,
+    function_name: functionName,
+    supported_cao_keys: SUPPORTED_CONTRACT_RUNTIME_CAO_KEYS,
+    message: supported
+      ? `Runtime ${functionName} ondersteunt CAO ${key}.`
+      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Contractregels zijn geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+  };
+}
+
+async function lazySyncCao(base44, forceCaoSync = false, caoKey = CAO_PB_KEY) {
+  if (caoKey !== CAO_PB_KEY) {
+    return {
+      changed: false,
+      reason: 'skipped_unsupported_cao_sync',
+      cao_key: caoKey,
+      note: 'Lazy Cloudflare sync is alleen ingericht voor CAO Particuliere Beveiliging.'
+    };
+  }
   try {
     const res = await base44.asServiceRole.functions.invoke('syncCaoFromCloudflare', {
       force: forceCaoSync,
@@ -3411,18 +3437,6 @@ Deno.serve(async (req) => {
     const { action, contract_id, force_cao_sync } = body;
     let { personnel_id } = body;
 
-    const syncResult = await lazySyncCao(base44, !!force_cao_sync);
-    const syncWarnings = [];
-    if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
-    if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
-    if (syncResult?.reason === 'cloudflare_unavailable' || syncResult?.reason === 'cloudflare_current_unavailable') syncWarnings.push('Cloudflare onbereikbaar; actieve Base44 CAO gebruikt.');
-
-    const caoSyncStatus = {
-      changed: syncResult?.changed ?? false,
-      reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
-      revision: syncResult?.revision || null
-    };
-
     let contract = body.contract || null;
     if (contract_id) {
       contract = await base44.entities.PersonnelContract.get(contract_id).catch(() => null);
@@ -3436,14 +3450,53 @@ Deno.serve(async (req) => {
       if (!personnel) return Response.json({ error: `Medewerker niet gevonden: ${personnel_id}` }, { status: 404 });
     }
 
+    const targetCaoKey = body.cao_key ||
+      contract?.cao_key ||
+      personnel?.cao ||
+      CAO_PB_KEY;
+
+    const syncResult = await lazySyncCao(base44, !!force_cao_sync, targetCaoKey);
+    const syncWarnings = [];
+    if (syncResult?.cloudflare_unavailable) syncWarnings.push('CAO Cloudflare sync tijdelijk niet bereikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'skipped_unsupported_cao_sync') syncWarnings.push('CAO Cloudflare lazy-sync overgeslagen: deze runtime ondersteunt alleen CAO Particuliere Beveiliging.');
+    if (syncResult?.reason === 'no_cloudflare_current') syncWarnings.push('Geen Cloudflare CAO-payload beschikbaar; actieve Base44 CAO gebruikt.');
+    if (syncResult?.reason === 'cloudflare_unavailable' || syncResult?.reason === 'cloudflare_current_unavailable') syncWarnings.push('Cloudflare onbereikbaar; actieve Base44 CAO gebruikt.');
+
+    const caoSyncStatus = {
+      changed: syncResult?.changed ?? false,
+      reason: syncResult?.reason || (syncResult?.cloudflare_unavailable ? 'cloudflare_unavailable' : 'ok'),
+      revision: syncResult?.revision || null
+    };
+
+    const contractRuntimeSupport = getCaoRuntimeSupport(targetCaoKey, 'applyCaoContractRules');
+    if (!contractRuntimeSupport.supported) {
+      return Response.json({
+        error: contractRuntimeSupport.message,
+        action: action || 'evaluate_contract_rules',
+        cao_sync_status: caoSyncStatus,
+        calculation_warnings: [
+          ...syncWarnings,
+          'Contractregels geblokkeerd: CAO-runtime voor deze cao_key is nog niet lokaal geimplementeerd en geverifieerd.'
+        ],
+        contract_id: contract_id || contract?.id || null,
+        personnel_id: personnel_id || null,
+        cao_key: targetCaoKey,
+        cao_runtime_support: contractRuntimeSupport,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        contract_final_allowed: false,
+        contract_rule_status: contractRuntimeSupport.status
+      }, { status: 422 });
+    }
+
     // ── CAO-toepassingscheck (scope eerst resolven) ──
     let caoScope = null;
-    if (personnel_id) {
+    if (targetCaoKey === CAO_PB_KEY && personnel_id) {
       try {
         const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id, contract });
         caoScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
-    } else if (personnel) {
+    } else if (targetCaoKey === CAO_PB_KEY && personnel) {
       // Inline personnel meegegeven (geen opgeslagen ID)
       try {
         const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel, contract });
@@ -3473,6 +3526,8 @@ Deno.serve(async (req) => {
       return Response.json({
         success: true,
         cao_sync_status: caoSyncStatus,
+        cao_key: targetCaoKey,
+        cao_runtime_support: contractRuntimeSupport,
         calculation_warnings: syncWarnings,
         contract_id: contract_id || contract?.id || null,
         personnel_id: personnel_id || null,
@@ -3489,6 +3544,8 @@ Deno.serve(async (req) => {
       return Response.json({
         success: result.contract_rule_violations.filter(v => v.severity === 'high' || v.severity === 'critical').length === 0,
         cao_sync_status: caoSyncStatus,
+        cao_key: targetCaoKey,
+        cao_runtime_support: contractRuntimeSupport,
         calculation_warnings: syncWarnings,
         contract_id: contract_id || contract?.id || null,
         personnel_id: personnel_id || null,
@@ -3509,6 +3566,8 @@ Deno.serve(async (req) => {
       return Response.json({
         success: result.contract_rule_status !== 'blocked',
         cao_sync_status: caoSyncStatus,
+        cao_key: targetCaoKey,
+        cao_runtime_support: contractRuntimeSupport,
         calculation_warnings: syncWarnings,
         contract_id: contract_id || contract?.id || null,
         personnel_id: personnel_id || null,
@@ -3550,6 +3609,8 @@ Deno.serve(async (req) => {
       return Response.json({
         success: true,
         cao_sync_status: caoSyncStatus,
+        cao_key: targetCaoKey,
+        cao_runtime_support: contractRuntimeSupport,
         calculation_warnings: syncWarnings,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
         manual_review_required: isUnknownOrMixed,
@@ -3592,7 +3653,7 @@ Deno.serve(async (req) => {
           personnel_id,
           company_id: body.company_id || contract?.company_id || personnel?.primary_company_id || null,
           personnel_contract_id: contract_id || contract?.id || null,
-          cao_key: contract?.cao_key || personnel?.cao || 'cao_particuliere_beveiliging',
+          cao_key: targetCaoKey,
           cao_configuration_id: contract?.cao_configuration_id || body.cao_configuration_id || null,
           event_type: 'suspension',
           event_start_date: result.recommended_event_update.suspension_start_date,
@@ -3618,6 +3679,8 @@ Deno.serve(async (req) => {
       return Response.json({
         success: result.suspension_rule_status !== 'blocked',
         cao_sync_status: caoSyncStatus,
+        cao_key: targetCaoKey,
+        cao_runtime_support: contractRuntimeSupport,
         calculation_warnings: syncWarnings,
         personnel_id: personnel_id || null,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
@@ -3635,7 +3698,7 @@ Deno.serve(async (req) => {
           personnel_id,
           company_id: body.acquiring_employer_id || body.company_id || contract?.company_id || personnel?.primary_company_id || null,
           personnel_contract_id: contract_id || contract?.id || null,
-          cao_key: contract?.cao_key || personnel?.cao || 'cao_particuliere_beveiliging',
+          cao_key: targetCaoKey,
           cao_configuration_id: contract?.cao_configuration_id || body.cao_configuration_id || null,
           event_type: 'contract_transfer',
           event_start_date: result.transfer_date,
@@ -3661,6 +3724,8 @@ Deno.serve(async (req) => {
       return Response.json({
         success: result.contract_transfer_rule_status !== 'blocked',
         cao_sync_status: caoSyncStatus,
+        cao_key: targetCaoKey,
+        cao_runtime_support: contractRuntimeSupport,
         calculation_warnings: syncWarnings,
         personnel_id: personnel_id || null,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
@@ -3676,6 +3741,8 @@ Deno.serve(async (req) => {
     return Response.json({
       success: result.contract_rule_status !== 'blocked',
       cao_sync_status: caoSyncStatus,
+      cao_key: targetCaoKey,
+      cao_runtime_support: contractRuntimeSupport,
       calculation_warnings: syncWarnings,
       contract_id: contract_id || contract?.id || null,
       personnel_id: personnel_id || null,
