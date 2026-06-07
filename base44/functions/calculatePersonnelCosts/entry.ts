@@ -1338,6 +1338,100 @@ async function collectObjectCaoKeys(base44, workSchedule, body = {}) {
   return keys;
 }
 
+function collectWorkScheduleDates(workSchedule) {
+  return [...new Set((workSchedule || [])
+    .map(shift => isoDate(shift?.date || shift?.service_date))
+    .filter(Boolean))]
+    .sort();
+}
+
+function resolvePayrollCalculationPeriod(workSchedule, { payPeriodStart, payPeriodEnd, fallbackDate }) {
+  const scheduleDates = collectWorkScheduleDates(workSchedule);
+  const explicitStart = isoDate(payPeriodStart);
+  const explicitEnd = isoDate(payPeriodEnd);
+  const periodStart = explicitStart || scheduleDates[0] || fallbackDate || amsterdamInstantParts(new Date()).date;
+  const periodEnd = explicitEnd || scheduleDates[scheduleDates.length - 1] || periodStart;
+  const outOfPeriodDates = scheduleDates.filter(date =>
+    (explicitStart && date < explicitStart) ||
+    (explicitEnd && date > explicitEnd)
+  );
+
+  return {
+    period_start: periodStart,
+    period_end: periodEnd,
+    schedule_dates: scheduleDates,
+    explicit_pay_period_start: explicitStart,
+    explicit_pay_period_end: explicitEnd,
+    invalid_range: !!(periodStart && periodEnd && periodEnd < periodStart),
+    out_of_period_dates: outOfPeriodDates
+  };
+}
+
+function caoConfigSummary(config) {
+  return {
+    id: config?.id || null,
+    name: config?.name || config?.version_label || null,
+    cloudflare_revision: config?.cloudflare_revision || null,
+    valid_from: config?.valid_from || null,
+    valid_until: config?.valid_until || null
+  };
+}
+
+function caoConfigOverlapsPeriod(config, periodStart, periodEnd) {
+  if (!config) return false;
+  if (config.valid_from && config.valid_from > periodEnd) return false;
+  if (config.valid_until && config.valid_until < periodStart) return false;
+  return true;
+}
+
+function caoConfigCoversPeriod(config, periodStart, periodEnd) {
+  if (!config) return false;
+  if (config.valid_from && config.valid_from > periodStart) return false;
+  if (config.valid_until && config.valid_until < periodEnd) return false;
+  return true;
+}
+
+function resolvePayrollCaoConfiguration(configs, { caoKey, periodStart, periodEnd }) {
+  const eligible = (configs || [])
+    .filter(config => caoConfigOverlapsPeriod(config, periodStart, periodEnd))
+    .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')));
+
+  if (eligible.length === 0) {
+    return {
+      config: null,
+      status: 'blocked_missing_active_cao_config',
+      candidates: [],
+      message: `Geen actieve CAO-configuratie gevonden voor ${caoKey} in loonperiode ${periodStart} t/m ${periodEnd}.`
+    };
+  }
+
+  if (eligible.length > 1) {
+    return {
+      config: null,
+      status: 'blocked_payroll_period_spans_multiple_cao_configs',
+      candidates: eligible.map(caoConfigSummary),
+      message: `Loonperiode ${periodStart} t/m ${periodEnd} raakt meerdere actieve CAO-configuraties voor ${caoKey}. Splits de loonrun per CAO-geldigheidsperiode.`
+    };
+  }
+
+  const config = eligible[0];
+  if (!caoConfigCoversPeriod(config, periodStart, periodEnd)) {
+    return {
+      config: null,
+      status: 'blocked_cao_config_not_covering_payroll_period',
+      candidates: [caoConfigSummary(config)],
+      message: `Actieve CAO-configuratie ${config.id} dekt loonperiode ${periodStart} t/m ${periodEnd} niet volledig.`
+    };
+  }
+
+  return {
+    config,
+    status: 'resolved',
+    candidates: [caoConfigSummary(config)],
+    message: null
+  };
+}
+
 function buildShiftContractServiceContext({ body, shift }) {
   const bodyContext = body.service_context || {};
   const shiftContext = shift.service_context || {};
@@ -1807,9 +1901,39 @@ Deno.serve(async (req) => {
     // Haal medewerker op
     const personnel = await base44.entities.Personnel.get(personnel_id);
 
-    // Bepaal referentiedatum op basis van de eerste dienst
-    const firstShiftDate = work_schedule[0]?.date || amsterdamInstantParts(new Date()).date;
-    const refDate = new Date(firstShiftDate);
+    // Bepaal referentieperiode op basis van expliciete loonperiode of alle diensten.
+    const firstShiftDate = isoDate(work_schedule[0]?.date || work_schedule[0]?.service_date) || amsterdamInstantParts(new Date()).date;
+    const payrollPeriod = resolvePayrollCalculationPeriod(work_schedule, {
+      payPeriodStart: pay_period_start,
+      payPeriodEnd: pay_period_end,
+      fallbackDate: firstShiftDate
+    });
+    const refDate = new Date(`${payrollPeriod.period_start}T00:00:00`);
+    if (payrollPeriod.invalid_range) {
+      return Response.json({
+        error: `Definitieve loonberekening geblokkeerd: pay_period_end (${payrollPeriod.period_end}) ligt voor pay_period_start (${payrollPeriod.period_start}).`,
+        personnel_id,
+        pay_period_start: payrollPeriod.period_start,
+        pay_period_end: payrollPeriod.period_end,
+        work_schedule_dates: payrollPeriod.schedule_dates,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_invalid_payroll_period'
+      }, { status: 400 });
+    }
+    if (payrollPeriod.out_of_period_dates.length > 0) {
+      return Response.json({
+        error: 'Definitieve loonberekening geblokkeerd: work_schedule bevat diensten buiten de opgegeven loonperiode.',
+        personnel_id,
+        pay_period_start: payrollPeriod.period_start,
+        pay_period_end: payrollPeriod.period_end,
+        work_schedule_dates: payrollPeriod.schedule_dates,
+        out_of_period_dates: payrollPeriod.out_of_period_dates,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        calculation_status: 'blocked_work_schedule_outside_pay_period'
+      }, { status: 400 });
+    }
     const objectCaoKeys = await collectObjectCaoKeys(base44, work_schedule, body);
     const objectCaoKey = objectCaoKeys[0] || null;
     const targetCaoKey = body.cao_key ||
@@ -1873,58 +1997,40 @@ Deno.serve(async (req) => {
       revision: syncResult?.revision || null
     };
 
-    // Haal ACTIEVE CAO op basis van cao_key + datum (niet op created_date).
+    // Haal ACTIEVE CAO op basis van cao_key + volledige loonperiode (niet op created_date).
     // Zonder cao_key-filter kan een PB-loonrun per ongeluk een andere actieve CAO pakken.
     const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({
       status: 'active',
       cao_key: targetCaoKey
     });
-    const eligibleCaos = allCaos.filter(c => {
-      if (c.valid_from && new Date(c.valid_from) > refDate) return false;
-      if (c.valid_until && new Date(c.valid_until) < refDate) return false;
-      return true;
-    });
-    eligibleCaos.sort((a, b) => {
-      const da = a.valid_from ? new Date(a.valid_from) : new Date(0);
-      const db = b.valid_from ? new Date(b.valid_from) : new Date(0);
-      return db - da;
+    const caoConfigResolution = resolvePayrollCaoConfiguration(allCaos, {
+      caoKey: targetCaoKey,
+      periodStart: payrollPeriod.period_start,
+      periodEnd: payrollPeriod.period_end
     });
 
-    if (eligibleCaos.length > 1) {
+    if (!caoConfigResolution.config) {
       return Response.json({
-        error: `Meerdere actieve CAO-configuraties gevonden voor ${targetCaoKey} op datum ${firstShiftDate}; definitieve loonberekening is geblokkeerd om historische CAO-keuze niet te gokken.`,
+        error: caoConfigResolution.message,
         cao_sync_status: caoSyncStatus,
         calculation_warnings: [
           ...calculationWarnings,
-          `Ambigue actieve CAO-configuraties voor ${targetCaoKey} op ${firstShiftDate}: ${eligibleCaos.map(c => c.id).join(', ')}`
+          caoConfigResolution.message
         ],
+        personnel_id,
+        pay_period_start: payrollPeriod.period_start,
+        pay_period_end: payrollPeriod.period_end,
+        work_schedule_dates: payrollPeriod.schedule_dates,
         cao_key: targetCaoKey,
-        active_cao_configuration_candidates: eligibleCaos.map(c => ({
-          id: c.id,
-          name: c.name || c.version_label || null,
-          cloudflare_revision: c.cloudflare_revision || null,
-          valid_from: c.valid_from || null,
-          valid_until: c.valid_until || null
-        })),
-        manual_review_required: true,
-        payroll_final_allowed: false,
-        calculation_status: 'blocked_ambiguous_active_cao_config'
-      }, { status: 400 });
-    }
-
-    const caoConfig = eligibleCaos[0];
-    if (!caoConfig) {
-      return Response.json({
-        error: `Geen actieve CAO-configuratie gevonden voor ${targetCaoKey} op datum ${firstShiftDate}. Activeer eerst een passende CAO-configuratie.`,
-        cao_sync_status: caoSyncStatus,
-        calculation_warnings: [...calculationWarnings, `Geen actieve CAO ${targetCaoKey} voor ${firstShiftDate}`],
-        cao_key: targetCaoKey,
+        active_cao_configuration_candidates: caoConfigResolution.candidates,
         cao_runtime_support: getCaoRuntimeSupport(targetCaoKey, 'calculatePersonnelCosts'),
         manual_review_required: true,
         payroll_final_allowed: false,
-        calculation_status: 'blocked_missing_active_cao_config'
+        calculation_status: caoConfigResolution.status
       }, { status: 400 });
     }
+
+    const caoConfig = caoConfigResolution.config;
 
     const payrollReadiness = getCaoPayrollReadiness(caoConfig);
     const caoRuleRegistrySnapshot = getCaoRuleRegistrySnapshot(caoConfig);
@@ -2927,7 +3033,7 @@ Deno.serve(async (req) => {
           personnel,
           body,
           contractResolutionResults,
-          referenceDate: pay_period_start || firstShiftDate
+          referenceDate: payrollPeriod.period_start
         });
         const vacationEntitlement = calculateVacationEntitlementForPayPeriod({
           paidHoursPerPayPeriod: paidHoursForVacationAccrual,
@@ -3053,8 +3159,9 @@ Deno.serve(async (req) => {
       cao_runtime_support: payrollRuntimeSupport,
       pay_period_year: pay_period_year || refDate.getFullYear(),
       pay_period_number: pay_period_number || null,
-      pay_period_start: pay_period_start || work_schedule[0]?.date || null,
-      pay_period_end: pay_period_end || work_schedule[work_schedule.length - 1]?.date || null,
+      pay_period_start: payrollPeriod.period_start,
+      pay_period_end: payrollPeriod.period_end,
+      work_schedule_dates: payrollPeriod.schedule_dates,
       cao_sync_status: caoSyncStatus,
       calculation_warnings: calculationWarnings,
       total_hours: Math.round(totalHours * 100) / 100,
