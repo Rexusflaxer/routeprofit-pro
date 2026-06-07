@@ -1,5 +1,7 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 
+const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+
 function todayIsoDate() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -68,9 +70,16 @@ function inferServiceContext({ body, task, route }) {
   const caoFunctionGroup = input.cao_function_group || task?.required_cao_function_group || null;
   const caoFunctionLevel = input.cao_function_level || task?.required_cao_function_level || null;
   const securityRoleStatus = input.security_role_status || task?.required_security_role_status || null;
+  const caoKey = input.cao_key ||
+    body.cao_key ||
+    route?.cao_key ||
+    route?.cao ||
+    null;
 
   return {
     service_date: body.service_date || input.service_date || todayIsoDate(),
+    cao_key: caoKey,
+    cao: input.cao || body.cao || route?.cao || null,
     company_id: body.company_id || input.company_id || route?.operating_company_id || null,
     route_id: body.route_id || null,
     task_id: body.task_id || null,
@@ -362,7 +371,7 @@ function evaluateHiredWorkerServiceConstraints(contract) {
   };
 }
 
-async function getCaoConfigForContract(base44, { contract, companyAssignment, company, companyCaoAssignments, serviceDate }) {
+async function getCaoConfigForContract(base44, { contract, companyAssignment, company, companyCaoAssignments, serviceDate, requestedCaoKey }) {
   const explicitId = contract?.cao_configuration_id ||
     companyAssignment?.default_cao_configuration_id ||
     company?.default_cao_configuration_id ||
@@ -401,7 +410,7 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
     return { config, source: 'company_cao_assignment', company_cao_assignment_id: matchingCompanyCao.id };
   }
 
-  const caoKey = contract?.cao_key || companyAssignment?.cao_key || 'cao_particuliere_beveiliging';
+  const caoKey = contract?.cao_key || companyAssignment?.cao_key || requestedCaoKey || CAO_PB_KEY;
   const configs = await base44.asServiceRole.entities.CAOConfiguration.filter({
     cao_key: caoKey,
     is_active: true
@@ -502,6 +511,25 @@ Deno.serve(async (req) => {
       blockingReasons.push(`Geen actief arbeidscontract gevonden voor bedrijf ${companyId || 'onbekend'} op ${serviceContext.service_date}.`);
     }
 
+    if (serviceContext.cao_key && contractCandidates.length > 0) {
+      const matchingCaoContracts = contractCandidates.filter(c => c.cao_key === serviceContext.cao_key);
+      const unknownCaoContracts = contractCandidates.filter(c => !c.cao_key);
+      const mismatchingCaoContracts = contractCandidates.filter(c => c.cao_key && c.cao_key !== serviceContext.cao_key);
+      contractCandidates = matchingCaoContracts.length > 0
+        ? matchingCaoContracts
+        : unknownCaoContracts;
+
+      if (matchingCaoContracts.length === 0 && unknownCaoContracts.length === 0 && mismatchingCaoContracts.length > 0) {
+        blockingReasons.push(`Geen actief contract met cao_key ${serviceContext.cao_key}; beschikbare contracten hebben een andere CAO.`);
+      }
+      if (matchingCaoContracts.length === 0 && unknownCaoContracts.length > 0) {
+        manualReviewReasons.push(`Dienst vraagt cao_key ${serviceContext.cao_key}, maar een of meer kandidaatcontracten missen cao_key. Vul contract.cao_key voor definitieve planning/payroll.`);
+      }
+      if (matchingCaoContracts.length > 0 && (mismatchingCaoContracts.length > 0 || unknownCaoContracts.length > 0)) {
+        warnings.push(`Contracten zonder of met afwijkende cao_key zijn genegeerd voor deze dienst (${serviceContext.cao_key}).`);
+      }
+    }
+
     if (exactCompanyContracts.length === 0 && legacyCompanylessContracts.length > 0 && companyId) {
       manualReviewReasons.push('Alleen legacy contract zonder company_id gevonden. Contract moet expliciet aan werkgever/bedrijf worden gekoppeld voor definitieve planning/payroll.');
     }
@@ -571,7 +599,8 @@ Deno.serve(async (req) => {
         companyAssignment,
         company,
         companyCaoAssignments,
-        serviceDate: serviceContext.service_date
+        serviceDate: serviceContext.service_date,
+        requestedCaoKey: serviceContext.cao_key
       });
       if (caoResolution.warning) warnings.push(caoResolution.warning);
     }
@@ -678,6 +707,7 @@ Deno.serve(async (req) => {
         contract_start_date: item.contract.contract_start_date || null,
         contract_end_date: item.contract.contract_end_date || null,
         contract_form: item.contract.contract_form || null,
+        cao_key: item.contract.cao_key || null,
         security_role_status: item.contract.security_role_status || null,
         allowed_security_role_statuses: item.contract.allowed_security_role_statuses || [],
         function_match: item.function_match
