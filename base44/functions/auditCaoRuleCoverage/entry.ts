@@ -323,9 +323,27 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       ...ruleRange(1815, 1836)
     ]
   },
+  'calculatePersonnelCosts.article_35_36_wage_promotion': {
+    functions: ['applyCaoContractRules', 'resolveCaoFunctionClassification', 'calculatePersonnelCosts'],
+    rule_ids: ruleIds(748, 749, 750, 751, 752, 753, 755, 757)
+  },
+  'calculatePersonnelCosts.article_37_wage_increases': {
+    functions: ['calculatePersonnelCosts', 'queueCaoPayrollCorrections'],
+    rule_ids: ruleIds(760, 761, 762, 764, 765, 766)
+  },
   'calculatePersonnelCosts.article_39_acting_function_allowance': {
     functions: ['resolveCaoFunctionClassification', 'calculatePersonnelCosts'],
     rule_ids: ruleRange(775, 783)
+  },
+  'calculatePersonnelCosts.article_40_41_special_holiday_surcharges': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
+    rule_ids: [
+      ...ruleIds(719, 720, 721, 722, 723, 724, 725, 774, 784),
+      ...ruleRange(785, 790),
+      ...ruleIds(791),
+      ...ruleRange(792, 795),
+      ...ruleIds(796, 798, 808)
+    ]
   },
   'calculateCaoYearEndBonus.article_38_year_end_bonus': {
     functions: ['calculatePersonnelCosts', 'calculateCaoYearEndBonus', 'queueCaoPayrollCorrections'],
@@ -349,6 +367,10 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'calculatePersonnelCosts.article_45_minimum_service_compensation': {
     functions: ['calculatePersonnelCosts', 'validateCaoScheduleRules', 'calculateCaoReimbursements'],
     rule_ids: ruleRange(810, 818)
+  },
+  'calculatePersonnelCosts.article_46_income_structure_phase_out': {
+    functions: ['calculatePersonnelCosts', 'validateCaoScheduleRules'],
+    rule_ids: ruleRange(820, 836)
   },
   'calculateCaoReimbursements.article_47_48_49_50': {
     functions: ['calculateCaoReimbursements'],

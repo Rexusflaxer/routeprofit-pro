@@ -634,6 +634,20 @@ function calculateCallWorkerVacationPayoutArticle59({
   };
 }
 
+function caoRuleId(number) {
+  return `CAO-PB-2024-R${String(number).padStart(4, '0')}`;
+}
+
+function caoRuleIds(...numbers) {
+  return numbers.map(caoRuleId);
+}
+
+function caoRuleRange(start, end) {
+  const ids = [];
+  for (let number = start; number <= end; number += 1) ids.push(caoRuleId(number));
+  return ids;
+}
+
 function isCallAgreementContext(input) {
   if (!input) return false;
   const contractType = input.contract_type || input.employment_contract_type || null;
@@ -785,6 +799,511 @@ function buildSingleContractClassificationContext(contractResolutionResults) {
 
 function pickFirstNonEmpty(...values) {
   return values.find(value => value !== null && value !== undefined && value !== '') ?? null;
+}
+
+function pickPolicyValue(fields, ...sources) {
+  for (const source of sources) {
+    if (!source || typeof source !== 'object') continue;
+    for (const field of fields) {
+      if (source[field] !== null && source[field] !== undefined && source[field] !== '') return source[field];
+    }
+  }
+  return null;
+}
+
+function normalizePolicyText(value) {
+  return String(value || '')
+    .toLowerCase()
+    .normalize('NFD')
+    .replace(/[\u0300-\u036f]/g, '')
+    .replace(/[_\s-]+/g, '_')
+    .trim();
+}
+
+function payrollPeriodRef(year, number) {
+  const periodYear = numberOrNull(year);
+  const periodNumber = numberOrNull(number);
+  if (periodYear === null || periodNumber === null) return null;
+  return {
+    year: periodYear,
+    number: periodNumber
+  };
+}
+
+function nextPayrollPeriodRef(period) {
+  if (!period) return null;
+  return period.number >= 13
+    ? { year: period.year + 1, number: 1 }
+    : { year: period.year, number: period.number + 1 };
+}
+
+function comparePayrollPeriodRef(left, right) {
+  if (!left || !right) return null;
+  if (left.year !== right.year) return left.year - right.year;
+  return left.number - right.number;
+}
+
+function formatPayrollPeriodRef(period) {
+  return period ? `${period.year}-P${String(period.number).padStart(2, '0')}` : null;
+}
+
+function defaultArticle37WageIncreaseSchedule(configured) {
+  const schedule = Array.isArray(configured?.schedule)
+    ? configured.schedule
+    : Array.isArray(configured)
+    ? configured
+    : [];
+  if (schedule.length > 0) return schedule;
+  return [
+    {
+      effective_year: 2025,
+      effective_pay_period_number: 1,
+      percentage: 4.5,
+      method: 'fixed_percentage',
+      source_rule_ids: caoRuleIds(760, 761)
+    },
+    {
+      effective_year: 2026,
+      effective_pay_period_number: 1,
+      method: 'cpi_formula',
+      base_percentage: 0.5,
+      cpi_minimum_percentage: 2,
+      cpi_maximum_percentage: 4.5,
+      total_minimum_percentage: 2.5,
+      total_maximum_percentage: 5,
+      source_rule_ids: caoRuleIds(762, 764, 765, 766)
+    }
+  ];
+}
+
+function selectApplicableWageIncrease(schedule, currentPeriod) {
+  if (!currentPeriod) return null;
+  return schedule
+    .map(item => ({
+      ...item,
+      effective_period: payrollPeriodRef(
+        item.effective_year ?? item.year,
+        item.effective_pay_period_number ?? item.pay_period_number ?? item.period
+      )
+    }))
+    .filter(item => item.effective_period && comparePayrollPeriodRef(item.effective_period, currentPeriod) <= 0)
+    .sort((a, b) => comparePayrollPeriodRef(b.effective_period, a.effective_period))[0] || null;
+}
+
+function resolveArticle37WageIncrease({ body, selectedContract, personnel, caoConfig, payrollPeriod, baseHourlyRate }) {
+  const currentPeriod = payrollPeriodRef(
+    body.pay_period_year ?? payrollPeriod?.period_start?.slice(0, 4),
+    body.pay_period_number
+  );
+  const configured = caoConfig?.wage_increase_rules || caoConfig?.wage_increases || {};
+  const schedule = defaultArticle37WageIncreaseSchedule(configured);
+  const selected = selectApplicableWageIncrease(schedule, currentPeriod);
+  const sourceRuleIds = caoRuleIds(760, 761, 762, 764, 765, 766);
+  const result = {
+    applies: !!selected,
+    current_pay_period: formatPayrollPeriodRef(currentPeriod),
+    selected_effective_pay_period: formatPayrollPeriodRef(selected?.effective_period || null),
+    method: selected?.method || null,
+    active_resolved_hourly_rate: numberOrNull(baseHourlyRate),
+    mutates_base_hourly_rate: false,
+    wage_table_must_already_include_approved_article_37_changes: true,
+    applicable_increase_percentage: null,
+    current_wage_before_increase: firstNumber(
+      body.current_wage_before_article_37_increase,
+      body.wage_before_article_37_increase,
+      selectedContract.current_wage_before_article_37_increase,
+      personnel.current_wage_before_article_37_increase
+    ),
+    concept_wage_after_increase: null,
+    cpi_year_mutation_percentage: null,
+    manual_review_required: false,
+    manual_review_items: [],
+    source_rule_ids: sourceRuleIds
+  };
+
+  if (!currentPeriod) {
+    result.manual_review_required = true;
+    result.manual_review_items.push({
+      rule_id: 'CAO-PB-2024-R0760',
+      domain: 'article_37_wage_increase',
+      field: 'pay_period_year/pay_period_number',
+      message: 'Loonperiode ontbreekt; CAO-loonsverhoging per loonperiode kan niet definitief worden vastgesteld.'
+    });
+    return result;
+  }
+  if (!selected) return result;
+
+  if (selected.method === 'cpi_formula') {
+    const cpi = firstNumber(
+      body.cpi_year_mutation_percentage,
+      body.article_37_cpi_year_mutation_percentage,
+      caoConfig?.cpi_year_mutation_percentage,
+      configured.cpi_year_mutation_percentage,
+      selected.cpi_year_mutation_percentage
+    );
+    result.cpi_year_mutation_percentage = cpi;
+    if (cpi === null) {
+      result.manual_review_required = true;
+      result.manual_review_items.push({
+        rule_id: 'CAO-PB-2024-R0764',
+        domain: 'article_37_wage_increase',
+        field: 'cpi_year_mutation_percentage',
+        message: 'CAO-loonsverhoging 2026 gebruikt CPI-formule; CPI jaarmutatie ontbreekt in request/CAOConfiguration.'
+      });
+    } else {
+      const cappedCpi = Math.max(
+        Number(selected.cpi_minimum_percentage ?? 2),
+        Math.min(Number(selected.cpi_maximum_percentage ?? 4.5), cpi)
+      );
+      const total = Number(selected.base_percentage ?? 0.5) + cappedCpi;
+      result.applicable_increase_percentage = Math.max(
+        Number(selected.total_minimum_percentage ?? 2.5),
+        Math.min(Number(selected.total_maximum_percentage ?? 5), total)
+      );
+    }
+  } else {
+    result.applicable_increase_percentage = Number(selected.percentage ?? selected.increase_percentage ?? 0);
+  }
+
+  if (result.applicable_increase_percentage !== null && result.current_wage_before_increase !== null) {
+    result.concept_wage_after_increase = r2(result.current_wage_before_increase * (1 + result.applicable_increase_percentage / 100));
+  }
+  return result;
+}
+
+function resolveArticle36PromotionPolicy({ body, selectedContract, personnel, classification, payrollPeriod }) {
+  const sourceRuleIds = caoRuleIds(748, 749, 750, 751, 752, 753, 755, 757);
+  const promotionSignal = pickPolicyValue(
+    ['promotion_type', 'promotion_event', 'cao_promotion_type', 'article_36_promotion_type'],
+    body,
+    selectedContract,
+    personnel,
+    classification
+  );
+  const promoted = booleanOrNull(pickPolicyValue(
+    ['promoted', 'cao_promoted', 'article_36_promotion_applies'],
+    body,
+    selectedContract,
+    personnel
+  )) === true;
+  const temporaryHigherFunction = booleanOrNull(pickPolicyValue(
+    ['temporary_higher_function', 'temporary_appointment_higher_function', 'temporary_function_assignment'],
+    body,
+    selectedContract,
+    personnel
+  )) === true;
+  const promotionActive = promoted || !!promotionSignal || temporaryHigherFunction;
+  const manualReviewItems = [];
+  const currentPeriodics = firstNumber(
+    body.current_periodics_built_up,
+    body.current_cao_period,
+    selectedContract.current_periodics_built_up,
+    selectedContract.cao_period,
+    personnel.cao_period,
+    classification?.period
+  );
+  const newPeriodics = firstNumber(
+    body.new_cao_period,
+    body.promoted_cao_period,
+    selectedContract.new_cao_period,
+    selectedContract.promoted_cao_period,
+    personnel.promoted_cao_period
+  );
+  const promotionPayPeriod = payrollPeriodRef(
+    pickPolicyValue(['promotion_pay_period_year', 'article_36_promotion_pay_period_year'], body, selectedContract),
+    pickPolicyValue(['promotion_pay_period_number', 'article_36_promotion_pay_period_number'], body, selectedContract)
+  );
+  const diplomaProvidedPeriod = payrollPeriodRef(
+    pickPolicyValue(['diploma_provided_pay_period_year', 'diploma_submitted_pay_period_year'], body, selectedContract),
+    pickPolicyValue(['diploma_provided_pay_period_number', 'diploma_submitted_pay_period_number'], body, selectedContract)
+  );
+  const promotionType = normalizePolicyText(promotionSignal);
+  const diplomaRequired = promotionType.includes('diploma') ||
+    booleanOrNull(pickPolicyValue(['promotion_requires_diploma', 'diploma_required_for_promotion'], body, selectedContract, personnel)) === true;
+  const effectivePeriod = diplomaRequired
+    ? nextPayrollPeriodRef(diplomaProvidedPeriod)
+    : promotionPayPeriod;
+
+  if (promotionActive && currentPeriodics !== null && newPeriodics !== null && newPeriodics < currentPeriodics) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R0752',
+      domain: 'article_36_promotion',
+      field: 'new_cao_period/current_periodics_built_up',
+      message: 'Bij bevordering mogen opgebouwde periodieken niet lager worden vastgesteld dan al opgebouwd.'
+    });
+  }
+  if (promotionActive && !effectivePeriod) {
+    manualReviewItems.push({
+      rule_id: diplomaRequired ? 'CAO-PB-2024-R0750' : 'CAO-PB-2024-R0749',
+      domain: 'article_36_promotion',
+      field: diplomaRequired ? 'diploma_provided_pay_period_number' : 'promotion_pay_period_number',
+      message: diplomaRequired
+        ? 'Diploma-afhankelijke bevordering mist de loonperiode waarin het diploma aan werkgever is verstrekt.'
+        : 'Bevordering mist de loonperiode waarin de hogere functie is ingegaan.'
+    });
+  }
+
+  const temporaryMonths = firstNumber(
+    body.temporary_higher_function_months,
+    body.temporary_appointment_months,
+    selectedContract.temporary_higher_function_months,
+    personnel.temporary_higher_function_months
+  );
+  if (temporaryHigherFunction && temporaryMonths !== null && temporaryMonths > 6) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R0755',
+      domain: 'article_36_promotion',
+      field: 'temporary_higher_function_months',
+      message: 'Tijdelijke hogere functie duurt langer dan 6 maanden; beoordeel bevordering/terugplaatsing in plaats van alleen art. 39 waarneming.'
+    });
+  }
+
+  return {
+    applies: promotionActive,
+    promotion_type: promotionSignal || null,
+    diploma_required_for_promotion: diplomaRequired,
+    promotion_effective_pay_period: formatPayrollPeriodRef(effectivePeriod),
+    periodic_increase_same_time_allowed: true,
+    current_periodics_built_up: currentPeriodics,
+    new_periodics_after_promotion: newPeriodics,
+    built_periodics_preserved: currentPeriodics === null || newPeriodics === null ? null : newPeriodics >= currentPeriodics,
+    temporary_higher_function: temporaryHigherFunction,
+    temporary_higher_function_months: temporaryMonths,
+    temporary_higher_function_pay_policy: temporaryHigherFunction ? 'article_39_acting_function_allowance_until_max_6_month_review' : null,
+    manual_review_required: manualReviewItems.length > 0,
+    manual_review_items: manualReviewItems,
+    source_rule_ids: sourceRuleIds
+  };
+}
+
+function resolveArticle40And41SurchargeMatrix({ caoConfig, isCallWorker, applySpecialHours, applyHolidays }) {
+  return {
+    apply_article_40_special_hours: applySpecialHours,
+    apply_article_41_holidays: applyHolidays,
+    special_hours: {
+      evening_18_00_24_00_monday_friday_percentage: Number(caoConfig?.surcharge_evening ?? 10),
+      night_00_00_07_00_monday_friday_percentage: Number(caoConfig?.surcharge_night ?? 20),
+      weekend_saturday_sunday_percentage: Number(caoConfig?.surcharge_weekend ?? 35),
+      new_years_eve_after_16_00_percentage: Number(caoConfig?.surcharge_new_years_eve_after_16 ?? 100)
+    },
+    holidays: {
+      standard_employee_percentage: Number(caoConfig?.surcharge_holiday ?? 50),
+      call_worker_percentage: Number(caoConfig?.surcharge_holiday_call_worker ?? 100),
+      applied_holiday_percentage: isCallWorker ? Number(caoConfig?.surcharge_holiday_call_worker ?? 100) : Number(caoConfig?.surcharge_holiday ?? 50),
+      article_40_stacks_with_article_41_for_this_employee: !isCallWorker
+    },
+    is_call_worker: isCallWorker,
+    source_rule_ids: [...caoRuleRange(785, 790), ...caoRuleRange(792, 795)]
+  };
+}
+
+function resolveArticle46PhaseOutPolicy({ body, selectedContract, personnel, caoConfig }) {
+  const phaseOutConfig = caoConfig?.phase_out_rules || caoConfig?.income_structure_phase_out_rules || {};
+  const sourceRuleIds = caoRuleRange(820, 836);
+  const oldIncome = firstNumber(
+    body.old_fixed_income_per_period,
+    body.previous_fixed_income_per_period,
+    body.old_structural_income_per_period,
+    selectedContract.old_fixed_income_per_period,
+    personnel.old_fixed_income_per_period
+  );
+  const newIncome = firstNumber(
+    body.new_fixed_income_per_period,
+    body.current_fixed_income_per_period,
+    body.new_structural_income_per_period,
+    selectedContract.new_fixed_income_per_period,
+    personnel.new_fixed_income_per_period
+  );
+  const oldStructurePeriods = firstNumber(
+    body.fixed_income_structure_periods_before_change,
+    body.old_fixed_income_structure_periods,
+    selectedContract.fixed_income_structure_periods_before_change,
+    personnel.fixed_income_structure_periods_before_change
+  );
+  const explicitYears = firstNumber(
+    body.fixed_income_structure_years_before_change,
+    selectedContract.fixed_income_structure_years_before_change,
+    personnel.fixed_income_structure_years_before_change
+  );
+  const structureYears = explicitYears !== null
+    ? explicitYears
+    : oldStructurePeriods !== null
+    ? oldStructurePeriods / 13
+    : null;
+  const reason = normalizePolicyText(pickPolicyValue(
+    ['income_structure_change_reason', 'fixed_income_change_reason', 'phase_out_reason'],
+    body,
+    selectedContract,
+    personnel
+  ));
+  const outsideEmployeeFault = booleanOrNull(pickPolicyValue(
+    ['income_structure_change_outside_employee_fault', 'outside_employee_fault', 'not_employee_fault'],
+    body,
+    selectedContract,
+    personnel
+  ));
+  const fixedIncomeChanged = booleanOrNull(pickPolicyValue(
+    ['fixed_income_structure_changed', 'income_structure_changed'],
+    body,
+    selectedContract,
+    personnel
+  ));
+  const changeReasonCovered = fixedIncomeChanged === true ||
+    ['function', 'functie', 'roster', 'schedule', 'rooster', 'times', 'tijdstippen', 'working_times'].some(value => reason.includes(value));
+  const changeSignal = oldIncome !== null ||
+    newIncome !== null ||
+    outsideEmployeeFault !== null ||
+    fixedIncomeChanged !== null ||
+    !!reason;
+  const manualReviewItems = [];
+  const thresholdAmount = firstNumber(
+    phaseOutConfig.threshold_amount,
+    phaseOutConfig.minimum_loss_threshold_amount,
+    caoConfig?.phase_out_threshold_amount
+  ) ?? 22.69;
+
+  if (changeSignal && outsideEmployeeFault !== true) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R0820',
+      domain: 'article_46_phase_out',
+      field: 'income_structure_change_outside_employee_fault',
+      message: 'Afbouwregeling geldt alleen als de structurele inkomensdaling buiten schuld van werknemer ligt; bevestiging ontbreekt.'
+    });
+  }
+  if (changeSignal && !changeReasonCovered) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R0821',
+      domain: 'article_46_phase_out',
+      field: 'income_structure_change_reason',
+      message: 'Afbouwregeling vereist wijziging van functie, rooster of tijdstippen; reden ontbreekt of valt buiten de automatische matrix.'
+    });
+  }
+  if (changeSignal && (oldIncome === null || newIncome === null)) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R0823',
+      domain: 'article_46_phase_out',
+      field: 'old_fixed_income_per_period/new_fixed_income_per_period',
+      message: 'Oude en nieuwe vaste inkomenscomponenten per loonperiode ontbreken; afbouwbedrag kan niet worden berekend.'
+    });
+  }
+  if (changeSignal && structureYears === null) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R0826',
+      domain: 'article_46_phase_out',
+      field: 'fixed_income_structure_periods_before_change',
+      message: 'Duur van oude vaste inkomensstructuur ontbreekt; afbouwduur 6/9/12 loonperioden kan niet worden bepaald.'
+    });
+  }
+
+  const incomeLoss = oldIncome !== null && newIncome !== null ? Math.max(0, oldIncome - newIncome) : null;
+  const eligibleLoss = incomeLoss !== null ? Math.max(0, incomeLoss - thresholdAmount) : null;
+  const enoughHistory = structureYears !== null ? structureYears >= 1 : null;
+  const applies = outsideEmployeeFault === true &&
+    changeReasonCovered &&
+    incomeLoss !== null &&
+    incomeLoss > thresholdAmount &&
+    enoughHistory === true;
+  let durationPayPeriods = null;
+  if (applies) {
+    durationPayPeriods = structureYears >= 4 ? 12 : structureYears >= 2 ? 9 : 6;
+  }
+  const incomeIncreaseAmount = firstNumber(
+    body.phase_out_income_increase_amount,
+    body.non_article_37_income_increase_amount,
+    selectedContract.phase_out_income_increase_amount,
+    personnel.phase_out_income_increase_amount
+  ) ?? 0;
+  const increaseIsArticle37 = booleanOrNull(pickPolicyValue(
+    ['phase_out_income_increase_is_article_37', 'income_increase_is_article_37'],
+    body,
+    selectedContract,
+    personnel
+  )) === true;
+  const reduction = increaseIsArticle37 ? 0 : incomeIncreaseAmount;
+  const currentAmount = applies ? Math.max(0, (eligibleLoss || 0) - reduction) : 0;
+
+  return {
+    applies,
+    change_signal_present: changeSignal,
+    old_fixed_income_per_period: oldIncome !== null ? r2(oldIncome) : null,
+    new_fixed_income_per_period: newIncome !== null ? r2(newIncome) : null,
+    income_loss_per_period: incomeLoss !== null ? r2(incomeLoss) : null,
+    threshold_amount_per_period: thresholdAmount,
+    eligible_loss_above_threshold: eligibleLoss !== null ? r2(eligibleLoss) : null,
+    fixed_income_structure_years_before_change: structureYears !== null ? r2(structureYears) : null,
+    enough_history_for_phase_out: enoughHistory,
+    duration_pay_periods: durationPayPeriods,
+    non_article_37_income_increase_reduction: r2(reduction),
+    article_37_increase_ignored_for_reduction: increaseIsArticle37,
+    current_phase_out_amount_per_period: r2(currentAmount),
+    manual_review_required: manualReviewItems.length > 0,
+    manual_review_items: manualReviewItems,
+    source_rule_ids: sourceRuleIds
+  };
+}
+
+function resolvePayrollWageAllowancePolicy({
+  body,
+  personnel,
+  caoConfig,
+  payrollPeriod,
+  baseHourlyRate,
+  isCallWorker,
+  caoScope,
+  contractResolutionResults,
+  functionClassificationResult
+}) {
+  const selectedContract = selectedContractsFromResolutionResults(contractResolutionResults)[0] || {};
+  const profile = caoScope?.payroll_rule_profile || {};
+  const isUnknownOrMixedScope = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(caoScope?.cao_scope_profile);
+  const applySpecialHours = !isUnknownOrMixedScope && profile.apply_article_40_special_hours === true;
+  const applyHolidays = profile.apply_article_41_holidays !== false;
+  const article36 = resolveArticle36PromotionPolicy({
+    body,
+    selectedContract,
+    personnel,
+    classification: functionClassificationResult,
+    payrollPeriod
+  });
+  const article37 = resolveArticle37WageIncrease({
+    body,
+    selectedContract,
+    personnel,
+    caoConfig,
+    payrollPeriod,
+    baseHourlyRate
+  });
+  const article40And41 = resolveArticle40And41SurchargeMatrix({
+    caoConfig,
+    isCallWorker,
+    applySpecialHours,
+    applyHolidays
+  });
+  const article46 = resolveArticle46PhaseOutPolicy({
+    body,
+    selectedContract,
+    personnel,
+    caoConfig
+  });
+  const manualReviewItems = [
+    ...(article36.manual_review_items || []),
+    ...(article37.manual_review_items || []),
+    ...(article46.manual_review_items || [])
+  ];
+  return {
+    article_35_36_wage_scale_and_promotion: article36,
+    article_37_wage_increase: article37,
+    article_40_41_special_hours_and_holiday_surcharges: article40And41,
+    article_46_income_structure_phase_out: article46,
+    manual_review_required: manualReviewItems.length > 0,
+    manual_review_items: manualReviewItems,
+    source_rule_ids: [
+      ...article36.source_rule_ids,
+      ...article37.source_rule_ids,
+      ...article40And41.source_rule_ids,
+      ...article46.source_rule_ids
+    ]
+  };
 }
 
 function yearsAtReferenceDate(startDate, referenceDate) {
@@ -3528,6 +4047,12 @@ Deno.serve(async (req) => {
         amount: 0,
         source_rule_ids: []
       },
+      income_structure_phase_out_allowance: {
+        applies: false,
+        amount: 0,
+        duration_pay_periods: null,
+        source_rule_ids: []
+      },
       general_reserve_allowance: {
         hours: 0,
         amount: 0,
@@ -3614,6 +4139,7 @@ Deno.serve(async (req) => {
       
       // Metadata
       is_call_worker: isCallWorker,
+      payroll_wage_allowance_policy: null,
       older_worker_arrangements: null,
       pension_calculation: null
     };
@@ -3650,6 +4176,31 @@ Deno.serve(async (req) => {
     let runtimeCalculationStatus = calculationStatus;
     const payrollRuntimeReviewItems = [];
     let minimumServiceTopUpHoursForOvertime = 0;
+    const payrollWageAllowancePolicy = resolvePayrollWageAllowancePolicy({
+      body,
+      personnel,
+      caoConfig,
+      payrollPeriod,
+      baseHourlyRate,
+      isCallWorker,
+      caoScope,
+      contractResolutionResults,
+      functionClassificationResult
+    });
+    payslip.payroll_wage_allowance_policy = payrollWageAllowancePolicy;
+    payslip.income_structure_phase_out_allowance = {
+      applies: payrollWageAllowancePolicy.article_46_income_structure_phase_out.applies,
+      amount: payrollWageAllowancePolicy.article_46_income_structure_phase_out.current_phase_out_amount_per_period || 0,
+      duration_pay_periods: payrollWageAllowancePolicy.article_46_income_structure_phase_out.duration_pay_periods,
+      source_rule_ids: payrollWageAllowancePolicy.article_46_income_structure_phase_out.source_rule_ids
+    };
+    for (const item of payrollWageAllowancePolicy.manual_review_items || []) {
+      payrollRuntimeReviewItems.push(item);
+    }
+    if (payrollWageAllowancePolicy.manual_review_required) {
+      runtimePayrollFinalAllowed = false;
+      runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+    }
     if (caoCorrectionApplication.has_unresolved_manual_review_corrections) {
       runtimePayrollFinalAllowed = false;
       runtimeCalculationStatus = 'blocked_manual_review_cao_corrections';
@@ -3771,6 +4322,9 @@ Deno.serve(async (req) => {
           if (!applyHolidays && surchargeType === 'holiday') {
             surchargeType = 'day';
             surchargePercentage = 0;
+          }
+          if (isCallWorker && surchargeType === 'holiday') {
+            surchargePercentage = payrollWageAllowancePolicy.article_40_41_special_hours_and_holiday_surcharges.holidays.applied_holiday_percentage;
           }
           
           hoursByType[surchargeType] += hoursThisSegment;
@@ -4072,6 +4626,7 @@ Deno.serve(async (req) => {
       const minimumServiceAmount = payslip.minimum_service_compensation.amount;
       const actingFunctionAllowanceAmount = payslip.acting_function_allowance.amount;
       const shiftChangeAllowanceAmount = payslip.shift_change_allowance.amount;
+      const incomeStructurePhaseOutAllowanceAmount = payslip.income_structure_phase_out_allowance.amount;
       const generalReserveAllowanceAmount = payslip.general_reserve_allowance.amount;
       const valueServicesEarlyShiftAllowanceAmount = payslip.value_services_early_shift_allowance.amount;
       const cashValueLateNextDayNoticeAllowanceAmount = payslip.cash_value_late_next_day_notice_allowance.amount;
@@ -4124,16 +4679,16 @@ Deno.serve(async (req) => {
       // Voor oproepkrachten: vakantiegeld en eindejaarsuitkering direct uitbetaald
       if (isCallWorker) {
         // Bereken vakantiegeld en eindejaarsuitkering als percentage van basis + toeslagen
-        const baseForAllowances = payslip.base_salary + minimumServiceAmount + totalSurcharges;
+        const baseForAllowances = payslip.base_salary + minimumServiceAmount + incomeStructurePhaseOutAllowanceAmount + totalSurcharges;
 
         payslip.accruals.vacation_allowance = baseForAllowances * ((caoConfig.vacation_allowance || 8) / 100);
         payslip.accruals.year_end_bonus = yearEndBonusBasisAmount * ((caoConfig.year_end_bonus || 2.01) / 100);
         payslip.vacation_paid = 0;
         
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + incomeStructurePhaseOutAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
       } else {
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + incomeStructurePhaseOutAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount;
       }
       
       const olderWorkerArrangements = {
@@ -4188,7 +4743,7 @@ Deno.serve(async (req) => {
       payslip.pension_base = pensionBase;
       
       // Werknemersbijdragen - basis is altijd bruto loon exclusief vakantiegeld/eindejaarsuitkering voor oproepkrachten
-      const basisForPremiums = isCallWorker ? (payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount) : payslip.total_gross;
+      const basisForPremiums = isCallWorker ? (payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + incomeStructurePhaseOutAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount) : payslip.total_gross;
       
       payslip.employee_deductions.premium_sfpb = basisForPremiums * (fundParameters.sfpbEmployeePercentage / 100);
       payslip.employee_deductions.premium_paww = basisForPremiums * (fundParameters.pawwEmployeePercentage / 100);
@@ -4384,6 +4939,7 @@ Deno.serve(async (req) => {
       cao_rule_registry_snapshot: caoRuleRegistrySnapshot,
       cao_runtime_support: payrollRuntimeSupport,
       cao_payroll_parameters: payrollCaoParameters,
+      payroll_wage_allowance_policy: payrollWageAllowancePolicy,
       pay_period_year: pay_period_year || refDate.getFullYear(),
       pay_period_number: pay_period_number || null,
       pay_period_start: payrollPeriod.period_start,
@@ -4466,6 +5022,12 @@ Deno.serve(async (req) => {
           amount: r2(payslip.shift_change_allowance.amount),
           source_rule_ids: payslip.shift_change_allowance.source_rule_ids
         },
+        income_structure_phase_out_allowance: {
+          applies: payslip.income_structure_phase_out_allowance.applies,
+          amount: r2(payslip.income_structure_phase_out_allowance.amount),
+          duration_pay_periods: payslip.income_structure_phase_out_allowance.duration_pay_periods,
+          source_rule_ids: payslip.income_structure_phase_out_allowance.source_rule_ids
+        },
         general_reserve_allowance: {
           hours: r2(payslip.general_reserve_allowance.hours),
           amount: r2(payslip.general_reserve_allowance.amount),
@@ -4513,6 +5075,7 @@ Deno.serve(async (req) => {
         
         pension_base: Math.round(payslip.pension_base * 100) / 100,
         pension_calculation: payslip.pension_calculation,
+        payroll_wage_allowance_policy: payslip.payroll_wage_allowance_policy,
         older_worker_arrangements: payslip.older_worker_arrangements,
         
         // Reserveringen

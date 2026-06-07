@@ -662,12 +662,40 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R1751', 'CAO-PB-2024-R1813'
     ]
   },
+  'calculatePersonnelCosts.article_35_36_wage_promotion': {
+    functions: ['applyCaoContractRules', 'resolveCaoFunctionClassification', 'calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R0748', 'CAO-PB-2024-R0749', 'CAO-PB-2024-R0750',
+      'CAO-PB-2024-R0751', 'CAO-PB-2024-R0752', 'CAO-PB-2024-R0753',
+      'CAO-PB-2024-R0755', 'CAO-PB-2024-R0757'
+    ]
+  },
+  'calculatePersonnelCosts.article_37_wage_increases': {
+    functions: ['calculatePersonnelCosts', 'queueCaoPayrollCorrections'],
+    rule_ids: [
+      'CAO-PB-2024-R0760', 'CAO-PB-2024-R0761', 'CAO-PB-2024-R0762',
+      'CAO-PB-2024-R0764', 'CAO-PB-2024-R0765', 'CAO-PB-2024-R0766'
+    ]
+  },
   'calculatePersonnelCosts.article_39_acting_function_allowance': {
     functions: ['resolveCaoFunctionClassification', 'calculatePersonnelCosts'],
     rule_ids: [
       'CAO-PB-2024-R0775', 'CAO-PB-2024-R0776', 'CAO-PB-2024-R0777',
       'CAO-PB-2024-R0778', 'CAO-PB-2024-R0779', 'CAO-PB-2024-R0780',
       'CAO-PB-2024-R0781', 'CAO-PB-2024-R0782', 'CAO-PB-2024-R0783'
+    ]
+  },
+  'calculatePersonnelCosts.article_40_41_special_holiday_surcharges': {
+    functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R0719', 'CAO-PB-2024-R0720', 'CAO-PB-2024-R0721',
+      'CAO-PB-2024-R0722', 'CAO-PB-2024-R0723', 'CAO-PB-2024-R0724',
+      'CAO-PB-2024-R0725', 'CAO-PB-2024-R0774', 'CAO-PB-2024-R0784',
+      'CAO-PB-2024-R0785', 'CAO-PB-2024-R0786', 'CAO-PB-2024-R0787',
+      'CAO-PB-2024-R0788', 'CAO-PB-2024-R0789', 'CAO-PB-2024-R0790',
+      'CAO-PB-2024-R0791', 'CAO-PB-2024-R0792', 'CAO-PB-2024-R0793',
+      'CAO-PB-2024-R0794', 'CAO-PB-2024-R0795', 'CAO-PB-2024-R0796',
+      'CAO-PB-2024-R0798', 'CAO-PB-2024-R0808'
     ]
   },
   'calculateCaoYearEndBonus.article_38_year_end_bonus': {
@@ -701,6 +729,17 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0810', 'CAO-PB-2024-R0811', 'CAO-PB-2024-R0812',
       'CAO-PB-2024-R0813', 'CAO-PB-2024-R0814', 'CAO-PB-2024-R0815',
       'CAO-PB-2024-R0816', 'CAO-PB-2024-R0817', 'CAO-PB-2024-R0818'
+    ]
+  },
+  'calculatePersonnelCosts.article_46_income_structure_phase_out': {
+    functions: ['calculatePersonnelCosts', 'validateCaoScheduleRules'],
+    rule_ids: [
+      'CAO-PB-2024-R0820', 'CAO-PB-2024-R0821', 'CAO-PB-2024-R0822',
+      'CAO-PB-2024-R0823', 'CAO-PB-2024-R0824', 'CAO-PB-2024-R0825',
+      'CAO-PB-2024-R0826', 'CAO-PB-2024-R0827', 'CAO-PB-2024-R0828',
+      'CAO-PB-2024-R0829', 'CAO-PB-2024-R0830', 'CAO-PB-2024-R0831',
+      'CAO-PB-2024-R0832', 'CAO-PB-2024-R0833', 'CAO-PB-2024-R0834',
+      'CAO-PB-2024-R0835', 'CAO-PB-2024-R0836'
     ]
   },
   'calculateCaoReimbursements.article_47_48_49_50': {
