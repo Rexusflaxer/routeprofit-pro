@@ -605,11 +605,110 @@ function normalizeCaoRulesInput(rules, fallbackCaoKey) {
   return (Array.isArray(rules) ? rules : []).map(rule => normalizeCaoRuleInput(rule || {}, fallbackCaoKey));
 }
 
+function hasMachineReadableObject(value) {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0
+  );
+}
+
+function inferRuntimeApplicabilityRequirements(binding) {
+  const functions = Array.isArray(binding?.functions) ? binding.functions : [];
+  return {
+    contract_context_required: functions.some(fn => [
+      'applyCaoContractRules',
+      'resolvePersonnelContractForService'
+    ].includes(fn)),
+    planning_context_required: functions.some(fn => [
+      'validateCaoScheduleRules',
+      'validateTaskPlanningContext'
+    ].includes(fn)),
+    payroll_context_required: functions.some(fn => [
+      'calculatePersonnelCosts',
+      'calculateRoutePersonnelCosts',
+      'calculateCaoYearEndBonus',
+      'calculateCaoReimbursements',
+      'calculateCaoLeaveAndSickness',
+      'queueCaoPayrollCorrections'
+    ].includes(fn)),
+    function_classification_context_required: functions.some(fn => fn === 'resolveCaoFunctionClassification'),
+    cao_scope_context_required: functions.some(fn => fn === 'resolveCaoApplicability' || fn === 'validateTaskPlanningContext')
+  };
+}
+
+function buildRuntimeDelegatedApplicability(rule, binding) {
+  return {
+    semantic_precision: 'runtime_delegated_minimum',
+    cao_key: normalizeCaoKey(rule?.cao_key) || CAO_PB_KEY,
+    rule_id: rule?.rule_id || null,
+    domain: rule?.domain || null,
+    automation_level: rule?.automation_level || null,
+    runtime_binding_key: binding.key,
+    runtime_binding_functions: binding.functions || [],
+    effective_date_required: true,
+    manual_review_if_context_missing: true,
+    ...inferRuntimeApplicabilityRequirements(binding)
+  };
+}
+
+function inferRuntimeEffects(binding) {
+  const functions = Array.isArray(binding?.functions) ? binding.functions : [];
+  return {
+    applies_contract_rules: functions.includes('applyCaoContractRules'),
+    validates_planning_rules: functions.includes('validateCaoScheduleRules') || functions.includes('validateTaskPlanningContext'),
+    resolves_contract_for_service: functions.includes('resolvePersonnelContractForService'),
+    resolves_cao_applicability: functions.includes('resolveCaoApplicability'),
+    resolves_function_classification: functions.includes('resolveCaoFunctionClassification'),
+    calculates_payroll_costs: functions.some(fn => [
+      'calculatePersonnelCosts',
+      'calculateRoutePersonnelCosts',
+      'calculateCaoYearEndBonus',
+      'calculateCaoReimbursements',
+      'calculateCaoLeaveAndSickness'
+    ].includes(fn)),
+    queues_retro_payroll_corrections: functions.includes('queueCaoPayrollCorrections')
+  };
+}
+
+function buildRuntimeDelegatedAction(rule, binding) {
+  return {
+    type: 'runtime_delegation',
+    semantic_precision: 'runtime_delegated_minimum',
+    rule_id: rule?.rule_id || null,
+    runtime_binding_key: binding.key,
+    runtime_binding_functions: binding.functions || [],
+    effects: inferRuntimeEffects(binding),
+    source_of_truth: 'local_base44_runtime_binding',
+    manual_review_if_runtime_unhandled: true
+  };
+}
+
 function withLocalRuntimeBindingMetadata(rule) {
   const binding = getLocalRuntimeBinding(rule);
   const critical = isPayrollCriticalRule(rule);
+  const runtimeApplicability = binding && !hasMachineReadableObject(rule.applies_when)
+    ? buildRuntimeDelegatedApplicability(rule, binding)
+    : rule.applies_when;
+  const runtimeAction = binding && !hasMachineReadableObject(rule.default_action)
+    ? buildRuntimeDelegatedAction(rule, binding)
+    : rule.default_action;
+  const runtimeValidationAction = binding && !hasMachineReadableObject(rule.validation_action)
+    ? {
+      type: 'runtime_validation_delegation',
+      semantic_precision: 'runtime_delegated_minimum',
+      rule_id: rule?.rule_id || null,
+      runtime_binding_key: binding.key,
+      runtime_binding_functions: binding.functions || [],
+      manual_review_if_validation_context_missing: true
+    }
+    : rule.validation_action;
   return {
     ...rule,
+    applies_when: runtimeApplicability,
+    default_action: runtimeAction,
+    validation_action: runtimeValidationAction,
     runtime_binding_status: binding ? 'verified_local_runtime' : critical ? 'missing_local_runtime' : 'not_required',
     runtime_binding_key: binding?.key || null,
     runtime_binding_functions: binding?.functions || [],
@@ -1000,15 +1099,6 @@ function isPositiveTestEvidence(value, key = '') {
 
 function hasVerifiedTestEvidence(rule) {
   return isPositiveTestEvidence(rule?.tests);
-}
-
-function hasMachineReadableObject(value) {
-  return Boolean(
-    value &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    Object.keys(value).length > 0
-  );
 }
 
 function hasMachineReadableApplicability(rule) {
@@ -1518,7 +1608,8 @@ Deno.serve(async (req) => {
       ...(payload.candidate_configuration || {}),
       cao_key: payloadCaoKey
     };
-    const candidateRulesForGate = normalizeCaoRulesInput(payload.candidate_rules || [], payloadCaoKey);
+    const candidateRulesForGate = normalizeCaoRulesInput(payload.candidate_rules || [], payloadCaoKey)
+      .map(rule => withLocalRuntimeBindingMetadata(rule));
     const mismatchingRuleCaoKeysForGate = [...new Set(candidateRulesForGate
       .map(rule => normalizeCaoKey(rule?.cao_key))
       .filter(key => key && key !== payloadCaoKey))];
@@ -1640,7 +1731,8 @@ Deno.serve(async (req) => {
       ...(payload.candidate_configuration || {}),
       cao_key: payloadCaoKey
     };
-    const candidateRules = normalizeCaoRulesInput(payload.candidate_rules || [], payloadCaoKey);
+    const candidateRules = normalizeCaoRulesInput(payload.candidate_rules || [], payloadCaoKey)
+      .map(rule => withLocalRuntimeBindingMetadata(rule));
     const payrollReadiness = resolvePayrollReadiness(candidateCfg, candidateRules);
     const caoDefaults = getCaoDisplayDefaults(payloadCaoKey);
     const initialProcessedRuleCount = Math.min(ruleBatchOffset, candidateRules.length);
@@ -1752,7 +1844,7 @@ Deno.serve(async (req) => {
         configId: newConfig.id
       });
       const ruleData = {
-        ...withLocalRuntimeBindingMetadata(rule),
+        ...rule,
         cao_key: rule.cao_key || payloadCaoKey,
         cao_configuration_id: newConfig.id,
         status: 'active',
