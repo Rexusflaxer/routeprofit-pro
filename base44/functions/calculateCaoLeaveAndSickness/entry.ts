@@ -48,43 +48,170 @@ async function lazySyncCao(base44, forceCaoSync = false, caoKey = CAO_PB_KEY) {
  * R1160: tweede 6 maanden ziekte 90%
  */
 
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const n = Number(value);
+  return Number.isFinite(n) ? n : null;
+}
+
+function booleanOrNull(value) {
+  if (value === true || value === false) return value;
+  if (value === 'true') return true;
+  if (value === 'false') return false;
+  return null;
+}
+
+function round2(value) {
+  return Math.round(Number(value || 0) * 100) / 100;
+}
+
+function asIsoDate(value) {
+  if (!value) return null;
+  return String(value).slice(0, 10);
+}
+
+function dateFromIso(value) {
+  const iso = asIsoDate(value);
+  if (!iso) return null;
+  const date = new Date(`${iso}T00:00:00.000Z`);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function daysBetweenInclusive(startDate, endDate) {
+  const start = dateFromIso(startDate);
+  const end = dateFromIso(endDate);
+  if (!start || !end || end < start) return null;
+  return Math.floor((end - start) / (1000 * 60 * 60 * 24)) + 1;
+}
+
+function isCallWorker(input) {
+  const callType = input.call_agreement_type || input.call_contract_type || null;
+  return input.is_call_worker === true ||
+    input.contract_type === '0_uren' ||
+    input.contract_type === 'oproep' ||
+    input.contract_form === 'oproep' ||
+    ['zero_hours', 'min_max', 'pre_agreement', 'annualized_bandwidth', 'no_work_no_pay_first_6_months'].includes(callType);
+}
+
+function extraVacationDaysForServiceYears(years) {
+  const serviceYears = numberOrNull(years);
+  if (serviceYears === null || serviceYears < 5) return 0;
+  if (serviceYears >= 40) return 8;
+  return Math.floor(serviceYears / 5);
+}
+
 function calculateVacationAccrual(input) {
-  const { contract_type, weekly_hours, period_hours, is_call_worker } = input;
+  const fulltimeAnnualHours = 172.8; // 24 dagen * 7,2 uur
+  const fulltimeAnnualDays = 24;
+  const fulltimePerPeriodHours = 13.3;
+  const fulltimePeriodHours = 144;
+  const fulltimeWeeklyHours = 36;
+  const ruleIds = ['CAO-PB-2024-R0999'];
+  const warnings = [];
+  const missingEvidence = [];
+  let manualReviewRequired = false;
 
-  // CAO-PB-2024-R0999: fulltime accrual
-  const fulltime_annual_hours = 172.8; // 24 days * 7.2 uur
-  const fulltime_per_period = 13.3; // 13,3 uur per 4 weken
+  if (isCallWorker(input)) {
+    const workedHours = numberOrNull(input.worked_hours) ??
+      numberOrNull(input.period_hours) ??
+      numberOrNull(input.paid_hours_per_pay_period) ??
+      0;
+    const payoutBaseHours = Math.min(workedHours, fulltimePeriodHours);
+    const hourlyRate = numberOrNull(input.base_hourly_rate) ?? numberOrNull(input.hourly_rate);
+    const explicitBaseAmount = numberOrNull(input.vacation_payout_base_amount) ??
+      numberOrNull(input.period_gross_wage) ??
+      numberOrNull(input.gross_wage_for_vacation);
+    const payoutBaseAmount = explicitBaseAmount !== null
+      ? explicitBaseAmount
+      : hourlyRate !== null
+      ? payoutBaseHours * hourlyRate
+      : null;
 
-  if (is_call_worker || contract_type === '0_uren') {
-    // Oproepkrachten: 9,24% van gewerkte uren (CAO art. leave_rules)
-    const worked_hours = period_hours || 0;
-    const vacation_hours = worked_hours * 0.0924;
-    const max_hours = 144;
+    if (payoutBaseAmount === null) {
+      manualReviewRequired = true;
+      missingEvidence.push({
+        field: 'vacation_payout_base_amount/base_hourly_rate',
+        rule_id: 'CAO-PB-2024-R1016',
+        message: 'Voor oproepkrachten moet de 9,24% vakantietoeslag over het loon van maximaal 144 uur per loonperiode worden berekend.'
+      });
+    }
+
     return {
-      rule_id: 'CAO-PB-2024-R0999-CALL',
-      vacation_hours_accrued: Math.min(Math.round(vacation_hours * 100) / 100, max_hours),
-      capped_at_max: vacation_hours > max_hours,
-      max_hours,
-      percentage: 9.24,
-      note: 'Oproepkracht: 9,24% van gewerkte uren, max 144 uur per jaar'
+      rule_ids: ['CAO-PB-2024-R1014', 'CAO-PB-2024-R1015', 'CAO-PB-2024-R1016', 'CAO-PB-2024-R1017'],
+      vacation_accrual_type: 'call_worker_paid_in_money',
+      vacation_days_takeable: false,
+      vacation_payout_percentage: 9.24,
+      worked_hours: workedHours,
+      payout_base_hours: payoutBaseHours,
+      capped_at_144_hours_per_pay_period: workedHours > fulltimePeriodHours,
+      payout_base_amount: payoutBaseAmount !== null ? round2(payoutBaseAmount) : null,
+      vacation_payout_amount: payoutBaseAmount !== null ? round2(payoutBaseAmount * 0.0924) : null,
+      vacation_hours_accrued_per_period: 0,
+      vacation_hours_annual: 0,
+      manual_review_required: manualReviewRequired,
+      payroll_final_allowed: !manualReviewRequired,
+      missing_evidence: missingEvidence,
+      warnings,
+      note: 'Oproepkracht: geen opneembare vakantiedagen; 9,24% uitbetaling per loonperiode over loon van maximaal 144 uur.'
     };
   }
 
-  // Parttime: naar rato van fulltimepercentage
-  const fulltime_weekly = 38;
-  const actual_weekly = weekly_hours || fulltime_weekly;
-  const parttimeRatio = Math.min(actual_weekly / fulltime_weekly, 1);
+  const paidHoursPerPeriod = numberOrNull(input.paid_hours_per_pay_period) ??
+    numberOrNull(input.period_hours) ??
+    numberOrNull(input.contract_hours_per_pay_period) ??
+    (numberOrNull(input.weekly_hours) !== null ? numberOrNull(input.weekly_hours) * 4 : fulltimePeriodHours);
+  const cappedPaidHours = Math.min(Math.max(paidHoursPerPeriod, 0), fulltimePeriodHours);
+  const parttimeRatio = cappedPaidHours / fulltimePeriodHours;
+  const serviceYears = numberOrNull(input.continuous_service_years) ??
+    numberOrNull(input.security_industry_service_years) ??
+    null;
+  const extraVacationDays = extraVacationDaysForServiceYears(serviceYears);
+  const extraVacationHoursAnnual = extraVacationDays * 7.2 * parttimeRatio;
 
-  const accrual = fulltime_per_period * parttimeRatio;
+  if (serviceYears === null) {
+    manualReviewRequired = true;
+    missingEvidence.push({
+      field: 'continuous_service_years/security_industry_service_years',
+      rule_id: 'CAO-PB-2024-R1019',
+      message: 'Dienstjaren ontbreken; extra vakantiedagen vanaf 5 dienstjaren kunnen niet definitief worden vastgesteld.'
+    });
+  } else {
+    ruleIds.push('CAO-PB-2024-R1019', 'CAO-PB-2024-R1022');
+  }
+
+  if (paidHoursPerPeriod > fulltimePeriodHours) {
+    warnings.push('Vakantieopbouw is afgetopt op 144 betaalde uren per loonperiode.');
+  }
 
   return {
-    rule_id: 'CAO-PB-2024-R0999',
-    vacation_hours_accrued_per_period: Math.round(accrual * 100) / 100,
-    vacation_hours_annual: Math.round(fulltime_annual_hours * parttimeRatio * 100) / 100,
-    parttime_ratio: Math.round(parttimeRatio * 1000) / 1000,
-    weekly_hours: actual_weekly,
-    note: parttimeRatio < 1 ? `Parttime ${actual_weekly}u/week: naar rato` : 'Fulltime 38u/week'
+    rule_ids: ruleIds,
+    vacation_accrual_type: parttimeRatio < 1 ? 'parttime_time_off_accrual' : 'fulltime_time_off_accrual',
+    fulltime_reference_hours_per_pay_period: fulltimePeriodHours,
+    fulltime_reference_weekly_hours: fulltimeWeeklyHours,
+    paid_hours_per_pay_period: paidHoursPerPeriod,
+    capped_paid_hours_per_pay_period: cappedPaidHours,
+    parttime_ratio: round2(parttimeRatio),
+    vacation_hours_accrued_per_period: round2(fulltimePerPeriodHours * parttimeRatio),
+    statutory_and_above_statutory_vacation_hours_annual: round2(fulltimeAnnualHours * parttimeRatio),
+    statutory_and_above_statutory_vacation_days_annual_fulltime_basis: fulltimeAnnualDays,
+    extra_vacation_days_annual_fulltime_basis: extraVacationDays,
+    extra_vacation_hours_annual: round2(extraVacationHoursAnnual),
+    vacation_hours_annual_total: round2((fulltimeAnnualHours * parttimeRatio) + extraVacationHoursAnnual),
+    manual_review_required: manualReviewRequired,
+    payroll_final_allowed: !manualReviewRequired,
+    missing_evidence: missingEvidence,
+    warnings,
+    note: parttimeRatio < 1
+      ? `Parttime vakantieopbouw naar rato over ${cappedPaidHours} betaalde uren per loonperiode.`
+      : 'Fulltime vakantieopbouw op basis van 144 uur per loonperiode / 36 uur per week.'
   };
+}
+
+function waitingDayExceptionApplies(input) {
+  return booleanOrNull(input.company_accident_or_occupational_disease) === true ||
+    booleanOrNull(input.pregnancy_or_childbirth_related) === true ||
+    booleanOrNull(input.organ_donation_related) === true ||
+    booleanOrNull(input.disabled_employee_status) === true;
 }
 
 function calculateSicknessPayment(input) {
@@ -100,48 +227,222 @@ function calculateSicknessPayment(input) {
     return { error: 'sickness_start_date en base_gross_salary zijn verplicht' };
   }
 
-  const start = new Date(sickness_start_date);
-  const end = sickness_end_date ? new Date(sickness_end_date) : new Date();
-  const sicknessDays = Math.max(1, Math.ceil((end - start) / (1000 * 60 * 60 * 24)));
+  const warnings = [];
+  const missingEvidence = [];
+  const ruleIds = ['CAO-PB-2024-R1165', 'CAO-PB-2024-R1166'];
+  let manualReviewRequired = false;
+  const contractEndDate = asIsoDate(input.contract_end_date || input.employment_end_date);
+  const requestedEndDate = asIsoDate(sickness_end_date) || new Date().toISOString().slice(0, 10);
+  const effectiveEndDate = contractEndDate && contractEndDate < requestedEndDate ? contractEndDate : requestedEndDate;
+  const calendarSicknessDays = daysBetweenInclusive(sickness_start_date, effectiveEndDate);
+  if (calendarSicknessDays === null) return { error: 'sickness_start_date/sickness_end_date zijn ongeldig' };
+  if (contractEndDate && contractEndDate < requestedEndDate) {
+    warnings.push('Ziekteloon is afgekapt op de einddatum van de arbeidsovereenkomst.');
+    ruleIds.push('CAO-PB-2024-R1155', 'CAO-PB-2024-R1163');
+  }
 
-  // CAO-PB-2024-R1149: wachtdag bij < 13 loonperioden brancheancienniteit
-  const seniority = industry_seniority_periods || 0;
-  const has_waiting_day = seniority < 13;
+  const explicitPayableDays = numberOrNull(input.sickness_payable_days) ??
+    numberOrNull(input.scheduled_sickness_days) ??
+    numberOrNull(input.social_insurance_days);
+  const sicknessDays = explicitPayableDays ?? calendarSicknessDays;
+  if (explicitPayableDays === null) {
+    manualReviewRequired = true;
+    missingEvidence.push({
+      field: 'sickness_payable_days/scheduled_sickness_days/social_insurance_days',
+      rule_id: 'CAO-PB-2024-R1167',
+      message: 'Artikel 67 rekent met ingeroosterde diensten/tijdvakken/sociale-verzekeringsdagen. Zonder die evidence is een kalenderdagberekening conceptmatig.'
+    });
+  }
 
-  // Eerste dag niet betaald indien wachtdag van toepassing
-  const paid_days_first_period = has_waiting_day
-    ? Math.max(0, Math.min(sicknessDays, 180) - 1)
-    : Math.min(sicknessDays, 180);
+  const seniority = numberOrNull(industry_seniority_periods) ?? 0;
+  const dailySalary = numberOrNull(input.daily_sickness_salary) ??
+    ((numberOrNull(base_gross_salary) + (numberOrNull(avg_ort_per_period) ?? 0)) / (numberOrNull(input.payable_days_per_pay_period) ?? 20));
 
-  const days_second_period = Math.max(0, sicknessDays - 180);
+  const callAgreementType = input.call_agreement_type || input.call_contract_type || null;
+  if (isCallWorker(input)) {
+    ruleIds.push('CAO-PB-2024-R1172');
+    const withinCallPeriod = booleanOrNull(input.sickness_started_during_call_period);
+    if (callAgreementType === 'pre_agreement' || callAgreementType === 'zero_hours') {
+      ruleIds.push(...(callAgreementType === 'pre_agreement'
+        ? ['CAO-PB-2024-R1173', 'CAO-PB-2024-R1174', 'CAO-PB-2024-R1175', 'CAO-PB-2024-R1176']
+        : ['CAO-PB-2024-R1177', 'CAO-PB-2024-R1178', 'CAO-PB-2024-R1179', 'CAO-PB-2024-R1180', 'CAO-PB-2024-R1181']));
+      if (withinCallPeriod !== true) {
+        const zeroHoursAverageClaimAssessed = callAgreementType === 'zero_hours'
+          ? booleanOrNull(input.zero_hours_52_week_average_claim_assessed) === true
+          : true;
+        const outsideCallManualReview = withinCallPeriod === null || !zeroHoursAverageClaimAssessed;
+        const outsideCallMissingEvidence = [];
+        if (withinCallPeriod === null) {
+          outsideCallMissingEvidence.push({
+            field: 'sickness_started_during_call_period',
+            rule_id: callAgreementType === 'pre_agreement' ? 'CAO-PB-2024-R1174' : 'CAO-PB-2024-R1178',
+            message: 'Bij voorovereenkomst/nul-uren moet bekend zijn of ziekte tijdens een oproepperiode is begonnen.'
+          });
+        }
+        if (!zeroHoursAverageClaimAssessed) {
+          outsideCallMissingEvidence.push({
+            field: 'zero_hours_52_week_average_claim_assessed',
+            rule_id: 'CAO-PB-2024-R1181',
+            message: 'Bij nul-urencontracten kan buiten de oproepperiode in sommige gevallen een 52-weken aanspraak bestaan; leg vast dat dit is beoordeeld.'
+          });
+        }
+        return {
+          rule_ids: ruleIds,
+          sickness_days_total: sicknessDays,
+          call_agreement_type: callAgreementType,
+          sickness_started_during_call_period: withinCallPeriod,
+          payment_percentage: 0,
+          total_sickness_payment: 0,
+          manual_review_required: outsideCallManualReview,
+          payroll_final_allowed: !outsideCallManualReview,
+          missing_evidence: outsideCallMissingEvidence,
+          warnings,
+          note: 'Geen ziekengeld buiten of na afloop van de oproepperiode, tenzij 52-weken aanspraak voor nul-uren afzonderlijk is vastgesteld.'
+        };
+      }
+      const callPeriodAmount = numberOrNull(input.agreed_call_period_gross_wage) ?? (dailySalary * sicknessDays);
+      return {
+        rule_ids: ruleIds,
+        sickness_days_total: sicknessDays,
+        call_agreement_type: callAgreementType,
+        sickness_started_during_call_period: true,
+        payment_percentage: 70,
+        total_sickness_payment: round2(callPeriodAmount * 0.7),
+        minimum_wage_floor_required: true,
+        manual_review_required: manualReviewRequired,
+        payroll_final_allowed: !manualReviewRequired,
+        missing_evidence: missingEvidence,
+        warnings,
+        note: 'Oproepkracht ziek tijdens oproepperiode: 70% over afgesproken oproepperiode, minimaal minimumloon.'
+      };
+    }
 
-  // CAO-PB-2024-R1159: eerste 6 maanden 100%
-  // CAO-PB-2024-R1160: tweede 6 maanden 90%
-  const daily_salary = base_gross_salary / 20; // ca 20 werkdagen per 4 weken
-  const daily_ort = (avg_ort_per_period || 0) / 20;
+    if (callAgreementType === 'min_max') {
+      ruleIds.push('CAO-PB-2024-R1182', 'CAO-PB-2024-R1183', 'CAO-PB-2024-R1184');
+      const guaranteeHours = numberOrNull(input.guarantee_hours_per_pay_period) ??
+        numberOrNull(input.min_hours_per_pay_period) ??
+        numberOrNull(input.min_hours_per_week);
+      if (guaranteeHours === null) {
+        manualReviewRequired = true;
+        missingEvidence.push({
+          field: 'guarantee_hours_per_pay_period/min_hours_per_pay_period',
+          rule_id: 'CAO-PB-2024-R1183',
+          message: 'Bij min-max ziekte moet het aantal garantie-uren bekend zijn.'
+        });
+      }
+      const guaranteeBaseAmount = numberOrNull(input.guarantee_gross_wage) ??
+        (guaranteeHours !== null && numberOrNull(input.base_hourly_rate) !== null ? guaranteeHours * numberOrNull(input.base_hourly_rate) : dailySalary * sicknessDays);
+      if (numberOrNull(input.average_hours_52_weeks) !== null && guaranteeHours !== null && numberOrNull(input.average_hours_52_weeks) > guaranteeHours) {
+        manualReviewRequired = true;
+        warnings.push('Gemiddelde arbeidsduur over 52 weken lijkt hoger dan garantie-uren; artikel 67 kan hogere loondoorbetaling geven. Handmatige review vereist.');
+      }
+      return {
+        rule_ids: ruleIds,
+        sickness_days_total: sicknessDays,
+        call_agreement_type: callAgreementType,
+        guarantee_hours_basis: guaranteeHours,
+        payment_percentage: 70,
+        total_sickness_payment: round2(guaranteeBaseAmount * 0.7),
+        minimum_wage_floor_required: true,
+        manual_review_required: manualReviewRequired,
+        payroll_final_allowed: !manualReviewRequired,
+        missing_evidence: missingEvidence,
+        warnings,
+        note: 'Min-maxcontract: 70% over garantie-uren, met mogelijke 52-weken aanspraak bij gemiddeld meer werken.'
+      };
+    }
 
-  const payment_first_period = paid_days_first_period * (daily_salary + daily_ort) * 1.0;
-  const payment_second_period = days_second_period * (daily_salary + daily_ort) * 0.9;
+    manualReviewRequired = true;
+    missingEvidence.push({
+      field: 'call_agreement_type',
+      rule_id: 'CAO-PB-2024-R1172',
+      message: 'Type oproepcontract ontbreekt of wordt niet volledig automatisch ondersteund voor ziekte.'
+    });
+  }
+
+  if (seniority < 13) {
+    ruleIds.push('CAO-PB-2024-R1148', 'CAO-PB-2024-R1149');
+    const hasWaitingDay = !waitingDayExceptionApplies(input);
+    if (!hasWaitingDay) ruleIds.push('CAO-PB-2024-R1150', 'CAO-PB-2024-R1151', 'CAO-PB-2024-R1152', 'CAO-PB-2024-R1153', 'CAO-PB-2024-R1154');
+    const paidDays = hasWaitingDay ? Math.max(0, sicknessDays - 1) : sicknessDays;
+    return {
+      rule_ids: ruleIds,
+      sickness_days_total: sicknessDays,
+      has_waiting_day: hasWaitingDay,
+      waiting_day_unpaid: hasWaitingDay,
+      industry_seniority_periods: seniority,
+      paid_days_70_percent: paidDays,
+      payment_percentage: 70,
+      payment_70_percent: round2(paidDays * dailySalary * 0.7),
+      total_sickness_payment: round2(paidDays * dailySalary * 0.7),
+      minimum_wage_floor_required: true,
+      manual_review_required: manualReviewRequired,
+      payroll_final_allowed: !manualReviewRequired,
+      missing_evidence: missingEvidence,
+      warnings,
+      note: hasWaitingDay
+        ? 'Minder dan 13 loonperioden brancheancienniteit: 70% ziekengeld en eerste ziektedag wachtdag.'
+        : 'Minder dan 13 loonperioden brancheancienniteit: 70% ziekengeld, geen wachtdag wegens CAO-uitzondering.'
+    };
+  }
+
+  ruleIds.push('CAO-PB-2024-R1157', 'CAO-PB-2024-R1158', 'CAO-PB-2024-R1159', 'CAO-PB-2024-R1160', 'CAO-PB-2024-R1161');
+  const firstSixMonthDays = Math.min(sicknessDays, 182);
+  const secondSixMonthDays = Math.min(Math.max(0, sicknessDays - 182), 183);
+  const secondYearDays = Math.min(Math.max(0, sicknessDays - 365), 365);
+  const reintegrationConfirmed = booleanOrNull(input.active_reintegration_confirmed);
+  if (secondYearDays > 0 && reintegrationConfirmed !== true) {
+    manualReviewRequired = true;
+    missingEvidence.push({
+      field: 'active_reintegration_confirmed',
+      rule_id: 'CAO-PB-2024-R1161',
+      message: '85% in het tweede ziektejaar geldt als actieve re-integratie binnen mogelijkheden is aangetoond.'
+    });
+  }
+  const thirdFourthYearSupplementEligible = booleanOrNull(input.wga_35_80) === true &&
+    booleanOrNull(input.medical_limitations_confirmed) === true &&
+    booleanOrNull(input.active_reintegration_confirmed) === true;
+  const thirdFourthYearDays = Math.min(Math.max(0, sicknessDays - 730), 730);
+  if (thirdFourthYearDays > 0) {
+    ruleIds.push('CAO-PB-2024-R1162');
+    if (!thirdFourthYearSupplementEligible) {
+      manualReviewRequired = true;
+      missingEvidence.push({
+        field: 'wga_35_80/medical_limitations_confirmed/active_reintegration_confirmed',
+        rule_id: 'CAO-PB-2024-R1162',
+        message: 'Aanvulling in ziektejaar 3/4 vereist 35-80% WGA en bewijs van actieve inzet/medische beperkingen.'
+      });
+    }
+  }
+
+  const paymentFirstSixMonths = firstSixMonthDays * dailySalary;
+  const paymentSecondSixMonths = secondSixMonthDays * dailySalary * 0.9;
+  const paymentSecondYear = reintegrationConfirmed === true ? secondYearDays * dailySalary * 0.85 : 0;
+  const supplementThirdFourthYear = thirdFourthYearSupplementEligible
+    ? (numberOrNull(input.wga_related_benefit_per_day) ?? dailySalary) * thirdFourthYearDays * 0.1
+    : 0;
 
   return {
-    rule_ids: [
-      has_waiting_day ? 'CAO-PB-2024-R1149' : null,
-      'CAO-PB-2024-R1159',
-      days_second_period > 0 ? 'CAO-PB-2024-R1160' : null
-    ].filter(Boolean),
+    rule_ids: ruleIds,
     sickness_days_total: sicknessDays,
-    has_waiting_day,
-    waiting_day_unpaid: has_waiting_day,
+    has_waiting_day: false,
+    waiting_day_unpaid: false,
     industry_seniority_periods: seniority,
-    paid_days_first_period,
-    days_second_period,
-    payment_first_period: Math.round(payment_first_period * 100) / 100,
-    payment_second_period: Math.round(payment_second_period * 100) / 100,
-    total_sickness_payment: Math.round((payment_first_period + payment_second_period) * 100) / 100,
-    ort_included: !!avg_ort_per_period,
-    note: has_waiting_day
-      ? 'Eerste ziektedag geldt als wachtdag (< 13 loonperioden brancheancienniteit)'
-      : 'Geen wachtdag (>= 13 loonperioden brancheancienniteit)'
+    days_first_six_months_100_percent: firstSixMonthDays,
+    days_second_six_months_90_percent: secondSixMonthDays,
+    days_second_year_85_percent: secondYearDays,
+    days_third_fourth_year_supplement: thirdFourthYearDays,
+    payment_first_six_months: round2(paymentFirstSixMonths),
+    payment_second_six_months: round2(paymentSecondSixMonths),
+    payment_second_year: round2(paymentSecondYear),
+    supplement_third_fourth_year: round2(supplementThirdFourthYear),
+    total_sickness_payment: round2(paymentFirstSixMonths + paymentSecondSixMonths + paymentSecondYear + supplementThirdFourthYear),
+    ort_included: numberOrNull(avg_ort_per_period) !== null,
+    manual_review_required: manualReviewRequired,
+    payroll_final_allowed: !manualReviewRequired,
+    missing_evidence: missingEvidence,
+    warnings,
+    note: 'Minimaal 13 loonperioden brancheancienniteit: 100% eerste 6 maanden, 90% tweede 6 maanden, 85% tweede ziektejaar bij actieve re-integratie.'
   };
 }
 
@@ -202,7 +503,11 @@ Deno.serve(async (req) => {
     let rawCaoScope = null;
     if (targetCaoKey === CAO_PB_KEY && personnel_id) {
       try {
-        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id });
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
+          personnel_id,
+          cao_key: targetCaoKey,
+          work_context: body.service_context || null
+        });
         rawCaoScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
     }
@@ -247,6 +552,7 @@ Deno.serve(async (req) => {
 
     if (action === 'calculate_vacation_accrual') {
       const result = calculateVacationAccrual(body);
+      const manualReviewRequired = isUnknownOrMixed || result.manual_review_required === true;
       return Response.json({
         success: true,
         cao_sync_status: caoSyncStatus,
@@ -255,15 +561,17 @@ Deno.serve(async (req) => {
         calculation_warnings: syncWarnings,
         scope_warnings: scopeWarnings,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
-        manual_review_required: isUnknownOrMixed || false,
         apply_ort_vacation: applyOrtVacation,
-        ...result
+        ...result,
+        manual_review_required: manualReviewRequired,
+        payroll_final_allowed: !manualReviewRequired && result.payroll_final_allowed !== false
       });
     }
 
     if (action === 'calculate_sickness_payment') {
       const result = calculateSicknessPayment(body);
       if (result.error) return Response.json({ error: result.error }, { status: 400 });
+      const manualReviewRequired = isUnknownOrMixed || result.manual_review_required === true;
       return Response.json({
         success: true,
         cao_sync_status: caoSyncStatus,
@@ -272,14 +580,18 @@ Deno.serve(async (req) => {
         calculation_warnings: syncWarnings,
         scope_warnings: scopeWarnings,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
-        manual_review_required: isUnknownOrMixed || false,
-        ...result
+        ...result,
+        manual_review_required: manualReviewRequired,
+        payroll_final_allowed: !manualReviewRequired && result.payroll_final_allowed !== false
       });
     }
 
     // Default: bereken beide
     const vacation = calculateVacationAccrual(body);
     const sickness = body.sickness_start_date ? calculateSicknessPayment(body) : null;
+    const manualReviewRequired = isUnknownOrMixed ||
+      vacation.manual_review_required === true ||
+      sickness?.manual_review_required === true;
 
     return Response.json({
       success: true,
@@ -289,7 +601,10 @@ Deno.serve(async (req) => {
       calculation_warnings: syncWarnings,
       scope_warnings: scopeWarnings,
       cao_scope_profile: caoScope?.cao_scope_profile || null,
-      manual_review_required: isUnknownOrMixed || false,
+      manual_review_required: manualReviewRequired,
+      payroll_final_allowed: !manualReviewRequired &&
+        vacation.payroll_final_allowed !== false &&
+        (sickness ? sickness.payroll_final_allowed !== false : true),
       apply_ort_vacation: applyOrtVacation,
       vacation_accrual: vacation,
       sickness_payment: sickness
