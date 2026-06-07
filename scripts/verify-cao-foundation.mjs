@@ -1830,8 +1830,40 @@ function runCaoStaticGovernanceScenarios() {
 
   const ingestSource = fs.readFileSync(path.join(repoRoot, 'base44/functions/ingestCaoAutomationPayload/entry.ts'), 'utf8');
   assert.ok(ingestSource.includes('CAO_AUTOMATION_SHARED_SECRET'), 'ingestCaoAutomationPayload must stay secret-only');
+  assert.ok(
+    ingestSource.includes("approval?.status === 'approved_by_owner'"),
+    'ingestCaoAutomationPayload must explicitly detect owner-approved Codex payloads'
+  );
+  assert.ok(
+    ingestSource.includes("const approval_status = isOwnerApproved ? 'owner_approved' : 'proposed'"),
+    'ingestCaoAutomationPayload must store non-owner-approved payloads as proposed only'
+  );
+  assert.ok(
+    ingestSource.includes('Proposed CAO payload ontvangen') && ingestSource.includes('niet geactiveerd'),
+    'ingestCaoAutomationPayload must clearly report that proposed payloads are not activated'
+  );
+  assert.ok(
+    ingestSource.includes('Owner-approved CAO payload toegepast'),
+    'ingestCaoAutomationPayload must distinguish owner-approved applied imports'
+  );
   const syncSource = fs.readFileSync(path.join(repoRoot, 'base44/functions/syncCaoFromCloudflare/entry.ts'), 'utf8');
   assert.ok(syncSource.includes('BASE44_CAO_SYNC_TRIGGER_SECRET'), 'syncCaoFromCloudflare must require the internal sync secret');
+  assert.ok(
+    syncSource.includes('payload.applied !== true'),
+    'syncCaoFromCloudflare must reject Cloudflare payloads that are not explicitly applied'
+  );
+  assert.ok(
+    syncSource.includes("payload.approval?.status !== 'approved_by_owner'"),
+    'syncCaoFromCloudflare must reject Cloudflare payloads without owner approval'
+  );
+  assert.ok(
+    syncSource.includes('Payload is niet goedgekeurd door eigenaar'),
+    'syncCaoFromCloudflare must make owner-approval failures explicit'
+  );
+  assert.ok(
+    syncSource.includes("approval_status: 'owner_approved'"),
+    'syncCaoFromCloudflare must only create active synced configs with owner-approved status'
+  );
 
   const personnelContractsSource = fs.readFileSync(path.join(repoRoot, 'src/components/personnel/PersonnelContractsTab.jsx'), 'utf8');
   assert.ok(
