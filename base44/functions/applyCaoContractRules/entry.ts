@@ -52,6 +52,39 @@ function asIsoDate(value) {
   return String(value).slice(0, 10);
 }
 
+function resolveContractCaoRequest({ explicitCaoKey, contract, personnel }) {
+  const contractCaoKey = contract?.cao_key || null;
+  const personnelCaoKey = personnel?.cao || null;
+  const resolution = {
+    explicit_cao_key: explicitCaoKey || null,
+    contract_cao_key: contractCaoKey,
+    personnel_cao_key: personnelCaoKey,
+    cao_key: explicitCaoKey || contractCaoKey || personnelCaoKey || CAO_PB_KEY,
+    status: 'resolved',
+    manual_review_required: false
+  };
+
+  if (explicitCaoKey && contractCaoKey && explicitCaoKey !== contractCaoKey) {
+    return {
+      ...resolution,
+      status: 'blocked_explicit_cao_contract_mismatch',
+      blocking_reason: `Expliciete cao_key ${explicitCaoKey} botst met contract-CAO ${contractCaoKey}.`,
+      manual_review_required: true
+    };
+  }
+
+  if (contract && !explicitCaoKey && !contractCaoKey) {
+    return {
+      ...resolution,
+      status: 'blocked_missing_contract_cao_key',
+      blocking_reason: 'Arbeidscontract mist cao_key; contractregels kunnen niet audit-proof worden toegepast vanuit medewerkerstamdata.',
+      manual_review_required: true
+    };
+  }
+
+  return resolution;
+}
+
 function dateFromIso(value) {
   const iso = asIsoDate(value);
   if (!iso) return null;
@@ -3696,6 +3729,17 @@ function buildContractRuleInput(body, personnel, contract) {
     social_committee_advice_reference: pickFirst(body.social_committee_advice_reference, contract?.social_committee_advice_reference, null),
     security_role_status: pickFirst(body.security_role_status, contract?.security_role_status, personnel?.security_role_status, 'unknown'),
     function_type: pickFirst(body.function_type, contract?.function_type, personnel?.function_type, null),
+    performs_security_work: pickFirst(body.performs_security_work, contract?.performs_security_work, personnel?.performs_security_work, null),
+    security_work_percentage: pickFirst(body.security_work_percentage, contract?.security_work_percentage, personnel?.security_work_percentage, null),
+    works_airport_schiphol: pickFirst(body.works_airport_schiphol, contract?.works_airport_schiphol, personnel?.works_airport_schiphol, null),
+    works_cash_value_logistics: pickFirst(body.works_cash_value_logistics, contract?.works_cash_value_logistics, personnel?.works_cash_value_logistics, null),
+    works_event_or_hospitality_security: pickFirst(body.works_event_or_hospitality_security, contract?.works_event_or_hospitality_security, personnel?.works_event_or_hospitality_security, null),
+    event_hospitality_cao_applies: pickFirst(body.event_hospitality_cao_applies, contract?.event_hospitality_cao_applies, personnel?.event_hospitality_cao_applies, null),
+    cao_scope_profile: pickFirst(body.cao_scope_profile, contract?.cao_scope_profile, personnel?.cao_scope_profile, null),
+    cao_applicable_rule_profile: pickFirst(body.cao_applicable_rule_profile, contract?.cao_applicable_rule_profile, personnel?.cao_applicable_rule_profile, null),
+    cao_excluded_rule_ids: pickFirst(body.cao_excluded_rule_ids, contract?.cao_excluded_rule_ids, personnel?.cao_excluded_rule_ids, []),
+    cao_excluded_articles: pickFirst(body.cao_excluded_articles, contract?.cao_excluded_articles, personnel?.cao_excluded_articles, []),
+    cao_excluded_chapters: pickFirst(body.cao_excluded_chapters, contract?.cao_excluded_chapters, personnel?.cao_excluded_chapters, []),
     cao_function_group: pickFirst(body.cao_function_group, contract?.cao_function_group, personnel?.cao_function_group, null),
     cao_function_level: pickFirst(body.cao_function_level, contract?.cao_function_level, personnel?.cao_function_level, null),
     cao_scale: pickFirst(body.cao_scale, contract?.cao_scale, personnel?.cao_scale, null),
@@ -3950,10 +3994,26 @@ Deno.serve(async (req) => {
       if (!personnel) return Response.json({ error: `Medewerker niet gevonden: ${personnel_id}` }, { status: 404 });
     }
 
-    const targetCaoKey = body.cao_key ||
-      contract?.cao_key ||
-      personnel?.cao ||
-      CAO_PB_KEY;
+    const contractCaoResolution = resolveContractCaoRequest({
+      explicitCaoKey: body.cao_key || null,
+      contract,
+      personnel
+    });
+    if (contractCaoResolution.status.startsWith('blocked_')) {
+      return Response.json({
+        error: contractCaoResolution.blocking_reason,
+        action: action || 'evaluate_contract_rules',
+        contract_id: contract_id || contract?.id || null,
+        personnel_id: personnel_id || null,
+        cao_key: contractCaoResolution.cao_key,
+        contract_cao_resolution: contractCaoResolution,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        contract_final_allowed: false,
+        contract_rule_status: contractCaoResolution.status
+      }, { status: 400 });
+    }
+    const targetCaoKey = contractCaoResolution.cao_key;
 
     const syncResult = await lazySyncCao(base44, !!force_cao_sync, targetCaoKey);
     const syncWarnings = [];
@@ -3981,6 +4041,7 @@ Deno.serve(async (req) => {
         contract_id: contract_id || contract?.id || null,
         personnel_id: personnel_id || null,
         cao_key: targetCaoKey,
+        contract_cao_resolution: contractCaoResolution,
         cao_runtime_support: contractRuntimeSupport,
         manual_review_required: true,
         payroll_final_allowed: false,
@@ -3993,13 +4054,21 @@ Deno.serve(async (req) => {
     let caoScope = null;
     if (targetCaoKey === CAO_PB_KEY && personnel_id) {
       try {
-        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel_id, contract });
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
+          personnel_id,
+          contract,
+          cao_key: targetCaoKey
+        });
         caoScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
     } else if (targetCaoKey === CAO_PB_KEY && personnel) {
       // Inline personnel meegegeven (geen opgeslagen ID)
       try {
-        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', { personnel, contract });
+        const scopeRes = await base44.asServiceRole.functions.invoke('resolveCaoApplicability', {
+          personnel,
+          contract,
+          cao_key: targetCaoKey
+        });
         caoScope = scopeRes?.data || null;
       } catch { /* stille fallback */ }
     }
@@ -4031,6 +4100,7 @@ Deno.serve(async (req) => {
         calculation_warnings: syncWarnings,
         contract_id: contract_id || contract?.id || null,
         personnel_id: personnel_id || null,
+        contract_cao_resolution: contractCaoResolution,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
         manual_review_required: result.manual_review_required || isUnknownOrMixed,
         persisted_to_contract: !!shouldPersistContract,
@@ -4049,6 +4119,7 @@ Deno.serve(async (req) => {
         calculation_warnings: syncWarnings,
         contract_id: contract_id || contract?.id || null,
         personnel_id: personnel_id || null,
+        contract_cao_resolution: contractCaoResolution,
         manual_review_required: result.call_agreement_status === 'manual_review_required',
         ...result
       });
@@ -4071,6 +4142,7 @@ Deno.serve(async (req) => {
         calculation_warnings: syncWarnings,
         contract_id: contract_id || contract?.id || null,
         personnel_id: personnel_id || null,
+        contract_cao_resolution: contractCaoResolution,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
         manual_review_required: result.manual_review_required || isUnknownOrMixed,
         persisted_to_contract: !!shouldPersistContract,
@@ -4082,9 +4154,13 @@ Deno.serve(async (req) => {
       let baseHourlyRate = body.base_hourly_rate || null;
       if (personnel_id && !baseHourlyRate) {
         const personnel = await base44.entities.Personnel.get(personnel_id);
-        if (personnel?.employee_type === 'loondienst' && personnel?.cao === 'cao_particuliere_beveiliging') {
+        if (personnel?.employee_type === 'loondienst' && targetCaoKey === CAO_PB_KEY) {
           try {
-            const classRes = await base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', { personnel_id });
+            const classRes = await base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', {
+              personnel_id,
+              contract,
+              cao_key: targetCaoKey
+            });
             const classification = classRes?.data || null;
             if (classification?.appendix_2_applies === false && Number(personnel.custom_hourly_rate || 0) > 0) {
               baseHourlyRate = Number(personnel.custom_hourly_rate);
@@ -4112,6 +4188,7 @@ Deno.serve(async (req) => {
         cao_key: targetCaoKey,
         cao_runtime_support: contractRuntimeSupport,
         calculation_warnings: syncWarnings,
+        contract_cao_resolution: contractCaoResolution,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
         manual_review_required: isUnknownOrMixed,
         ...result
@@ -4122,9 +4199,13 @@ Deno.serve(async (req) => {
       let baseHourlyRate = body.base_hourly_rate || null;
       if (personnel_id && !baseHourlyRate) {
         const personnel = await base44.entities.Personnel.get(personnel_id);
-        if (personnel?.employee_type === 'loondienst' && personnel?.cao === 'cao_particuliere_beveiliging') {
+        if (personnel?.employee_type === 'loondienst' && targetCaoKey === CAO_PB_KEY) {
           try {
-            const classRes = await base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', { personnel_id });
+            const classRes = await base44.asServiceRole.functions.invoke('resolveCaoFunctionClassification', {
+              personnel_id,
+              contract,
+              cao_key: targetCaoKey
+            });
             const classification = classRes?.data || null;
             if (classification?.appendix_2_applies === false && Number(personnel.custom_hourly_rate || 0) > 0) {
               baseHourlyRate = Number(personnel.custom_hourly_rate);
@@ -4183,6 +4264,7 @@ Deno.serve(async (req) => {
         cao_runtime_support: contractRuntimeSupport,
         calculation_warnings: syncWarnings,
         personnel_id: personnel_id || null,
+        contract_cao_resolution: contractCaoResolution,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
         manual_review_required: result.manual_review_required || isUnknownOrMixed,
         persisted_event_id: createdEvent?.id || null,
@@ -4228,6 +4310,7 @@ Deno.serve(async (req) => {
         cao_runtime_support: contractRuntimeSupport,
         calculation_warnings: syncWarnings,
         personnel_id: personnel_id || null,
+        contract_cao_resolution: contractCaoResolution,
         cao_scope_profile: caoScope?.cao_scope_profile || null,
         manual_review_required: result.manual_review_required || isUnknownOrMixed,
         persisted_event_id: createdEvent?.id || null,
@@ -4276,6 +4359,7 @@ Deno.serve(async (req) => {
       cao_runtime_support: contractRuntimeSupport,
       contract_id: contract_id || contract?.id || null,
       personnel_id: personnel_id || null,
+      contract_cao_resolution: contractCaoResolution,
       cao_scope_profile: caoScope?.cao_scope_profile || null,
       ...result,
       contract_basis: contractBasis,
