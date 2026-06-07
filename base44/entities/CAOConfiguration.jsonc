@@ -72,6 +72,7 @@
         "blocked_missing_effective_date",
         "blocked_ambiguous_effective_date",
         "blocked_missing_rules",
+        "blocked_unsupported_cao_runtime",
         "blocked_incomplete_source_coverage",
         "blocked_missing_payroll_parameters",
         "blocked_incomplete_runtime_rules",

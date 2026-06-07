@@ -23,6 +23,44 @@ const CAO_PB_2024_2026_SOURCE_COVERAGE_MINIMUMS = {
   workflow_or_documentation: 84
 };
 
+const CAO_PB_KEY = 'cao_particuliere_beveiliging';
+const CAO_EVENT_HOSPITALITY_SECURITY_KEY = 'cao_evenementen_horecabeveiliging';
+const CAO_TRAFFIC_CONTROLLERS_KEY = 'cao_verkeersregelaars';
+const CAO_SAFETY_DOMAIN_KEY = 'cao_veiligheidsdomein';
+const KNOWN_SECURITY_CAO_KEYS = [
+  CAO_PB_KEY,
+  CAO_EVENT_HOSPITALITY_SECURITY_KEY,
+  CAO_TRAFFIC_CONTROLLERS_KEY,
+  CAO_SAFETY_DOMAIN_KEY
+];
+const LOCAL_PAYROLL_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
+const CAO_DISPLAY_DEFAULTS = {
+  [CAO_PB_KEY]: { name: 'CAO PB', display_name: 'CAO Particuliere Beveiliging', sector: 'Particuliere beveiliging' },
+  [CAO_EVENT_HOSPITALITY_SECURITY_KEY]: { name: 'CAO Evenementen- en Horecabeveiliging', display_name: 'CAO Evenementen- en Horecabeveiliging', sector: 'Evenementen- en horecabeveiliging' },
+  [CAO_TRAFFIC_CONTROLLERS_KEY]: { name: 'CAO Verkeersregelaars', display_name: 'CAO Verkeersregelaars', sector: 'Verkeersregelaars' },
+  [CAO_SAFETY_DOMAIN_KEY]: { name: 'CAO Veiligheidsdomein', display_name: 'CAO Veiligheidsdomein', sector: 'Veiligheidsdomein' }
+};
+
+function normalizeCaoKey(value) {
+  return String(value || '').trim();
+}
+
+function isKnownSecurityCaoKey(caoKey) {
+  return KNOWN_SECURITY_CAO_KEYS.includes(normalizeCaoKey(caoKey));
+}
+
+function getCaoDisplayDefaults(caoKey) {
+  return CAO_DISPLAY_DEFAULTS[normalizeCaoKey(caoKey)] || {
+    name: `CAO ${normalizeCaoKey(caoKey) || 'onbekend'}`,
+    display_name: `CAO ${normalizeCaoKey(caoKey) || 'onbekend'}`,
+    sector: null
+  };
+}
+
+function hasLocalPayrollRuntime(caoKey) {
+  return LOCAL_PAYROLL_RUNTIME_CAO_KEYS.includes(normalizeCaoKey(caoKey));
+}
+
 const LOCAL_RUNTIME_RULE_BINDINGS = {
   'resolveCaoApplicability.article_3_scope': {
     functions: ['resolveCaoApplicability', 'calculatePersonnelCosts', 'validateCaoScheduleRules'],
@@ -483,7 +521,15 @@ function getDeclaredCoverageSummary(candidateCfg) {
 
 function getSourceCoverageMinimums(candidateCfg) {
   const summary = getDeclaredCoverageSummary(candidateCfg);
-  const minimums = { ...CAO_PB_2024_2026_SOURCE_COVERAGE_MINIMUMS };
+  const caoKey = normalizeCaoKey(candidateCfg?.cao_key) || CAO_PB_KEY;
+  const minimums = caoKey === CAO_PB_KEY
+    ? { ...CAO_PB_2024_2026_SOURCE_COVERAGE_MINIMUMS }
+    : {
+      total: 0,
+      automatic_or_calculation: 0,
+      validation_or_policy: 0,
+      workflow_or_documentation: 0
+    };
   const declaredTotal = numberOrNull(
     summary.expected_total_rules ??
     summary.total_atomic_rules ??
@@ -512,6 +558,7 @@ function countByAutomationLevel(rules) {
 }
 
 function evaluateSourceCoverageCompleteness(candidateCfg, rules) {
+  const caoKey = normalizeCaoKey(candidateCfg?.cao_key) || CAO_PB_KEY;
   const minimums = getSourceCoverageMinimums(candidateCfg);
   const uniqueRuleIds = new Set(rules.map(rule => rule.rule_id).filter(Boolean));
   const byAutomationLevel = countByAutomationLevel(rules);
@@ -521,7 +568,9 @@ function evaluateSourceCoverageCompleteness(candidateCfg, rules) {
     blockingFindings.push({
       code: 'incomplete_source_rule_coverage',
       severity: 'critical',
-      message: `CAO-broncoverage is incompleet: ${uniqueRuleIds.size} unieke regels aanwezig, minimaal ${minimums.total} verwacht voor CAO PB 2024-2026.`
+      message: caoKey === CAO_PB_KEY
+        ? `CAO-broncoverage is incompleet: ${uniqueRuleIds.size} unieke regels aanwezig, minimaal ${minimums.total} verwacht voor CAO PB 2024-2026.`
+        : `CAO-broncoverage is incompleet: ${uniqueRuleIds.size} unieke regels aanwezig, minimaal ${minimums.total} verwacht voor ${caoKey}.`
     });
   }
 
@@ -564,6 +613,7 @@ function isPayrollCriticalRule(rule) {
 
 function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
   const rules = Array.isArray(candidateRules) ? candidateRules : [];
+  const caoKey = normalizeCaoKey(candidateCfg?.cao_key) || CAO_PB_KEY;
   const sourceCoverage = evaluateSourceCoverageCompleteness(candidateCfg, rules);
   const counts = {
     total: rules.length,
@@ -677,6 +727,13 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
   }
 
   const blockingFindings = [];
+  if (!hasLocalPayrollRuntime(caoKey)) {
+    blockingFindings.push({
+      code: 'unsupported_cao_runtime',
+      severity: 'critical',
+      message: `CAO ${caoKey} kan worden opgeslagen als owner-approved bronconfiguratie, maar payroll/planning runtime is lokaal nog niet geimplementeerd en geverifieerd.`
+    });
+  }
   blockingFindings.push(...sourceCoverage.blocking_findings);
   if (!candidateCfg?.valid_from) {
     blockingFindings.push({
@@ -743,7 +800,8 @@ function evaluateCaoCoverageGate(candidateCfg, candidateRules) {
   }
 
   let status = 'ready';
-  if (blockingFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
+  if (blockingFindings.some(f => f.code === 'unsupported_cao_runtime')) status = 'blocked_unsupported_cao_runtime';
+  else if (blockingFindings.some(f => f.code === 'missing_effective_date')) status = 'blocked_missing_effective_date';
   else if (blockingFindings.some(f => f.code === 'missing_rules')) status = 'blocked_missing_rules';
   else if (blockingFindings.some(f => String(f.code || '').startsWith('incomplete_'))) status = 'blocked_incomplete_source_coverage';
   else if (blockingFindings.some(f => f.code === 'missing_wage_scales' || f.code === 'missing_pay_periods')) status = 'blocked_missing_payroll_parameters';
@@ -905,10 +963,25 @@ Deno.serve(async (req) => {
     }
 
     const cloudflareRevision = statusData.current_revision;
+    const explicitRequestedCaoKey = normalizeCaoKey(
+      body.cao_key ||
+      statusData.cao_key ||
+      statusData.current_cao_key ||
+      statusData.cao ||
+      ''
+    );
+    const requestedCaoKey = explicitRequestedCaoKey || CAO_PB_KEY;
+    if (!isKnownSecurityCaoKey(requestedCaoKey)) {
+      return Response.json({
+        success: false,
+        error: `Onbekende of niet-toegestane cao_key in Cloudflare-status: ${requestedCaoKey}`,
+        known_cao_keys: KNOWN_SECURITY_CAO_KEYS
+      }, { status: 422 });
+    }
 
     // ── Stap 2: Revision check over ALLE actieve configs ──
     const activeConfigs = await base44.asServiceRole.entities.CAOConfiguration.filter({
-      cao_key: 'cao_particuliere_beveiliging',
+      cao_key: requestedCaoKey,
       is_active: true
     });
 
@@ -947,14 +1020,46 @@ Deno.serve(async (req) => {
     if (payload.approval?.status !== 'approved_by_owner') {
       return Response.json({ success: false, error: 'Payload is niet goedgekeurd door eigenaar.' }, { status: 422 });
     }
-    if (payload.cao_key !== 'cao_particuliere_beveiliging') {
-      return Response.json({ success: false, error: `Onverwachte cao_key: ${payload.cao_key}` }, { status: 422 });
+    const payloadCaoKey = normalizeCaoKey(payload.cao_key || payload.candidate_configuration?.cao_key || requestedCaoKey);
+    const candidatePayloadCaoKey = normalizeCaoKey(payload.candidate_configuration?.cao_key);
+    if (!payloadCaoKey || !isKnownSecurityCaoKey(payloadCaoKey)) {
+      return Response.json({
+        success: false,
+        error: `Onbekende of niet-toegestane cao_key: ${payloadCaoKey || '(leeg)'}`,
+        known_cao_keys: KNOWN_SECURITY_CAO_KEYS
+      }, { status: 422 });
+    }
+    if (explicitRequestedCaoKey && payloadCaoKey !== explicitRequestedCaoKey) {
+      return Response.json({
+        success: false,
+        error: `Gevraagde cao_key ${explicitRequestedCaoKey} botst met Cloudflare-payload cao_key ${payloadCaoKey}.`
+      }, { status: 422 });
+    }
+    if (candidatePayloadCaoKey && candidatePayloadCaoKey !== payloadCaoKey) {
+      return Response.json({
+        success: false,
+        error: `Payload cao_key ${payloadCaoKey} botst met candidate_configuration.cao_key ${candidatePayloadCaoKey}.`
+      }, { status: 422 });
     }
     if (!payload.revision || !payload.idempotency_key) {
       return Response.json({ success: false, error: 'Payload mist revision of idempotency_key.' }, { status: 422 });
     }
-    const candidateCfgForGate = payload.candidate_configuration || {};
+    const candidateCfgForGate = {
+      ...(payload.candidate_configuration || {}),
+      cao_key: payloadCaoKey
+    };
     const candidateRulesForGate = payload.candidate_rules || [];
+    const mismatchingRuleCaoKeysForGate = [...new Set(candidateRulesForGate
+      .map(rule => normalizeCaoKey(rule?.cao_key))
+      .filter(key => key && key !== payloadCaoKey))];
+    if (mismatchingRuleCaoKeysForGate.length > 0) {
+      return Response.json({
+        success: false,
+        error: `Payload bevat CAORule records met afwijkende cao_key waarden: ${mismatchingRuleCaoKeysForGate.join(', ')}.`,
+        cao_key: payloadCaoKey,
+        mismatching_rule_cao_keys: mismatchingRuleCaoKeysForGate
+      }, { status: 422 });
+    }
     const initialPayrollReadiness = resolvePayrollReadiness(candidateCfgForGate, candidateRulesForGate);
 
     // ── Stap 5: Idempotency check met herstelpad ──
@@ -964,7 +1069,7 @@ Deno.serve(async (req) => {
     const existingRun = existingRuns[0] || null;
 
     const existingSameConfig = await base44.asServiceRole.entities.CAOConfiguration.filter({
-      cao_key: 'cao_particuliere_beveiliging',
+      cao_key: payloadCaoKey,
       idempotency_key: payload.idempotency_key
     });
 
@@ -1064,9 +1169,13 @@ Deno.serve(async (req) => {
     }
 
     // ── Stap 9: Upsert CAOConfiguration ──
-    const candidateCfg = payload.candidate_configuration || {};
+    const candidateCfg = {
+      ...(payload.candidate_configuration || {}),
+      cao_key: payloadCaoKey
+    };
     const candidateRules = payload.candidate_rules || [];
     const payrollReadiness = resolvePayrollReadiness(candidateCfg, candidateRules);
+    const caoDefaults = getCaoDisplayDefaults(payloadCaoKey);
     const initialProcessedRuleCount = Math.min(ruleBatchOffset, candidateRules.length);
     const inProgressReadinessGate = buildIncompleteRuleImportGate(
       payrollReadiness.gate,
@@ -1074,10 +1183,10 @@ Deno.serve(async (req) => {
       candidateRules.length
     );
     const configData = {
-      name: candidateCfg.name || `CAO PB - ${payload.revision}`,
-      cao_key: 'cao_particuliere_beveiliging',
-      display_name: candidateCfg.display_name || null,
-      sector: candidateCfg.sector || 'Particuliere beveiliging',
+      name: candidateCfg.name || `${caoDefaults.name} - ${payload.revision}`,
+      cao_key: payloadCaoKey,
+      display_name: candidateCfg.display_name || caoDefaults.display_name || null,
+      sector: candidateCfg.sector || caoDefaults.sector || null,
       version_label: candidateCfg.version_label || payload.revision,
       valid_from: candidateCfg.valid_from || null,
       valid_until: candidateCfg.valid_until || null,
@@ -1170,12 +1279,12 @@ Deno.serve(async (req) => {
       if (!rule.rule_id) continue;
       const existing = await findExistingCaoRule(base44, {
         ruleId: rule.rule_id,
-        caoKey: 'cao_particuliere_beveiliging',
+        caoKey: payloadCaoKey,
         configId: newConfig.id
       });
       const ruleData = {
         ...withLocalRuntimeBindingMetadata(rule),
-        cao_key: rule.cao_key || 'cao_particuliere_beveiliging',
+        cao_key: rule.cao_key || payloadCaoKey,
         cao_configuration_id: newConfig.id,
         status: 'active',
         last_verified_at: new Date().toISOString()
@@ -1243,7 +1352,7 @@ Deno.serve(async (req) => {
     }
 
     const persistedRegistry = await verifyPersistedRuleRegistry(base44, {
-      caoKey: 'cao_particuliere_beveiliging',
+      caoKey: payloadCaoKey,
       configId: newConfig.id,
       candidateCfg,
       candidateRules
