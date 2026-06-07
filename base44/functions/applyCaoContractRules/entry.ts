@@ -287,7 +287,78 @@ function finalizeProbationResult(input, partial, duration, normalizedScope, extr
     cao_scope_profile: normalizedScope.cao_scope_profile,
     contract_rule_violations: validation.contract_rule_violations,
     recommended_contract_update: validation.recommended_contract_update,
+    probation_contract_form: partial.probation_contract_form || input.contract_form || null,
+    underlying_contract_form: partial.underlying_contract_form || input.underlying_contract_form || null,
+    call_agreement_type: partial.call_agreement_type || null,
     rule_engine_notes: partial.rule_engine_notes || []
+  };
+}
+
+function resolveProbationContractForm(input) {
+  const contractForm = input.contract_form || 'unknown';
+  if (contractForm !== 'oproep') {
+    return {
+      probation_contract_form: contractForm,
+      underlying_contract_form: input.underlying_contract_form || null,
+      call_agreement_type: null,
+      manual_review_required: false,
+      warnings: [],
+      source_rule_ids: [],
+      rule_engine_notes: []
+    };
+  }
+
+  const callAgreementType = inferCallAgreementType(input);
+  const underlyingContractForm = input.underlying_contract_form ||
+    input.call_underlying_contract_form ||
+    input.call_employment_contract_form ||
+    input.employment_duration_type ||
+    null;
+
+  if (callAgreementType === 'pre_agreement') {
+    return {
+      probation_contract_form: 'unknown',
+      underlying_contract_form: underlyingContractForm,
+      call_agreement_type: callAgreementType,
+      manual_review_required: true,
+      warnings: ['Oproepcontract met voorovereenkomst: iedere oproep kan een tijdelijke arbeidsovereenkomst laten ontstaan. Proeftijd kan niet definitief op hoofdcontractniveau worden berekend.'],
+      source_rule_ids: ['CAO-PB-2024-R0371', 'CAO-PB-2024-R0372'],
+      rule_engine_notes: ['Artikel 13 voorovereenkomst eerst juridisch/HR beoordelen voordat artikel 9 proeftijd definitief wordt toegepast.']
+    };
+  }
+
+  if (underlyingContractForm === 'bepaalde_tijd' || underlyingContractForm === 'onbepaalde_tijd') {
+    return {
+      probation_contract_form: underlyingContractForm,
+      underlying_contract_form: underlyingContractForm,
+      call_agreement_type: callAgreementType,
+      manual_review_required: false,
+      warnings: [`Oproepovereenkomst (${callAgreementType}) gebruikt onderliggende duurvorm ${underlyingContractForm} voor artikel 9 proeftijd.`],
+      source_rule_ids: [],
+      rule_engine_notes: ['Artikel 13 nul-uren/min-max kan tijdelijk of vast zijn; artikel 9 proeftijd wordt toegepast op de onderliggende arbeidsovereenkomst.']
+    };
+  }
+
+  if (asIsoDate(input.contract_end_date)) {
+    return {
+      probation_contract_form: 'bepaalde_tijd',
+      underlying_contract_form: null,
+      call_agreement_type: callAgreementType,
+      manual_review_required: false,
+      warnings: [`Oproepovereenkomst (${callAgreementType}) heeft een einddatum; proeftijd wordt als bepaalde tijd berekend. Leg bij voorkeur underlying_contract_form=bepaalde_tijd vast.`],
+      source_rule_ids: [],
+      rule_engine_notes: ['Onderliggende duurvorm is afgeleid uit contract_end_date zodat artikel 9 niet wordt overgeslagen bij oproepcontracten.']
+    };
+  }
+
+  return {
+    probation_contract_form: 'unknown',
+    underlying_contract_form: null,
+    call_agreement_type: callAgreementType,
+    manual_review_required: true,
+    warnings: [`Oproepovereenkomst (${callAgreementType}) mist onderliggende duurvorm. Leg underlying_contract_form=bepaalde_tijd of onbepaalde_tijd vast voordat proeftijd definitief mag zijn.`],
+    source_rule_ids: ['CAO-PB-2024-R0315', 'CAO-PB-2024-R0316', 'CAO-PB-2024-R0371'],
+    rule_engine_notes: ['Fail-closed: nul-uren/min-maxcontracten kunnen tijdelijk of vast zijn; zonder duurvorm is artikel 9 proeftijd onzeker.']
   };
 }
 
@@ -307,6 +378,24 @@ function calculateProbationPeriod(input, caoScope) {
   const isUnknownOrMixed = ['unknown_manual_review', 'mixed_security_work_manual_review'].includes(normalizedScope.cao_scope_profile);
   const scopeBlocksAspirant = normalizedScope.applies_full_security_rules === false;
   const duration = calculateContractDurationBoundary(contract_start_date, contract_end_date);
+  const probationContract = resolveProbationContractForm(input);
+  warnings.push(...(probationContract.warnings || []));
+
+  if (probationContract.manual_review_required) {
+    return finalizeProbationResult(input, {
+      probation_period_months: null,
+      source_rule_ids: probationContract.source_rule_ids || [],
+      warnings,
+      scope_warnings,
+      manual_review_required: true,
+      probation_contract_form: probationContract.probation_contract_form,
+      underlying_contract_form: probationContract.underlying_contract_form,
+      call_agreement_type: probationContract.call_agreement_type,
+      rule_engine_notes: probationContract.rule_engine_notes || []
+    }, duration, normalizedScope);
+  }
+
+  const effectiveContractForm = probationContract.probation_contract_form || contract_form;
 
   // Aspirant-beveiliger regel (CAO-PB-2024-R0317): ALLEEN als full-security scope
   if (security_role_status === 'aspirant_beveiliger') {
@@ -325,21 +414,29 @@ function calculateProbationPeriod(input, caoScope) {
           source_rule_ids,
           warnings,
           scope_warnings,
-          manual_review_required: isUnknownOrMixed
+          manual_review_required: isUnknownOrMixed,
+          probation_contract_form: effectiveContractForm,
+          underlying_contract_form: probationContract.underlying_contract_form,
+          call_agreement_type: probationContract.call_agreement_type,
+          rule_engine_notes: probationContract.rule_engine_notes || []
         }, duration, normalizedScope);
       }
     }
   }
 
   // Onbepaalde tijd → 2 maanden (CAO-PB-2024-R0316)
-  if (contract_form === 'onbepaalde_tijd') {
+  if (effectiveContractForm === 'onbepaalde_tijd') {
     source_rule_ids.push('CAO-PB-2024-R0316');
     return finalizeProbationResult(input, {
       probation_period_months: 2,
       source_rule_ids,
       warnings,
       scope_warnings,
-      manual_review_required: isUnknownOrMixed
+      manual_review_required: isUnknownOrMixed,
+      probation_contract_form: effectiveContractForm,
+      underlying_contract_form: probationContract.underlying_contract_form,
+      call_agreement_type: probationContract.call_agreement_type,
+      rule_engine_notes: probationContract.rule_engine_notes || []
     }, {
       contract_duration_months: null,
       longer_than_six_months: null,
@@ -350,14 +447,18 @@ function calculateProbationPeriod(input, caoScope) {
   }
 
   // Bepaalde tijd (CAO-PB-2024-R0315)
-  if (contract_form === 'bepaalde_tijd') {
+  if (effectiveContractForm === 'bepaalde_tijd') {
     if (duration.longer_than_six_months === null) {
       return finalizeProbationResult(input, {
         probation_period_months: null,
         source_rule_ids: ['CAO-PB-2024-R0315'],
         warnings,
         scope_warnings,
-        manual_review_required: true
+        manual_review_required: true,
+        probation_contract_form: effectiveContractForm,
+        underlying_contract_form: probationContract.underlying_contract_form,
+        call_agreement_type: probationContract.call_agreement_type,
+        rule_engine_notes: probationContract.rule_engine_notes || []
       }, duration, normalizedScope);
     }
     if (duration.longer_than_six_months === true) {
@@ -367,7 +468,11 @@ function calculateProbationPeriod(input, caoScope) {
         source_rule_ids,
         warnings,
         scope_warnings,
-        manual_review_required: isUnknownOrMixed
+        manual_review_required: isUnknownOrMixed,
+        probation_contract_form: effectiveContractForm,
+        underlying_contract_form: probationContract.underlying_contract_form,
+        call_agreement_type: probationContract.call_agreement_type,
+        rule_engine_notes: probationContract.rule_engine_notes || []
       }, duration, normalizedScope);
     } else {
       source_rule_ids.push('CAO-PB-2024-R0315');
@@ -376,19 +481,26 @@ function calculateProbationPeriod(input, caoScope) {
         source_rule_ids,
         warnings: [...warnings, 'Contract korter dan of gelijk aan 6 maanden: geen proeftijd van toepassing.'],
         scope_warnings,
-        manual_review_required: isUnknownOrMixed
+        manual_review_required: isUnknownOrMixed,
+        probation_contract_form: effectiveContractForm,
+        underlying_contract_form: probationContract.underlying_contract_form,
+        call_agreement_type: probationContract.call_agreement_type,
+        rule_engine_notes: probationContract.rule_engine_notes || []
       }, duration, normalizedScope);
     }
   }
 
-  // Oproep/0-uren/stage/uitzend/payroll/zzp: geen directe CAO-proeftijdregels bij de inlener
-  if (['oproep', 'stage', 'uitzend', 'payroll', 'zzp'].includes(contract_form)) {
+  // Stage/uitzend/payroll/zzp: geen directe CAO-proeftijdregels bij de inlener
+  if (['stage', 'uitzend', 'payroll', 'zzp'].includes(contract_form)) {
     return finalizeProbationResult(input, {
       probation_period_months: 0,
       source_rule_ids: [],
       warnings: [`Proeftijdregel niet van toepassing op contractvorm: ${contract_form}`],
       scope_warnings,
-      manual_review_required: false
+      manual_review_required: false,
+      probation_contract_form: contract_form,
+      underlying_contract_form: probationContract.underlying_contract_form,
+      call_agreement_type: probationContract.call_agreement_type
     }, duration, normalizedScope);
   }
 
@@ -397,7 +509,11 @@ function calculateProbationPeriod(input, caoScope) {
     source_rule_ids: [],
     warnings: ['Contractvorm niet herkend; proeftijd kan niet worden berekend.'],
     scope_warnings,
-    manual_review_required: true
+    manual_review_required: true,
+    probation_contract_form: effectiveContractForm,
+    underlying_contract_form: probationContract.underlying_contract_form,
+    call_agreement_type: probationContract.call_agreement_type,
+    rule_engine_notes: probationContract.rule_engine_notes || []
   }, duration, normalizedScope);
 }
 
@@ -3071,11 +3187,15 @@ function buildFullContractRuleResult(input, caoScope) {
       longer_than_six_months: probation.longer_than_six_months,
       six_month_boundary_date: probation.six_month_boundary_date,
       six_month_exact_last_day: probation.six_month_exact_last_day,
+      probation_contract_form: probation.probation_contract_form,
+      underlying_contract_form: probation.underlying_contract_form,
+      call_agreement_type: probation.call_agreement_type,
       source_rule_ids: probation.source_rule_ids,
       manual_review_required: probation.manual_review_required,
       warnings: probation.warnings,
       scope_warnings: probation.scope_warnings,
-      contract_rule_violations: probation.contract_rule_violations
+      contract_rule_violations: probation.contract_rule_violations,
+      rule_engine_notes: probation.rule_engine_notes
     },
     call_agreement_rule_result: callAgreement,
     internship_rule_result: internship,
@@ -3139,6 +3259,13 @@ function buildContractRuleInput(body, personnel, contract) {
   const hasContractContext = !!contract;
   return {
     contract_form: pickFirst(body.contract_form, contract?.contract_form, personnel?.contract_form),
+    underlying_contract_form: pickFirst(
+      body.underlying_contract_form,
+      body.call_underlying_contract_form,
+      contract?.underlying_contract_form,
+      contract?.call_underlying_contract_form,
+      null
+    ),
     contract_start_date: pickFirst(body.contract_start_date, contract?.contract_start_date, personnel?.contract_start_date),
     contract_end_date: pickFirst(body.contract_end_date, contract?.contract_end_date, personnel?.contract_end_date),
     reference_date: pickFirst(body.reference_date, null),
@@ -3363,6 +3490,7 @@ function buildContractRulePersistence(result) {
     probation_period_source_rule_id: getProbationSourceRuleId(result),
     probation_period_manual_review_required: result.probation_rule_result?.manual_review_required ?? result.manual_review_required,
     probation_period_validation_status: result.probation_validation_status,
+    underlying_contract_form: result.probation_rule_result?.underlying_contract_form ?? undefined,
     is_call_agreement: result.call_agreement?.is_call_agreement ?? false,
     call_agreement_type: result.call_agreement?.call_agreement_type || null,
     call_agreement_rule_status: result.call_agreement?.call_agreement_status || null,

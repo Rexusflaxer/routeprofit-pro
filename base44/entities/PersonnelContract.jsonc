@@ -42,6 +42,19 @@
       "default": "unknown",
       "description": "Contractvorm conform CAO"
     },
+    "underlying_contract_form": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "bepaalde_tijd",
+        "onbepaalde_tijd",
+        "unknown",
+        null
+      ],
+      "description": "Onderliggende duurvorm voor oproepovereenkomsten: tijdelijk of vast. Nodig om o.a. proeftijdregels uit artikel 9 correct toe te passen op nul-uren- en min-maxcontracten."
+    },
     "employment_contract_model": {
       "type": [
         "string",
