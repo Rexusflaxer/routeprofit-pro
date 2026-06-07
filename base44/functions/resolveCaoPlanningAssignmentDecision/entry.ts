@@ -3,6 +3,23 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 const CAO_PB_KEY = 'cao_particuliere_beveiliging';
 const SUPPORTED_ASSIGNMENT_DECISION_CAO_KEYS = [CAO_PB_KEY];
 
+function getCaoRuntimeSupport(caoKey, functionName) {
+  const key = caoKey || null;
+  const supported = SUPPORTED_ASSIGNMENT_DECISION_CAO_KEYS.includes(key);
+  return {
+    supported,
+    status: supported ? 'supported' : key ? 'blocked_unsupported_cao_runtime' : 'blocked_missing_cao_key',
+    cao_key: key,
+    function_name: functionName,
+    supported_cao_keys: SUPPORTED_ASSIGNMENT_DECISION_CAO_KEYS,
+    message: supported
+      ? `Runtime ${functionName} ondersteunt CAO ${key}.`
+      : !key
+      ? `Runtime ${functionName} mist cao_key. Assignmentbeslissing is geblokkeerd zodat geen PB-default wordt toegepast.`
+      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Assignmentbeslissing is geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+  };
+}
+
 const ASSIGNMENT_DECISION_SOURCE_RULE_IDS = [
   'CAO-PB-2024-R0227', 'CAO-PB-2024-R0228', 'CAO-PB-2024-R0229',
   'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232',

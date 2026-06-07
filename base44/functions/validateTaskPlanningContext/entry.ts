@@ -6,6 +6,23 @@ const CAO_TRAFFIC_CONTROLLERS_KEY = 'cao_verkeersregelaars';
 const CAO_SAFETY_DOMAIN_KEY = 'cao_veiligheidsdomein';
 const SUPPORTED_PLANNING_CONTEXT_CAO_KEYS = [CAO_PB_KEY];
 
+function getCaoRuntimeSupport(caoKey, functionName) {
+  const key = caoKey || null;
+  const supported = SUPPORTED_PLANNING_CONTEXT_CAO_KEYS.includes(key);
+  return {
+    supported,
+    status: supported ? 'supported' : key ? 'blocked_unsupported_cao_runtime' : 'blocked_missing_cao_key',
+    cao_key: key,
+    function_name: functionName,
+    supported_cao_keys: SUPPORTED_PLANNING_CONTEXT_CAO_KEYS,
+    message: supported
+      ? `Runtime ${functionName} ondersteunt CAO ${key}.`
+      : !key
+      ? `Runtime ${functionName} mist cao_key. Definitieve planning/payroll is geblokkeerd zodat geen PB-default wordt toegepast.`
+      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Definitieve planning/payroll is geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+  };
+}
+
 function normalizeToken(value) {
   return String(value || '')
     .toLowerCase()

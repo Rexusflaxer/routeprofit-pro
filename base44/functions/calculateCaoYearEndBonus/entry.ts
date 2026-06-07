@@ -351,7 +351,7 @@ function activeCaoConfigurationCandidates(configs, referenceDate) {
     .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')));
 }
 
-async function resolveActiveCaoConfig(base44, referenceDate, caoKey = CAO_PB_KEY) {
+async function resolveActiveCaoConfig(base44, referenceDate, caoKey = null) {
   const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({
     status: 'active',
     cao_key: caoKey

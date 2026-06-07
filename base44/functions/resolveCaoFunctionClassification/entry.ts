@@ -343,7 +343,7 @@ function inferFunctionGroup(p, wc) {
   return { group: null, source: null, matched_alias: null };
 }
 
-async function lazySyncCao(base44, force = false, caoKey = CAO_PB_KEY) {
+async function lazySyncCao(base44, force = false, caoKey = null) {
   if (caoKey !== CAO_PB_KEY) {
     return {
       changed: false,
@@ -363,7 +363,7 @@ async function lazySyncCao(base44, force = false, caoKey = CAO_PB_KEY) {
 /**
  * Haal actieve CAO-configuratie op voor een referentiedatum.
  */
-async function resolveActiveCaoConfig(base44, referenceDate, caoKey = CAO_PB_KEY) {
+async function resolveActiveCaoConfig(base44, referenceDate, caoKey = null) {
   const refDate = referenceDate ? new Date(referenceDate) : new Date();
   const allCaos = await base44.asServiceRole.entities.CAOConfiguration.filter({
     status: 'active',

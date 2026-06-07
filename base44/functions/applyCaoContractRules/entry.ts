@@ -20,7 +20,7 @@ function getCaoRuntimeSupport(caoKey, functionName) {
   };
 }
 
-async function lazySyncCao(base44, forceCaoSync = false, caoKey = CAO_PB_KEY) {
+async function lazySyncCao(base44, forceCaoSync = false, caoKey = null) {
   if (caoKey !== CAO_PB_KEY) {
     return {
       changed: false,

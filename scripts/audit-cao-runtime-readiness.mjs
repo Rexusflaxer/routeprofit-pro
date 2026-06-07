@@ -22,6 +22,8 @@ const runtimeReadiness = loadFunctionModule('base44/functions/resolveCaoRuntimeR
 const ingestCaoAutomation = loadFunctionModule('base44/functions/ingestCaoAutomationPayload/entry.ts');
 const syncCaoFromCloudflare = loadFunctionModule('base44/functions/syncCaoFromCloudflare/entry.ts');
 const scheduleRules = loadFunctionModule('base44/functions/validateCaoScheduleRules/entry.ts');
+const taskPlanningContext = loadFunctionModule('base44/functions/validateTaskPlanningContext/entry.ts');
+const contractResolver = loadFunctionModule('base44/functions/resolvePersonnelContractForService/entry.ts');
 const personnelCosts = loadFunctionModule('base44/functions/calculatePersonnelCosts/entry.ts');
 const routePersonnelCosts = loadFunctionModule('base44/functions/calculateRoutePersonnelCosts/entry.ts');
 const contractRules = loadFunctionModule('base44/functions/applyCaoContractRules/entry.ts');
@@ -99,6 +101,9 @@ for (const key of matrix.known_source_monitoring_only_cao_keys) {
 }
 
 const payrollRuntimeModules = [
+  ['validateTaskPlanningContext', taskPlanningContext],
+  ['resolvePersonnelContractForService', contractResolver],
+  ['resolveCaoPlanningAssignmentDecision', planningAssignment],
   ['validateCaoScheduleRules', scheduleRules],
   ['calculatePersonnelCosts', personnelCosts],
   ['calculateRoutePersonnelCosts', routePersonnelCosts],
@@ -144,6 +149,17 @@ for (const [functionName, module] of payrollRuntimeModules) {
   const missingSupport = module.getCaoRuntimeSupport(null, functionName);
   assert.equal(missingSupport.supported, false, `${functionName} must fail closed when cao_key is missing`);
   assert.equal(missingSupport.status, 'blocked_missing_cao_key', `${functionName} must report missing cao_key`);
+}
+
+const customerRuntimeFunctionNames = new Set(payrollRuntimeModules.map(([functionName]) => functionName));
+for (const functionName of customerRuntimeFunctionNames) {
+  const functionPath = path.join(repoRoot, 'base44/functions', functionName, 'entry.ts');
+  const source = fs.readFileSync(functionPath, 'utf8');
+  assert.equal(
+    /caoKey\s*=\s*CAO_PB_KEY/.test(source),
+    false,
+    `${functionName} must not default helper caoKey parameters to CAO_PB_KEY; missing cao_key must fail closed`
+  );
 }
 
 for (const externalKey of matrix.known_source_monitoring_only_cao_keys) {

@@ -1915,6 +1915,7 @@ function runCaoStaticGovernanceScenarios() {
 
   const functionFiles = listFilesRecursive(path.join(repoRoot, 'base44/functions'), ['.ts']);
   const customerRuntimeDefaultPbFallbacks = [];
+  const customerRuntimeDefaultPbHelperParams = [];
   const ownerInternalCaoFunctions = new Set([
     'approveCaoConfiguration',
     'checkCaoSources',
@@ -1931,11 +1932,19 @@ function runCaoStaticGovernanceScenarios() {
     if (/body\.cao_key\s*(\|\||\?\?)\s*CAO_PB_KEY/.test(source)) {
       customerRuntimeDefaultPbFallbacks.push(relativeRepoPath(file));
     }
+    if (/caoKey\s*=\s*CAO_PB_KEY/.test(source)) {
+      customerRuntimeDefaultPbHelperParams.push(relativeRepoPath(file));
+    }
   }
   assert.deepEqual(
     customerRuntimeDefaultPbFallbacks,
     [],
     'Customer/runtime functions must not default body.cao_key to CAO PB; missing cao_key must fail closed'
+  );
+  assert.deepEqual(
+    customerRuntimeDefaultPbHelperParams,
+    [],
+    'Customer/runtime helper parameters must not default caoKey to CAO PB; missing cao_key must fail closed'
   );
 
   const syncInvokeWithoutSecret = [];
