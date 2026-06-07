@@ -1642,6 +1642,17 @@ function hasObjectValues(value) {
     Object.values(value).some(v => v !== null && v !== undefined && v !== '');
 }
 
+function isFinalScheduleValidation(body = {}) {
+  return body.final_planning === true ||
+    body.finalize_planning === true ||
+    body.approve_planning === true ||
+    body.approve_schedule === true ||
+    body.require_planning_final === true ||
+    body.require_payroll_final === true ||
+    body.payroll_final === true ||
+    body.record_payroll_run === true;
+}
+
 function shiftHasContractContext(shift) {
   return !!(
     shift.company_id ||
@@ -3806,6 +3817,7 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
     !(s.is_time_window === true || s.roster_block_type === 'time_window' || s.block_type === 'time_window')
   );
   const enforceContractResolution = body.enforce_contract_resolution === true ||
+    isFinalScheduleValidation(body) ||
     body.contract_id ||
     body.company_id ||
     body.route_id ||
@@ -3823,7 +3835,8 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
       contract_violations: [],
       contract_warnings: [],
       contract_manual_review_required: false,
-      contract_payroll_final_allowed: true,
+      contract_payroll_final_allowed: false,
+      contract_resolution_note: 'Contractresolutie is niet uitgevoerd; roostercontrole is concept en niet payroll-final.',
       contract_hours_summary: []
     };
   }
@@ -3862,7 +3875,7 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
           cao_key: serviceContext.cao_key || shift.cao_key || body.cao_key || null,
           cao: serviceContext.cao || shift.cao || body.cao || null,
           task_type: serviceContext.task_type || shift.task_type || null,
-          function_type: serviceContext.function_type || shift.service_function_type || shift.function_type || null,
+          function_type: serviceContext.function_type || shift.service_function_type || shift.required_function_type || null,
           cao_function_group: serviceContext.cao_function_group || shift.required_cao_function_group || shift.cao_function_group || null,
           cao_function_level: serviceContext.cao_function_level || shift.required_cao_function_level || shift.cao_function_level || null,
           security_role_status: serviceContext.security_role_status || shift.required_security_role_status || shift.security_role_status || null,
@@ -4200,6 +4213,8 @@ Deno.serve(async (req) => {
     result.is_valid = result.violations.filter(v => v.severity === 'high').length === 0;
     const strictScheduleManualReviewRequired = result.schedule_manual_review_required === true &&
       result.cao_evidence_mode === 'strict';
+    const contractProofAvailable = contractValidation.contract_resolution_required === true &&
+      contractValidation.contract_payroll_final_allowed === true;
 
     // Scope-context in response
     const scopeWarnings = [...scopeSelectionWarnings];
@@ -4253,9 +4268,12 @@ Deno.serve(async (req) => {
       contract_resolution_results: contractValidation.contract_resolution_results,
       contract_hours_summary: contractValidation.contract_hours_summary,
       contract_warning_items: contractValidation.contract_warnings,
+      contract_resolution_note: contractValidation.contract_resolution_note || null,
       contract_payroll_final_allowed: contractValidation.contract_payroll_final_allowed,
       manual_review_required: isUnknownOrMixed || contractValidation.contract_manual_review_required || strictScheduleManualReviewRequired || false,
-      payroll_final_allowed: !isUnknownOrMixed && result.is_valid === true && contractValidation.contract_payroll_final_allowed === true && !strictScheduleManualReviewRequired,
+      planning_allowed: !isUnknownOrMixed && result.is_valid === true && contractProofAvailable && !strictScheduleManualReviewRequired,
+      payroll_final_allowed: !isUnknownOrMixed && result.is_valid === true && contractProofAvailable && !strictScheduleManualReviewRequired,
+      schedule_final_requested: isFinalScheduleValidation(scheduleBody),
       ...result
     });
 
