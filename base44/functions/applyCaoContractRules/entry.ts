@@ -645,6 +645,12 @@ function evaluateSuspensionRules(input) {
   const missingEvidence = [];
   const violations = [];
   const payrollEntitlements = [];
+  const cashValueLogistics = booleanOrNull(input.works_cash_value_logistics) === true ||
+    booleanOrNull(input.cash_value_logistics) === true ||
+    input.cao_scope_profile === 'cash_value_logistics';
+  const cashValueSuspensionExtensionConfirmed = booleanOrNull(input.cash_value_suspension_extension_confirmed ?? input.suspension_extension_confirmed);
+  const maxSuspensionDays = cashValueLogistics ? 14 : 7;
+  if (cashValueLogistics) sourceRuleIds.push('CAO-PB-2024-R1605');
   const startDate = asIsoDate(input.suspension_start_date || input.event_start_date || input.start_date);
   const endDate = asIsoDate(input.suspension_end_date || input.event_end_date || input.end_date);
   const baseHourlyRate = numberOrNull(input.base_hourly_rate);
@@ -679,13 +685,22 @@ function evaluateSuspensionRules(input) {
       message: 'Schorsingsdatums zijn ongeldig: einddatum ligt voor startdatum.',
       suspension_days: suspensionDays
     });
-  } else if (suspensionDays !== null && suspensionDays > 7) {
+  } else if (suspensionDays !== null && suspensionDays > maxSuspensionDays) {
     violations.push({
-      rule_id: 'CAO-PB-2024-R0448',
+      rule_id: cashValueLogistics ? 'CAO-PB-2024-R1605' : 'CAO-PB-2024-R0448',
       severity: 'high',
-      message: `Schorsing duurt ${suspensionDays} dagen; CAO staat maximaal 7 dagen toe.`,
+      message: `Schorsing duurt ${suspensionDays} dagen; CAO staat maximaal ${maxSuspensionDays} dagen toe.`,
       suspension_days: suspensionDays,
-      max_suspension_days: 7
+      max_suspension_days: maxSuspensionDays
+    });
+  } else if (cashValueLogistics && suspensionDays !== null && suspensionDays > 7 && cashValueSuspensionExtensionConfirmed !== true) {
+    missingEvidence.push({
+      rule_id: 'CAO-PB-2024-R1605',
+      field: 'cash_value_suspension_extension_confirmed',
+      message: 'Geld- en waardelogistiek: verlenging van schorsing boven 7 dagen mag maximaal 1 keer met 7 dagen en moet expliciet zijn vastgelegd.',
+      suspension_days: suspensionDays,
+      max_without_extension_days: 7,
+      max_with_extension_days: 14
     });
   }
 
@@ -736,6 +751,7 @@ function evaluateSuspensionRules(input) {
   }
 
   warnings.push('Artikel 16: schorsing stopt de loonbetaling niet; basisuurloon blijft verschuldigd tijdens de schorsing.');
+  if (cashValueLogistics) warnings.push('Protocol II geld- en waardelogistiek: schorsing kan 1 keer met maximaal 7 dagen worden verlengd als die verlenging expliciet is bevestigd.');
 
   const hasBlockingViolation = violations.some(v => v.severity === 'high' || v.severity === 'critical');
   const manualReviewRequired = missingEvidence.length > 0;
@@ -753,7 +769,8 @@ function evaluateSuspensionRules(input) {
     contract_rule_violations: violations,
     payroll_entitlements: payrollEntitlements,
     suspension_days: suspensionDays,
-    max_suspension_days: 7,
+    max_suspension_days: maxSuspensionDays,
+    cash_value_logistics_suspension_extension_confirmed: cashValueSuspensionExtensionConfirmed === true,
     payroll_final_allowed: !hasBlockingViolation && !manualReviewRequired,
     manual_review_required: manualReviewRequired,
     recommended_event_update: {
@@ -764,7 +781,7 @@ function evaluateSuspensionRules(input) {
       suspension_end_date: endDate,
       suspension_days: suspensionDays,
       suspension_base_hourly_wage_due: true,
-      suspension_max_days: 7
+      suspension_max_days: maxSuspensionDays
     }
   };
 }

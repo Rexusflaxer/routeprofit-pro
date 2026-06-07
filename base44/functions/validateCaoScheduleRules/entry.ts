@@ -2100,6 +2100,137 @@ function sumBodyHours(body, fields) {
   return fields.reduce((sum, field) => sum + (numberOrNull(body[field]) || 0), 0);
 }
 
+function shiftWorksAirportSchipholSchedule(shift = {}, body = {}, caoScope = {}) {
+  return caoScope?.cao_scope_profile === 'airport_schiphol' ||
+    booleanOrNull(shift.works_airport_schiphol ?? shift.schiphol_service ?? shift.airport_schiphol_service) === true ||
+    booleanOrNull(body.works_airport_schiphol ?? body.schiphol_service ?? body.airport_schiphol_service) === true;
+}
+
+function schipholStandingTimeLimitMinutes(shift = {}) {
+  const positionText = normalizeCaoSignalText(
+    shift.schiphol_position_code ||
+    shift.airport_position_code ||
+    shift.position_code ||
+    shift.schiphol_position ||
+    shift.position_name ||
+    ''
+  );
+  if (/\bv[0-4]\b/.test(positionText) || /^v[0-4]$/.test(positionText)) {
+    return { max_minutes: 120, category: 'v0_to_v4', source_rule_id: 'CAO-PB-2024-R1531' };
+  }
+  if (positionText.includes('hrf')) {
+    return { max_minutes: 135, category: 'hrf', source_rule_id: 'CAO-PB-2024-R1532' };
+  }
+  return {
+    max_minutes: 150,
+    category: positionText.includes('bmc') || positionText.includes('x_passage') || positionText.includes('transfer')
+      ? 'bmc_x_passage_transfer_or_passenger_related'
+      : 'other_secured_position',
+    source_rule_id: 'CAO-PB-2024-R1533'
+  };
+}
+
+function resolveSchipholAirportSchedulePolicy({ serviceShifts, body, caoScope }) {
+  const sourceRuleIds = [
+    'CAO-PB-2024-R1520', 'CAO-PB-2024-R1521', 'CAO-PB-2024-R1523',
+    'CAO-PB-2024-R1524', 'CAO-PB-2024-R1525', 'CAO-PB-2024-R1531',
+    'CAO-PB-2024-R1532', 'CAO-PB-2024-R1533', 'CAO-PB-2024-R1539',
+    'CAO-PB-2024-R1543', 'CAO-PB-2024-R1545', 'CAO-PB-2024-R1547',
+    'CAO-PB-2024-R1551', 'CAO-PB-2024-R1554', 'CAO-PB-2024-R1565',
+    'CAO-PB-2024-R1566', 'CAO-PB-2024-R1568', 'CAO-PB-2024-R1569',
+    'CAO-PB-2024-R1573', 'CAO-PB-2024-R1997', 'CAO-PB-2024-R2036',
+    'CAO-PB-2024-R2038'
+  ];
+  const schipholShifts = serviceShifts.filter(shift => shiftWorksAirportSchipholSchedule(shift, body, caoScope));
+  const standing_time_checks = [];
+  const violations = [];
+  const manual_review_items = [];
+  const entryMomentsByDate = {};
+  for (const shift of schipholShifts) {
+    const date = asIsoDate(shift.date || shift.service_date);
+    if (date && shift.start_time) {
+      entryMomentsByDate[date] ||= new Set();
+      entryMomentsByDate[date].add(shift.start_time);
+    }
+    const standingMinutes = numberOrNull(
+      shift.schiphol_standing_time_minutes ??
+      shift.standing_time_minutes ??
+      shift.position_standing_time_minutes ??
+      shift.position_time_minutes
+    );
+    const limit = schipholStandingTimeLimitMinutes(shift);
+    const calamityException = booleanOrNull(
+      shift.schiphol_standing_time_calamity_exception ??
+      shift.calamity_or_unforeseen_airport_exception ??
+      body.schiphol_standing_time_calamity_exception
+    ) === true;
+    const row = {
+      shift_id: shift.id || null,
+      date,
+      start_time: shift.start_time || null,
+      end_time: shift.end_time || null,
+      position_category: limit.category,
+      standing_time_minutes: standingMinutes,
+      max_standing_time_minutes: limit.max_minutes,
+      calamity_exception_applied: calamityException,
+      source_rule_id: limit.source_rule_id
+    };
+    standing_time_checks.push(row);
+    if (standingMinutes === null) {
+      manual_review_items.push({
+        rule_id: 'CAO-PB-2024-R1529',
+        domain: 'airport_schiphol_standing_time',
+        field: 'schiphol_standing_time_minutes',
+        message: 'Schipholdienst mist sta-tijd per positie; maximale sta-tijd kan niet audit-proof worden gevalideerd.',
+        affected_shift_ids: shift.id ? [shift.id] : []
+      });
+    } else if (standingMinutes > limit.max_minutes && !calamityException) {
+      violations.push({
+        rule_id: limit.source_rule_id,
+        severity: 'high',
+        message: `Schiphol sta-tijd ${standingMinutes} minuten overschrijdt maximum ${limit.max_minutes} minuten voor categorie ${limit.category}.`,
+        payroll_impact: false,
+        manual_review_required: false,
+        affected_shift_ids: shift.id ? [shift.id] : []
+      });
+    }
+  }
+
+  const entry_moment_checks = Object.entries(entryMomentsByDate).map(([date, values]) => ({
+    date,
+    entry_moment_count: values.size,
+    max_entry_moments_per_day: 10,
+    source_rule_id: 'CAO-PB-2024-R2036'
+  }));
+  for (const row of entry_moment_checks) {
+    if (row.entry_moment_count > row.max_entry_moments_per_day) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R2036',
+        severity: 'medium',
+        message: `Schipholrooster heeft ${row.entry_moment_count} instapmomenten op ${row.date}; akkoord beloningsmaatregelen noemt maximaal 10 per dag vanaf 2 januari 2023.`,
+        payroll_impact: false,
+        manual_review_required: true
+      });
+    }
+  }
+
+  return {
+    applies: schipholShifts.length > 0,
+    source_rule_ids: sourceRuleIds,
+    shift_count: schipholShifts.length,
+    standing_time_checks,
+    entry_moment_checks,
+    fulltime_hours_per_pay_period_from_2022: 144,
+    policy_notes: [
+      'Schiphol fulltime arbeidsduur is sinds 1 januari 2022 144 uur per loonperiode.',
+      'Schiphol sta-tijd maxima gelden niet bij calamiteiten en onvoorziene omstandigheden.',
+      'Pauzetijd is 15 minuten netto; looptijd tussen positie en lounge telt niet als pauzetijd.'
+    ],
+    violations,
+    manual_review_items
+  };
+}
+
 function isMandatoryTrainingShift(shift = {}) {
   return booleanOrNull(
     shift.mandatory_training ??
@@ -4559,6 +4690,13 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     overtimeHours,
     minusHoursGenerated
   });
+  const schipholAirportPolicy = resolveSchipholAirportSchedulePolicy({
+    serviceShifts,
+    body,
+    caoScope
+  });
+  violations.push(...schipholAirportPolicy.violations);
+  manualReviewItems.push(...schipholAirportPolicy.manual_review_items);
 
   return {
     total_shifts: totalShifts,
@@ -4570,6 +4708,7 @@ function validateSchedule(shifts, periodStart, periodEnd, caoScope, body = {}) {
     overtime_hours: Math.round(overtimeHours * 100) / 100,
     free_days_count: freeDaysCount,
     cao_article_1_definition_summary: caoArticle1DefinitionSummary,
+    schiphol_airport_policy: schipholAirportPolicy,
     cash_value_time_window_summary: cashValueTimeWindowSummary,
     general_reserve_summary: {
       is_general_reserve: isGeneralReserve,

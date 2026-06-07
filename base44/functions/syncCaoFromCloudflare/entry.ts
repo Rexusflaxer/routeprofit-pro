@@ -468,6 +468,10 @@ function hasLocalPayrollRuntime(caoKey) {
   return LOCAL_PAYROLL_RUNTIME_CAO_KEYS.includes(normalizeCaoKey(caoKey));
 }
 
+function localRuleIds(...ids) {
+  return ids.map(id => `CAO-PB-2024-R${String(id).padStart(4, '0')}`);
+}
+
 const LOCAL_RUNTIME_RULE_BINDINGS = {
   'resolveCaoApplicability.article_3_scope': {
     functions: ['resolveCaoApplicability', 'validateTaskPlanningContext', 'calculatePersonnelCosts', 'validateCaoScheduleRules'],
@@ -574,7 +578,8 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
     functions: ['applyCaoContractRules', 'calculatePersonnelCosts'],
     rule_ids: [
       'CAO-PB-2024-R0445', 'CAO-PB-2024-R0446',
-      'CAO-PB-2024-R0447', 'CAO-PB-2024-R0448', 'CAO-PB-2024-R0451'
+      'CAO-PB-2024-R0447', 'CAO-PB-2024-R0448', 'CAO-PB-2024-R0451',
+      'CAO-PB-2024-R1605'
     ]
   },
   'applyCaoContractRules.contract_transfer_articles_18_20': {
@@ -614,6 +619,8 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
     functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
     rule_ids: [
       'CAO-PB-2024-R0547', 'CAO-PB-2024-R0548', 'CAO-PB-2024-R0549',
+      'CAO-PB-2024-R0552', 'CAO-PB-2024-R0553', 'CAO-PB-2024-R0555',
+      'CAO-PB-2024-R0556', 'CAO-PB-2024-R0557',
       'CAO-PB-2024-R0560', 'CAO-PB-2024-R0561',
       'CAO-PB-2024-R0562', 'CAO-PB-2024-R0563', 'CAO-PB-2024-R0564',
       'CAO-PB-2024-R0565', 'CAO-PB-2024-R0566', 'CAO-PB-2024-R0567',
@@ -764,7 +771,10 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'calculateCaoReimbursements.article_47_48_49_50': {
     functions: ['calculateCaoReimbursements'],
     rule_ids: [
-      'CAO-PB-2024-R0855', 'CAO-PB-2024-R0878', 'CAO-PB-2024-R0880',
+      'CAO-PB-2024-R0855', 'CAO-PB-2024-R0859', 'CAO-PB-2024-R0860',
+      'CAO-PB-2024-R0865', 'CAO-PB-2024-R0866', 'CAO-PB-2024-R0867',
+      'CAO-PB-2024-R0869', 'CAO-PB-2024-R0870', 'CAO-PB-2024-R0872',
+      'CAO-PB-2024-R0873', 'CAO-PB-2024-R0878', 'CAO-PB-2024-R0880',
       'CAO-PB-2024-R0885', 'CAO-PB-2024-R0890', 'CAO-PB-2024-R0895',
       'CAO-PB-2024-R0900', 'CAO-PB-2024-R0905', 'CAO-PB-2024-R1609'
     ]
@@ -819,7 +829,8 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'calculateCaoLeaveAndSickness.article_59_reference_and_protocol_ii_vacation': {
     functions: ['calculateCaoLeaveAndSickness', 'calculatePersonnelCosts', 'calculateRoutePersonnelCosts'],
     rule_ids: [
-      'CAO-PB-2024-R1021', 'CAO-PB-2024-R1601', 'CAO-PB-2024-R1602'
+      'CAO-PB-2024-R1021', 'CAO-PB-2024-R1589', 'CAO-PB-2024-R1601',
+      'CAO-PB-2024-R1602'
     ]
   },
   'calculateCaoLeaveAndSickness.article_60_vacation_requests': {
@@ -897,6 +908,7 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'validateCaoScheduleRules.article_73_older_workers': {
     functions: ['validateCaoScheduleRules', 'calculatePersonnelCosts'],
     rule_ids: [
+      'CAO-PB-2024-R1202',
       'CAO-PB-2024-R1242', 'CAO-PB-2024-R1244',
       'CAO-PB-2024-R1245', 'CAO-PB-2024-R1246',
       'CAO-PB-2024-R1248', 'CAO-PB-2024-R1253',
@@ -932,6 +944,8 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'validateCaoScheduleRules.protocol_ii_cash_value_schedule_articles_104_107': {
     functions: ['validateCaoScheduleRules'],
     rule_ids: [
+      'CAO-PB-2024-R1592', 'CAO-PB-2024-R1593', 'CAO-PB-2024-R1610',
+      'CAO-PB-2024-R1615', 'CAO-PB-2024-R1616',
       'CAO-PB-2024-R1619', 'CAO-PB-2024-R1620', 'CAO-PB-2024-R1621',
       'CAO-PB-2024-R1622', 'CAO-PB-2024-R1623', 'CAO-PB-2024-R1624',
       'CAO-PB-2024-R1626', 'CAO-PB-2024-R1627', 'CAO-PB-2024-R1628',
@@ -949,6 +963,102 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R1745', 'CAO-PB-2024-R1746', 'CAO-PB-2024-R1747',
       'CAO-PB-2024-R1749', 'CAO-PB-2024-R1750'
     ]
+  },
+  'validateCaoScheduleRules.schiphol_airport_schedule_policy': {
+    functions: ['resolveCaoApplicability', 'validateCaoScheduleRules'],
+    rule_ids: [
+      'CAO-PB-2024-R1520', 'CAO-PB-2024-R1524', 'CAO-PB-2024-R1525',
+      'CAO-PB-2024-R1531', 'CAO-PB-2024-R1532', 'CAO-PB-2024-R1533',
+      'CAO-PB-2024-R1561', 'CAO-PB-2024-R1562', 'CAO-PB-2024-R1564',
+      'CAO-PB-2024-R1565', 'CAO-PB-2024-R1566', 'CAO-PB-2024-R1567',
+      'CAO-PB-2024-R1568', 'CAO-PB-2024-R1569', 'CAO-PB-2024-R1573',
+      'CAO-PB-2024-R1997', 'CAO-PB-2024-R2036', 'CAO-PB-2024-R2038'
+    ]
+  },
+  'calculateCaoReimbursements.schiphol_reimbursements_article_94_96': {
+    functions: ['resolveCaoApplicability', 'calculateCaoReimbursements'],
+    rule_ids: [
+      'CAO-PB-2024-R1521', 'CAO-PB-2024-R1523', 'CAO-PB-2024-R1539',
+      'CAO-PB-2024-R1543', 'CAO-PB-2024-R1545', 'CAO-PB-2024-R1547',
+      'CAO-PB-2024-R1551', 'CAO-PB-2024-R1554'
+    ]
+  },
+  'calculatePersonnelCosts.schiphol_payroll_allowances': {
+    functions: ['resolveCaoApplicability', 'calculatePersonnelCosts', 'queueCaoPayrollCorrections'],
+    rule_ids: [
+      'CAO-PB-2024-R1555', 'CAO-PB-2024-R1556', 'CAO-PB-2024-R1558',
+      'CAO-PB-2024-R1559', 'CAO-PB-2024-R1560', 'CAO-PB-2024-R1576',
+      'CAO-PB-2024-R1577', 'CAO-PB-2024-R1578', 'CAO-PB-2024-R1579',
+      'CAO-PB-2024-R1580', 'CAO-PB-2024-R1582', 'CAO-PB-2024-R1583',
+      'CAO-PB-2024-R1584', 'CAO-PB-2024-R1585', 'CAO-PB-2024-R1586',
+      'CAO-PB-2024-R1958', 'CAO-PB-2024-R1973', 'CAO-PB-2024-R1974',
+      'CAO-PB-2024-R1975', 'CAO-PB-2024-R1976', 'CAO-PB-2024-R1977',
+      'CAO-PB-2024-R1978', 'CAO-PB-2024-R1982', 'CAO-PB-2024-R2017',
+      'CAO-PB-2024-R2039', 'CAO-PB-2024-R2040', 'CAO-PB-2024-R2041',
+      'CAO-PB-2024-R2042', 'CAO-PB-2024-R2043', 'CAO-PB-2024-R2044',
+      'CAO-PB-2024-R2045', 'CAO-PB-2024-R2046', 'CAO-PB-2024-R2064',
+      'CAO-PB-2024-R2065', 'CAO-PB-2024-R2067', 'CAO-PB-2024-R2068',
+      'CAO-PB-2024-R2069', 'CAO-PB-2024-R2070', 'CAO-PB-2024-R2071',
+      'CAO-PB-2024-R2072'
+    ]
+  },
+  'resolveCaoGovernanceCompliancePolicy.organization_social_policy_unions': {
+    functions: ['resolveCaoGovernanceCompliancePolicy'],
+    rule_ids: [
+      ...localRuleIds(1337, 1338, 1357, 1358, 1359, 1360, 1366, 1375, 1377),
+      ...localRuleIds(1386, 1387, 1392, 1393, 1395, 1399, 1400, 1401, 1408, 1409),
+      ...localRuleIds(1423, 1436, 1438, 1439, 1440, 1441, 1442, 1443, 1444, 1445),
+      ...localRuleIds(1455, 1460, 1472, 1474, 1484, 1491, 1495, 1499, 1500, 1501),
+      ...localRuleIds(1506, 1508, 1509, 1510, 1514, 1515, 1516)
+    ]
+  },
+  'resolveCaoGovernanceCompliancePolicy.compliance_control_regulation': {
+    functions: ['resolveCaoGovernanceCompliancePolicy'],
+    rule_ids: [
+      ...localRuleIds(1841, 1844, 1847, 1848, 1850, 1857, 1858, 1859, 1861, 1862),
+      ...localRuleIds(1865, 1868, 1869, 1871, 1872, 1873, 1874, 1875, 1877),
+      ...localRuleIds(1879, 1881, 1883, 1884, 1885, 1886, 1887, 1888, 1889, 1890, 1891),
+      ...localRuleIds(1892, 1893, 1894, 1895, 1896, 1897, 1898, 1900, 1902, 1903),
+      ...localRuleIds(1904, 1905, 1908, 1910, 1911, 1913, 1914, 1915, 1916, 1917),
+      ...localRuleIds(1918, 1919, 1920, 1921)
+    ]
+  },
+  'resolveCaoGovernanceCompliancePolicy.employer_compliance_and_scope': {
+    functions: ['resolveCaoGovernanceCompliancePolicy', 'resolveCaoApplicability'],
+    rule_ids: [
+      ...localRuleIds(164, 221, 234),
+      ...localRuleIds(1651, 1652, 1658, 1668, 1669, 1670, 1671, 1673, 1675, 1676),
+      ...localRuleIds(1677, 1678, 1679, 1681, 1682, 1683, 1686, 1689, 1690, 1691),
+      ...localRuleIds(1692, 1693, 1694, 1695, 1696, 1698),
+      ...localRuleIds(2074, 2077, 2078, 2079, 2080, 2081, 2084, 2088, 2089, 2090),
+      ...localRuleIds(2091, 2092, 2093, 2094, 2095, 2099, 2100, 2101, 2102, 2103)
+    ]
+  },
+  'resolveCaoGovernanceCompliancePolicy.protocols_travel_vacation_contract_change': {
+    functions: ['resolveCaoGovernanceCompliancePolicy', 'calculateCaoReimbursements', 'calculateCaoLeaveAndSickness'],
+    rule_ids: [
+      ...localRuleIds(1707, 1708, 1712, 1714, 1716, 1717, 1719, 1720, 1722, 1723, 1725, 1736),
+      ...localRuleIds(1927, 1928, 1929, 1932, 1934, 1935, 1936),
+      ...localRuleIds(1937, 1938, 1939, 1940, 1941, 1942, 1943, 1944, 1945, 1946, 1947, 1948),
+      ...localRuleIds(1949, 1950, 1951, 1952, 1953),
+      ...localRuleIds(2105, 2107, 2108, 2109, 2110)
+    ]
+  },
+  'resolveCaoGovernanceCompliancePolicy.schiphol_social_agreement_policy': {
+    functions: ['resolveCaoGovernanceCompliancePolicy', 'calculatePersonnelCosts', 'calculateCaoReimbursements', 'validateCaoScheduleRules'],
+    rule_ids: [
+      ...localRuleIds(1957, 1959, 1962, 1965, 1966, 1971, 1979, 1983, 1984, 1985),
+      ...localRuleIds(1987, 1989, 1990, 1991, 1993, 2001, 2003, 2006, 2008, 2010),
+      ...localRuleIds(2011, 2012, 2013, 2018, 2024, 2026, 2028, 2035, 2053, 2055)
+    ]
+  },
+  'resolveCaoGovernanceCompliancePolicy.contract_employment_governance': {
+    functions: ['resolveCaoGovernanceCompliancePolicy', 'applyCaoContractRules', 'resolvePersonnelContractForService'],
+    rule_ids: localRuleIds(301, 305, 306, 338, 346, 453, 456, 461, 462, 1923, 1925)
+  },
+  'resolveCaoGovernanceCompliancePolicy.safety_risk_working_conditions_policy': {
+    functions: ['resolveCaoGovernanceCompliancePolicy'],
+    rule_ids: localRuleIds(1303, 1311, 1313, 1322, 1327, 1330)
   }
 };
 

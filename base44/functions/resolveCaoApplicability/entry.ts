@@ -600,10 +600,11 @@ function resolveApplicability(personnel, contract, work_context) {
     warnings.push('Functie-indeling/bijlage-2 schaal kon niet automatisch worden bepaald. Handmatige review vereist voor correcte loonschaal.');
   }
 
-  // Punt 6: bijzondere scopes Schiphol / geld-waardelogistiek → special_scope_manual_review
-  const specialScopeManualReview = isSchiphol || isCashValueLogistics;
+  // Punt 6: bijzondere scopes. Schiphol heeft inmiddels eigen runtime policies
+  // voor planning/payroll/vergoedingen; geld-waardelogistiek blijft apart reviewen.
+  const specialScopeManualReview = isCashValueLogistics;
   if (isSchiphol) {
-    warnings.push('Schiphol bijzondere regels (bijlage 8 CAO PB) zijn nog niet volledig geïmplementeerd in de runtime. Handmatige review vereist voor Schiphol-specifieke toeslagen/afspraken.');
+    warnings.push('Schiphol bijzondere regels zijn van toepassing. Planning/payroll gebruiken de Schiphol policies; ontbrekende operationele bevestigingen worden per berekening als manual review gemarkeerd.');
   }
   if (isCashValueLogistics) {
     warnings.push('Geld- en waardelogistiek bijzondere regels (bijlage 9 CAO PB) zijn nog niet volledig geïmplementeerd in de runtime. Handmatige review vereist.');

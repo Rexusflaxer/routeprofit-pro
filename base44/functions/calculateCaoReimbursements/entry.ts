@@ -649,6 +649,220 @@ function calculateDeclaredTravelExpenses(body) {
   };
 }
 
+function calculateTravelSpecialCases(body, parameters = resolveReimbursementParameters(null)) {
+  const manualItems = [];
+  const sourceRuleIds = [
+    'CAO-PB-2024-R0859', 'CAO-PB-2024-R0860', 'CAO-PB-2024-R0865',
+    'CAO-PB-2024-R0866', 'CAO-PB-2024-R0867', 'CAO-PB-2024-R0869',
+    'CAO-PB-2024-R0870', 'CAO-PB-2024-R0872', 'CAO-PB-2024-R0873'
+  ];
+
+  const brokenServiceTotalKm = numberOrNull(body.broken_service_total_commute_km);
+  const brokenServiceOutboundKmTotal = numberOrNull(body.broken_service_outbound_km_total);
+  const brokenServiceAmount = brokenServiceTotalKm !== null
+    ? round2(brokenServiceTotalKm * parameters.travel_cost_per_km)
+    : null;
+  if (brokenServiceOutboundKmTotal !== null && brokenServiceTotalKm === null) {
+    manualItems.push(manualReview(
+      'CAO-PB-2024-R0859',
+      'travel_broken_service',
+      'Gebroken dienst: geef totale woon-werk-kilometers op, of bevestig hoe heenreizen/terugreizen zijn omgerekend.',
+      { field: 'broken_service_total_commute_km' }
+    ));
+  }
+
+  const arboVisitKm = numberOrNull(body.arbo_or_reintegration_visit_km_total);
+  const arboVisitAmount = arboVisitKm !== null ? round2(arboVisitKm * parameters.travel_cost_per_km) : null;
+  const arboVisitRequired = booleanOrNull(body.arbo_or_reintegration_visit_required);
+  if (arboVisitKm !== null && arboVisitRequired !== true) {
+    manualItems.push(manualReview(
+      'CAO-PB-2024-R0860',
+      'travel_arbo_reintegration',
+      'Reisvergoeding voor arbodienst/re-integratiebedrijf vereist dat het bezoek in dit kader plaatsvindt.',
+      { field: 'arbo_or_reintegration_visit_required' }
+    ));
+  }
+
+  const moved = booleanOrNull(body.employee_moved_after_contract_start);
+  const employerWrittenConsent = booleanOrNull(body.relocation_employer_written_consent);
+  const oldPostcodeOneWayKm = numberOrNull(body.old_home_postcode_one_way_km);
+  const newPostcodeOneWayKm = numberOrNull(body.new_home_postcode_one_way_km);
+  const relocationCapApplies = moved === true && employerWrittenConsent !== true;
+  const relocationReimbursementOneWayKm = relocationCapApplies && oldPostcodeOneWayKm !== null && newPostcodeOneWayKm !== null
+    ? Math.min(oldPostcodeOneWayKm, newPostcodeOneWayKm)
+    : null;
+  const relocationCompensationOffered = booleanOrNull(body.relocation_lower_reimbursement_compensation_offered);
+  if (relocationCapApplies && (oldPostcodeOneWayKm === null || newPostcodeOneWayKm === null)) {
+    manualItems.push(manualReview(
+      'CAO-PB-2024-R0866',
+      'travel_relocation',
+      'Verhuizing zonder schriftelijke toestemming: oude en nieuwe postcodeafstand zijn nodig om de reiskostenbegrenzing te bepalen.',
+      { field: 'old_home_postcode_one_way_km/new_home_postcode_one_way_km' }
+    ));
+  }
+  if (relocationCapApplies && relocationCompensationOffered === false) {
+    manualItems.push(manualReview(
+      'CAO-PB-2024-R0867',
+      'travel_relocation',
+      'Bij lagere reisvergoeding door verhuizing kan werkgever een compensatie beoordelen; leg besluitvorming vast.',
+      { field: 'relocation_lower_reimbursement_compensation_offered' }
+    ));
+  }
+
+  const salderingApplied = booleanOrNull(body.travel_reimbursement_saldering_applied);
+  const period = body.travel_reimbursement_saldering_period || null;
+  if (salderingApplied === true && !['service', 'dienst', 'pay_period', 'loonperiode', 'year', 'jaar'].includes(String(period || '').toLowerCase())) {
+    manualItems.push(manualReview(
+      'CAO-PB-2024-R0872',
+      'travel_fiscal_saldering',
+      'Salderen van vergoedingen moet per dienst, loonperiode of jaar worden ingericht.',
+      { field: 'travel_reimbursement_saldering_period' }
+    ));
+  }
+  if (booleanOrNull(body.max_fiscally_favorable_travel_treatment_applied) === false) {
+    manualItems.push(manualReview(
+      'CAO-PB-2024-R0873',
+      'travel_fiscal_saldering',
+      'Werkgever moet streven naar de maximaal fiscaal haalbare behandeling van vergoedingen.',
+      { field: 'max_fiscally_favorable_travel_treatment_applied' }
+    ));
+  }
+
+  return {
+    rule_id: 'CAO-PB-2024-R0859',
+    source_rule_ids: sourceRuleIds,
+    broken_service_commute: {
+      total_commute_km: brokenServiceTotalKm,
+      outbound_km_total_input: brokenServiceOutboundKmTotal,
+      rate_per_km: parameters.travel_cost_per_km,
+      amount: brokenServiceAmount,
+      tax_treatment: 'netto'
+    },
+    arbo_or_reintegration_visit: {
+      required_visit_confirmed: arboVisitRequired === true,
+      km_total: arboVisitKm,
+      rate_per_km: parameters.travel_cost_per_km,
+      amount: arboVisitAmount,
+      tax_treatment: 'netto'
+    },
+    relocation: {
+      employee_moved_after_contract_start: moved,
+      employer_written_consent: employerWrittenConsent,
+      cap_to_old_postcode_applies: relocationCapApplies,
+      old_home_postcode_one_way_km: oldPostcodeOneWayKm,
+      new_home_postcode_one_way_km: newPostcodeOneWayKm,
+      reimbursement_one_way_km: relocationReimbursementOneWayKm,
+      lower_reimbursement_compensation_offered: relocationCompensationOffered
+    },
+    fiscal_saldering: {
+      reimbursements_may_be_paid_net_or_gross: true,
+      saldering_allowed_for_relevant_travel_reimbursements: true,
+      saldering_period: period,
+      allowed_periods: ['service', 'pay_period', 'year'],
+      max_fiscally_favorable_treatment_required: true
+    },
+    amount: round2((brokenServiceAmount || 0) + (arboVisitAmount || 0)),
+    manual_review_required: manualItems.length > 0,
+    manual_review_items: manualItems
+  };
+}
+
+function calculateSchipholReimbursements(body, caoScope) {
+  const worksAirport = caoScope?.cao_scope_profile === 'airport_schiphol' ||
+    booleanOrNull(body.works_airport_schiphol ?? body.schiphol_service ?? body.airport_schiphol_service) === true;
+  const sourceRuleIds = [
+    'CAO-PB-2024-R1539', 'CAO-PB-2024-R1540', 'CAO-PB-2024-R1541',
+    'CAO-PB-2024-R1542', 'CAO-PB-2024-R1543', 'CAO-PB-2024-R1544',
+    'CAO-PB-2024-R1545', 'CAO-PB-2024-R1546', 'CAO-PB-2024-R1547',
+    'CAO-PB-2024-R1548', 'CAO-PB-2024-R1549', 'CAO-PB-2024-R1550',
+    'CAO-PB-2024-R1551', 'CAO-PB-2024-R1552', 'CAO-PB-2024-R1553',
+    'CAO-PB-2024-R1554'
+  ];
+  const manualItems = [];
+  if (!worksAirport) {
+    return {
+      applies: false,
+      source_rule_ids: sourceRuleIds,
+      parking: { eligible: false, amount: 0 },
+      shoes: { eligible: false, amount: 0 },
+      hearing_protection: { eligible: false, employer_must_provide: false },
+      manual_review_required: false,
+      manual_review_items: []
+    };
+  }
+
+  const parkingCosts = numberOrNull(body.schiphol_parking_costs ?? body.parking_costs);
+  const monthlySubscriptionRequired = booleanOrNull(body.schiphol_monthly_parking_subscription_required);
+  const earlyOrLateService = booleanOrNull(body.schiphol_early_or_late_service ?? body.parking_due_early_or_late_service);
+  const designatedParkingUsed = booleanOrNull(body.schiphol_designated_parking_used);
+  const parkingEligible = (parkingCosts !== null || monthlySubscriptionRequired === true) &&
+    earlyOrLateService === true &&
+    designatedParkingUsed === true;
+  if ((parkingCosts !== null || monthlySubscriptionRequired === true) && !parkingEligible) {
+    manualItems.push(manualReview(
+      'CAO-PB-2024-R1540',
+      'airport_schiphol_parking',
+      'Schiphol parkeervergoeding vereist vroege/late dienst en gebruik van de door werkgever aangewezen parkeervoorziening.',
+      { field: 'schiphol_early_or_late_service/schiphol_designated_parking_used' }
+    ));
+  }
+
+  const probationCompleted = booleanOrNull(body.probation_completed ?? body.proeftijd_afgerond);
+  const shoesRequested = booleanOrNull(body.schiphol_shoes_requested ?? body.arbo_shoes_requested);
+  const shoesCashRequested = booleanOrNull(body.schiphol_shoes_cash_compensation_requested);
+  if (shoesRequested === true && probationCompleted !== true) {
+    manualItems.push(manualReview(
+      'CAO-PB-2024-R1547',
+      'airport_schiphol_shoes',
+      'Schiphol arbo-schoenen kunnen pas na afloop van de proeftijd worden aangevraagd.',
+      { field: 'probation_completed' }
+    ));
+  }
+  if (shoesCashRequested === true) {
+    manualItems.push(manualReview(
+      'CAO-PB-2024-R1551',
+      'airport_schiphol_shoes',
+      'Voor Schiphol arbo-schoenen bestaat geen geldvergoeding in plaats van de aangeboden schoenen.',
+      { field: 'schiphol_shoes_cash_compensation_requested' }
+    ));
+  }
+
+  const hearingProtectionNeeded = booleanOrNull(body.schiphol_hearing_protection_needed);
+  const hearingProtectionProvided = booleanOrNull(body.schiphol_hearing_protection_provided);
+  if (hearingProtectionNeeded === true && hearingProtectionProvided !== true) {
+    manualItems.push(manualReview(
+      'CAO-PB-2024-R1553',
+      'airport_schiphol_hearing_protection',
+      'Als gehoorbescherming nodig is om gehoorschade te voorkomen, moet de werkgever arbo-verantwoorde gehoorbescherming beschikbaar stellen.',
+      { field: 'schiphol_hearing_protection_provided' }
+    ));
+  }
+
+  return {
+    applies: true,
+    source_rule_ids: sourceRuleIds,
+    parking: {
+      eligible: parkingEligible,
+      amount: parkingEligible ? round2(parkingCosts ?? 0) : 0,
+      monthly_subscription_fully_reimbursed_if_required: monthlySubscriptionRequired === true,
+      tax_treatment: 'netto'
+    },
+    shoes: {
+      eligible: shoesRequested === true && probationCompleted === true && shoesCashRequested !== true,
+      provided_in_kind_only: true,
+      replacement_interval_years: 2,
+      cash_compensation_allowed: false
+    },
+    hearing_protection: {
+      eligible: hearingProtectionNeeded === true,
+      employer_must_provide: hearingProtectionNeeded === true,
+      provided: hearingProtectionProvided === true
+    },
+    manual_review_required: manualItems.length > 0,
+    manual_review_items: manualItems
+  };
+}
+
 function calculateMealAllowance(input, startTimeOrParameters = null, maybeParameters = null) {
   const parameters = maybeParameters || (startTimeOrParameters && typeof startTimeOrParameters === 'object'
     ? startTimeOrParameters
@@ -1174,6 +1388,18 @@ Deno.serve(async (req) => {
       if (body.parking_costs !== undefined || body.toll_costs !== undefined || body.ferry_costs !== undefined) {
         result.declared_travel_expenses = calculateDeclaredTravelExpenses(body);
       }
+      if (body.broken_service_total_commute_km !== undefined ||
+        body.broken_service_outbound_km_total !== undefined ||
+        body.arbo_or_reintegration_visit_km_total !== undefined ||
+        body.employee_moved_after_contract_start !== undefined ||
+        body.travel_reimbursement_saldering_applied !== undefined ||
+        body.max_fiscally_favorable_travel_treatment_applied !== undefined) {
+        result.travel_special_cases = calculateTravelSpecialCases(body, reimbursementParameters);
+      }
+    }
+
+    if (action === 'travel_special_cases') {
+      result.travel_special_cases = calculateTravelSpecialCases(body, reimbursementParameters);
     }
 
     if (!action || action === 'meal_allowance') {
@@ -1233,6 +1459,16 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (!action || action === 'schiphol' || action === 'airport_schiphol') {
+      if (caoScope.cao_scope_profile === 'airport_schiphol' ||
+        body.works_airport_schiphol !== undefined ||
+        body.schiphol_parking_costs !== undefined ||
+        body.schiphol_shoes_requested !== undefined ||
+        body.schiphol_hearing_protection_needed !== undefined) {
+        result.schiphol_reimbursements = calculateSchipholReimbursements(body, caoScope);
+      }
+    }
+
     result.manual_review_items = collectManualReviewItems(result);
     result.reimbursement_totals = {
       gross_amount: round2(
@@ -1246,10 +1482,12 @@ Deno.serve(async (req) => {
         (result.work_work_travel_cost?.amount || 0) +
         (result.public_transport?.amount || 0) +
         (result.declared_travel_expenses?.amount || 0) +
+        (result.travel_special_cases?.amount || 0) +
         (result.meal_allowance?.amount || 0) +
         (result.dog_allowance?.amount_net || 0) +
         (result.dry_cleaning?.amount || 0) +
-        (result.accommodation?.amount || 0)
+        (result.accommodation?.amount || 0) +
+        (result.schiphol_reimbursements?.parking?.amount || 0)
       ),
       jubilee_amount: result.jubilee?.amount ?? null
     };

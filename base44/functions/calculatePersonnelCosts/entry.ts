@@ -1367,6 +1367,10 @@ function buildCaoPayslipTemplateCompliance({
     general_reserve_allowance: r2(payslip.general_reserve_allowance?.amount),
     value_services_early_shift_allowance: r2(payslip.value_services_early_shift_allowance?.amount),
     cash_value_late_next_day_notice_allowance: r2(payslip.cash_value_late_next_day_notice_allowance?.amount),
+    schiphol_object_allowance_included_in_base_wage: r2(payslip.schiphol_allowances?.object_allowance?.amount),
+    schiphol_early_start_allowance: r2(payslip.schiphol_allowances?.early_start_allowance?.amount),
+    schiphol_historical_summer_allowance_2022: r2(payslip.schiphol_allowances?.historical_summer_allowance_2022?.amount),
+    schiphol_historical_labor_market_allowance_2022_2023: r2(payslip.schiphol_allowances?.historical_labor_market_allowance_2022_2023?.amount),
     travel_and_other_reimbursements_external: true
   };
 
@@ -1425,6 +1429,150 @@ function buildCaoPayslipTemplateCompliance({
     manual_review_required: missingOrExternalFields.length > 0,
     export_control_ready: missingOrExternalFields.length === 0
   };
+}
+
+function localWindowOverlapHours(interval, dateStr, windowStart, windowEnd) {
+  if (!interval?.start || !interval?.end || !dateStr) return 0;
+  const window = buildCaoShiftInterval(dateStr, windowStart, windowEnd, true);
+  if (!window?.start || !window?.end) return 0;
+  const start = Math.max(interval.start.getTime(), window.start.getTime());
+  const end = Math.min(interval.end.getTime(), window.end.getTime());
+  return Math.max(0, (end - start) / (1000 * 60 * 60));
+}
+
+function shiftOverlapsDateTimeRange(interval, startIso, endIsoExclusive) {
+  if (!interval?.start || !interval?.end) return false;
+  const start = new Date(startIso).getTime();
+  const end = new Date(endIsoExclusive).getTime();
+  return interval.start.getTime() < end && interval.end.getTime() > start;
+}
+
+function shiftWorksAirportSchiphol(shift = {}, body = {}, caoScope = {}) {
+  return caoScope?.cao_scope_profile === 'airport_schiphol' ||
+    booleanOrNull(shift.works_airport_schiphol ?? shift.schiphol_service ?? shift.airport_schiphol_service) === true ||
+    booleanOrNull(body.works_airport_schiphol ?? body.schiphol_service ?? body.airport_schiphol_service) === true;
+}
+
+function schipholTenderScopeConfirmed(shift = {}, body = {}) {
+  return booleanOrNull(
+    shift.schiphol_tender_security_operation_confirmed ??
+    shift.schiphol_object_allowance_eligible ??
+    body.schiphol_tender_security_operation_confirmed ??
+    body.schiphol_object_allowance_eligible
+  ) === true;
+}
+
+function resolveSchipholShiftPayrollComponents({ shift, body, caoScope, shiftInterval, hoursWorked, baseHourlyRate }) {
+  const sourceRuleIds = [
+    'CAO-PB-2024-R1576', 'CAO-PB-2024-R1577', 'CAO-PB-2024-R1578',
+    'CAO-PB-2024-R1579', 'CAO-PB-2024-R1580', 'CAO-PB-2024-R1583',
+    'CAO-PB-2024-R1584', 'CAO-PB-2024-R1585', 'CAO-PB-2024-R1586',
+    'CAO-PB-2024-R1973', 'CAO-PB-2024-R1975', 'CAO-PB-2024-R1976',
+    'CAO-PB-2024-R1977', 'CAO-PB-2024-R1978', 'CAO-PB-2024-R1982',
+    'CAO-PB-2024-R2039', 'CAO-PB-2024-R2040', 'CAO-PB-2024-R2041',
+    'CAO-PB-2024-R2042', 'CAO-PB-2024-R2043', 'CAO-PB-2024-R2044',
+    'CAO-PB-2024-R2045', 'CAO-PB-2024-R2046', 'CAO-PB-2024-R2064',
+    'CAO-PB-2024-R2065', 'CAO-PB-2024-R2067', 'CAO-PB-2024-R2068',
+    'CAO-PB-2024-R2069', 'CAO-PB-2024-R2070', 'CAO-PB-2024-R2071',
+    'CAO-PB-2024-R2072'
+  ];
+  const appliesAirport = shiftWorksAirportSchiphol(shift, body, caoScope);
+  const date = isoDate(shift.date || shift.service_date);
+  const manualReviewItems = [];
+  const base = {
+    applies: appliesAirport,
+    source_rule_ids: sourceRuleIds,
+    object_allowance: { applies: false, hours: 0, rate: 2.5, amount: 0, included_in_base_salary: true },
+    early_start_allowance: { applies: false, hours: 0, percentage: 35, base_rate_including_object_allowance: r2(baseHourlyRate), amount: 0 },
+    historical_summer_allowance_2022: { applies: false, hours: 0, rate: 5.25, amount: 0, excluded_from_vacation_pension_year_end_and_ort_basis: true },
+    historical_labor_market_allowance_2022_2023: { applies: false, hours: 0, rate: 1.4, amount: 0, excluded_from_vacation_pension_year_end_and_ort_basis: true },
+    manual_review_required: false,
+    manual_review_items: []
+  };
+  if (!appliesAirport || !date || !shiftInterval) return base;
+
+  const tenderConfirmed = schipholTenderScopeConfirmed(shift, body);
+  if (!tenderConfirmed) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R2040',
+      domain: 'airport_schiphol_object_allowance',
+      field: 'schiphol_tender_security_operation_confirmed',
+      message: 'Schiphol objecttoeslag vereist bevestiging dat werknemer beveiligingswerk verricht op/in opdracht van Schiphol binnen de Schipholtender/operatie.'
+    });
+  }
+
+  const structuralEffective = date >= '2022-11-01';
+  if (structuralEffective) {
+    const allowanceHours = firstNumber(
+      shift.schiphol_contract_hours,
+      shift.schiphol_object_allowance_hours,
+      shift.contract_hours,
+      hoursWorked
+    ) || 0;
+    base.object_allowance = {
+      applies: allowanceHours > 0,
+      hours: r2(allowanceHours),
+      rate: 2.5,
+      amount: r2(allowanceHours * 2.5),
+      included_in_base_salary: true,
+      source_rule_ids: ['CAO-PB-2024-R1583', 'CAO-PB-2024-R1584', 'CAO-PB-2024-R2040', 'CAO-PB-2024-R2041', 'CAO-PB-2024-R2042', 'CAO-PB-2024-R2069', 'CAO-PB-2024-R2070']
+    };
+
+    const startMinutes = parseClockParts(shift.start_time)?.total_minutes ?? null;
+    const startsInEarlyWindow = startMinutes !== null && startMinutes >= 0 && startMinutes <= (5 * 60 + 30);
+    const earlyHours = startsInEarlyWindow
+      ? localWindowOverlapHours(shiftInterval, date, '00:00', '06:00') + localWindowOverlapHours(shiftInterval, addDaysIso(date, 1), '00:00', '06:00')
+      : 0;
+    const earlyRateBase = baseHourlyRate + 2.5;
+    base.early_start_allowance = {
+      applies: earlyHours > 0,
+      hours: r2(earlyHours),
+      percentage: 35,
+      base_rate_including_object_allowance: r2(earlyRateBase),
+      amount: r2(earlyHours * earlyRateBase * 0.35),
+      source_rule_ids: ['CAO-PB-2024-R1585', 'CAO-PB-2024-R1586', 'CAO-PB-2024-R2043', 'CAO-PB-2024-R2044', 'CAO-PB-2024-R2045']
+    };
+  }
+
+  const workedHours = Math.max(0, hoursWorked || 0);
+  const isActualWorkedHours = ![
+    shift.is_vacation,
+    shift.is_sickness,
+    shift.is_training,
+    shift.is_paid_absence
+  ].some(value => booleanOrNull(value) === true);
+  const summerApplies = isActualWorkedHours && (
+    shiftOverlapsDateTimeRange(shiftInterval, '2022-04-23T00:00:00+02:00', '2022-05-09T00:00:00+02:00') ||
+    shiftOverlapsDateTimeRange(shiftInterval, '2022-06-01T00:00:00+02:00', '2022-09-05T00:00:00+02:00')
+  );
+  if (summerApplies) {
+    base.historical_summer_allowance_2022 = {
+      applies: true,
+      hours: r2(workedHours),
+      rate: 5.25,
+      amount: r2(workedHours * 5.25),
+      payout_deadline: '2022-09-30',
+      excluded_from_vacation_pension_year_end_and_ort_basis: true,
+      source_rule_ids: ['CAO-PB-2024-R1576', 'CAO-PB-2024-R1577', 'CAO-PB-2024-R1973', 'CAO-PB-2024-R1975', 'CAO-PB-2024-R1976', 'CAO-PB-2024-R1977', 'CAO-PB-2024-R1978']
+    };
+  }
+  const laborMarketApplies = isActualWorkedHours &&
+    shiftOverlapsDateTimeRange(shiftInterval, '2022-09-05T00:00:00+02:00', '2023-09-01T00:00:00+02:00');
+  if (laborMarketApplies) {
+    base.historical_labor_market_allowance_2022_2023 = {
+      applies: true,
+      hours: r2(workedHours),
+      rate: 1.4,
+      amount: r2(workedHours * 1.4),
+      payout_months: ['2022-11', '2023-03', '2023-06', '2023-09'],
+      excluded_from_vacation_pension_year_end_and_ort_basis: true,
+      source_rule_ids: ['CAO-PB-2024-R1578', 'CAO-PB-2024-R1579', 'CAO-PB-2024-R1580', 'CAO-PB-2024-R1982']
+    };
+  }
+
+  base.manual_review_required = manualReviewItems.length > 0;
+  base.manual_review_items = manualReviewItems;
+  return base;
 }
 
 function resolveCaoTrainingEducationPolicy({ body, workSchedule }) {
@@ -4304,6 +4452,40 @@ Deno.serve(async (req) => {
         details: [],
         source_rule_ids: []
       },
+      schiphol_allowances: {
+        object_allowance: {
+          hours: 0,
+          rate: 2.5,
+          amount: 0,
+          included_in_base_salary: true,
+          details: [],
+          source_rule_ids: []
+        },
+        early_start_allowance: {
+          hours: 0,
+          percentage: 35,
+          amount: 0,
+          details: [],
+          source_rule_ids: []
+        },
+        historical_summer_allowance_2022: {
+          hours: 0,
+          rate: 5.25,
+          amount: 0,
+          details: [],
+          excluded_from_vacation_pension_year_end_and_ort_basis: true,
+          source_rule_ids: []
+        },
+        historical_labor_market_allowance_2022_2023: {
+          hours: 0,
+          rate: 1.4,
+          amount: 0,
+          details: [],
+          excluded_from_vacation_pension_year_end_and_ort_basis: true,
+          source_rule_ids: []
+        },
+        source_rule_ids: []
+      },
       cao_retroactive_corrections: {
         applied: false,
         correction_count: 0,
@@ -4742,6 +4924,84 @@ Deno.serve(async (req) => {
             ])
           ];
         }
+
+        const schipholShiftAllowances = resolveSchipholShiftPayrollComponents({
+          shift,
+          body,
+          caoScope,
+          shiftInterval,
+          hoursWorked,
+          baseHourlyRate
+        });
+        if (schipholShiftAllowances.applies) {
+          if (schipholShiftAllowances.manual_review_required) {
+            for (const item of schipholShiftAllowances.manual_review_items || []) payrollRuntimeReviewItems.push(item);
+            runtimePayrollFinalAllowed = false;
+            runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+          }
+          const objectAllowance = schipholShiftAllowances.object_allowance;
+          if (objectAllowance.amount > 0) {
+            payslip.base_salary += objectAllowance.amount;
+            payslip.schiphol_allowances.object_allowance.hours += objectAllowance.hours;
+            payslip.schiphol_allowances.object_allowance.amount += objectAllowance.amount;
+            payslip.schiphol_allowances.object_allowance.details.push({
+              date,
+              hours: r2(objectAllowance.hours),
+              rate: objectAllowance.rate,
+              amount: r2(objectAllowance.amount)
+            });
+            payslip.schiphol_allowances.object_allowance.source_rule_ids = [
+              ...new Set([
+                ...payslip.schiphol_allowances.object_allowance.source_rule_ids,
+                ...(objectAllowance.source_rule_ids || [])
+              ])
+            ];
+          }
+          const earlyStartAllowance = schipholShiftAllowances.early_start_allowance;
+          if (earlyStartAllowance.amount > 0) {
+            payslip.schiphol_allowances.early_start_allowance.hours += earlyStartAllowance.hours;
+            payslip.schiphol_allowances.early_start_allowance.amount += earlyStartAllowance.amount;
+            payslip.schiphol_allowances.early_start_allowance.details.push({
+              date,
+              hours: r2(earlyStartAllowance.hours),
+              percentage: earlyStartAllowance.percentage,
+              base_rate_including_object_allowance: earlyStartAllowance.base_rate_including_object_allowance,
+              amount: r2(earlyStartAllowance.amount)
+            });
+            payslip.schiphol_allowances.early_start_allowance.source_rule_ids = [
+              ...new Set([
+                ...payslip.schiphol_allowances.early_start_allowance.source_rule_ids,
+                ...(earlyStartAllowance.source_rule_ids || [])
+              ])
+            ];
+          }
+          for (const [key, component] of [
+            ['historical_summer_allowance_2022', schipholShiftAllowances.historical_summer_allowance_2022],
+            ['historical_labor_market_allowance_2022_2023', schipholShiftAllowances.historical_labor_market_allowance_2022_2023]
+          ]) {
+            if (!component?.amount) continue;
+            payslip.schiphol_allowances[key].hours += component.hours;
+            payslip.schiphol_allowances[key].amount += component.amount;
+            payslip.schiphol_allowances[key].details.push({
+              date,
+              hours: r2(component.hours),
+              rate: component.rate,
+              amount: r2(component.amount)
+            });
+            payslip.schiphol_allowances[key].source_rule_ids = [
+              ...new Set([
+                ...payslip.schiphol_allowances[key].source_rule_ids,
+                ...(component.source_rule_ids || [])
+              ])
+            ];
+          }
+          payslip.schiphol_allowances.source_rule_ids = [
+            ...new Set([
+              ...payslip.schiphol_allowances.source_rule_ids,
+              ...(schipholShiftAllowances.source_rule_ids || [])
+            ])
+          ];
+        }
         
         payslip.shift_details.push({
           date,
@@ -4803,7 +5063,8 @@ Deno.serve(async (req) => {
             deadline_at: cashValueLateNextDayNoticeAllowance.deadline_at,
             manual_review_required: cashValueLateNextDayNoticeAllowance.manual_review_required,
             source_rule_ids: cashValueLateNextDayNoticeAllowance.source_rule_ids
-          }
+          },
+          schiphol_allowances: schipholShiftAllowances
         });
       }
     }
@@ -4864,7 +5125,8 @@ Deno.serve(async (req) => {
         payslip.surcharges.night_20.amount +
         payslip.surcharges.weekend_35.amount +
         payslip.surcharges.holiday_50.amount +
-        payslip.surcharges.new_years_eve_100.amount;
+        payslip.surcharges.new_years_eve_100.amount +
+        payslip.schiphol_allowances.early_start_allowance.amount;
       const overtimeAmount = payslip.overtime_50.amount;
       const minimumServiceAmount = payslip.minimum_service_compensation.amount;
       const actingFunctionAllowanceAmount = payslip.acting_function_allowance.amount;
@@ -4873,6 +5135,9 @@ Deno.serve(async (req) => {
       const generalReserveAllowanceAmount = payslip.general_reserve_allowance.amount;
       const valueServicesEarlyShiftAllowanceAmount = payslip.value_services_early_shift_allowance.amount;
       const cashValueLateNextDayNoticeAllowanceAmount = payslip.cash_value_late_next_day_notice_allowance.amount;
+      const schipholHistoricalAllowanceAmount =
+        payslip.schiphol_allowances.historical_summer_allowance_2022.amount +
+        payslip.schiphol_allowances.historical_labor_market_allowance_2022_2023.amount;
       if (isCallWorker) {
         const callWorkerVacationPayout = calculateCallWorkerVacationPayoutArticle59({
           baseWageAmount: payslip.base_salary,
@@ -4929,9 +5194,9 @@ Deno.serve(async (req) => {
         payslip.vacation_paid = 0;
         
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + incomeStructurePhaseOutAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + incomeStructurePhaseOutAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount + schipholHistoricalAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
       } else {
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + incomeStructurePhaseOutAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + incomeStructurePhaseOutAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount + schipholHistoricalAllowanceAmount;
       }
       
       const olderWorkerArrangements = {
@@ -4986,7 +5251,7 @@ Deno.serve(async (req) => {
       payslip.pension_base = pensionBase;
       
       // Werknemersbijdragen - basis is altijd bruto loon exclusief vakantiegeld/eindejaarsuitkering voor oproepkrachten
-      const basisForPremiums = isCallWorker ? (payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + incomeStructurePhaseOutAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount) : payslip.total_gross;
+      const basisForPremiums = isCallWorker ? (payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + incomeStructurePhaseOutAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + cashValueLateNextDayNoticeAllowanceAmount) : Math.max(0, payslip.total_gross - schipholHistoricalAllowanceAmount);
       
       payslip.employee_deductions.premium_sfpb = basisForPremiums * (fundParameters.sfpbEmployeePercentage / 100);
       payslip.employee_deductions.premium_paww = basisForPremiums * (fundParameters.pawwEmployeePercentage / 100);
@@ -5315,6 +5580,56 @@ Deno.serve(async (req) => {
             amount: r2(item.amount)
           })),
           source_rule_ids: payslip.cash_value_late_next_day_notice_allowance.source_rule_ids
+        },
+        schiphol_allowances: {
+          object_allowance: {
+            hours: r2(payslip.schiphol_allowances.object_allowance.hours),
+            rate: payslip.schiphol_allowances.object_allowance.rate,
+            amount: r2(payslip.schiphol_allowances.object_allowance.amount),
+            included_in_base_salary: true,
+            details: payslip.schiphol_allowances.object_allowance.details.map(item => ({
+              ...item,
+              hours: r2(item.hours),
+              amount: r2(item.amount)
+            })),
+            source_rule_ids: payslip.schiphol_allowances.object_allowance.source_rule_ids
+          },
+          early_start_allowance: {
+            hours: r2(payslip.schiphol_allowances.early_start_allowance.hours),
+            percentage: payslip.schiphol_allowances.early_start_allowance.percentage,
+            amount: r2(payslip.schiphol_allowances.early_start_allowance.amount),
+            details: payslip.schiphol_allowances.early_start_allowance.details.map(item => ({
+              ...item,
+              hours: r2(item.hours),
+              amount: r2(item.amount)
+            })),
+            source_rule_ids: payslip.schiphol_allowances.early_start_allowance.source_rule_ids
+          },
+          historical_summer_allowance_2022: {
+            hours: r2(payslip.schiphol_allowances.historical_summer_allowance_2022.hours),
+            rate: payslip.schiphol_allowances.historical_summer_allowance_2022.rate,
+            amount: r2(payslip.schiphol_allowances.historical_summer_allowance_2022.amount),
+            excluded_from_vacation_pension_year_end_and_ort_basis: true,
+            details: payslip.schiphol_allowances.historical_summer_allowance_2022.details.map(item => ({
+              ...item,
+              hours: r2(item.hours),
+              amount: r2(item.amount)
+            })),
+            source_rule_ids: payslip.schiphol_allowances.historical_summer_allowance_2022.source_rule_ids
+          },
+          historical_labor_market_allowance_2022_2023: {
+            hours: r2(payslip.schiphol_allowances.historical_labor_market_allowance_2022_2023.hours),
+            rate: payslip.schiphol_allowances.historical_labor_market_allowance_2022_2023.rate,
+            amount: r2(payslip.schiphol_allowances.historical_labor_market_allowance_2022_2023.amount),
+            excluded_from_vacation_pension_year_end_and_ort_basis: true,
+            details: payslip.schiphol_allowances.historical_labor_market_allowance_2022_2023.details.map(item => ({
+              ...item,
+              hours: r2(item.hours),
+              amount: r2(item.amount)
+            })),
+            source_rule_ids: payslip.schiphol_allowances.historical_labor_market_allowance_2022_2023.source_rule_ids
+          },
+          source_rule_ids: payslip.schiphol_allowances.source_rule_ids
         },
         cao_retroactive_corrections: payslip.cao_retroactive_corrections,
         total_gross: Math.round(payslip.total_gross * 100) / 100,
