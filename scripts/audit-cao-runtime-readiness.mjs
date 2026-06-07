@@ -6,13 +6,14 @@ import { fileURLToPath } from 'node:url';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
+const workspaceRoot = path.resolve(repoRoot, '..');
 
 function loadFunctionModule(relativePath) {
   const absolutePath = path.join(repoRoot, relativePath);
   let code = fs.readFileSync(absolutePath, 'utf8');
   code = code.replace(/^import[^\n]+\n/, '');
   code = code.split('\nDeno.serve')[0];
-  const context = { console, setTimeout, clearTimeout };
+  const context = { console, setTimeout, clearTimeout, TextEncoder, crypto: globalThis.crypto, URL };
   vm.createContext(context);
   vm.runInContext(code, context, { filename: relativePath });
   return context;
@@ -285,6 +286,34 @@ for (const module of [ingestCaoAutomation, syncCaoFromCloudflare]) {
   assert.equal(declaredExternalMinimums.automatic_or_calculation, 45);
   assert.equal(declaredExternalMinimums.validation_or_policy, 12);
   assert.equal(declaredExternalMinimums.workflow_or_documentation, 8);
+}
+
+async function assertApprovedPayloadPayrollReady(module, year) {
+  const payloadPath = path.join(workspaceRoot, 'AutomationState/cao', `approved-payload-candidate-${year}.json`);
+  assert.ok(fs.existsSync(payloadPath), `Approved CAO PB ${year} payload ontbreekt: ${payloadPath}`);
+  const payload = JSON.parse(fs.readFileSync(payloadPath, 'utf8'));
+  const payloadCaoKey = module.normalizeCaoKey(payload.cao_key || payload.candidate_configuration?.cao_key || 'cao_particuliere_beveiliging');
+  const candidateCfg = {
+    ...(payload.candidate_configuration || {}),
+    cao_key: payloadCaoKey,
+    source_documents_snapshot: Array.isArray(payload.candidate_configuration?.source_documents_snapshot) &&
+      payload.candidate_configuration.source_documents_snapshot.length > 0
+      ? payload.candidate_configuration.source_documents_snapshot
+      : (payload.source_documents || [])
+  };
+  const candidateRules = module.normalizeCaoRulesInput(payload.candidate_rules || [], payloadCaoKey)
+    .map(rule => module.withLocalRuntimeBindingMetadata(rule));
+  const readiness = await module.resolvePayrollReadiness(candidateCfg, candidateRules);
+  const explicitPayrollReady = readiness.is_payroll_ready ?? readiness.payroll_ready;
+  assert.equal(readiness.requested_payroll_ready, true, `CAO PB ${year} payload moet owner-approved payroll-ready aanvragen`);
+  assert.equal(readiness.gate.passed, true, `CAO PB ${year} payload coverage gate blokkeert: ${JSON.stringify(readiness.gate.blocking_findings || [])}`);
+  assert.equal(readiness.status, 'ready', `CAO PB ${year} payload readiness status moet ready zijn`);
+  assert.equal(explicitPayrollReady ?? (readiness.status === 'ready' && readiness.gate.passed === true), true, `CAO PB ${year} payload is niet payroll-ready: ${readiness.status}`);
+}
+
+for (const module of [ingestCaoAutomation, syncCaoFromCloudflare]) {
+  await assertApprovedPayloadPayrollReady(module, 2025);
+  await assertApprovedPayloadPayrollReady(module, 2026);
 }
 
 const unknown = runtimeReadiness.buildCaoRuntimeReadinessForKey('cao_onbekend');

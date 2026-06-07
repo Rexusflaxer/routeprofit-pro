@@ -883,7 +883,9 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0739', 'CAO-PB-2024-R0740', 'CAO-PB-2024-R0741',
       'CAO-PB-2024-R0742', 'CAO-PB-2024-R0743', 'CAO-PB-2024-R0744',
       'CAO-PB-2024-R0745', 'CAO-PB-2024-R0746', 'CAO-PB-2024-R0747',
-      'CAO-PB-2024-R1751', 'CAO-PB-2024-R1813'
+      ...localRuleIds(1751, 1753, 1754, 1755, 1756, 1757, 1758, 1760),
+      ...localRuleIds(1767, 1774, 1781, 1790, 1797, 1803, 1804, 1805),
+      ...localRuleIds(1810, 1811, 1812, 1813, 1814, 1837, 1838, 1840)
     ]
   },
   'calculatePersonnelCosts.article_35_36_wage_promotion': {
@@ -967,15 +969,19 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R0835', 'CAO-PB-2024-R0836'
     ]
   },
-  'calculateCaoReimbursements.article_47_48_49_50': {
+  'calculateCaoReimbursements.article_47_54_reimbursements': {
     functions: ['calculateCaoReimbursements'],
     rule_ids: [
-      'CAO-PB-2024-R0855', 'CAO-PB-2024-R0859', 'CAO-PB-2024-R0860',
-      'CAO-PB-2024-R0865', 'CAO-PB-2024-R0866', 'CAO-PB-2024-R0867',
-      'CAO-PB-2024-R0869', 'CAO-PB-2024-R0870', 'CAO-PB-2024-R0872',
-      'CAO-PB-2024-R0873', 'CAO-PB-2024-R0878', 'CAO-PB-2024-R0880',
-      'CAO-PB-2024-R0885', 'CAO-PB-2024-R0890', 'CAO-PB-2024-R0895',
-      'CAO-PB-2024-R0900', 'CAO-PB-2024-R0905', 'CAO-PB-2024-R1609'
+      ...localRuleIds(838, 839, 840, 841, 842, 843, 844, 845),
+      ...localRuleIds(847, 849, 853, 854, 855, 856, 857, 858, 859, 860),
+      ...localRuleIds(861, 862, 864, 865, 866, 867, 868, 869, 870, 872),
+      ...localRuleIds(873, 877, 878, 879, 880, 881, 882, 883, 884, 885),
+      ...localRuleIds(887, 888, 889, 890, 891, 892, 893, 894, 895, 896),
+      ...localRuleIds(897, 898, 899, 900, 901, 902, 903, 904, 905, 906),
+      ...localRuleIds(907, 908, 909, 910, 911, 912, 913, 914, 915, 916),
+      ...localRuleIds(917, 919, 920, 921, 922, 923, 924, 925, 926, 927),
+      ...localRuleIds(928, 930, 931, 932, 937, 938, 939, 941, 942, 943),
+      ...localRuleIds(944, 945, 946, 1609)
     ]
   },
   'calculatePersonnelCosts.articles_55_58_training_education': {
