@@ -1939,6 +1939,8 @@ function shiftHasContractContext(shift) {
     shift.required_cao_function_group ||
     shift.cao_function_level ||
     shift.required_cao_function_level ||
+    normalizeArray(shift.required_qualification_types).length > 0 ||
+    normalizeArray(shift.required_qualification_groups).length > 0 ||
     shift.task_type ||
     shift.customer_billable !== undefined ||
     shift.counts_toward_required_staffing !== undefined ||
@@ -2009,6 +2011,18 @@ function buildShiftContractServiceContext({ body, shift }) {
       shiftContext.security_role_status ||
       bodyContext.security_role_status ||
       null,
+    required_qualification_types: [...new Set([
+      ...normalizeArray(body.required_qualification_types),
+      ...normalizeArray(bodyContext.required_qualification_types),
+      ...normalizeArray(shiftContext.required_qualification_types),
+      ...normalizeArray(shift.required_qualification_types)
+    ].filter(Boolean))],
+    required_qualification_groups: [...new Set([
+      ...normalizeArray(body.required_qualification_groups),
+      ...normalizeArray(bodyContext.required_qualification_groups),
+      ...normalizeArray(shiftContext.required_qualification_groups),
+      ...normalizeArray(shift.required_qualification_groups)
+    ].filter(Boolean))],
     performs_security_work: shift.performs_security_work ??
       shiftContext.performs_security_work ??
       bodyContext.performs_security_work ??
@@ -4327,6 +4341,8 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
     body.object_id ||
     body.cao_key ||
     body.cao ||
+    normalizeArray(body.required_qualification_types).length > 0 ||
+    normalizeArray(body.required_qualification_groups).length > 0 ||
     hasObjectValues(body.service_context) ||
     periodShifts.some(shiftHasContractContext);
 

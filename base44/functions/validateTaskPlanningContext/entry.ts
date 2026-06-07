@@ -19,6 +19,16 @@ function booleanTrue(value) {
   return value === true || value === 'true' || value === 'yes' || value === 'ja';
 }
 
+function normalizeArray(value) {
+  if (Array.isArray(value)) return value.filter(Boolean);
+  if (value === null || value === undefined || value === '') return [];
+  return [value];
+}
+
+function uniqueValues(values) {
+  return [...new Set((values || []).filter(Boolean))];
+}
+
 function inferServiceCaoKey({ explicitCaoKey, explicitCao, worksEventOrHospitalitySecurity, eventHospitalityCaoApplies }) {
   if (explicitCaoKey) {
     return {
@@ -161,6 +171,18 @@ function buildServiceContext({ body, task, object, route }) {
     cao_function_group: caoFunctionGroup,
     cao_function_level: caoFunctionLevel,
     security_role_status: securityRoleStatus,
+    required_qualification_types: uniqueValues([
+      ...normalizeArray(input.required_qualification_types),
+      ...normalizeArray(body.required_qualification_types),
+      ...normalizeArray(task?.required_qualification_types),
+      ...normalizeArray(object?.default_required_qualification_types)
+    ]),
+    required_qualification_groups: uniqueValues([
+      ...normalizeArray(input.required_qualification_groups),
+      ...normalizeArray(body.required_qualification_groups),
+      ...normalizeArray(task?.required_qualification_groups),
+      ...normalizeArray(object?.default_required_qualification_groups)
+    ]),
     performs_security_work: input.performs_security_work ??
       body.performs_security_work ??
       task?.performs_security_work ??

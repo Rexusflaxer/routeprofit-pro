@@ -973,11 +973,13 @@ function inferServiceContext({ body, task, route, object }) {
     security_role_status: securityRoleStatus,
     required_qualification_types: uniq([
       ...normalizeArray(input.required_qualification_types),
+      ...normalizeArray(body.required_qualification_types),
       ...normalizeArray(task?.required_qualification_types),
       ...normalizeArray(object?.default_required_qualification_types)
     ]),
     required_qualification_groups: uniq([
       ...normalizeArray(input.required_qualification_groups),
+      ...normalizeArray(body.required_qualification_groups),
       ...normalizeArray(task?.required_qualification_groups),
       ...normalizeArray(object?.default_required_qualification_groups)
     ]),
