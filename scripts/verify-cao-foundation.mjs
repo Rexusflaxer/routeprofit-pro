@@ -968,6 +968,24 @@ function runEffectiveDateCorrectionScenarios() {
   assert.equal(overlap.overlap_end, '2026-05-28');
   assert.equal(overlap.overlap_days, 19);
 
+  const limitedWindowReview = { ...review, effective_until: '2026-05-20' };
+  const afterWindowRun = {
+    id: 'payroll-after-effective-until',
+    cao_key: 'cao_particuliere_beveiliging',
+    cao_configuration_id: 'cao-config-pb',
+    pay_period_year: 2026,
+    pay_period_number: 5,
+    pay_period_start: '2026-05-21',
+    pay_period_end: '2026-05-28',
+    payroll_run_status: 'paid'
+  };
+  assert.equal(correctionQueue.runTouchesReview(touchedRun, limitedWindowReview), true);
+  assert.equal(correctionQueue.runTouchesReview(afterWindowRun, limitedWindowReview), false, 'Payroll after effective_until must not be affected');
+  const limitedOverlap = correctionQueue.exactOverlapEvidence(touchedRun, limitedWindowReview);
+  assert.equal(limitedOverlap.overlap_start, '2026-05-10');
+  assert.equal(limitedOverlap.overlap_end, '2026-05-20');
+  assert.equal(limitedOverlap.overlap_days, 11);
+
   const inferredDateReview = { ...review, effective_from_inferred: true };
   const manualReason = correctionQueue.effectiveDateManualReviewReason(inferredDateReview);
   assert.ok(manualReason.includes('afgeleide ingangsdatum'), 'Inferred effective date must require manual review before correction matching');
@@ -1108,6 +1126,28 @@ async function runCaoConfigurationDateSelectionScenarios() {
   assert.equal(spanningSchedule.status, 'blocked_schedule_period_spans_multiple_cao_configs');
   assert.equal(spanningSchedule.config, null);
 
+  for (const [label, module] of [
+    ['leave/sickness', leaveSickness],
+    ['reimbursements', reimbursements],
+    ['year-end bonus', yearEndBonus]
+  ]) {
+    const before = await module.resolveActiveCaoConfig(
+      scheduleBase44,
+      '2026-05-09',
+      'cao_particuliere_beveiliging'
+    );
+    assert.equal(before.status, 'resolved', `${label} should resolve old config before change date`);
+    assert.equal(before.config.id, 'cao-old', `${label} through 2026-05-09 must use old CAO config`);
+
+    const after = await module.resolveActiveCaoConfig(
+      scheduleBase44,
+      '2026-05-10',
+      'cao_particuliere_beveiliging'
+    );
+    assert.equal(after.status, 'resolved', `${label} should resolve new config from change date`);
+    assert.equal(after.config.id, 'cao-new', `${label} from 2026-05-10 must use new CAO config`);
+  }
+
   const classificationBase44 = {
     asServiceRole: {
       entities: {
@@ -1155,6 +1195,25 @@ async function runCaoConfigurationDateSelectionScenarios() {
     ['cao-new', 'cao-old-overlap'],
     'Overlapping function-classification CAO configs must block instead of silently selecting latest'
   );
+
+  for (const [label, module] of [
+    ['leave/sickness', leaveSickness],
+    ['reimbursements', reimbursements],
+    ['year-end bonus', yearEndBonus]
+  ]) {
+    const ambiguous = await module.resolveActiveCaoConfig(
+      overlappingBase44,
+      '2026-05-10',
+      'cao_particuliere_beveiliging'
+    );
+    assert.equal(ambiguous.status, 'blocked_ambiguous_active_cao_config', `${label} must block overlapping active CAO configs`);
+    assert.equal(ambiguous.config, null);
+    assert.deepEqual(
+      ambiguous.candidates.map(candidate => candidate.id),
+      ['cao-new', 'cao-old-overlap'],
+      `${label} overlap must expose candidate configs for owner cleanup`
+    );
+  }
 }
 
 function runReimbursementScenarios() {
