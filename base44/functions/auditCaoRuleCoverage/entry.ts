@@ -461,6 +461,9 @@ async function buildRuleRegistrySnapshot(config, rules) {
       automation_level: rule.automation_level || null,
       implementation_status: rule.implementation_status || null,
       manual_review_required: rule.manual_review_required === true,
+      applies_when: stableForHash(rule.applies_when || null),
+      default_action: stableForHash(rule.default_action || null),
+      validation_action: stableForHash(rule.validation_action || null),
       calculation_policy: rule.calculation_policy || null,
       runtime_binding_status: rule.runtime_binding_status || null,
       runtime_binding_key: rule.runtime_binding_key || null,
@@ -622,6 +625,26 @@ function hasVerifiedTestEvidence(rule) {
   return isPositiveTestEvidence(rule?.tests);
 }
 
+function hasMachineReadableObject(value) {
+  return Boolean(
+    value &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.keys(value).length > 0
+  );
+}
+
+function hasMachineReadableApplicability(rule) {
+  return hasMachineReadableObject(rule?.applies_when);
+}
+
+function hasMachineReadableAction(rule) {
+  const calculationPolicy = String(rule?.calculation_policy || '').toLowerCase();
+  return hasMachineReadableObject(rule?.default_action) ||
+    hasMachineReadableObject(rule?.validation_action) ||
+    ['automatic', 'manual_review_required', 'policy_only'].includes(calculationPolicy);
+}
+
 function countBy(collection, keyFn) {
   return collection.reduce((acc, item) => {
     const key = keyFn(item) || 'unknown';
@@ -714,6 +737,8 @@ function evaluateCoverageGate(config, rules, options = {}) {
     implemented_without_test_evidence: 0,
     partial_without_manual_review: 0,
     payroll_critical_missing_rule_text: 0,
+    payroll_critical_missing_applicability_semantics: 0,
+    payroll_critical_missing_action_semantics: 0,
     missing_rule_text: 0,
     local_runtime_binding_count: localRuntimeCoverage.local_runtime_binding_count,
     local_runtime_bound_rule_count: localRuntimeCoverage.local_runtime_bound_rule_count,
@@ -726,6 +751,8 @@ function evaluateCoverageGate(config, rules, options = {}) {
   const implementedWithoutTestEvidence = [];
   const partialWithoutManualReview = [];
   const payrollCriticalMissingRuleText = [];
+  const payrollCriticalMissingApplicabilitySemantics = [];
+  const payrollCriticalMissingActionSemantics = [];
   const missingRuleText = [];
 
   for (const rule of rules) {
@@ -758,11 +785,27 @@ function evaluateCoverageGate(config, rules, options = {}) {
     const implementedNoTests = status === 'IMPLEMENTED' && !testEvidence;
     const partialNoManualReview = status === 'PARTIAL' && rule.manual_review_required !== true;
     const payrollCriticalNoText = missingText;
+    const hasApplicabilitySemantics = hasMachineReadableApplicability(rule);
+    const hasActionSemantics = hasMachineReadableAction(rule);
+    const missingApplicabilitySemantics = !hasApplicabilitySemantics;
+    const missingActionSemantics = !hasActionSemantics;
 
     if (payrollCriticalNoText) {
       counts.payroll_critical_missing_rule_text++;
       payrollCriticalMissingRuleText.push(summarizeRule(rule, {
         message: 'Payrollkritische regel mist zowel rule_text als rule_text_summary; CAO-broninterpretatie kan niet worden bewezen.'
+      }));
+    }
+    if (missingApplicabilitySemantics) {
+      counts.payroll_critical_missing_applicability_semantics++;
+      payrollCriticalMissingApplicabilitySemantics.push(summarizeRule(rule, {
+        message: 'Payrollkritische regel mist machineleesbare applies_when-condities; de applicatie kan niet audit-proof bepalen voor welk contract, functieprofiel, diensttype of CAO-scope deze regel geldt.'
+      }));
+    }
+    if (missingActionSemantics) {
+      counts.payroll_critical_missing_action_semantics++;
+      payrollCriticalMissingActionSemantics.push(summarizeRule(rule, {
+        message: 'Payrollkritische regel mist machineleesbare default_action/validation_action/calculation_policy; de applicatie weet niet bewijsbaar of zij moet berekenen, blokkeren, waarschuwen of handmatige review eisen.'
       }));
     }
 
@@ -792,14 +835,18 @@ function evaluateCoverageGate(config, rules, options = {}) {
       implementedNoRuntime ||
       implementedNoTests ||
       partialNoManualReview ||
-      payrollCriticalNoText
+      payrollCriticalNoText ||
+      missingApplicabilitySemantics ||
+      missingActionSemantics
     ) {
       counts.payroll_critical_open++;
       openCriticalRules.push(summarizeRule(rule, {
         has_runtime_binding: runtimeBound,
         has_runtime_binding_metadata: runtimeMetadataPresent,
         has_test_evidence: testEvidence,
-        has_verified_test_evidence: testEvidence
+        has_verified_test_evidence: testEvidence,
+        has_machine_applicability: hasApplicabilitySemantics,
+        has_machine_action: hasActionSemantics
       }));
     }
   }
@@ -898,6 +945,20 @@ function evaluateCoverageGate(config, rules, options = {}) {
       message: `${payrollCriticalMissingRuleText.length} payrollkritische CAO-regels missen rule_text en rule_text_summary; broninterpretatie is niet audit-proof.`
     });
   }
+  if (payrollCriticalMissingApplicabilitySemantics.length > 0) {
+    blockingFindings.push({
+      code: 'missing_payroll_critical_applicability_semantics',
+      severity: 'critical',
+      message: `${payrollCriticalMissingApplicabilitySemantics.length} payrollkritische CAO-regels missen machineleesbare applies_when-condities; de applicatie kan niet zeker bepalen op wie of welke dienst de regel geldt.`
+    });
+  }
+  if (payrollCriticalMissingActionSemantics.length > 0) {
+    blockingFindings.push({
+      code: 'missing_payroll_critical_action_semantics',
+      severity: 'critical',
+      message: `${payrollCriticalMissingActionSemantics.length} payrollkritische CAO-regels missen machineleesbare actie-/validatiesemantiek; de applicatie kan niet zeker bepalen wat zij met de regel moet doen.`
+    });
+  }
 
   let status = 'ready';
   if (blockingFindings.some(f => f.code === 'unsupported_cao_runtime')) status = 'blocked_unsupported_cao_runtime';
@@ -934,6 +995,10 @@ function evaluateCoverageGate(config, rules, options = {}) {
     partial_without_manual_review_truncated: partialWithoutManualReview.length > maxOpenRules,
     payroll_critical_missing_rule_text_rules: payrollCriticalMissingRuleText.slice(0, maxOpenRules),
     payroll_critical_missing_rule_text_truncated: payrollCriticalMissingRuleText.length > maxOpenRules,
+    payroll_critical_missing_applicability_semantics_rules: payrollCriticalMissingApplicabilitySemantics.slice(0, maxOpenRules),
+    payroll_critical_missing_applicability_semantics_truncated: payrollCriticalMissingApplicabilitySemantics.length > maxOpenRules,
+    payroll_critical_missing_action_semantics_rules: payrollCriticalMissingActionSemantics.slice(0, maxOpenRules),
+    payroll_critical_missing_action_semantics_truncated: payrollCriticalMissingActionSemantics.length > maxOpenRules,
     missing_rule_text_rule_ids: missingRuleText.slice(0, maxOpenRules),
     missing_rule_text_truncated: missingRuleText.length > maxOpenRules
   };
