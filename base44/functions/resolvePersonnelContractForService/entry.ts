@@ -173,6 +173,12 @@ function booleanOrNull(value) {
   return null;
 }
 
+function numberOrNull(value) {
+  if (value === null || value === undefined || value === '') return null;
+  const number = Number(value);
+  return Number.isFinite(number) ? number : null;
+}
+
 const SECURITY_FUNCTION_GROUPS = [
   'objectbeveiliger_receptionist', 'mobiel_surveillant', 'winkelsurveillant',
   'brandwacht', 'geld_waardetransporteur', 'centralist'
@@ -182,16 +188,28 @@ const SECURITY_FUNCTION_TYPES = [
   'surveillant', 'centralist', 'verkeersregelaar', 'brandwacht', 'rechercheur'
 ];
 const SECURITY_ROLE_STATUSES = ['aspirant_beveiliger', 'beveiliger', 'leidinggevende'];
+const NON_SECURITY_FUNCTION_GROUPS = ['non_security_staff'];
+const NON_SECURITY_FUNCTION_TYPES = [
+  'klantrelatie', 'relatiebeheer', 'accountmanager', 'sales',
+  'binnendienst', 'backoffice', 'administratie', 'hr', 'planning',
+  'planner', 'office', 'management'
+];
+const FULL_SECURITY_SCOPE_PROFILES = ['full_security_worker', 'airport_schiphol', 'cash_value_logistics'];
+const NON_SECURITY_SCOPE_PROFILES = ['non_security_work_article_3_exception'];
 
 function unwrapFunctionData(response) {
   return response?.data || response || null;
 }
 
 function serviceRequiresSecurityScope(serviceContext) {
+  const securityRoleStatus = normalizeToken(serviceContext?.security_role_status);
+  const caoFunctionGroup = normalizeToken(serviceContext?.cao_function_group);
+  const functionType = normalizeToken(serviceContext?.function_type);
   return serviceContext?.performs_security_work === true ||
-    SECURITY_ROLE_STATUSES.includes(serviceContext.security_role_status) ||
-    SECURITY_FUNCTION_GROUPS.includes(serviceContext.cao_function_group) ||
-    SECURITY_FUNCTION_TYPES.includes(normalizeToken(serviceContext.function_type));
+    numberOrNull(serviceContext?.security_work_percentage) > 0 ||
+    SECURITY_ROLE_STATUSES.includes(securityRoleStatus) ||
+    SECURITY_FUNCTION_GROUPS.includes(caoFunctionGroup) ||
+    SECURITY_FUNCTION_TYPES.includes(functionType);
 }
 
 function getContractResolutionRuntimeSupport(caoKey) {
@@ -213,11 +231,24 @@ function getContractResolutionRuntimeSupport(caoKey) {
 function listAllowsValue(list, value) {
   if (!value) return { matched: true, reason: 'no_requested_value' };
   const values = normalizeArray(list);
-  if (values.includes('all')) return { matched: true, reason: 'all' };
+  const normalizedRequested = normalizeToken(value);
+  const normalizedValues = values.map(item => ({
+    raw: item,
+    normalized: normalizeToken(item)
+  }));
+  if (normalizedValues.some(item => item.normalized === 'all')) return { matched: true, reason: 'all' };
   if (values.length === 0) return { matched: false, reason: 'contract_has_no_allowed_values' };
+  const normalizedMatch = normalizedValues.find(item => item.normalized && item.normalized === normalizedRequested);
+  if (normalizedMatch) {
+    return {
+      matched: true,
+      reason: normalizedMatch.raw === value ? 'explicit_match' : 'normalized_token_match',
+      matched_allowed_value: normalizedMatch.raw
+    };
+  }
   return {
-    matched: values.includes(value),
-    reason: values.includes(value) ? 'explicit_match' : 'not_allowed'
+    matched: false,
+    reason: 'not_allowed'
   };
 }
 
@@ -445,6 +476,179 @@ function evaluateFunctionMatch(contract, serviceContext) {
     manual_review_required: missingProof.length > 0,
     blocking_checks: blocking,
     missing_proof_checks: missingProof,
+    checks
+  };
+}
+
+function serviceSecurityIntent(serviceContext = {}) {
+  const performsSecurityWork = booleanOrNull(serviceContext.performs_security_work);
+  const securityWorkPercentage = numberOrNull(serviceContext.security_work_percentage);
+  const securityRoleStatus = normalizeToken(serviceContext.security_role_status);
+  const caoFunctionGroup = normalizeToken(serviceContext.cao_function_group);
+  const functionType = normalizeToken(serviceContext.function_type);
+  const taskType = normalizeToken(serviceContext.task_type);
+  const securitySignals = [];
+  const nonSecuritySignals = [];
+
+  if (performsSecurityWork === true) securitySignals.push('performs_security_work=true');
+  if (performsSecurityWork === false) nonSecuritySignals.push('performs_security_work=false');
+  if (securityWorkPercentage !== null && securityWorkPercentage > 0) securitySignals.push(`security_work_percentage=${securityWorkPercentage}`);
+  if (securityWorkPercentage === 0) nonSecuritySignals.push('security_work_percentage=0');
+  if (SECURITY_ROLE_STATUSES.includes(securityRoleStatus)) securitySignals.push(`security_role_status=${securityRoleStatus}`);
+  if (securityRoleStatus === 'not_applicable') nonSecuritySignals.push('security_role_status=not_applicable');
+  if (SECURITY_FUNCTION_GROUPS.includes(caoFunctionGroup)) securitySignals.push(`cao_function_group=${caoFunctionGroup}`);
+  if (NON_SECURITY_FUNCTION_GROUPS.includes(caoFunctionGroup)) nonSecuritySignals.push(`cao_function_group=${caoFunctionGroup}`);
+  if (SECURITY_FUNCTION_TYPES.includes(functionType)) securitySignals.push(`function_type=${functionType}`);
+  if (NON_SECURITY_FUNCTION_TYPES.includes(functionType)) nonSecuritySignals.push(`function_type=${functionType}`);
+  if (NON_SECURITY_FUNCTION_TYPES.includes(taskType)) nonSecuritySignals.push(`task_type=${taskType}`);
+
+  if (securitySignals.length > 0 && nonSecuritySignals.length > 0) {
+    return {
+      intent: 'mixed_manual_review',
+      security_signals: securitySignals,
+      non_security_signals: nonSecuritySignals
+    };
+  }
+  if (securitySignals.length > 0) {
+    return {
+      intent: 'security_work',
+      security_signals: securitySignals,
+      non_security_signals: []
+    };
+  }
+  if (nonSecuritySignals.length > 0) {
+    return {
+      intent: 'non_security_work',
+      security_signals: [],
+      non_security_signals: nonSecuritySignals
+    };
+  }
+  return {
+    intent: 'unknown',
+    security_signals: [],
+    non_security_signals: []
+  };
+}
+
+function contractSecurityCapabilities(contract = {}) {
+  const performsSecurityWork = booleanOrNull(contract.performs_security_work);
+  const securityWorkPercentage = numberOrNull(contract.security_work_percentage);
+  const securityRoleStatus = normalizeToken(contract.security_role_status);
+  const caoFunctionGroup = normalizeToken(contract.cao_function_group);
+  const scopeProfile = normalizeToken(contract.cao_scope_profile);
+  const allowedSecurityRoleStatuses = normalizeArray(contract.allowed_security_role_statuses).map(normalizeToken);
+  const allowedCaoFunctionGroups = normalizeArray(contract.allowed_cao_function_groups).map(normalizeToken);
+  const payrollRuleProfile = contract.cao_applicable_rule_profile || {};
+  const securitySignals = [];
+  const nonSecuritySignals = [];
+
+  if (performsSecurityWork === true) securitySignals.push('performs_security_work=true');
+  if (performsSecurityWork === false) nonSecuritySignals.push('performs_security_work=false');
+  if (securityWorkPercentage !== null && securityWorkPercentage > 0) securitySignals.push(`security_work_percentage=${securityWorkPercentage}`);
+  if (securityWorkPercentage === 0) nonSecuritySignals.push('security_work_percentage=0');
+  if (FULL_SECURITY_SCOPE_PROFILES.includes(scopeProfile)) securitySignals.push(`cao_scope_profile=${scopeProfile}`);
+  if (NON_SECURITY_SCOPE_PROFILES.includes(scopeProfile)) nonSecuritySignals.push(`cao_scope_profile=${scopeProfile}`);
+  if (payrollRuleProfile.apply_appendix_2_function_scales === true) securitySignals.push('cao_applicable_rule_profile.apply_appendix_2_function_scales=true');
+  if (payrollRuleProfile.apply_appendix_2_function_scales === false) nonSecuritySignals.push('cao_applicable_rule_profile.apply_appendix_2_function_scales=false');
+  if (SECURITY_ROLE_STATUSES.includes(securityRoleStatus)) securitySignals.push(`security_role_status=${securityRoleStatus}`);
+  if (securityRoleStatus === 'not_applicable') nonSecuritySignals.push('security_role_status=not_applicable');
+  if (allowedSecurityRoleStatuses.some(value => SECURITY_ROLE_STATUSES.includes(value))) securitySignals.push('allowed_security_role_statuses includes security role');
+  if (allowedSecurityRoleStatuses.includes('not_applicable')) nonSecuritySignals.push('allowed_security_role_statuses includes not_applicable');
+  if (SECURITY_FUNCTION_GROUPS.includes(caoFunctionGroup)) securitySignals.push(`cao_function_group=${caoFunctionGroup}`);
+  if (NON_SECURITY_FUNCTION_GROUPS.includes(caoFunctionGroup)) nonSecuritySignals.push(`cao_function_group=${caoFunctionGroup}`);
+  if (allowedCaoFunctionGroups.some(value => SECURITY_FUNCTION_GROUPS.includes(value))) securitySignals.push('allowed_cao_function_groups includes security group');
+  if (allowedCaoFunctionGroups.some(value => NON_SECURITY_FUNCTION_GROUPS.includes(value))) nonSecuritySignals.push('allowed_cao_function_groups includes non_security_staff');
+
+  return {
+    allows_security_work: securitySignals.length > 0,
+    allows_non_security_work: nonSecuritySignals.length > 0,
+    security_signals: [...new Set(securitySignals)],
+    non_security_signals: [...new Set(nonSecuritySignals)]
+  };
+}
+
+function evaluateSecurityScopeMatch(contract, serviceContext) {
+  if (serviceContext.contract_assignment_policy === 'not_required') {
+    return {
+      matched: true,
+      manual_review_required: false,
+      blocking_checks: [],
+      missing_proof_checks: [],
+      source_rule_ids: ['CAO-PB-2024-R0227', 'CAO-PB-2024-R0228', 'CAO-PB-2024-R0229', 'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232', 'CAO-PB-2024-R0233'],
+      service_security_intent: { intent: 'not_required', security_signals: [], non_security_signals: [] },
+      contract_security_capabilities: contractSecurityCapabilities(contract),
+      checks: [{ field: 'contract_assignment_policy', requested: 'not_required', matched: true, reason: 'security_scope_match_not_required' }]
+    };
+  }
+
+  const serviceIntent = serviceSecurityIntent(serviceContext);
+  const contractCapabilities = contractSecurityCapabilities(contract);
+  const strict = serviceContext.contract_assignment_policy === 'strict_contract_match';
+  const sourceRuleIds = ['CAO-PB-2024-R0227', 'CAO-PB-2024-R0228', 'CAO-PB-2024-R0229', 'CAO-PB-2024-R0230', 'CAO-PB-2024-R0231', 'CAO-PB-2024-R0232', 'CAO-PB-2024-R0233'];
+  const checks = [];
+  const blockingChecks = [];
+  const missingProofChecks = [];
+
+  if (serviceIntent.intent === 'security_work') {
+    const check = {
+      field: 'article_3_security_scope',
+      requested: 'security_work',
+      allowed_security_work: contractCapabilities.allows_security_work,
+      allowed_non_security_work: contractCapabilities.allows_non_security_work,
+      matched: contractCapabilities.allows_security_work,
+      reason: contractCapabilities.allows_security_work
+        ? 'contract_allows_security_work'
+        : contractCapabilities.allows_non_security_work
+        ? 'contract_scope_is_non_security_only'
+        : 'contract_security_scope_not_proven'
+    };
+    checks.push(check);
+    if (!check.matched && contractCapabilities.allows_non_security_work) blockingChecks.push(check);
+    else if (!check.matched) missingProofChecks.push(check);
+  } else if (serviceIntent.intent === 'non_security_work') {
+    const check = {
+      field: 'article_3_non_security_scope',
+      requested: 'non_security_work',
+      allowed_security_work: contractCapabilities.allows_security_work,
+      allowed_non_security_work: contractCapabilities.allows_non_security_work,
+      matched: contractCapabilities.allows_non_security_work,
+      reason: contractCapabilities.allows_non_security_work
+        ? 'contract_allows_article_3_non_security_scope'
+        : contractCapabilities.allows_security_work
+        ? 'contract_scope_is_security_only'
+        : 'contract_non_security_scope_not_proven'
+    };
+    checks.push(check);
+    if (!check.matched && contractCapabilities.allows_security_work) blockingChecks.push(check);
+    else if (!check.matched) missingProofChecks.push(check);
+  } else if (serviceIntent.intent === 'mixed_manual_review') {
+    const check = {
+      field: 'article_3_mixed_scope',
+      requested: 'mixed_manual_review',
+      matched: false,
+      reason: 'service_context_has_conflicting_security_scope_signals'
+    };
+    checks.push(check);
+    missingProofChecks.push(check);
+  } else {
+    const check = {
+      field: 'article_3_security_scope',
+      requested: 'unknown',
+      matched: false,
+      reason: 'service_security_scope_not_proven'
+    };
+    checks.push(check);
+    missingProofChecks.push(check);
+  }
+
+  return {
+    matched: blockingChecks.length === 0 && (!strict || missingProofChecks.length === 0),
+    manual_review_required: missingProofChecks.length > 0,
+    blocking_checks: blockingChecks,
+    missing_proof_checks: missingProofChecks,
+    source_rule_ids: sourceRuleIds,
+    service_security_intent: serviceIntent,
+    contract_security_capabilities: contractCapabilities,
     checks
   };
 }
@@ -1115,14 +1319,28 @@ Deno.serve(async (req) => {
       manualReviewReasons.push('Alleen legacy contract zonder company_id gevonden. Contract moet expliciet aan werkgever/bedrijf worden gekoppeld voor definitieve planning/payroll.');
     }
 
-    const evaluatedContracts = contractCandidates.map(contract => ({
-      contract,
-      function_match: evaluateFunctionMatch(contract, serviceContext)
-    }));
+    const evaluatedContracts = contractCandidates.map(contract => {
+      const functionMatch = evaluateFunctionMatch(contract, serviceContext);
+      const securityScopeMatch = evaluateSecurityScopeMatch(contract, serviceContext);
+      return {
+        contract,
+        function_match: functionMatch,
+        security_scope_match: securityScopeMatch,
+        matched: functionMatch.matched && securityScopeMatch.matched
+      };
+    });
 
-    const matchingContracts = evaluatedContracts.filter(item => item.function_match.matched);
+    const matchingContracts = evaluatedContracts.filter(item => item.matched);
     if (evaluatedContracts.length > 0 && matchingContracts.length === 0) {
-      blockingReasons.push('Geen actief contract staat de gevraagde dienstfunctie toe.');
+      const hasFunctionMatch = evaluatedContracts.some(item => item.function_match.matched);
+      const hasScopeMatch = evaluatedContracts.some(item => item.security_scope_match.matched);
+      if (!hasFunctionMatch && !hasScopeMatch) {
+        blockingReasons.push('Geen actief contract staat de gevraagde dienstfunctie en CAO artikel-3 beveiligingsscope toe.');
+      } else if (!hasFunctionMatch) {
+        blockingReasons.push('Geen actief contract staat de gevraagde dienstfunctie toe.');
+      } else {
+        blockingReasons.push('Geen actief contract past bij de CAO artikel-3 beveiligingsscope van deze dienst.');
+      }
     }
 
     const selected = matchingContracts.length === 1 ? matchingContracts[0] : null;
@@ -1139,14 +1357,20 @@ Deno.serve(async (req) => {
       } else {
         selectedItem = explicit;
         selectedContract = explicit.contract;
-        if (!explicit.function_match.matched) {
-          blockingReasons.push(`Opgegeven contract_id ${body.contract_id} staat de gevraagde dienstfunctie of beveiligingsstatus niet toe.`);
+        if (!explicit.function_match.matched || !explicit.security_scope_match.matched) {
+          blockingReasons.push(`Opgegeven contract_id ${body.contract_id} staat de gevraagde dienstfunctie, beveiligingsstatus of CAO artikel-3 scope niet toe.`);
         }
       }
     }
 
     if (selectedItem?.function_match?.manual_review_required) {
       manualReviewReasons.push('Contract mist expliciete allowed_* functievelden voor de gevraagde dienst. Dit moet worden aangevuld voor definitieve planning/payroll.');
+    }
+    if (selectedItem?.security_scope_match?.manual_review_required) {
+      manualReviewReasons.push('Contract-/dienstkoppeling mist expliciet bewijs voor CAO artikel 3 beveiligingsscope. Leg performs_security_work, security_work_percentage, security_role_status of cao_function_group vast op contract en dienst.');
+    }
+    if (selectedItem?.security_scope_match?.blocking_checks?.length > 0) {
+      blockingReasons.push('Contract-/dienstkoppeling heeft een tegenstrijdige CAO artikel 3 beveiligingsscope.');
     }
 
     if (selectedContract && !selectedContract.cao_key) {
@@ -1298,6 +1522,9 @@ Deno.serve(async (req) => {
         allowed_function_types: selectedContract.allowed_function_types || [],
         security_role_status: selectedContract.security_role_status || null,
         allowed_security_role_statuses: selectedContract.allowed_security_role_statuses || [],
+        performs_security_work: selectedContract.performs_security_work ?? null,
+        security_work_percentage: selectedContract.security_work_percentage ?? null,
+        cao_scope_profile: selectedContract.cao_scope_profile || null,
         cao_function_group: selectedContract.cao_function_group || null,
         allowed_cao_function_groups: selectedContract.allowed_cao_function_groups || [],
         cao_function_level: selectedContract.cao_function_level || null,
@@ -1327,6 +1554,7 @@ Deno.serve(async (req) => {
       selected_contract_readiness: selectedContractReadiness,
       cao_applicability: caoApplicability,
       function_match: selectedItem?.function_match || null,
+      security_scope_match: selectedItem?.security_scope_match || null,
       evaluated_contracts: evaluatedContracts.map(item => ({
         contract_id: item.contract.id,
         company_id: item.contract.company_id || null,
@@ -1343,8 +1571,13 @@ Deno.serve(async (req) => {
         payroll_final_allowed: item.contract.payroll_final_allowed === true,
         security_role_status: item.contract.security_role_status || null,
         allowed_security_role_statuses: item.contract.allowed_security_role_statuses || [],
+        performs_security_work: item.contract.performs_security_work ?? null,
+        security_work_percentage: item.contract.security_work_percentage ?? null,
+        cao_scope_profile: item.contract.cao_scope_profile || null,
         stored_contract_readiness: evaluateStoredContractReadiness(item.contract),
-        function_match: item.function_match
+        function_match: item.function_match,
+        security_scope_match: item.security_scope_match,
+        matched: item.matched
       })),
       cao_configuration_id: caoResolution.config?.id || null,
       cao_key: caoResolution.config?.cao_key || serviceContext.cao_key || selectedContract?.cao_key || companyAssignment?.cao_key || null,
