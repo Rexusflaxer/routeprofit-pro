@@ -273,6 +273,32 @@ function numberOrNull(value) {
   return Number.isFinite(n) ? n : null;
 }
 
+function calculateCallWorkerVacationPayoutArticle59({ baseWageAmount, minimumServiceAmount, baseHourlyRate, paidBaseHours }) {
+  const maxHoursPerPayPeriod = 144;
+  const percentage = 9.24;
+  const paidHours = Math.max(0, numberOrZero(paidBaseHours));
+  const uncappedBaseAmount = Math.max(0, numberOrZero(baseWageAmount) + numberOrZero(minimumServiceAmount));
+  const hourlyRate = numberOrNull(baseHourlyRate);
+  const capped = paidHours > maxHoursPerPayPeriod;
+  const cappedBaseAmount = capped && hourlyRate !== null
+    ? Math.min(uncappedBaseAmount, hourlyRate * maxHoursPerPayPeriod)
+    : uncappedBaseAmount;
+  const manualReviewRequired = capped && hourlyRate === null;
+
+  return {
+    amount: r2(cappedBaseAmount * (percentage / 100)),
+    percentage,
+    payout_base_amount: r2(cappedBaseAmount),
+    uncapped_payout_base_amount: r2(uncappedBaseAmount),
+    payout_base_hours: r2(Math.min(paidHours, maxHoursPerPayPeriod)),
+    uncapped_paid_base_hours: r2(paidHours),
+    max_hours_per_pay_period: maxHoursPerPayPeriod,
+    capped_at_144_hours_per_pay_period: capped,
+    manual_review_required: manualReviewRequired,
+    source_rule_ids: ['CAO-PB-2024-R1014', 'CAO-PB-2024-R1015', 'CAO-PB-2024-R1016', 'CAO-PB-2024-R1017']
+  };
+}
+
 function getOvertimeRules(caoConfig) {
   const rules = caoConfig?.overtime_rules || {};
   return {
@@ -1728,7 +1754,19 @@ Deno.serve(async (req) => {
     let payslip = {
       // Bruto componenten
       base_salary: 0,
-      vacation_hours_call_worker: 0, // Vakantie-uren oproep (8% extra uren)
+      vacation_hours_call_worker: 0, // Compatibel veld: artikel 59 vakantiedagenuitbetaling oproepkracht
+      vacation_pay_call_worker_article_59: {
+        amount: 0,
+        percentage: 9.24,
+        payout_base_amount: 0,
+        uncapped_payout_base_amount: 0,
+        payout_base_hours: 0,
+        uncapped_paid_base_hours: 0,
+        max_hours_per_pay_period: 144,
+        capped_at_144_hours_per_pay_period: false,
+        manual_review_required: false,
+        source_rule_ids: ['CAO-PB-2024-R1014', 'CAO-PB-2024-R1015', 'CAO-PB-2024-R1016', 'CAO-PB-2024-R1017']
+      },
       vacation_paid: 0, // Doorbetaling verlof
       surcharges: {
         evening_10: { hours: 0, rate: 0, amount: 0 },
@@ -2178,13 +2216,7 @@ Deno.serve(async (req) => {
         calculationWarnings.push(`Meer dan ${overtimeRules.threshold_hours_per_pay_period} uur arbeidstijd gesignaleerd, maar art. 42 overwerktoeslag is niet van toepassing op dit CAO-profiel.`);
       }
       
-      // Voor oproepkrachten: bereken vakantie-uren (8% extra uren die uitbetaald worden)
-      if (isCallWorker) {
-        const vacationHours = totalHours * 0.08;
-        payslip.vacation_hours_call_worker = vacationHours * baseHourlyRate;
-      }
-      
-      // Totaal bruto loon = basis + vakantie-uren oproep + toeslagen
+      // Totaal bruto loon = basis + artikel 59 vakantiedagenuitbetaling oproep + toeslagen
       const totalSurcharges = 
         payslip.surcharges.evening_10.amount +
         payslip.surcharges.night_20.amount +
@@ -2196,6 +2228,26 @@ Deno.serve(async (req) => {
       const actingFunctionAllowanceAmount = payslip.acting_function_allowance.amount;
       const shiftChangeAllowanceAmount = payslip.shift_change_allowance.amount;
       const generalReserveAllowanceAmount = payslip.general_reserve_allowance.amount;
+      if (isCallWorker) {
+        const callWorkerVacationPayout = calculateCallWorkerVacationPayoutArticle59({
+          baseWageAmount: payslip.base_salary,
+          minimumServiceAmount,
+          baseHourlyRate,
+          paidBaseHours: totalHours + payslip.minimum_service_compensation.top_up_hours
+        });
+        payslip.vacation_pay_call_worker_article_59 = callWorkerVacationPayout;
+        payslip.vacation_hours_call_worker = callWorkerVacationPayout.amount;
+        if (callWorkerVacationPayout.manual_review_required) {
+          payrollRuntimeReviewItems.push({
+            rule_id: 'CAO-PB-2024-R1016',
+            domain: 'call_worker_vacation_payout',
+            message: 'Vakantiedagenuitbetaling oproepkracht is afgetopt op 144 uur, maar de basisuurloon-context ontbreekt voor definitieve cap-berekening.',
+            field: 'base_hourly_rate'
+          });
+          runtimePayrollFinalAllowed = false;
+          runtimeCalculationStatus = runtimeCalculationStatus === 'final' ? 'concept_manual_review' : runtimeCalculationStatus;
+        }
+      }
       const yearEndBonusEligibleBaseWage = payslip.base_salary + minimumServiceAmount;
       const yearEndBonusEligibleVacationAllowance = yearEndBonusEligibleBaseWage * ((caoConfig.vacation_allowance || 8) / 100);
       const yearEndBonusBasisAmount = yearEndBonusEligibleBaseWage + yearEndBonusEligibleVacationAllowance;
@@ -2218,16 +2270,10 @@ Deno.serve(async (req) => {
       if (isCallWorker) {
         // Bereken vakantiegeld en eindejaarsuitkering als percentage van basis + toeslagen
         const baseForAllowances = payslip.base_salary + minimumServiceAmount + totalSurcharges;
-        
-        // Bereken ORT verlof: vakantie-uren * gemiddelde ORT per uur
-        const vacationHours = totalHours * 0.08;
-        const ortVerlof = vacationHours * avgOrtPerHour;
-        
+
         payslip.accruals.vacation_allowance = baseForAllowances * ((caoConfig.vacation_allowance || 8) / 100);
         payslip.accruals.year_end_bonus = yearEndBonusBasisAmount * ((caoConfig.year_end_bonus || 2.01) / 100);
-        
-        // Voeg ORT verlof toe aan doorbetaling verlof
-        payslip.vacation_paid = ortVerlof;
+        payslip.vacation_paid = 0;
         
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
         payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
@@ -2387,6 +2433,18 @@ Deno.serve(async (req) => {
         // Bruto onderdeel
         base_salary: Math.round(payslip.base_salary * 100) / 100,
         vacation_hours_call_worker: Math.round(payslip.vacation_hours_call_worker * 100) / 100,
+        vacation_pay_call_worker_article_59: {
+          amount: r2(payslip.vacation_pay_call_worker_article_59.amount),
+          percentage: payslip.vacation_pay_call_worker_article_59.percentage,
+          payout_base_amount: r2(payslip.vacation_pay_call_worker_article_59.payout_base_amount),
+          uncapped_payout_base_amount: r2(payslip.vacation_pay_call_worker_article_59.uncapped_payout_base_amount),
+          payout_base_hours: r2(payslip.vacation_pay_call_worker_article_59.payout_base_hours),
+          uncapped_paid_base_hours: r2(payslip.vacation_pay_call_worker_article_59.uncapped_paid_base_hours),
+          max_hours_per_pay_period: payslip.vacation_pay_call_worker_article_59.max_hours_per_pay_period,
+          capped_at_144_hours_per_pay_period: payslip.vacation_pay_call_worker_article_59.capped_at_144_hours_per_pay_period,
+          manual_review_required: payslip.vacation_pay_call_worker_article_59.manual_review_required,
+          source_rule_ids: payslip.vacation_pay_call_worker_article_59.source_rule_ids
+        },
         vacation_paid: Math.round(payslip.vacation_paid * 100) / 100,
         surcharges: {
           evening_10: {
