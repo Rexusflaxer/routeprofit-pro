@@ -10,6 +10,104 @@
       "type": "string",
       "description": "ID van de gekoppelde klant"
     },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Default CAO-key voor diensten op dit object wanneer taak/planning geen specifiekere CAO-key meegeeft"
+    },
+    "default_service_function_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Default functietype voor diensten op dit object, bijvoorbeeld surveillant, receptioniste of klantrelatie"
+    },
+    "default_cao_function_group": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Default CAO-functiegroep voor diensten op dit object"
+    },
+    "default_cao_function_level": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Default CAO-functieniveau voor diensten op dit object"
+    },
+    "default_security_role_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Default beveiligingsstatus voor diensten op dit object, bijvoorbeeld aspirant_beveiliger of beveiliger"
+    },
+    "default_performs_security_work": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Default of diensten op dit object feitelijk beveiligingswerk zijn"
+    },
+    "default_security_work_percentage": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Default percentage beveiligingswerk voor diensten op dit object"
+    },
+    "default_works_event_or_hospitality_security": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Default of diensten op dit object evenementen- of horecabeveiliging betreffen"
+    },
+    "default_event_hospitality_cao_applies": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Default of voor diensten op dit object de evenementen-/horecabeveiligings-CAO geldt"
+    },
+    "default_works_airport_schiphol": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Default of diensten op dit object onder Schiphol/airport-context vallen"
+    },
+    "default_works_cash_value_logistics": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Default of diensten op dit object geld- en waardelogistiek betreffen"
+    },
+    "default_customer_billable": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Default of diensten op dit object klantfacturabel zijn"
+    },
+    "default_counts_toward_required_staffing": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Default of diensten op dit object meetellen voor verplichte bezetting"
+    },
+    "contract_assignment_policy": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Default contractmatchingbeleid voor diensten op dit object"
+    },
     "name": {
       "type": "string",
       "description": "Naam van het object/locatie"

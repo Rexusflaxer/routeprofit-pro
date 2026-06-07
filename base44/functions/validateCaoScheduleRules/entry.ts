@@ -31,6 +31,24 @@ function firstShiftCaoKey(shifts) {
   return null;
 }
 
+function addUnique(values, value) {
+  if (value && !values.includes(value)) values.push(value);
+}
+
+function collectShiftCaoKeys(shifts, body = {}) {
+  const keys = [];
+  addUnique(keys, body?.cao_key);
+  addUnique(keys, body?.service_context?.cao_key);
+  if (!Array.isArray(shifts)) return keys;
+  for (const shift of shifts) {
+    addUnique(keys, shift?.cao_key);
+    addUnique(keys, shift?.cao);
+    addUnique(keys, shift?.service_context?.cao_key);
+    addUnique(keys, shift?.service_context?.cao);
+  }
+  return keys;
+}
+
 function collectScheduleTaskIds(shifts, body = {}) {
   const ids = [];
   const bodyTaskIds = [body?.task_id, body?.service_context?.task_id].filter(Boolean);
@@ -42,6 +60,22 @@ function collectScheduleTaskIds(shifts, body = {}) {
       if (shift?.task_id && !ids.includes(shift.task_id)) ids.push(shift.task_id);
       const serviceTaskId = shift?.service_context?.task_id;
       if (serviceTaskId && !ids.includes(serviceTaskId)) ids.push(serviceTaskId);
+    }
+  }
+  return ids;
+}
+
+function collectScheduleObjectIds(shifts, body = {}) {
+  const ids = [];
+  const bodyObjectIds = [body?.object_id, body?.service_context?.object_id].filter(Boolean);
+  for (const id of bodyObjectIds) {
+    if (!ids.includes(id)) ids.push(id);
+  }
+  if (Array.isArray(shifts)) {
+    for (const shift of shifts) {
+      if (shift?.object_id && !ids.includes(shift.object_id)) ids.push(shift.object_id);
+      const serviceObjectId = shift?.service_context?.object_id;
+      if (serviceObjectId && !ids.includes(serviceObjectId)) ids.push(serviceObjectId);
     }
   }
   return ids;
@@ -61,6 +95,18 @@ async function firstTaskCaoKey(base44, shifts, body = {}) {
     } catch { /* taakcontext is optioneel */ }
   }
   return null;
+}
+
+async function collectObjectCaoKeys(base44, shifts, body = {}) {
+  const objectIds = collectScheduleObjectIds(shifts, body);
+  const keys = [];
+  for (const objectId of objectIds) {
+    try {
+      const object = await base44.asServiceRole.entities.SurveillanceObject.get(objectId);
+      addUnique(keys, object?.cao_key || object?.cao || null);
+    } catch { /* objectcontext is optioneel */ }
+  }
+  return keys;
 }
 
 async function lazySyncCao(base44, forceCaoSync = false, caoKey = CAO_PB_KEY) {
@@ -3588,13 +3634,40 @@ Deno.serve(async (req) => {
     }
 
     const taskCaoKey = await firstTaskCaoKey(base44, shifts, body);
+    const objectCaoKeys = await collectObjectCaoKeys(base44, shifts, body);
+    const objectCaoKey = objectCaoKeys[0] || null;
 
     const targetCaoKey = body.cao_key ||
       body.service_context?.cao_key ||
       firstShiftCaoKey(shifts) ||
       taskCaoKey ||
+      objectCaoKey ||
       personnelContext?.cao ||
       CAO_PB_KEY;
+
+    const explicitScheduleCaoKeys = collectShiftCaoKeys(shifts, body);
+    addUnique(explicitScheduleCaoKeys, taskCaoKey);
+    for (const key of objectCaoKeys) addUnique(explicitScheduleCaoKeys, key);
+    const conflictingScheduleCaoKeys = explicitScheduleCaoKeys.filter(key => key !== targetCaoKey);
+    if (explicitScheduleCaoKeys.length > 1 || conflictingScheduleCaoKeys.length > 0) {
+      return Response.json({
+        error: 'Roostercontrole geblokkeerd: dit rooster bevat diensten met meerdere of afwijkende cao_key waarden.',
+        calculation_warnings: [
+          'Splits de roostercontrole per cao_key of geef een consistente cao_key mee op alle diensten, taken en objecten.'
+        ],
+        period_start: period_start || null,
+        period_end: period_end || null,
+        personnel_id: personnel_id || null,
+        cao_key: targetCaoKey,
+        task_cao_key: taskCaoKey || null,
+        object_cao_keys: objectCaoKeys,
+        schedule_cao_keys: explicitScheduleCaoKeys,
+        manual_review_required: true,
+        payroll_final_allowed: false,
+        planning_allowed: false,
+        calculation_status: 'blocked_mixed_schedule_cao_keys'
+      }, { status: 400 });
+    }
 
     const syncResult = await lazySyncCao(base44, !!force_cao_sync, targetCaoKey);
 
@@ -3624,6 +3697,7 @@ Deno.serve(async (req) => {
         personnel_id: personnel_id || null,
         cao_key: targetCaoKey,
         task_cao_key: taskCaoKey || null,
+        object_cao_keys: objectCaoKeys,
         cao_runtime_support: scheduleRuntimeSupport,
         manual_review_required: true,
         payroll_final_allowed: false,
@@ -3721,6 +3795,7 @@ Deno.serve(async (req) => {
       cao_sync_status: caoSyncStatus,
       cao_key: targetCaoKey,
       task_cao_key: taskCaoKey || null,
+      object_cao_keys: objectCaoKeys,
       cao_runtime_support: scheduleRuntimeSupport,
       calculation_warnings: syncWarnings,
       scope_warnings: scopeWarnings,

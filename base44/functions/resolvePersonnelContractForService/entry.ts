@@ -63,47 +63,97 @@ function listAllowsValue(list, value) {
   };
 }
 
-function inferServiceContext({ body, task, route }) {
+function inferServiceContext({ body, task, route, object }) {
   const input = body.service_context || {};
   const taskType = input.task_type || task?.task_type || null;
-  const functionType = input.function_type || task?.service_function_type || null;
-  const caoFunctionGroup = input.cao_function_group || task?.required_cao_function_group || null;
-  const caoFunctionLevel = input.cao_function_level || task?.required_cao_function_level || null;
-  const securityRoleStatus = input.security_role_status || task?.required_security_role_status || null;
+  const functionType = input.function_type ||
+    task?.service_function_type ||
+    object?.default_service_function_type ||
+    null;
+  const caoFunctionGroup = input.cao_function_group ||
+    task?.required_cao_function_group ||
+    object?.default_cao_function_group ||
+    null;
+  const caoFunctionLevel = input.cao_function_level ||
+    task?.required_cao_function_level ||
+    object?.default_cao_function_level ||
+    null;
+  const securityRoleStatus = input.security_role_status ||
+    task?.required_security_role_status ||
+    object?.default_security_role_status ||
+    null;
   const caoKey = input.cao_key ||
     body.cao_key ||
     task?.cao_key ||
     task?.cao ||
+    object?.cao_key ||
+    object?.cao ||
     route?.cao_key ||
     route?.cao ||
     null;
+  const objectId = body.object_id || input.object_id || task?.object_id || object?.id || null;
 
   return {
     service_date: body.service_date || input.service_date || todayIsoDate(),
     cao_key: caoKey,
-    cao: input.cao || body.cao || task?.cao || route?.cao || null,
+    cao: input.cao || body.cao || task?.cao || object?.cao || route?.cao || null,
     company_id: body.company_id || input.company_id || route?.operating_company_id || null,
     route_id: body.route_id || null,
     task_id: body.task_id || null,
-    object_id: body.object_id || input.object_id || task?.object_id || null,
+    object_id: objectId,
     task_type: taskType,
     function_type: functionType,
     cao_function_group: caoFunctionGroup,
     cao_function_level: caoFunctionLevel,
     security_role_status: securityRoleStatus,
-    performs_security_work: input.performs_security_work ?? task?.performs_security_work ?? null,
-    security_work_percentage: input.security_work_percentage ?? task?.security_work_percentage ?? null,
-    works_airport_schiphol: input.works_airport_schiphol ?? task?.works_airport_schiphol ?? null,
-    works_cash_value_logistics: input.works_cash_value_logistics ?? task?.works_cash_value_logistics ?? null,
-    works_event_or_hospitality_security: input.works_event_or_hospitality_security ?? task?.works_event_or_hospitality_security ?? null,
-    event_hospitality_cao_applies: input.event_hospitality_cao_applies ?? task?.event_hospitality_cao_applies ?? null,
-    customer_billable: input.customer_billable ?? task?.customer_billable ?? null,
-    counts_toward_required_staffing: input.counts_toward_required_staffing ?? task?.counts_toward_required_staffing ?? null,
+    performs_security_work: input.performs_security_work ??
+      task?.performs_security_work ??
+      object?.default_performs_security_work ??
+      object?.performs_security_work ??
+      null,
+    security_work_percentage: input.security_work_percentage ??
+      task?.security_work_percentage ??
+      object?.default_security_work_percentage ??
+      object?.security_work_percentage ??
+      null,
+    works_airport_schiphol: input.works_airport_schiphol ??
+      task?.works_airport_schiphol ??
+      object?.default_works_airport_schiphol ??
+      object?.works_airport_schiphol ??
+      null,
+    works_cash_value_logistics: input.works_cash_value_logistics ??
+      task?.works_cash_value_logistics ??
+      object?.default_works_cash_value_logistics ??
+      object?.works_cash_value_logistics ??
+      null,
+    works_event_or_hospitality_security: input.works_event_or_hospitality_security ??
+      task?.works_event_or_hospitality_security ??
+      object?.default_works_event_or_hospitality_security ??
+      object?.works_event_or_hospitality_security ??
+      null,
+    event_hospitality_cao_applies: input.event_hospitality_cao_applies ??
+      task?.event_hospitality_cao_applies ??
+      object?.default_event_hospitality_cao_applies ??
+      object?.event_hospitality_cao_applies ??
+      null,
+    customer_billable: input.customer_billable ??
+      task?.customer_billable ??
+      object?.default_customer_billable ??
+      object?.customer_billable ??
+      null,
+    counts_toward_required_staffing: input.counts_toward_required_staffing ??
+      task?.counts_toward_required_staffing ??
+      object?.default_counts_toward_required_staffing ??
+      object?.counts_toward_required_staffing ??
+      null,
     internship_practice_trainer_personnel_id: input.internship_practice_trainer_personnel_id ?? task?.internship_practice_trainer_personnel_id ?? null,
     internship_mentor_personnel_id: input.internship_mentor_personnel_id ?? task?.internship_mentor_personnel_id ?? null,
     internship_one_to_one_guidance_confirmed: input.internship_one_to_one_guidance_confirmed ?? task?.internship_one_to_one_guidance_confirmed ?? null,
     internship_uniform_label_confirmed: input.internship_uniform_label_confirmed ?? task?.internship_uniform_label_confirmed ?? null,
-    contract_assignment_policy: input.contract_assignment_policy || task?.contract_assignment_policy || 'strict_contract_match'
+    contract_assignment_policy: input.contract_assignment_policy ||
+      task?.contract_assignment_policy ||
+      object?.contract_assignment_policy ||
+      'strict_contract_match'
   };
 }
 
@@ -454,7 +504,11 @@ Deno.serve(async (req) => {
 
     if (!personnel) return Response.json({ error: 'Medewerker niet gevonden.' }, { status: 404 });
 
-    const serviceContext = inferServiceContext({ body, task, route });
+    const input = body.service_context || {};
+    const objectId = body.object_id || input.object_id || task?.object_id || null;
+    const object = objectId ? await base44.entities.SurveillanceObject.get(objectId).catch(() => null) : null;
+
+    const serviceContext = inferServiceContext({ body, task, route, object });
     const warnings = [];
     const manualReviewReasons = [];
     const blockingReasons = [];

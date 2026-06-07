@@ -929,6 +929,10 @@ function firstScheduleCaoKey(workSchedule) {
   return null;
 }
 
+function addUnique(values, value) {
+  if (value && !values.includes(value)) values.push(value);
+}
+
 function collectScheduleCaoKeys(workSchedule) {
   const keys = [];
   for (const shift of workSchedule || []) {
@@ -938,7 +942,30 @@ function collectScheduleCaoKeys(workSchedule) {
       shiftContext.cao_key ||
       shiftContext.cao ||
       null;
-    if (key && !keys.includes(key)) keys.push(key);
+    addUnique(keys, key);
+  }
+  return keys;
+}
+
+function collectScheduleObjectIds(workSchedule, body = {}) {
+  const ids = [];
+  addUnique(ids, body?.object_id);
+  addUnique(ids, body?.service_context?.object_id);
+  for (const shift of workSchedule || []) {
+    addUnique(ids, shift?.object_id);
+    addUnique(ids, shift?.service_context?.object_id);
+  }
+  return ids;
+}
+
+async function collectObjectCaoKeys(base44, workSchedule, body = {}) {
+  const objectIds = collectScheduleObjectIds(workSchedule, body);
+  const keys = [];
+  for (const objectId of objectIds) {
+    try {
+      const object = await base44.asServiceRole.entities.SurveillanceObject.get(objectId);
+      addUnique(keys, object?.cao_key || object?.cao || null);
+    } catch { /* objectcontext is optioneel */ }
   }
   return keys;
 }
@@ -1393,14 +1420,18 @@ Deno.serve(async (req) => {
     // Bepaal referentiedatum op basis van de eerste dienst
     const firstShiftDate = work_schedule[0]?.date || amsterdamInstantParts(new Date()).date;
     const refDate = new Date(firstShiftDate);
+    const objectCaoKeys = await collectObjectCaoKeys(base44, work_schedule, body);
+    const objectCaoKey = objectCaoKeys[0] || null;
     const targetCaoKey = body.cao_key ||
       service_context?.cao_key ||
       firstScheduleCaoKey(work_schedule) ||
+      objectCaoKey ||
       personnel.cao ||
       CAO_PB_KEY;
 
     const calculationWarnings = [];
     const explicitScheduleCaoKeys = collectScheduleCaoKeys(work_schedule);
+    for (const key of objectCaoKeys) addUnique(explicitScheduleCaoKeys, key);
     const conflictingScheduleCaoKeys = explicitScheduleCaoKeys.filter(key => key !== targetCaoKey);
     if (explicitScheduleCaoKeys.length > 1 || conflictingScheduleCaoKeys.length > 0) {
       return Response.json({
@@ -1411,6 +1442,7 @@ Deno.serve(async (req) => {
         personnel_id,
         cao_key: targetCaoKey,
         schedule_cao_keys: explicitScheduleCaoKeys,
+        object_cao_keys: objectCaoKeys,
         cao_runtime_support: getCaoRuntimeSupport(targetCaoKey, 'calculatePersonnelCosts'),
         manual_review_required: true,
         payroll_final_allowed: false,
