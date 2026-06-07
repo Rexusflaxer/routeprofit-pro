@@ -1970,6 +1970,42 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
     securityRoleProofValues
   );
 
+  const persistContractScopeValue = (field, value, options = {}) => {
+    if (!hasAnyValue(value)) return;
+    if (options.skipUnknown && normalizeToken(value) === 'unknown') return;
+    if (!hasAnyValue(contract?.[field])) recommendedContractUpdate[field] = value;
+  };
+  const persistContractScopeArray = (field, value, options = {}) => {
+    const values = uniqueValues(normalizeArray(value));
+    if (values.length === 0) return;
+    const filtered = options.skipUnknown
+      ? values.filter(item => normalizeToken(item) !== 'unknown')
+      : values;
+    if (filtered.length > 0 && !hasAnyValue(contract?.[field])) recommendedContractUpdate[field] = filtered;
+  };
+
+  persistContractScopeValue('function_type', body.function_type);
+  persistContractScopeValue('cao_function_group', body.cao_function_group);
+  persistContractScopeValue('cao_function_level', body.cao_function_level);
+  persistContractScopeValue('security_role_status', body.security_role_status, { skipUnknown: true });
+  persistContractScopeValue('performs_security_work', body.performs_security_work);
+  persistContractScopeValue('security_work_percentage', body.security_work_percentage);
+  persistContractScopeValue('works_airport_schiphol', body.works_airport_schiphol);
+  persistContractScopeValue('works_cash_value_logistics', body.works_cash_value_logistics);
+  persistContractScopeValue('works_event_or_hospitality_security', body.works_event_or_hospitality_security);
+  persistContractScopeValue('event_hospitality_cao_applies', body.event_hospitality_cao_applies);
+  persistContractScopeValue('cao_scope_profile', body.cao_scope_profile, { skipUnknown: true });
+  persistContractScopeValue('cao_applicable_rule_profile', body.cao_applicable_rule_profile);
+  persistContractScopeValue('contract_assignment_policy', body.contract_assignment_policy);
+  persistContractScopeArray('allowed_function_types', body.allowed_function_types);
+  persistContractScopeArray('allowed_cao_function_groups', body.allowed_cao_function_groups);
+  persistContractScopeArray('allowed_cao_function_levels', body.allowed_cao_function_levels);
+  persistContractScopeArray('allowed_security_role_statuses', body.allowed_security_role_statuses, { skipUnknown: true });
+  persistContractScopeArray('allowed_task_types', body.allowed_task_types);
+  persistContractScopeArray('cao_excluded_rule_ids', body.cao_excluded_rule_ids);
+  persistContractScopeArray('cao_excluded_articles', body.cao_excluded_articles);
+  persistContractScopeArray('cao_excluded_chapters', body.cao_excluded_chapters);
+
   if (!explicitCompanyId) {
     violations.push({
       rule_id: 'APP-CONTRACT-BASIS-COMPANY',
@@ -4670,6 +4706,27 @@ function buildContractRulePersistence(result) {
     company_id: recommendedContractUpdate.company_id ?? undefined,
     cao_key: recommendedContractUpdate.cao_key ?? undefined,
     cao_configuration_id: recommendedContractUpdate.cao_configuration_id ?? undefined,
+    function_type: recommendedContractUpdate.function_type ?? undefined,
+    allowed_function_types: recommendedContractUpdate.allowed_function_types ?? undefined,
+    cao_function_group: recommendedContractUpdate.cao_function_group ?? undefined,
+    allowed_cao_function_groups: recommendedContractUpdate.allowed_cao_function_groups ?? undefined,
+    cao_function_level: recommendedContractUpdate.cao_function_level ?? undefined,
+    allowed_cao_function_levels: recommendedContractUpdate.allowed_cao_function_levels ?? undefined,
+    security_role_status: recommendedContractUpdate.security_role_status ?? undefined,
+    allowed_security_role_statuses: recommendedContractUpdate.allowed_security_role_statuses ?? undefined,
+    allowed_task_types: recommendedContractUpdate.allowed_task_types ?? undefined,
+    performs_security_work: recommendedContractUpdate.performs_security_work ?? undefined,
+    security_work_percentage: recommendedContractUpdate.security_work_percentage ?? undefined,
+    works_airport_schiphol: recommendedContractUpdate.works_airport_schiphol ?? undefined,
+    works_cash_value_logistics: recommendedContractUpdate.works_cash_value_logistics ?? undefined,
+    works_event_or_hospitality_security: recommendedContractUpdate.works_event_or_hospitality_security ?? undefined,
+    event_hospitality_cao_applies: recommendedContractUpdate.event_hospitality_cao_applies ?? undefined,
+    cao_scope_profile: recommendedContractUpdate.cao_scope_profile ?? undefined,
+    cao_applicable_rule_profile: recommendedContractUpdate.cao_applicable_rule_profile ?? undefined,
+    cao_excluded_rule_ids: recommendedContractUpdate.cao_excluded_rule_ids ?? undefined,
+    cao_excluded_articles: recommendedContractUpdate.cao_excluded_articles ?? undefined,
+    cao_excluded_chapters: recommendedContractUpdate.cao_excluded_chapters ?? undefined,
+    contract_assignment_policy: recommendedContractUpdate.contract_assignment_policy ?? undefined,
     contract_context_status: contractBasis?.status ?? undefined,
     contract_context_missing_fields: contractContextMissingFields,
     contract_context_checked_at: contractBasis ? new Date().toISOString() : undefined,
