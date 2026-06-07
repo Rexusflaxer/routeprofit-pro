@@ -630,6 +630,23 @@ function getActingFunctionAllowanceRules(caoConfig) {
   };
 }
 
+function resolveValueServicesEarlyShiftAllowance(shift, caoScope) {
+  const serviceContext = shift?.service_context || {};
+  const appliesScope = caoScope?.cao_scope_profile === 'cash_value_logistics' ||
+    shift?.works_cash_value_logistics === true ||
+    serviceContext.works_cash_value_logistics === true;
+  const clock = parseClockParts(shift?.start_time);
+  const applies = appliesScope && clock && clock.total_minutes >= 120 && clock.total_minutes < 240;
+  return {
+    applies: !!applies,
+    amount: applies ? 7.50 : 0,
+    rate_per_shift: 7.50,
+    tax_treatment: 'bruto',
+    source_rule_ids: applies ? ['CAO-PB-2024-R1609'] : [],
+    note: applies ? 'Geld- en waardelogistiek vroege dienst 02:00-04:00: EUR 7,50 bruto per dienst.' : null
+  };
+}
+
 function resolveActingFunctionAllowance(shift, personnel, paidHoursForShift, caoConfig) {
   const currentScale = numberOrZero(shift.current_cao_scale ?? personnel.cao_scale);
   const actingScale = numberOrZero(
@@ -2046,6 +2063,14 @@ Deno.serve(async (req) => {
         amount: 0,
         source_rule_ids: []
       },
+      value_services_early_shift_allowance: {
+        shift_count: 0,
+        amount: 0,
+        rate_per_shift: 7.50,
+        tax_treatment: 'bruto',
+        details: [],
+        source_rule_ids: []
+      },
       cao_retroactive_corrections: {
         applied: false,
         correction_count: 0,
@@ -2356,6 +2381,25 @@ Deno.serve(async (req) => {
             ])
           ];
         }
+
+        const valueServicesEarlyShiftAllowance = resolveValueServicesEarlyShiftAllowance(shift, caoScope);
+        if (valueServicesEarlyShiftAllowance.applies) {
+          payslip.value_services_early_shift_allowance.shift_count += 1;
+          payslip.value_services_early_shift_allowance.amount += valueServicesEarlyShiftAllowance.amount;
+          payslip.value_services_early_shift_allowance.details.push({
+            date,
+            start_time,
+            amount: valueServicesEarlyShiftAllowance.amount,
+            tax_treatment: valueServicesEarlyShiftAllowance.tax_treatment,
+            source_rule_ids: valueServicesEarlyShiftAllowance.source_rule_ids
+          });
+          payslip.value_services_early_shift_allowance.source_rule_ids = [
+            ...new Set([
+              ...payslip.value_services_early_shift_allowance.source_rule_ids,
+              ...valueServicesEarlyShiftAllowance.source_rule_ids
+            ])
+          ];
+        }
         
         payslip.shift_details.push({
           date,
@@ -2400,6 +2444,13 @@ Deno.serve(async (req) => {
             notice_days: shiftChangeAllowance.notice_days,
             manual_review_required: shiftChangeAllowance.manual_review_required,
             source_rule_ids: shiftChangeAllowance.source_rule_ids
+          },
+          value_services_early_shift_allowance: {
+            applies: valueServicesEarlyShiftAllowance.applies,
+            amount: r2(valueServicesEarlyShiftAllowance.amount),
+            rate_per_shift: valueServicesEarlyShiftAllowance.rate_per_shift,
+            tax_treatment: valueServicesEarlyShiftAllowance.tax_treatment,
+            source_rule_ids: valueServicesEarlyShiftAllowance.source_rule_ids
           }
         });
       }
@@ -2467,6 +2518,7 @@ Deno.serve(async (req) => {
       const actingFunctionAllowanceAmount = payslip.acting_function_allowance.amount;
       const shiftChangeAllowanceAmount = payslip.shift_change_allowance.amount;
       const generalReserveAllowanceAmount = payslip.general_reserve_allowance.amount;
+      const valueServicesEarlyShiftAllowanceAmount = payslip.value_services_early_shift_allowance.amount;
       if (isCallWorker) {
         const callWorkerVacationPayout = calculateCallWorkerVacationPayoutArticle59({
           baseWageAmount: payslip.base_salary,
@@ -2499,6 +2551,7 @@ Deno.serve(async (req) => {
         excluded_acting_function_allowance: actingFunctionAllowanceAmount,
         excluded_shift_change_allowance: shiftChangeAllowanceAmount,
         excluded_general_reserve_allowance: generalReserveAllowanceAmount,
+        excluded_value_services_early_shift_allowance: valueServicesEarlyShiftAllowanceAmount,
         source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
       };
       
@@ -2515,15 +2568,15 @@ Deno.serve(async (req) => {
         payslip.vacation_paid = 0;
         
         // Voor oproepkrachten wordt dit direct uitbetaald, niet gereserveerd
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + payslip.vacation_hours_call_worker + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount + payslip.accruals.vacation_allowance + payslip.accruals.year_end_bonus + payslip.vacation_paid;
       } else {
-        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount;
+        payslip.total_gross = payslip.base_salary + minimumServiceAmount + totalSurcharges + overtimeAmount + actingFunctionAllowanceAmount + shiftChangeAllowanceAmount + generalReserveAllowanceAmount + valueServicesEarlyShiftAllowanceAmount;
       }
       
       // Bereken pensioengrondslag (bruto loon - vakantiegeld/eindejaarsuitkering - franchise)
       // Voor oproepkrachten: basis + toeslagen (zonder vakantiegeld/eindejaarsuitkering)
       const pensionBaseAmount = isCallWorker 
-        ? (payslip.base_salary + totalSurcharges)
+        ? (payslip.base_salary + totalSurcharges + valueServicesEarlyShiftAllowanceAmount)
         : payslip.total_gross;
       
       // Franchise op jaarbasis, hier naar periode omrekenen (4-wekelijks = 13 periodes)
@@ -2539,7 +2592,7 @@ Deno.serve(async (req) => {
       payslip.pension_base = pensionBase;
       
       // Werknemersbijdragen - basis is altijd bruto loon exclusief vakantiegeld/eindejaarsuitkering voor oproepkrachten
-      const basisForPremiums = isCallWorker ? (payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges) : payslip.total_gross;
+      const basisForPremiums = isCallWorker ? (payslip.base_salary + payslip.vacation_hours_call_worker + totalSurcharges + valueServicesEarlyShiftAllowanceAmount) : payslip.total_gross;
       
       payslip.employee_deductions.premium_sfpb = basisForPremiums * ((caoConfig.premium_sfpb || 0.061) / 100);
       payslip.employee_deductions.premium_paww = basisForPremiums * ((caoConfig.premium_paww_employee || 0.1) / 100);
@@ -2795,6 +2848,17 @@ Deno.serve(async (req) => {
           amount: r2(payslip.general_reserve_allowance.amount),
           source_rule_ids: payslip.general_reserve_allowance.source_rule_ids
         },
+        value_services_early_shift_allowance: {
+          shift_count: payslip.value_services_early_shift_allowance.shift_count,
+          amount: r2(payslip.value_services_early_shift_allowance.amount),
+          rate_per_shift: payslip.value_services_early_shift_allowance.rate_per_shift,
+          tax_treatment: payslip.value_services_early_shift_allowance.tax_treatment,
+          details: payslip.value_services_early_shift_allowance.details.map(item => ({
+            ...item,
+            amount: r2(item.amount)
+          })),
+          source_rule_ids: payslip.value_services_early_shift_allowance.source_rule_ids
+        },
         cao_retroactive_corrections: payslip.cao_retroactive_corrections,
         total_gross: Math.round(payslip.total_gross * 100) / 100,
         is_call_worker: payslip.is_call_worker,
@@ -2826,6 +2890,7 @@ Deno.serve(async (req) => {
           excluded_acting_function_allowance: r2(payslip.year_end_bonus_basis.excluded_acting_function_allowance),
           excluded_shift_change_allowance: r2(payslip.year_end_bonus_basis.excluded_shift_change_allowance),
           excluded_general_reserve_allowance: r2(payslip.year_end_bonus_basis.excluded_general_reserve_allowance),
+          excluded_value_services_early_shift_allowance: r2(payslip.year_end_bonus_basis.excluded_value_services_early_shift_allowance || 0),
           source_rule_ids: payslip.year_end_bonus_basis.source_rule_ids
         },
         

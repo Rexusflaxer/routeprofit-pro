@@ -398,6 +398,26 @@ function calculateVacationEntitlementForPayPeriod({ paidHoursPerPayPeriod, vacat
     ]
   };
 }
+
+function resolveValueServicesEarlyShiftAllowance({ date, startTime, shift = null, caoScope }) {
+  const serviceContext = shift?.service_context || {};
+  const appliesScope = caoScope?.cao_scope_profile === 'cash_value_logistics' ||
+    shift?.works_cash_value_logistics === true ||
+    serviceContext.works_cash_value_logistics === true;
+  const clock = parseClockParts(startTime || shift?.start_time);
+  const applies = appliesScope && clock && clock.total_minutes >= 120 && clock.total_minutes < 240;
+  return {
+    applies: !!applies,
+    date,
+    start_time: startTime || shift?.start_time || null,
+    amount: applies ? 7.50 : 0,
+    rate_per_shift: 7.50,
+    tax_treatment: 'bruto',
+    source_rule_ids: applies ? ['CAO-PB-2024-R1609'] : [],
+    note: applies ? 'Geld- en waardelogistiek vroege dienst 02:00-04:00: EUR 7,50 bruto per dienst.' : null
+  };
+}
+
 function timeToMinutes(t) { const [h, m] = t.split(':').map(Number); return h * 60 + m; }
 function minutesToTime(m) {
   const total = ((m % (24 * 60)) + (24 * 60)) % (24 * 60);
@@ -950,6 +970,11 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
     .map(([type, amount]) => ({ label: surchargeLabels[type], amount: r2(amount) }));
   const surchargesTotal = Object.values(surchargeAmounts).reduce((a, b) => a + b, 0);
   const isCallWorker = isCallWorkerForRouteCost(personnel, contractResolution);
+  const valueServicesEarlyShiftAllowance = resolveValueServicesEarlyShiftAllowance({
+    date,
+    startTime,
+    caoScope
+  });
   const grossBeforeDirectPayouts = baseSalary + surchargesTotal;
   const callWorkerVacationPayout = isCallWorker
     ? calculateCallWorkerVacationPayoutArticle59({
@@ -976,13 +1001,14 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
   const yearEndBonusBasisAmount = yearEndBonusEligibleBaseWage + yearEndBonusEligibleVacationAllowance;
   const yearEndBonus = yearEndBonusBasisAmount * ((caoConfig.year_end_bonus || 2.01) / 100);
   const directCallWorkerAllowancePayouts = isCallWorker ? vacationAllowance + yearEndBonus : 0;
-  const totalGross = grossBeforeDirectPayouts + callWorkerVacationPayout.amount + directCallWorkerAllowancePayouts;
+  const valueServicesEarlyShiftAllowanceAmount = valueServicesEarlyShiftAllowance.amount;
+  const totalGross = grossBeforeDirectPayouts + callWorkerVacationPayout.amount + directCallWorkerAllowancePayouts + valueServicesEarlyShiftAllowanceAmount;
   const premiumBasis = isCallWorker
-    ? grossBeforeDirectPayouts + callWorkerVacationPayout.amount
+    ? grossBeforeDirectPayouts + callWorkerVacationPayout.amount + valueServicesEarlyShiftAllowanceAmount
     : totalGross;
 
   const franchisePerPeriod = (caoConfig.pension_base_salary_threshold || 16164) / 13;
-  const pensionBaseAmount = isCallWorker ? grossBeforeDirectPayouts : totalGross;
+  const pensionBaseAmount = isCallWorker ? grossBeforeDirectPayouts + valueServicesEarlyShiftAllowanceAmount : totalGross;
   const pensionBase = Math.max(0, pensionBaseAmount - franchisePerPeriod);
   const totalPensionPremium = pensionBase * ((caoConfig.pension_premium_rate_total || 24.1) / 100);
   const employerPension = totalPensionPremium * ((caoConfig.pension_premium_employer || 60) / 100);
@@ -1020,6 +1046,13 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
   return {
     base_hourly_rate: baseHourlyRate, total_hours: totalHours,
     base_salary: r2(baseSalary), surcharges_total: r2(surchargesTotal), surcharge_details: surchargeDetails,
+    value_services_early_shift_allowance: {
+      applies: valueServicesEarlyShiftAllowance.applies,
+      amount: r2(valueServicesEarlyShiftAllowance.amount),
+      rate_per_shift: valueServicesEarlyShiftAllowance.rate_per_shift,
+      tax_treatment: valueServicesEarlyShiftAllowance.tax_treatment,
+      source_rule_ids: valueServicesEarlyShiftAllowance.source_rule_ids
+    },
     total_gross: r2(totalGross),
     employer_costs_total: r2(employerCostsTotal),
     employer_costs: {
@@ -1035,6 +1068,7 @@ function calculateShiftCost(personnel, date, startTime, endTime, caoConfig, rawS
         vacation_allowance_on_eligible_base_wage: r2(yearEndBonusEligibleVacationAllowance),
         eligible_amount_including_vacation_allowance: r2(yearEndBonusBasisAmount),
         excluded_special_hours_allowances: r2(surchargesTotal),
+        excluded_value_services_early_shift_allowance: r2(valueServicesEarlyShiftAllowanceAmount),
         source_rule_ids: ['CAO-PB-2024-R0770', 'CAO-PB-2024-R0771', 'CAO-PB-2024-R0772', 'CAO-PB-2024-R0773']
       },
       ort_vacation_reservation: r2(ortVacationReservation),
