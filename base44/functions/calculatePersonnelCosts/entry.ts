@@ -1885,6 +1885,11 @@ function collectContractResolutionCaoReferences(results) {
         start_time: item?.start_time || null,
         end_time: item?.end_time || null,
         contract_id: resolution.contract_id || resolution.selected_contract?.id || null,
+        company_id: resolution.company_id ||
+          resolution.selected_contract?.company_id ||
+          resolution.service_context?.company_id ||
+          resolution.service_context?.operating_company_id ||
+          null,
         cao_configuration_id: resolution.cao_configuration_id || null,
         cao_key: resolution.cao_key || null,
         cao_resolution_source: resolution.cao_resolution_source || null,
@@ -1895,10 +1900,88 @@ function collectContractResolutionCaoReferences(results) {
     .filter(ref =>
       ref.cao_configuration_id ||
       ref.cao_key ||
+      ref.company_id ||
+      ref.contract_id ||
       ref.cao_resolution_source ||
       ref.candidate_configuration_ids.length > 0 ||
       ref.candidate_company_cao_assignment_ids.length > 0
     );
+}
+
+function collectPayrollRunRouteIds(workSchedule, body = {}) {
+  const ids = [];
+  addUnique(ids, body.route_id);
+  addUnique(ids, body.service_context?.route_id);
+  for (const shift of workSchedule || []) {
+    addUnique(ids, shift?.route_id);
+    addUnique(ids, shift?.service_context?.route_id);
+  }
+  return ids;
+}
+
+function collectPayrollRunCompanyIds({ body = {}, workSchedule = [], contractReferences = [] }) {
+  const ids = [];
+  for (const ref of contractReferences || []) addUnique(ids, ref.company_id);
+  addUnique(ids, body.company_id);
+  addUnique(ids, body.operating_company_id);
+  addUnique(ids, body.service_context?.company_id);
+  addUnique(ids, body.service_context?.operating_company_id);
+  for (const shift of workSchedule || []) {
+    addUnique(ids, shift?.company_id);
+    addUnique(ids, shift?.operating_company_id);
+    addUnique(ids, shift?.service_context?.company_id);
+    addUnique(ids, shift?.service_context?.operating_company_id);
+  }
+  return ids;
+}
+
+function collectPayrollRunContractIds({ body = {}, contractReferences = [] }) {
+  const ids = [];
+  addUnique(ids, body.contract_id);
+  addUnique(ids, body.service_context?.contract_id);
+  for (const ref of contractReferences || []) addUnique(ids, ref.contract_id);
+  return ids;
+}
+
+function buildPayrollRunContractSummary({ body = {}, workSchedule = [], contractResolutionResults = [] }) {
+  const contractReferences = collectContractResolutionCaoReferences(contractResolutionResults);
+  const routeIds = collectPayrollRunRouteIds(workSchedule, body);
+  const companyIds = collectPayrollRunCompanyIds({ body, workSchedule, contractReferences });
+  const contractIds = collectPayrollRunContractIds({ body, contractReferences });
+  const caoKeys = [...new Set(contractReferences.map(ref => ref.cao_key).filter(Boolean))];
+  const caoConfigurationIds = [...new Set(contractReferences.map(ref => ref.cao_configuration_id).filter(Boolean))];
+  const resultCount = (contractResolutionResults || []).length;
+  const payrollFinalCount = (contractResolutionResults || [])
+    .filter(item => item?.contract_resolution?.payroll_final_allowed === true)
+    .length;
+  const blockedCount = (contractResolutionResults || [])
+    .filter(contractResolutionBlocksPayroll)
+    .length;
+
+  return {
+    route_id: routeIds.length === 1 ? routeIds[0] : null,
+    route_ids: routeIds,
+    company_id: companyIds.length === 1 ? companyIds[0] : null,
+    company_ids: companyIds,
+    contract_ids: contractIds,
+    contract_resolution_summary: {
+      contract_resolution_required: resultCount > 0,
+      contract_resolution_count: resultCount,
+      payroll_final_contract_resolution_count: payrollFinalCount,
+      blocked_contract_resolution_count: blockedCount,
+      route_ids: routeIds,
+      company_ids: companyIds,
+      contract_ids: contractIds,
+      cao_keys: caoKeys,
+      cao_configuration_ids: caoConfigurationIds,
+      mixed_routes: routeIds.length > 1,
+      mixed_companies: companyIds.length > 1,
+      mixed_contracts: contractIds.length > 1,
+      mixed_cao_keys: caoKeys.length > 1,
+      mixed_cao_configurations: caoConfigurationIds.length > 1,
+      references: contractReferences
+    }
+  };
 }
 
 function normalizeCorrectionAdjustments(value) {
@@ -3880,6 +3963,20 @@ Deno.serve(async (req) => {
       },
       shift_details: payslip.shift_details
     };
+    const payrollRunContractSummary = buildPayrollRunContractSummary({
+      body: {
+        ...body,
+        contract_id,
+        company_id,
+        route_id,
+        task_id,
+        object_id,
+        service_context
+      },
+      workSchedule: work_schedule,
+      contractResolutionResults
+    });
+    responsePayload.payroll_run_contract_summary = payrollRunContractSummary;
 
     if (record_payroll_run === true) {
       if (responsePayload.payroll_final_allowed !== true) {
@@ -3896,7 +3993,12 @@ Deno.serve(async (req) => {
       }
       const run = await base44.asServiceRole.entities.PayrollCalculationRun.create({
         personnel_id,
-        route_id: null,
+        route_id: payrollRunContractSummary.route_id,
+        route_ids: payrollRunContractSummary.route_ids,
+        company_id: payrollRunContractSummary.company_id,
+        company_ids: payrollRunContractSummary.company_ids,
+        contract_ids: payrollRunContractSummary.contract_ids,
+        contract_resolution_summary: payrollRunContractSummary.contract_resolution_summary,
         cao_configuration_id: caoConfig.id,
         cao_key: caoConfig.cao_key || targetCaoKey,
         cao_version_label: caoConfig.version_label || caoConfig.name,
@@ -3934,6 +4036,7 @@ Deno.serve(async (req) => {
           object_id,
           service_context,
           contract_resolution_results: contractResolutionResults,
+          payroll_run_contract_summary: payrollRunContractSummary,
           apply_queued_cao_corrections: applyQueuedCaoCorrections,
           cao_payroll_correction_ids: caoCorrectionApplication.correction_ids,
           cao_payroll_correction_review_ids: caoCorrectionApplication.review_ids,

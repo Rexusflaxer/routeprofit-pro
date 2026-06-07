@@ -14,6 +14,42 @@
         "null"
       ]
     },
+    "route_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Alle route IDs die in deze loonrun voorkomen. route_id is alleen gevuld als exact één route audit-proof is vastgesteld."
+    },
+    "company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Werkgever/bedrijf waarop deze loonrun ziet. Null als meerdere bedrijven voorkomen of als bedrijf niet audit-proof is vastgesteld."
+    },
+    "company_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Alle werkgevers/bedrijven die via contractresolutie of dienstcontext in deze loonrun voorkomen."
+    },
+    "contract_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Arbeidscontracten die voor de diensten in deze loonrun zijn gebruikt."
+    },
+    "contract_resolution_summary": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Audit-samenvatting van contractresolutie: routes, bedrijven, contracten, gemengde context en payroll-final bewijs."
+    },
     "cao_configuration_id": {
       "type": "string"
     },
