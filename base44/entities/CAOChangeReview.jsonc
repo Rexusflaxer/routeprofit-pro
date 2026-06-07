@@ -92,6 +92,30 @@
       ],
       "format": "date"
     },
+    "effective_from_source": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Herkomst van de gebruikte ingangsdatum, bijv. change.effective_from, change.valid_from, change.applies_from of candidate_configuration.valid_from."
+    },
+    "effective_from_inferred": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als effective_from is afgeleid uit de CAO-configuratie en niet expliciet op de wijziging stond."
+    },
+    "effective_date_manual_review_required": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als de ingangsdatum/werkingsperiode niet veilig automatisch kan worden toegepast op historische payroll."
+    },
+    "effective_date_warnings": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Auditnotities over ontbrekende, afgeleide of conflicterende ingangsdata."
+    },
     "payroll_impact": {
       "type": "boolean",
       "default": false,
