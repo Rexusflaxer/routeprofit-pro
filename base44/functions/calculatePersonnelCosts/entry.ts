@@ -1478,6 +1478,7 @@ function shiftHasContractResolutionContext(shift) {
   return !!(
     shift.contract_id ||
     shift.company_id ||
+    shift.operating_company_id ||
     shift.route_id ||
     shift.task_type ||
     shift.task_id ||
@@ -1516,6 +1517,7 @@ function shouldEnforceContractResolution({ body, workSchedule }) {
   if (
     body.contract_id ||
     body.company_id ||
+    body.operating_company_id ||
     body.route_id ||
     body.task_id ||
     body.object_id ||
@@ -1703,7 +1705,15 @@ function resolvePayrollCaoConfiguration(configs, { caoKey, periodStart, periodEn
 function buildShiftContractServiceContext({ body, shift }) {
   const bodyContext = body.service_context || {};
   const shiftContext = shift.service_context || {};
-  const companyId = shift.company_id || body.company_id || shiftContext.company_id || bodyContext.company_id || null;
+  const companyId = shift.company_id ||
+    shift.operating_company_id ||
+    body.company_id ||
+    body.operating_company_id ||
+    shiftContext.company_id ||
+    shiftContext.operating_company_id ||
+    bodyContext.company_id ||
+    bodyContext.operating_company_id ||
+    null;
   const routeId = shift.route_id || shiftContext.route_id || body.route_id || bodyContext.route_id || null;
   const taskId = shift.task_id || shiftContext.task_id || body.task_id || bodyContext.task_id || null;
   const objectId = shift.object_id || body.object_id || shiftContext.object_id || bodyContext.object_id || null;
@@ -1722,6 +1732,7 @@ function buildShiftContractServiceContext({ body, shift }) {
       body.cao ||
       null,
     company_id: companyId,
+    operating_company_id: companyId,
     route_id: routeId,
     task_id: taskId,
     object_id: objectId,
