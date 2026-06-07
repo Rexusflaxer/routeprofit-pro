@@ -244,7 +244,7 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   },
   'applyCaoContractRules.probation_and_probation_dismissal': {
     functions: ['applyCaoContractRules'],
-    rule_ids: ruleIds(315, 316, 317, 321, 322)
+    rule_ids: ruleIds(313, 314, 315, 316, 317, 318, 319, 320, 321, 322)
   },
   'applyCaoContractRules.fulltime_parttime_contract_model_articles_10_11': {
     functions: ['applyCaoContractRules', 'resolvePersonnelContractForService', 'validateCaoScheduleRules', 'calculatePersonnelCosts'],
@@ -390,6 +390,8 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'calculateCaoLeaveAndSickness.articles_59_65_66_67': {
     functions: ['calculateCaoLeaveAndSickness'],
     rule_ids: [
+      ...ruleRange(1133, 1137),
+      ...ruleIds(1147, 1156, 1164),
       ...ruleIds(998),
       ...ruleRange(999, 1006),
       ...ruleIds(1007),
@@ -399,6 +401,13 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       ...ruleRange(1157, 1163),
       ...ruleRange(1165, 1167),
       ...ruleRange(1172, 1184)
+    ]
+  },
+  'calculateCaoLeaveAndSickness.articles_68_69_70_disability_compliance': {
+    functions: ['calculateCaoLeaveAndSickness', 'calculatePersonnelCosts'],
+    rule_ids: [
+      ...ruleRange(1186, 1193),
+      ...ruleRange(1195, 1198)
     ]
   },
   'calculateCaoLeaveAndSickness.article_59_reference_and_protocol_ii_vacation': {

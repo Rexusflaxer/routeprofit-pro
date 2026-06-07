@@ -464,7 +464,9 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'applyCaoContractRules.probation_and_probation_dismissal': {
     functions: ['applyCaoContractRules'],
     rule_ids: [
+      'CAO-PB-2024-R0313', 'CAO-PB-2024-R0314',
       'CAO-PB-2024-R0315', 'CAO-PB-2024-R0316', 'CAO-PB-2024-R0317',
+      'CAO-PB-2024-R0318', 'CAO-PB-2024-R0319', 'CAO-PB-2024-R0320',
       'CAO-PB-2024-R0321', 'CAO-PB-2024-R0322'
     ]
   },
@@ -737,6 +739,9 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
   'calculateCaoLeaveAndSickness.articles_59_65_66_67': {
     functions: ['calculateCaoLeaveAndSickness'],
     rule_ids: [
+      'CAO-PB-2024-R1133', 'CAO-PB-2024-R1134', 'CAO-PB-2024-R1135',
+      'CAO-PB-2024-R1136', 'CAO-PB-2024-R1137', 'CAO-PB-2024-R1147',
+      'CAO-PB-2024-R1156', 'CAO-PB-2024-R1164',
       'CAO-PB-2024-R0998',
       'CAO-PB-2024-R0999', 'CAO-PB-2024-R1000', 'CAO-PB-2024-R1001',
       'CAO-PB-2024-R1002', 'CAO-PB-2024-R1003', 'CAO-PB-2024-R1004',
@@ -756,6 +761,15 @@ const LOCAL_RUNTIME_RULE_BINDINGS = {
       'CAO-PB-2024-R1178', 'CAO-PB-2024-R1179', 'CAO-PB-2024-R1180',
       'CAO-PB-2024-R1181', 'CAO-PB-2024-R1182', 'CAO-PB-2024-R1183',
       'CAO-PB-2024-R1184'
+    ]
+  },
+  'calculateCaoLeaveAndSickness.articles_68_69_70_disability_compliance': {
+    functions: ['calculateCaoLeaveAndSickness', 'calculatePersonnelCosts'],
+    rule_ids: [
+      'CAO-PB-2024-R1186', 'CAO-PB-2024-R1187', 'CAO-PB-2024-R1188',
+      'CAO-PB-2024-R1189', 'CAO-PB-2024-R1190', 'CAO-PB-2024-R1191',
+      'CAO-PB-2024-R1192', 'CAO-PB-2024-R1193', 'CAO-PB-2024-R1195',
+      'CAO-PB-2024-R1196', 'CAO-PB-2024-R1197', 'CAO-PB-2024-R1198'
     ]
   },
   'calculateCaoLeaveAndSickness.article_59_reference_and_protocol_ii_vacation': {

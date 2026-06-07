@@ -67,6 +67,16 @@ function round2(value) {
   return Math.round(Number(value || 0) * 100) / 100;
 }
 
+function caoRuleId(number) {
+  return `CAO-PB-2024-R${String(number).padStart(4, '0')}`;
+}
+
+function caoRuleRange(start, end) {
+  const ids = [];
+  for (let number = start; number <= end; number += 1) ids.push(caoRuleId(number));
+  return ids;
+}
+
 function firstNumber(...values) {
   for (const value of values) {
     const n = numberOrNull(value);
@@ -1196,6 +1206,122 @@ function waitingDayExceptionApplies(input) {
     booleanOrNull(input.disabled_employee_status) === true;
 }
 
+function resolveSicknessDisabilityCompliancePolicy(input) {
+  const manualReviewItems = [];
+  const warnings = [];
+  const sourceRuleIds = [...caoRuleRange(1186, 1198)];
+  const statutoryNoWage = booleanOrNull(
+    input.no_wage_due_to_bw_7_629_3 ??
+    input.article_68_no_wage_entitlement ??
+    input.sickness_no_wage_entitlement_confirmed
+  );
+  const controlRulesNotFollowed = booleanOrNull(
+    input.sickness_control_rules_not_followed ??
+    input.control_instructions_not_followed ??
+    input.employee_not_following_sickness_rules
+  );
+  const wageSuspended = booleanOrNull(
+    input.sickness_wage_suspended ??
+    input.employer_suspends_sickness_wage ??
+    input.suspend_sickness_wage_payment
+  );
+  const supplementRefused = booleanOrNull(
+    input.sickness_supplement_refused ??
+    input.employer_refuses_sickness_supplement ??
+    input.article_68_supplement_refusal
+  );
+  const abuseProvision = booleanOrNull(
+    input.sickness_abuse_of_provision ??
+    input.misuse_sickness_arrangement
+  );
+  const occupationalDoctorConsulted = booleanOrNull(
+    input.company_doctor_consulted ??
+    input.arbo_service_consulted ??
+    input.occupational_health_service_consulted
+  );
+  const thirdPartyCausedDisability = booleanOrNull(
+    input.third_party_caused_disability ??
+    input.disability_caused_by_third_party ??
+    input.sickness_due_to_third_party
+  );
+  const employeeCooperatesDamageRecovery = booleanOrNull(
+    input.employee_cooperates_damage_recovery ??
+    input.employee_cooperates_with_third_party_recovery
+  );
+  const preventionPolicyAvailable = booleanOrNull(
+    input.employer_sickness_prevention_policy_available ??
+    input.preventiebeleid_ziekteverzuim_aanwezig
+  );
+
+  if (controlRulesNotFollowed === true && wageSuspended !== true) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R1187',
+      domain: 'sickness_disability_compliance',
+      field: 'sickness_wage_suspended',
+      message: 'Controlevoorschriften worden niet nagekomen; leg vast of loonbetaling formeel is opgeschort.'
+    });
+  }
+  if ((supplementRefused === true || abuseProvision === true) && occupationalDoctorConsulted !== true) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R1191',
+      domain: 'sickness_disability_compliance',
+      field: 'company_doctor_consulted/arbo_service_consulted',
+      message: 'Weigeren van de ziekteaanvulling of misbruiksignaal vereist overleg met bedrijfsarts/arbodienst.'
+    });
+  }
+  if (thirdPartyCausedDisability === true && employeeCooperatesDamageRecovery !== true) {
+    manualReviewItems.push({
+      rule_id: 'CAO-PB-2024-R1193',
+      domain: 'sickness_disability_compliance',
+      field: 'employee_cooperates_damage_recovery',
+      message: 'Arbeidsongeschiktheid door derde: werknemer moet meewerken aan schadeverhaal; bevestiging ontbreekt.'
+    });
+  }
+  if (preventionPolicyAvailable === false) {
+    warnings.push('Preventiebeleid tegen onnodig ziekteverzuim/arbeidsongeschiktheid is als ontbrekend gemarkeerd.');
+  }
+
+  return {
+    statutory_no_wage_entitlement_confirmed: statutoryNoWage === true,
+    payment_hold_required: controlRulesNotFollowed === true && wageSuspended === true,
+    supplement_refusal_confirmed: supplementRefused === true,
+    abuse_of_sickness_provision_signal: abuseProvision === true,
+    occupational_doctor_or_arbo_consulted: occupationalDoctorConsulted,
+    third_party_damage_recovery_required: thirdPartyCausedDisability === true,
+    employee_cooperates_damage_recovery: employeeCooperatesDamageRecovery,
+    employer_prevention_policy_available: preventionPolicyAvailable,
+    overrides_sickness_payment_to_zero: statutoryNoWage === true,
+    payroll_final_allowed: statutoryNoWage === true
+      ? true
+      : !(controlRulesNotFollowed === true && wageSuspended !== true) && manualReviewItems.length === 0,
+    manual_review_required: manualReviewItems.length > 0,
+    manual_review_items: manualReviewItems,
+    warnings,
+    source_rule_ids: sourceRuleIds
+  };
+}
+
+function finalizeSicknessPaymentResult(result, policy) {
+  if (!result || result.error) return result;
+  const missingEvidence = [
+    ...(result.missing_evidence || []),
+    ...(policy.manual_review_items || [])
+  ];
+  const warnings = [
+    ...(result.warnings || []),
+    ...(policy.warnings || [])
+  ];
+  return {
+    ...result,
+    rule_ids: [...new Set([...(result.rule_ids || []), ...(policy.source_rule_ids || [])])],
+    sickness_disability_compliance_policy: policy,
+    manual_review_required: result.manual_review_required === true || policy.manual_review_required === true,
+    payroll_final_allowed: result.payroll_final_allowed !== false && policy.payroll_final_allowed !== false,
+    missing_evidence: missingEvidence,
+    warnings
+  };
+}
+
 function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParameters(null)) {
   const {
     sickness_start_date,
@@ -1213,6 +1339,7 @@ function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParame
   const missingEvidence = [];
   const ruleIds = ['CAO-PB-2024-R1165', 'CAO-PB-2024-R1166'];
   let manualReviewRequired = false;
+  const sicknessCompliancePolicy = resolveSicknessDisabilityCompliancePolicy(input);
   const contractEndDate = asIsoDate(input.contract_end_date || input.employment_end_date);
   const requestedEndDate = asIsoDate(sickness_end_date) || new Date().toISOString().slice(0, 10);
   const effectiveEndDate = contractEndDate && contractEndDate < requestedEndDate ? contractEndDate : requestedEndDate;
@@ -1239,6 +1366,20 @@ function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParame
   const seniority = numberOrNull(industry_seniority_periods) ?? 0;
   const dailySalary = numberOrNull(input.daily_sickness_salary) ??
     ((numberOrNull(base_gross_salary) + (numberOrNull(avg_ort_per_period) ?? 0)) / (numberOrNull(input.payable_days_per_pay_period) ?? 20));
+
+  if (sicknessCompliancePolicy.overrides_sickness_payment_to_zero) {
+    return finalizeSicknessPaymentResult({
+      rule_ids: [...ruleIds, 'CAO-PB-2024-R1186'],
+      sickness_days_total: sicknessDays,
+      payment_percentage: 0,
+      total_sickness_payment: 0,
+      manual_review_required: manualReviewRequired,
+      payroll_final_allowed: !manualReviewRequired,
+      missing_evidence: missingEvidence,
+      warnings,
+      note: 'Artikel 68/BW 7:629 lid 3: geen recht op loon tijdens arbeidsongeschiktheid is expliciet bevestigd.'
+    }, sicknessCompliancePolicy);
+  }
 
   const callAgreementType = input.call_agreement_type || input.call_contract_type || null;
   if (isCallWorker(input)) {
@@ -1268,7 +1409,7 @@ function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParame
             message: 'Bij nul-urencontracten kan buiten de oproepperiode in sommige gevallen een 52-weken aanspraak bestaan; leg vast dat dit is beoordeeld.'
           });
         }
-        return {
+        return finalizeSicknessPaymentResult({
           rule_ids: ruleIds,
           sickness_days_total: sicknessDays,
           call_agreement_type: callAgreementType,
@@ -1280,10 +1421,10 @@ function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParame
           missing_evidence: outsideCallMissingEvidence,
           warnings,
           note: 'Geen ziekengeld buiten of na afloop van de oproepperiode, tenzij 52-weken aanspraak voor nul-uren afzonderlijk is vastgesteld.'
-        };
+        }, sicknessCompliancePolicy);
       }
       const callPeriodAmount = numberOrNull(input.agreed_call_period_gross_wage) ?? (dailySalary * sicknessDays);
-      return {
+      return finalizeSicknessPaymentResult({
         rule_ids: ruleIds,
         sickness_days_total: sicknessDays,
         call_agreement_type: callAgreementType,
@@ -1299,7 +1440,7 @@ function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParame
         missing_evidence: missingEvidence,
         warnings,
         note: 'Oproepkracht ziek tijdens oproepperiode: 70% over afgesproken oproepperiode, minimaal minimumloon.'
-      };
+      }, sicknessCompliancePolicy);
     }
 
     if (callAgreementType === 'min_max') {
@@ -1321,7 +1462,7 @@ function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParame
         manualReviewRequired = true;
         warnings.push('Gemiddelde arbeidsduur over 52 weken lijkt hoger dan garantie-uren; artikel 67 kan hogere loondoorbetaling geven. Handmatige review vereist.');
       }
-      return {
+      return finalizeSicknessPaymentResult({
         rule_ids: ruleIds,
         sickness_days_total: sicknessDays,
         call_agreement_type: callAgreementType,
@@ -1337,7 +1478,7 @@ function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParame
         missing_evidence: missingEvidence,
         warnings,
         note: 'Min-maxcontract: 70% over garantie-uren, met mogelijke 52-weken aanspraak bij gemiddeld meer werken.'
-      };
+      }, sicknessCompliancePolicy);
     }
 
     manualReviewRequired = true;
@@ -1353,7 +1494,7 @@ function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParame
     const hasWaitingDay = !waitingDayExceptionApplies(input);
     if (!hasWaitingDay) ruleIds.push('CAO-PB-2024-R1150', 'CAO-PB-2024-R1151', 'CAO-PB-2024-R1152', 'CAO-PB-2024-R1153', 'CAO-PB-2024-R1154');
     const paidDays = hasWaitingDay ? Math.max(0, sicknessDays - 1) : sicknessDays;
-    return {
+    return finalizeSicknessPaymentResult({
       rule_ids: ruleIds,
       sickness_days_total: sicknessDays,
       has_waiting_day: hasWaitingDay,
@@ -1376,7 +1517,7 @@ function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParame
       note: hasWaitingDay
         ? 'Minder dan 13 loonperioden brancheancienniteit: 70% ziekengeld en eerste ziektedag wachtdag.'
         : 'Minder dan 13 loonperioden brancheancienniteit: 70% ziekengeld, geen wachtdag wegens CAO-uitzondering.'
-    };
+    }, sicknessCompliancePolicy);
   }
 
   ruleIds.push('CAO-PB-2024-R1157', 'CAO-PB-2024-R1158', 'CAO-PB-2024-R1159', 'CAO-PB-2024-R1160', 'CAO-PB-2024-R1161');
@@ -1422,7 +1563,7 @@ function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParame
     ? (numberOrNull(input.wga_related_benefit_per_day) ?? dailySalary) * thirdFourthYearDays * (parameters.sickness.third_fourth_year_supplement_percentage / 100)
     : 0;
 
-  return {
+  return finalizeSicknessPaymentResult({
     rule_ids: ruleIds,
     sickness_days_total: sicknessDays,
     has_waiting_day: false,
@@ -1452,7 +1593,7 @@ function calculateSicknessPayment(input, parameters = resolveLeaveSicknessParame
     missing_evidence: missingEvidence,
     warnings,
     note: 'Minimaal 13 loonperioden brancheancienniteit: 100% eerste 6 maanden, 90% tweede 6 maanden, 85% tweede ziektejaar bij actieve re-integratie.'
-  };
+  }, sicknessCompliancePolicy);
 }
 
 Deno.serve(async (req) => {
