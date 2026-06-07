@@ -252,14 +252,14 @@ function resolveReimbursementParameters(caoConfig) {
     value_services_early_shift: configuredEarlyShiftAmount ?? REIMBURSEMENT_RATES.value_services_early_shift,
     value_services_early_shift_amount: configuredEarlyShiftAmount ?? REIMBURSEMENT_RATES.value_services_early_shift,
     source_rule_ids: {
-      travel: travel.source_rule_ids || ['CAO-PB-2024-R0847', 'CAO-PB-2024-R0855', 'CAO-PB-2024-R0857', 'CAO-PB-2024-R0858'],
-      meal: meal.source_rule_ids || ['CAO-PB-2024-R0878', 'CAO-PB-2024-R0880', 'CAO-PB-2024-R0881', 'CAO-PB-2024-R0882'],
-      break_availability: breakAvailability.source_rule_ids || ['CAO-PB-2024-R0888', 'CAO-PB-2024-R0891', 'CAO-PB-2024-R0892', 'CAO-PB-2024-R0896'],
-      consignment: consignment.source_rule_ids || ['CAO-PB-2024-R0898', 'CAO-PB-2024-R0900', 'CAO-PB-2024-R0901', 'CAO-PB-2024-R0906'],
-      dog: dog.source_rule_ids || ['CAO-PB-2024-R0911', 'CAO-PB-2024-R0912', 'CAO-PB-2024-R0920', 'CAO-PB-2024-R0921', 'CAO-PB-2024-R0923'],
-      dry_cleaning: ['CAO-PB-2024-R0938'],
-      accommodation: ['CAO-PB-2024-R0940'],
-      jubilee: ['CAO-PB-2024-R0942', 'CAO-PB-2024-R0943', 'CAO-PB-2024-R0944', 'CAO-PB-2024-R0946'],
+      travel: travel.source_rule_ids || ['CAO-PB-2024-R0845', 'CAO-PB-2024-R0847', 'CAO-PB-2024-R0849', 'CAO-PB-2024-R0853', 'CAO-PB-2024-R0854', 'CAO-PB-2024-R0855', 'CAO-PB-2024-R0857', 'CAO-PB-2024-R0858', 'CAO-PB-2024-R0868'],
+      meal: meal.source_rule_ids || ['CAO-PB-2024-R0838', 'CAO-PB-2024-R0877', 'CAO-PB-2024-R0878', 'CAO-PB-2024-R0879', 'CAO-PB-2024-R0880', 'CAO-PB-2024-R0881', 'CAO-PB-2024-R0882', 'CAO-PB-2024-R0883', 'CAO-PB-2024-R0884'],
+      break_availability: breakAvailability.source_rule_ids || ['CAO-PB-2024-R0839', 'CAO-PB-2024-R0887', 'CAO-PB-2024-R0888', 'CAO-PB-2024-R0889', 'CAO-PB-2024-R0891', 'CAO-PB-2024-R0892', 'CAO-PB-2024-R0893', 'CAO-PB-2024-R0894', 'CAO-PB-2024-R0896'],
+      consignment: consignment.source_rule_ids || ['CAO-PB-2024-R0840', 'CAO-PB-2024-R0897', 'CAO-PB-2024-R0898', 'CAO-PB-2024-R0899', 'CAO-PB-2024-R0900', 'CAO-PB-2024-R0901', 'CAO-PB-2024-R0902', 'CAO-PB-2024-R0903', 'CAO-PB-2024-R0904', 'CAO-PB-2024-R0906', 'CAO-PB-2024-R0907', 'CAO-PB-2024-R0908', 'CAO-PB-2024-R0909'],
+      dog: dog.source_rule_ids || ['CAO-PB-2024-R0841', 'CAO-PB-2024-R0910', 'CAO-PB-2024-R0911', 'CAO-PB-2024-R0912', 'CAO-PB-2024-R0913', 'CAO-PB-2024-R0914', 'CAO-PB-2024-R0915', 'CAO-PB-2024-R0916', 'CAO-PB-2024-R0917', 'CAO-PB-2024-R0919', 'CAO-PB-2024-R0920', 'CAO-PB-2024-R0921', 'CAO-PB-2024-R0923', 'CAO-PB-2024-R0925', 'CAO-PB-2024-R0926', 'CAO-PB-2024-R0927', 'CAO-PB-2024-R0928', 'CAO-PB-2024-R0931'],
+      dry_cleaning: ['CAO-PB-2024-R0842', 'CAO-PB-2024-R0937', 'CAO-PB-2024-R0938'],
+      accommodation: ['CAO-PB-2024-R0843', 'CAO-PB-2024-R0939', 'CAO-PB-2024-R0940', 'CAO-PB-2024-R0945'],
+      jubilee: ['CAO-PB-2024-R0844', 'CAO-PB-2024-R0941', 'CAO-PB-2024-R0942', 'CAO-PB-2024-R0943', 'CAO-PB-2024-R0944', 'CAO-PB-2024-R0946', 'CAO-PB-2024-R0947'],
       value_services_early_shift: valueServices.source_rule_ids || ['CAO-PB-2024-R1609']
     },
     provenance: {
@@ -1047,7 +1047,7 @@ function calculateDryCleaningAllowance(input) {
   const receipt = booleanOrNull(input.dry_cleaning_receipt_provided);
   return {
     rule_id: 'CAO-PB-2024-R0938',
-    source_rule_ids: ['CAO-PB-2024-R0938'],
+    source_rule_ids: ['CAO-PB-2024-R0842', 'CAO-PB-2024-R0937', 'CAO-PB-2024-R0938'],
     eligible: costs !== null && costs > 0,
     amount: round2(costs ?? 0),
     tax_treatment: 'netto',
@@ -1070,7 +1070,7 @@ function calculateAccommodationAllowance(input) {
   }
   return {
     rule_id: 'CAO-PB-2024-R0940',
-    source_rule_ids: ['CAO-PB-2024-R0940'],
+    source_rule_ids: ['CAO-PB-2024-R0843', 'CAO-PB-2024-R0939', 'CAO-PB-2024-R0940', 'CAO-PB-2024-R0945'],
     eligible: required && amount > 0,
     accommodation_costs: round2(accommodationCosts ?? 0),
     meal_costs: round2(mealCosts ?? 0),
@@ -1095,7 +1095,7 @@ function calculateJubileeAllowance(input) {
   }
   return {
     rule_id: 'CAO-PB-2024-R0942',
-    source_rule_ids: ['CAO-PB-2024-R0942', 'CAO-PB-2024-R0943', 'CAO-PB-2024-R0944', 'CAO-PB-2024-R0946', 'CAO-PB-2024-R0947'],
+    source_rule_ids: ['CAO-PB-2024-R0844', 'CAO-PB-2024-R0941', 'CAO-PB-2024-R0942', 'CAO-PB-2024-R0943', 'CAO-PB-2024-R0944', 'CAO-PB-2024-R0946', 'CAO-PB-2024-R0947'],
     eligible: factor > 0,
     service_years: serviceYears,
     period_salary: periodSalary,

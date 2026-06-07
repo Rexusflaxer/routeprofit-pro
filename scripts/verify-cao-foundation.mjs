@@ -27,6 +27,7 @@ const reimbursements = loadFunctionModule('base44/functions/calculateCaoReimburs
 const leaveSickness = loadFunctionModule('base44/functions/calculateCaoLeaveAndSickness/entry.ts');
 const yearEndBonus = loadFunctionModule('base44/functions/calculateCaoYearEndBonus/entry.ts');
 const personnelCosts = loadFunctionModule('base44/functions/calculatePersonnelCosts/entry.ts');
+const functionClassification = loadFunctionModule('base44/functions/resolveCaoFunctionClassification/entry.ts');
 
 function assertIncludes(values, expected, message) {
   assert.ok(values.includes(expected), `${message}: expected ${expected} in ${JSON.stringify(values)}`);
@@ -592,6 +593,63 @@ function runPayrollPolicyScenarios() {
   assertAlmostEqual(correctionComponent.total_cost_employer_delta, 140, 'Correction employer total should default to gross plus employer/vacation/year-end deltas');
 }
 
+function runFunctionClassificationScenarios() {
+  const nonSecurity = functionClassification.classify({
+    function_type: 'klantrelatie',
+    cao_function_group: 'non_security_staff',
+    custom_hourly_rate: 25
+  }, {}, {
+    cao_scope_profile: 'non_security_work_article_3_exception',
+    manual_review_required: false,
+    payroll_rule_profile: {
+      apply_appendix_2_function_scales: false
+    }
+  }, null, '2026-01-01', []);
+  assert.equal(nonSecurity.appendix_2_applies, false);
+  assert.equal(nonSecurity.classification_status, 'not_applicable');
+  assert.equal(nonSecurity.cao_function_group, 'non_security_staff');
+  assertAlmostEqual(nonSecurity.hourly_rate, 25, 'Non-security function must use explicit custom hourly wage basis');
+  assert.equal(nonSecurity.payroll_final_allowed, true);
+  assertIncludes(nonSecurity.source_rule_ids, 'CAO-PB-2024-R0228', 'Non-security classification must cite article 3 exclusion scope');
+  assertIncludes(nonSecurity.source_rule_ids, 'CAO-PB-2024-R0233', 'Non-security classification must cite article 3 exclusion scope');
+
+  const security = functionClassification.classify({
+    function_type: 'objectbeveiliger',
+    cao_function_group: 'objectbeveiliger_receptionist',
+    cao_function_level: 'a',
+    security_role_status: 'beveiliger',
+    performs_security_work: true,
+    security_work_percentage: 100,
+    cao_scale: 3,
+    cao_period: 0,
+    written_classification_notice_confirmed: true,
+    written_scale_period_notice_confirmed: true,
+    periodic_increase_due_confirmed: true
+  }, {}, {
+    cao_scope_profile: 'full_security_worker',
+    manual_review_required: false,
+    payroll_rule_profile: {
+      apply_appendix_2_function_scales: true
+    }
+  }, {
+    wage_scales_detailed: {
+      3: {
+        0: { hourly_rate: 16.02, period_salary: 2307.84 }
+      }
+    }
+  }, '2026-01-01', []);
+  assert.equal(security.appendix_2_applies, true);
+  assert.equal(security.classification_status, 'resolved');
+  assert.equal(security.suggested_cao_scale, 3);
+  assert.equal(security.current_cao_period, 0);
+  assert.equal(security.period_valid_for_scale, true);
+  assert.equal(security.wage_rate_found, true);
+  assertAlmostEqual(security.hourly_rate, 16.02, 'Security worker wage must come from wage_scales_detailed');
+  assert.equal(security.payroll_final_allowed, true);
+  assertIncludes(security.source_rule_ids, 'CAO-PB-2024-R1812', 'Function-to-salary-scale mapping source missing');
+  assertIncludes(security.source_rule_ids, 'CAO-PB-2024-R1838', 'Appendix 4 wage-scale source missing');
+}
+
 async function main() {
   const scenarios = [
     ['external CAO gates', () => runExternalCaoGateScenarios()],
@@ -602,7 +660,8 @@ async function main() {
     ['effective-date correction queue', () => runEffectiveDateCorrectionScenarios()],
     ['reimbursements', () => runReimbursementScenarios()],
     ['leave and sickness', () => runLeaveSicknessScenarios()],
-    ['payroll policy and corrections', () => runPayrollPolicyScenarios()]
+    ['payroll policy and corrections', () => runPayrollPolicyScenarios()],
+    ['function classification and wage scales', () => runFunctionClassificationScenarios()]
   ];
 
   for (const [name, fn] of scenarios) {

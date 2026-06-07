@@ -91,6 +91,23 @@ function resolveScopedCaoRequest({ explicitCaoKey, contract, workContext, person
  * Als functiegroep of niveau onbekend is → manual_review_required=true, geen schaal.
  */
 
+const APPENDIX_2_FUNCTION_CLASSIFICATION_SOURCE_RULE_IDS = [
+  'CAO-PB-2024-R1754',
+  'CAO-PB-2024-R1757',
+  'CAO-PB-2024-R1758',
+  'CAO-PB-2024-R1760',
+  'CAO-PB-2024-R1810',
+  'CAO-PB-2024-R1811',
+  'CAO-PB-2024-R1812',
+  'CAO-PB-2024-R1814'
+];
+
+const APPENDIX_4_WAGE_SCALE_SOURCE_RULE_IDS = [
+  'CAO-PB-2024-R1837',
+  'CAO-PB-2024-R1838',
+  'CAO-PB-2024-R1840'
+];
+
 // ── Bijlage 2 matrix: functiegroep → functieniveau → salarisschaal ──
 // Bronregel CAO-PB-2024-R1813: alle functiegroepen volgen schaal 2 t/m 7.
 const APPENDIX_2_SCALE_MAP = {
@@ -637,7 +654,9 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate, pe
   pushUnique(
     source_rule_ids,
     'CAO-PB-2024-R0714', 'CAO-PB-2024-R0715', 'CAO-PB-2024-R0716',
-    'CAO-PB-2024-R0728', 'CAO-PB-2024-R0738', 'CAO-PB-2024-R1751'
+    'CAO-PB-2024-R0728', 'CAO-PB-2024-R0738', 'CAO-PB-2024-R1751',
+    APPENDIX_2_FUNCTION_CLASSIFICATION_SOURCE_RULE_IDS,
+    APPENDIX_4_WAGE_SCALE_SOURCE_RULE_IDS
   );
 
   // Bepaal functiegroep: expliciete velden eerst (R0728), dan inferentie via function_type (R0729)
