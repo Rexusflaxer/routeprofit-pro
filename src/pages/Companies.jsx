@@ -1,7 +1,6 @@
 import React, { useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
@@ -9,9 +8,6 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 import { Plus, Building2, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import CompanyForm from "@/components/companies/CompanyForm";
-
-import LocationsTab from "@/components/companies/LocationsTab";
-import CompanyBankTab from "@/components/companies/CompanyBankTab";
 
 const ROLE_LABELS = {
   holding: "Holding", operating_company: "Werkmaatschappij",
@@ -148,97 +144,76 @@ export default function Companies() {
         </div>
       )}
 
-      <Tabs defaultValue="companies">
-        <TabsList className="flex flex-wrap h-auto gap-1">
-          <TabsTrigger value="companies">Bedrijven</TabsTrigger>
-          <TabsTrigger value="locations">Vestigingen</TabsTrigger>
-          <TabsTrigger value="bank">Bank / G-rekeningen</TabsTrigger>
-        </TabsList>
-
-        {/* BEDRIJVEN TAB */}
-        <TabsContent value="companies" className="pt-4">
-          {isLoading && <p className="text-sm text-muted-foreground py-8 text-center">Laden...</p>}
-          {!isLoading && companies.length === 0 && (
-            <div className="py-12 text-center text-muted-foreground">
-              <Building2 className="w-12 h-12 mx-auto mb-3 text-muted-foreground/50" />
-              <p className="text-sm">Geen bedrijven aangemaakt.</p>
-              <Button className="mt-4" size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" />Eerste bedrijf toevoegen</Button>
-            </div>
-          )}
-          {companies.length > 0 && (
-            <div className="overflow-x-auto rounded-xl border border-border shadow-sm">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/40">
-                    <TableHead>Bedrijf</TableHead>
-                    <TableHead>KvK</TableHead>
-                    <TableHead>Rol</TableHead>
-                    <TableHead>Activiteiten</TableHead>
-                    <TableHead>CAO</TableHead>
-                    <TableHead>Status</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {getGroupedCompanies().map(({ company, isChild }) => (
-                    <TableRow
-                      key={company.id}
-                      className={`cursor-pointer transition-colors ${isChild ? "bg-muted/10 hover:bg-accent" : "hover:bg-accent"}`}
-                      onClick={() => navigate(`/CompanyDetail?id=${company.id}`)}
-                    >
-                      <TableCell>
-                        <div className={`flex items-center gap-2 ${isChild ? "pl-6 border-l-2 border-muted ml-1" : ""}`}>
-                          {company.logo_file_url
-                            ? <img src={company.logo_file_url} alt="logo" className="w-7 h-7 rounded object-contain bg-white border border-border p-0.5 shrink-0" />
-                            : <div className="w-7 h-7 rounded bg-muted flex items-center justify-center shrink-0"><Building2 className="w-3.5 h-3.5 text-muted-foreground" /></div>
-                          }
-                          <div>
-                            <p className="font-medium text-sm text-foreground">{company.display_name}</p>
-                            {company.trade_name && company.trade_name !== company.display_name && (
-                              <p className="text-xs text-muted-foreground">{company.trade_name}</p>
-                            )}
-                          </div>
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-sm text-muted-foreground">{company.kvk_number || "—"}</TableCell>
-                      <TableCell>
-                        <Badge variant="outline" className="text-xs">{ROLE_LABELS[company.company_role] || company.company_role}</Badge>
-                      </TableCell>
-                      <TableCell>
-                        <div className="flex flex-wrap gap-1">
-                          {(company.activities || []).slice(0, 2).map(a => (
-                            <span key={a} className="text-xs bg-muted text-foreground px-1.5 py-0.5 rounded">{ACTIVITY_LABELS[a] || a}</span>
-                          ))}
-                          {(company.activities || []).length > 2 && (
-                            <span className="text-xs text-muted-foreground">+{(company.activities || []).length - 2}</span>
-                          )}
-                        </div>
-                      </TableCell>
-                      <TableCell className="text-xs text-muted-foreground">
-                        {company.default_cao_configuration_id ? getCaoName(company.default_cao_configuration_id) : "—"}
-                      </TableCell>
-                      <TableCell>
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[company.status] || "bg-slate-100 text-slate-600"}`}>
-                          {company.status === "active" ? "Actief" : company.status === "inactive" ? "Inactief" : "Gearchiveerd"}
-                        </span>
-                      </TableCell>
-                    </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
-            </div>
-          )}
-        </TabsContent>
-
-        <TabsContent value="locations" className="pt-4">
-          <LocationsTab companies={companies} />
-        </TabsContent>
-
-        <TabsContent value="bank" className="pt-4">
-          {companies.length === 0
-            ? <p className="text-sm text-muted-foreground py-8 text-center">Voeg eerst een bedrijf toe.</p>
-            : <CompanyBankTab companies={companies} />}
-        </TabsContent>
-      </Tabs>
+      {isLoading && <p className="text-sm text-muted-foreground py-8 text-center">Laden...</p>}
+      {!isLoading && companies.length === 0 && (
+        <div className="py-12 text-center text-muted-foreground">
+          <Building2 className="w-12 h-12 mx-auto mb-3 text-muted-foreground/50" />
+          <p className="text-sm">Geen bedrijven aangemaakt.</p>
+          <Button className="mt-4" size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" />Eerste bedrijf toevoegen</Button>
+        </div>
+      )}
+      {companies.length > 0 && (
+        <div className="overflow-x-auto rounded-xl border border-border shadow-sm">
+          <Table>
+            <TableHeader>
+              <TableRow className="bg-muted/40">
+                <TableHead>Bedrijf</TableHead>
+                <TableHead>KvK</TableHead>
+                <TableHead>Rol</TableHead>
+                <TableHead>Activiteiten</TableHead>
+                <TableHead>CAO</TableHead>
+                <TableHead>Status</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {getGroupedCompanies().map(({ company, isChild }) => (
+                <TableRow
+                  key={company.id}
+                  className={`cursor-pointer transition-colors ${isChild ? "bg-muted/10 hover:bg-accent" : "hover:bg-accent"}`}
+                  onClick={() => navigate(`/CompanyDetail?id=${company.id}`)}
+                >
+                  <TableCell>
+                    <div className={`flex items-center gap-2 ${isChild ? "pl-6 border-l-2 border-muted ml-1" : ""}`}>
+                      {company.logo_file_url
+                        ? <img src={company.logo_file_url} alt="logo" className="w-7 h-7 rounded object-contain bg-white border border-border p-0.5 shrink-0" />
+                        : <div className="w-7 h-7 rounded bg-muted flex items-center justify-center shrink-0"><Building2 className="w-3.5 h-3.5 text-muted-foreground" /></div>
+                      }
+                      <div>
+                        <p className="font-medium text-sm text-foreground">{company.display_name}</p>
+                        {company.trade_name && company.trade_name !== company.display_name && (
+                          <p className="text-xs text-muted-foreground">{company.trade_name}</p>
+                        )}
+                      </div>
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-sm text-muted-foreground">{company.kvk_number || "—"}</TableCell>
+                  <TableCell>
+                    <Badge variant="outline" className="text-xs">{ROLE_LABELS[company.company_role] || company.company_role}</Badge>
+                  </TableCell>
+                  <TableCell>
+                    <div className="flex flex-wrap gap-1">
+                      {(company.activities || []).slice(0, 2).map(a => (
+                        <span key={a} className="text-xs bg-muted text-foreground px-1.5 py-0.5 rounded">{ACTIVITY_LABELS[a] || a}</span>
+                      ))}
+                      {(company.activities || []).length > 2 && (
+                        <span className="text-xs text-muted-foreground">+{(company.activities || []).length - 2}</span>
+                      )}
+                    </div>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {company.default_cao_configuration_id ? getCaoName(company.default_cao_configuration_id) : "—"}
+                  </TableCell>
+                  <TableCell>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[company.status] || "bg-slate-100 text-slate-600"}`}>
+                      {company.status === "active" ? "Actief" : company.status === "inactive" ? "Inactief" : "Gearchiveerd"}
+                    </span>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      )}
 
       {/* Company form dialog */}
       <Dialog open={dialogOpen} onOpenChange={v => { setDialogOpen(v); if (!v) setEditingCompany(null); }}>

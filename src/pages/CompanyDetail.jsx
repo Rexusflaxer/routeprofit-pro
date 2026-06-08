@@ -4,9 +4,12 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, Edit, Building2, Phone, Mail, Globe, MapPin, FileText } from "lucide-react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import CompanyForm from "@/components/companies/CompanyForm";
+import LocationsTab from "@/components/companies/LocationsTab";
+import CompanyBankTab from "@/components/companies/CompanyBankTab";
 
 const ROLE_LABELS = {
   holding: "Holding", operating_company: "Werkmaatschappij",
@@ -227,6 +230,20 @@ export default function CompanyDetail() {
           )}
         </div>
       </div>
+
+      {/* Vestigingen & Bank tabs */}
+      <Tabs defaultValue="locations">
+        <TabsList>
+          <TabsTrigger value="locations">Vestigingen</TabsTrigger>
+          <TabsTrigger value="bank">Bank / G-rekeningen</TabsTrigger>
+        </TabsList>
+        <TabsContent value="locations" className="pt-4">
+          <LocationsTab companies={companies} />
+        </TabsContent>
+        <TabsContent value="bank" className="pt-4">
+          <CompanyBankTab companies={[company]} />
+        </TabsContent>
+      </Tabs>
 
       {/* Edit dialog */}
       <Dialog open={editOpen} onOpenChange={v => setEditOpen(v)}>
