@@ -7,12 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
-import { ArrowLeft, Edit, Check, X, Building2, Phone, Mail, Globe, MapPin, FileText, Upload } from "lucide-react";
+import { ArrowLeft, Edit, Check, X, Building2, Phone, Mail, Globe, MapPin, FileText, Upload, Shield, BookOpen } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import LocationsTab from "@/components/companies/LocationsTab";
 import CompanyBankTab from "@/components/companies/CompanyBankTab";
 import WpbrTab from "@/components/companies/WpbrTab";
+import SidebarPanel from "@/components/companies/CompanySidebarPanel";
 
 const ROLE_LABELS = {
   holding: "Holding", operating_company: "Werkmaatschappij",
@@ -378,61 +378,19 @@ export default function CompanyDetail() {
         )}
       </div>
 
-      {/* WPBR & CAO tabs */}
-      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-        <Tabs defaultValue="wpbr">
-          <div className="border-b border-border px-6 pt-4">
-            <TabsList className="bg-transparent p-0 gap-4 h-auto">
-              <TabsTrigger value="wpbr" className="text-sm px-0 pb-3 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none font-medium">
-                WPBR-vergunning
-              </TabsTrigger>
-              <TabsTrigger value="cao" className="text-sm px-0 pb-3 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none font-medium">
-                CAO
-              </TabsTrigger>
-            </TabsList>
-          </div>
-          <TabsContent value="wpbr" className="mt-0">
-            <WpbrTab companyId={companyId} />
-          </TabsContent>
-          <TabsContent value="cao" className="mt-0">
-            <div className="p-6 space-y-3">
-              <h3 className="text-sm font-semibold text-foreground">Standaard CAO</h3>
-              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-                {editing ? (
-                  <Select value={data.default_cao_configuration_id || "none"} onValueChange={v => set("default_cao_configuration_id", v === "none" ? null : v)}>
-                    <SelectTrigger className="h-8 text-sm w-72"><SelectValue placeholder="Geen" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">— Geen standaard —</SelectItem>
-                      {caoConfigurations.map(c => (
-                        <SelectItem key={c.id} value={c.id} disabled={c.selectable === false}>
-                          {c.label || c.display_name || c.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                ) : (
-                  <span className="text-sm font-medium text-foreground">
-                    {caoName ? (caoName.label || caoName.display_name || caoName.name) : <span className="text-muted-foreground">—</span>}
-                  </span>
-                )}
-                {!editing && (
-                  <Button size="sm" variant="outline" onClick={startEdit}>
-                    <Edit className="w-4 h-4 mr-1" /> Wijzigen
-                  </Button>
-                )}
-                {editing && (
-                  <div className="flex gap-2">
-                    <Button variant="outline" size="sm" onClick={cancelEdit}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
-                    <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
-                      <Check className="w-4 h-4 mr-1" /> Opslaan
-                    </Button>
-                  </div>
-                )}
-              </div>
-            </div>
-          </TabsContent>
-        </Tabs>
-      </div>
+      {/* WPBR & CAO sectie met sidebar-menu */}
+      <SidebarPanel
+        companyId={companyId}
+        editing={editing}
+        data={data}
+        caoConfigurations={caoConfigurations}
+        caoName={caoName}
+        set={set}
+        startEdit={startEdit}
+        cancelEdit={cancelEdit}
+        saveMutation={saveMutation}
+        form={form}
+      />
 
       {/* Vestigingen */}
       <LocationsTab companies={companies} />
