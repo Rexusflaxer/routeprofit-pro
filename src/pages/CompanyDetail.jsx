@@ -442,11 +442,11 @@ export default function CompanyDetail() {
       </div>
 
       {/* Vestigingen */}
-      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-        <div className="bg-muted/40 border-b border-border px-6 py-4">
+      <div className="rounded-xl border border-border bg-card shadow-sm">
+        <div className="bg-muted/40 border-b border-border px-6 py-4 rounded-t-xl">
           <h2 className="text-base font-semibold text-foreground">Vestigingen</h2>
         </div>
-        <div className="p-6">
+        <div className="p-6 overflow-visible">
           <LocationsTab companies={companies} />
         </div>
       </div>
