@@ -213,7 +213,7 @@ export default function CompanyDetail() {
                   </span>
                 </div>
                 {company.legal_name && company.legal_name !== company.display_name && (
-                  <p className="text-sm text-muted-foreground mt-0.5">{company.legal_name}</p>
+                  <p className="text-sm text-muted-foreground mt-0.5">Handelsnaam: {company.legal_name}</p>
                 )}
               </div>
             )}
