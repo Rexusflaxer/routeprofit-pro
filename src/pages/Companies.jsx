@@ -8,7 +8,6 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, Edit, Trash2, Building2, AlertCircle } from "lucide-react";
 import CompanyForm from "@/components/companies/CompanyForm";
-import HoldingStructureTab from "@/components/companies/HoldingStructureTab";
 import LocationsTab from "@/components/companies/LocationsTab";
 import CompanyBankTab from "@/components/companies/CompanyBankTab";
 
@@ -157,7 +156,6 @@ export default function Companies() {
       <Tabs defaultValue="companies">
         <TabsList className="flex flex-wrap h-auto gap-1">
           <TabsTrigger value="companies">Bedrijven</TabsTrigger>
-          <TabsTrigger value="holding">Holdingstructuur</TabsTrigger>
           <TabsTrigger value="locations">Vestigingen</TabsTrigger>
           <TabsTrigger value="bank">Bank / G-rekeningen</TabsTrigger>
         </TabsList>
@@ -233,10 +231,6 @@ export default function Companies() {
               </Table>
             </div>
           )}
-        </TabsContent>
-
-        <TabsContent value="holding" className="pt-4">
-          <HoldingStructureTab companies={companies} />
         </TabsContent>
 
         <TabsContent value="locations" className="pt-4">
