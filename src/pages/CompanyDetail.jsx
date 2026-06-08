@@ -195,12 +195,12 @@ export default function CompanyDetail() {
             {editing ? (
               <div className="flex flex-col gap-2 max-w-md">
                 <div>
-                  <span className="text-xs text-muted-foreground">Weergavenaam</span>
-                  <Input value={data.display_name || ""} onChange={e => set("display_name", e.target.value)} className="text-lg font-bold h-9 mt-0.5" placeholder="Weergavenaam" />
+                  <span className="text-xs text-muted-foreground">Bedrijfsnaam</span>
+                  <Input value={data.display_name || ""} onChange={e => set("display_name", e.target.value)} className="text-lg font-bold h-9 mt-0.5" placeholder="Bedrijfsnaam" />
                 </div>
                 <div>
-                  <span className="text-xs text-muted-foreground">Juridische naam (handelsnaam KvK)</span>
-                  <Input value={data.legal_name || ""} onChange={e => set("legal_name", e.target.value)} className="text-sm h-8 mt-0.5" placeholder="Juridische naam" />
+                  <span className="text-xs text-muted-foreground">Handelsnaam</span>
+                  <Input value={data.legal_name || ""} onChange={e => set("legal_name", e.target.value)} className="text-sm h-8 mt-0.5" placeholder="Handelsnaam" />
                 </div>
               </div>
             ) : (
@@ -243,9 +243,6 @@ export default function CompanyDetail() {
           {/* Juridisch */}
           <div className="space-y-1">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Juridische gegevens</h3>
-            <InfoRow label="Handelsnaam">
-              {editing ? <Input value={data.trade_name || ""} onChange={e => set("trade_name", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.trade_name} />}
-            </InfoRow>
             <InfoRow label="KvK-nummer">
               {editing ? <Input value={data.kvk_number || ""} onChange={e => set("kvk_number", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.kvk_number} />}
             </InfoRow>
