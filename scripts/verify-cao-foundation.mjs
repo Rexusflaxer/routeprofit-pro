@@ -929,7 +929,7 @@ function runProbationScenarios() {
   assertIncludes(indefinite.source_rule_ids, 'CAO-PB-2024-R0316', 'Indefinite probation source rule missing');
 }
 
-function runEffectiveDateCorrectionScenarios() {
+async function runEffectiveDateCorrectionScenarios() {
   for (const module of [ingestCaoAutomation, syncCaoFromCloudflare]) {
     const explicitPayrollChange = module.buildChangeEffectiveMetadata({
       rule_key: 'wage_scales.2026.scale_3.period_0',
@@ -1099,6 +1099,54 @@ function runEffectiveDateCorrectionScenarios() {
   assert.equal(correctionData.affected_overlap_start, '2026-05-10');
   assert.equal(correctionData.queued_for_pay_period_number, 6);
   assert.equal(correctionData.queue_target_match_type, 'next_open_pay_period');
+
+  const finalizedQueueUpdates = [];
+  const finalizedMark = await correctionQueue.markPayrollRunForRecalculation({
+    asServiceRole: {
+      entities: {
+        PayrollCalculationRun: {
+          update: async (...args) => finalizedQueueUpdates.push(args)
+        }
+      }
+    }
+  }, touchedRun, review.id);
+  assert.equal(finalizedMark.updated, false);
+  assert.equal(finalizedMark.skipped_immutable_finalized_run, true);
+  assert.equal(finalizedQueueUpdates.length, 0, 'Finalized payroll runs must not be mutated when CAO corrections are queued');
+
+  const calculatedQueueUpdates = [];
+  const calculatedMark = await correctionQueue.markPayrollRunForRecalculation({
+    asServiceRole: {
+      entities: {
+        PayrollCalculationRun: {
+          update: async (...args) => calculatedQueueUpdates.push(args)
+        }
+      }
+    }
+  }, { ...touchedRun, payroll_run_status: 'calculated', payroll_exported_at: null, payroll_paid_at: null }, review.id);
+  assert.equal(calculatedMark.updated, true);
+  assert.equal(calculatedQueueUpdates.length, 1, 'Non-final payroll runs may be marked for recalculation');
+
+  const finalizedApplyUpdates = [];
+  const finalizedApply = await personnelCosts.markAffectedPayrollRunCorrectionApplied({
+    asServiceRole: {
+      entities: {
+        PayrollCalculationRun: {
+          get: async () => touchedRun,
+          update: async (...args) => finalizedApplyUpdates.push(args)
+        }
+      }
+    }
+  }, {
+    correction: {
+      affected_payroll_run_id: touchedRun.id,
+      cao_change_review_id: review.id
+    },
+    correctionPayrollRunId: 'payroll-correction-run'
+  });
+  assert.equal(finalizedApply.immutable_finalized_run, true);
+  assert.equal(finalizedApply.skipped_update, true);
+  assert.equal(finalizedApplyUpdates.length, 0, 'Applying a correction must not mutate the original finalized payroll run');
 
   const ehbRun = { ...touchedRun, id: 'ehb-payroll', cao_key: 'cao_evenementen_horecabeveiliging' };
   assert.equal(

@@ -3793,12 +3793,28 @@ async function markCaoCorrectionsApplied(base44, { corrections, adjustments, pay
   return appliedCorrectionIds;
 }
 
+function isImmutableFinalizedPayrollRun(run) {
+  const status = run?.payroll_run_status || 'calculated';
+  return ['approved', 'exported', 'paid', 'corrected'].includes(status) ||
+    !!run?.payroll_exported_at ||
+    !!run?.payroll_paid_at;
+}
+
 async function markAffectedPayrollRunCorrectionApplied(base44, { correction, correctionPayrollRunId }) {
   if (!correction?.affected_payroll_run_id || !correctionPayrollRunId) return null;
   const affectedRun = await base44.asServiceRole.entities.PayrollCalculationRun
     .get(correction.affected_payroll_run_id)
     .catch(() => null);
   if (!affectedRun) return null;
+
+  if (isImmutableFinalizedPayrollRun(affectedRun)) {
+    return {
+      affected_payroll_run_id: affectedRun.id,
+      immutable_finalized_run: true,
+      skipped_update: true,
+      payroll_run_status: affectedRun.payroll_run_status || null
+    };
+  }
 
   const existingReasonIds = Array.isArray(affectedRun.cao_recalculation_reason_ids)
     ? affectedRun.cao_recalculation_reason_ids
@@ -3810,22 +3826,18 @@ async function markAffectedPayrollRunCorrectionApplied(base44, { correction, cor
       correctionPayrollRunId
     ])
   ];
-  const finalizedStatuses = ['approved', 'exported', 'paid', 'corrected'];
   const updates = {
     corrected_by_payroll_run_ids: correctedByIds,
     cao_correction_applied_at: new Date().toISOString(),
     cao_recalculation_reason_ids: remainingReasonIds,
     requires_cao_recalculation: remainingReasonIds.length > 0
   };
-  if (remainingReasonIds.length === 0 && finalizedStatuses.includes(affectedRun.payroll_run_status || 'calculated')) {
-    updates.payroll_run_status = 'corrected';
-  }
   await base44.asServiceRole.entities.PayrollCalculationRun.update(affectedRun.id, updates);
   return {
     affected_payroll_run_id: affectedRun.id,
     corrected_by_payroll_run_ids: correctedByIds,
     remaining_cao_recalculation_reason_ids: remainingReasonIds,
-    payroll_run_status: updates.payroll_run_status || affectedRun.payroll_run_status || null
+    payroll_run_status: affectedRun.payroll_run_status || null
   };
 }
 

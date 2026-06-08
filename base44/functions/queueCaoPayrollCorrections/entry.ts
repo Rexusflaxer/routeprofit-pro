@@ -485,6 +485,14 @@ async function upsertCorrection(base44, data) {
 }
 
 async function markPayrollRunForRecalculation(base44, run, reviewId) {
+  if (isFinalizedPayrollRun(run)) {
+    return {
+      updated: false,
+      skipped_immutable_finalized_run: true,
+      payroll_run_id: run?.id || null,
+      payroll_run_status: run?.payroll_run_status || null
+    };
+  }
   const existingIds = Array.isArray(run.cao_recalculation_reason_ids)
     ? run.cao_recalculation_reason_ids
     : [];
@@ -493,6 +501,12 @@ async function markPayrollRunForRecalculation(base44, run, reviewId) {
     requires_cao_recalculation: true,
     cao_recalculation_reason_ids: nextIds
   });
+  return {
+    updated: true,
+    skipped_immutable_finalized_run: false,
+    payroll_run_id: run.id,
+    cao_recalculation_reason_ids: nextIds
+  };
 }
 
 function isAuthorized(req, body) {
@@ -558,6 +572,7 @@ Deno.serve(async (req) => {
     const unmatchedReviewIds = [];
     const unverifiableReviewIds = [];
     const markedPayrollRunIds = [];
+    const immutableFinalizedPayrollRunIds = [];
     const legacyManualReviewRunIds = [];
     const queueTargetManualReviewRunIds = [];
 
@@ -715,8 +730,12 @@ Deno.serve(async (req) => {
         if (saved.created) createdCorrectionIds.push(saved.id);
         else updatedCorrectionIds.push(saved.id);
 
-        await markPayrollRunForRecalculation(base44, run, review.id);
-        markedPayrollRunIds.push(run.id);
+        const markResult = await markPayrollRunForRecalculation(base44, run, review.id);
+        if (markResult.updated) {
+          markedPayrollRunIds.push(run.id);
+        } else if (markResult.skipped_immutable_finalized_run) {
+          immutableFinalizedPayrollRunIds.push(run.id);
+        }
         if (queueTarget.manual_review_required === true) {
           reviewHasQueueTargetManualReview = true;
           queueTargetManualReviewRunIds.push(run.id);
@@ -772,6 +791,7 @@ Deno.serve(async (req) => {
       created_correction_ids: createdCorrectionIds,
       updated_correction_ids: updatedCorrectionIds,
       marked_payroll_run_ids: [...new Set(markedPayrollRunIds)],
+      immutable_finalized_payroll_run_ids: [...new Set(immutableFinalizedPayrollRunIds)],
       legacy_manual_review_run_ids: [...new Set(legacyManualReviewRunIds)],
       queue_target_manual_review_run_ids: [...new Set(queueTargetManualReviewRunIds)],
       unmatched_review_ids: unmatchedReviewIds,
