@@ -182,7 +182,7 @@ export default function Companies() {
                   {getGroupedCompanies().map(({ company, isChild }) => (
                     <TableRow
                       key={company.id}
-                      className={`cursor-pointer ${isChild ? "hover:bg-muted/30 bg-muted/10" : "hover:bg-muted/20"}`}
+                      className={`cursor-pointer transition-colors ${isChild ? "bg-muted/10 hover:bg-accent" : "hover:bg-accent"}`}
                       onClick={() => navigate(`/CompanyDetail?id=${company.id}`)}
                     >
                       <TableCell>
