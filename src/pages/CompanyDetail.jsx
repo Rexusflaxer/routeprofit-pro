@@ -257,19 +257,7 @@ export default function CompanyDetail() {
                   </Select>
                 : <ViewText value={data.legal_form} />}
             </InfoRow>
-            <InfoRow label="Rol">
-              {editing
-                ? <Select value={data.company_role || ""} onValueChange={v => set("company_role", v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="holding">Holding</SelectItem>
-                      <SelectItem value="operating_company">Werkmaatschappij</SelectItem>
-                      <SelectItem value="sole_proprietor">Eenmanszaak</SelectItem>
-                      <SelectItem value="other">Overig</SelectItem>
-                    </SelectContent>
-                  </Select>
-                : <ViewText value={ROLE_LABELS[data.company_role] || data.company_role} />}
-            </InfoRow>
+
 
             {(holdingOptions.length > 0 || holdingCompany) && (
               <InfoRow label="Onder holding">
