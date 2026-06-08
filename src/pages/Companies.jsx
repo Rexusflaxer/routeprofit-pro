@@ -108,6 +108,24 @@ export default function Companies() {
     return cao ? (cao.label || cao.display_name || cao.name) : null;
   };
 
+  // Groepeer bedrijven: holdings bovenaan, dan hun werkmaatschappijen, dan zelfstandige bedrijven
+  const getGroupedCompanies = () => {
+    const holdings = companies.filter(c => c.company_role === "holding");
+    const subsidiaries = companies.filter(c => c.holding_company_id);
+    const independents = companies.filter(c => c.company_role !== "holding" && !c.holding_company_id);
+    const result = [];
+    for (const holding of holdings) {
+      result.push({ company: holding, isChild: false });
+      const children = subsidiaries.filter(c => c.holding_company_id === holding.id);
+      for (const child of children) result.push({ company: child, isChild: true });
+    }
+    // Subsidiaries zonder bekende holding
+    const orphanSubsidiaries = subsidiaries.filter(c => !holdings.find(h => h.id === c.holding_company_id));
+    for (const c of orphanSubsidiaries) result.push({ company: c, isChild: false });
+    for (const c of independents) result.push({ company: c, isChild: false });
+    return result;
+  };
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between flex-wrap gap-3">
@@ -169,10 +187,10 @@ export default function Companies() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {companies.map(company => (
-                    <TableRow key={company.id} className="hover:bg-muted/20">
+                  {getGroupedCompanies().map(({ company, isChild }) => (
+                    <TableRow key={company.id} className={isChild ? "hover:bg-muted/20 bg-muted/10" : "hover:bg-muted/20"}>
                       <TableCell>
-                        <div>
+                        <div className={isChild ? "pl-6 border-l-2 border-muted ml-1" : ""}>
                           <p className="font-medium text-sm text-foreground">{company.display_name}</p>
                           {company.trade_name && company.trade_name !== company.display_name && (
                             <p className="text-xs text-muted-foreground">{company.trade_name}</p>
