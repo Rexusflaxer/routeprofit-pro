@@ -8,12 +8,10 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Switch } from "@/components/ui/switch";
 import { Plus, Trash2, Edit, MapPin, Building2 } from "lucide-react";
 
 const LOCATION_TYPES = {
-  head_office: "Hoofdkantoor", branch: "Vestiging", warehouse: "Magazijn",
-  shared_office: "Gedeeld kantoor", customer_site: "Klantenlocatie", other: "Overig",
+  head_office: "Hoofdkantoor", branch: "Vestiging", warehouse: "Magazijn", other: "Overig",
 };
 
 const EMPTY_LOC = { name: "", location_type: "branch", street_name: "", house_number: "", house_number_addition: "", postal_code: "", city: "", country: "Nederland", is_active: true, is_route_office: false, notes: "" };
@@ -112,46 +110,29 @@ export default function LocationsTab({ companies }) {
         <DialogContent className="max-w-lg max-h-[90vh] overflow-y-auto">
           <DialogHeader><DialogTitle>{editing ? "Vestiging bewerken" : "Vestiging toevoegen"}</DialogTitle></DialogHeader>
           <div className="space-y-4">
-            <div className="grid grid-cols-2 gap-3">
-              <div className="col-span-2 space-y-1"><Label>Naam *</Label><Input value={form.name} onChange={e => set("name", e.target.value)} /></div>
-              <div className="col-span-2 space-y-1">
-                <Label>Type</Label>
-                <Select value={form.location_type} onValueChange={v => set("location_type", v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>{Object.entries(LOCATION_TYPES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="col-span-2 space-y-1 relative">
-                <Label>Straatnaam</Label>
-                <Input value={form.street_name || ""} onChange={e => handleAddressQuery(e.target.value)} autoComplete="off" />
-                {showSugg && addressSugg.length > 0 && (
-                  <div className="absolute z-50 w-full mt-1 bg-white border border-slate-200 rounded-lg shadow-lg max-h-40 overflow-y-auto">
-                    {addressSugg.map((s, i) => (
-                      <button key={i} type="button" onClick={() => selectAddress(s)} className="w-full px-3 py-2 text-left text-sm hover:bg-slate-50 flex gap-2">
-                        <MapPin className="w-4 h-4 text-slate-400 mt-0.5 shrink-0" />{s.address}
-                      </button>
-                    ))}
-                  </div>
-                )}
-              </div>
-              <div className="space-y-1"><Label>Huisnummer</Label><Input value={form.house_number || ""} onChange={e => set("house_number", e.target.value)} /></div>
-              <div className="space-y-1"><Label>Toevoeging</Label><Input value={form.house_number_addition || ""} onChange={e => set("house_number_addition", e.target.value)} /></div>
-              <div className="space-y-1"><Label>Postcode</Label><Input value={form.postal_code || ""} onChange={e => set("postal_code", e.target.value)} /></div>
-              <div className="space-y-1"><Label>Plaats</Label><Input value={form.city || ""} onChange={e => set("city", e.target.value)} /></div>
+            <div className="space-y-1">
+              <Label>Type</Label>
+              <Select value={form.location_type} onValueChange={v => set("location_type", v)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>{Object.entries(LOCATION_TYPES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+              </Select>
             </div>
-            <div className="space-y-2">
-              <div className="flex items-center gap-2">
-                <Switch checked={!!form.is_active} onCheckedChange={v => set("is_active", v)} />
-                <span className="text-sm">Actief</span>
-              </div>
-              <div className="flex items-center gap-2">
-                <Switch checked={!!form.is_route_office} onCheckedChange={v => set("is_route_office", v)} />
-                <span className="text-sm">Gebruiken als route-kantoor (start/eindlocatie)</span>
-              </div>
+            <div className="space-y-1 relative">
+              <Label>Adres</Label>
+              <Input value={form.street_name || ""} onChange={e => handleAddressQuery(e.target.value)} autoComplete="off" placeholder="Begin met typen voor adressuggesties..." />
+              {showSugg && addressSugg.length > 0 && (
+                <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-lg shadow-lg max-h-40 overflow-y-auto">
+                  {addressSugg.map((s, i) => (
+                    <button key={i} type="button" onClick={() => selectAddress(s)} className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex gap-2 text-foreground">
+                      <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />{s.address}
+                    </button>
+                  ))}
+                </div>
+              )}
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Annuleren</Button>
-              <Button onClick={() => saveMutation.mutate(form)} disabled={!form.name}>Opslaan</Button>
+              <Button onClick={() => saveMutation.mutate(form)}>Opslaan</Button>
             </div>
           </div>
         </DialogContent>
