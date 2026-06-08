@@ -14,45 +14,48 @@ import { Plus, Trash2, Edit, CreditCard, AlertTriangle } from "lucide-react";
 const EMPTY = { company_id: "", account_type: "normal", iban: "", account_holder_name: "", bank_name: "", bic: "", is_default: false, is_default_for_invoicing: false, is_default_for_payroll: false, status: "active", notes: "" };
 
 export default function CompanyBankTab({ companies }) {
-  const [selectedCompanyId, setSelectedCompanyId] = useState(companies[0]?.id || "");
+  const companyId = companies[0]?.id || "";
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY);
   const queryClient = useQueryClient();
 
   const { data: accounts = [] } = useQuery({
-    queryKey: ["company-bank-accounts", selectedCompanyId],
-    queryFn: () => base44.entities.CompanyBankAccount.filter({ company_id: selectedCompanyId }),
-    enabled: !!selectedCompanyId,
+    queryKey: ["company-bank-accounts", companyId],
+    queryFn: () => base44.entities.CompanyBankAccount.filter({ company_id: companyId }),
+    enabled: !!companyId,
   });
 
   const saveMutation = useMutation({
-    mutationFn: (data) => editing ? base44.entities.CompanyBankAccount.update(editing, data) : base44.entities.CompanyBankAccount.create({ ...data, company_id: selectedCompanyId }),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["company-bank-accounts", selectedCompanyId] }); setDialogOpen(false); },
+    mutationFn: (data) => editing ? base44.entities.CompanyBankAccount.update(editing, data) : base44.entities.CompanyBankAccount.create({ ...data, company_id: companyId }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["company-bank-accounts", companyId] }); setDialogOpen(false); },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => base44.entities.CompanyBankAccount.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["company-bank-accounts", selectedCompanyId] }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["company-bank-accounts", companyId] }),
   });
 
-  const openNew = () => { setEditing(null); setForm({ ...EMPTY, company_id: selectedCompanyId }); setDialogOpen(true); };
+  const openNew = () => { setEditing(null); setForm({ ...EMPTY, company_id: companyId }); setDialogOpen(true); };
   const openEdit = (acc) => { setEditing(acc.id); setForm(acc); setDialogOpen(true); };
   const set = (f, v) => setForm(p => ({ ...p, [f]: v }));
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-center gap-3">
-        <Select value={selectedCompanyId} onValueChange={setSelectedCompanyId}>
-          <SelectTrigger className="w-64"><SelectValue placeholder="Kies bedrijf" /></SelectTrigger>
-          <SelectContent>{companies.map(c => <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>)}</SelectContent>
-        </Select>
-        <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" />Rekening toevoegen</Button>
+    <div className="rounded-xl border border-border bg-card shadow-sm">
+      {/* Header met knop */}
+      <div className="bg-muted/40 border-b border-border px-6 py-4 rounded-t-xl flex items-center justify-between">
+        <h2 className="text-base font-semibold text-foreground">Bank / G-rekeningen</h2>
+        <Button size="sm" onClick={openNew}>
+          <Plus className="w-4 h-4 mr-1" />Rekening toevoegen
+        </Button>
       </div>
 
-      {accounts.length === 0 && <p className="text-sm text-slate-400 py-8 text-center">Nog geen rekeningen voor dit bedrijf.</p>}
+      {/* Content */}
+      <div className="p-6 space-y-3">
+        {accounts.length === 0 && (
+          <p className="text-sm text-muted-foreground py-6 text-center">Nog geen rekeningen voor dit bedrijf.</p>
+        )}
 
-      <div className="space-y-3">
         {accounts.map(acc => (
           <Card key={acc.id} className="border-0 shadow-sm">
             <CardContent className="p-4 flex items-start gap-3">
@@ -68,7 +71,7 @@ export default function CompanyBankTab({ companies }) {
                   {acc.is_default && <Badge className="bg-green-100 text-green-800 text-xs">Standaard</Badge>}
                   {acc.status !== "active" && <Badge variant="outline" className="text-xs">{acc.status}</Badge>}
                 </div>
-                <p className="text-xs text-slate-500 mt-0.5">{acc.account_holder_name || acc.bank_name || ""}</p>
+                <p className="text-xs text-muted-foreground mt-0.5">{acc.account_holder_name || acc.bank_name || ""}</p>
                 {acc.account_type === "g_account" && (
                   <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
                     <AlertTriangle className="w-3 h-3" /> G-rekening voor loonheffingen/btw bij inleners- of ketenaansprakelijkheid

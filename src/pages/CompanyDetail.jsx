@@ -445,14 +445,7 @@ export default function CompanyDetail() {
       <LocationsTab companies={companies} />
 
       {/* Bank / G-rekeningen */}
-      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-        <div className="bg-muted/40 border-b border-border px-6 py-4">
-          <h2 className="text-base font-semibold text-foreground">Bank / G-rekeningen</h2>
-        </div>
-        <div className="p-6">
-          <CompanyBankTab companies={[company]} />
-        </div>
-      </div>
+      <CompanyBankTab companies={[company]} />
     </div>
   );
 }
