@@ -131,9 +131,9 @@ export default function LocationsTab({ companies }) {
 
         {/* Inline new form */}
         {showInlineForm && !editingId && (
-          <Card className="border border-primary/30 shadow-sm">
-            <CardContent className="p-4">
-              <InlineForm
+          <Card className="border border-primary/30 shadow-sm overflow-visible">
+          <CardContent className="p-4 overflow-visible">
+          <InlineForm
                 form={form} set={set}
                 addressSugg={addressSugg} showSugg={showSugg}
                 handleAddressQuery={handleAddressQuery} selectAddress={selectAddress}
@@ -151,7 +151,7 @@ export default function LocationsTab({ companies }) {
 
 function InlineForm({ form, set, addressSugg, showSugg, handleAddressQuery, selectAddress, onSave, onCancel, saving }) {
   return (
-    <div className="flex flex-col sm:flex-row gap-3 items-start">
+    <div className="flex flex-col sm:flex-row gap-3 items-start overflow-visible">
       <div className="w-40 shrink-0">
         <Select value={form.location_type} onValueChange={v => set("location_type", v)}>
           <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
@@ -167,9 +167,9 @@ function InlineForm({ form, set, addressSugg, showSugg, handleAddressQuery, sele
           className="h-9 text-sm"
         />
         {showSugg && addressSugg.length > 0 && (
-          <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-lg shadow-lg max-h-40 overflow-y-auto">
+          <div className="absolute z-[200] w-full top-full mt-1 bg-popover border border-border rounded-lg shadow-xl max-h-60 overflow-y-auto">
             {addressSugg.map((s, i) => (
-              <button key={i} type="button" onClick={() => selectAddress(s)} className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex gap-2 text-foreground">
+              <button key={i} type="button" onClick={() => selectAddress(s)} className="w-full px-3 py-2.5 text-left text-sm hover:bg-accent flex gap-2 text-foreground">
                 <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />{s.address}
               </button>
             ))}
