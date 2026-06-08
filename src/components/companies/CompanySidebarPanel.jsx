@@ -1,6 +1,8 @@
 import React, { useState } from "react";
 import { Shield, BookOpen, MapPin, CreditCard } from "lucide-react";
 import WpbrTab from "./WpbrTab";
+import LocationsTab from "./LocationsTab";
+import CompanyBankTab from "./CompanyBankTab";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Check, Edit, X } from "lucide-react";
@@ -8,11 +10,13 @@ import { Check, Edit, X } from "lucide-react";
 const MENU_ITEMS = [
   { key: "wpbr", label: "WPBR-vergunning", icon: Shield },
   { key: "cao", label: "CAO", icon: BookOpen },
+  { key: "locations", label: "Vestigingen", icon: MapPin },
+  { key: "bank", label: "Bank / G-rekeningen", icon: CreditCard },
 ];
 
 export default function CompanySidebarPanel({
   companyId, editing, data, caoConfigurations, caoName,
-  set, startEdit, cancelEdit, saveMutation, form,
+  set, startEdit, cancelEdit, saveMutation, form, companies, company,
 }) {
   const [active, setActive] = useState("wpbr");
 
@@ -40,6 +44,14 @@ export default function CompanySidebarPanel({
       <div className="flex-1 min-w-0">
         {active === "wpbr" && (
           <WpbrTab companyId={companyId} />
+        )}
+
+        {active === "locations" && (
+          <LocationsTab companies={companies} />
+        )}
+
+        {active === "bank" && (
+          <CompanyBankTab companies={company ? [company] : []} />
         )}
 
         {active === "cao" && (

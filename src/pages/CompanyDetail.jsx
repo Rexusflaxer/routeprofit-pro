@@ -9,8 +9,6 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowLeft, Edit, Check, X, Building2, Phone, Mail, Globe, MapPin, FileText, Upload, Shield, BookOpen } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import LocationsTab from "@/components/companies/LocationsTab";
-import CompanyBankTab from "@/components/companies/CompanyBankTab";
 import WpbrTab from "@/components/companies/WpbrTab";
 import SidebarPanel from "@/components/companies/CompanySidebarPanel";
 
@@ -390,13 +388,9 @@ export default function CompanyDetail() {
         cancelEdit={cancelEdit}
         saveMutation={saveMutation}
         form={form}
+        companies={companies}
+        company={company}
       />
-
-      {/* Vestigingen */}
-      <LocationsTab companies={companies} />
-
-      {/* Bank / G-rekeningen */}
-      <CompanyBankTab companies={[company]} />
     </div>
   );
 }
