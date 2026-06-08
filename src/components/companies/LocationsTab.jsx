@@ -80,7 +80,7 @@ export default function LocationsTab({ companies }) {
       </div>
 
       {/* Content */}
-      <div className="p-6 space-y-2">
+      <div className="divide-y divide-border">
         {locations.length === 0 && !showInlineForm && (
           <p className="text-sm text-muted-foreground py-6 text-center">Nog geen vestigingen aangemaakt.</p>
         )}
@@ -91,24 +91,21 @@ export default function LocationsTab({ companies }) {
 
           if (isEditingThis) {
             return (
-              <Card key={loc.id} className="border border-primary/30 shadow-sm overflow-visible">
-                <CardContent className="p-4 overflow-visible">
-                  <InlineForm
-                    form={form} set={set}
-                    addressSugg={addressSugg} showSugg={showSugg}
-                    handleAddressQuery={handleAddressQuery} selectAddress={selectAddress}
-                    onSave={() => saveMutation.mutate(form)}
-                    onCancel={cancel}
-                    saving={saveMutation.isPending}
-                  />
-                </CardContent>
-              </Card>
+              <div key={loc.id} className="px-6 py-4">
+                <InlineForm
+                  form={form} set={set}
+                  addressSugg={addressSugg} showSugg={showSugg}
+                  handleAddressQuery={handleAddressQuery} selectAddress={selectAddress}
+                  onSave={() => saveMutation.mutate(form)}
+                  onCancel={cancel}
+                  saving={saveMutation.isPending}
+                />
+              </div>
             );
           }
 
           return (
-            <Card key={loc.id} className="border-0 shadow-sm">
-              <CardContent className="p-4 flex items-start gap-3">
+            <div key={loc.id} className="flex items-start gap-3 px-6 py-4">
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant="secondary" className="text-xs">{LOCATION_TYPES[loc.location_type] || loc.location_type}</Badge>
@@ -126,25 +123,22 @@ export default function LocationsTab({ companies }) {
                   <Button size="icon" variant="ghost" onClick={() => openEdit(loc)}><Edit className="w-4 h-4" /></Button>
                   <Button size="icon" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => { if (confirm("Vestiging verwijderen?")) deleteMutation.mutate(loc.id); }}><Trash2 className="w-4 h-4" /></Button>
                 </div>
-              </CardContent>
-            </Card>
+            </div>
           );
         })}
 
         {/* Inline nieuw formulier */}
         {showInlineForm && !editingId && (
-          <Card className="border border-primary/30 shadow-sm overflow-visible">
-            <CardContent className="p-4 overflow-visible">
-              <InlineForm
-                form={form} set={set}
-                addressSugg={addressSugg} showSugg={showSugg}
-                handleAddressQuery={handleAddressQuery} selectAddress={selectAddress}
-                onSave={() => saveMutation.mutate(form)}
-                onCancel={cancel}
-                saving={saveMutation.isPending}
-              />
-            </CardContent>
-          </Card>
+          <div className="px-6 py-4">
+            <InlineForm
+              form={form} set={set}
+              addressSugg={addressSugg} showSugg={showSugg}
+              handleAddressQuery={handleAddressQuery} selectAddress={selectAddress}
+              onSave={() => saveMutation.mutate(form)}
+              onCancel={cancel}
+              saving={saveMutation.isPending}
+            />
+          </div>
         )}
       </div>
     </div>
