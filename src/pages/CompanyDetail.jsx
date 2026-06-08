@@ -194,8 +194,14 @@ export default function CompanyDetail() {
           <div className="flex-1 min-w-0">
             {editing ? (
               <div className="flex flex-col gap-2 max-w-md">
-                <Input value={data.display_name || ""} onChange={e => set("display_name", e.target.value)} className="text-lg font-bold h-9" placeholder="Weergavenaam" />
-                <Input value={data.legal_name || ""} onChange={e => set("legal_name", e.target.value)} className="text-sm h-8" placeholder="Juridische naam" />
+                <div>
+                  <span className="text-xs text-muted-foreground">Weergavenaam</span>
+                  <Input value={data.display_name || ""} onChange={e => set("display_name", e.target.value)} className="text-lg font-bold h-9 mt-0.5" placeholder="Weergavenaam" />
+                </div>
+                <div>
+                  <span className="text-xs text-muted-foreground">Juridische naam (handelsnaam KvK)</span>
+                  <Input value={data.legal_name || ""} onChange={e => set("legal_name", e.target.value)} className="text-sm h-8 mt-0.5" placeholder="Juridische naam" />
+                </div>
               </div>
             ) : (
               <div>
@@ -237,9 +243,6 @@ export default function CompanyDetail() {
           {/* Juridisch */}
           <div className="space-y-1">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Juridische gegevens</h3>
-            <InfoRow label="Bedrijfsnaam">
-              {editing ? <Input value={data.display_name || ""} onChange={e => set("display_name", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.display_name} />}
-            </InfoRow>
             <InfoRow label="Handelsnaam">
               {editing ? <Input value={data.trade_name || ""} onChange={e => set("trade_name", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.trade_name} />}
             </InfoRow>
