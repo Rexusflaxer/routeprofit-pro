@@ -270,20 +270,7 @@ export default function CompanyDetail() {
                   </Select>
                 : <ViewText value={ROLE_LABELS[data.company_role] || data.company_role} />}
             </InfoRow>
-            <InfoRow label="Status">
-              {editing
-                ? <Select value={data.status || "active"} onValueChange={v => set("status", v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="active">Actief</SelectItem>
-                      <SelectItem value="inactive">Inactief</SelectItem>
-                      <SelectItem value="archived">Gearchiveerd</SelectItem>
-                    </SelectContent>
-                  </Select>
-                : <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[data.status] || ""}`}>
-                    {data.status === "active" ? "Actief" : data.status === "inactive" ? "Inactief" : "Gearchiveerd"}
-                  </span>}
-            </InfoRow>
+
             {(holdingOptions.length > 0 || holdingCompany) && (
               <InfoRow label="Onder holding">
                 {editing
