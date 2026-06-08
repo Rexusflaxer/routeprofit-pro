@@ -237,11 +237,8 @@ export default function CompanyDetail() {
           {/* Juridisch */}
           <div className="space-y-1">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Juridische gegevens</h3>
-            <InfoRow label="Weergavenaam">
+            <InfoRow label="Bedrijfsnaam">
               {editing ? <Input value={data.display_name || ""} onChange={e => set("display_name", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.display_name} />}
-            </InfoRow>
-            <InfoRow label="Juridische naam">
-              {editing ? <Input value={data.legal_name || ""} onChange={e => set("legal_name", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.legal_name} />}
             </InfoRow>
             <InfoRow label="Handelsnaam">
               {editing ? <Input value={data.trade_name || ""} onChange={e => set("trade_name", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.trade_name} />}
