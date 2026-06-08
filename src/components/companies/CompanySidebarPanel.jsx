@@ -11,7 +11,7 @@ const MENU_ITEMS = [
   { key: "wpbr", label: "WPBR-vergunning", icon: Shield },
   { key: "cao", label: "CAO", icon: BookOpen },
   { key: "locations", label: "Vestigingen", icon: MapPin },
-  { key: "bank", label: "Bank / G-rekeningen", icon: CreditCard },
+  { key: "bank", label: "Bank", icon: CreditCard },
 ];
 
 export default function CompanySidebarPanel({
