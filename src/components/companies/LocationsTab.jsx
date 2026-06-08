@@ -109,9 +109,6 @@ export default function LocationsTab({ companies }) {
           return (
             <Card key={loc.id} className="border-0 shadow-sm">
               <CardContent className="p-4 flex items-start gap-3">
-                <div className="p-2 rounded-lg bg-muted/50">
-                  <Building2 className="w-5 h-5 text-muted-foreground" />
-                </div>
                 <div className="flex-1 min-w-0">
                   <div className="flex items-center gap-2 flex-wrap">
                     <Badge variant="secondary" className="text-xs">{LOCATION_TYPES[loc.location_type] || loc.location_type}</Badge>
