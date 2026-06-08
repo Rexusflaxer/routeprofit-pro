@@ -3,7 +3,6 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { ArrowLeft, Edit, X, Building2, Phone, Mail, Globe, MapPin, FileText } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import CompanyForm from "@/components/companies/CompanyForm";
@@ -251,19 +250,25 @@ export default function CompanyDetail() {
         </div>
       )}
 
-      {/* Vestigingen & Bank tabs */}
-      <Tabs defaultValue="locations">
-        <TabsList>
-          <TabsTrigger value="locations">Vestigingen</TabsTrigger>
-          <TabsTrigger value="bank">Bank / G-rekeningen</TabsTrigger>
-        </TabsList>
-        <TabsContent value="locations" className="pt-4">
+      {/* Vestigingen */}
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+        <div className="bg-muted/40 border-b border-border px-6 py-4">
+          <h2 className="text-base font-semibold text-foreground">Vestigingen</h2>
+        </div>
+        <div className="p-6">
           <LocationsTab companies={companies} />
-        </TabsContent>
-        <TabsContent value="bank" className="pt-4">
+        </div>
+      </div>
+
+      {/* Bank / G-rekeningen */}
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+        <div className="bg-muted/40 border-b border-border px-6 py-4">
+          <h2 className="text-base font-semibold text-foreground">Bank / G-rekeningen</h2>
+        </div>
+        <div className="p-6">
           <CompanyBankTab companies={[company]} />
-        </TabsContent>
-      </Tabs>
+        </div>
+      </div>
 
 
     </div>
