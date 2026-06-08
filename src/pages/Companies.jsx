@@ -6,8 +6,10 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Plus, Edit, Trash2, Building2, AlertCircle } from "lucide-react";
+import { Plus, Building2, AlertCircle } from "lucide-react";
+import { useNavigate } from "react-router-dom";
 import CompanyForm from "@/components/companies/CompanyForm";
+
 import LocationsTab from "@/components/companies/LocationsTab";
 import CompanyBankTab from "@/components/companies/CompanyBankTab";
 
@@ -35,6 +37,7 @@ export default function Companies() {
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editingCompany, setEditingCompany] = useState(null);
   const [migrateLoading, setMigrateLoading] = useState(false);
+  const navigate = useNavigate();
   const queryClient = useQueryClient();
 
   const { data: companies = [], isLoading } = useQuery({
@@ -62,19 +65,12 @@ export default function Companies() {
   });
 
   const saveMutation = useMutation({
-    mutationFn: (data) => editingCompany?.id
-      ? base44.entities.Company.update(editingCompany.id, data)
-      : base44.entities.Company.create(data),
+    mutationFn: (data) => base44.entities.Company.create(data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
       setDialogOpen(false);
       setEditingCompany(null);
     },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.Company.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["companies"] }),
   });
 
   const handleMigrateFromSettings = async () => {
@@ -100,7 +96,6 @@ export default function Companies() {
   };
 
   const openNew = () => { setEditingCompany(null); setDialogOpen(true); };
-  const openEdit = (c) => { setEditingCompany(c); setDialogOpen(true); };
 
   const getCaoName = (id) => {
     const cao = caoConfigurations.find(c => c.id === id);
@@ -181,18 +176,27 @@ export default function Companies() {
                     <TableHead>Activiteiten</TableHead>
                     <TableHead>CAO</TableHead>
                     <TableHead>Status</TableHead>
-                    <TableHead className="w-24"></TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
                   {getGroupedCompanies().map(({ company, isChild }) => (
-                    <TableRow key={company.id} className={isChild ? "hover:bg-muted/20 bg-muted/10" : "hover:bg-muted/20"}>
+                    <TableRow
+                      key={company.id}
+                      className={`cursor-pointer ${isChild ? "hover:bg-muted/30 bg-muted/10" : "hover:bg-muted/20"}`}
+                      onClick={() => navigate(`/CompanyDetail?id=${company.id}`)}
+                    >
                       <TableCell>
-                        <div className={isChild ? "pl-6 border-l-2 border-muted ml-1" : ""}>
-                          <p className="font-medium text-sm text-foreground">{company.display_name}</p>
-                          {company.trade_name && company.trade_name !== company.display_name && (
-                            <p className="text-xs text-muted-foreground">{company.trade_name}</p>
-                          )}
+                        <div className={`flex items-center gap-2 ${isChild ? "pl-6 border-l-2 border-muted ml-1" : ""}`}>
+                          {company.logo_file_url
+                            ? <img src={company.logo_file_url} alt="logo" className="w-7 h-7 rounded object-contain bg-white border border-border p-0.5 shrink-0" />
+                            : <div className="w-7 h-7 rounded bg-muted flex items-center justify-center shrink-0"><Building2 className="w-3.5 h-3.5 text-muted-foreground" /></div>
+                          }
+                          <div>
+                            <p className="font-medium text-sm text-foreground">{company.display_name}</p>
+                            {company.trade_name && company.trade_name !== company.display_name && (
+                              <p className="text-xs text-muted-foreground">{company.trade_name}</p>
+                            )}
+                          </div>
                         </div>
                       </TableCell>
                       <TableCell className="text-sm text-muted-foreground">{company.kvk_number || "—"}</TableCell>
@@ -217,14 +221,6 @@ export default function Companies() {
                           {company.status === "active" ? "Actief" : company.status === "inactive" ? "Inactief" : "Gearchiveerd"}
                         </span>
                       </TableCell>
-                      <TableCell>
-                        <div className="flex gap-1">
-                          <Button size="icon" variant="ghost" onClick={() => openEdit(company)}><Edit className="w-4 h-4" /></Button>
-                          <Button size="icon" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => { if (confirm(`${company.display_name} verwijderen?`)) deleteMutation.mutate(company.id); }}>
-                            <Trash2 className="w-4 h-4" />
-                          </Button>
-                        </div>
-                      </TableCell>
                     </TableRow>
                   ))}
                 </TableBody>
@@ -248,7 +244,7 @@ export default function Companies() {
       <Dialog open={dialogOpen} onOpenChange={v => { setDialogOpen(v); if (!v) setEditingCompany(null); }}>
         <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
           <DialogHeader>
-            <DialogTitle>{editingCompany ? `${editingCompany.display_name} bewerken` : "Nieuw bedrijf"}</DialogTitle>
+            <DialogTitle>Nieuw bedrijf</DialogTitle>
           </DialogHeader>
           <CompanyForm
             company={editingCompany}

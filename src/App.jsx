@@ -14,6 +14,7 @@ import RouteExecutionDetails from './pages/RouteExecutionDetails';
 import ReportTemplates from './pages/ReportTemplates';
 import Companies from './pages/Companies';
 import EmployeePortal from './pages/EmployeePortal';
+import CompanyDetail from './pages/CompanyDetail';
 // CAOBeheer removed from customer app — owner-only via Codex/Cloudflare governance
 
 const { Pages, Layout, mainPage } = pagesConfig;
@@ -62,6 +63,7 @@ const AuthenticatedApp = () => {
       <Route path="/ReportTemplates" element={<LayoutWrapper currentPageName="ReportTemplates"><ReportTemplates /></LayoutWrapper>} />
       <Route path="/Companies" element={<LayoutWrapper currentPageName="Companies"><Companies /></LayoutWrapper>} />
       <Route path="/EmployeePortal" element={<LayoutWrapper currentPageName="EmployeePortal"><EmployeePortal /></LayoutWrapper>} />
+      <Route path="/CompanyDetail" element={<LayoutWrapper currentPageName="Companies"><CompanyDetail /></LayoutWrapper>} />
       {/* CAOBeheer: geen route — CAO governance is owner-only via Codex/Cloudflare.
            Klanten kunnen CAO-regels/configuraties niet zien, goedkeuren of aanpassen. */}
       {Object.entries(Pages).map(([path, Page]) => (
