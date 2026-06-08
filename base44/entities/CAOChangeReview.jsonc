@@ -143,6 +143,7 @@
         "applied",
         "manual_review_required",
         "skipped_no_affected_run",
+        "superseded",
         null
       ],
       "default": "not_required"
@@ -188,6 +189,13 @@
         "string",
         "null"
       ]
+    },
+    "review_deduplication_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Stabiele sleutel voor idempotente CAOChangeReview-upsert, gebaseerd op idempotency_key + cao/rule/field/change/effective/value-signature."
     },
     "idempotency_key": {
       "type": [

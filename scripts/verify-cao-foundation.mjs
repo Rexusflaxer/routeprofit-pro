@@ -1896,7 +1896,8 @@ function runCaoStaticGovernanceScenarios() {
     'ingestCaoAutomationPayload',
     'syncCaoFromCloudflare',
     'auditCaoRuleCoverage',
-    'queueCaoPayrollCorrections'
+    'queueCaoPayrollCorrections',
+    'dedupeCaoAutomationArtifacts'
   ];
   const frontendSensitiveFunctionInvokes = srcFiles
     .filter(file => {
@@ -1923,7 +1924,8 @@ function runCaoStaticGovernanceScenarios() {
     'ingestCaoAutomationPayload',
     'syncCaoFromCloudflare',
     'auditCaoRuleCoverage',
-    'queueCaoPayrollCorrections'
+    'queueCaoPayrollCorrections',
+    'dedupeCaoAutomationArtifacts'
   ]);
   for (const file of functionFiles) {
     const functionName = path.basename(path.dirname(file));
@@ -2027,6 +2029,52 @@ function runCaoStaticGovernanceScenarios() {
       syncSource.includes('base44_caorule_import_required_for_payroll_ready: false'),
     'syncCaoFromCloudflare must store a compact CAORule manifest registry for payroll-ready sync'
   );
+  for (const [name, source] of [
+    ['ingestCaoAutomationPayload', ingestSource],
+    ['syncCaoFromCloudflare', syncSource]
+  ]) {
+    assert.ok(source.includes('upsertCaoChangeReview'), `${name} must upsert CAOChangeReview records idempotently`);
+    assert.ok(source.includes('review_deduplication_key'), `${name} must store a stable review_deduplication_key`);
+    assert.ok(source.includes('sameStableValue'), `${name} must include old/new values in duplicate matching`);
+  }
+
+  const correctionQueueSource = fs.readFileSync(path.join(repoRoot, 'base44/functions/queueCaoPayrollCorrections/entry.ts'), 'utf8');
+  assert.ok(
+    correctionQueueSource.includes("'cao-payroll-correction'"),
+    'queueCaoPayrollCorrections must use semantic CAO payroll correction keys'
+  );
+  assert.equal(
+    correctionQueueSource.includes('${review.id}::${run?.id || \'unmatched\'}') ||
+      correctionQueueSource.includes('${review.id}::${run?.id || "unmatched"}'),
+    false,
+    'queueCaoPayrollCorrections must not key corrections by CAOChangeReview id'
+  );
+  assert.ok(
+    correctionQueueSource.includes('correctionReviewValueSignature') &&
+      correctionQueueSource.includes('review.review_deduplication_key'),
+    'queueCaoPayrollCorrections must include the review value signature in semantic correction keys'
+  );
+
+  const caoChangeReviewEntitySource = fs.readFileSync(path.join(repoRoot, 'base44/entities/CAOChangeReview.jsonc'), 'utf8');
+  const caoImportRunEntitySource = fs.readFileSync(path.join(repoRoot, 'base44/entities/CAOImportRun.jsonc'), 'utf8');
+  const caoPayrollCorrectionEntitySource = fs.readFileSync(path.join(repoRoot, 'base44/entities/CAOPayrollCorrection.jsonc'), 'utf8');
+  assert.ok(caoChangeReviewEntitySource.includes('"review_deduplication_key"'), 'CAOChangeReview schema must expose review_deduplication_key');
+  assert.ok(caoChangeReviewEntitySource.includes('"superseded"'), 'CAOChangeReview correction/status schemas must allow superseded duplicates');
+  assert.ok(caoImportRunEntitySource.includes('"reused_review_ids"'), 'CAOImportRun schema must record reused review ids');
+  assert.ok(caoImportRunEntitySource.includes('"superseded_review_ids"'), 'CAOImportRun schema must record superseded review ids');
+  assert.ok(
+    caoPayrollCorrectionEntitySource.includes('Semantische idempotency key'),
+    'CAOPayrollCorrection schema must document semantic correction keys'
+  );
+
+  const dedupeFunctionPath = path.join(repoRoot, 'base44/functions/dedupeCaoAutomationArtifacts/entry.ts');
+  assert.ok(fs.existsSync(dedupeFunctionPath), 'Owner-only CAO automation dedupe function must exist');
+  const dedupeSource = fs.readFileSync(dedupeFunctionPath, 'utf8');
+  assert.ok(dedupeSource.includes('BASE44_CAO_SYNC_TRIGGER_SECRET'), 'dedupeCaoAutomationArtifacts must require the internal sync secret');
+  assert.ok(dedupeSource.includes('CAO_AUTOMATION_SHARED_SECRET'), 'dedupeCaoAutomationArtifacts must also accept the automation relay secret');
+  assert.ok(dedupeSource.includes('review_deduplication_key'), 'dedupeCaoAutomationArtifacts must normalize review_deduplication_key');
+  assert.ok(dedupeSource.includes("status: 'superseded'"), 'dedupeCaoAutomationArtifacts must supersede duplicate artifacts');
+  assert.ok(dedupeSource.includes('correctionReviewValueSignature'), 'dedupeCaoAutomationArtifacts must normalize correction keys with the review value signature');
 
   const personnelContractsSource = fs.readFileSync(path.join(repoRoot, 'src/components/personnel/PersonnelContractsTab.jsx'), 'utf8');
   assert.ok(

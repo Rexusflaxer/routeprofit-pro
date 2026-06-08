@@ -1550,6 +1550,87 @@ async function sha256Hex(value) {
     .join('');
 }
 
+async function buildCaoReviewDeduplicationKey({ idempotencyKey, caoKey, change, effectiveMeta }) {
+  const semanticPayload = stableForHash({
+    idempotency_key: idempotencyKey || null,
+    cao_key: caoKey || null,
+    rule_key: change?.rule_key || change?.field_path || 'unknown',
+    field_path: change?.field_path || '',
+    change_type: change?.change_type || 'changed',
+    effective_from: effectiveMeta?.effective_from || null,
+    effective_until: effectiveMeta?.effective_until || null,
+    old_value: change?.old_value ?? null,
+    new_value: change?.new_value ?? null
+  });
+  return `cao-change-review::${await sha256Hex(JSON.stringify(semanticPayload))}`;
+}
+
+function appendReviewNote(existingNotes, note) {
+  return [existingNotes || '', note].filter(Boolean).join('\n');
+}
+
+function sameStableValue(left, right) {
+  return JSON.stringify(stableForHash(left ?? null)) === JSON.stringify(stableForHash(right ?? null));
+}
+
+async function upsertCaoChangeReview(base44, reviewData) {
+  const candidates = reviewData.idempotency_key
+    ? await base44.asServiceRole.entities.CAOChangeReview.filter({ idempotency_key: reviewData.idempotency_key })
+    : [];
+  const matches = candidates.filter(review =>
+    review.review_deduplication_key === reviewData.review_deduplication_key ||
+    (
+      !review.review_deduplication_key &&
+      review.cao_key === reviewData.cao_key &&
+      review.rule_key === reviewData.rule_key &&
+      review.field_path === reviewData.field_path &&
+      review.change_type === reviewData.change_type &&
+      (review.effective_from || null) === (reviewData.effective_from || null) &&
+      (review.effective_until || null) === (reviewData.effective_until || null) &&
+      sameStableValue(review.old_value, reviewData.old_value) &&
+      sameStableValue(review.new_value, reviewData.new_value)
+    )
+  );
+  const canonical = matches
+    .filter(review => review.status !== 'superseded')
+    .sort((a, b) => String(b.approved_at || b.id || '').localeCompare(String(a.approved_at || a.id || '')))[0] ||
+    matches.sort((a, b) => String(b.approved_at || b.id || '').localeCompare(String(a.approved_at || a.id || '')))[0] ||
+    null;
+
+  if (!canonical) {
+    const created = await base44.asServiceRole.entities.CAOChangeReview.create(reviewData);
+    return { review: created, created: true, superseded_review_ids: [] };
+  }
+
+  await base44.asServiceRole.entities.CAOChangeReview.update(canonical.id, {
+    ...reviewData,
+    review_notes: appendReviewNote(
+      canonical.review_notes,
+      `Idempotent bijgewerkt door sync ${reviewData.import_run_id || 'onbekend'} op ${new Date().toISOString()}.`
+    )
+  });
+
+  const supersededIds = [];
+  for (const duplicate of matches) {
+    if (duplicate.id === canonical.id || duplicate.status === 'superseded') continue;
+    await base44.asServiceRole.entities.CAOChangeReview.update(duplicate.id, {
+      status: 'superseded',
+      correction_status: 'superseded',
+      review_notes: appendReviewNote(
+        duplicate.review_notes,
+        `Superseded als duplicate van CAOChangeReview ${canonical.id} via deduplication key ${reviewData.review_deduplication_key}.`
+      )
+    });
+    supersededIds.push(duplicate.id);
+  }
+
+  return {
+    review: { ...canonical, ...reviewData, id: canonical.id },
+    created: false,
+    superseded_review_ids: supersededIds
+  };
+}
+
 function localRuntimeBindingRegistryEntries() {
   return Object.entries(LOCAL_RUNTIME_RULE_BINDINGS)
     .map(([key, binding]) => {
@@ -3199,6 +3280,8 @@ Deno.serve(async (req) => {
 
     // ── Stap 12: Alle regels klaar — maak CAOChangeReview records ──
     const reviewIds = [];
+    const reusedReviewIds = [];
+    const supersededReviewIds = [];
     const detectedChanges = payload.detected_changes || [];
     for (const change of detectedChanges) {
       const effectiveMeta = buildChangeEffectiveMetadata(
@@ -3206,7 +3289,13 @@ Deno.serve(async (req) => {
         newConfig.valid_from || candidateCfg.valid_from || null,
         payload.approval?.approved_at || null
       );
-      const review = await base44.asServiceRole.entities.CAOChangeReview.create({
+      const reviewDeduplicationKey = await buildCaoReviewDeduplicationKey({
+        idempotencyKey: payload.idempotency_key,
+        caoKey: newConfig.cao_key || candidateCfg.cao_key || null,
+        change,
+        effectiveMeta
+      });
+      const { review, created, superseded_review_ids = [] } = await upsertCaoChangeReview(base44, {
         import_run_id: importRun.id,
         cao_configuration_id: newConfig.id,
         cao_key: newConfig.cao_key || candidateCfg.cao_key || null,
@@ -3222,9 +3311,12 @@ Deno.serve(async (req) => {
         approved_by_owner_name: payload.approval?.approved_by_owner_name || null,
         approved_at: payload.approval?.approved_at || null,
         codex_thread_id: payload.approval?.codex_thread_id || null,
-        idempotency_key: payload.idempotency_key
+        idempotency_key: payload.idempotency_key,
+        review_deduplication_key: reviewDeduplicationKey
       });
       reviewIds.push(review.id);
+      if (!created) reusedReviewIds.push(review.id);
+      supersededReviewIds.push(...superseded_review_ids);
     }
 
     let correctionQueueSummary = null;
@@ -3252,6 +3344,8 @@ Deno.serve(async (req) => {
       status: 'completed',
       created_configuration_id: newConfig.id,
       created_review_ids: reviewIds,
+      reused_review_ids: reusedReviewIds,
+      superseded_review_ids: [...new Set(supersededReviewIds)],
       created_correction_ids: [
         ...(correctionQueueSummary?.created_correction_ids || []),
         ...(correctionQueueSummary?.updated_correction_ids || [])

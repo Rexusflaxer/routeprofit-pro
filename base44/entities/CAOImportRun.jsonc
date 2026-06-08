@@ -92,6 +92,20 @@
         "type": "string"
       }
     },
+    "reused_review_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "CAOChangeReview IDs die idempotent zijn hergebruikt in plaats van opnieuw aangemaakt."
+    },
+    "superseded_review_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Duplicate CAOChangeReview IDs die tijdens import op superseded zijn gezet."
+    },
     "created_correction_ids": {
       "type": "array",
       "items": {

@@ -323,8 +323,49 @@ function resolveCorrectionQueueTarget({
   };
 }
 
+function correctionKeyPart(value) {
+  const normalized = value === null || value === undefined || value === '' ? '-' : String(value);
+  return encodeURIComponent(normalized);
+}
+
+function stableForCorrectionKey(value) {
+  if (Array.isArray(value)) return value.map(stableForCorrectionKey);
+  if (!value || typeof value !== 'object') return value ?? null;
+  return Object.keys(value)
+    .sort()
+    .reduce((acc, key) => {
+      acc[key] = stableForCorrectionKey(value[key]);
+      return acc;
+    }, {});
+}
+
+function correctionReviewValueSignature(review) {
+  if (review.review_deduplication_key) return review.review_deduplication_key;
+  return JSON.stringify(stableForCorrectionKey({
+    old_value: review.old_value ?? null,
+    new_value: review.new_value ?? null
+  }));
+}
+
+function buildReviewSemanticCorrectionScope(review) {
+  return [
+    review.idempotency_key || review.import_run_id || review.id || 'unknown_import',
+    review.cao_key || 'unknown_cao',
+    review.rule_key || 'unknown_rule',
+    review.field_path || '',
+    review.change_type || 'changed',
+    isoDate(review.effective_from) || '',
+    isoDate(review.effective_until) || '',
+    correctionReviewValueSignature(review)
+  ].map(correctionKeyPart).join('::');
+}
+
 function buildCorrectionKey(review, run) {
-  return `${review.id}::${run?.id || 'unmatched'}`;
+  return [
+    'cao-payroll-correction',
+    buildReviewSemanticCorrectionScope(review),
+    correctionKeyPart(run?.id || 'unmatched')
+  ].join('::');
 }
 
 function buildCorrectionData(review, run, status, reason, caoKey = null, match = {}, queueTarget = {}) {
@@ -400,11 +441,44 @@ async function upsertCorrection(base44, data) {
     correction_key: data.correction_key
   });
   if (existing.length > 0) {
-    await base44.asServiceRole.entities.CAOPayrollCorrection.update(existing[0].id, {
+    const canonical = existing
+      .filter(correction => correction.status !== 'superseded')
+      .sort((a, b) => String(b.created_at || b.id || '').localeCompare(String(a.created_at || a.id || '')))[0] ||
+      existing[0];
+    const protectedAppliedFields = canonical.status === 'applied'
+      ? {
+        status: 'applied',
+        applied_payroll_run_id: canonical.applied_payroll_run_id || data.applied_payroll_run_id || null,
+        new_calculation_snapshot: canonical.new_calculation_snapshot || data.new_calculation_snapshot || null,
+        delta_snapshot: canonical.delta_snapshot || data.delta_snapshot || null
+      }
+      : {};
+    const existingNotes = canonical.notes || '';
+    const nextNotes = [existingNotes];
+    if (data.notes && !existingNotes.includes(data.notes)) {
+      nextNotes.push(data.notes);
+    }
+    if (canonical.cao_change_review_id && canonical.cao_change_review_id !== data.cao_change_review_id) {
+      nextNotes.push(`Idempotent bijgewerkt via semantische correction_key op ${nowIso()}; gekoppelde canonical review blijft ${canonical.cao_change_review_id}.`);
+    }
+    await base44.asServiceRole.entities.CAOPayrollCorrection.update(canonical.id, {
       ...data,
-      created_at: existing[0].created_at || data.created_at
+      ...protectedAppliedFields,
+      cao_change_review_id: canonical.cao_change_review_id || data.cao_change_review_id,
+      created_at: canonical.created_at || data.created_at,
+      notes: nextNotes.filter(Boolean).join('\n')
     });
-    return { id: existing[0].id, created: false };
+    for (const duplicate of existing) {
+      if (duplicate.id === canonical.id || duplicate.status === 'superseded') continue;
+      await base44.asServiceRole.entities.CAOPayrollCorrection.update(duplicate.id, {
+        status: 'superseded',
+        notes: [
+          duplicate.notes || '',
+          `Superseded als duplicate van CAOPayrollCorrection ${canonical.id} met correction_key ${data.correction_key}.`
+        ].filter(Boolean).join('\n')
+      });
+    }
+    return { id: canonical.id, created: false };
   }
   const created = await base44.asServiceRole.entities.CAOPayrollCorrection.create(data);
   return { id: created.id, created: true };
