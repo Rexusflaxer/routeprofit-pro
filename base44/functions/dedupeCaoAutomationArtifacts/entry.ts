@@ -178,6 +178,7 @@ Deno.serve(async (req) => {
     const reviewIdReplacement = {};
     const canonicalReviewIds = new Set();
     const reviewActions = [];
+    const reviewNormalizationActions = [];
 
     for (const [key, group] of Object.entries(reviewGroups)) {
       const sorted = [...group].sort((a, b) => compareRank(reviewRank(a, activeConfigIds), reviewRank(b, activeConfigIds)));
@@ -185,6 +186,9 @@ Deno.serve(async (req) => {
       if (!canonical) continue;
       canonicalReviewIds.add(canonical.id);
 
+      if (canonical.review_deduplication_key !== key) {
+        reviewNormalizationActions.push({ review_id: canonical.id, key });
+      }
       if (apply && canonical.review_deduplication_key !== key) {
         await base44.asServiceRole.entities.CAOChangeReview.update(canonical.id, {
           review_deduplication_key: key
@@ -193,8 +197,13 @@ Deno.serve(async (req) => {
 
       for (const duplicate of sorted.slice(1)) {
         reviewIdReplacement[duplicate.id] = canonical.id;
+        const alreadySuperseded =
+          duplicate.status === 'superseded' &&
+          duplicate.correction_status === 'superseded' &&
+          duplicate.review_deduplication_key === key;
+        if (alreadySuperseded) continue;
         reviewActions.push({ duplicate_review_id: duplicate.id, canonical_review_id: canonical.id, key });
-        if (!apply || duplicate.status === 'superseded') continue;
+        if (!apply) continue;
         await base44.asServiceRole.entities.CAOChangeReview.update(duplicate.id, {
           status: 'superseded',
           correction_status: 'superseded',
@@ -215,12 +224,20 @@ Deno.serve(async (req) => {
     }
 
     const correctionActions = [];
+    const correctionNormalizationActions = [];
     for (const [key, group] of Object.entries(correctionGroups)) {
       const sorted = [...group].sort((a, b) => compareRank(correctionRank(a, canonicalReviewIds), correctionRank(b, canonicalReviewIds)));
       const canonical = sorted[0];
       if (!canonical) continue;
       const canonicalReviewId = reviewIdReplacement[canonical.cao_change_review_id] || canonical.cao_change_review_id;
 
+      if (canonical.correction_key !== key || canonical.cao_change_review_id !== canonicalReviewId) {
+        correctionNormalizationActions.push({
+          correction_id: canonical.id,
+          canonical_review_id: canonicalReviewId,
+          key
+        });
+      }
       if (apply && (canonical.correction_key !== key || canonical.cao_change_review_id !== canonicalReviewId)) {
         await base44.asServiceRole.entities.CAOPayrollCorrection.update(canonical.id, {
           correction_key: key,
@@ -233,8 +250,10 @@ Deno.serve(async (req) => {
       }
 
       for (const duplicate of sorted.slice(1)) {
+        const alreadySuperseded = duplicate.status === 'superseded' && duplicate.correction_key === key;
+        if (alreadySuperseded) continue;
         correctionActions.push({ duplicate_correction_id: duplicate.id, canonical_correction_id: canonical.id, key });
-        if (!apply || duplicate.status === 'superseded') continue;
+        if (!apply) continue;
         await base44.asServiceRole.entities.CAOPayrollCorrection.update(duplicate.id, {
           status: 'superseded',
           correction_key: key,
@@ -268,12 +287,18 @@ Deno.serve(async (req) => {
       idempotency_keys: [...idempotencyKeys],
       reviews_checked: reviews.length,
       review_duplicates_superseded: reviewActions.length,
+      review_normalizations: reviewNormalizationActions.length,
       corrections_checked: corrections.length,
       correction_duplicates_superseded: correctionActions.length,
+      correction_normalizations: correctionNormalizationActions.length,
       payroll_runs_checked: (payrollRunsAll || []).length,
       payroll_runs_relinked: payrollRunActions.length,
+      review_normalization_actions: reviewNormalizationActions.slice(0, 200),
+      review_normalization_actions_truncated: reviewNormalizationActions.length > 200,
       review_actions: reviewActions.slice(0, 200),
       review_actions_truncated: reviewActions.length > 200,
+      correction_normalization_actions: correctionNormalizationActions.slice(0, 200),
+      correction_normalization_actions_truncated: correctionNormalizationActions.length > 200,
       correction_actions: correctionActions.slice(0, 200),
       correction_actions_truncated: correctionActions.length > 200,
       payroll_run_actions: payrollRunActions.slice(0, 100),
