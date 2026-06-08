@@ -68,26 +68,31 @@ export default function LocationsTab({ companies }) {
   };
 
   return (
-    <div className="space-y-3">
-      <div className="flex justify-end">
+    <div className="rounded-xl border border-border bg-card shadow-sm">
+      {/* Header met knop */}
+      <div className="bg-muted/40 border-b border-border px-6 py-4 rounded-t-xl flex items-center justify-between">
+        <h2 className="text-base font-semibold text-foreground">Vestigingen</h2>
         {!showInlineForm && (
-          <Button size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" />Vestiging toevoegen</Button>
+          <Button size="sm" onClick={openNew}>
+            <Plus className="w-4 h-4 mr-1" />Vestiging toevoegen
+          </Button>
         )}
       </div>
 
-      {locations.length === 0 && !showInlineForm && (
-        <p className="text-sm text-muted-foreground py-6 text-center">Nog geen vestigingen aangemaakt.</p>
-      )}
+      {/* Content */}
+      <div className="p-6 space-y-2">
+        {locations.length === 0 && !showInlineForm && (
+          <p className="text-sm text-muted-foreground py-6 text-center">Nog geen vestigingen aangemaakt.</p>
+        )}
 
-      <div className="space-y-2">
         {locations.map(loc => {
           const linkedCompanies = getCompaniesForLocation(loc.id);
           const isEditingThis = editingId === loc.id && showInlineForm;
 
           if (isEditingThis) {
             return (
-              <Card key={loc.id} className="border border-primary/30 shadow-sm">
-                <CardContent className="p-4">
+              <Card key={loc.id} className="border border-primary/30 shadow-sm overflow-visible">
+                <CardContent className="p-4 overflow-visible">
                   <InlineForm
                     form={form} set={set}
                     addressSugg={addressSugg} showSugg={showSugg}
@@ -129,11 +134,11 @@ export default function LocationsTab({ companies }) {
           );
         })}
 
-        {/* Inline new form */}
+        {/* Inline nieuw formulier */}
         {showInlineForm && !editingId && (
           <Card className="border border-primary/30 shadow-sm overflow-visible">
-          <CardContent className="p-4 overflow-visible">
-          <InlineForm
+            <CardContent className="p-4 overflow-visible">
+              <InlineForm
                 form={form} set={set}
                 addressSugg={addressSugg} showSugg={showSugg}
                 handleAddressQuery={handleAddressQuery} selectAddress={selectAddress}
