@@ -1,0 +1,85 @@
+{
+  "name": "CompanyWpbrLicense",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "description": "ID van het bedrijf"
+    },
+    "license_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "ND",
+        "HND",
+        "BD",
+        "PAC",
+        "VTC",
+        "PGW",
+        "POB",
+        "other",
+        null
+      ],
+      "description": "WPBR-vergunningstype"
+    },
+    "license_number": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Vergunningsnummer"
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Geldig vanaf"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Geldig tot"
+    },
+    "document_file_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Ge\u00fcploade vergunning (PDF/afbeelding)"
+    },
+    "document_filename": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bestandsnaam van het ge\u00fcploade document"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "expired",
+        "superseded"
+      ],
+      "default": "active",
+      "description": "Status van de vergunning"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Opmerkingen"
+    }
+  },
+  "required": [
+    "company_id"
+  ]
+}

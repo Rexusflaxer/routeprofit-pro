@@ -7,10 +7,12 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
+import { Tabs, TabsList, TabsTrigger, TabsContent } from "@/components/ui/tabs";
 import { ArrowLeft, Edit, Check, X, Building2, Phone, Mail, Globe, MapPin, FileText, Upload } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import LocationsTab from "@/components/companies/LocationsTab";
 import CompanyBankTab from "@/components/companies/CompanyBankTab";
+import WpbrTab from "@/components/companies/WpbrTab";
 
 const ROLE_LABELS = {
   holding: "Holding", operating_company: "Werkmaatschappij",
@@ -28,8 +30,6 @@ const ACTIVITY_LABELS = {
 
 const ACTIVITIES = Object.entries(ACTIVITY_LABELS).map(([key, label]) => ({ key, label }));
 const LEGAL_FORMS = ["BV", "NV", "VOF", "CV", "Eenmanszaak", "Maatschap", "Stichting", "Coöperatie", "Anders"];
-const WPBR_TYPES = ["ND", "HND", "BD", "PAC", "VTC", "PGW", "POB", "other"];
-
 const STATUS_COLORS = {
   active: "bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-300",
   inactive: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
@@ -344,42 +344,7 @@ export default function CompanyDetail() {
                 </div>}
           </div>
 
-          {/* Wpbr + CAO */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">WPBR & CAO</h3>
-            <InfoRow label="WPBR-type">
-              {editing
-                ? <Select value={data.wpbr_license_type || "none"} onValueChange={v => set("wpbr_license_type", v === "none" ? null : v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Geen" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Geen</SelectItem>
-                      {WPBR_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                : <ViewText value={data.wpbr_license_type && data.wpbr_license_type !== "none" ? data.wpbr_license_type : null} />}
-            </InfoRow>
-            <InfoRow label="WPBR-nummer">
-              {editing ? <Input value={data.wpbr_license_number || ""} onChange={e => set("wpbr_license_number", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.wpbr_license_number} />}
-            </InfoRow>
-            <InfoRow label="WPBR geldig tot">
-              {editing ? <Input type="date" value={data.wpbr_license_valid_until || ""} onChange={e => set("wpbr_license_valid_until", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.wpbr_license_valid_until} />}
-            </InfoRow>
-            <InfoRow label="Standaard CAO">
-              {editing
-                ? <Select value={data.default_cao_configuration_id || "none"} onValueChange={v => set("default_cao_configuration_id", v === "none" ? null : v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Geen" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">— Geen standaard —</SelectItem>
-                      {caoConfigurations.map(c => (
-                        <SelectItem key={c.id} value={c.id} disabled={c.selectable === false}>
-                          {c.label || c.display_name || c.name}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                : <ViewText value={caoName ? (caoName.label || caoName.display_name || caoName.name) : null} />}
-            </InfoRow>
-          </div>
+
 
           {/* Notities */}
           <div className="space-y-3 md:col-span-2">
@@ -411,6 +376,62 @@ export default function CompanyDetail() {
             </Button>
           </div>
         )}
+      </div>
+
+      {/* WPBR & CAO tabs */}
+      <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+        <Tabs defaultValue="wpbr">
+          <div className="border-b border-border px-6 pt-4">
+            <TabsList className="bg-transparent p-0 gap-4 h-auto">
+              <TabsTrigger value="wpbr" className="text-sm px-0 pb-3 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none font-medium">
+                WPBR-vergunning
+              </TabsTrigger>
+              <TabsTrigger value="cao" className="text-sm px-0 pb-3 rounded-none border-b-2 border-transparent data-[state=active]:border-primary data-[state=active]:bg-transparent data-[state=active]:shadow-none font-medium">
+                CAO
+              </TabsTrigger>
+            </TabsList>
+          </div>
+          <TabsContent value="wpbr" className="mt-0">
+            <WpbrTab companyId={companyId} />
+          </TabsContent>
+          <TabsContent value="cao" className="mt-0">
+            <div className="p-6 space-y-3">
+              <h3 className="text-sm font-semibold text-foreground">Standaard CAO</h3>
+              <div className="flex flex-col sm:flex-row sm:items-center gap-3">
+                {editing ? (
+                  <Select value={data.default_cao_configuration_id || "none"} onValueChange={v => set("default_cao_configuration_id", v === "none" ? null : v)}>
+                    <SelectTrigger className="h-8 text-sm w-72"><SelectValue placeholder="Geen" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">— Geen standaard —</SelectItem>
+                      {caoConfigurations.map(c => (
+                        <SelectItem key={c.id} value={c.id} disabled={c.selectable === false}>
+                          {c.label || c.display_name || c.name}
+                        </SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                ) : (
+                  <span className="text-sm font-medium text-foreground">
+                    {caoName ? (caoName.label || caoName.display_name || caoName.name) : <span className="text-muted-foreground">—</span>}
+                  </span>
+                )}
+                {!editing && (
+                  <Button size="sm" variant="outline" onClick={startEdit}>
+                    <Edit className="w-4 h-4 mr-1" /> Wijzigen
+                  </Button>
+                )}
+                {editing && (
+                  <div className="flex gap-2">
+                    <Button variant="outline" size="sm" onClick={cancelEdit}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
+                    <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
+                      <Check className="w-4 h-4 mr-1" /> Opslaan
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </div>
+          </TabsContent>
+        </Tabs>
       </div>
 
       {/* Vestigingen */}
