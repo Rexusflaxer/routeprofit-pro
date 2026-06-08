@@ -3,9 +3,8 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { ArrowLeft, Edit, Building2, Phone, Mail, Globe, MapPin, FileText } from "lucide-react";
+import { ArrowLeft, Edit, X, Building2, Phone, Mail, Globe, MapPin, FileText } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import CompanyForm from "@/components/companies/CompanyForm";
 import LocationsTab from "@/components/companies/LocationsTab";
@@ -231,6 +230,27 @@ export default function CompanyDetail() {
         </div>
       </div>
 
+      {/* Inline edit form */}
+      {editOpen && (
+        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+          <div className="bg-muted/40 border-b border-border px-6 py-4 flex items-center justify-between">
+            <h2 className="text-base font-semibold text-foreground">Bedrijf bewerken</h2>
+            <Button variant="ghost" size="icon" onClick={() => setEditOpen(false)}>
+              <X className="w-4 h-4" />
+            </Button>
+          </div>
+          <div className="p-6">
+            <CompanyForm
+              company={company}
+              companies={companies}
+              caoConfigurations={caoConfigurations}
+              onSave={(data) => saveMutation.mutate(data)}
+              onCancel={() => setEditOpen(false)}
+            />
+          </div>
+        </div>
+      )}
+
       {/* Vestigingen & Bank tabs */}
       <Tabs defaultValue="locations">
         <TabsList>
@@ -245,21 +265,7 @@ export default function CompanyDetail() {
         </TabsContent>
       </Tabs>
 
-      {/* Edit dialog */}
-      <Dialog open={editOpen} onOpenChange={v => setEditOpen(v)}>
-        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>{company.display_name} bewerken</DialogTitle>
-          </DialogHeader>
-          <CompanyForm
-            company={company}
-            companies={companies}
-            caoConfigurations={caoConfigurations}
-            onSave={(data) => saveMutation.mutate(data)}
-            onCancel={() => setEditOpen(false)}
-          />
-        </DialogContent>
-      </Dialog>
+
     </div>
   );
 }
