@@ -115,9 +115,11 @@ export default function ManagedFilePreviewDialog({
                 <FileText className="h-4 w-4 text-primary" />
                 <span className="truncate">{title}</span>
               </DialogTitle>
-              <DialogDescription className="truncate">
-                {description || resolvedFilename}
-              </DialogDescription>
+              {description && (
+                <DialogDescription className="truncate">
+                  {description}
+                </DialogDescription>
+              )}
             </div>
             <Button
               type="button"
@@ -152,11 +154,15 @@ export default function ManagedFilePreviewDialog({
           )}
 
           {!loading && !error && preview && canPreviewPdf && (
-            <iframe
-              title={resolvedFilename}
-              src={pdfViewerUrl(preview.url)}
-              className="h-full min-h-[22rem] w-full bg-background"
-            />
+            <div className="flex h-full min-h-[22rem] justify-center overflow-auto bg-muted/30 p-4">
+              <div className="w-full max-w-[52vh] overflow-hidden rounded-sm bg-background shadow-sm" style={{ aspectRatio: "210 / 297" }}>
+                <iframe
+                  title={resolvedFilename}
+                  src={pdfViewerUrl(preview.url)}
+                  className="h-full w-full bg-background"
+                />
+              </div>
+            </div>
           )}
 
           {!loading && !error && preview && canPreviewImage && (

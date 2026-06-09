@@ -270,9 +270,18 @@ export default function WpbrTab({ companyId, company }) {
                       {form.document_file_url ? (
                         <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
                           <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                          <button type="button" onClick={() => setFormPreviewOpen(true)} className="text-sm text-blue-600 hover:underline flex-1 truncate text-left">
-                            {form.document_download_filename || form.document_filename || "Document"}
-                          </button>
+                          <span className="text-sm text-muted-foreground flex-1 truncate">Document toegevoegd</span>
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => setFormPreviewOpen(true)}
+                            className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700"
+                            title="Document bekijken"
+                          >
+                            <Eye className="w-3.5 h-3.5" />
+                            Bekijken
+                          </Button>
                           <button onClick={() => { setFormPreviewOpen(false); setForm((f) => ({ ...f, document_file_url: "", document_filename: "", document_file_id: "", document_download_filename: "", document_logical_path: "", document_metadata: null })); }} className="text-muted-foreground hover:text-destructive" title="Verwijderen">
                             <X className="w-4 h-4" />
                           </button>
@@ -351,13 +360,13 @@ function LicenseCard({ license, muted }) {
             <Button
               type="button"
               variant="ghost"
-              size="sm"
+              size="icon"
               onClick={() => setPreviewOpen(true)}
-              className="h-7 max-w-72 px-2 text-xs text-blue-600 hover:text-blue-700"
-              title={documentName}
+              className="h-7 w-7 text-blue-600 hover:text-blue-700"
+              title="Vergunning bekijken"
+              aria-label="Vergunning bekijken"
             >
               <Eye className="w-3.5 h-3.5" />
-              <span className="truncate">{documentName}</span>
             </Button>
           </div>
           }
@@ -375,7 +384,6 @@ function LicenseCard({ license, muted }) {
         fileUrl={license.document_file_url}
         filename={documentName}
         title={`WPBR ${license.license_type || "vergunning"}`}
-        description={documentName}
       />
     </>);
 
