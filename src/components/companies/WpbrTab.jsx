@@ -178,7 +178,10 @@ export default function WpbrTab({ companyId }) {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div>
                           <label className="text-xs text-muted-foreground mb-1 block">Vergunningsnummer</label>
-                          <Input value={form.license_number} onChange={(e) => set("license_number", e.target.value)} className="h-8 text-sm" placeholder="Nummer..." />
+                          <div className="flex items-center gap-0">
+                            <span className="inline-flex items-center h-8 px-3 rounded-l-md border border-r-0 border-input bg-muted text-sm font-semibold text-foreground select-none">{form.license_type}</span>
+                            <Input value={form.license_number} onChange={(e) => set("license_number", e.target.value)} className="h-8 text-sm rounded-l-none" placeholder="Nummer..." />
+                          </div>
                         </div>
                         <div className="sm:col-span-1" />
                         <div>
@@ -189,10 +192,6 @@ export default function WpbrTab({ companyId }) {
                           <label className="text-xs text-muted-foreground mb-1 block">Geldig tot</label>
                           <Input type="date" value={form.valid_until} onChange={(e) => set("valid_until", e.target.value)} className="h-8 text-sm" />
                         </div>
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Opmerkingen</label>
-                        <Input value={form.notes} onChange={(e) => set("notes", e.target.value)} className="h-8 text-sm" placeholder="Optioneel..." />
                       </div>
                       <div className="flex justify-between pt-1">
                         <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
