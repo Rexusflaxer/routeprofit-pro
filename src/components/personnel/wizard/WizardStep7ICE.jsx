@@ -3,7 +3,7 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Upload, Plus, Trash2, Phone } from "lucide-react";
-import { uploadManagedFile } from "@/lib/managedFiles";
+import { downloadManagedFile, uploadManagedFile } from "@/lib/managedFiles";
 
 export default function WizardStep7ICE({ iceContacts, onAddContact, onChangeContact, onRemoveContact, cvDoc, onCvChange, form, personnelId, uploadSessionId }) {
   const [uploadingCv, setUploadingCv] = useState(false);
@@ -90,7 +90,7 @@ export default function WizardStep7ICE({ iceContacts, onAddContact, onChangeCont
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">CV</p>
         {cvDoc.file_url ? (
           <div className="flex items-center gap-2 text-sm">
-            <a href={cvDoc.file_url} download={cvDoc.file_download_filename || undefined} target="_blank" rel="noopener noreferrer" className="text-primary underline">{cvDoc.file_download_filename || "CV bekijken"}</a>
+            <button type="button" onClick={() => downloadManagedFile({ managedFileId: cvDoc.file_id, fileUrl: cvDoc.file_url, filename: cvDoc.file_download_filename || "CV" })} className="text-primary underline text-left">{cvDoc.file_download_filename || "CV bekijken"}</button>
             <button type="button" className="text-destructive text-xs" onClick={() => {
               onCvChange("file_url", null);
               onCvChange("file_id", null);

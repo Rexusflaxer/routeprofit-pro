@@ -31,6 +31,63 @@ function safeFilenamePart(value, fallback = 'Bestand') {
   return clean || fallback;
 }
 
+function fromBase64(value) {
+  const binary = atob(value || '');
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+function toBase64(bytes) {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = '';
+  for (const byte of view) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function masterKeyId() {
+  return Deno.env.get('MANAGED_FILE_MASTER_KEY_ID') || 'managed-file-master-v1';
+}
+
+async function importMasterKey(usage) {
+  const raw = Deno.env.get('MANAGED_FILE_MASTER_KEY_B64');
+  if (!raw) throw new Error('MANAGED_FILE_MASTER_KEY_B64 is niet geconfigureerd.');
+  const bytes = fromBase64(raw);
+  if (bytes.byteLength !== 32) throw new Error('MANAGED_FILE_MASTER_KEY_B64 moet exact 32 bytes base64 bevatten.');
+  return crypto.subtle.importKey('raw', bytes, { name: 'AES-GCM' }, false, usage);
+}
+
+async function sha256Base64(buffer) {
+  const digest = await crypto.subtle.digest('SHA-256', buffer);
+  return toBase64(digest);
+}
+
+async function encryptBytesForStorage(bytes) {
+  const dataKey = await crypto.subtle.generateKey(
+    { name: 'AES-GCM', length: 256 },
+    true,
+    ['encrypt', 'decrypt']
+  );
+  const rawDataKey = await crypto.subtle.exportKey('raw', dataKey);
+  const fileIv = crypto.getRandomValues(new Uint8Array(12));
+  const wrapIv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: fileIv }, dataKey, bytes);
+  const masterKey = await importMasterKey(['encrypt']);
+  const wrappedKey = await crypto.subtle.encrypt({ name: 'AES-GCM', iv: wrapIv }, masterKey, rawDataKey);
+
+  return {
+    ciphertext,
+    encryption_algorithm: 'AES-256-GCM',
+    encryption_key_id: masterKeyId(),
+    encryption_iv: toBase64(fileIv),
+    encrypted_data_key: toBase64(wrappedKey),
+    key_wrap_algorithm: 'AES-256-GCM',
+    key_wrap_iv: toBase64(wrapIv),
+    plaintext_sha256: await sha256Base64(bytes),
+    ciphertext_sha256: await sha256Base64(ciphertext)
+  };
+}
+
 function slug(value, fallback = 'unknown') {
   const clean = ascii(value)
     .toLowerCase()
@@ -73,10 +130,12 @@ async function uploadBase64Asset(base44, asset, context) {
     const binaryStr = atob(asset.base64_data);
     const bytes = new Uint8Array(binaryStr.length);
     for (let i = 0; i < binaryStr.length; i++) bytes[i] = binaryStr.charCodeAt(i);
-    const blob = new Blob([bytes], { type: asset.mime_type || 'application/octet-stream' });
+    const encrypted = await encryptBytesForStorage(bytes);
+    const storageFilename = `${fileContext.filename}.enc`;
+    const blob = new Blob([encrypted.ciphertext], { type: 'application/octet-stream' });
     const file = typeof File === 'undefined'
       ? blob
-      : new File([blob], fileContext.filename, { type: blob.type });
+      : new File([blob], storageFilename, { type: blob.type });
     const result = await base44.asServiceRole.integrations.Core.UploadFile({ file });
     const fileUrl = result?.file_url || null;
     if (!fileUrl) return null;
@@ -95,6 +154,7 @@ async function uploadBase64Asset(base44, asset, context) {
       source_entity_id: null,
       source_field: fileContext.sourceField,
       file_url: fileUrl,
+      storage_filename: storageFilename,
       original_filename: asset.filename || asset.name || null,
       display_filename: fileContext.filename,
       download_filename: fileContext.filename,
@@ -102,7 +162,18 @@ async function uploadBase64Asset(base44, asset, context) {
       folder_path: fileContext.folderPath,
       extension: fileContext.extension,
       mime_type: asset.mime_type || blob.type || null,
+      stored_mime_type: 'application/octet-stream',
       size_bytes: bytes.length,
+      ciphertext_size_bytes: encrypted.ciphertext.byteLength,
+      encrypted: true,
+      encryption_algorithm: encrypted.encryption_algorithm,
+      encryption_key_id: encrypted.encryption_key_id,
+      encryption_iv: encrypted.encryption_iv,
+      encrypted_data_key: encrypted.encrypted_data_key,
+      key_wrap_algorithm: encrypted.key_wrap_algorithm,
+      key_wrap_iv: encrypted.key_wrap_iv,
+      plaintext_sha256: encrypted.plaintext_sha256,
+      ciphertext_sha256: encrypted.ciphertext_sha256,
       document_label: context.label || null,
       document_number: `rev-${context.revision}`,
       valid_from: null,
@@ -128,8 +199,9 @@ async function uploadBase64Asset(base44, asset, context) {
       download_filename: managed.download_filename,
       logical_path: managed.logical_path
     };
-  } catch {
-    return null;
+  } catch (error) {
+    console.error('Encrypted floorplan upload failed:', error);
+    throw error;
   }
 }
 

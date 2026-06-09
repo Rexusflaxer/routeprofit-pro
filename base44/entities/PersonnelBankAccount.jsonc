@@ -6,7 +6,27 @@
       "type": "string"
     },
     "iban": {
-      "type": "string"
+      "type": "string",
+      "description": "Gemaskerde IBAN bij nieuwe records. Volledige IBAN staat versleuteld in iban_encrypted_payload."
+    },
+    "iban_masked": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "iban_encrypted_payload": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "sensitive_payload_version": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "account_holder_name": {
       "type": [

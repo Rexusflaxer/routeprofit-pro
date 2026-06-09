@@ -1,0 +1,102 @@
+{
+  "name": "ManagedFileAccessLog",
+  "type": "object",
+  "properties": {
+    "managed_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "action": {
+      "type": "string",
+      "enum": [
+        "key_wrap",
+        "key_unwrap",
+        "download",
+        "decrypt",
+        "access_denied",
+        "encryption_required",
+        "error"
+      ]
+    },
+    "actor_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actor_email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "actor_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "owner_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "owner_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "company_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "tenant_container_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_entity": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_entity_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "success": {
+      "type": "boolean",
+      "default": true
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string"
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "action",
+    "created_at"
+  ]
+}

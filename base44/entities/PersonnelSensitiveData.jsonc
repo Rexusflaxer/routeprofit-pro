@@ -11,7 +11,28 @@
         "string",
         "null"
       ],
-      "description": "BSN \u2013 uitsluitend voor loonadministratie/loonheffingen"
+      "description": "Legacy plaintext BSN. Nieuwe records gebruiken bsn_encrypted_payload."
+    },
+    "bsn_masked": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Gemaskerde BSN-weergave, bijv. *** *** 123"
+    },
+    "bsn_encrypted_payload": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Applicatie-level versleutelde BSN payload"
+    },
+    "sensitive_payload_version": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "identity_verified_at_hire": {
       "type": "boolean",

@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Upload } from "lucide-react";
-import { uploadManagedFile } from "@/lib/managedFiles";
+import { downloadManagedFile, uploadManagedFile } from "@/lib/managedFiles";
 
 const LICENSE_CATEGORIES = ["A", "A1", "A2", "AM", "B", "BE", "C", "CE", "C1", "C1E", "D", "DE", "D1", "D1E", "T"];
 
@@ -128,7 +128,7 @@ export default function WizardStep6Mobility({ driversLicense, onLicenseChange, b
           <Label>Bewijs bankrekening</Label>
           {bankAccount._proof_file_url ? (
             <div className="flex items-center gap-2 text-sm">
-              <a href={bankAccount._proof_file_url} download={bankAccount._proof_download_filename || undefined} target="_blank" rel="noopener noreferrer" className="text-primary underline">{bankAccount._proof_download_filename || "Bewijs bekijken"}</a>
+              <button type="button" onClick={() => downloadManagedFile({ managedFileId: bankAccount._proof_file_id, fileUrl: bankAccount._proof_file_url, filename: bankAccount._proof_download_filename || "Bewijs bankrekening" })} className="text-primary underline text-left">{bankAccount._proof_download_filename || "Bewijs bekijken"}</button>
               <button type="button" className="text-destructive text-xs" onClick={() => {
                 onBankChange("_proof_file_url", null);
                 onBankChange("_proof_file_id", null);

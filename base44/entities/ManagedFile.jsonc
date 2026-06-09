@@ -91,6 +91,13 @@
     "file_url": {
       "type": "string"
     },
+    "storage_filename": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Werkelijke naam van het opgeslagen object. Bij encryptie eindigt deze meestal op .enc."
+    },
     "original_filename": {
       "type": [
         "string",
@@ -122,11 +129,84 @@
         "null"
       ]
     },
+    "stored_mime_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "MIME-type van het opgeslagen object. Kan afwijken bij encrypted blobs."
+    },
     "size_bytes": {
       "type": [
         "number",
         "null"
       ]
+    },
+    "ciphertext_size_bytes": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "encrypted": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als het opgeslagen bestand applicatie-level versleuteld is."
+    },
+    "encryption_algorithm": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bijv. AES-256-GCM."
+    },
+    "encryption_key_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Server-side master key id waarmee de data key is gewrapt."
+    },
+    "encryption_iv": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Base64 IV/nonce voor decryptie van het bestand."
+    },
+    "encrypted_data_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Base64 gewrapte per-file data key."
+    },
+    "key_wrap_algorithm": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "key_wrap_iv": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Base64 IV/nonce voor het unwrap proces."
+    },
+    "plaintext_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Base64 SHA-256 hash van het originele bestand voor integriteitscontrole na decryptie."
+    },
+    "ciphertext_sha256": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Base64 SHA-256 hash van het opgeslagen encrypted object."
     },
     "document_label": {
       "type": [

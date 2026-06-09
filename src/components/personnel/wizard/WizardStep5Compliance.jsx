@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, Plus, Trash2 } from "lucide-react";
-import { uploadManagedFile } from "@/lib/managedFiles";
+import { downloadManagedFile, uploadManagedFile } from "@/lib/managedFiles";
 
 const QUAL_TYPES = [
   { value: "beveiliger_2", label: "Beveiliger niveau 2" },
@@ -76,7 +76,7 @@ export default function WizardStep5Compliance({ form, onChange, vogDoc, onVogDoc
         <div className="mt-2">
           {vogDoc.file_url ? (
             <div className="flex items-center gap-2 text-sm">
-              <a href={vogDoc.file_url} download={vogDoc.file_download_filename || undefined} target="_blank" rel="noopener noreferrer" className="text-primary underline">{vogDoc.file_download_filename || "VOG bekijken"}</a>
+              <button type="button" onClick={() => downloadManagedFile({ managedFileId: vogDoc.file_id, fileUrl: vogDoc.file_url, filename: vogDoc.file_download_filename || "VOG" })} className="text-primary underline text-left">{vogDoc.file_download_filename || "VOG bekijken"}</button>
               <button type="button" className="text-destructive text-xs" onClick={() => {
                 onVogDocChange("file_url", null);
                 onVogDocChange("file_id", null);

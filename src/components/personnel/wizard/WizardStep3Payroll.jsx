@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button";
 import { Upload, Eye, EyeOff, Lock } from "lucide-react";
 import ContractRulesPanel from "@/components/personnel/ContractRulesPanel";
 import CaoApplicabilityPanel from "@/components/personnel/CaoApplicabilityPanel";
-import { uploadManagedFile } from "@/lib/managedFiles";
+import { downloadManagedFile, uploadManagedFile } from "@/lib/managedFiles";
 
 const CAO_OPTIONS = [
   { value: "cao_particuliere_beveiliging", label: "CAO Particuliere Beveiliging" },
@@ -137,7 +137,7 @@ export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSe
           <Label>Loonheffingsverklaring uploaden</Label>
           {form.payroll_tax_statement_file_url ? (
             <div className="flex items-center gap-2 text-sm text-primary">
-              <a href={form.payroll_tax_statement_file_url} download={form.payroll_tax_statement_download_filename || undefined} target="_blank" rel="noopener noreferrer" className="underline">{form.payroll_tax_statement_download_filename || "Huidig bestand bekijken"}</a>
+              <button type="button" onClick={() => downloadManagedFile({ managedFileId: form.payroll_tax_statement_file_id, fileUrl: form.payroll_tax_statement_file_url, filename: form.payroll_tax_statement_download_filename || "Loonheffingsverklaring" })} className="underline text-left">{form.payroll_tax_statement_download_filename || "Huidig bestand bekijken"}</button>
               <button type="button" className="text-destructive text-xs" onClick={() => {
                 onChange("payroll_tax_statement_file_url", null);
                 onChange("payroll_tax_statement_file_id", null);

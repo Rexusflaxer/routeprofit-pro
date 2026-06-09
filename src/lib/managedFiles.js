@@ -10,6 +10,8 @@ const MIME_EXTENSION = {
   "application/vnd.openxmlformats-officedocument.wordprocessingml.document": "docx"
 };
 
+const ENCRYPTED_STORAGE_MIME = "application/octet-stream";
+
 const OWNER_ROOTS = {
   company: "companies",
   personnel: "personnel",
@@ -155,6 +157,145 @@ function cloneFileWithName(file, filename) {
   });
 }
 
+function bytesToBase64(bytes) {
+  const view = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
+  let binary = "";
+  for (const byte of view) binary += String.fromCharCode(byte);
+  return btoa(binary);
+}
+
+function base64ToBytes(value) {
+  const binary = atob(value || "");
+  const bytes = new Uint8Array(binary.length);
+  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i);
+  return bytes;
+}
+
+async function sha256Base64(buffer) {
+  const digest = await crypto.subtle.digest("SHA-256", buffer);
+  return bytesToBase64(digest);
+}
+
+function assertCryptoSupport() {
+  if (!crypto?.subtle || typeof File === "undefined") {
+    throw new Error("Deze browser ondersteunt beveiligde bestandsencryptie niet.");
+  }
+}
+
+async function encryptFileForUpload({
+  file,
+  descriptor,
+  ownerType,
+  ownerId,
+  companyId,
+  sourceEntity,
+  sourceEntityId,
+  sourceField,
+  category,
+  domain
+}) {
+  assertCryptoSupport();
+
+  const plaintext = await file.arrayBuffer();
+  const dataKey = await crypto.subtle.generateKey(
+    { name: "AES-GCM", length: 256 },
+    true,
+    ["encrypt", "decrypt"]
+  );
+  const rawKey = await crypto.subtle.exportKey("raw", dataKey);
+  const iv = crypto.getRandomValues(new Uint8Array(12));
+  const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, dataKey, plaintext);
+  const plaintextSha256 = await sha256Base64(plaintext);
+  const ciphertextSha256 = await sha256Base64(ciphertext);
+
+  const { data } = await base44.functions.invoke("wrapManagedFileKey", {
+    raw_key_b64: bytesToBase64(rawKey),
+    context: {
+      owner_type: ownerType,
+      owner_id: ownerId || null,
+      company_id: companyId || null,
+      tenant_container_key: descriptor.tenant_container_key,
+      source_entity: sourceEntity,
+      source_entity_id: sourceEntityId,
+      source_field: sourceField,
+      category,
+      domain
+    }
+  });
+
+  if (!data?.encrypted_data_key || !data?.key_wrap_iv) {
+    throw new Error("Encryptiesleutel kon niet veilig worden gewrapt.");
+  }
+
+  const encryptedFilename = `${descriptor.download_filename}.enc`;
+  const encryptedFile = new File([ciphertext], encryptedFilename, {
+    type: ENCRYPTED_STORAGE_MIME,
+    lastModified: file.lastModified
+  });
+
+  return {
+    uploadFile: encryptedFile,
+    encryption: {
+      encrypted: true,
+      encryption_algorithm: data.encryption_algorithm || "AES-256-GCM",
+      encryption_key_id: data.encryption_key_id,
+      encryption_iv: bytesToBase64(iv),
+      encrypted_data_key: data.encrypted_data_key,
+      key_wrap_algorithm: data.key_wrap_algorithm || "AES-256-GCM",
+      key_wrap_iv: data.key_wrap_iv,
+      plaintext_sha256: plaintextSha256,
+      ciphertext_sha256: ciphertextSha256,
+      ciphertext_size_bytes: ciphertext.byteLength,
+      storage_filename: encryptedFilename,
+      stored_mime_type: ENCRYPTED_STORAGE_MIME
+    }
+  };
+}
+
+async function decryptManagedFile({ fileUrl, rawKeyB64, ivB64, mimeType }) {
+  assertCryptoSupport();
+  const response = await fetch(fileUrl);
+  if (!response.ok) {
+    throw new Error(`Bestand kon niet worden opgehaald (${response.status}).`);
+  }
+  const ciphertext = await response.arrayBuffer();
+  const key = await crypto.subtle.importKey(
+    "raw",
+    base64ToBytes(rawKeyB64),
+    { name: "AES-GCM" },
+    false,
+    ["decrypt"]
+  );
+  const plaintext = await crypto.subtle.decrypt(
+    { name: "AES-GCM", iv: base64ToBytes(ivB64) },
+    key,
+    ciphertext
+  );
+  return new Blob([plaintext], { type: mimeType || "application/octet-stream" });
+}
+
+function triggerBlobDownload(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement("a");
+  a.href = url;
+  a.download = filename || "document";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 1000);
+}
+
+function triggerUrlDownload(url, filename) {
+  const a = document.createElement("a");
+  a.href = url;
+  if (filename) a.download = filename;
+  a.target = "_blank";
+  a.rel = "noopener noreferrer";
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+}
+
 function buildDescriptor(input) {
   const {
     file,
@@ -256,7 +397,39 @@ export async function uploadManagedFile(input) {
     version
   });
 
-  const uploadFile = cloneFileWithName(file, descriptor.download_filename);
+  let uploadFile = cloneFileWithName(file, descriptor.download_filename);
+  let encryption = {
+    encrypted: false,
+    encryption_algorithm: null,
+    encryption_key_id: null,
+    encryption_iv: null,
+    encrypted_data_key: null,
+    key_wrap_algorithm: null,
+    key_wrap_iv: null,
+    plaintext_sha256: null,
+    ciphertext_sha256: null,
+    ciphertext_size_bytes: null,
+    storage_filename: descriptor.download_filename,
+    stored_mime_type: file.type || null
+  };
+
+  if (isSensitive) {
+    const encrypted = await encryptFileForUpload({
+      file,
+      descriptor,
+      ownerType,
+      ownerId,
+      companyId,
+      sourceEntity,
+      sourceEntityId,
+      sourceField,
+      category,
+      domain
+    });
+    uploadFile = encrypted.uploadFile;
+    encryption = encrypted.encryption;
+  }
+
   const { file_url } = await base44.integrations.Core.UploadFile({ file: uploadFile });
   const security = sensitivityDefaults(isSensitive);
 
@@ -274,6 +447,7 @@ export async function uploadManagedFile(input) {
     source_entity_id: sourceEntityId,
     source_field: sourceField,
     file_url,
+    storage_filename: encryption.storage_filename,
     original_filename: file.name || null,
     display_filename: descriptor.display_filename,
     download_filename: descriptor.download_filename,
@@ -281,7 +455,18 @@ export async function uploadManagedFile(input) {
     folder_path: descriptor.folder_path,
     extension: descriptor.extension,
     mime_type: file.type || null,
+    stored_mime_type: encryption.stored_mime_type,
     size_bytes: typeof file.size === "number" ? file.size : null,
+    ciphertext_size_bytes: encryption.ciphertext_size_bytes,
+    encrypted: encryption.encrypted,
+    encryption_algorithm: encryption.encryption_algorithm,
+    encryption_key_id: encryption.encryption_key_id,
+    encryption_iv: encryption.encryption_iv,
+    encrypted_data_key: encryption.encrypted_data_key,
+    key_wrap_algorithm: encryption.key_wrap_algorithm,
+    key_wrap_iv: encryption.key_wrap_iv,
+    plaintext_sha256: encryption.plaintext_sha256,
+    ciphertext_sha256: encryption.ciphertext_sha256,
     document_label: documentLabel || null,
     document_number: documentNumber || null,
     valid_from: validFrom || null,
@@ -297,6 +482,7 @@ export async function uploadManagedFile(input) {
       ...metadata,
       owner_label: ownerLabel || null,
       commercial_container_policy: "company-scoped-managed-files-v1",
+      encryption_policy: isSensitive ? "client-side-file-encryption-v1" : "not-required",
       folder_segments: folderSegments
     }
   });
@@ -310,6 +496,40 @@ export async function uploadManagedFile(input) {
     folder_path: managed.folder_path,
     managed_file: managed
   };
+}
+
+export async function downloadManagedFile({ managedFileId, fileUrl = null, filename = "document" }) {
+  try {
+    if (!managedFileId) {
+      if (!fileUrl) throw new Error("Geen bestand beschikbaar om te downloaden.");
+      triggerUrlDownload(fileUrl, filename);
+      return;
+    }
+
+    const { data } = await base44.functions.invoke("unwrapManagedFileKey", {
+      managed_file_id: managedFileId
+    });
+
+    if (!data) throw new Error("Bestand kon niet worden voorbereid voor download.");
+
+    if (!data.encrypted) {
+      triggerUrlDownload(data.file_url || fileUrl, data.download_filename || filename);
+      return;
+    }
+
+    const blob = await decryptManagedFile({
+      fileUrl: data.file_url,
+      rawKeyB64: data.raw_key_b64,
+      ivB64: data.encryption_iv,
+      mimeType: data.mime_type
+    });
+    triggerBlobDownload(blob, data.download_filename || filename);
+  } catch (error) {
+    console.error("Managed file download failed:", error);
+    if (typeof window !== "undefined") {
+      window.alert(error?.message || "Bestand kon niet veilig worden gedownload.");
+    }
+  }
 }
 
 export async function updateManagedFileSource(fileId, updates = {}) {

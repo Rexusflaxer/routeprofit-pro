@@ -15,6 +15,7 @@ import WizardStep8Review from "./wizard/WizardStep8Review";
 import PersonnelAccessTab from "./PersonnelAccessTab";
 import PersonnelContractsTab from "./PersonnelContractsTab";
 import { attachManagedFilesToOwner, createManagedUploadSession, updateManagedFileSource } from "@/lib/managedFiles";
+import { prepareBankAccountSensitiveData, preparePersonnelSensitiveData } from "@/lib/sensitiveFields";
 
 const BASE_STEPS = [
   { label: "Bedrijf & rol" },
@@ -145,10 +146,27 @@ export default function PersonnelWizard({ person, onClose }) {
 
       // Save/update sensitive data
       const existing = await base44.entities.PersonnelSensitiveData.filter({ personnel_id: personnelId });
+      let sensitiveToSave = await preparePersonnelSensitiveData(data.sensitive, {
+        owner_type: "personnel",
+        owner_id: personnelId,
+        company_id: primaryCompanyId,
+        source_entity_id: personnelId
+      });
+
+      if (!String(data.sensitive.bsn || "").trim() && existing[0]) {
+        sensitiveToSave = {
+          ...sensitiveToSave,
+          bsn: existing[0].bsn || null,
+          bsn_masked: existing[0].bsn_masked || null,
+          bsn_encrypted_payload: existing[0].bsn_encrypted_payload || null,
+          sensitive_payload_version: existing[0].sensitive_payload_version || sensitiveToSave.sensitive_payload_version
+        };
+      }
+
       if (existing.length > 0) {
-        await base44.entities.PersonnelSensitiveData.update(existing[0].id, { ...data.sensitive, personnel_id: personnelId });
+        await base44.entities.PersonnelSensitiveData.update(existing[0].id, { ...sensitiveToSave, personnel_id: personnelId });
       } else {
-        await base44.entities.PersonnelSensitiveData.create({ ...data.sensitive, personnel_id: personnelId });
+        await base44.entities.PersonnelSensitiveData.create({ ...sensitiveToSave, personnel_id: personnelId });
       }
 
       // Save company assignments
@@ -262,13 +280,20 @@ export default function PersonnelWizard({ person, onClose }) {
 
       // Bank account
       if (data.bankAccount.iban) {
+        const plainIban = data.bankAccount.iban;
+        const preparedBankAccount = await prepareBankAccountSensitiveData(data.bankAccount, {
+          owner_type: "personnel",
+          owner_id: personnelId,
+          company_id: primaryCompanyId,
+          source_entity: "PersonnelBankAccount"
+        });
         const {
           _proof_file_url,
           _proof_file_id,
           _proof_download_filename,
           _proof_logical_path,
           ...ba
-        } = data.bankAccount;
+        } = preparedBankAccount;
         let proofDocumentId = null;
         const proofManagedFile = _proof_file_id ? attachedById[_proof_file_id] : null;
         if (_proof_file_url || _proof_file_id) {
@@ -283,7 +308,7 @@ export default function PersonnelWizard({ person, onClose }) {
             verification_status: ba.verification_status || "pending_review",
             is_sensitive: true,
             metadata: {
-              iban_last4: String(data.bankAccount.iban || "").replace(/\s/g, "").slice(-4)
+              iban_last4: String(plainIban || "").replace(/\s/g, "").slice(-4)
             }
           });
           proofDocumentId = proofDoc.id;

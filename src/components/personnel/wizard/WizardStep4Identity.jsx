@@ -5,7 +5,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Upload, CheckCircle } from "lucide-react";
-import { uploadManagedFile } from "@/lib/managedFiles";
+import { downloadManagedFile, uploadManagedFile } from "@/lib/managedFiles";
 
 const ID_DOC_LABELS = {
   passport: "Paspoort",
@@ -88,6 +88,7 @@ export default function WizardStep4Identity({ sensitiveData, onSensitiveChange, 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {["front", "back"].map(side => {
             const url = side === "front" ? idDoc.front_file_url : idDoc.back_file_url;
+            const fileId = side === "front" ? idDoc.front_file_id : idDoc.back_file_id;
             const downloadName = side === "front" ? idDoc.front_download_filename : idDoc.back_download_filename;
             const label = side === "front" ? "Voorzijde" : "Achterzijde";
             return (
@@ -96,7 +97,7 @@ export default function WizardStep4Identity({ sensitiveData, onSensitiveChange, 
                 {url ? (
                   <div className="flex items-center gap-2 text-sm">
                     <CheckCircle className="w-4 h-4 text-emerald-500" />
-                    <a href={url} download={downloadName || undefined} target="_blank" rel="noopener noreferrer" className="text-primary underline">{downloadName || "Bekijken"}</a>
+                    <button type="button" onClick={() => downloadManagedFile({ managedFileId: fileId, fileUrl: url, filename: downloadName || label })} className="text-primary underline text-left">{downloadName || "Bekijken"}</button>
                     <button type="button" className="text-destructive text-xs" onClick={() => {
                       onIdDocChange(side === "front" ? "front_file_url" : "back_file_url", null);
                       onIdDocChange(side === "front" ? "front_file_id" : "back_file_id", null);

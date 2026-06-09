@@ -6,7 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { FileText, Upload, Plus, X, Check, ExternalLink, ChevronRight, ChevronLeft } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
+import { downloadManagedFile, uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
 
 const WPBR_TYPES = [
 { key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
@@ -267,9 +267,9 @@ export default function WpbrTab({ companyId, company }) {
                       {form.document_file_url ? (
                         <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
                           <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                          <a href={form.document_file_url} download={form.document_download_filename || form.document_filename || undefined} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex-1 truncate">
+                          <button type="button" onClick={() => downloadManagedFile({ managedFileId: form.document_file_id, fileUrl: form.document_file_url, filename: form.document_download_filename || form.document_filename })} className="text-sm text-blue-600 hover:underline flex-1 truncate text-left">
                             {form.document_download_filename || form.document_filename || "Document"}
-                          </a>
+                          </button>
                           <button onClick={() => setForm((f) => ({ ...f, document_file_url: "", document_filename: "", document_file_id: "", document_download_filename: "", document_logical_path: "", document_metadata: null }))} className="text-muted-foreground hover:text-destructive">
                             <X className="w-4 h-4" />
                           </button>
@@ -333,11 +333,11 @@ function LicenseCard({ license, muted }) {
           <LicenseStatusBadge license={license} />
         </div>
         {license.document_file_url &&
-        <a href={license.document_file_url} target="_blank" rel="noopener noreferrer"
-        download={documentName}
+        <button type="button"
+        onClick={() => downloadManagedFile({ managedFileId: license.document_file_id, fileUrl: license.document_file_url, filename: documentName })}
         className="flex items-center gap-1 text-xs text-blue-600 hover:underline shrink-0">
             <FileText className="w-3.5 h-3.5" /> <span className="max-w-64 truncate">{documentName}</span> <ExternalLink className="w-3 h-3" />
-          </a>
+          </button>
         }
       </div>
       <div className="flex gap-6 text-xs text-muted-foreground">

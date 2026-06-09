@@ -10,6 +10,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Plus, Trash2, Edit, CreditCard, AlertTriangle } from "lucide-react";
+import { prepareBankAccountSensitiveData } from "@/lib/sensitiveFields";
 
 const EMPTY = { company_id: "", account_type: "normal", iban: "", account_holder_name: "", bank_name: "", bic: "", is_default: false, is_default_for_invoicing: false, is_default_for_payroll: false, status: "active", notes: "" };
 
@@ -27,7 +28,17 @@ export default function CompanyBankTab({ companies }) {
   });
 
   const saveMutation = useMutation({
-    mutationFn: (data) => editing ? base44.entities.CompanyBankAccount.update(editing, data) : base44.entities.CompanyBankAccount.create({ ...data, company_id: companyId }),
+    mutationFn: async (data) => {
+      const prepared = await prepareBankAccountSensitiveData(data, {
+        owner_type: "company",
+        owner_id: companyId,
+        company_id: companyId,
+        source_entity: "CompanyBankAccount"
+      });
+      return editing
+        ? base44.entities.CompanyBankAccount.update(editing, prepared)
+        : base44.entities.CompanyBankAccount.create({ ...prepared, company_id: companyId });
+    },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["company-bank-accounts", companyId] }); setDialogOpen(false); },
   });
 
@@ -64,7 +75,7 @@ export default function CompanyBankTab({ companies }) {
               </div>
               <div className="flex-1 min-w-0">
                 <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium text-sm">{acc.iban}</span>
+                  <span className="font-medium text-sm">{acc.iban_masked || acc.iban}</span>
                   <Badge variant={acc.account_type === "g_account" ? "outline" : "secondary"} className={acc.account_type === "g_account" ? "border-amber-400 text-amber-700" : ""}>
                     {acc.account_type === "g_account" ? "G-rekening" : "Normale rekening"}
                   </Badge>
