@@ -1,4 +1,5 @@
 import React, { useState, useRef } from "react";
+import { motion } from "framer-motion";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -184,7 +185,12 @@ export default function CompanyDetail() {
   const holdingOptions = companies.filter(c => c.id !== companyId && c.company_role === "holding");
 
   return (
-    <div className="space-y-6">
+    <motion.div
+      className="space-y-6"
+      initial={{ opacity: 0, x: 32 }}
+      animate={{ opacity: 1, x: 0 }}
+      transition={{ duration: 0.22, ease: "easeOut" }}
+    >
       {/* Header */}
       <div className="flex items-center gap-3">
         <Button variant="ghost" size="sm" onClick={() => navigate("/Companies")}>
@@ -401,6 +407,6 @@ export default function CompanyDetail() {
         companies={companies}
         company={company}
       />
-    </div>
+    </motion.div>
   );
 }
