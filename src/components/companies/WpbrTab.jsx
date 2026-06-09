@@ -4,25 +4,27 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Eye, FileText, Upload, Plus, X, Check, ChevronRight, ChevronLeft } from "lucide-react";
+import { Eye, FileText, Upload, Plus, X, Check, ChevronRight, ChevronLeft, Edit, Trash2, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
 
 const WPBR_TYPES = [
-{ key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
-{ key: "HND", label: "HND", desc: "Hoofd Nationaal Particulier beveiligingsbedrijf alleen voor horecabeveiliging" },
-{ key: "BD", label: "BD", desc: "Particuliere bedrijfsbeveiligingsdienst" },
-{ key: "PAC", label: "PAC", desc: "Particulier Alarm Centralist" },
-{ key: "VTC", label: "VTC", desc: "Particuliere Video Toezicht Centrale" },
-{ key: "PGW", label: "PGW", desc: "Particulier Geld- en Waardentransportbedrijf" },
-{ key: "POB", label: "POB", desc: "Particuliere Alarmcentrale" }];
+  { key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
+  { key: "HND", label: "HND", desc: "Hoofd Nationaal Particulier beveiligingsbedrijf alleen voor horecabeveiliging" },
+  { key: "BD", label: "BD", desc: "Particuliere bedrijfsbeveiligingsdienst" },
+  { key: "PAC", label: "PAC", desc: "Particulier Alarm Centralist" },
+  { key: "VTC", label: "VTC", desc: "Particuliere Video Toezicht Centrale" },
+  { key: "PGW", label: "PGW", desc: "Particulier Geld- en Waardentransportbedrijf" },
+  { key: "POB", label: "POB", desc: "Particuliere Alarmcentrale" },
+];
 
+const DELETE_PASSWORD = "verwijder";
 
 const EMPTY_FORM = {
   license_type: "", license_number: "", valid_from: "", valid_until: "",
   notes: "", document_file_url: "", document_filename: "", document_file_id: "",
-  document_download_filename: "", document_logical_path: "", document_metadata: null
+  document_download_filename: "", document_logical_path: "", document_metadata: null,
 };
 
 function LicenseStatusBadge({ license }) {
@@ -33,7 +35,6 @@ function LicenseStatusBadge({ license }) {
   return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0">Actief</Badge>;
 }
 
-// Step indicator
 function WizardSteps({ step }) {
   const steps = ["Type", "Gegevens", "Document"];
   const CheckIcon = () => (
@@ -41,40 +42,90 @@ function WizardSteps({ step }) {
       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
     </svg>
   );
-
   return (
     <div className="flex items-center gap-1 mb-4">
-      {steps.map((s, i) =>
-      <React.Fragment key={s}>
+      {steps.map((s, i) => (
+        <React.Fragment key={s}>
           <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full transition-colors ${
-        i + 1 === step ? "bg-primary text-primary-foreground" :
-        i + 1 < step ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" :
-        "text-muted-foreground"}`
-        }>
+            i + 1 === step ? "bg-primary text-primary-foreground" :
+            i + 1 < step ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" :
+            "text-muted-foreground"}`}>
             <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-          i + 1 === step ? "bg-primary-foreground text-primary" :
-          i + 1 < step ? "text-green-700 dark:text-green-300" :
-          "border border-muted-foreground/30 text-muted-foreground"}`
-          }>{i + 1 < step ? <CheckIcon /> : i + 1}</span>
+              i + 1 === step ? "bg-primary-foreground text-primary" :
+              i + 1 < step ? "text-green-700 dark:text-green-300" :
+              "border border-muted-foreground/30 text-muted-foreground"}`}>
+              {i + 1 < step ? <CheckIcon /> : i + 1}
+            </span>
             {s}
           </div>
           {i < steps.length - 1 && <div className={`h-px flex-1 ${i + 1 < step ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />}
         </React.Fragment>
-      )}
-    </div>);
+      ))}
+    </div>
+  );
+}
 
+// Delete confirmation dialog
+function DeleteConfirmDialog({ license, onConfirm, onCancel, isPending }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  const handleConfirm = () => {
+    if (password !== DELETE_PASSWORD) {
+      setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`);
+      return;
+    }
+    onConfirm();
+  };
+
+  return (
+    <div className="border-b border-destructive/20 bg-destructive/5 p-5">
+      <div className="flex items-start gap-3 mb-3">
+        <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-foreground">Vergunning verwijderen?</p>
+          <p className="text-xs text-muted-foreground mt-0.5">
+            Je staat op het punt de <strong>{license.license_type}</strong> vergunning #{license.license_number} te verwijderen.
+            Zonder geldige vergunning kunnen geen diensten worden gedraaid.
+          </p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <label className="text-xs text-muted-foreground block">
+          Typ <strong className="text-foreground font-mono">{DELETE_PASSWORD}</strong> om te bevestigen:
+        </label>
+        <div className="flex gap-2">
+          <Input
+            value={password}
+            onChange={(e) => { setPassword(e.target.value); setError(""); }}
+            placeholder={DELETE_PASSWORD}
+            className={`h-8 text-sm font-mono max-w-[200px] ${error ? "border-destructive" : ""}`}
+            onKeyDown={(e) => e.key === "Enter" && handleConfirm()}
+            autoFocus
+          />
+          <Button variant="destructive" size="sm" onClick={handleConfirm} disabled={isPending}>
+            <Trash2 className="w-3.5 h-3.5 mr-1" /> {isPending ? "Verwijderen..." : "Verwijderen"}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onCancel}>Annuleren</Button>
+        </div>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+    </div>
+  );
 }
 
 export default function WpbrTab({ companyId, company }) {
   const queryClient = useQueryClient();
   const wizardRef = useRef(null);
   const [showWizard, setShowWizard] = useState(false);
+  const [editingId, setEditingId] = useState(null);
   const [step, setStep] = useState(1);
-  const [direction, setDirection] = useState(1); // 1 = forward, -1 = backward
+  const [direction, setDirection] = useState(1);
   const [uploading, setUploading] = useState(false);
   const [formPreviewOpen, setFormPreviewOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
+  const [deleteId, setDeleteId] = useState(null);
 
   useEffect(() => {
     if (showWizard) {
@@ -88,12 +139,26 @@ export default function WpbrTab({ companyId, company }) {
   const { data: licenses = [] } = useQuery({
     queryKey: ["wpbr-licenses", companyId],
     queryFn: () => base44.entities.CompanyWpbrLicense.filter({ company_id: companyId }, "-created_date"),
-    enabled: !!companyId
+    enabled: !!companyId,
   });
 
-  const createMutation = useMutation({
+  const saveMutation = useMutation({
     mutationFn: async (data) => {
-      // Supersede only same-type active licenses
+      if (editingId) {
+        return base44.entities.CompanyWpbrLicense.update(editingId, {
+          license_type: data.license_type,
+          license_number: data.license_number,
+          valid_from: data.valid_from || null,
+          valid_until: data.valid_until || null,
+          document_file_url: data.document_file_url || null,
+          document_filename: data.document_filename || null,
+          document_file_id: data.document_file_id || null,
+          document_download_filename: data.document_download_filename || null,
+          document_logical_path: data.document_logical_path || null,
+          document_metadata: data.document_metadata || null,
+        });
+      }
+      // Create: supersede same-type active licenses
       const sameTypeActive = licenses.filter((l) => l.status === "active" && l.license_type === data.license_type);
       await Promise.all(sameTypeActive.map((l) => base44.entities.CompanyWpbrLicense.update(l.id, { status: "superseded" })));
       const created = await base44.entities.CompanyWpbrLicense.create({ ...data, company_id: companyId, status: "active" });
@@ -101,7 +166,7 @@ export default function WpbrTab({ companyId, company }) {
         await updateManagedFileSource(data.document_file_id, {
           owner_id: companyId,
           company_id: companyId,
-          source_entity_id: created.id
+          source_entity_id: created.id,
         });
       }
       return created;
@@ -109,15 +174,43 @@ export default function WpbrTab({ companyId, company }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["wpbr-licenses", companyId] });
       cancelWizard();
-    }
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => base44.entities.CompanyWpbrLicense.delete(id),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["wpbr-licenses", companyId] });
+      setDeleteId(null);
+    },
   });
 
   const cancelWizard = () => {
     setShowWizard(false);
     setFormPreviewOpen(false);
+    setEditingId(null);
     setStep(1);
     setForm(EMPTY_FORM);
     setErrors({});
+  };
+
+  const startEdit = (license) => {
+    setForm({
+      license_type: license.license_type || "",
+      license_number: license.license_number || "",
+      valid_from: license.valid_from || "",
+      valid_until: license.valid_until || "",
+      notes: license.notes || "",
+      document_file_url: license.document_file_url || "",
+      document_filename: license.document_filename || "",
+      document_file_id: license.document_file_id || "",
+      document_download_filename: license.document_download_filename || "",
+      document_logical_path: license.document_logical_path || "",
+      document_metadata: license.document_metadata || null,
+    });
+    setEditingId(license.id);
+    setStep(2); // Skip type selection when editing
+    setShowWizard(true);
   };
 
   const validateStep2 = () => {
@@ -150,10 +243,7 @@ export default function WpbrTab({ companyId, company }) {
         validUntil: form.valid_until || null,
         isSensitive: true,
         folderSegments: ["wpbr", form.license_type || "onbekend", validYear],
-        metadata: {
-          license_type: form.license_type || null,
-          license_number: form.license_number || null
-        }
+        metadata: { license_type: form.license_type || null, license_number: form.license_number || null },
       });
       setForm((f) => ({
         ...f,
@@ -162,10 +252,7 @@ export default function WpbrTab({ companyId, company }) {
         document_file_id: result.managed_file_id,
         document_download_filename: result.download_filename,
         document_logical_path: result.logical_path,
-        document_metadata: {
-          managed_file_id: result.managed_file_id,
-          folder_path: result.folder_path
-        }
+        document_metadata: { managed_file_id: result.managed_file_id, folder_path: result.folder_path },
       }));
     } finally {
       setUploading(false);
@@ -177,8 +264,24 @@ export default function WpbrTab({ companyId, company }) {
   const activeLicenses = licenses.filter((l) => l.status === "active");
   const historicLicenses = licenses.filter((l) => l.status !== "active");
 
+  const licenseToDelete = licenses.find((l) => l.id === deleteId);
+
   return (
     <div className="flex flex-col h-full">
+
+      {/* Delete confirmation */}
+      <AnimatePresence>
+        {deleteId && licenseToDelete && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15 }}>
+            <DeleteConfirmDialog
+              license={licenseToDelete}
+              onConfirm={() => deleteMutation.mutate(deleteId)}
+              onCancel={() => setDeleteId(null)}
+              isPending={deleteMutation.isPending}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Wizard */}
       <AnimatePresence>
@@ -191,7 +294,10 @@ export default function WpbrTab({ companyId, company }) {
             transition={{ duration: 0.2 }}
             className="rounded-none border-0 border-b border-primary/30 bg-muted/20 p-5 overflow-hidden"
           >
-            <WizardSteps step={step} />
+            {editingId && (
+              <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">Vergunning bewerken</p>
+            )}
+            <WizardSteps step={editingId ? step - 1 : step} />
 
             <div className="relative">
               <AnimatePresence mode="wait">
@@ -202,8 +308,8 @@ export default function WpbrTab({ companyId, company }) {
                   exit={{ opacity: 0, y: -6 }}
                   transition={{ duration: 0.18, ease: "easeOut" }}
                 >
-                  {/* Step 1: Kies type */}
-                  {step === 1 && (
+                  {/* Step 1: Kies type (only for new) */}
+                  {step === 1 && !editingId && (
                     <div className="space-y-3">
                       <p className="text-sm font-medium text-foreground">Kies het vergunningstype</p>
                       <div className="grid grid-cols-1 gap-2">
@@ -256,34 +362,30 @@ export default function WpbrTab({ companyId, company }) {
                         </div>
                       </div>
                       <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        {!editingId ? (
+                          <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        ) : (
+                          <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
+                        )}
                         <Button size="sm" onClick={() => { if (validateStep2()) { setDirection(1); setStep(3); } }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
                       </div>
                     </div>
                   )}
 
-                  {/* Step 3: Document uploaden + opslaan */}
+                  {/* Step 3: Document */}
                   {step === 3 && (
                     <div className="space-y-4">
-                      <p className="text-sm font-medium text-foreground">Vergunningsdocument uploaden</p>
-                      <p className="text-xs text-muted-foreground">Upload het officiële vergunningsdocument (PDF of afbeelding). <span className="text-destructive font-medium">Verplicht.</span></p>
+                      <p className="text-sm font-medium text-foreground">Vergunningsdocument {editingId ? "bijwerken" : "uploaden"}</p>
+                      {!editingId && <p className="text-xs text-muted-foreground">Upload het officiële vergunningsdocument (PDF of afbeelding). <span className="text-destructive font-medium">Verplicht.</span></p>}
 
                       {form.document_file_url ? (
                         <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
                           <FileText className="w-4 h-4 text-blue-600 shrink-0" />
                           <span className="text-sm text-muted-foreground flex-1 truncate">Document toegevoegd</span>
-                          <Button
-                            type="button"
-                            variant="ghost"
-                            size="sm"
-                            onClick={() => setFormPreviewOpen(true)}
-                            className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700"
-                            title="Document bekijken"
-                          >
-                            <Eye className="w-3.5 h-3.5" />
-                            Bekijken
+                          <Button type="button" variant="ghost" size="sm" onClick={() => setFormPreviewOpen(true)} className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700">
+                            <Eye className="w-3.5 h-3.5" /> Bekijken
                           </Button>
-                          <button onClick={() => { setFormPreviewOpen(false); setForm((f) => ({ ...f, document_file_url: "", document_filename: "", document_file_id: "", document_download_filename: "", document_logical_path: "", document_metadata: null })); }} className="text-muted-foreground hover:text-destructive" title="Verwijderen">
+                          <button onClick={() => { setFormPreviewOpen(false); setForm((f) => ({ ...f, document_file_url: "", document_filename: "", document_file_id: "", document_download_filename: "", document_logical_path: "", document_metadata: null })); }} className="text-muted-foreground hover:text-destructive">
                             <X className="w-4 h-4" />
                           </button>
                         </div>
@@ -300,8 +402,8 @@ export default function WpbrTab({ companyId, company }) {
                         <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(2); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
-                          <Button size="sm" onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending || !form.document_file_url}>
-                            <Check className="w-4 h-4 mr-1" /> {createMutation.isPending ? "Opslaan..." : "Vergunning opslaan"}
+                          <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending || (!editingId && !form.document_file_url)}>
+                            <Check className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : (editingId ? "Wijzigingen opslaan" : "Vergunning opslaan")}
                           </Button>
                         </div>
                       </div>
@@ -314,38 +416,44 @@ export default function WpbrTab({ companyId, company }) {
         )}
       </AnimatePresence>
 
-      {/* Active licenses */}
-      <div className="flex-1">
-        <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          <span className="w-10 shrink-0">Type</span>
-          <span className="w-24 shrink-0">Nummer</span>
-          <span className="w-20 shrink-0">Status</span>
-          <span className="flex-1">Geldigheid</span>
-          {!showWizard && (
-            <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
-              <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
-            </Button>
-          )}
-        </div>
-        {activeLicenses.length === 0 && !showWizard && (
-          <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
+      {/* Table header */}
+      <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="w-10 shrink-0">Type</span>
+        <span className="w-24 shrink-0">Nummer</span>
+        <span className="w-20 shrink-0">Status</span>
+        <span className="flex-1">Geldigheid</span>
+        {!showWizard && !deleteId && (
+          <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
+            <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
+          </Button>
         )}
-        <div className="divide-y divide-border">
-          {activeLicenses.map((l) => <LicenseCard key={l.id} license={l} />)}
-        </div>
+      </div>
+
+      {activeLicenses.length === 0 && !showWizard && (
+        <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
+      )}
+      <div className="divide-y divide-border">
+        {activeLicenses.map((l) => (
+          <LicenseCard
+            key={l.id}
+            license={l}
+            onEdit={() => startEdit(l)}
+            onDelete={() => setDeleteId(l.id)}
+          />
+        ))}
       </div>
 
       {/* Historic licenses */}
-      {historicLicenses.length > 0 &&
-      <div className="space-y-2 pt-2">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vorige vergunningen</p>
-          <div className="rounded-lg border border-border overflow-hidden">
-            <div className="divide-y divide-border opacity-70">
-              {historicLicenses.map((l) => <LicenseCard key={l.id} license={l} muted />)}
-            </div>
+      {historicLicenses.length > 0 && (
+        <div className="border-t border-border">
+          <p className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground bg-muted/20">Vorige vergunningen</p>
+          <div className="divide-y divide-border opacity-70">
+            {historicLicenses.map((l) => (
+              <LicenseCard key={l.id} license={l} onEdit={() => startEdit(l)} onDelete={() => setDeleteId(l.id)} muted />
+            ))}
           </div>
         </div>
-      }
+      )}
 
       <ManagedFilePreviewDialog
         open={formPreviewOpen}
@@ -355,28 +463,38 @@ export default function WpbrTab({ companyId, company }) {
         filename={form.document_download_filename || form.document_filename || "Document"}
         title="Vergunningsdocument bekijken"
       />
-    </div>);
-
+    </div>
+  );
 }
 
-function LicenseCard({ license, muted }) {
+function LicenseCard({ license, onEdit, onDelete }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const documentName = license.document_download_filename || license.document_filename || "Document";
   return (
     <>
-      <div
-        className={`flex items-center px-4 py-3 ${license.document_file_url ? "cursor-pointer hover:bg-accent/50 transition-colors" : ""}`}
-        onClick={license.document_file_url ? () => setPreviewOpen(true) : undefined}
-        title={license.document_file_url ? "Klik om vergunning te bekijken" : undefined}
-      >
+      <div className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
         <span className="w-10 shrink-0 text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
         <span className="w-24 shrink-0 text-sm text-muted-foreground">{license.license_number ? `#${license.license_number}` : "—"}</span>
         <div className="w-20 shrink-0"><LicenseStatusBadge license={license} /></div>
-        <div className="flex-1 flex gap-4 text-xs text-muted-foreground">
+        <div
+          className={`flex-1 flex gap-4 text-xs text-muted-foreground ${license.document_file_url ? "cursor-pointer" : ""}`}
+          onClick={license.document_file_url ? () => setPreviewOpen(true) : undefined}
+          title={license.document_file_url ? "Klik om vergunning te bekijken" : undefined}
+        >
           {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
           {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
+          {license.document_file_url && (
+            <span className="flex items-center gap-1 text-blue-500"><FileText className="w-3 h-3" /> Document</span>
+          )}
         </div>
-
+        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} title="Bewerken">
+            <Edit className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={onDelete} title="Verwijderen">
+            <Trash2 className="w-3.5 h-3.5" />
+          </Button>
+        </div>
       </div>
       <ManagedFilePreviewDialog
         open={previewOpen}
@@ -386,6 +504,6 @@ function LicenseCard({ license, muted }) {
         filename={documentName}
         title={`WPBR ${license.license_type || "vergunning"}`}
       />
-    </>);
-
+    </>
+  );
 }
