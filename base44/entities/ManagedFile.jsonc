@@ -1,0 +1,221 @@
+{
+  "name": "ManagedFile",
+  "type": "object",
+  "properties": {
+    "owner_type": {
+      "type": "string",
+      "enum": [
+        "company",
+        "personnel",
+        "customer",
+        "object",
+        "route",
+        "vehicle",
+        "system"
+      ],
+      "description": "Primair domein waar het bestand bij hoort."
+    },
+    "owner_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ID van de primaire eigenaar. Kan leeg zijn tijdens een concept-upload."
+    },
+    "company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bedrijfscontainer waar het bestand commercieel en administratief onder valt."
+    },
+    "upload_session_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Tijdelijke container voor uploads voordat het definitieve record bestaat."
+    },
+    "tenant_container_key": {
+      "type": "string",
+      "description": "Stabiele tenant/container sleutel, bijv. company:<company_id>."
+    },
+    "owner_container_key": {
+      "type": "string",
+      "description": "Stabiele eigenaar/container sleutel, bijv. personnel:<personnel_id>."
+    },
+    "access_scope": {
+      "type": "string",
+      "enum": [
+        "company",
+        "personnel",
+        "system",
+        "public"
+      ],
+      "default": "company"
+    },
+    "domain": {
+      "type": "string",
+      "enum": [
+        "compliance",
+        "identity",
+        "payroll",
+        "branding",
+        "operations",
+        "reporting",
+        "other"
+      ]
+    },
+    "category": {
+      "type": "string",
+      "description": "Specifieke documentcategorie, bijv. company_wpbr_license of bank_account_proof."
+    },
+    "source_entity": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_entity_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_field": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "file_url": {
+      "type": "string"
+    },
+    "original_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "display_filename": {
+      "type": "string"
+    },
+    "download_filename": {
+      "type": "string"
+    },
+    "logical_path": {
+      "type": "string",
+      "description": "Pad voor export/backups en menselijke organisatie."
+    },
+    "folder_path": {
+      "type": "string"
+    },
+    "extension": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "mime_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "size_bytes": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "document_label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "superseded",
+        "deleted"
+      ],
+      "default": "active"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "is_sensitive": {
+      "type": "boolean",
+      "default": false
+    },
+    "security_classification": {
+      "type": "string",
+      "enum": [
+        "public",
+        "internal",
+        "confidential",
+        "strictly_confidential"
+      ],
+      "default": "confidential"
+    },
+    "retention_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "uploaded_at": {
+      "type": "string"
+    },
+    "uploaded_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "owner_type",
+    "tenant_container_key",
+    "owner_container_key",
+    "domain",
+    "category",
+    "file_url",
+    "display_filename",
+    "download_filename",
+    "logical_path",
+    "folder_path",
+    "uploaded_at"
+  ]
+}

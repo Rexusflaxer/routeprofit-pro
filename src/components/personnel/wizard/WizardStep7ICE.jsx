@@ -3,16 +3,36 @@ import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Button } from "@/components/ui/button";
 import { Upload, Plus, Trash2, Phone } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { uploadManagedFile } from "@/lib/managedFiles";
 
-export default function WizardStep7ICE({ iceContacts, onAddContact, onChangeContact, onRemoveContact, cvDoc, onCvChange }) {
+export default function WizardStep7ICE({ iceContacts, onAddContact, onChangeContact, onRemoveContact, cvDoc, onCvChange, form, personnelId, uploadSessionId }) {
   const [uploadingCv, setUploadingCv] = useState(false);
 
   const uploadCv = async (file) => {
     setUploadingCv(true);
-    const { file_url } = await base44.integrations.Core.UploadFile({ file });
-    onCvChange("file_url", file_url);
-    setUploadingCv(false);
+    try {
+      const result = await uploadManagedFile({
+        file,
+        ownerType: "personnel",
+        ownerId: personnelId || null,
+        companyId: form.primary_company_id || null,
+        uploadSessionId,
+        ownerLabel: form.name || `${form.first_name || ""} ${form.last_name || ""}`.trim() || "Medewerker",
+        domain: "identity",
+        category: "cv",
+        sourceEntity: "PersonnelDocument",
+        sourceField: "file_url",
+        documentLabel: "CV",
+        isSensitive: true,
+        folderSegments: ["identity", "cv"]
+      });
+      onCvChange("file_url", result.file_url);
+      onCvChange("file_id", result.managed_file_id);
+      onCvChange("file_download_filename", result.download_filename);
+      onCvChange("file_logical_path", result.logical_path);
+    } finally {
+      setUploadingCv(false);
+    }
   };
 
   return (
@@ -70,8 +90,13 @@ export default function WizardStep7ICE({ iceContacts, onAddContact, onChangeCont
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">CV</p>
         {cvDoc.file_url ? (
           <div className="flex items-center gap-2 text-sm">
-            <a href={cvDoc.file_url} target="_blank" rel="noopener noreferrer" className="text-primary underline">CV bekijken</a>
-            <button type="button" className="text-destructive text-xs" onClick={() => onCvChange("file_url", null)}>Verwijderen</button>
+            <a href={cvDoc.file_url} download={cvDoc.file_download_filename || undefined} target="_blank" rel="noopener noreferrer" className="text-primary underline">{cvDoc.file_download_filename || "CV bekijken"}</a>
+            <button type="button" className="text-destructive text-xs" onClick={() => {
+              onCvChange("file_url", null);
+              onCvChange("file_id", null);
+              onCvChange("file_download_filename", null);
+              onCvChange("file_logical_path", null);
+            }}>Verwijderen</button>
           </div>
         ) : (
           <label className="cursor-pointer">

@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Badge } from "@/components/ui/badge";
 import { Search, Upload, X, MapPin } from "lucide-react";
+import { createManagedUploadSession, uploadManagedFile } from "@/lib/managedFiles";
 
 const ACTIVITIES = [
   { key: "private_security", label: "Particulier beveiligingsbedrijf" },
@@ -30,12 +31,14 @@ const LEGAL_FORMS = ["BV", "NV", "VOF", "CV", "Eenmanszaak", "Maatschap", "Stich
 const WPBR_TYPES = ["ND", "HND", "BD", "PAC", "VTC", "PGW", "POB", "none", "other"];
 
 export default function CompanyForm({ company, companies = [], caoConfigurations = [], onSave, onCancel }) {
+  const [uploadSessionId] = useState(() => createManagedUploadSession("company"));
   const [form, setForm] = useState(company || {
     display_name: "", legal_name: "", trade_name: "", kvk_number: "", rsin: "", btw_number: "",
     legal_form: "", status: "active", company_role: "operating_company", holding_company_id: null,
     primary_activity: null, activities: [], wpbr_license_type: null, wpbr_license_number: "", wpbr_license_valid_until: "",
     street_name: "", house_number: "", house_number_addition: "", postal_code: "", city: "", country: "Nederland",
-    phone: "", email: "", website: "", logo_file_url: null, letterhead_file_url: null,
+    phone: "", email: "", website: "", logo_file_url: null, logo_file_id: null, logo_download_filename: null, logo_logical_path: null,
+    letterhead_file_url: null, letterhead_file_id: null, letterhead_download_filename: null, letterhead_logical_path: null,
     default_cao_configuration_id: null, notes: "",
   });
 
@@ -104,11 +107,34 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
   const uploadFile = async (file, field, setLoading) => {
     setLoading(true);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      set(field, file_url);
+      const isLogo = field === "logo_file_url";
+      const result = await uploadManagedFile({
+        file,
+        ownerType: "company",
+        ownerId: company?.id || null,
+        companyId: company?.id || null,
+        uploadSessionId,
+        ownerLabel: form.display_name || form.legal_name || "Bedrijf",
+        domain: "branding",
+        category: isLogo ? "company_logo" : "company_letterhead",
+        sourceEntity: "Company",
+        sourceEntityId: company?.id || null,
+        sourceField: field,
+        documentLabel: isLogo ? "Logo" : "Briefpapier",
+        isSensitive: false,
+        folderSegments: ["branding", isLogo ? "logo" : "briefpapier"]
+      });
+      set(field, result.file_url);
+      set(isLogo ? "logo_file_id" : "letterhead_file_id", result.managed_file_id);
+      set(isLogo ? "logo_download_filename" : "letterhead_download_filename", result.download_filename);
+      set(isLogo ? "logo_logical_path" : "letterhead_logical_path", result.logical_path);
     } finally {
       setLoading(false);
     }
+  };
+
+  const clearManagedFile = (fields) => {
+    fields.forEach(([field, value]) => set(field, value));
   };
 
   const toggleActivity = (key) => {
@@ -335,7 +361,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
               {form.logo_file_url && (
                 <div className="relative w-32 h-20 border border-border rounded-lg overflow-hidden bg-muted/50">
                   <img src={form.logo_file_url} alt="logo" className="object-contain w-full h-full p-1" />
-                  <button type="button" onClick={() => set("logo_file_url", null)} className="absolute top-1 right-1 bg-white rounded-full p-0.5 shadow">
+                  <button type="button" onClick={() => clearManagedFile([["logo_file_url", null], ["logo_file_id", null], ["logo_download_filename", null], ["logo_logical_path", null]])} className="absolute top-1 right-1 bg-white rounded-full p-0.5 shadow">
                     <X className="w-3 h-3 text-red-500" />
                   </button>
                 </div>
@@ -351,8 +377,8 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
               <Label>Briefpapier</Label>
               {form.letterhead_file_url && (
                 <div className="flex items-center gap-2 text-sm text-blue-600">
-                  <a href={form.letterhead_file_url} target="_blank" rel="noopener noreferrer" className="underline">Huidig bestand bekijken</a>
-                  <button type="button" onClick={() => set("letterhead_file_url", null)}><X className="w-4 h-4 text-red-500" /></button>
+                  <a href={form.letterhead_file_url} download={form.letterhead_download_filename || undefined} target="_blank" rel="noopener noreferrer" className="underline">{form.letterhead_download_filename || "Huidig bestand bekijken"}</a>
+                  <button type="button" onClick={() => clearManagedFile([["letterhead_file_url", null], ["letterhead_file_id", null], ["letterhead_download_filename", null], ["letterhead_logical_path", null]])}><X className="w-4 h-4 text-red-500" /></button>
                 </div>
               )}
               <label className="flex items-center gap-2 cursor-pointer w-fit">
@@ -386,7 +412,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
 
       <div className="flex justify-end gap-2 pt-2 border-t">
         <Button type="button" variant="outline" onClick={onCancel}>Annuleren</Button>
-        <Button type="button" onClick={() => onSave(form)}>Opslaan</Button>
+        <Button type="button" onClick={() => onSave({ ...form, _managed_file_upload_session_id: uploadSessionId })}>Opslaan</Button>
       </div>
     </div>
   );

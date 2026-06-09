@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { FileText, Upload, Plus, X, Check, ExternalLink, ChevronRight, ChevronLeft } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
 
 const WPBR_TYPES = [
 { key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
@@ -19,7 +20,8 @@ const WPBR_TYPES = [
 
 const EMPTY_FORM = {
   license_type: "", license_number: "", valid_from: "", valid_until: "",
-  notes: "", document_file_url: "", document_filename: ""
+  notes: "", document_file_url: "", document_filename: "", document_file_id: "",
+  document_download_filename: "", document_logical_path: "", document_metadata: null
 };
 
 function LicenseStatusBadge({ license }) {
@@ -62,7 +64,7 @@ function WizardSteps({ step }) {
 
 }
 
-export default function WpbrTab({ companyId }) {
+export default function WpbrTab({ companyId, company }) {
   const queryClient = useQueryClient();
   const wizardRef = useRef(null);
   const [showWizard, setShowWizard] = useState(false);
@@ -83,7 +85,15 @@ export default function WpbrTab({ companyId }) {
       // Supersede only same-type active licenses
       const sameTypeActive = licenses.filter((l) => l.status === "active" && l.license_type === data.license_type);
       await Promise.all(sameTypeActive.map((l) => base44.entities.CompanyWpbrLicense.update(l.id, { status: "superseded" })));
-      return base44.entities.CompanyWpbrLicense.create({ ...data, company_id: companyId, status: "active" });
+      const created = await base44.entities.CompanyWpbrLicense.create({ ...data, company_id: companyId, status: "active" });
+      if (created?.id && data.document_file_id) {
+        await updateManagedFileSource(data.document_file_id, {
+          owner_id: companyId,
+          company_id: companyId,
+          source_entity_id: created.id
+        });
+      }
+      return created;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["wpbr-licenses", companyId] });
@@ -110,8 +120,41 @@ export default function WpbrTab({ companyId }) {
   const handleUpload = async (file) => {
     setUploading(true);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      setForm((f) => ({ ...f, document_file_url: file_url, document_filename: file.name }));
+      const licenseNumber = [form.license_type, form.license_number].filter(Boolean).join("-");
+      const validYear = form.valid_until ? form.valid_until.slice(0, 4) : "zonder-einddatum";
+      const result = await uploadManagedFile({
+        file,
+        ownerType: "company",
+        ownerId: companyId,
+        companyId,
+        ownerLabel: company?.display_name || company?.legal_name || "Bedrijf",
+        domain: "compliance",
+        category: "company_wpbr_license",
+        sourceEntity: "CompanyWpbrLicense",
+        sourceField: "document_file_url",
+        documentLabel: `WPBR ${form.license_type || "vergunning"}`,
+        documentNumber: licenseNumber || null,
+        validFrom: form.valid_from || null,
+        validUntil: form.valid_until || null,
+        isSensitive: true,
+        folderSegments: ["wpbr", form.license_type || "onbekend", validYear],
+        metadata: {
+          license_type: form.license_type || null,
+          license_number: form.license_number || null
+        }
+      });
+      setForm((f) => ({
+        ...f,
+        document_file_url: result.file_url,
+        document_filename: result.download_filename,
+        document_file_id: result.managed_file_id,
+        document_download_filename: result.download_filename,
+        document_logical_path: result.logical_path,
+        document_metadata: {
+          managed_file_id: result.managed_file_id,
+          folder_path: result.folder_path
+        }
+      }));
     } finally {
       setUploading(false);
     }
@@ -224,10 +267,10 @@ export default function WpbrTab({ companyId }) {
                       {form.document_file_url ? (
                         <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
                           <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                          <a href={form.document_file_url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex-1 truncate">
-                            {form.document_filename || "Document"}
+                          <a href={form.document_file_url} download={form.document_download_filename || form.document_filename || undefined} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex-1 truncate">
+                            {form.document_download_filename || form.document_filename || "Document"}
                           </a>
-                          <button onClick={() => set("document_file_url", "")} className="text-muted-foreground hover:text-destructive">
+                          <button onClick={() => setForm((f) => ({ ...f, document_file_url: "", document_filename: "", document_file_id: "", document_download_filename: "", document_logical_path: "", document_metadata: null }))} className="text-muted-foreground hover:text-destructive">
                             <X className="w-4 h-4" />
                           </button>
                         </div>
@@ -280,6 +323,7 @@ export default function WpbrTab({ companyId }) {
 }
 
 function LicenseCard({ license, muted }) {
+  const documentName = license.document_download_filename || license.document_filename || "Document";
   return (
     <div className={`rounded-lg border p-4 space-y-2 ${muted ? "border-border/50 opacity-70" : "border-border bg-card"}`}>
       <div className="flex items-start justify-between gap-2">
@@ -290,8 +334,9 @@ function LicenseCard({ license, muted }) {
         </div>
         {license.document_file_url &&
         <a href={license.document_file_url} target="_blank" rel="noopener noreferrer"
+        download={documentName}
         className="flex items-center gap-1 text-xs text-blue-600 hover:underline shrink-0">
-            <FileText className="w-3.5 h-3.5" /> Document <ExternalLink className="w-3 h-3" />
+            <FileText className="w-3.5 h-3.5" /> <span className="max-w-64 truncate">{documentName}</span> <ExternalLink className="w-3 h-3" />
           </a>
         }
       </div>

@@ -177,7 +177,45 @@
         "null"
       ]
     },
+    "logo_file_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ManagedFile ID voor het bedrijfslogo"
+    },
+    "logo_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "logo_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "letterhead_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "letterhead_file_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ManagedFile ID voor briefpapier"
+    },
+    "letterhead_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "letterhead_logical_path": {
       "type": [
         "string",
         "null"

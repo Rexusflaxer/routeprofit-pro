@@ -14,6 +14,7 @@ import WizardStep7ICE from "./wizard/WizardStep7ICE";
 import WizardStep8Review from "./wizard/WizardStep8Review";
 import PersonnelAccessTab from "./PersonnelAccessTab";
 import PersonnelContractsTab from "./PersonnelContractsTab";
+import { attachManagedFilesToOwner, createManagedUploadSession, updateManagedFileSource } from "@/lib/managedFiles";
 
 const BASE_STEPS = [
   { label: "Bedrijf & rol" },
@@ -57,9 +58,31 @@ function getInitialContractMissingFields({
   return missing;
 }
 
+function managedFileById(files = []) {
+  return Object.fromEntries(files.filter(file => file?.id).map(file => [file.id, file]));
+}
+
+function withManagedDocumentPaths(doc, fileMap) {
+  const next = { ...doc };
+  if (next.file_id && fileMap[next.file_id]) {
+    next.file_download_filename = fileMap[next.file_id].download_filename;
+    next.file_logical_path = fileMap[next.file_id].logical_path;
+  }
+  if (next.front_file_id && fileMap[next.front_file_id]) {
+    next.front_download_filename = fileMap[next.front_file_id].download_filename;
+    next.front_logical_path = fileMap[next.front_file_id].logical_path;
+  }
+  if (next.back_file_id && fileMap[next.back_file_id]) {
+    next.back_download_filename = fileMap[next.back_file_id].download_filename;
+    next.back_logical_path = fileMap[next.back_file_id].logical_path;
+  }
+  return next;
+}
+
 export default function PersonnelWizard({ person, onClose }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(0);
+  const [uploadSessionId] = useState(() => createManagedUploadSession("personnel"));
 
   const STEPS = person ? [...BASE_STEPS, { label: "Contracten" }, { label: "App-toegang" }] : BASE_STEPS;
   const { data: companies = [] } = useQuery({ queryKey: ["companies"], queryFn: () => base44.entities.Company.list() });
@@ -93,6 +116,33 @@ export default function PersonnelWizard({ person, onClose }) {
         personnelId = created.id;
       }
 
+      const primaryAssignment = data.assignments.find(a => a.is_primary) || data.assignments[0] || null;
+      const primaryCompanyId = data.personnel.primary_company_id || primaryAssignment?.company_id || null;
+      const attachedFiles = await attachManagedFilesToOwner({
+        uploadSessionId: data.uploadSessionId,
+        ownerType: "personnel",
+        ownerId: personnelId,
+        companyId: primaryCompanyId,
+        ownerLabel: data.personnel.name || `${data.personnel.first_name || ""} ${data.personnel.last_name || ""}`.trim() || "Medewerker"
+      });
+      const attachedById = managedFileById(attachedFiles);
+
+      const personnelFilePatch = {};
+      if (data.personnel.photo_file_id && attachedById[data.personnel.photo_file_id]) {
+        personnelFilePatch.photo_download_filename = attachedById[data.personnel.photo_file_id].download_filename;
+        personnelFilePatch.photo_logical_path = attachedById[data.personnel.photo_file_id].logical_path;
+      }
+      if (data.personnel.payroll_tax_statement_file_id && attachedById[data.personnel.payroll_tax_statement_file_id]) {
+        personnelFilePatch.payroll_tax_statement_download_filename = attachedById[data.personnel.payroll_tax_statement_file_id].download_filename;
+        personnelFilePatch.payroll_tax_statement_logical_path = attachedById[data.personnel.payroll_tax_statement_file_id].logical_path;
+      }
+
+      await Promise.all([
+        data.personnel.photo_file_id ? updateManagedFileSource(data.personnel.photo_file_id, { owner_id: personnelId, company_id: primaryCompanyId, source_entity_id: personnelId }) : null,
+        data.personnel.payroll_tax_statement_file_id ? updateManagedFileSource(data.personnel.payroll_tax_statement_file_id, { owner_id: personnelId, company_id: primaryCompanyId, source_entity_id: personnelId }) : null,
+        Object.keys(personnelFilePatch).length ? base44.entities.Personnel.update(personnelId, personnelFilePatch) : null
+      ].filter(Boolean));
+
       // Save/update sensitive data
       const existing = await base44.entities.PersonnelSensitiveData.filter({ personnel_id: personnelId });
       if (existing.length > 0) {
@@ -111,8 +161,7 @@ export default function PersonnelWizard({ person, onClose }) {
       if (isNewPersonnel && data.personnel.employee_type === "loondienst") {
         const existingContracts = await base44.entities.PersonnelContract.filter({ personnel_id: personnelId });
         if (existingContracts.length === 0) {
-          const primaryAssignment = data.assignments.find(a => a.is_primary) || data.assignments[0] || null;
-          const companyId = data.personnel.primary_company_id || primaryAssignment?.company_id || null;
+          const companyId = primaryCompanyId;
           const functionType = data.personnel.function_type || null;
           const caoFunctionGroup = data.personnel.cao_function_group || null;
           const caoFunctionLevel = data.personnel.cao_function_level || null;
@@ -200,13 +249,61 @@ export default function PersonnelWizard({ person, onClose }) {
       }
       if (data.cvDoc.file_url) docs.push({ ...data.cvDoc, personnel_id: personnelId });
       for (const doc of docs) {
-        if (doc.personnel_id) await base44.entities.PersonnelDocument.create(doc);
+        if (doc.personnel_id) {
+          const normalizedDoc = withManagedDocumentPaths(doc, attachedById);
+          const createdDoc = await base44.entities.PersonnelDocument.create(normalizedDoc);
+          await Promise.all([
+            normalizedDoc.file_id ? updateManagedFileSource(normalizedDoc.file_id, { owner_id: personnelId, company_id: primaryCompanyId, source_entity_id: createdDoc.id }) : null,
+            normalizedDoc.front_file_id ? updateManagedFileSource(normalizedDoc.front_file_id, { owner_id: personnelId, company_id: primaryCompanyId, source_entity_id: createdDoc.id }) : null,
+            normalizedDoc.back_file_id ? updateManagedFileSource(normalizedDoc.back_file_id, { owner_id: personnelId, company_id: primaryCompanyId, source_entity_id: createdDoc.id }) : null
+          ].filter(Boolean));
+        }
       }
 
       // Bank account
       if (data.bankAccount.iban) {
-        const { _proof_file_url, ...ba } = data.bankAccount;
-        await base44.entities.PersonnelBankAccount.create({ ...ba, personnel_id: personnelId });
+        const {
+          _proof_file_url,
+          _proof_file_id,
+          _proof_download_filename,
+          _proof_logical_path,
+          ...ba
+        } = data.bankAccount;
+        let proofDocumentId = null;
+        const proofManagedFile = _proof_file_id ? attachedById[_proof_file_id] : null;
+        if (_proof_file_url || _proof_file_id) {
+          const proofDoc = await base44.entities.PersonnelDocument.create({
+            personnel_id: personnelId,
+            company_id: primaryCompanyId,
+            category: "bank_account_proof",
+            file_url: _proof_file_url || null,
+            file_id: _proof_file_id || null,
+            file_download_filename: proofManagedFile?.download_filename || _proof_download_filename || null,
+            file_logical_path: proofManagedFile?.logical_path || _proof_logical_path || null,
+            verification_status: ba.verification_status || "pending_review",
+            is_sensitive: true,
+            metadata: {
+              iban_last4: String(data.bankAccount.iban || "").replace(/\s/g, "").slice(-4)
+            }
+          });
+          proofDocumentId = proofDoc.id;
+          if (_proof_file_id) {
+            await updateManagedFileSource(_proof_file_id, {
+              owner_id: personnelId,
+              company_id: primaryCompanyId,
+              source_entity: "PersonnelDocument",
+              source_entity_id: proofDoc.id
+            });
+          }
+        }
+        await base44.entities.PersonnelBankAccount.create({
+          ...ba,
+          personnel_id: personnelId,
+          proof_document_id: proofDocumentId,
+          proof_file_id: _proof_file_id || null,
+          proof_download_filename: proofManagedFile?.download_filename || _proof_download_filename || null,
+          proof_logical_path: proofManagedFile?.logical_path || _proof_logical_path || null
+        });
       }
 
       // ICE contacts
@@ -228,7 +325,7 @@ export default function PersonnelWizard({ person, onClose }) {
   });
 
   const handleSave = () => {
-    saveMutation.mutate({ personnel: form, sensitive: sensitiveData, assignments, idDoc, vogDoc, driversLicense, bankAccount, iceContacts, cvDoc, qualifications });
+    saveMutation.mutate({ personnel: form, sensitive: sensitiveData, assignments, idDoc, vogDoc, driversLicense, bankAccount, iceContacts, cvDoc, qualifications, uploadSessionId });
   };
 
   const stepContent = [
@@ -236,10 +333,10 @@ export default function PersonnelWizard({ person, onClose }) {
       onAddAssignment={(companyId) => setAssignments(a => [...a, { company_id: companyId, relation_type: "employee", assignment_status: "active", is_primary: false }])}
       onRemoveAssignment={(i) => setAssignments(a => a.filter((_, idx) => idx !== i))}
     />,
-    <WizardStep2NAW form={form} onChange={onChange} />,
-    <WizardStep3Payroll form={form} onChange={onChange} sensitiveData={sensitiveData} onSensitiveChange={onSensitiveChange} personnelId={person?.id || null} />,
+    <WizardStep2NAW form={form} onChange={onChange} uploadSessionId={uploadSessionId} personnelId={person?.id || null} />,
+    <WizardStep3Payroll form={form} onChange={onChange} sensitiveData={sensitiveData} onSensitiveChange={onSensitiveChange} personnelId={person?.id || null} uploadSessionId={uploadSessionId} />,
     <WizardStep4Identity sensitiveData={sensitiveData} onSensitiveChange={onSensitiveChange}
-      idDoc={idDoc} onIdDocChange={(f, v) => setIdDoc(d => ({ ...d, [f]: v }))}
+      idDoc={idDoc} onIdDocChange={(f, v) => setIdDoc(d => ({ ...d, [f]: v }))} form={form} personnelId={person?.id || null} uploadSessionId={uploadSessionId}
     />,
     <WizardStep5Compliance form={form} onChange={onChange} vogDoc={vogDoc}
       onVogDocChange={(f, v) => setVogDoc(d => ({ ...d, [f]: v }))}
@@ -247,18 +344,23 @@ export default function PersonnelWizard({ person, onClose }) {
       onQualAdd={(q) => setQualifications(a => [...a, q])}
       onQualChange={(i, f, v) => setQualifications(a => a.map((q, idx) => idx === i ? { ...q, [f]: v } : q))}
       onQualRemove={(i) => setQualifications(a => a.filter((_, idx) => idx !== i))}
+      personnelId={person?.id || null}
+      uploadSessionId={uploadSessionId}
     />,
     <WizardStep6Mobility
       driversLicense={driversLicense}
       onLicenseChange={(f, v) => setDriversLicense(d => ({ ...d, [f]: v }))}
       bankAccount={bankAccount}
       onBankChange={(f, v) => setBankAccount(d => ({ ...d, [f]: v }))}
+      form={form}
+      personnelId={person?.id || null}
+      uploadSessionId={uploadSessionId}
     />,
     <WizardStep7ICE iceContacts={iceContacts}
       onAddContact={(c) => setIceContacts(a => [...a, c])}
       onChangeContact={(i, f, v) => setIceContacts(a => a.map((c, idx) => idx === i ? { ...c, [f]: v } : c))}
       onRemoveContact={(i) => setIceContacts(a => a.filter((_, idx) => idx !== i))}
-      cvDoc={cvDoc} onCvChange={(f, v) => setCvDoc(d => ({ ...d, [f]: v }))}
+      cvDoc={cvDoc} onCvChange={(f, v) => setCvDoc(d => ({ ...d, [f]: v }))} form={form} personnelId={person?.id || null} uploadSessionId={uploadSessionId}
     />,
     <WizardStep8Review form={form} sensitiveData={sensitiveData} idDoc={idDoc} bankAccount={bankAccount} iceContacts={iceContacts} vogDoc={vogDoc} />,
     ...(person ? [

@@ -4,9 +4,9 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Upload, Eye, EyeOff, Lock } from "lucide-react";
-import { base44 } from "@/api/base44Client";
 import ContractRulesPanel from "@/components/personnel/ContractRulesPanel";
 import CaoApplicabilityPanel from "@/components/personnel/CaoApplicabilityPanel";
+import { uploadManagedFile } from "@/lib/managedFiles";
 
 const CAO_OPTIONS = [
   { value: "cao_particuliere_beveiliging", label: "CAO Particuliere Beveiliging" },
@@ -15,15 +15,37 @@ const CAO_OPTIONS = [
   { value: "cao_veiligheidsdomein", label: "CAO Veiligheidsdomein" }
 ];
 
-export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSensitiveChange, personnelId }) {
+export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSensitiveChange, personnelId, uploadSessionId }) {
   const [showBsn, setShowBsn] = useState(false);
   const [uploadingDoc, setUploadingDoc] = useState(false);
 
   const uploadPayrollDoc = async (file) => {
     setUploadingDoc(true);
-    const { file_url } = await base44.integrations.Core.UploadFile({ file });
-    onChange("payroll_tax_statement_file_url", file_url);
-    setUploadingDoc(false);
+    try {
+      const result = await uploadManagedFile({
+        file,
+        ownerType: "personnel",
+        ownerId: personnelId || null,
+        companyId: form.primary_company_id || null,
+        uploadSessionId,
+        ownerLabel: form.name || `${form.first_name || ""} ${form.last_name || ""}`.trim() || "Medewerker",
+        domain: "payroll",
+        category: "payroll_tax_statement",
+        sourceEntity: "Personnel",
+        sourceEntityId: personnelId || null,
+        sourceField: "payroll_tax_statement_file_url",
+        documentLabel: "Loonheffingsverklaring",
+        effectiveDate: form.payroll_tax_statement_signed_at || null,
+        isSensitive: true,
+        folderSegments: ["payroll", "loonheffingsverklaring"]
+      });
+      onChange("payroll_tax_statement_file_url", result.file_url);
+      onChange("payroll_tax_statement_file_id", result.managed_file_id);
+      onChange("payroll_tax_statement_download_filename", result.download_filename);
+      onChange("payroll_tax_statement_logical_path", result.logical_path);
+    } finally {
+      setUploadingDoc(false);
+    }
   };
 
   return (
@@ -115,8 +137,13 @@ export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSe
           <Label>Loonheffingsverklaring uploaden</Label>
           {form.payroll_tax_statement_file_url ? (
             <div className="flex items-center gap-2 text-sm text-primary">
-              <a href={form.payroll_tax_statement_file_url} target="_blank" rel="noopener noreferrer" className="underline">Huidig bestand bekijken</a>
-              <button type="button" className="text-destructive text-xs" onClick={() => onChange("payroll_tax_statement_file_url", null)}>Verwijderen</button>
+              <a href={form.payroll_tax_statement_file_url} download={form.payroll_tax_statement_download_filename || undefined} target="_blank" rel="noopener noreferrer" className="underline">{form.payroll_tax_statement_download_filename || "Huidig bestand bekijken"}</a>
+              <button type="button" className="text-destructive text-xs" onClick={() => {
+                onChange("payroll_tax_statement_file_url", null);
+                onChange("payroll_tax_statement_file_id", null);
+                onChange("payroll_tax_statement_download_filename", null);
+                onChange("payroll_tax_statement_logical_path", null);
+              }}>Verwijderen</button>
             </div>
           ) : (
             <label className="cursor-pointer">

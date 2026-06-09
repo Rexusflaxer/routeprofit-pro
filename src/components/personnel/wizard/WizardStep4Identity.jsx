@@ -5,16 +5,48 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Button } from "@/components/ui/button";
 import { Switch } from "@/components/ui/switch";
 import { Upload, CheckCircle } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { uploadManagedFile } from "@/lib/managedFiles";
 
-export default function WizardStep4Identity({ sensitiveData, onSensitiveChange, idDoc, onIdDocChange }) {
+const ID_DOC_LABELS = {
+  passport: "Paspoort",
+  id_card: "Identiteitskaart",
+  residence_permit: "Verblijfsdocument",
+  other: "Identiteitsdocument"
+};
+
+export default function WizardStep4Identity({ sensitiveData, onSensitiveChange, idDoc, onIdDocChange, form, personnelId, uploadSessionId }) {
   const [uploading, setUploading] = useState({ front: false, back: false });
 
   const uploadFile = async (side, file) => {
     setUploading(p => ({ ...p, [side]: true }));
-    const { file_url } = await base44.integrations.Core.UploadFile({ file });
-    onIdDocChange(side === "front" ? "front_file_url" : "back_file_url", file_url);
-    setUploading(p => ({ ...p, [side]: false }));
+    try {
+      const sideLabel = side === "front" ? "voorzijde" : "achterzijde";
+      const docLabel = ID_DOC_LABELS[idDoc.document_type] || "Identiteitsdocument";
+      const result = await uploadManagedFile({
+        file,
+        ownerType: "personnel",
+        ownerId: personnelId || null,
+        companyId: form.primary_company_id || null,
+        uploadSessionId,
+        ownerLabel: form.name || `${form.first_name || ""} ${form.last_name || ""}`.trim() || "Medewerker",
+        domain: "identity",
+        category: `identity_document_${side}`,
+        sourceEntity: "PersonnelDocument",
+        sourceField: side === "front" ? "front_file_url" : "back_file_url",
+        documentLabel: `${docLabel} ${sideLabel}`,
+        documentNumber: idDoc.document_number || null,
+        validFrom: idDoc.valid_from || null,
+        validUntil: idDoc.valid_until || null,
+        isSensitive: true,
+        folderSegments: ["identity", idDoc.document_type || "identity-document", side]
+      });
+      onIdDocChange(side === "front" ? "front_file_url" : "back_file_url", result.file_url);
+      onIdDocChange(side === "front" ? "front_file_id" : "back_file_id", result.managed_file_id);
+      onIdDocChange(side === "front" ? "front_download_filename" : "back_download_filename", result.download_filename);
+      onIdDocChange(side === "front" ? "front_logical_path" : "back_logical_path", result.logical_path);
+    } finally {
+      setUploading(p => ({ ...p, [side]: false }));
+    }
   };
 
   return (
@@ -56,6 +88,7 @@ export default function WizardStep4Identity({ sensitiveData, onSensitiveChange, 
         <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
           {["front", "back"].map(side => {
             const url = side === "front" ? idDoc.front_file_url : idDoc.back_file_url;
+            const downloadName = side === "front" ? idDoc.front_download_filename : idDoc.back_download_filename;
             const label = side === "front" ? "Voorzijde" : "Achterzijde";
             return (
               <div key={side} className="space-y-2">
@@ -63,8 +96,13 @@ export default function WizardStep4Identity({ sensitiveData, onSensitiveChange, 
                 {url ? (
                   <div className="flex items-center gap-2 text-sm">
                     <CheckCircle className="w-4 h-4 text-emerald-500" />
-                    <a href={url} target="_blank" rel="noopener noreferrer" className="text-primary underline">Bekijken</a>
-                    <button type="button" className="text-destructive text-xs" onClick={() => onIdDocChange(side === "front" ? "front_file_url" : "back_file_url", null)}>Verwijderen</button>
+                    <a href={url} download={downloadName || undefined} target="_blank" rel="noopener noreferrer" className="text-primary underline">{downloadName || "Bekijken"}</a>
+                    <button type="button" className="text-destructive text-xs" onClick={() => {
+                      onIdDocChange(side === "front" ? "front_file_url" : "back_file_url", null);
+                      onIdDocChange(side === "front" ? "front_file_id" : "back_file_id", null);
+                      onIdDocChange(side === "front" ? "front_download_filename" : "back_download_filename", null);
+                      onIdDocChange(side === "front" ? "front_logical_path" : "back_logical_path", null);
+                    }}>Verwijderen</button>
                   </div>
                 ) : (
                   <label className="cursor-pointer">

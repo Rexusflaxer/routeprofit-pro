@@ -124,6 +124,24 @@
         "null"
       ]
     },
+    "photo_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "photo_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "photo_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "email": {
       "type": [
         "string",
@@ -241,6 +259,24 @@
       ]
     },
     "payroll_tax_statement_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payroll_tax_statement_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payroll_tax_statement_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payroll_tax_statement_logical_path": {
       "type": [
         "string",
         "null"

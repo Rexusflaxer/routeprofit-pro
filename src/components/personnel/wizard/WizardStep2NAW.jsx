@@ -1,20 +1,41 @@
-import React, { useState } from "react";
+import React from "react";
 import { Label } from "@/components/ui/label";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Upload, X } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { uploadManagedFile } from "@/lib/managedFiles";
 
-export default function WizardStep2NAW({ form, onChange }) {
+export default function WizardStep2NAW({ form, onChange, uploadSessionId, personnelId }) {
   const [uploading, setUploading] = React.useState(false);
 
   const uploadPhoto = async (file) => {
     setUploading(true);
-    const { file_url } = await base44.integrations.Core.UploadFile({ file });
-    onChange("photo_file_url", file_url);
-    setUploading(false);
+    try {
+      const result = await uploadManagedFile({
+        file,
+        ownerType: "personnel",
+        ownerId: personnelId || null,
+        companyId: form.primary_company_id || null,
+        uploadSessionId,
+        ownerLabel: form.name || `${form.first_name || ""} ${form.last_name || ""}`.trim() || "Medewerker",
+        domain: "identity",
+        category: "personnel_photo",
+        sourceEntity: "Personnel",
+        sourceEntityId: personnelId || null,
+        sourceField: "photo_file_url",
+        documentLabel: "Pasfoto",
+        isSensitive: true,
+        folderSegments: ["identity", "photo"]
+      });
+      onChange("photo_file_url", result.file_url);
+      onChange("photo_file_id", result.managed_file_id);
+      onChange("photo_download_filename", result.download_filename);
+      onChange("photo_logical_path", result.logical_path);
+    } finally {
+      setUploading(false);
+    }
   };
 
   // Auto-fill display name from name parts
@@ -82,7 +103,12 @@ export default function WizardStep2NAW({ form, onChange }) {
           {form.photo_file_url && (
             <div className="relative w-16 h-16 rounded-full overflow-hidden border-2 border-border">
               <img src={form.photo_file_url} alt="foto" className="object-cover w-full h-full" />
-              <button type="button" onClick={() => onChange("photo_file_url", null)} className="absolute top-0 right-0 bg-destructive text-destructive-foreground rounded-full p-0.5">
+              <button type="button" onClick={() => {
+                onChange("photo_file_url", null);
+                onChange("photo_file_id", null);
+                onChange("photo_download_filename", null);
+                onChange("photo_logical_path", null);
+              }} className="absolute top-0 right-0 bg-destructive text-destructive-foreground rounded-full p-0.5">
                 <X className="w-2.5 h-2.5" />
               </button>
             </div>

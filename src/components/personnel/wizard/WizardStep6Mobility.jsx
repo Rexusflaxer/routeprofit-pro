@@ -4,13 +4,12 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
-import { Upload, X } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { Upload } from "lucide-react";
+import { uploadManagedFile } from "@/lib/managedFiles";
 
 const LICENSE_CATEGORIES = ["A", "A1", "A2", "AM", "B", "BE", "C", "CE", "C1", "C1E", "D", "DE", "D1", "D1E", "T"];
 
-export default function WizardStep6Mobility({ driversLicense, onLicenseChange, bankAccount, onBankChange }) {
+export default function WizardStep6Mobility({ driversLicense, onLicenseChange, bankAccount, onBankChange, form, personnelId, uploadSessionId }) {
   const [uploadingProof, setUploadingProof] = useState(false);
 
   const toggleCategory = (cat) => {
@@ -21,9 +20,32 @@ export default function WizardStep6Mobility({ driversLicense, onLicenseChange, b
 
   const uploadBankProof = async (file) => {
     setUploadingProof(true);
-    const { file_url } = await base44.integrations.Core.UploadFile({ file });
-    onBankChange("_proof_file_url", file_url);
-    setUploadingProof(false);
+    try {
+      const iban = String(bankAccount.iban || "").replace(/\s/g, "");
+      const result = await uploadManagedFile({
+        file,
+        ownerType: "personnel",
+        ownerId: personnelId || null,
+        companyId: form.primary_company_id || null,
+        uploadSessionId,
+        ownerLabel: form.name || `${form.first_name || ""} ${form.last_name || ""}`.trim() || "Medewerker",
+        domain: "payroll",
+        category: "bank_account_proof",
+        sourceEntity: "PersonnelDocument",
+        sourceField: "file_url",
+        documentLabel: "Bewijs bankrekening",
+        documentNumber: iban ? `IBAN-${iban.slice(-4)}` : null,
+        validFrom: bankAccount.valid_from || null,
+        isSensitive: true,
+        folderSegments: ["payroll", "bank"]
+      });
+      onBankChange("_proof_file_url", result.file_url);
+      onBankChange("_proof_file_id", result.managed_file_id);
+      onBankChange("_proof_download_filename", result.download_filename);
+      onBankChange("_proof_logical_path", result.logical_path);
+    } finally {
+      setUploadingProof(false);
+    }
   };
 
   const hasLicense = !!driversLicense._enabled;
@@ -106,8 +128,13 @@ export default function WizardStep6Mobility({ driversLicense, onLicenseChange, b
           <Label>Bewijs bankrekening</Label>
           {bankAccount._proof_file_url ? (
             <div className="flex items-center gap-2 text-sm">
-              <a href={bankAccount._proof_file_url} target="_blank" rel="noopener noreferrer" className="text-primary underline">Bewijs bekijken</a>
-              <button type="button" className="text-destructive text-xs" onClick={() => onBankChange("_proof_file_url", null)}>Verwijderen</button>
+              <a href={bankAccount._proof_file_url} download={bankAccount._proof_download_filename || undefined} target="_blank" rel="noopener noreferrer" className="text-primary underline">{bankAccount._proof_download_filename || "Bewijs bekijken"}</a>
+              <button type="button" className="text-destructive text-xs" onClick={() => {
+                onBankChange("_proof_file_url", null);
+                onBankChange("_proof_file_id", null);
+                onBankChange("_proof_download_filename", null);
+                onBankChange("_proof_logical_path", null);
+              }}>Verwijderen</button>
             </div>
           ) : (
             <label className="cursor-pointer">

@@ -43,7 +43,7 @@ export default function CompanySidebarPanel({
       {/* Right content */}
       <div className="flex-1 min-w-0">
         {active === "wpbr" && (
-          <WpbrTab companyId={companyId} />
+          <WpbrTab companyId={companyId} company={company} />
         )}
 
         {active === "locations" && (

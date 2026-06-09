@@ -68,6 +68,24 @@
       ],
       "description": "URL naar USDZ 3D model"
     },
+    "usdz_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "usdz_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "usdz_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "raw_roomplan_file_url": {
       "type": [
         "string",
@@ -75,12 +93,48 @@
       ],
       "description": "URL naar ruwe RoomPlan JSON"
     },
+    "raw_roomplan_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "raw_roomplan_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "raw_roomplan_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "preview_2d_file_url": {
       "type": [
         "string",
         "null"
       ],
       "description": "URL naar 2D preview afbeelding"
+    },
+    "preview_2d_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "preview_2d_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "preview_2d_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "fallback_pdf_file_url": {
       "type": [

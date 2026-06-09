@@ -61,6 +61,34 @@
       ],
       "description": "Bestandsnaam van het ge\u00fcploade document"
     },
+    "document_file_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ManagedFile ID van het vergunningsdocument"
+    },
+    "document_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Commercieel nette downloadnaam"
+    },
+    "document_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Logisch containerpad voor backup/export"
+    },
+    "document_metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
     "status": {
       "type": "string",
       "enum": [

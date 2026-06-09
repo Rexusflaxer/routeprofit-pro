@@ -60,13 +60,68 @@
         "null"
       ]
     },
+    "file_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ManagedFile ID voor enkelvoudige documenten"
+    },
+    "file_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "file_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "front_file_url": {
       "type": [
         "string",
         "null"
       ]
     },
+    "front_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "front_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "front_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "back_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "back_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "back_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "back_logical_path": {
       "type": [
         "string",
         "null"

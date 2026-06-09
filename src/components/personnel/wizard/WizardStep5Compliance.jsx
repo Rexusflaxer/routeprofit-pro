@@ -6,7 +6,7 @@ import { Switch } from "@/components/ui/switch";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Upload, Plus, Trash2 } from "lucide-react";
-import { base44 } from "@/api/base44Client";
+import { uploadManagedFile } from "@/lib/managedFiles";
 
 const QUAL_TYPES = [
   { value: "beveiliger_2", label: "Beveiliger niveau 2" },
@@ -21,14 +21,37 @@ const QUAL_TYPES = [
   { value: "other", label: "Overig" },
 ];
 
-export default function WizardStep5Compliance({ form, onChange, vogDoc, onVogDocChange, qualifications, onQualAdd, onQualChange, onQualRemove }) {
+export default function WizardStep5Compliance({ form, onChange, vogDoc, onVogDocChange, qualifications, onQualAdd, onQualChange, onQualRemove, personnelId, uploadSessionId }) {
   const [uploadingVog, setUploadingVog] = useState(false);
 
   const uploadVog = async (file) => {
     setUploadingVog(true);
-    const { file_url } = await base44.integrations.Core.UploadFile({ file });
-    onVogDocChange("file_url", file_url);
-    setUploadingVog(false);
+    try {
+      const result = await uploadManagedFile({
+        file,
+        ownerType: "personnel",
+        ownerId: personnelId || null,
+        companyId: form.primary_company_id || null,
+        uploadSessionId,
+        ownerLabel: form.name || `${form.first_name || ""} ${form.last_name || ""}`.trim() || "Medewerker",
+        domain: "compliance",
+        category: "vog",
+        sourceEntity: "PersonnelDocument",
+        sourceField: "file_url",
+        documentLabel: "VOG",
+        documentNumber: vogDoc.document_number || null,
+        validFrom: vogDoc.valid_from || null,
+        validUntil: vogDoc.valid_until || null,
+        isSensitive: true,
+        folderSegments: ["compliance", "vog"]
+      });
+      onVogDocChange("file_url", result.file_url);
+      onVogDocChange("file_id", result.managed_file_id);
+      onVogDocChange("file_download_filename", result.download_filename);
+      onVogDocChange("file_logical_path", result.logical_path);
+    } finally {
+      setUploadingVog(false);
+    }
   };
 
   return (
@@ -53,8 +76,13 @@ export default function WizardStep5Compliance({ form, onChange, vogDoc, onVogDoc
         <div className="mt-2">
           {vogDoc.file_url ? (
             <div className="flex items-center gap-2 text-sm">
-              <a href={vogDoc.file_url} target="_blank" rel="noopener noreferrer" className="text-primary underline">VOG bekijken</a>
-              <button type="button" className="text-destructive text-xs" onClick={() => onVogDocChange("file_url", null)}>Verwijderen</button>
+              <a href={vogDoc.file_url} download={vogDoc.file_download_filename || undefined} target="_blank" rel="noopener noreferrer" className="text-primary underline">{vogDoc.file_download_filename || "VOG bekijken"}</a>
+              <button type="button" className="text-destructive text-xs" onClick={() => {
+                onVogDocChange("file_url", null);
+                onVogDocChange("file_id", null);
+                onVogDocChange("file_download_filename", null);
+                onVogDocChange("file_logical_path", null);
+              }}>Verwijderen</button>
             </div>
           ) : (
             <label className="cursor-pointer">

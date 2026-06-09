@@ -11,6 +11,7 @@ import { ArrowLeft, Edit, Check, X, Building2, Phone, Mail, Globe, MapPin, FileT
 import { useNavigate } from "react-router-dom";
 import WpbrTab from "@/components/companies/WpbrTab";
 import SidebarPanel from "@/components/companies/CompanySidebarPanel";
+import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
 
 const ROLE_LABELS = {
   holding: "Holding", operating_company: "Werkmaatschappij",
@@ -126,8 +127,26 @@ export default function CompanyDetail() {
   const uploadLogo = async (file) => {
     setUploadingLogo(true);
     try {
-      const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      set("logo_file_url", file_url);
+      const result = await uploadManagedFile({
+        file,
+        ownerType: "company",
+        ownerId: companyId,
+        companyId,
+        ownerLabel: data.display_name || data.legal_name || "Bedrijf",
+        domain: "branding",
+        category: "company_logo",
+        sourceEntity: "Company",
+        sourceEntityId: companyId,
+        sourceField: "logo_file_url",
+        documentLabel: "Logo",
+        isSensitive: false,
+        folderSegments: ["branding", "logo"]
+      });
+      set("logo_file_url", result.file_url);
+      set("logo_file_id", result.managed_file_id);
+      set("logo_download_filename", result.download_filename);
+      set("logo_logical_path", result.logical_path);
+      await updateManagedFileSource(result.managed_file_id, { source_entity_id: companyId });
     } finally {
       setUploadingLogo(false);
     }
@@ -357,8 +376,8 @@ export default function CompanyDetail() {
             <div className="space-y-2">
               <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Briefpapier</h3>
               {data.letterhead_file_url && (
-                <a href={data.letterhead_file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-blue-600 hover:underline">
-                  <FileText className="w-4 h-4" /> Briefpapier bekijken
+                <a href={data.letterhead_file_url} download={data.letterhead_download_filename || undefined} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-blue-600 hover:underline">
+                  <FileText className="w-4 h-4" /> {data.letterhead_download_filename || "Briefpapier bekijken"}
                 </a>
               )}
             </div>

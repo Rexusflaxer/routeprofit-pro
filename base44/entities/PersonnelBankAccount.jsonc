@@ -40,6 +40,25 @@
         "null"
       ]
     },
+    "proof_file_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ManagedFile ID voor het bankbewijs"
+    },
+    "proof_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proof_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "is_primary": {
       "type": "boolean",
       "default": false
