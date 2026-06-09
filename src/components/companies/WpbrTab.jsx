@@ -3,21 +3,22 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Upload, Plus, X, Check, ExternalLink, Info } from "lucide-react";
-import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
+import { FileText, Upload, Plus, X, Check, ExternalLink, ChevronRight, ChevronLeft } from "lucide-react";
 
-const WPBR_TYPES = ["ND", "HND", "BD", "PAC", "VTC", "PGW", "POB"];
+const WPBR_TYPES = [
+  { key: "ND",  label: "ND",  desc: "Nationaal Dagdienst" },
+  { key: "HND", label: "HND", desc: "Hoofd Nationaal Dagdienst" },
+  { key: "BD",  label: "BD",  desc: "Bijzondere Dienst" },
+  { key: "PAC", label: "PAC", desc: "Particulier Alarm Centralist" },
+  { key: "VTC", label: "VTC", desc: "Vervoer Transport en Cash" },
+  { key: "PGW", label: "PGW", desc: "Particulier Geld- en Waardetransport" },
+  { key: "POB", label: "POB", desc: "Particulier Objectbeveiliging" },
+];
 
-const WPBR_TYPE_INFO = {
-  ND:  "ND – Nationaal Dagdienst: reguliere beveiliging overdag",
-  HND: "HND – Hoofd Nationaal Dagdienst: leidinggevende dagbeveiliging",
-  BD:  "BD – Bijzondere Dienst: beveiliging bij bijzondere omstandigheden",
-  PAC: "PAC – Particulier Alarm Centralist: meldkamerfunctie",
-  VTC: "VTC – Vervoer Transport en Cash: geld- en waardetransport",
-  PGW: "PGW – Particulier Geld- en Waardetransport: specifiek waardetransport",
-  POB: "POB – Particulier Objectbeveiliging: bewaking van objecten",
+const EMPTY_FORM = {
+  license_type: "", license_number: "", valid_from: "", valid_until: "",
+  notes: "", document_file_url: "", document_filename: ""
 };
 
 function LicenseStatusBadge({ license }) {
@@ -28,13 +29,38 @@ function LicenseStatusBadge({ license }) {
   return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0">Actief</Badge>;
 }
 
+// Step indicator
+function WizardSteps({ step }) {
+  const steps = ["Type", "Gegevens", "Document"];
+  return (
+    <div className="flex items-center gap-1 mb-4">
+      {steps.map((s, i) => (
+        <React.Fragment key={s}>
+          <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full transition-colors ${
+            i + 1 === step ? "bg-primary text-primary-foreground" :
+            i + 1 < step  ? "bg-muted text-muted-foreground line-through" :
+                            "text-muted-foreground"
+          }`}>
+            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+              i + 1 === step ? "bg-primary-foreground text-primary" :
+              i + 1 < step  ? "bg-muted-foreground/40 text-muted-foreground" :
+                              "border border-muted-foreground/30 text-muted-foreground"
+            }`}>{i + 1}</span>
+            {s}
+          </div>
+          {i < steps.length - 1 && <div className="h-px flex-1 bg-border" />}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
 export default function WpbrTab({ companyId }) {
   const queryClient = useQueryClient();
-  const [showForm, setShowForm] = useState(false);
+  const [showWizard, setShowWizard] = useState(false);
+  const [step, setStep] = useState(1);
   const [uploading, setUploading] = useState(false);
-  const [form, setForm] = useState({
-    license_type: "", license_number: "", valid_from: "", valid_until: "", notes: "", document_file_url: "", document_filename: ""
-  });
+  const [form, setForm] = useState(EMPTY_FORM);
 
   const { data: licenses = [] } = useQuery({
     queryKey: ["wpbr-licenses", companyId],
@@ -44,17 +70,21 @@ export default function WpbrTab({ companyId }) {
 
   const createMutation = useMutation({
     mutationFn: async (data) => {
-      // Mark previous active licenses as superseded
       const active = licenses.filter(l => l.status === "active");
       await Promise.all(active.map(l => base44.entities.CompanyWpbrLicense.update(l.id, { status: "superseded" })));
       return base44.entities.CompanyWpbrLicense.create({ ...data, company_id: companyId, status: "active" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["wpbr-licenses", companyId] });
-      setShowForm(false);
-      setForm({ license_type: "", license_number: "", valid_from: "", valid_until: "", notes: "", document_file_url: "", document_filename: "" });
+      cancelWizard();
     },
   });
+
+  const cancelWizard = () => {
+    setShowWizard(false);
+    setStep(1);
+    setForm(EMPTY_FORM);
+  };
 
   const handleUpload = async (file) => {
     setUploading(true);
@@ -75,94 +105,118 @@ export default function WpbrTab({ companyId }) {
     <div className="space-y-4 p-6">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">WPBR-vergunningen</h3>
-        {!showForm && (
-          <Button size="sm" variant="outline" onClick={() => setShowForm(true)}>
+        {!showWizard && (
+          <Button size="sm" variant="outline" onClick={() => setShowWizard(true)}>
             <Plus className="w-4 h-4 mr-1" /> Nieuwe vergunning
           </Button>
         )}
       </div>
 
-      {/* Add form */}
-      {showForm && (
-        <div className="rounded-lg border border-border bg-muted/30 p-4 space-y-3">
-          <p className="text-sm font-medium text-foreground">Nieuwe vergunning toevoegen</p>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-            <div>
-              <div className="flex items-center gap-1 mb-1">
-                <label className="text-xs text-muted-foreground">Type</label>
-                <TooltipProvider>
-                  <Tooltip>
-                    <TooltipTrigger asChild>
-                      <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
-                    </TooltipTrigger>
-                    <TooltipContent side="right" className="max-w-xs p-3 space-y-1">
-                      {Object.values(WPBR_TYPE_INFO).map(line => (
-                        <p key={line} className="text-xs">{line}</p>
-                      ))}
-                    </TooltipContent>
-                  </Tooltip>
-                </TooltipProvider>
+      {/* Wizard */}
+      {showWizard && (
+        <div className="rounded-lg border border-primary/30 bg-muted/20 p-5">
+          <WizardSteps step={step} />
+
+          {/* Step 1: Kies type */}
+          {step === 1 && (
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-foreground">Kies het vergunningstype</p>
+              <div className="grid grid-cols-1 gap-2">
+                {WPBR_TYPES.map(t => (
+                  <button
+                    key={t.key}
+                    onClick={() => { set("license_type", t.key); setStep(2); }}
+                    className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent ${
+                      form.license_type === t.key ? "border-primary bg-accent" : "border-border bg-card"
+                    }`}
+                  >
+                    <div>
+                      <span className="text-sm font-semibold text-foreground">{t.label}</span>
+                      <span className="text-xs text-muted-foreground ml-2">{t.desc}</span>
+                    </div>
+                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                  </button>
+                ))}
               </div>
-              <Select value={form.license_type || "none"} onValueChange={v => set("license_type", v === "none" ? "" : v)}>
-                <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Kies type..." /></SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">— Kies type —</SelectItem>
-                  {WPBR_TYPES.map(t => <SelectItem key={t} value={t}>{t}</SelectItem>)}
-                </SelectContent>
-              </Select>
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Vergunningsnummer</label>
-              <Input value={form.license_number} onChange={e => set("license_number", e.target.value)} className="h-8 text-sm" placeholder="Nummer..." />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf</label>
-              <Input type="date" value={form.valid_from} onChange={e => set("valid_from", e.target.value)} className="h-8 text-sm" />
-            </div>
-            <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Geldig tot</label>
-              <Input type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)} className="h-8 text-sm" />
-            </div>
-          </div>
-
-          {/* Document upload */}
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Vergunningsdocument</label>
-            {form.document_file_url ? (
-              <div className="flex items-center gap-2">
-                <a href={form.document_file_url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-1.5 text-sm text-blue-600 hover:underline">
-                  <FileText className="w-4 h-4" /> {form.document_filename || "Document"}
-                </a>
-                <button onClick={() => set("document_file_url", "")} className="text-muted-foreground hover:text-destructive">
-                  <X className="w-4 h-4" />
-                </button>
+              <div className="flex justify-end pt-1">
+                <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
               </div>
-            ) : (
-              <label className="flex items-center gap-2 cursor-pointer w-fit">
-                <input type="file" accept=".pdf,image/*" className="hidden" onChange={e => e.target.files?.[0] && handleUpload(e.target.files[0])} />
-                <Button type="button" variant="outline" size="sm" disabled={uploading} asChild>
-                  <span><Upload className="w-4 h-4 mr-1" /> {uploading ? "Uploaden..." : "Document uploaden"}</span>
-                </Button>
-              </label>
-            )}
-          </div>
+            </div>
+          )}
 
-          <div>
-            <label className="text-xs text-muted-foreground mb-1 block">Opmerkingen</label>
-            <Input value={form.notes} onChange={e => set("notes", e.target.value)} className="h-8 text-sm" placeholder="Optioneel..." />
-          </div>
+          {/* Step 2: Vergunningsgegevens */}
+          {step === 2 && (
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-foreground">
+                Vergunningsgegevens — <span className="text-muted-foreground font-normal">{form.license_type}</span>
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Vergunningsnummer</label>
+                  <Input value={form.license_number} onChange={e => set("license_number", e.target.value)} className="h-8 text-sm" placeholder="Nummer..." />
+                </div>
+                <div className="sm:col-span-1" />
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf</label>
+                  <Input type="date" value={form.valid_from} onChange={e => set("valid_from", e.target.value)} className="h-8 text-sm" />
+                </div>
+                <div>
+                  <label className="text-xs text-muted-foreground mb-1 block">Geldig tot</label>
+                  <Input type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)} className="h-8 text-sm" />
+                </div>
+              </div>
+              <div>
+                <label className="text-xs text-muted-foreground mb-1 block">Opmerkingen</label>
+                <Input value={form.notes} onChange={e => set("notes", e.target.value)} className="h-8 text-sm" placeholder="Optioneel..." />
+              </div>
+              <div className="flex justify-between pt-1">
+                <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <Button size="sm" onClick={() => setStep(3)}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+              </div>
+            </div>
+          )}
 
-          <div className="flex gap-2 justify-end">
-            <Button variant="outline" size="sm" onClick={() => setShowForm(false)}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
-            <Button size="sm" onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending}>
-              <Check className="w-4 h-4 mr-1" /> {createMutation.isPending ? "Opslaan..." : "Opslaan"}
-            </Button>
-          </div>
+          {/* Step 3: Document uploaden + opslaan */}
+          {step === 3 && (
+            <div className="space-y-4">
+              <p className="text-sm font-medium text-foreground">Vergunningsdocument uploaden</p>
+              <p className="text-xs text-muted-foreground">Upload optioneel het officiële vergunningsdocument (PDF of afbeelding).</p>
+
+              {form.document_file_url ? (
+                <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
+                  <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                  <a href={form.document_file_url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex-1 truncate">
+                    {form.document_filename || "Document"}
+                  </a>
+                  <button onClick={() => set("document_file_url", "")} className="text-muted-foreground hover:text-destructive">
+                    <X className="w-4 h-4" />
+                  </button>
+                </div>
+              ) : (
+                <label className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed border-border hover:border-primary cursor-pointer transition-colors">
+                  <input type="file" accept=".pdf,image/*" className="hidden" onChange={e => e.target.files?.[0] && handleUpload(e.target.files[0])} />
+                  <Upload className="w-6 h-6 text-muted-foreground" />
+                  <span className="text-sm text-muted-foreground">{uploading ? "Uploaden..." : "Klik om document te uploaden"}</span>
+                  <span className="text-xs text-muted-foreground">PDF of afbeelding</span>
+                </label>
+              )}
+
+              <div className="flex justify-between pt-1">
+                <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
+                  <Button size="sm" onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending}>
+                    <Check className="w-4 h-4 mr-1" /> {createMutation.isPending ? "Opslaan..." : "Vergunning opslaan"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
       )}
 
       {/* Active licenses */}
-      {activeLicenses.length === 0 && !showForm && (
+      {activeLicenses.length === 0 && !showWizard && (
         <p className="text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
       )}
       {activeLicenses.map(l => (
