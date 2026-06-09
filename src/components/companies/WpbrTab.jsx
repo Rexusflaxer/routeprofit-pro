@@ -472,22 +472,19 @@ function LicenseCard({ license, onEdit, onDelete }) {
   const documentName = license.document_download_filename || license.document_filename || "Document";
   return (
     <>
-      <div className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
+      <div
+        className={`flex items-center px-4 py-3 group transition-colors ${license.document_file_url ? "cursor-pointer hover:bg-accent/50" : "hover:bg-accent/30"}`}
+        onClick={license.document_file_url ? () => setPreviewOpen(true) : undefined}
+        title={license.document_file_url ? "Klik om vergunning te bekijken" : undefined}
+      >
         <span className="w-10 shrink-0 text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
         <span className="w-24 shrink-0 text-sm text-muted-foreground">{license.license_number ? `#${license.license_number}` : "—"}</span>
         <div className="w-20 shrink-0"><LicenseStatusBadge license={license} /></div>
-        <div
-          className={`flex-1 flex gap-4 text-xs text-muted-foreground ${license.document_file_url ? "cursor-pointer" : ""}`}
-          onClick={license.document_file_url ? () => setPreviewOpen(true) : undefined}
-          title={license.document_file_url ? "Klik om vergunning te bekijken" : undefined}
-        >
+        <div className="flex-1 flex gap-4 text-xs text-muted-foreground">
           {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
           {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
-          {license.document_file_url && (
-            <span className="flex items-center gap-1 text-blue-500"><FileText className="w-3 h-3" /> Document</span>
-          )}
         </div>
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} title="Bewerken">
             <Edit className="w-3.5 h-3.5" />
           </Button>
