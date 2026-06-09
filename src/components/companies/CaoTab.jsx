@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Plus, X, Check, ChevronRight, ChevronLeft, Edit, Trash2 } from "lucide-react";
+import { Plus, X, Check, ChevronRight, ChevronLeft, Edit, Trash2, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
 const CAO_KEY_LABELS = {
@@ -24,6 +24,8 @@ const ACTIVITY_OPTIONS = [
   { value: "cash_value_logistics", label: "Geld- en Waardetransport" },
 ];
 
+const DELETE_PASSWORD = "verwijder";
+
 const EMPTY_FORM = {
   cao_configuration_id: "",
   cao_key: null,
@@ -34,7 +36,6 @@ const EMPTY_FORM = {
   notes: "",
 };
 
-// Step indicator
 function WizardSteps({ step }) {
   const steps = ["CAO kiezen", "Geldigheid", "Bevestigen"];
   const CheckIcon = () => (
@@ -75,6 +76,35 @@ function CaoStatusBadge({ assignment }) {
   return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0">Actief</Badge>;
 }
 
+function DeleteConfirmBar({ label, onConfirm, onCancel, isPending }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const handleConfirm = () => {
+    if (password !== DELETE_PASSWORD) { setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`); return; }
+    onConfirm();
+  };
+  return (
+    <div className="border-b border-destructive/20 bg-destructive/5 p-4">
+      <div className="flex items-start gap-3 mb-3">
+        <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-foreground">CAO-koppeling verwijderen?</p>
+          <p className="text-xs text-muted-foreground mt-0.5"><strong>{label}</strong> wordt verwijderd.</p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <label className="text-xs text-muted-foreground block">Typ <strong className="text-foreground font-mono">{DELETE_PASSWORD}</strong> om te bevestigen:</label>
+        <div className="flex gap-2">
+          <Input value={password} onChange={(e) => { setPassword(e.target.value); setError(""); }} placeholder={DELETE_PASSWORD} className={`h-8 text-sm font-mono max-w-[200px] ${error ? "border-destructive" : ""}`} onKeyDown={(e) => e.key === "Enter" && handleConfirm()} autoFocus />
+          <Button variant="destructive" size="sm" onClick={handleConfirm} disabled={isPending}><Trash2 className="w-3.5 h-3.5 mr-1" />{isPending ? "Verwijderen..." : "Verwijderen"}</Button>
+          <Button variant="ghost" size="sm" onClick={onCancel}>Annuleren</Button>
+        </div>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function CaoTab({ companyId }) {
   const queryClient = useQueryClient();
   const wizardRef = useRef(null);
@@ -83,12 +113,11 @@ export default function CaoTab({ companyId }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
+  const [deleteId, setDeleteId] = useState(null);
 
   useEffect(() => {
     if (showWizard) {
-      const timer = setTimeout(() => {
-        wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-      }, 200);
+      const timer = setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 200);
       return () => clearTimeout(timer);
     }
   }, [step, showWizard]);
@@ -106,48 +135,22 @@ export default function CaoTab({ companyId }) {
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
-      const payload = {
-        ...data,
-        company_id: companyId,
-        valid_from: data.valid_from || null,
-        valid_until: data.valid_until || null,
-        notes: data.notes || null,
-      };
-      if (editingId) {
-        return base44.entities.CompanyCaoAssignment.update(editingId, payload);
-      }
-      return base44.entities.CompanyCaoAssignment.create(payload);
+      const payload = { ...data, company_id: companyId, valid_from: data.valid_from || null, valid_until: data.valid_until || null, notes: data.notes || null };
+      return editingId ? base44.entities.CompanyCaoAssignment.update(editingId, payload) : base44.entities.CompanyCaoAssignment.create(payload);
     },
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["cao-assignments", companyId] });
-      cancelWizard();
-    },
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["cao-assignments", companyId] }); cancelWizard(); },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => base44.entities.CompanyCaoAssignment.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["cao-assignments", companyId] }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["cao-assignments", companyId] }); setDeleteId(null); },
   });
 
-  const cancelWizard = () => {
-    setShowWizard(false);
-    setStep(1);
-    setForm(EMPTY_FORM);
-    setErrors({});
-    setEditingId(null);
-  };
+  const cancelWizard = () => { setShowWizard(false); setStep(1); setForm(EMPTY_FORM); setErrors({}); setEditingId(null); };
 
-  const startEdit = (assignment) => {
-    setForm({
-      cao_configuration_id: assignment.cao_configuration_id || "",
-      cao_key: assignment.cao_key || null,
-      is_primary: assignment.is_primary || false,
-      applies_to_activities: assignment.applies_to_activities || ["all"],
-      valid_from: assignment.valid_from || "",
-      valid_until: assignment.valid_until || "",
-      notes: assignment.notes || "",
-    });
-    setEditingId(assignment.id);
+  const startEdit = (a) => {
+    setForm({ cao_configuration_id: a.cao_configuration_id || "", cao_key: a.cao_key || null, is_primary: a.is_primary || false, applies_to_activities: a.applies_to_activities || ["all"], valid_from: a.valid_from || "", valid_until: a.valid_until || "", notes: a.notes || "" });
+    setEditingId(a.id);
     setStep(1);
     setShowWizard(true);
   };
@@ -160,214 +163,154 @@ export default function CaoTab({ companyId }) {
   };
 
   const set = (field, val) => setForm((f) => ({ ...f, [field]: val }));
-
   const selectedConfig = caoConfigurations.find(c => c.id === form.cao_configuration_id);
+  const assignmentToDelete = assignments.find(a => a.id === deleteId);
+  const deleteLabel = assignmentToDelete ? (caoConfigurations.find(c => c.id === assignmentToDelete.cao_configuration_id)?.display_name || assignmentToDelete.cao_key || "—") : "";
 
   return (
-    <div className="space-y-4 p-6">
-      <div className="flex items-center justify-between">
-        <h3 className="text-sm font-semibold text-foreground">CAO-koppelingen</h3>
-        {!showWizard && (
-          <Button size="sm" variant="outline" onClick={() => setShowWizard(true)}>
-            <Plus className="w-4 h-4 mr-1" /> Nieuwe koppeling
-          </Button>
-        )}
-      </div>
+    <div className="flex flex-col h-full">
 
-      {/* Wizard */}
+      {/* Delete confirm */}
       <AnimatePresence>
-        {showWizard && (
-          <motion.div
-            ref={wizardRef}
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
-            className="rounded-lg border border-primary/30 bg-muted/20 p-5 overflow-hidden"
-          >
-            <WizardSteps step={step} />
-
-            <div className="relative">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={step}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  transition={{ duration: 0.18, ease: "easeOut" }}
-                >
-                  {/* Step 1: Kies CAO */}
-                  {step === 1 && (
-                    <div className="space-y-3">
-                      <p className="text-sm font-medium text-foreground">Kies de CAO-configuratie</p>
-                      <div className="grid grid-cols-1 gap-2">
-                        {caoConfigurations.length === 0 && (
-                          <p className="text-sm text-muted-foreground">Geen actieve CAO-configuraties beschikbaar.</p>
-                        )}
-                        {caoConfigurations.map((c) => (
-                          <button
-                            key={c.id}
-                            onClick={() => {
-                              set("cao_configuration_id", c.id);
-                              set("cao_key", c.cao_key || null);
-                              setErrors({});
-                            }}
-                            className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${
-                              form.cao_configuration_id === c.id ? "border-primary bg-accent" : "border-border bg-card"}`}
-                          >
-                            <div>
-                              <span className="text-sm font-semibold text-foreground">{c.display_name || c.name}</span>
-                              {c.version_label && <span className="text-xs text-muted-foreground ml-2">{c.version_label}</span>}
-                              {c.valid_from && c.valid_until && (
-                                <span className="text-xs text-muted-foreground ml-2">{c.valid_from} – {c.valid_until}</span>
-                              )}
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-                          </button>
-                        ))}
-                      </div>
-                      {errors.cao_configuration_id && <p className="text-xs text-destructive">{errors.cao_configuration_id}</p>}
-                      <div className="flex items-center gap-3 pt-1">
-                        <label className="flex items-center gap-2 text-sm cursor-pointer">
-                          <input
-                            type="checkbox"
-                            checked={form.is_primary}
-                            onChange={(e) => set("is_primary", e.target.checked)}
-                            className="rounded border-input"
-                          />
-                          Primaire CAO voor dit bedrijf
-                        </label>
-                      </div>
-                      <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
-                        <Button size="sm" onClick={() => { if (validateStep1()) setStep(2); }}>
-                          Volgende <ChevronRight className="w-4 h-4 ml-1" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 2: Geldigheid & activiteiten */}
-                  {step === 2 && (
-                    <div className="space-y-3">
-                      <p className="text-sm font-medium text-foreground">
-                        Geldigheid — <span className="text-muted-foreground font-normal">{selectedConfig?.display_name || selectedConfig?.name}</span>
-                      </p>
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div>
-                          <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf</label>
-                          <Input type="date" value={form.valid_from} onChange={(e) => set("valid_from", e.target.value)} className="h-8 text-sm" />
-                        </div>
-                        <div>
-                          <label className="text-xs text-muted-foreground mb-1 block">Geldig tot</label>
-                          <Input type="date" value={form.valid_until} onChange={(e) => set("valid_until", e.target.value)} className="h-8 text-sm" />
-                        </div>
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Van toepassing op</label>
-                        <Select
-                          value={(form.applies_to_activities || ["all"])[0] || "all"}
-                          onValueChange={(v) => set("applies_to_activities", [v])}
-                        >
-                          <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {ACTIVITY_OPTIONS.map(o => (
-                              <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                        <Button size="sm" onClick={() => setStep(3)}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 3: Bevestigen */}
-                  {step === 3 && (
-                    <div className="space-y-3">
-                      <p className="text-sm font-medium text-foreground">Controleer en bevestig</p>
-                      <div className="rounded-lg border border-border bg-card p-4 space-y-2 text-sm">
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">CAO</span>
-                          <span className="font-medium">{selectedConfig?.display_name || selectedConfig?.name || "—"}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Primair</span>
-                          <span>{form.is_primary ? "Ja" : "Nee"}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Geldig vanaf</span>
-                          <span>{form.valid_from || "—"}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Geldig tot</span>
-                          <span>{form.valid_until || "—"}</span>
-                        </div>
-                        <div className="flex justify-between">
-                          <span className="text-muted-foreground">Activiteiten</span>
-                          <span>{ACTIVITY_OPTIONS.find(o => o.value === (form.applies_to_activities || ["all"])[0])?.label || "Alle"}</span>
-                        </div>
-                      </div>
-                      <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
-                          <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
-                            <Check className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : (editingId ? "Wijzigingen opslaan" : "Koppeling opslaan")}
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </motion.div>
-              </AnimatePresence>
-            </div>
+        {deleteId && assignmentToDelete && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15 }}>
+            <DeleteConfirmBar label={deleteLabel} onConfirm={() => deleteMutation.mutate(deleteId)} onCancel={() => setDeleteId(null)} isPending={deleteMutation.isPending} />
           </motion.div>
         )}
       </AnimatePresence>
 
-      {/* Table */}
-      {assignments.length === 0 && !showWizard ? (
-        <p className="text-sm text-muted-foreground">Nog geen CAO-koppeling geregistreerd.</p>
-      ) : assignments.length > 0 && (
-        <div className="rounded-lg border border-border overflow-hidden">
-          <div className="grid grid-cols-[1fr_5rem_1fr_4rem] px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <span>CAO</span>
-            <span>Status</span>
-            <span>Geldigheid</span>
-            <span></span>
-          </div>
-          <div className="divide-y divide-border">
-            {assignments.map((a) => {
-              const config = caoConfigurations.find(c => c.id === a.cao_configuration_id);
-              return (
-                <div key={a.id} className="grid grid-cols-[1fr_5rem_1fr_4rem] items-center px-4 py-3">
-                  <div>
-                    <span className="text-sm font-medium text-foreground">{config?.display_name || config?.name || a.cao_key || "—"}</span>
-                    {config?.version_label && <span className="text-xs text-muted-foreground ml-2">{config.version_label}</span>}
+      {/* Wizard */}
+      <AnimatePresence>
+        {showWizard && (
+          <motion.div ref={wizardRef} initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className="border-b border-primary/30 bg-muted/20 p-5">
+            {editingId && <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">CAO-koppeling bewerken</p>}
+            <WizardSteps step={step} />
+            <AnimatePresence mode="wait">
+              <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
+
+                {step === 1 && (
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium text-foreground">Kies de CAO-configuratie</p>
+                    <div className="grid grid-cols-1 gap-2">
+                      {caoConfigurations.length === 0 && <p className="text-sm text-muted-foreground">Geen actieve CAO-configuraties beschikbaar.</p>}
+                      {caoConfigurations.map((c) => (
+                        <button key={c.id} onClick={() => { set("cao_configuration_id", c.id); set("cao_key", c.cao_key || null); setErrors({}); }}
+                          className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${form.cao_configuration_id === c.id ? "border-primary bg-accent" : "border-border bg-card"}`}>
+                          <div>
+                            <span className="text-sm font-semibold text-foreground">{c.display_name || c.name}</span>
+                            {c.version_label && <span className="text-xs text-muted-foreground ml-2">{c.version_label}</span>}
+                            {c.valid_from && c.valid_until && <span className="text-xs text-muted-foreground ml-2">{c.valid_from} – {c.valid_until}</span>}
+                          </div>
+                          <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                        </button>
+                      ))}
+                    </div>
+                    {errors.cao_configuration_id && <p className="text-xs text-destructive">{errors.cao_configuration_id}</p>}
+                    <div className="flex items-center gap-3 pt-1">
+                      <label className="flex items-center gap-2 text-sm cursor-pointer">
+                        <input type="checkbox" checked={form.is_primary} onChange={(e) => set("is_primary", e.target.checked)} className="rounded border-input" />
+                        Primaire CAO voor dit bedrijf
+                      </label>
+                    </div>
+                    <div className="flex justify-between pt-1">
+                      <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
+                      <Button size="sm" onClick={() => { if (validateStep1()) setStep(2); }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                    </div>
                   </div>
-                  <div><CaoStatusBadge assignment={a} /></div>
-                  <div className="flex gap-4 text-xs text-muted-foreground">
-                    {a.valid_from && <span>Vanaf: <strong className="text-foreground">{a.valid_from}</strong></span>}
-                    {a.valid_until && <span>Tot: <strong className="text-foreground">{a.valid_until}</strong></span>}
-                    {!a.valid_from && !a.valid_until && <span>Geen einddatum</span>}
+                )}
+
+                {step === 2 && (
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium text-foreground">Geldigheid — <span className="text-muted-foreground font-normal">{selectedConfig?.display_name || selectedConfig?.name}</span></p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf</label>
+                        <Input type="date" value={form.valid_from} onChange={(e) => set("valid_from", e.target.value)} className="h-8 text-sm" />
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">Geldig tot</label>
+                        <Input type="date" value={form.valid_until} onChange={(e) => set("valid_until", e.target.value)} className="h-8 text-sm" />
+                      </div>
+                    </div>
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Van toepassing op</label>
+                      <Select value={(form.applies_to_activities || ["all"])[0] || "all"} onValueChange={(v) => set("applies_to_activities", [v])}>
+                        <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                        <SelectContent>{ACTIVITY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
+                      </Select>
+                    </div>
+                    <div className="flex justify-between pt-1">
+                      <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                      <Button size="sm" onClick={() => setStep(3)}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                    </div>
                   </div>
-                  <div className="flex gap-1 justify-end">
-                    <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(a)} title="Bewerken">
-                      <Edit className="w-3.5 h-3.5" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive" onClick={() => deleteMutation.mutate(a.id)} title="Verwijderen">
-                      <Trash2 className="w-3.5 h-3.5" />
-                    </Button>
+                )}
+
+                {step === 3 && (
+                  <div className="space-y-3">
+                    <p className="text-sm font-medium text-foreground">Controleer en bevestig</p>
+                    <div className="rounded-lg border border-border bg-card p-4 space-y-2 text-sm">
+                      <div className="flex justify-between"><span className="text-muted-foreground">CAO</span><span className="font-medium">{selectedConfig?.display_name || selectedConfig?.name || "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Primair</span><span>{form.is_primary ? "Ja" : "Nee"}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Geldig vanaf</span><span>{form.valid_from || "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Geldig tot</span><span>{form.valid_until || "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">Activiteiten</span><span>{ACTIVITY_OPTIONS.find(o => o.value === (form.applies_to_activities || ["all"])[0])?.label || "Alle"}</span></div>
+                    </div>
+                    <div className="flex justify-between pt-1">
+                      <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
+                        <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
+                          <Check className="w-4 h-4 mr-1" />{saveMutation.isPending ? "Opslaan..." : (editingId ? "Wijzigingen opslaan" : "Koppeling opslaan")}
+                        </Button>
+                      </div>
+                    </div>
                   </div>
-                </div>
-              );
-            })}
-          </div>
-        </div>
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Table header */}
+      <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="flex-1">CAO</span>
+        <span className="w-24 shrink-0">Status</span>
+        <span className="w-48 shrink-0">Geldigheid</span>
+        {!showWizard && !deleteId && (
+          <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
+            <Plus className="w-3 h-3 mr-1" /> Nieuwe koppeling
+          </Button>
+        )}
+      </div>
+
+      {assignments.length === 0 && !showWizard && (
+        <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen CAO-koppeling geregistreerd.</p>
       )}
+      <div className="divide-y divide-border">
+        {assignments.map((a) => {
+          const config = caoConfigurations.find(c => c.id === a.cao_configuration_id);
+          return (
+            <div key={a.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
+              <div className="flex-1 min-w-0">
+                <span className="text-sm font-medium text-foreground">{config?.display_name || config?.name || a.cao_key || "—"}</span>
+                {config?.version_label && <span className="text-xs text-muted-foreground ml-2">{config.version_label}</span>}
+              </div>
+              <div className="w-24 shrink-0"><CaoStatusBadge assignment={a} /></div>
+              <div className="w-48 shrink-0 flex gap-3 text-xs text-muted-foreground">
+                {a.valid_from && <span>Vanaf: <strong className="text-foreground">{a.valid_from}</strong></span>}
+                {a.valid_until && <span>Tot: <strong className="text-foreground">{a.valid_until}</strong></span>}
+                {!a.valid_from && !a.valid_until && <span>Geen einddatum</span>}
+              </div>
+              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(a)} title="Bewerken"><Edit className="w-3.5 h-3.5" /></Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteId(a.id)} title="Verwijderen"><Trash2 className="w-3.5 h-3.5" /></Button>
+              </div>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

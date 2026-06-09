@@ -6,19 +6,50 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Switch } from "@/components/ui/switch";
 import { Plus, Trash2, Edit, CreditCard, AlertTriangle } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 import { prepareBankAccountSensitiveData } from "@/lib/sensitiveFields";
 
+const DELETE_PASSWORD = "verwijder";
 const EMPTY = { company_id: "", account_type: "normal", iban: "", account_holder_name: "", bank_name: "", bic: "", is_default: false, is_default_for_invoicing: false, is_default_for_payroll: false, status: "active", notes: "" };
+
+function DeleteConfirmBar({ label, onConfirm, onCancel, isPending }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const handleConfirm = () => {
+    if (password !== DELETE_PASSWORD) { setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`); return; }
+    onConfirm();
+  };
+  return (
+    <div className="border-b border-destructive/20 bg-destructive/5 p-4">
+      <div className="flex items-start gap-3 mb-3">
+        <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-foreground">Rekening verwijderen?</p>
+          <p className="text-xs text-muted-foreground mt-0.5"><strong>{label}</strong> wordt verwijderd.</p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <label className="text-xs text-muted-foreground block">Typ <strong className="text-foreground font-mono">{DELETE_PASSWORD}</strong> om te bevestigen:</label>
+        <div className="flex gap-2">
+          <Input value={password} onChange={(e) => { setPassword(e.target.value); setError(""); }} placeholder={DELETE_PASSWORD} className={`h-8 text-sm font-mono max-w-[200px] ${error ? "border-destructive" : ""}`} onKeyDown={(e) => e.key === "Enter" && handleConfirm()} autoFocus />
+          <Button variant="destructive" size="sm" onClick={handleConfirm} disabled={isPending}><Trash2 className="w-3.5 h-3.5 mr-1" />{isPending ? "Verwijderen..." : "Verwijderen"}</Button>
+          <Button variant="ghost" size="sm" onClick={onCancel}>Annuleren</Button>
+        </div>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+    </div>
+  );
+}
 
 export default function CompanyBankTab({ companies }) {
   const companyId = companies[0]?.id || "";
   const [dialogOpen, setDialogOpen] = useState(false);
   const [editing, setEditing] = useState(null);
   const [form, setForm] = useState(EMPTY);
+  const [deleteId, setDeleteId] = useState(null);
   const queryClient = useQueryClient();
 
   const { data: accounts = [] } = useQuery({
@@ -29,75 +60,87 @@ export default function CompanyBankTab({ companies }) {
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
-      const prepared = await prepareBankAccountSensitiveData(data, {
-        owner_type: "company",
-        owner_id: companyId,
-        company_id: companyId,
-        source_entity: "CompanyBankAccount"
-      });
-      return editing
-        ? base44.entities.CompanyBankAccount.update(editing, prepared)
-        : base44.entities.CompanyBankAccount.create({ ...prepared, company_id: companyId });
+      const prepared = await prepareBankAccountSensitiveData(data, { owner_type: "company", owner_id: companyId, company_id: companyId, source_entity: "CompanyBankAccount" });
+      return editing ? base44.entities.CompanyBankAccount.update(editing, prepared) : base44.entities.CompanyBankAccount.create({ ...prepared, company_id: companyId });
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["company-bank-accounts", companyId] }); setDialogOpen(false); },
   });
 
   const deleteMutation = useMutation({
     mutationFn: (id) => base44.entities.CompanyBankAccount.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["company-bank-accounts", companyId] }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["company-bank-accounts", companyId] }); setDeleteId(null); },
   });
 
   const openNew = () => { setEditing(null); setForm({ ...EMPTY, company_id: companyId }); setDialogOpen(true); };
   const openEdit = (acc) => { setEditing(acc.id); setForm(acc); setDialogOpen(true); };
   const set = (f, v) => setForm(p => ({ ...p, [f]: v }));
 
+  const accToDelete = accounts.find(a => a.id === deleteId);
+
   return (
-    <div className="rounded-xl border border-border bg-card shadow-sm">
-      {/* Header met knop */}
-      <div className="bg-muted/40 border-b border-border px-6 py-4 rounded-t-xl flex items-center justify-between">
-        <h2 className="text-base font-semibold text-foreground">Bank / G-rekeningen</h2>
-        <Button size="sm" onClick={openNew}>
-          <Plus className="w-4 h-4 mr-1" />Rekening toevoegen
-        </Button>
+    <div className="flex flex-col h-full">
+
+      {/* Delete confirm */}
+      <AnimatePresence>
+        {deleteId && accToDelete && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15 }}>
+            <DeleteConfirmBar
+              label={accToDelete.iban_masked || accToDelete.iban}
+              onConfirm={() => deleteMutation.mutate(deleteId)}
+              onCancel={() => setDeleteId(null)}
+              isPending={deleteMutation.isPending}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Table header */}
+      <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="flex-1">IBAN / Rekening</span>
+        <span className="w-28 shrink-0">Type</span>
+        <span className="w-20 shrink-0">Status</span>
+        {!deleteId && (
+          <Button size="sm" variant="outline" onClick={openNew} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
+            <Plus className="w-3 h-3 mr-1" /> Rekening toevoegen
+          </Button>
+        )}
       </div>
 
-      {/* Content */}
-      <div className="p-6 space-y-3">
-        {accounts.length === 0 && (
-          <p className="text-sm text-muted-foreground py-6 text-center">Nog geen rekeningen voor dit bedrijf.</p>
-        )}
+      {accounts.length === 0 && (
+        <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen rekeningen voor dit bedrijf.</p>
+      )}
 
+      <div className="divide-y divide-border">
         {accounts.map(acc => (
-          <Card key={acc.id} className="border-0 shadow-sm">
-            <CardContent className="p-4 flex items-start gap-3">
-              <div className={`p-2 rounded-lg ${acc.account_type === "g_account" ? "bg-amber-50" : "bg-blue-50"}`}>
-                <CreditCard className={`w-5 h-5 ${acc.account_type === "g_account" ? "text-amber-600" : "text-blue-600"}`} />
+          <div key={acc.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
+            <div className="flex-1 min-w-0 flex items-center gap-2">
+              <div className={`p-1.5 rounded ${acc.account_type === "g_account" ? "bg-amber-50 dark:bg-amber-950" : "bg-blue-50 dark:bg-blue-950"}`}>
+                <CreditCard className={`w-3.5 h-3.5 ${acc.account_type === "g_account" ? "text-amber-600" : "text-blue-600"}`} />
               </div>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center gap-2 flex-wrap">
-                  <span className="font-medium text-sm">{acc.iban_masked || acc.iban}</span>
-                  <Badge variant={acc.account_type === "g_account" ? "outline" : "secondary"} className={acc.account_type === "g_account" ? "border-amber-400 text-amber-700" : ""}>
-                    {acc.account_type === "g_account" ? "G-rekening" : "Normale rekening"}
-                  </Badge>
-                  {acc.is_default && <Badge className="bg-green-100 text-green-800 text-xs">Standaard</Badge>}
-                  {acc.status !== "active" && <Badge variant="outline" className="text-xs">{acc.status}</Badge>}
-                </div>
-                <p className="text-xs text-muted-foreground mt-0.5">{acc.account_holder_name || acc.bank_name || ""}</p>
+              <div>
+                <span className="text-sm font-medium text-foreground">{acc.iban_masked || acc.iban}</span>
+                {acc.account_holder_name && <span className="text-xs text-muted-foreground ml-2">{acc.account_holder_name}</span>}
+                {acc.is_default && <Badge className="ml-2 text-xs bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200 border-0">Standaard</Badge>}
                 {acc.account_type === "g_account" && (
-                  <p className="text-xs text-amber-700 mt-1 flex items-center gap-1">
-                    <AlertTriangle className="w-3 h-3" /> G-rekening voor loonheffingen/btw bij inleners- of ketenaansprakelijkheid
-                  </p>
+                  <span className="ml-2 text-xs text-amber-600 flex items-center gap-1 inline-flex"><AlertTriangle className="w-3 h-3" /> G-rekening</span>
                 )}
               </div>
-              <div className="flex gap-1">
-                <Button size="icon" variant="ghost" onClick={() => openEdit(acc)}><Edit className="w-4 h-4" /></Button>
-                <Button size="icon" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => { if (confirm("Rekening verwijderen?")) deleteMutation.mutate(acc.id); }}><Trash2 className="w-4 h-4" /></Button>
-              </div>
-            </CardContent>
-          </Card>
+            </div>
+            <div className="w-28 shrink-0">
+              <Badge variant={acc.account_type === "g_account" ? "outline" : "secondary"} className={`text-xs ${acc.account_type === "g_account" ? "border-amber-400 text-amber-700" : ""}`}>
+                {acc.account_type === "g_account" ? "G-rekening" : "Normaal"}
+              </Badge>
+            </div>
+            <div className="w-20 shrink-0 text-xs text-muted-foreground capitalize">{acc.status || "actief"}</div>
+            <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(acc)} title="Bewerken"><Edit className="w-3.5 h-3.5" /></Button>
+              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteId(acc.id)} title="Verwijderen"><Trash2 className="w-3.5 h-3.5" /></Button>
+            </div>
+          </div>
         ))}
       </div>
 
+      {/* Edit/Add dialog (unchanged logic) */}
       <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
         <DialogContent className="max-w-lg">
           <DialogHeader><DialogTitle>{editing ? "Rekening bewerken" : "Rekening toevoegen"}</DialogTitle></DialogHeader>
@@ -112,9 +155,7 @@ export default function CompanyBankTab({ companies }) {
                 </SelectContent>
               </Select>
               {form.account_type === "g_account" && (
-                <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mt-1">
-                  Een G-rekening is een geblokkeerde rekening voor afdracht van loonheffingen en btw bij inleners- of ketenaansprakelijkheid.
-                </p>
+                <p className="text-xs text-amber-700 bg-amber-50 rounded px-2 py-1 mt-1">Een G-rekening is een geblokkeerde rekening voor afdracht van loonheffingen en btw bij inleners- of ketenaansprakelijkheid.</p>
               )}
             </div>
             <div className="grid grid-cols-2 gap-3">
@@ -145,7 +186,7 @@ export default function CompanyBankTab({ companies }) {
             </div>
             <div className="flex justify-end gap-2">
               <Button variant="outline" onClick={() => setDialogOpen(false)}>Annuleren</Button>
-              <Button onClick={() => saveMutation.mutate(form)} disabled={!form.iban}>Opslaan</Button>
+              <Button onClick={() => saveMutation.mutate(form)} disabled={!form.iban || saveMutation.isPending}>{saveMutation.isPending ? "Opslaan..." : "Opslaan"}</Button>
             </div>
           </div>
         </DialogContent>

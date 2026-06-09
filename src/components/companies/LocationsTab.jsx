@@ -5,21 +5,52 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Card, CardContent } from "@/components/ui/card";
-import { Plus, Trash2, Edit, MapPin, Building2, Check, X } from "lucide-react";
+import { Plus, Trash2, Edit, MapPin, Check, X, AlertTriangle } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
 const LOCATION_TYPES = {
   head_office: "Hoofdkantoor", branch: "Vestiging", warehouse: "Magazijn", other: "Overig",
 };
 
+const DELETE_PASSWORD = "verwijder";
 const EMPTY_LOC = { name: "", location_type: "branch", street_name: "", house_number: "", house_number_addition: "", postal_code: "", city: "", country: "Nederland", is_active: true, is_route_office: false, notes: "" };
 
+function DeleteConfirmBar({ label, onConfirm, onCancel, isPending }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const handleConfirm = () => {
+    if (password !== DELETE_PASSWORD) { setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`); return; }
+    onConfirm();
+  };
+  return (
+    <div className="border-b border-destructive/20 bg-destructive/5 p-4">
+      <div className="flex items-start gap-3 mb-3">
+        <AlertTriangle className="w-5 h-5 text-destructive shrink-0 mt-0.5" />
+        <div>
+          <p className="text-sm font-semibold text-foreground">Vestiging verwijderen?</p>
+          <p className="text-xs text-muted-foreground mt-0.5"><strong>{label}</strong> wordt verwijderd.</p>
+        </div>
+      </div>
+      <div className="space-y-2">
+        <label className="text-xs text-muted-foreground block">Typ <strong className="text-foreground font-mono">{DELETE_PASSWORD}</strong> om te bevestigen:</label>
+        <div className="flex gap-2">
+          <Input value={password} onChange={(e) => { setPassword(e.target.value); setError(""); }} placeholder={DELETE_PASSWORD} className={`h-8 text-sm font-mono max-w-[200px] ${error ? "border-destructive" : ""}`} onKeyDown={(e) => e.key === "Enter" && handleConfirm()} autoFocus />
+          <Button variant="destructive" size="sm" onClick={handleConfirm} disabled={isPending}><Trash2 className="w-3.5 h-3.5 mr-1" />{isPending ? "Verwijderen..." : "Verwijderen"}</Button>
+          <Button variant="ghost" size="sm" onClick={onCancel}>Annuleren</Button>
+        </div>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function LocationsTab({ companies }) {
-  const [showInlineForm, setShowInlineForm] = useState(false);
+  const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_LOC);
   const [addressSugg, setAddressSugg] = useState([]);
   const [showSugg, setShowSugg] = useState(false);
+  const [deleteId, setDeleteId] = useState(null);
   const addrTimeout = useRef(null);
   const queryClient = useQueryClient();
 
@@ -28,21 +59,17 @@ export default function LocationsTab({ companies }) {
 
   const saveMutation = useMutation({
     mutationFn: (data) => editingId ? base44.entities.CompanyLocation.update(editingId, data) : base44.entities.CompanyLocation.create(data),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["company-locations"] });
-      setShowInlineForm(false);
-      setEditingId(null);
-      setForm(EMPTY_LOC);
-    },
-  });
-  const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.CompanyLocation.delete(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ["company-locations"] }),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["company-locations"] }); cancel(); },
   });
 
-  const openNew = () => { setEditingId(null); setForm(EMPTY_LOC); setShowInlineForm(true); };
-  const openEdit = (loc) => { setEditingId(loc.id); setForm(loc); setShowInlineForm(true); };
-  const cancel = () => { setShowInlineForm(false); setEditingId(null); setForm(EMPTY_LOC); };
+  const deleteMutation = useMutation({
+    mutationFn: (id) => base44.entities.CompanyLocation.delete(id),
+    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["company-locations"] }); setDeleteId(null); },
+  });
+
+  const openNew = () => { setEditingId(null); setForm(EMPTY_LOC); setShowForm(true); };
+  const openEdit = (loc) => { setEditingId(loc.id); setForm(loc); setShowForm(true); };
+  const cancel = () => { setShowForm(false); setEditingId(null); setForm(EMPTY_LOC); setShowSugg(false); };
   const set = (f, v) => setForm(p => ({ ...p, [f]: v }));
 
   const handleAddressQuery = (val) => {
@@ -63,118 +90,99 @@ export default function LocationsTab({ companies }) {
   };
 
   const getCompaniesForLocation = (locId) => {
-    const asgns = assignments.filter(a => a.location_id === locId);
-    return asgns.map(a => companies.find(c => c.id === a.company_id)).filter(Boolean);
+    return assignments.filter(a => a.location_id === locId).map(a => companies.find(c => c.id === a.company_id)).filter(Boolean);
   };
 
+  const locToDelete = locations.find(l => l.id === deleteId);
+
   return (
-    <div className="rounded-xl border border-border bg-card shadow-sm">
-      {/* Header met knop */}
-      <div className="bg-muted/40 border-b border-border px-6 py-4 rounded-t-xl flex items-center justify-between">
-        <h2 className="text-base font-semibold text-foreground">Vestigingen</h2>
-        {!showInlineForm && (
-          <Button size="sm" onClick={openNew}>
-            <Plus className="w-4 h-4 mr-1" />Vestiging toevoegen
+    <div className="flex flex-col h-full">
+
+      {/* Delete confirm */}
+      <AnimatePresence>
+        {deleteId && locToDelete && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15 }}>
+            <DeleteConfirmBar
+              label={[locToDelete.street_name, locToDelete.house_number, locToDelete.city].filter(Boolean).join(" ") || "Vestiging"}
+              onConfirm={() => deleteMutation.mutate(deleteId)}
+              onCancel={() => setDeleteId(null)}
+              isPending={deleteMutation.isPending}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Inline form */}
+      <AnimatePresence>
+        {showForm && (
+          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className="border-b border-primary/30 bg-muted/20 p-4">
+            {editingId && <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">Vestiging bewerken</p>}
+            <div className="flex flex-col sm:flex-row gap-3 items-start overflow-visible">
+              <div className="w-40 shrink-0">
+                <Select value={form.location_type} onValueChange={v => set("location_type", v)}>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                  <SelectContent>{Object.entries(LOCATION_TYPES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
+                </Select>
+              </div>
+              <div className="flex-1 relative">
+                <Input value={form.street_name || ""} onChange={e => handleAddressQuery(e.target.value)} autoComplete="off" placeholder="Begin met typen voor adressuggesties..." className="h-8 text-sm" />
+                {showSugg && addressSugg.length > 0 && (
+                  <div className="absolute z-[200] w-full top-full mt-1 bg-popover border border-border rounded-lg shadow-xl max-h-60 overflow-y-auto">
+                    {addressSugg.map((s, i) => (
+                      <button key={i} type="button" onClick={() => selectAddress(s)} className="w-full px-3 py-2.5 text-left text-sm hover:bg-accent flex gap-2 text-foreground">
+                        <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />{s.address}
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+              <div className="flex gap-1 shrink-0">
+                <Button size="icon" variant="ghost" className="h-8 w-8" onClick={cancel}><X className="w-4 h-4" /></Button>
+                <Button size="icon" className="h-8 w-8" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}><Check className="w-4 h-4" /></Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* Table header */}
+      <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="w-28 shrink-0">Type</span>
+        <span className="flex-1">Adres</span>
+        {!showForm && !deleteId && (
+          <Button size="sm" variant="outline" onClick={openNew} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
+            <Plus className="w-3 h-3 mr-1" /> Vestiging toevoegen
           </Button>
         )}
       </div>
 
-      {/* Content */}
-      <div className="divide-y divide-border">
-        {locations.length === 0 && !showInlineForm && (
-          <p className="text-sm text-muted-foreground py-6 text-center">Nog geen vestigingen aangemaakt.</p>
-        )}
+      {locations.length === 0 && !showForm && (
+        <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen vestigingen aangemaakt.</p>
+      )}
 
+      <div className="divide-y divide-border">
         {locations.map(loc => {
           const linkedCompanies = getCompaniesForLocation(loc.id);
-          const isEditingThis = editingId === loc.id && showInlineForm;
-
-          if (isEditingThis) {
-            return (
-              <div key={loc.id} className="px-6 py-4">
-                <InlineForm
-                  form={form} set={set}
-                  addressSugg={addressSugg} showSugg={showSugg}
-                  handleAddressQuery={handleAddressQuery} selectAddress={selectAddress}
-                  onSave={() => saveMutation.mutate(form)}
-                  onCancel={cancel}
-                  saving={saveMutation.isPending}
-                />
-              </div>
-            );
-          }
-
           return (
-            <div key={loc.id} className="flex items-start gap-3 px-6 py-4">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 flex-wrap">
-                    <Badge variant="secondary" className="text-xs">{LOCATION_TYPES[loc.location_type] || loc.location_type}</Badge>
+            <div key={loc.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
+              <div className="w-28 shrink-0">
+                <Badge variant="secondary" className="text-xs">{LOCATION_TYPES[loc.location_type] || loc.location_type}</Badge>
+              </div>
+              <div className="flex-1 min-w-0">
+                <p className="text-sm text-foreground">{[loc.street_name, loc.house_number, loc.postal_code, loc.city].filter(Boolean).join(" ")}</p>
+                {linkedCompanies.length > 0 && (
+                  <div className="flex flex-wrap gap-1 mt-0.5">
+                    {linkedCompanies.map(c => <span key={c.id} className="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground">{c.display_name}</span>)}
                   </div>
-                  <p className="text-sm text-foreground mt-0.5">
-                    {[loc.street_name, loc.house_number, loc.postal_code, loc.city].filter(Boolean).join(" ")}
-                  </p>
-                  {linkedCompanies.length > 0 && (
-                    <div className="flex flex-wrap gap-1 mt-1">
-                      {linkedCompanies.map(c => <span key={c.id} className="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground">{c.display_name}</span>)}
-                    </div>
-                  )}
-                </div>
-                <div className="flex gap-1">
-                  <Button size="icon" variant="ghost" onClick={() => openEdit(loc)}><Edit className="w-4 h-4" /></Button>
-                  <Button size="icon" variant="ghost" className="text-red-500 hover:text-red-700" onClick={() => { if (confirm("Vestiging verwijderen?")) deleteMutation.mutate(loc.id); }}><Trash2 className="w-4 h-4" /></Button>
-                </div>
+                )}
+              </div>
+              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(loc)} title="Bewerken"><Edit className="w-3.5 h-3.5" /></Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteId(loc.id)} title="Verwijderen"><Trash2 className="w-3.5 h-3.5" /></Button>
+              </div>
             </div>
           );
         })}
-
-        {/* Inline nieuw formulier */}
-        {showInlineForm && !editingId && (
-          <div className="px-6 py-4">
-            <InlineForm
-              form={form} set={set}
-              addressSugg={addressSugg} showSugg={showSugg}
-              handleAddressQuery={handleAddressQuery} selectAddress={selectAddress}
-              onSave={() => saveMutation.mutate(form)}
-              onCancel={cancel}
-              saving={saveMutation.isPending}
-            />
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function InlineForm({ form, set, addressSugg, showSugg, handleAddressQuery, selectAddress, onSave, onCancel, saving }) {
-  return (
-    <div className="flex flex-col sm:flex-row gap-3 items-start overflow-visible">
-      <div className="w-40 shrink-0">
-        <Select value={form.location_type} onValueChange={v => set("location_type", v)}>
-          <SelectTrigger className="h-9 text-sm"><SelectValue /></SelectTrigger>
-          <SelectContent>{Object.entries(LOCATION_TYPES).map(([k, v]) => <SelectItem key={k} value={k}>{v}</SelectItem>)}</SelectContent>
-        </Select>
-      </div>
-      <div className="flex-1 relative">
-        <Input
-          value={form.street_name || ""}
-          onChange={e => handleAddressQuery(e.target.value)}
-          autoComplete="off"
-          placeholder="Begin met typen voor adressuggesties..."
-          className="h-9 text-sm"
-        />
-        {showSugg && addressSugg.length > 0 && (
-          <div className="absolute z-[200] w-full top-full mt-1 bg-popover border border-border rounded-lg shadow-xl max-h-60 overflow-y-auto">
-            {addressSugg.map((s, i) => (
-              <button key={i} type="button" onClick={() => selectAddress(s)} className="w-full px-3 py-2.5 text-left text-sm hover:bg-accent flex gap-2 text-foreground">
-                <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />{s.address}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-      <div className="flex gap-1 shrink-0">
-        <Button size="icon" variant="ghost" onClick={onCancel}><X className="w-4 h-4" /></Button>
-        <Button size="icon" onClick={onSave} disabled={saving}><Check className="w-4 h-4" /></Button>
       </div>
     </div>
   );
