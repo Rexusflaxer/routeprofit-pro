@@ -180,8 +180,18 @@ export default function WpbrTab({ companyId }) {
                           <label className="text-xs text-muted-foreground mb-1 block">Vergunningsnummer</label>
                           <div className="flex items-center gap-0">
                             <span className="inline-flex items-center h-8 px-3 rounded-l-md border border-r-0 border-input bg-muted text-sm font-semibold text-foreground select-none">{form.license_type}</span>
-                            <Input value={form.license_number} onChange={(e) => set("license_number", e.target.value)} className="h-8 text-sm rounded-l-none" placeholder="Nummer..." />
+                            <Input value={form.license_number} onChange={(e) => set("license_number", e.target.value)} className="h-8 text-sm rounded-l-none rounded-r-none" placeholder="Nummer..." />
+                            <a
+                              href={`https://www.justis.nl/registers/wpbr-register?f%5B0%5D=wpbr_column%3A${form.license_type}`}
+                              target="_blank"
+                              rel="noopener noreferrer"
+                              title="Zoek in WPBR-register (justis.nl)"
+                              className="inline-flex items-center h-8 px-2.5 rounded-r-md border border-l-0 border-input bg-muted hover:bg-accent transition-colors shrink-0"
+                            >
+                              <ExternalLink className="w-3.5 h-3.5 text-muted-foreground" />
+                            </a>
                           </div>
+                          <p className="text-[11px] text-muted-foreground mt-1">Klik <ExternalLink className="w-3 h-3 inline" /> om het officiële WPBR-register te raadplegen.</p>
                         </div>
                         <div className="sm:col-span-1" />
                         <div>
