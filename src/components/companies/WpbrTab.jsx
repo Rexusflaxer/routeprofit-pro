@@ -361,18 +361,18 @@ function LicenseCard({ license, muted }) {
   return (
     <>
       <div
-        className={`px-4 py-3 flex items-center gap-4 ${license.document_file_url ? "cursor-pointer hover:bg-accent/50 transition-colors" : ""}`}
+        className={`grid grid-cols-[2.5rem_6rem_5rem_1fr_1fr] items-center px-4 py-3 ${license.document_file_url ? "cursor-pointer hover:bg-accent/50 transition-colors" : ""}`}
         onClick={license.document_file_url ? () => setPreviewOpen(true) : undefined}
         title={license.document_file_url ? "Klik om vergunning te bekijken" : undefined}
       >
-        <span className="text-sm font-semibold text-foreground w-10 shrink-0">{license.license_type || "?"}</span>
-        {license.license_number && <span className="text-sm text-muted-foreground w-24 shrink-0">#{license.license_number}</span>}
-        <LicenseStatusBadge license={license} />
-        <div className="flex gap-4 text-xs text-muted-foreground flex-1">
+        <span className="text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
+        <span className="text-sm text-muted-foreground">{license.license_number ? `#${license.license_number}` : "—"}</span>
+        <div><LicenseStatusBadge license={license} /></div>
+        <div className="flex gap-4 text-xs text-muted-foreground">
           {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
           {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
         </div>
-        {license.notes && <span className="text-xs text-muted-foreground truncate">{license.notes}</span>}
+        <span className="text-xs text-muted-foreground truncate">{license.notes || ""}</span>
       </div>
       <ManagedFilePreviewDialog
         open={previewOpen}
