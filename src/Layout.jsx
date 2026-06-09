@@ -3,7 +3,8 @@ import { Link } from "react-router-dom";
 import { createPageUrl } from "./utils";
 import {
   LayoutDashboard, Users, Settings, Menu, X,
-  CarFront, Smartphone, ClipboardList, Building2
+  CarFront, Smartphone, ClipboardList, Building2,
+  Activity, CircleDot, Radio, ShieldCheck
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeProvider, useTheme } from "next-themes";
@@ -20,8 +21,8 @@ const NAV_ITEMS = [
   { name: "Instellingen",         icon: Settings,        page: "Settings" },
 ];
 
-const LOGO_DARK  = "https://media.base44.com/images/public/698e307ed3aa4cab3729bbf1/028ef0527_LogoBlack.png";
-const LOGO_LIGHT = "https://media.base44.com/images/public/698e307ed3aa4cab3729bbf1/fd21cdb86_LogoWit.png";
+const LOGO_DARK = "/loq-logo-dark.png";
+const LOGO_LIGHT = "/loq-logo-light.png";
 
 function LOQLogo({ className = "h-6 w-auto" }) {
   const { resolvedTheme } = useTheme();
@@ -40,73 +41,91 @@ function LOQLogo({ className = "h-6 w-auto" }) {
 function AppShell({ children, currentPageName }) {
   const [mobileOpen, setMobileOpen] = useState(false);
 
+  const navigation = (
+    <nav className="space-y-1">
+      {NAV_ITEMS.map(item => {
+        const isActive = currentPageName === item.page;
+        return (
+          <Link
+            key={item.page}
+            to={createPageUrl(item.page)}
+            onClick={() => setMobileOpen(false)}
+            className={`group flex items-center gap-3 rounded-lg px-3 py-2.5 text-sm font-medium transition-colors ${
+              isActive
+                ? "bg-primary text-primary-foreground shadow-sm"
+                : "text-muted-foreground hover:bg-accent hover:text-foreground"
+            }`}
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            <span className="truncate">{item.name}</span>
+          </Link>
+        );
+      })}
+    </nav>
+  );
+
   return (
     <div className="min-h-screen bg-background">
-      {/* Top navigation bar */}
-      <header className="sticky top-0 z-40 bg-sidebar border-b border-sidebar-border">
-        <div className="max-w-screen-2xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex items-center h-14 gap-6">
-            {/* Logo */}
-            <Link to={createPageUrl("Dashboard")} className="shrink-0 mr-2">
-              <LOQLogo className="h-6 w-auto" />
-            </Link>
-
-            {/* Desktop nav links */}
-            <nav className="hidden lg:flex items-center gap-0.5 flex-1 overflow-x-auto">
-              {NAV_ITEMS.map(item => {
-                const isActive = currentPageName === item.page;
-                return (
-                  <Link
-                    key={item.page}
-                    to={createPageUrl(item.page)}
-                    className={`flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium whitespace-nowrap transition-all duration-150 ${
-                      isActive
-                        ? "bg-primary text-primary-foreground"
-                        : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                    }`}
-                  >
-                    <item.icon className="w-3.5 h-3.5 shrink-0" />
-                    {item.name}
-                  </Link>
-                );
-              })}
-            </nav>
-
-            {/* Mobile hamburger */}
-            <div className="flex lg:hidden ml-auto">
-              <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)}>
-                {mobileOpen ? <X className="w-5 h-5" /> : <Menu className="w-5 h-5" />}
-              </Button>
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 flex-col border-r border-sidebar-border bg-sidebar lg:flex">
+        <div className="border-b border-sidebar-border px-5 py-5">
+          <Link to={createPageUrl("Dashboard")} className="inline-flex items-center">
+            <LOQLogo className="h-7 w-auto" />
+          </Link>
+          <div className="mt-4 rounded-lg border border-sidebar-border bg-background/70 p-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Control Center</p>
+                <p className="mt-1 text-sm font-semibold text-foreground">Operationeel overzicht</p>
+              </div>
+              <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary text-primary-foreground">
+                <Activity className="h-4 w-4" />
+              </span>
+            </div>
+            <div className="mt-3 grid grid-cols-3 gap-2 text-center text-[11px] text-muted-foreground">
+              <div className="rounded-md bg-card px-2 py-1.5">
+                <CircleDot className="mx-auto mb-1 h-3.5 w-3.5 text-emerald-500" />
+                Live
+              </div>
+              <div className="rounded-md bg-card px-2 py-1.5">
+                <Radio className="mx-auto mb-1 h-3.5 w-3.5" />
+                Sync
+              </div>
+              <div className="rounded-md bg-card px-2 py-1.5">
+                <ShieldCheck className="mx-auto mb-1 h-3.5 w-3.5" />
+                LOQ
+              </div>
             </div>
           </div>
         </div>
+        <div className="flex-1 overflow-y-auto px-3 py-4">
+          {navigation}
+        </div>
+        <div className="border-t border-sidebar-border p-4">
+          <div className="rounded-lg bg-background/70 px-3 py-2 text-xs text-muted-foreground">
+            Objecten, diensten en rapportages in een helder overzicht.
+          </div>
+        </div>
+      </aside>
 
-        {/* Mobile dropdown */}
+      <header className="sticky top-0 z-40 border-b border-sidebar-border bg-sidebar/95 backdrop-blur lg:hidden">
+        <div className="flex h-14 items-center justify-between px-4">
+          <Link to={createPageUrl("Dashboard")} className="shrink-0">
+            <LOQLogo className="h-6 w-auto" />
+          </Link>
+          <Button variant="ghost" size="icon" onClick={() => setMobileOpen(!mobileOpen)}>
+            {mobileOpen ? <X className="h-5 w-5" /> : <Menu className="h-5 w-5" />}
+          </Button>
+        </div>
+
         {mobileOpen && (
-          <div className="lg:hidden border-t border-sidebar-border bg-sidebar p-3 space-y-0.5">
-            {NAV_ITEMS.map(item => {
-              const isActive = currentPageName === item.page;
-              return (
-                <Link
-                  key={item.page}
-                  to={createPageUrl(item.page)}
-                  onClick={() => setMobileOpen(false)}
-                  className={`flex items-center gap-3 px-3 py-2.5 rounded-xl text-sm font-medium ${
-                    isActive ? "bg-primary text-primary-foreground" : "text-muted-foreground hover:bg-accent hover:text-foreground"
-                  }`}
-                >
-                  <item.icon className="w-4 h-4 shrink-0" />
-                  {item.name}
-                </Link>
-              );
-            })}
+          <div className="border-t border-sidebar-border bg-sidebar p-3">
+            {navigation}
           </div>
         )}
       </header>
 
-      {/* Main content */}
-      <main className="min-h-screen">
-        <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
+      <main className="min-h-screen lg:pl-72">
+        <div className="mx-auto max-w-7xl px-4 py-6 sm:px-6 lg:px-8 lg:py-8">
           {children}
         </div>
       </main>

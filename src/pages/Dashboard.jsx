@@ -8,15 +8,22 @@ import PageHeader from "../components/ui-custom/PageHeader";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGrid } from "recharts";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { LayoutDashboard, MapPin, Users, Route, Euro, Plus, ArrowRight } from "lucide-react";
+import {
+  AlertTriangle, ArrowRight, CheckCircle2, Clock3, Euro,
+  LayoutDashboard, MapPin, Plus, RadioTower, Route, ShieldCheck, Users
+} from "lucide-react";
 
 export default function Dashboard() {
   const { data: objects = [] } = useQuery({ queryKey: ["objects"], queryFn: () => base44.entities.SurveillanceObject.list() });
   const { data: personnel = [] } = useQuery({ queryKey: ["personnel"], queryFn: () => base44.entities.Personnel.list() });
   const { data: routes = [] } = useQuery({ queryKey: ["routes"], queryFn: () => base44.entities.Route.list() });
   const { data: costSettings = [] } = useQuery({ queryKey: ["costSettings"], queryFn: () => base44.entities.CostSettings.list() });
+  const { data: executions = [] } = useQuery({ queryKey: ["route-executions"], queryFn: () => base44.entities.RouteExecution.list("-generated_at") });
+  const { data: taskExecutions = [] } = useQuery({ queryKey: ["task-executions"], queryFn: () => base44.entities.TaskExecution.list() });
+  const { data: auditLogs = [] } = useQuery({ queryKey: ["mobile-audit-log"], queryFn: () => base44.entities.MobileAuditLog.list("-created_at") });
 
   const cs = costSettings[0];
 
@@ -57,12 +64,47 @@ export default function Dashboard() {
   const totalRevenue = routeData.reduce((s, r) => s + r.revenue, 0);
   const totalCosts = routeData.reduce((s, r) => s + r.costs, 0);
   const totalProfit = totalRevenue - totalCosts;
+  const activeExecutions = executions.filter(item => ["downloaded", "active", "paused"].includes(item.status)).slice(0, 4);
+  const completedExecutions = executions.filter(item => item.status === "completed").length;
+  const failedLogs = auditLogs.filter(log => {
+    const value = `${log.status || ""} ${log.level || ""} ${log.type || ""}`.toLowerCase();
+    return value.includes("fail") || value.includes("error") || value.includes("critical");
+  });
+  const openTaskCount = taskExecutions.filter(task => !["completed", "skipped", "cancelled"].includes(task.status)).length;
+
+  const taskProgressFor = (routeId) => {
+    const routeTasks = taskExecutions.filter(task => task.route_execution_id === routeId);
+    const done = routeTasks.filter(task => ["completed", "skipped"].includes(task.status)).length;
+    const total = routeTasks.length || 0;
+    return { done, total, pct: total ? Math.round((done / total) * 100) : 0 };
+  };
+
+  const attentionItems = [
+    failedLogs.length > 0 && {
+      label: "Mobiele sync controleren",
+      detail: `${failedLogs.length} logregel(s) met foutstatus`,
+      icon: RadioTower,
+      tone: "text-red-600 bg-red-50 border-red-200 dark:bg-red-950/30 dark:border-red-900 dark:text-red-300",
+    },
+    openTaskCount > 0 && {
+      label: "Open taken in uitvoering",
+      detail: `${openTaskCount} taak/taken staan nog open`,
+      icon: Clock3,
+      tone: "text-amber-700 bg-amber-50 border-amber-200 dark:bg-amber-950/30 dark:border-amber-900 dark:text-amber-300",
+    },
+    routes.length === 0 && {
+      label: "Geen routeblauwdrukken",
+      detail: "Maak een route aan voordat de uitvoering kan draaien",
+      icon: AlertTriangle,
+      tone: "text-muted-foreground bg-secondary border-border",
+    },
+  ].filter(Boolean);
 
   return (
     <div className="space-y-8">
       <PageHeader
-        title="Dashboard"
-        subtitle="Overzicht van uw surveillancediensten"
+        title="Operationeel overzicht"
+        subtitle="Live status, aandachtspunten en routekwaliteit voor de mobiele surveillance."
         actions={
           <Link to={createPageUrl("Routes")}>
             <Button>
@@ -72,18 +114,99 @@ export default function Dashboard() {
         }
       />
 
+      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.5fr_1fr]">
+        <Card className="border border-border bg-card shadow-sm">
+          <CardHeader className="pb-3">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <CardTitle className="text-base">Live diensten</CardTitle>
+                <p className="mt-1 text-sm text-muted-foreground">Actieve of klaargezette route-uitvoeringen.</p>
+              </div>
+              <Badge variant="outline" className="gap-1.5">
+                <span className="h-2 w-2 rounded-full bg-emerald-500" />
+                {activeExecutions.length} live
+              </Badge>
+            </div>
+          </CardHeader>
+          <CardContent>
+            {activeExecutions.length > 0 ? (
+              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+                {activeExecutions.map(route => {
+                  const progress = taskProgressFor(route.id);
+                  return (
+                    <Link key={route.id} to={`/RouteExecutionDetails?id=${route.id}`} className="rounded-lg border border-border bg-background/60 p-4 transition-colors hover:bg-accent/60">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-foreground">{route.route_name || "Onbekende dienst"}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{route.employee_name || "Geen medewerker"} · {route.vehicle_license_plate || "Geen voertuig"}</p>
+                        </div>
+                        <Badge>{route.status}</Badge>
+                      </div>
+                      <div className="mt-4">
+                        <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
+                          <span>Taken afgerond</span>
+                          <span>{progress.done}/{progress.total}</span>
+                        </div>
+                        <div className="h-2 overflow-hidden rounded-full bg-secondary">
+                          <div className="h-full rounded-full bg-primary" style={{ width: `${progress.pct}%` }} />
+                        </div>
+                      </div>
+                    </Link>
+                  );
+                })}
+              </div>
+            ) : (
+              <div className="rounded-lg border border-dashed border-border bg-background/50 p-6 text-sm text-muted-foreground">
+                Geen actieve mobiele diensten. Start vanuit de uitvoeringkalender zodra de planning klaarstaat.
+              </div>
+            )}
+          </CardContent>
+        </Card>
+
+        <Card className="border border-border bg-card shadow-sm">
+          <CardHeader className="pb-3">
+            <CardTitle className="text-base">Aandacht</CardTitle>
+            <p className="text-sm text-muted-foreground">Wat de centralist als eerste moet zien.</p>
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {attentionItems.length > 0 ? attentionItems.map(({ label, detail, icon: Icon, tone }) => (
+              <div key={label} className={`flex items-start gap-3 rounded-lg border p-3 ${tone}`}>
+                <Icon className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold">{label}</p>
+                  <p className="mt-0.5 text-xs opacity-80">{detail}</p>
+                </div>
+              </div>
+            )) : (
+              <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+                <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
+                <div>
+                  <p className="text-sm font-semibold">Geen directe aandachtspunten</p>
+                  <p className="mt-0.5 text-xs opacity-80">Routes, taken en sync ogen rustig.</p>
+                </div>
+              </div>
+            )}
+          </CardContent>
+        </Card>
+      </section>
+
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
         <StatCard title="Objecten" value={objects.length} icon={MapPin} />
         <StatCard title="Medewerkers" value={personnel.filter(p => p.is_active !== false).length} icon={Users} />
-        <StatCard title="Routes" value={routes.length} icon={Route} />
+        <StatCard title="Routeblauwdrukken" value={routes.length} icon={Route} />
+        <StatCard title="Diensten afgerond" value={completedExecutions} icon={ShieldCheck} />
+      </div>
+
+      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <StatCard title="Maandwinst" value={`€${totalProfit.toFixed(0)}`} icon={Euro}
           trend={totalRevenue > 0 ? Number(((totalProfit / totalRevenue) * 100).toFixed(1)) : 0}
           trendLabel="marge"
         />
+        <StatCard title="Open mobiele taken" value={openTaskCount} icon={Clock3} />
       </div>
 
       {routes.length > 0 && cs && (
-        <Card className="border-0 shadow-sm">
+        <Card className="border border-border shadow-sm">
           <CardHeader>
             <CardTitle className="text-base">Omzet vs. Kosten per route</CardTitle>
           </CardHeader>
@@ -91,12 +214,12 @@ export default function Dashboard() {
             <div className="h-64">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={routeData} barGap={4}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#f1f5f9" />
-                  <XAxis dataKey="name" tick={{ fontSize: 12 }} stroke="#94a3b8" />
-                  <YAxis tick={{ fontSize: 12 }} stroke="#94a3b8" tickFormatter={(v) => `€${v}`} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
+                  <XAxis dataKey="name" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
+                  <YAxis tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `€${v}`} />
                   <Tooltip formatter={(v) => `€${Number(v).toFixed(0)}`} contentStyle={{ borderRadius: 12, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
-                  <Bar dataKey="revenue" fill="#1e293b" radius={[6, 6, 0, 0]} name="Omzet" />
-                  <Bar dataKey="costs" fill="#f59e0b" radius={[6, 6, 0, 0]} name="Kosten" />
+                  <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} name="Omzet" />
+                  <Bar dataKey="costs" fill="hsl(var(--muted-foreground))" radius={[6, 6, 0, 0]} name="Kosten" />
                 </BarChart>
               </ResponsiveContainer>
             </div>
@@ -109,7 +232,7 @@ export default function Dashboard() {
           <div className="flex items-center justify-between">
             <h2 className="text-lg font-semibold text-foreground">Route-analyses</h2>
             <Link to={createPageUrl("Routes")}>
-              <Button variant="ghost" size="sm" className="text-slate-500">
+              <Button variant="ghost" size="sm" className="text-muted-foreground">
                 Alle routes <ArrowRight className="w-3.5 h-3.5 ml-1" />
               </Button>
             </Link>
@@ -123,8 +246,8 @@ export default function Dashboard() {
       ) : (
         <EmptyState
           icon={LayoutDashboard}
-          title="Welkom bij Route Calculator"
-          description="Begin met het toevoegen van objecten, medewerkers en kosteninstelling om routes te analyseren."
+          title="Welkom bij LOQ"
+          description="Begin met objecten, medewerkers en kosteninstellingen om het control center te vullen."
           actionLabel="Objecten toevoegen"
           onAction={() => window.location.href = createPageUrl("Objects")}
         />
