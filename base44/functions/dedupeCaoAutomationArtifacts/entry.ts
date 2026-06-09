@@ -115,6 +115,17 @@ function correctionRank(correction, canonicalReviewIds) {
   ];
 }
 
+function configRank(config) {
+  const validUntil = config.valid_until || '9999-12-31';
+  return [
+    config.is_payroll_ready === true ? 1 : 0,
+    config.payroll_readiness_status === 'ready' ? 1 : 0,
+    String(validUntil),
+    String(config.approved_at || ''),
+    String(config.id || '')
+  ];
+}
+
 function compareRank(a, b) {
   for (let i = 0; i < Math.max(a.length, b.length); i++) {
     const next = String(b[i] ?? '').localeCompare(String(a[i] ?? ''));
@@ -165,8 +176,43 @@ Deno.serve(async (req) => {
     const corrections = (correctionsAll || []).filter(correction =>
       includeRecord(correction) || includedReviewIds.has(correction.cao_change_review_id)
     );
+    const configs = (configsAll || []).filter(config =>
+      idempotencyKeys.size === 0 || includeRecord(config)
+    );
     const activeConfigIds = new Set((configsAll || []).filter(cfg => cfg.is_active === true).map(cfg => cfg.id));
     const reviewById = Object.fromEntries((reviewsAll || []).filter(review => review.id).map(review => [review.id, review]));
+
+    const configGroups = {};
+    for (const config of configs) {
+      if (config.status !== 'active' || config.is_active !== true || !config.cao_key || !config.valid_from) continue;
+      const key = `${config.cao_key}::${config.valid_from}`;
+      if (!configGroups[key]) configGroups[key] = [];
+      configGroups[key].push(config);
+    }
+
+    const configActions = [];
+    for (const [key, group] of Object.entries(configGroups)) {
+      if (group.length < 2) continue;
+      const sorted = [...group].sort((a, b) => compareRank(configRank(a), configRank(b)));
+      const canonical = sorted[0];
+      if (!canonical) continue;
+      for (const duplicate of sorted.slice(1)) {
+        configActions.push({
+          duplicate_configuration_id: duplicate.id,
+          canonical_configuration_id: canonical.id,
+          key
+        });
+        if (!apply) continue;
+        await base44.asServiceRole.entities.CAOConfiguration.update(duplicate.id, {
+          status: 'archived',
+          is_active: false,
+          notes: appendNote(
+            duplicate.notes,
+            `Gearchiveerd door dedupeCaoAutomationArtifacts op ${nowIso()}; canonical_configuration_id=${canonical.id}; duplicate key=${key}.`
+          )
+        });
+      }
+    }
 
     const reviewGroups = {};
     for (const review of reviews) {
@@ -285,6 +331,8 @@ Deno.serve(async (req) => {
       success: true,
       applied: apply,
       idempotency_keys: [...idempotencyKeys],
+      configurations_checked: configs.length,
+      configuration_duplicates_archived: configActions.length,
       reviews_checked: reviews.length,
       review_duplicates_superseded: reviewActions.length,
       review_normalizations: reviewNormalizationActions.length,
@@ -293,6 +341,8 @@ Deno.serve(async (req) => {
       correction_normalizations: correctionNormalizationActions.length,
       payroll_runs_checked: (payrollRunsAll || []).length,
       payroll_runs_relinked: payrollRunActions.length,
+      configuration_actions: configActions.slice(0, 100),
+      configuration_actions_truncated: configActions.length > 100,
       review_normalization_actions: reviewNormalizationActions.slice(0, 200),
       review_normalization_actions_truncated: reviewNormalizationActions.length > 200,
       review_actions: reviewActions.slice(0, 200),

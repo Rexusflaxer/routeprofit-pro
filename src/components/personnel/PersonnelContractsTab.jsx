@@ -1,4 +1,4 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -15,6 +15,8 @@ const CAO_OPTIONS = [
   { value: "cao_verkeersregelaars", label: "CAO Verkeersregelaars" },
   { value: "cao_veiligheidsdomein", label: "CAO Veiligheidsdomein" },
 ];
+
+const CAO_OPTION_LABELS = Object.fromEntries(CAO_OPTIONS.map(option => [option.value, option.label]));
 
 const CONTRACT_FORM_OPTIONS = [
   { value: "bepaalde_tijd", label: "Bepaalde tijd" },
@@ -111,6 +113,21 @@ function isDateWithinOptionRange(option, date) {
   return true;
 }
 
+function resolveAssignmentCaoKey(assignment, caoOptions = []) {
+  if (assignment?.cao_key) return assignment.cao_key;
+  if (!assignment?.cao_configuration_id) return null;
+  return (caoOptions || []).find(option => option.id === assignment.cao_configuration_id)?.cao_key || null;
+}
+
+function buildCompanyCaoKeyOptions(assignments, referenceDate, caoOptions = []) {
+  const activeAssignments = (assignments || []).filter(assignment => isDateWithinOptionRange(assignment, referenceDate));
+  return uniqueValues(activeAssignments.map(assignment => resolveAssignmentCaoKey(assignment, caoOptions))).map(value => ({
+    value,
+    label: CAO_OPTION_LABELS[value] || value,
+    assignment_count: activeAssignments.filter(assignment => resolveAssignmentCaoKey(assignment, caoOptions) === value).length,
+  }));
+}
+
 function caoConfigurationLabel(option) {
   const label = option?.label || option?.display_name || option?.name || option?.cao_key || "CAO";
   const version = option?.version_label ? ` (${option.version_label})` : "";
@@ -169,6 +186,11 @@ function initialForm(personnel) {
     underlying_contract_form: personnel.underlying_contract_form || null,
     contract_start_date: personnel.contract_start_date || "",
     contract_end_date: personnel.contract_end_date || "",
+    cao_scale: personnel.cao_scale ?? "",
+    cao_period: personnel.cao_period ?? "",
+    custom_hourly_rate: personnel.custom_hourly_rate ?? "",
+    written_scale_period_notice_confirmed: boolToSelect(personnel.written_scale_period_notice_confirmed),
+    periodic_increase_due_confirmed: boolToSelect(personnel.periodic_increase_due_confirmed),
     function_type: personnel.function_type || null,
     allowed_function_types_text: personnel.function_type ? personnel.function_type : "",
     cao_function_group: personnel.cao_function_group || null,
@@ -204,6 +226,11 @@ function formFromContract(contract) {
     underlying_contract_form: contract.underlying_contract_form || null,
     contract_start_date: contract.contract_start_date || "",
     contract_end_date: contract.contract_end_date || "",
+    cao_scale: contract.cao_scale ?? "",
+    cao_period: contract.cao_period ?? "",
+    custom_hourly_rate: contract.custom_hourly_rate ?? "",
+    written_scale_period_notice_confirmed: boolToSelect(contract.written_scale_period_notice_confirmed),
+    periodic_increase_due_confirmed: boolToSelect(contract.periodic_increase_due_confirmed),
     function_type: contract.function_type || null,
     allowed_function_types_text: toArrayText(contract.allowed_function_types),
     cao_function_group: contract.cao_function_group || null,
@@ -246,6 +273,11 @@ function buildContractPayload(personnel, form) {
     underlying_contract_form: form.contract_form === "oproep" ? (form.underlying_contract_form || "unknown") : null,
     contract_start_date: form.contract_start_date || null,
     contract_end_date: form.contract_end_date || null,
+    cao_scale: numberOrNull(form.cao_scale),
+    cao_period: numberOrNull(form.cao_period),
+    custom_hourly_rate: numberOrNull(form.custom_hourly_rate),
+    written_scale_period_notice_confirmed: boolOrNull(form.written_scale_period_notice_confirmed),
+    periodic_increase_due_confirmed: boolOrNull(form.periodic_increase_due_confirmed),
     function_type: form.function_type || null,
     allowed_function_types: allowedFunctionTypes,
     cao_function_group: form.cao_function_group || null,
@@ -313,10 +345,26 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     },
   });
 
+  const { data: companyCaoAssignments = [], isLoading: companyCaoAssignmentsLoading } = useQuery({
+    queryKey: ["company-cao-assignments", form.company_id],
+    queryFn: () => base44.entities.CompanyCaoAssignment.filter({ company_id: form.company_id }, "-created_date"),
+    enabled: !!form.company_id,
+  });
+
+  const companyCaoKeyOptions = useMemo(
+    () => buildCompanyCaoKeyOptions(companyCaoAssignments, form.contract_start_date, caoConfigurationOptions),
+    [caoConfigurationOptions, companyCaoAssignments, form.contract_start_date]
+  );
+  const companyCaoKeySignature = useMemo(
+    () => companyCaoKeyOptions.map(option => option.value).join("|"),
+    [companyCaoKeyOptions]
+  );
+
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["personnel_contracts", personnel.id] });
     queryClient.invalidateQueries({ queryKey: ["personnel"] });
     queryClient.invalidateQueries({ queryKey: ["cao-configuration-options"] });
+    queryClient.invalidateQueries({ queryKey: ["company-cao-assignments"] });
   };
 
   const saveMutation = useMutation({
@@ -349,6 +397,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   });
 
   const set = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
+  const setCompanyId = (value) => setForm(prev => {
+    const companyId = value === "none" ? null : value;
+    if (prev.company_id === companyId) return prev;
+    return { ...prev, company_id: companyId, cao_key: null, cao_configuration_id: null };
+  });
   const setCaoKey = (value) => setForm(prev => {
     const caoKey = value === "none" ? null : value;
     const selectedOption = caoConfigurationOptions.find(option => option.id === prev.cao_configuration_id);
@@ -377,6 +430,21 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const visibleCaoConfigurationOptions = filterCaoConfigurationOptions(caoConfigurationOptions, form);
   const selectedCaoConfiguration = caoConfigurationOptions.find(option => option.id === form.cao_configuration_id) || null;
   const caoConfigurationSelectionWarning = selectedCaoConfigurationWarning(selectedCaoConfiguration, form);
+  const caoSelectDisabled = !form.company_id || companyCaoAssignmentsLoading || companyCaoKeyOptions.length === 0;
+
+  useEffect(() => {
+    if (!formOpen || !form.company_id || companyCaoAssignmentsLoading) return;
+    setForm(prev => {
+      if (prev.company_id !== form.company_id) return prev;
+      if (companyCaoKeyOptions.length === 1 && prev.cao_key !== companyCaoKeyOptions[0].value) {
+        return { ...prev, cao_key: companyCaoKeyOptions[0].value, cao_configuration_id: null };
+      }
+      if (prev.cao_key && !companyCaoKeyOptions.some(option => option.value === prev.cao_key)) {
+        return { ...prev, cao_key: null, cao_configuration_id: null };
+      }
+      return prev;
+    });
+  }, [formOpen, form.company_id, form.cao_key, companyCaoAssignmentsLoading, companyCaoKeyOptions, companyCaoKeySignature]);
 
   return (
     <div className="space-y-5">
@@ -416,7 +484,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           <div className="grid grid-cols-1 md:grid-cols-3 gap-3">
             <div className="space-y-1">
               <Label>Werkgever/bedrijf</Label>
-              <Select value={form.company_id || "none"} onValueChange={value => set("company_id", value === "none" ? null : value)}>
+              <Select value={form.company_id || "none"} onValueChange={setCompanyId}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Kies bedrijf</SelectItem>
@@ -428,15 +496,22 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             </div>
             <div className="space-y-1">
               <Label>Contract-CAO</Label>
-              <Select value={form.cao_key || "none"} onValueChange={setCaoKey}>
+              <Select value={form.cao_key || "none"} onValueChange={setCaoKey} disabled={caoSelectDisabled}>
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Kies CAO</SelectItem>
-                  {CAO_OPTIONS.map(option => (
+                  {companyCaoKeyOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
+              {!form.company_id && <p className="text-xs text-muted-foreground">Kies eerst het bedrijf.</p>}
+              {form.company_id && !companyCaoAssignmentsLoading && companyCaoKeyOptions.length === 0 && (
+                <p className="text-xs text-amber-700">Dit bedrijf heeft nog geen actieve CAO-koppeling op de contractdatum.</p>
+              )}
+              {form.company_id && companyCaoKeyOptions.length === 1 && (
+                <p className="text-xs text-muted-foreground">Automatisch gekoppeld aan de bedrijfs-CAO.</p>
+              )}
             </div>
             <div className="space-y-1">
               <Label>Contractvorm</Label>
@@ -508,6 +583,43 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             <div className="space-y-1">
               <Label>CAO-functieniveau</Label>
               <Input value={form.cao_function_level || ""} onChange={event => set("cao_function_level", event.target.value || null)} placeholder="a, b, c, d, e" />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-5 gap-3">
+            <div className="space-y-1">
+              <Label>Loonschaal</Label>
+              <Input type="number" min="0" value={form.cao_scale ?? ""} onChange={event => set("cao_scale", event.target.value)} placeholder="bijv. 3" />
+            </div>
+            <div className="space-y-1">
+              <Label>Periodiek</Label>
+              <Input type="number" min="0" value={form.cao_period ?? ""} onChange={event => set("cao_period", event.target.value)} placeholder="bijv. 1" />
+            </div>
+            <div className="space-y-1">
+              <Label>Vrij uurloon</Label>
+              <Input type="number" min="0" step="0.01" value={form.custom_hourly_rate ?? ""} onChange={event => set("custom_hourly_rate", event.target.value)} placeholder="niet-beveiligingswerk" />
+            </div>
+            <div className="space-y-1">
+              <Label>Schaal schriftelijk bevestigd</Label>
+              <Select value={form.written_scale_period_notice_confirmed || "unknown"} onValueChange={value => set("written_scale_period_notice_confirmed", value)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unknown">Onbekend</SelectItem>
+                  <SelectItem value="true">Ja</SelectItem>
+                  <SelectItem value="false">Nee</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-1">
+              <Label>Periodiekverhoging verwerkt</Label>
+              <Select value={form.periodic_increase_due_confirmed || "unknown"} onValueChange={value => set("periodic_increase_due_confirmed", value)}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="unknown">Onbekend</SelectItem>
+                  <SelectItem value="true">Ja</SelectItem>
+                  <SelectItem value="false">Nee</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
 
@@ -655,6 +767,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   </p>
                   <p className="text-xs text-muted-foreground mt-1">
                     {contract.function_type || "functie onbekend"} | {contract.cao_function_group || "geen functiegroep"} | niveau {contract.cao_function_level || "-"}
+                  </p>
+                  <p className="text-xs text-muted-foreground mt-1">
+                    {contract.custom_hourly_rate ? `Vrij uurloon €${Number(contract.custom_hourly_rate).toFixed(2)}` : `Schaal ${contract.cao_scale ?? "-"}, periodiek ${contract.cao_period ?? "-"}`}
                   </p>
                 </div>
                 <div className="flex gap-2">

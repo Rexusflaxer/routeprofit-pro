@@ -1373,6 +1373,108 @@ function hasAnyValue(...values) {
   });
 }
 
+function dateRangesOverlap(startA, endA, startB, endB) {
+  const fromA = asIsoDate(startA) || '0000-01-01';
+  const untilA = asIsoDate(endA) || '9999-12-31';
+  const fromB = asIsoDate(startB) || '0000-01-01';
+  const untilB = asIsoDate(endB) || '9999-12-31';
+  return fromA <= untilB && fromB <= untilA;
+}
+
+function collectContractFunctionScopeTokens(contractLike = {}) {
+  return uniqueValues([
+    ...normalizeArray(contractLike.allowed_function_types),
+    contractLike.function_type,
+    ...normalizeArray(contractLike.allowed_cao_function_groups),
+    contractLike.cao_function_group,
+    ...normalizeArray(contractLike.allowed_task_types)
+  ].map(normalizeToken).filter(value => value && value !== 'unknown'));
+}
+
+async function evaluateCompanyCaoLink(base44, { companyId, caoKey, referenceDate }) {
+  const entity = base44?.asServiceRole?.entities?.CompanyCaoAssignment;
+  if (!entity?.filter || !companyId || !caoKey || !referenceDate) {
+    return {
+      status: 'not_checked',
+      active_assignments: [],
+      matching_assignments: [],
+      blocking_reason: null
+    };
+  }
+
+  const assignments = await entity.filter({ company_id: companyId }).catch(() => []);
+  const activeAssignments = (assignments || []).filter(assignment => isWithinDateRange(assignment, referenceDate));
+  const activeAssignmentsWithResolvedKeys = await Promise.all(activeAssignments.map(async assignment => {
+    if (assignment.cao_key || !assignment.cao_configuration_id) return { ...assignment, resolved_cao_key: assignment.cao_key || null };
+    const configEntity = base44?.asServiceRole?.entities?.CAOConfiguration;
+    if (!configEntity?.get) return { ...assignment, resolved_cao_key: null };
+    const config = await configEntity.get(assignment.cao_configuration_id).catch(() => null);
+    return { ...assignment, resolved_cao_key: config?.cao_key || null };
+  }));
+  const matchingAssignments = activeAssignmentsWithResolvedKeys.filter(assignment => assignment.resolved_cao_key === caoKey);
+
+  if (activeAssignmentsWithResolvedKeys.length === 0) {
+    return {
+      status: 'blocked_no_active_company_cao_assignment',
+      active_assignments: [],
+      matching_assignments: [],
+      blocking_reason: `Bedrijf ${companyId} heeft geen actieve CAO-koppeling op ${referenceDate}.`
+    };
+  }
+
+  if (matchingAssignments.length === 0) {
+    return {
+      status: 'blocked_company_cao_not_linked',
+      active_assignments: activeAssignmentsWithResolvedKeys,
+      matching_assignments: [],
+      blocking_reason: `CAO ${caoKey} is op ${referenceDate} niet gekoppeld aan bedrijf ${companyId}.`
+    };
+  }
+
+  return {
+    status: 'linked',
+    active_assignments: activeAssignmentsWithResolvedKeys,
+    matching_assignments: matchingAssignments,
+    blocking_reason: null
+  };
+}
+
+async function evaluateDuplicateFunctionScope(base44, { personnelId, currentContractId, contractStartDate, contractEndDate, contractScope }) {
+  const entity = base44?.asServiceRole?.entities?.PersonnelContract;
+  const currentTokens = collectContractFunctionScopeTokens(contractScope);
+  if (!entity?.filter || !personnelId || currentTokens.length === 0 || !contractStartDate) {
+    return {
+      status: 'not_checked',
+      current_function_scope_tokens: currentTokens,
+      conflicts: []
+    };
+  }
+
+  const contracts = await entity.filter({ personnel_id: personnelId }).catch(() => []);
+  const conflicts = (contracts || [])
+    .filter(other => other.id !== currentContractId)
+    .filter(other => other.is_current !== false)
+    .filter(other => dateRangesOverlap(contractStartDate, contractEndDate, other.contract_start_date, other.contract_end_date))
+    .map(other => {
+      const otherTokens = collectContractFunctionScopeTokens(other);
+      const duplicateTokens = currentTokens.filter(token => otherTokens.includes(token));
+      return {
+        contract_id: other.id,
+        company_id: other.company_id || null,
+        contract_start_date: other.contract_start_date || null,
+        contract_end_date: other.contract_end_date || null,
+        duplicate_function_scope_tokens: duplicateTokens
+      };
+    })
+    .filter(item => item.duplicate_function_scope_tokens.length > 0);
+
+  return {
+    status: conflicts.length > 0 ? 'blocked_duplicate_active_function_scope' : 'unique',
+    current_function_scope_tokens: currentTokens,
+    conflicts
+  };
+}
+
 const CAO_PB_SECURITY_FUNCTION_GROUPS = [
   'objectbeveiliger_receptionist',
   'mobiel_surveillant',
@@ -1946,6 +2048,7 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
   const contractStartDate = asIsoDate(pickFirst(body.contract_start_date, contract?.contract_start_date, null));
   const contractEndDate = asIsoDate(pickFirst(body.contract_end_date, contract?.contract_end_date, null));
   const caoConfigurationId = pickFirst(body.cao_configuration_id, contract?.cao_configuration_id, null);
+  const personnelIdForContract = pickFirst(body.personnel_id, contract?.personnel_id, personnel?.id, null);
   const securityRoleProofValues = normalizeArray([
     body.security_role_status,
     contract?.security_role_status,
@@ -1994,6 +2097,11 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
   persistContractScopeValue('works_cash_value_logistics', body.works_cash_value_logistics);
   persistContractScopeValue('works_event_or_hospitality_security', body.works_event_or_hospitality_security);
   persistContractScopeValue('event_hospitality_cao_applies', body.event_hospitality_cao_applies);
+  persistContractScopeValue('cao_scale', body.cao_scale);
+  persistContractScopeValue('cao_period', body.cao_period);
+  persistContractScopeValue('custom_hourly_rate', body.custom_hourly_rate);
+  persistContractScopeValue('written_scale_period_notice_confirmed', body.written_scale_period_notice_confirmed);
+  persistContractScopeValue('periodic_increase_due_confirmed', body.periodic_increase_due_confirmed);
   persistContractScopeValue('cao_scope_profile', body.cao_scope_profile, { skipUnknown: true });
   persistContractScopeValue('cao_applicable_rule_profile', body.cao_applicable_rule_profile);
   persistContractScopeValue('contract_assignment_policy', body.contract_assignment_policy);
@@ -2101,6 +2209,27 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
     });
   }
 
+  const companyCaoLink = await evaluateCompanyCaoLink(base44, {
+    companyId: explicitCompanyId,
+    caoKey: explicitCaoKey,
+    referenceDate: contractStartDate
+  });
+  if (companyCaoLink.blocking_reason) {
+    violations.push({
+      rule_id: 'APP-CONTRACT-BASIS-COMPANY-CAO-LINK',
+      severity: 'high',
+      message: companyCaoLink.blocking_reason,
+      payroll_impact: true,
+      manual_review_required: true,
+      field: 'company_id/cao_key'
+    });
+    missingEvidence.push({
+      rule_id: 'APP-CONTRACT-BASIS-COMPANY-CAO-LINK',
+      field: 'company_id/cao_key',
+      message: 'Koppel de gekozen CAO eerst aan het bedrijf via CompanyCaoAssignment.'
+    });
+  }
+
   if (!functionContextPresent) {
     violations.push({
       rule_id: 'APP-CONTRACT-BASIS-FUNCTION',
@@ -2114,6 +2243,28 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
       rule_id: 'APP-CONTRACT-BASIS-FUNCTION',
       field: 'function_type/cao_function_group/security_role_status/allowed_*',
       message: 'Leg minimaal een functieprofiel of allowed_* scope op het contract vast.'
+    });
+  }
+
+  const duplicateFunctionScope = await evaluateDuplicateFunctionScope(base44, {
+    personnelId: personnelIdForContract,
+    currentContractId: pickFirst(body.contract_id, contract?.id, null),
+    contractStartDate,
+    contractEndDate,
+    contractScope: {
+      ...contract,
+      ...body
+    }
+  });
+  if (duplicateFunctionScope.conflicts.length > 0) {
+    violations.push({
+      rule_id: 'APP-CONTRACT-BASIS-DUPLICATE-FUNCTION-SCOPE',
+      severity: 'high',
+      message: 'Deze medewerker heeft dezelfde functie/scope al onder een ander actief of overlappend arbeidscontract. Een functie mag niet dubbel onder meerdere contracten hangen.',
+      payroll_impact: true,
+      manual_review_required: true,
+      field: 'function_type/allowed_function_types/cao_function_group/allowed_task_types',
+      conflicts: duplicateFunctionScope.conflicts
     });
   }
 
@@ -2241,6 +2392,12 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
     contract_start_date: contractStartDate,
     contract_end_date: contractEndDate,
     function_context_present: functionContextPresent,
+    company_cao_link: {
+      status: companyCaoLink.status,
+      active_assignment_ids: (companyCaoLink.active_assignments || []).map(assignment => assignment.id).filter(Boolean),
+      matching_assignment_ids: (companyCaoLink.matching_assignments || []).map(assignment => assignment.id).filter(Boolean)
+    },
+    duplicate_function_scope: duplicateFunctionScope,
     cao_function_qualification: caoFunctionQualification,
     missing_evidence: missingEvidence,
     violations,
@@ -4721,6 +4878,11 @@ function buildContractRulePersistence(result) {
     works_cash_value_logistics: recommendedContractUpdate.works_cash_value_logistics ?? undefined,
     works_event_or_hospitality_security: recommendedContractUpdate.works_event_or_hospitality_security ?? undefined,
     event_hospitality_cao_applies: recommendedContractUpdate.event_hospitality_cao_applies ?? undefined,
+    cao_scale: recommendedContractUpdate.cao_scale ?? undefined,
+    cao_period: recommendedContractUpdate.cao_period ?? undefined,
+    custom_hourly_rate: recommendedContractUpdate.custom_hourly_rate ?? undefined,
+    written_scale_period_notice_confirmed: recommendedContractUpdate.written_scale_period_notice_confirmed ?? undefined,
+    periodic_increase_due_confirmed: recommendedContractUpdate.periodic_increase_due_confirmed ?? undefined,
     cao_scope_profile: recommendedContractUpdate.cao_scope_profile ?? undefined,
     cao_applicable_rule_profile: recommendedContractUpdate.cao_applicable_rule_profile ?? undefined,
     cao_excluded_rule_ids: recommendedContractUpdate.cao_excluded_rule_ids ?? undefined,

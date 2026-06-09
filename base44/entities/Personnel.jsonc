@@ -414,6 +414,22 @@
       ],
       "default": null
     },
+    "written_scale_period_notice_confirmed": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "default": null,
+      "description": "True als schriftelijk aan werknemer is bevestigd welke loonschaal, basisloon en periodiek gelden."
+    },
+    "periodic_increase_due_confirmed": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "default": null,
+      "description": "True als de jaarlijkse CAO-periodiekverhoging is beoordeeld/verwerkt."
+    },
     "custom_hourly_rate": {
       "type": "number"
     },

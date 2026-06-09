@@ -7,8 +7,11 @@
       "description": "ID van het bedrijf"
     },
     "cao_configuration_id": {
-      "type": "string",
-      "description": "ID van de CAO-configuratie"
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optionele technische CAO-configuratie. Voor bedrijfskoppelingen bij voorkeur leeg laten en oplossen via cao_key + datum, zodat alle CAO-perioden automatisch worden meegenomen."
     },
     "cao_key": {
       "type": [
@@ -53,7 +56,6 @@
     }
   },
   "required": [
-    "company_id",
-    "cao_configuration_id"
+    "company_id"
   ]
 }

@@ -27,7 +27,7 @@ const ACTIVITY_OPTIONS = [
 const DELETE_PASSWORD = "verwijder";
 
 const EMPTY_FORM = {
-  cao_configuration_id: "",
+  cao_configuration_id: null,
   cao_key: null,
   is_primary: false,
   applies_to_activities: ["all"],
@@ -35,6 +35,25 @@ const EMPTY_FORM = {
   valid_until: "",
   notes: "",
 };
+
+function uniqueStrings(values) {
+  return [...new Set((values || []).map(value => String(value || "").trim()).filter(Boolean))];
+}
+
+function caoOptionLabel(option) {
+  if (!option) return "—";
+  return option.label || option.display_name || CAO_KEY_LABELS[option.cao_key] || option.name || option.cao_key || "CAO";
+}
+
+function findCaoOption(options, value) {
+  if (!value) return null;
+  const caoKey = value.cao_key || null;
+  const configId = value.cao_configuration_id || null;
+  return (options || []).find(option =>
+    (caoKey && option.cao_key === caoKey) ||
+    (configId && Array.isArray(option.configuration_ids) && option.configuration_ids.includes(configId))
+  ) || null;
+}
 
 function WizardSteps({ step }) {
   const steps = ["CAO kiezen", "Geldigheid", "Bevestigen"];
@@ -128,14 +147,29 @@ export default function CaoTab({ companyId }) {
     enabled: !!companyId,
   });
 
-  const { data: caoConfigurations = [] } = useQuery({
-    queryKey: ["cao-configurations-active"],
-    queryFn: () => base44.entities.CAOConfiguration.filter({ is_active: true }, "name"),
+  const selectedCaoConfigurationIds = uniqueStrings(assignments.map(a => a.cao_configuration_id));
+  const { data: caoOptions = [] } = useQuery({
+    queryKey: ["company-cao-key-options", selectedCaoConfigurationIds],
+    queryFn: async () => {
+      const { data } = await base44.functions.invoke("listCaoConfigurationOptions", {
+        group_by_cao_key: true,
+        include_ids: selectedCaoConfigurationIds,
+      });
+      return data?.options || [];
+    },
   });
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
-      const payload = { ...data, company_id: companyId, valid_from: data.valid_from || null, valid_until: data.valid_until || null, notes: data.notes || null };
+      const payload = {
+        ...data,
+        company_id: companyId,
+        cao_key: data.cao_key || null,
+        cao_configuration_id: data.cao_configuration_id || null,
+        valid_from: data.valid_from || null,
+        valid_until: data.valid_until || null,
+        notes: data.notes || null
+      };
       return editingId ? base44.entities.CompanyCaoAssignment.update(editingId, payload) : base44.entities.CompanyCaoAssignment.create(payload);
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["cao-assignments", companyId] }); cancelWizard(); },
@@ -149,7 +183,16 @@ export default function CaoTab({ companyId }) {
   const cancelWizard = () => { setShowWizard(false); setStep(1); setForm(EMPTY_FORM); setErrors({}); setEditingId(null); };
 
   const startEdit = (a) => {
-    setForm({ cao_configuration_id: a.cao_configuration_id || "", cao_key: a.cao_key || null, is_primary: a.is_primary || false, applies_to_activities: a.applies_to_activities || ["all"], valid_from: a.valid_from || "", valid_until: a.valid_until || "", notes: a.notes || "" });
+    const option = findCaoOption(caoOptions, a);
+    setForm({
+      cao_configuration_id: a.cao_key ? null : a.cao_configuration_id || null,
+      cao_key: a.cao_key || option?.cao_key || null,
+      is_primary: a.is_primary || false,
+      applies_to_activities: a.applies_to_activities || ["all"],
+      valid_from: a.valid_from || "",
+      valid_until: a.valid_until || "",
+      notes: a.notes || ""
+    });
     setEditingId(a.id);
     setStep(1);
     setShowWizard(true);
@@ -157,15 +200,15 @@ export default function CaoTab({ companyId }) {
 
   const validateStep1 = () => {
     const e = {};
-    if (!form.cao_configuration_id) e.cao_configuration_id = "Verplicht";
+    if (!form.cao_key) e.cao_key = "Verplicht";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
   const set = (field, val) => setForm((f) => ({ ...f, [field]: val }));
-  const selectedConfig = caoConfigurations.find(c => c.id === form.cao_configuration_id);
+  const selectedCaoOption = findCaoOption(caoOptions, form);
   const assignmentToDelete = assignments.find(a => a.id === deleteId);
-  const deleteLabel = assignmentToDelete ? (caoConfigurations.find(c => c.id === assignmentToDelete.cao_configuration_id)?.display_name || assignmentToDelete.cao_key || "—") : "";
+  const deleteLabel = assignmentToDelete ? caoOptionLabel(findCaoOption(caoOptions, assignmentToDelete) || assignmentToDelete) : "";
 
   return (
     <div className="flex flex-col h-full">
@@ -190,22 +233,22 @@ export default function CaoTab({ companyId }) {
 
                 {step === 1 && (
                   <div className="space-y-3">
-                    <p className="text-sm font-medium text-foreground">Kies de CAO-configuratie</p>
+                    <p className="text-sm font-medium text-foreground">Kies de CAO</p>
                     <div className="grid grid-cols-1 gap-2">
-                      {caoConfigurations.length === 0 && <p className="text-sm text-muted-foreground">Geen actieve CAO-configuraties beschikbaar.</p>}
-                      {caoConfigurations.map((c) => (
-                        <button key={c.id} onClick={() => { set("cao_configuration_id", c.id); set("cao_key", c.cao_key || null); setErrors({}); }}
-                          className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${form.cao_configuration_id === c.id ? "border-primary bg-accent" : "border-border bg-card"}`}>
+                      {caoOptions.length === 0 && <p className="text-sm text-muted-foreground">Geen actieve CAO's beschikbaar.</p>}
+                      {caoOptions.map((c) => (
+                        <button key={c.id} onClick={() => { set("cao_configuration_id", null); set("cao_key", c.cao_key || null); setErrors({}); }}
+                          className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${form.cao_key === c.cao_key ? "border-primary bg-accent" : "border-border bg-card"}`}>
                           <div>
-                            <span className="text-sm font-semibold text-foreground">{c.display_name || c.name}</span>
+                            <span className="text-sm font-semibold text-foreground">{caoOptionLabel(c)}</span>
                             {c.version_label && <span className="text-xs text-muted-foreground ml-2">{c.version_label}</span>}
-                            {c.valid_from && c.valid_until && <span className="text-xs text-muted-foreground ml-2">{c.valid_from} – {c.valid_until}</span>}
+                            {c.valid_from && <span className="text-xs text-muted-foreground ml-2">vanaf {c.valid_from}</span>}
                           </div>
                           <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
                         </button>
                       ))}
                     </div>
-                    {errors.cao_configuration_id && <p className="text-xs text-destructive">{errors.cao_configuration_id}</p>}
+                    {errors.cao_key && <p className="text-xs text-destructive">{errors.cao_key}</p>}
                     <div className="flex items-center gap-3 pt-1">
                       <label className="flex items-center gap-2 text-sm cursor-pointer">
                         <input type="checkbox" checked={form.is_primary} onChange={(e) => set("is_primary", e.target.checked)} className="rounded border-input" />
@@ -221,7 +264,7 @@ export default function CaoTab({ companyId }) {
 
                 {step === 2 && (
                   <div className="space-y-3">
-                    <p className="text-sm font-medium text-foreground">Geldigheid — <span className="text-muted-foreground font-normal">{selectedConfig?.display_name || selectedConfig?.name}</span></p>
+                    <p className="text-sm font-medium text-foreground">Geldigheid bedrijfskoppeling — <span className="text-muted-foreground font-normal">{caoOptionLabel(selectedCaoOption)}</span></p>
                     <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                       <div>
                         <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf</label>
@@ -250,7 +293,7 @@ export default function CaoTab({ companyId }) {
                   <div className="space-y-3">
                     <p className="text-sm font-medium text-foreground">Controleer en bevestig</p>
                     <div className="rounded-lg border border-border bg-card p-4 space-y-2 text-sm">
-                      <div className="flex justify-between"><span className="text-muted-foreground">CAO</span><span className="font-medium">{selectedConfig?.display_name || selectedConfig?.name || "—"}</span></div>
+                      <div className="flex justify-between"><span className="text-muted-foreground">CAO</span><span className="font-medium">{caoOptionLabel(selectedCaoOption)}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Primair</span><span>{form.is_primary ? "Ja" : "Nee"}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Geldig vanaf</span><span>{form.valid_from || "—"}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Geldig tot</span><span>{form.valid_until || "—"}</span></div>
@@ -290,12 +333,12 @@ export default function CaoTab({ companyId }) {
       )}
       <div className="divide-y divide-border">
         {assignments.map((a) => {
-          const config = caoConfigurations.find(c => c.id === a.cao_configuration_id);
+          const option = findCaoOption(caoOptions, a);
           return (
             <div key={a.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
               <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-foreground">{config?.display_name || config?.name || a.cao_key || "—"}</span>
-                {config?.version_label && <span className="text-xs text-muted-foreground ml-2">{config.version_label}</span>}
+                <span className="text-sm font-medium text-foreground">{caoOptionLabel(option || a)}</span>
+                {option?.version_label && <span className="text-xs text-muted-foreground ml-2">{option.version_label}</span>}
               </div>
               <div className="w-24 shrink-0"><CaoStatusBadge assignment={a} /></div>
               <div className="w-48 shrink-0 flex gap-3 text-xs text-muted-foreground">

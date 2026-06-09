@@ -1550,6 +1550,42 @@ function assignmentMatchesConfigCaoKey(assignment, config) {
   return config?.cao_key === assignment.cao_key;
 }
 
+async function resolveConfigForCompanyCaoAssignment(base44, assignment, serviceDate) {
+  if (assignment?.cao_configuration_id) {
+    try {
+      const config = await base44.asServiceRole.entities.CAOConfiguration.get(assignment.cao_configuration_id);
+      return { assignment, config, error: null, candidate_configuration_ids: config?.id ? [config.id] : [] };
+    } catch {
+      return { assignment, config: null, error: 'config_not_found', candidate_configuration_ids: [assignment.cao_configuration_id].filter(Boolean) };
+    }
+  }
+
+  if (!assignment?.cao_key) {
+    return { assignment, config: null, error: 'missing_cao_key', candidate_configuration_ids: [] };
+  }
+
+  const configs = await base44.asServiceRole.entities.CAOConfiguration.filter({
+    cao_key: assignment.cao_key,
+    is_active: true
+  }).catch(() => []);
+  const eligible = (configs || [])
+    .filter(config => isWithinDateRange(config, serviceDate, 'valid_from', 'valid_until'))
+    .sort((a, b) => String(b.valid_from || '').localeCompare(String(a.valid_from || '')) ||
+      String(b.approved_at || '').localeCompare(String(a.approved_at || '')) ||
+      String(b.id || '').localeCompare(String(a.id || '')));
+
+  if (eligible.length === 1) {
+    return { assignment, config: eligible[0], error: null, candidate_configuration_ids: [eligible[0].id].filter(Boolean) };
+  }
+
+  return {
+    assignment,
+    config: null,
+    error: eligible.length > 1 ? 'ambiguous_active_cao_configurations' : 'config_not_valid_on_service_date',
+    candidate_configuration_ids: eligible.map(config => config.id).filter(Boolean)
+  };
+}
+
 function evaluateInternshipServiceConstraints(contract, serviceContext) {
   if (contract?.contract_form !== 'stage') {
     return {
@@ -1816,14 +1852,9 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
   }
 
   if (matchingCompanyCaoAssignments.length > 0) {
-    const resolvedCompanyCaos = await Promise.all(matchingCompanyCaoAssignments.map(async assignment => {
-      try {
-        const config = await base44.asServiceRole.entities.CAOConfiguration.get(assignment.cao_configuration_id);
-        return { assignment, config, error: null };
-      } catch {
-        return { assignment, config: null, error: 'config_not_found' };
-      }
-    }));
+    const resolvedCompanyCaos = await Promise.all(matchingCompanyCaoAssignments.map(assignment =>
+      resolveConfigForCompanyCaoAssignment(base44, assignment, serviceDate)
+    ));
 
     const dateValidLinks = resolvedCompanyCaos
       .filter(item => item.config && isWithinDateRange(item.config, serviceDate, 'valid_from', 'valid_until'));
@@ -1864,6 +1895,19 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
       };
     }
 
+    const ambiguousAssignmentConfigs = resolvedCompanyCaos
+      .filter(item => item.error === 'ambiguous_active_cao_configurations');
+    if (ambiguousAssignmentConfigs.length > 0 && validLinks.length === 0) {
+      return {
+        config: null,
+        source: 'company_cao_assignment_ambiguous_active_cao_configurations',
+        cao_key: ambiguousAssignmentConfigs[0]?.assignment?.cao_key || requestedCaoKey || null,
+        candidate_company_cao_assignment_ids: ambiguousAssignmentConfigs.map(item => item.assignment.id).filter(Boolean),
+        candidate_configuration_ids: ambiguousAssignmentConfigs.flatMap(item => item.candidate_configuration_ids || []),
+        warning: `Meerdere actieve CAO-configuraties gevonden voor een bedrijfs-CAO-koppeling op ${serviceDate}; planning/payroll is geblokkeerd totdat overlappende CAO-configuraties zijn opgeschoond.`
+      };
+    }
+
     if (validLinks.length > 1) {
       return {
         config: null,
@@ -1886,7 +1930,7 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
           config: null,
           source: 'company_cao_assignment_contains_invalid_config',
           candidate_company_cao_assignment_ids: resolvedCompanyCaos.map(item => item.assignment.id).filter(Boolean),
-          candidate_configuration_ids: resolvedCompanyCaos.map(item => item.assignment.cao_configuration_id).filter(Boolean),
+          candidate_configuration_ids: resolvedCompanyCaos.flatMap(item => item.candidate_configuration_ids || [item.assignment.cao_configuration_id]).filter(Boolean),
           warning: `Actieve bedrijfs-CAO-koppelingen gevonden voor ${serviceDate}, maar minimaal een gekoppelde CAO-configuratie ontbreekt of is niet geldig op die datum.`
         };
       }
@@ -1906,7 +1950,7 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
       config: null,
       source,
       candidate_company_cao_assignment_ids: matchingCompanyCaoAssignments.map(assignment => assignment.id).filter(Boolean),
-      candidate_configuration_ids: matchingCompanyCaoAssignments.map(assignment => assignment.cao_configuration_id).filter(Boolean),
+      candidate_configuration_ids: resolvedCompanyCaos.flatMap(item => item.candidate_configuration_ids || [item.assignment.cao_configuration_id]).filter(Boolean),
       warning: `Actieve bedrijfs-CAO-koppeling gevonden voor ${serviceDate}, maar de gekoppelde CAO-configuratie ontbreekt of is niet geldig op die datum.`
     };
   }

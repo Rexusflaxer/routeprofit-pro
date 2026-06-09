@@ -831,6 +831,111 @@ async function runContractScopePersistenceScenarios() {
   assert.equal(persistence.security_role_status, 'not_applicable');
 }
 
+async function runPersonnelContractCaoFoundationScenarios() {
+  const duplicateScopeBase44 = {
+    asServiceRole: {
+      entities: {
+        CompanyCaoAssignment: {
+          filter: async () => [{
+            id: 'company-cao-pb',
+            company_id: 'company-a',
+            cao_key: null,
+            cao_configuration_id: 'cao-config-pb',
+            valid_from: '2025-01-01',
+            valid_until: null
+          }]
+        },
+        CAOConfiguration: {
+          get: async (id) => id === 'cao-config-pb'
+            ? { id, cao_key: 'cao_particuliere_beveiliging' }
+            : null
+        },
+        PersonnelContract: {
+          filter: async () => [{
+            id: 'contract-existing',
+            personnel_id: 'person-1',
+            company_id: 'company-b',
+            contract_start_date: '2026-01-01',
+            contract_end_date: null,
+            function_type: 'klantrelatie',
+            allowed_function_types: ['klantrelatie'],
+            cao_function_group: 'non_security_staff',
+            is_current: true
+          }]
+        }
+      }
+    }
+  };
+  const duplicateResult = await contractRules.evaluateContractBasis(duplicateScopeBase44, {
+    body: {
+      personnel_id: 'person-1',
+      company_id: 'company-a',
+      cao_key: 'cao_particuliere_beveiliging',
+      contract_form: 'bepaalde_tijd',
+      contract_start_date: '2026-06-01',
+      contract_end_date: null,
+      function_type: 'klantrelatie',
+      allowed_function_types: ['klantrelatie'],
+      cao_function_group: 'non_security_staff',
+      performs_security_work: false,
+      security_work_percentage: 0,
+      security_role_status: 'not_applicable'
+    },
+    personnel: { id: 'person-1' },
+    contract: { id: 'contract-new' },
+    targetCaoKey: null
+  });
+  assert.equal(duplicateResult.company_cao_link.status, 'linked', 'Contract CAO must be checked against company-linked CAOs');
+  assert.equal(duplicateResult.duplicate_function_scope.status, 'blocked_duplicate_active_function_scope');
+  assert.ok(
+    duplicateResult.violations.some(violation => violation.rule_id === 'APP-CONTRACT-BASIS-DUPLICATE-FUNCTION-SCOPE'),
+    'Overlapping duplicate function scope must block contract finalisation'
+  );
+
+  const mismatchedCompanyCaoBase44 = {
+    asServiceRole: {
+      entities: {
+        CompanyCaoAssignment: {
+          filter: async () => [{
+            id: 'company-cao-ehb',
+            company_id: 'company-a',
+            cao_key: 'cao_evenementen_horecabeveiliging',
+            valid_from: '2025-01-01',
+            valid_until: null
+          }]
+        },
+        PersonnelContract: {
+          filter: async () => []
+        }
+      }
+    }
+  };
+  const mismatchResult = await contractRules.evaluateContractBasis(mismatchedCompanyCaoBase44, {
+    body: {
+      personnel_id: 'person-2',
+      company_id: 'company-a',
+      cao_key: 'cao_particuliere_beveiliging',
+      contract_form: 'bepaalde_tijd',
+      contract_start_date: '2026-06-01',
+      contract_end_date: null,
+      function_type: 'objectbeveiliger',
+      allowed_function_types: ['objectbeveiliger'],
+      cao_function_group: 'objectbeveiliger_receptionist',
+      performs_security_work: true,
+      security_work_percentage: 100,
+      security_role_status: 'beveiliger'
+    },
+    personnel: { id: 'person-2' },
+    contract: { id: 'contract-pb' },
+    targetCaoKey: null
+  });
+  assert.equal(mismatchResult.company_cao_link.status, 'blocked_company_cao_not_linked');
+  assert.ok(
+    mismatchResult.violations.some(violation => violation.rule_id === 'APP-CONTRACT-BASIS-COMPANY-CAO-LINK'),
+    'Contract finalisation must block when selected CAO is not linked to the selected company'
+  );
+}
+
 function runProbationScenarios() {
   const fullSecurityScope = {
     cao_scope_profile: 'full_security_worker',
@@ -1201,6 +1306,37 @@ async function runCaoConfigurationDateSelectionScenarios() {
     spanningPayroll.candidates.map(candidate => candidate.id),
     ['cao-new', 'cao-old'],
     'Payroll period crossing a CAO change must expose both candidates and require splitting'
+  );
+
+  const keyOnlyCompanyCaoResolution = await contractResolver.getCaoConfigForContract({
+    asServiceRole: {
+      entities: {
+        CAOConfiguration: {
+          filter: async ({ cao_key }) => [oldConfig, newConfig].filter(config =>
+            config.cao_key === cao_key && config.is_active === true
+          )
+        }
+      }
+    }
+  }, {
+    contract: {},
+    companyAssignment: null,
+    company: {},
+    companyCaoAssignments: [{
+      id: 'company-cao-pb',
+      cao_key: 'cao_particuliere_beveiliging',
+      cao_configuration_id: null,
+      applies_to_activities: ['all']
+    }],
+    serviceDate: '2026-05-10',
+    requestedCaoKey: 'cao_particuliere_beveiliging',
+    serviceContext: {}
+  });
+  assert.equal(keyOnlyCompanyCaoResolution.source, 'company_cao_assignment');
+  assert.equal(
+    keyOnlyCompanyCaoResolution.config.id,
+    'cao-new',
+    'Company CAO assignments must resolve by cao_key + service date when no fixed cao_configuration_id is stored'
   );
 
   const scheduleBase44 = {
@@ -1869,6 +2005,28 @@ function runCaoGovernanceUiOptionScenarios() {
   assert.equal(includedInactive.selectable, false, 'Inactive selected CAO configs may be shown for existing companies but must not be selectable');
   assert.equal(includedInactive.included_for_existing_company, true);
   assert.ok(includedInactive.warning.includes('niet actief'));
+
+  const groupedOptions = caoConfigurationOptions.buildGroupedCaoKeyOptions([
+    activeConfig,
+    {
+      ...activeConfig,
+      id: 'cao-config-active-2026',
+      name: 'CAO PB loonperiode 1 2026 registry baseline',
+      version_label: '2026',
+      valid_from: '2025-12-29',
+      valid_until: '2027-01-03'
+    }
+  ], []);
+  assert.equal(groupedOptions.length, 1, 'Company CAO chooser must group technical CAO periods into one business-level CAO option');
+  assert.equal(groupedOptions[0].id, 'cao-key:cao_particuliere_beveiliging');
+  assert.equal(groupedOptions[0].label, 'CAO Particuliere Beveiliging');
+  assert.equal(groupedOptions[0].grouped_by_cao_key, true);
+  assertSameValues(
+    groupedOptions[0].configuration_ids,
+    ['cao-config-active', 'cao-config-active-2026'],
+    'Grouped company CAO option must retain the technical period ids for backwards-compatible labels'
+  );
+  assert.equal(caoConfigurationOptions.assertNoSensitiveCaoConfigurationFields(groupedOptions[0]).passed, true);
 }
 
 function listFilesRecursive(rootDir, extensions) {
@@ -2230,6 +2388,7 @@ async function main() {
     ['planning assignment decision', () => runPlanningAssignmentDecisionScenarios()],
     ['integrated multi-company planning contract flow', () => runIntegratedMultiCompanyPlanningContractScenarios()],
     ['contract scope persistence', () => runContractScopePersistenceScenarios()],
+    ['personnel contract company CAO foundation', () => runPersonnelContractCaoFoundationScenarios()],
     ['probation rules', () => runProbationScenarios()],
     ['effective-date correction queue', () => runEffectiveDateCorrectionScenarios()],
     ['CAO configuration date selection', () => runCaoConfigurationDateSelectionScenarios()],

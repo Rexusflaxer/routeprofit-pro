@@ -800,6 +800,46 @@
       ],
       "description": "Bijlage-2 functieniveau voor dit contract."
     },
+    "cao_scale": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "default": null,
+      "description": "Contractspecifieke CAO-loonschaal. Voor beveiligingswerk moet deze passen bij de CAO-functieclassificatie en de geldige loontabel."
+    },
+    "cao_period": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "default": null,
+      "description": "Contractspecifieke periodiek/functiejaar binnen de loonschaal. CAO PB artikel 35 kent jaarlijks 1 periodiekverhoging toe totdat de schaal is volgemaakt."
+    },
+    "custom_hourly_rate": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "default": null,
+      "description": "Vrij uurloon voor contractscope waarop bijlage 2-loonschalen niet van toepassing zijn, bijvoorbeeld artikel 3 niet-beveiligingswerk."
+    },
+    "written_scale_period_notice_confirmed": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "default": null,
+      "description": "True als werkgever schriftelijk heeft bevestigd in welke loonschaal, welk basisloon en welke periodiek de werknemer valt."
+    },
+    "periodic_increase_due_confirmed": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "default": null,
+      "description": "True als de jaarlijkse periodiekverhoging voor dit contract is beoordeeld/verwerkt voor de relevante peildatum."
+    },
     "allowed_cao_function_levels": {
       "type": "array",
       "items": {

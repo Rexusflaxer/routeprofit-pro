@@ -1552,6 +1552,33 @@ function appendReviewNote(existingNotes, note) {
   return [existingNotes || '', note].filter(Boolean).join('\n');
 }
 
+function appendConfigNote(existingNotes, note) {
+  return [existingNotes || '', note].filter(Boolean).join('\n');
+}
+
+async function archiveSameStartActiveCaoConfigurations(base44, { caoKey, validFrom, keepId }) {
+  if (!caoKey || !validFrom || !keepId) return [];
+  const candidates = await base44.asServiceRole.entities.CAOConfiguration.filter({
+    cao_key: caoKey,
+    valid_from: validFrom,
+    is_active: true
+  }).catch(() => []);
+  const archivedIds = [];
+  for (const config of candidates || []) {
+    if (!config?.id || config.id === keepId || config.status === 'archived') continue;
+    await base44.asServiceRole.entities.CAOConfiguration.update(config.id, {
+      status: 'archived',
+      is_active: false,
+      notes: appendConfigNote(
+        config.notes,
+        `Gearchiveerd door ingestCaoAutomationPayload omdat CAO-configuratie ${keepId} dezelfde cao_key + valid_from actief houdt (${caoKey}, ${validFrom}).`
+      )
+    });
+    archivedIds.push(config.id);
+  }
+  return archivedIds;
+}
+
 function sameStableValue(left, right) {
   return JSON.stringify(stableForHash(left ?? null)) === JSON.stringify(stableForHash(right ?? null));
 }
@@ -2760,6 +2787,7 @@ Deno.serve(async (req) => {
 
     // Upsert / create CAOConfiguration
     let configId = null;
+    let archivedSameStartConfigIds = [];
     if (Object.keys(candidate_configuration).length > 0 || isOwnerApproved) {
       const existingConfigs = await base44.asServiceRole.entities.CAOConfiguration.filter({ cao_key: normalizedCaoKey });
       const inProgressReadinessGate = buildIncompleteRuleImportGate(
@@ -2826,6 +2854,13 @@ Deno.serve(async (req) => {
       } else {
         const newConfig = await base44.asServiceRole.entities.CAOConfiguration.create(configData);
         configId = newConfig.id;
+      }
+      if (isOwnerApproved && configId) {
+        archivedSameStartConfigIds = await archiveSameStartActiveCaoConfigurations(base44, {
+          caoKey: candidate_configuration.cao_key || normalizedCaoKey,
+          validFrom: candidate_configuration.valid_from || null,
+          keepId: configId
+        });
       }
     }
 
@@ -3015,6 +3050,7 @@ Deno.serve(async (req) => {
       created_review_ids: reviewIds,
       reused_review_ids: reusedReviewIds,
       superseded_review_ids: [...new Set(supersededReviewIds)],
+      archived_same_start_configuration_ids: archivedSameStartConfigIds,
       created_correction_ids: [
         ...(correctionQueueSummary?.created_correction_ids || []),
         ...(correctionQueueSummary?.updated_correction_ids || [])

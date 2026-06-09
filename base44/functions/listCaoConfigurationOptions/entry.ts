@@ -42,6 +42,13 @@ const SENSITIVE_CAO_CONFIGURATION_FIELDS = [
   'notes'
 ];
 
+const CAO_KEY_LABELS = {
+  cao_particuliere_beveiliging: 'CAO Particuliere Beveiliging',
+  cao_evenementen_horecabeveiliging: 'Evenementen- en Horecabeveiligingsbranche',
+  cao_verkeersregelaars: 'CAO Verkeersregelaars',
+  cao_veiligheidsdomein: 'CAO Veiligheidsdomein'
+};
+
 function uniqueStrings(values) {
   return [...new Set((values || [])
     .map(value => String(value || '').trim())
@@ -83,6 +90,87 @@ function sortCaoConfigurationOptions(a, b) {
   return keyA.localeCompare(keyB);
 }
 
+function sortByValidFrom(a, b) {
+  return String(a.valid_from || '').localeCompare(String(b.valid_from || '')) ||
+    String(a.valid_until || '').localeCompare(String(b.valid_until || '')) ||
+    String(a.id || '').localeCompare(String(b.id || ''));
+}
+
+function minDate(values) {
+  const dates = uniqueStrings(values).sort();
+  return dates[0] || null;
+}
+
+function maxDate(values) {
+  const dates = uniqueStrings(values).sort();
+  return dates[dates.length - 1] || null;
+}
+
+function buildCaoKeyOption(configs, includeIds = []) {
+  const sorted = [...configs].sort(sortByValidFrom);
+  const active = sorted.filter(isActiveCaoConfiguration);
+  const representative = active[active.length - 1] || sorted[sorted.length - 1] || sorted[0] || {};
+  const caoKey = representative.cao_key || sorted.find(config => config.cao_key)?.cao_key || null;
+  const label = CAO_KEY_LABELS[caoKey] ||
+    representative.display_name ||
+    representative.name ||
+    caoKey ||
+    'CAO';
+  const validFrom = minDate(sorted.map(config => config.valid_from));
+  const hasOpenEnded = sorted.some(config => !config.valid_until);
+  const validUntil = hasOpenEnded ? null : maxDate(sorted.map(config => config.valid_until));
+  const includedInactiveIds = sorted
+    .filter(config => includeIds.includes(config.id) && !isActiveCaoConfiguration(config))
+    .map(config => config.id);
+
+  return {
+    id: `cao-key:${caoKey || 'unknown'}`,
+    cao_key: caoKey,
+    cao_configuration_id: null,
+    name: label,
+    display_name: label,
+    label,
+    sector: representative.sector || null,
+    version_label: active.length === 1
+      ? '1 actieve CAO-periode automatisch'
+      : `${active.length} actieve CAO-perioden automatisch`,
+    valid_from: validFrom,
+    valid_until: validUntil,
+    status: active.length > 0 ? 'active' : 'archived',
+    is_active: active.length > 0,
+    is_payroll_ready: active.some(config => config.is_payroll_ready === true),
+    payroll_readiness_status: active.length > 0 && active.every(config => config.payroll_readiness_status === 'ready') ? 'ready' : representative.payroll_readiness_status || null,
+    selectable: active.length > 0,
+    grouped_by_cao_key: true,
+    configuration_ids: sorted.map(config => config.id).filter(Boolean),
+    active_configuration_count: active.length,
+    periods: sorted.map(config => ({
+      id: config.id,
+      valid_from: config.valid_from || null,
+      valid_until: config.valid_until || null,
+      version_label: config.version_label || null,
+      selectable: isActiveCaoConfiguration(config)
+    })),
+    included_for_existing_company: includedInactiveIds.length > 0,
+    warning: includedInactiveIds.length > 0
+      ? 'Deze CAO bevat een oudere niet-actieve configuratie die alleen is meegenomen vanwege een bestaande koppeling.'
+      : null
+  };
+}
+
+function buildGroupedCaoKeyOptions(configs, includeIds = []) {
+  const groups = {};
+  for (const config of configs || []) {
+    const key = config.cao_key || `config:${config.id}`;
+    if (!groups[key]) groups[key] = [];
+    groups[key].push(config);
+  }
+  return Object.values(groups)
+    .map(group => buildCaoKeyOption(group, includeIds))
+    .filter(option => option.cao_key)
+    .sort((a, b) => String(a.label || '').localeCompare(String(b.label || '')));
+}
+
 Deno.serve(async (req) => {
   try {
     if (!['GET', 'POST'].includes(req.method)) {
@@ -92,16 +180,20 @@ Deno.serve(async (req) => {
     const body = req.method === 'POST' ? await req.json().catch(() => ({})) : {};
     const includeIds = uniqueStrings(body.include_ids || body.includeIds || []);
     const includeInactiveSelected = body.include_inactive_selected !== false;
+    const groupByCaoKey = body.group_by_cao_key === true || body.groupByCaoKey === true;
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ success: false, error: 'Unauthorized' }, { status: 401 });
 
     const configs = await base44.asServiceRole.entities.CAOConfiguration.list();
-    const options = (configs || [])
-      .filter(config => isActiveCaoConfiguration(config) || (includeInactiveSelected && includeIds.includes(config.id)))
-      .map(config => buildCaoConfigurationOption(config, includeIds))
-      .filter(option => assertNoSensitiveCaoConfigurationFields(option).passed)
-      .sort(sortCaoConfigurationOptions);
+    const visibleConfigs = (configs || [])
+      .filter(config => isActiveCaoConfiguration(config) || (includeInactiveSelected && includeIds.includes(config.id)));
+    const options = groupByCaoKey
+      ? buildGroupedCaoKeyOptions(visibleConfigs, includeIds)
+      : visibleConfigs
+        .map(config => buildCaoConfigurationOption(config, includeIds))
+        .filter(option => assertNoSensitiveCaoConfigurationFields(option).passed)
+        .sort(sortCaoConfigurationOptions);
 
     return Response.json({
       success: true,

@@ -106,6 +106,13 @@
       },
       "description": "Duplicate CAOChangeReview IDs die tijdens import op superseded zijn gezet."
     },
+    "archived_same_start_configuration_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "description": "Oudere actieve CAOConfiguration IDs met dezelfde cao_key + valid_from die tijdens sync/ingest zijn gearchiveerd."
+    },
     "created_correction_ids": {
       "type": "array",
       "items": {
