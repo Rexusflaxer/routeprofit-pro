@@ -7,6 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, Building2, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
+import { motion, AnimatePresence } from "framer-motion";
 import CompanyForm from "@/components/companies/CompanyForm";
 import { attachManagedFilesToOwner, updateManagedFileSource } from "@/lib/managedFiles";
 

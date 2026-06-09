@@ -279,7 +279,7 @@ export default function CaoTab({ companyId }) {
         <span className="w-24 shrink-0">Status</span>
         <span className="w-48 shrink-0">Geldigheid</span>
         {!showWizard && !deleteId && (
-          <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
+          <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
             <Plus className="w-3 h-3 mr-1" /> Nieuwe koppeling
           </Button>
         )}

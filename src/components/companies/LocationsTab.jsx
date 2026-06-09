@@ -150,7 +150,7 @@ export default function LocationsTab({ companies }) {
         <span className="w-28 shrink-0">Type</span>
         <span className="flex-1">Adres</span>
         {!showForm && !deleteId && (
-          <Button size="sm" variant="outline" onClick={openNew} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
+          <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
             <Plus className="w-3 h-3 mr-1" /> Vestiging toevoegen
           </Button>
         )}
