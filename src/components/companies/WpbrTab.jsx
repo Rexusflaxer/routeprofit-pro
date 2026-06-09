@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -75,6 +75,15 @@ export default function WpbrTab({ companyId, company }) {
   const [formPreviewOpen, setFormPreviewOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
+
+  useEffect(() => {
+    if (showWizard) {
+      const timer = setTimeout(() => {
+        wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+      }, 200);
+      return () => clearTimeout(timer);
+    }
+  }, [step, showWizard]);
 
   const { data: licenses = [] } = useQuery({
     queryKey: ["wpbr-licenses", companyId],
@@ -173,7 +182,7 @@ export default function WpbrTab({ companyId, company }) {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">WPBR-vergunningen</h3>
         {!showWizard &&
-        <Button size="sm" variant="outline" onClick={() => {setShowWizard(true);setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);}}>
+        <Button size="sm" variant="outline" onClick={() => setShowWizard(true)}>
             <Plus className="w-4 h-4 mr-1" /> Nieuwe vergunning
           </Button>
         }
@@ -255,7 +264,7 @@ export default function WpbrTab({ companyId, company }) {
                         </div>
                       </div>
                       <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); setErrors({}); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }), 150); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                         <Button size="sm" onClick={() => { if (validateStep2()) { setDirection(1); setStep(3); } }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
                       </div>
                     </div>
@@ -296,7 +305,7 @@ export default function WpbrTab({ companyId, company }) {
                       )}
 
                       <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(2); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(2); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
                           <Button size="sm" onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending || !form.document_file_url}>
