@@ -122,6 +122,13 @@ export default function Companies() {
     setMigrateLoading(false);
   };
 
+  const [clickedId, setClickedId] = useState(null);
+
+  const handleRowClick = (id) => {
+    setClickedId(id);
+    setTimeout(() => navigate(`/CompanyDetail?id=${id}`), 220);
+  };
+
   const openNew = () => { setEditingCompany(null); setDialogOpen(true); };
 
   const getCaoName = (id) => {
@@ -198,10 +205,12 @@ export default function Companies() {
             </TableHeader>
             <TableBody>
               {getGroupedCompanies().map(({ company, isChild }) => (
-                <TableRow
+                <motion.tr
                   key={company.id}
-                  className={`cursor-pointer transition-colors ${isChild ? "bg-muted/10 hover:bg-accent" : "hover:bg-accent"}`}
-                  onClick={() => navigate(`/CompanyDetail?id=${company.id}`)}
+                  animate={clickedId === company.id ? { opacity: 0, x: 18 } : { opacity: 1, x: 0 }}
+                  transition={{ duration: 0.2, ease: "easeIn" }}
+                  className={`cursor-pointer transition-colors border-b border-border last:border-0 ${isChild ? "bg-muted/10 hover:bg-accent" : "hover:bg-accent"}`}
+                  onClick={() => handleRowClick(company.id)}
                 >
                   <TableCell>
                     <div className={`flex items-center gap-2 ${isChild ? "pl-6 border-l-2 border-muted ml-1" : ""}`}>
@@ -239,7 +248,7 @@ export default function Companies() {
                       {company.status === "active" ? "Actief" : company.status === "inactive" ? "Inactief" : "Gearchiveerd"}
                     </span>
                   </TableCell>
-                </TableRow>
+                </motion.tr>
               ))}
             </TableBody>
           </Table>
