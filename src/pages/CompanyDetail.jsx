@@ -196,10 +196,10 @@ export default function CompanyDetail() {
       <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
         {/* Top banner */}
         <div className="bg-muted/40 border-b border-border px-6 py-5 flex items-center gap-5">
-          <div className="w-24 h-24 rounded-xl border border-border bg-white flex items-center justify-center overflow-hidden shrink-0 relative group">
+          <div className="w-16 h-16 rounded-xl border border-border bg-white flex items-center justify-center overflow-hidden shrink-0 relative group">
             {data.logo_file_url
-              ? <img src={data.logo_file_url} alt="logo" className="object-contain w-full h-full p-2" />
-              : <Building2 className="w-12 h-12 text-muted-foreground/50" />
+              ? <img src={data.logo_file_url} alt="logo" className="object-contain w-full h-full p-1" />
+              : <Building2 className="w-8 h-8 text-muted-foreground/50" />
             }
             {editing && (
               <label className="absolute inset-0 flex items-center justify-center bg-black/40 cursor-pointer rounded-xl">
