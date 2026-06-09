@@ -255,7 +255,7 @@ export default function WpbrTab({ companyId, company }) {
                         </div>
                       </div>
                       <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); setErrors({}); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); setErrors({}); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "end" }), 150); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                         <Button size="sm" onClick={() => { if (validateStep2()) { setDirection(1); setStep(3); } }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
                       </div>
                     </div>
