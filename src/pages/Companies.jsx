@@ -218,7 +218,7 @@ export default function Companies() {
                   </TableCell>
                   <TableCell className="text-sm text-muted-foreground">{company.kvk_number || "—"}</TableCell>
                   <TableCell>
-                    <Badge variant="outline" className="text-xs">{ROLE_LABELS[company.company_role] || company.company_role}</Badge>
+                    <span className="text-xs bg-muted text-foreground px-2 py-1 rounded font-medium">{ROLE_LABELS[company.company_role] || company.company_role}</span>
                   </TableCell>
                   <TableCell>
                     <div className="flex flex-wrap gap-1">
