@@ -244,7 +244,7 @@ export default function CompanyDetail() {
                 </Button>
               </>
             ) : (
-              <Button onClick={startEdit}>
+              <Button onClick={startEdit} className="bg-primary text-primary-foreground hover:bg-primary/90">
                 <Edit className="w-4 h-4 mr-1" /> Wijzigen
               </Button>
             )}
