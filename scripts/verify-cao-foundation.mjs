@@ -1308,13 +1308,11 @@ async function runCaoConfigurationDateSelectionScenarios() {
     'Payroll period crossing a CAO change must expose both candidates and require splitting'
   );
 
-  const keyOnlyCompanyCaoResolution = await contractResolver.getCaoConfigForContract({
+  const missingContractCaoResolution = await contractResolver.getCaoConfigForContract({
     asServiceRole: {
       entities: {
         CAOConfiguration: {
-          filter: async ({ cao_key }) => [oldConfig, newConfig].filter(config =>
-            config.cao_key === cao_key && config.is_active === true
-          )
+          filter: async () => [oldConfig, newConfig]
         }
       }
     }
@@ -1332,11 +1330,44 @@ async function runCaoConfigurationDateSelectionScenarios() {
     requestedCaoKey: 'cao_particuliere_beveiliging',
     serviceContext: {}
   });
+  assert.equal(
+    missingContractCaoResolution.source,
+    'missing_contract_cao_key',
+    'Company CAO must not fill a missing contract cao_key'
+  );
+
+  const keyOnlyCompanyCaoResolution = await contractResolver.getCaoConfigForContract({
+    asServiceRole: {
+      entities: {
+        CAOConfiguration: {
+          filter: async ({ cao_key }) => [oldConfig, newConfig].filter(config =>
+            config.cao_key === cao_key && config.is_active === true
+          )
+        }
+      }
+    }
+  }, {
+    contract: {
+      id: 'contract-pb',
+      cao_key: 'cao_particuliere_beveiliging'
+    },
+    companyAssignment: null,
+    company: {},
+    companyCaoAssignments: [{
+      id: 'company-cao-pb',
+      cao_key: 'cao_particuliere_beveiliging',
+      cao_configuration_id: null,
+      applies_to_activities: ['all']
+    }],
+    serviceDate: '2026-05-10',
+    requestedCaoKey: 'cao_particuliere_beveiliging',
+    serviceContext: {}
+  });
   assert.equal(keyOnlyCompanyCaoResolution.source, 'company_cao_assignment');
   assert.equal(
     keyOnlyCompanyCaoResolution.config.id,
     'cao-new',
-    'Company CAO assignments must resolve by cao_key + service date when no fixed cao_configuration_id is stored'
+    'Company CAO assignments must resolve the technical config by contract cao_key + service date when no fixed cao_configuration_id is stored'
   );
 
   const scheduleBase44 = {

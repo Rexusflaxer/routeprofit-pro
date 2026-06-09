@@ -225,7 +225,8 @@
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "Legacy/reference CAO-configuratie. Nieuwe contracten en payroll mogen niet via deze default worden afgeleid; gebruik CompanyCaoAssignment als toegestane CAO-lijst en PersonnelContract.cao_key als leidende contract-CAO."
     },
     "primary_location_id": {
       "type": [

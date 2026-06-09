@@ -1794,14 +1794,35 @@ function evaluateStoredContractReadiness(contract) {
 }
 
 async function getCaoConfigForContract(base44, { contract, companyAssignment, company, companyCaoAssignments, serviceDate, requestedCaoKey, serviceContext }) {
-  const explicitId = contract?.cao_configuration_id ||
-    companyAssignment?.default_cao_configuration_id ||
-    company?.default_cao_configuration_id ||
-    null;
-  const expectedExplicitCaoKey = requestedCaoKey ||
-    contract?.cao_key ||
-    companyAssignment?.cao_key ||
-    null;
+  if (!contract) {
+    return {
+      config: null,
+      source: 'missing_selected_contract',
+      warning: 'Geen arbeidscontract geselecteerd. CAO-resolutie mag niet via bedrijfsdefaults verlopen; kies eerst een passend arbeidscontract.'
+    };
+  }
+
+  const contractCaoKey = contract?.cao_key || null;
+  if (!contractCaoKey) {
+    return {
+      config: null,
+      source: 'missing_contract_cao_key',
+      warning: 'Geselecteerd arbeidscontract mist cao_key. Leg de toepasselijke CAO expliciet vast op het contract voordat planning/payroll definitief mag zijn.'
+    };
+  }
+
+  if (requestedCaoKey && requestedCaoKey !== contractCaoKey) {
+    return {
+      config: null,
+      source: 'contract_cao_key_mismatch',
+      cao_key: contractCaoKey,
+      requested_cao_key: requestedCaoKey,
+      warning: `Dienst vraagt cao_key ${requestedCaoKey}, maar geselecteerd arbeidscontract heeft cao_key ${contractCaoKey}.`
+    };
+  }
+
+  const explicitId = contract?.cao_configuration_id || null;
+  const expectedExplicitCaoKey = contractCaoKey;
 
   if (explicitId) {
     try {
@@ -1815,7 +1836,7 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
             warning: `CAO-configuratie ${explicitId} hoort bij ${config.cao_key || 'cao_key onbekend'}, maar de contract-/dienstcontext vraagt ${expectedExplicitCaoKey}.`
           };
         }
-        return { config, source: contract?.cao_configuration_id ? 'contract' : companyAssignment?.default_cao_configuration_id ? 'personnel_company_assignment' : 'company_default' };
+        return { config, source: 'contract' };
       }
       return {
         config: null,
@@ -1836,7 +1857,7 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
   const scopedCompanyCaoAssignments = activeCompanyCaoAssignments
     .map(assignment => ({
       assignment,
-      match: companyCaoAssignmentMatchesService(assignment, serviceContext, requestedCaoKey)
+      match: companyCaoAssignmentMatchesService(assignment, serviceContext, contractCaoKey)
     }));
   const matchingCompanyCaoAssignments = scopedCompanyCaoAssignments
     .filter(item => item.match.matched)
@@ -1861,27 +1882,25 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
     const assignmentConfigMismatches = dateValidLinks
       .filter(item => !assignmentMatchesConfigCaoKey(item.assignment, item.config));
     const caoKeyMismatches = dateValidLinks
-      .filter(item => !configMatchesRequestedCaoKey(item.config, requestedCaoKey));
+      .filter(item => !configMatchesRequestedCaoKey(item.config, contractCaoKey));
     const validLinks = dateValidLinks
-      .filter(item => configMatchesRequestedCaoKey(item.config, requestedCaoKey))
+      .filter(item => configMatchesRequestedCaoKey(item.config, contractCaoKey))
       .filter(item => assignmentMatchesConfigCaoKey(item.assignment, item.config))
       .sort((a, b) => {
-        if (a.assignment.is_primary && !b.assignment.is_primary) return -1;
-        if (!a.assignment.is_primary && b.assignment.is_primary) return 1;
         const assignmentDateCompare = String(b.assignment.valid_from || '').localeCompare(String(a.assignment.valid_from || ''));
         if (assignmentDateCompare !== 0) return assignmentDateCompare;
         return String(b.config.valid_from || '').localeCompare(String(a.config.valid_from || ''));
       });
 
-    if (requestedCaoKey && dateValidLinks.length > 0 && validLinks.length === 0) {
+    if (dateValidLinks.length > 0 && validLinks.length === 0) {
       return {
         config: null,
         source: 'company_cao_assignment_cao_key_mismatch',
-        cao_key: requestedCaoKey,
+        cao_key: contractCaoKey,
         candidate_company_cao_assignment_ids: matchingCompanyCaoAssignments.map(assignment => assignment.id).filter(Boolean),
         candidate_configuration_ids: dateValidLinks.map(item => item.config.id).filter(Boolean),
         mismatching_cao_keys: [...new Set(caoKeyMismatches.map(item => item.config.cao_key || 'unknown'))],
-        warning: `Actieve bedrijfs-CAO-koppelingen matchen de dienstactiviteit, maar geen gekoppelde CAO-configuratie hoort bij cao_key ${requestedCaoKey}.`
+        warning: `Actieve bedrijfs-CAO-koppelingen matchen de dienstactiviteit, maar geen gekoppelde CAO-configuratie hoort bij contract-cao_key ${contractCaoKey}.`
       };
     }
 
@@ -1901,7 +1920,7 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
       return {
         config: null,
         source: 'company_cao_assignment_ambiguous_active_cao_configurations',
-        cao_key: ambiguousAssignmentConfigs[0]?.assignment?.cao_key || requestedCaoKey || null,
+        cao_key: ambiguousAssignmentConfigs[0]?.assignment?.cao_key || contractCaoKey,
         candidate_company_cao_assignment_ids: ambiguousAssignmentConfigs.map(item => item.assignment.id).filter(Boolean),
         candidate_configuration_ids: ambiguousAssignmentConfigs.flatMap(item => item.candidate_configuration_ids || []),
         warning: `Meerdere actieve CAO-configuraties gevonden voor een bedrijfs-CAO-koppeling op ${serviceDate}; planning/payroll is geblokkeerd totdat overlappende CAO-configuraties zijn opgeschoond.`
@@ -1922,7 +1941,7 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
       const invalidLinks = resolvedCompanyCaos.filter(item =>
         !item.config ||
         !isWithinDateRange(item.config, serviceDate, 'valid_from', 'valid_until') ||
-        !configMatchesRequestedCaoKey(item.config, requestedCaoKey) ||
+        !configMatchesRequestedCaoKey(item.config, contractCaoKey) ||
         !assignmentMatchesConfigCaoKey(item.assignment, item.config)
       );
       if (invalidLinks.length > 0) {
@@ -1955,12 +1974,13 @@ async function getCaoConfigForContract(base44, { contract, companyAssignment, co
     };
   }
 
-  const caoKey = contract?.cao_key || companyAssignment?.cao_key || requestedCaoKey || null;
-  if (!caoKey) {
+  const caoKey = contractCaoKey;
+  if (activeCompanyCaoAssignments.length === 0) {
     return {
       config: null,
-      source: 'missing_cao_key',
-      warning: 'Geen cao_key gevonden op contract, medewerker-bedrijfskoppeling of dienstcontext. Contractresolutie mag niet standaard naar CAO PB vallen; leg de toepasselijke CAO expliciet vast.'
+      source: 'missing_company_cao_assignment',
+      cao_key: caoKey,
+      warning: `Bedrijf heeft geen actieve CAO-koppeling voor contract-cao_key ${caoKey} op ${serviceDate}. Koppel de CAO eerst aan het bedrijf.`
     };
   }
 
@@ -2081,22 +2101,22 @@ Deno.serve(async (req) => {
     manualReviewReasons.push(...companyScopedContracts.manual_review_reasons);
     warnings.push(...companyScopedContracts.warnings);
 
+    const contractsMissingCaoKey = contractCandidates.filter(c => !c.cao_key);
+    if (contractsMissingCaoKey.length > 0) {
+      blockingReasons.push('Een of meer actieve kandidaatcontracten missen cao_key. Contracten zonder expliciete CAO mogen niet worden gebruikt voor planning/payroll.');
+      contractCandidates = contractCandidates.filter(c => c.cao_key);
+    }
+
     if (serviceContext.cao_key && contractCandidates.length > 0) {
       const matchingCaoContracts = contractCandidates.filter(c => c.cao_key === serviceContext.cao_key);
-      const unknownCaoContracts = contractCandidates.filter(c => !c.cao_key);
       const mismatchingCaoContracts = contractCandidates.filter(c => c.cao_key && c.cao_key !== serviceContext.cao_key);
-      contractCandidates = matchingCaoContracts.length > 0
-        ? matchingCaoContracts
-        : unknownCaoContracts;
+      contractCandidates = matchingCaoContracts;
 
-      if (matchingCaoContracts.length === 0 && unknownCaoContracts.length === 0 && mismatchingCaoContracts.length > 0) {
+      if (matchingCaoContracts.length === 0 && mismatchingCaoContracts.length > 0) {
         blockingReasons.push(`Geen actief contract met cao_key ${serviceContext.cao_key}; beschikbare contracten hebben een andere CAO.`);
       }
-      if (matchingCaoContracts.length === 0 && unknownCaoContracts.length > 0) {
-        manualReviewReasons.push(`Dienst vraagt cao_key ${serviceContext.cao_key}, maar een of meer kandidaatcontracten missen cao_key. Vul contract.cao_key voor definitieve planning/payroll.`);
-      }
-      if (matchingCaoContracts.length > 0 && (mismatchingCaoContracts.length > 0 || unknownCaoContracts.length > 0)) {
-        warnings.push(`Contracten zonder of met afwijkende cao_key zijn genegeerd voor deze dienst (${serviceContext.cao_key}).`);
+      if (matchingCaoContracts.length > 0 && mismatchingCaoContracts.length > 0) {
+        warnings.push(`Contracten met afwijkende cao_key zijn genegeerd voor deze dienst (${serviceContext.cao_key}).`);
       }
     }
 
@@ -2174,7 +2194,7 @@ Deno.serve(async (req) => {
     }
 
     if (selectedContract && !selectedContract.cao_key) {
-      manualReviewReasons.push('Geselecteerd contract mist cao_key. Leg de toepasselijke CAO expliciet vast op het arbeidscontract voordat planning/payroll definitief mag zijn.');
+      blockingReasons.push('Geselecteerd contract mist cao_key. Leg de toepasselijke CAO expliciet vast op het arbeidscontract voordat planning/payroll definitief mag zijn.');
     }
 
     const selectedContractReadiness = selectedContract

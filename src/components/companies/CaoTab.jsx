@@ -29,7 +29,6 @@ const DELETE_PASSWORD = "verwijder";
 const EMPTY_FORM = {
   cao_configuration_id: null,
   cao_key: null,
-  is_primary: false,
   applies_to_activities: ["all"],
   valid_from: "",
   valid_until: "",
@@ -91,7 +90,6 @@ function CaoStatusBadge({ assignment }) {
   const notStarted = assignment.valid_from && assignment.valid_from > today;
   if (isExpired) return <Badge variant="outline" className="text-xs text-amber-600 border-amber-300">Verlopen</Badge>;
   if (notStarted) return <Badge variant="outline" className="text-xs text-muted-foreground">Toekomstig</Badge>;
-  if (assignment.is_primary) return <Badge className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 border-0">Primair</Badge>;
   return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0">Actief</Badge>;
 }
 
@@ -187,7 +185,6 @@ export default function CaoTab({ companyId }) {
     setForm({
       cao_configuration_id: a.cao_key ? null : a.cao_configuration_id || null,
       cao_key: a.cao_key || option?.cao_key || null,
-      is_primary: a.is_primary || false,
       applies_to_activities: a.applies_to_activities || ["all"],
       valid_from: a.valid_from || "",
       valid_until: a.valid_until || "",
@@ -241,20 +238,12 @@ export default function CaoTab({ companyId }) {
                           className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${form.cao_key === c.cao_key ? "border-primary bg-accent" : "border-border bg-card"}`}>
                           <div>
                             <span className="text-sm font-semibold text-foreground">{caoOptionLabel(c)}</span>
-                            {c.version_label && <span className="text-xs text-muted-foreground ml-2">{c.version_label}</span>}
-                            {c.valid_from && <span className="text-xs text-muted-foreground ml-2">vanaf {c.valid_from}</span>}
                           </div>
                           <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
                         </button>
                       ))}
                     </div>
                     {errors.cao_key && <p className="text-xs text-destructive">{errors.cao_key}</p>}
-                    <div className="flex items-center gap-3 pt-1">
-                      <label className="flex items-center gap-2 text-sm cursor-pointer">
-                        <input type="checkbox" checked={form.is_primary} onChange={(e) => set("is_primary", e.target.checked)} className="rounded border-input" />
-                        Primaire CAO voor dit bedrijf
-                      </label>
-                    </div>
                     <div className="flex justify-between pt-1">
                       <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
                       <Button size="sm" onClick={() => { if (validateStep1()) setStep(2); }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
@@ -294,7 +283,6 @@ export default function CaoTab({ companyId }) {
                     <p className="text-sm font-medium text-foreground">Controleer en bevestig</p>
                     <div className="rounded-lg border border-border bg-card p-4 space-y-2 text-sm">
                       <div className="flex justify-between"><span className="text-muted-foreground">CAO</span><span className="font-medium">{caoOptionLabel(selectedCaoOption)}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Primair</span><span>{form.is_primary ? "Ja" : "Nee"}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Geldig vanaf</span><span>{form.valid_from || "—"}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Geldig tot</span><span>{form.valid_until || "—"}</span></div>
                       <div className="flex justify-between"><span className="text-muted-foreground">Activiteiten</span><span>{ACTIVITY_OPTIONS.find(o => o.value === (form.applies_to_activities || ["all"])[0])?.label || "Alle"}</span></div>
@@ -338,7 +326,6 @@ export default function CaoTab({ companyId }) {
             <div key={a.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
               <div className="flex-1 min-w-0">
                 <span className="text-sm font-medium text-foreground">{caoOptionLabel(option || a)}</span>
-                {option?.version_label && <span className="text-xs text-muted-foreground ml-2">{option.version_label}</span>}
               </div>
               <div className="w-24 shrink-0"><CaoStatusBadge assignment={a} /></div>
               <div className="w-48 shrink-0 flex gap-3 text-xs text-muted-foreground">

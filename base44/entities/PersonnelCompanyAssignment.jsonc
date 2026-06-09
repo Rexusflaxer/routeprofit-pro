@@ -13,7 +13,7 @@
         "string",
         "null"
       ],
-      "description": "Default CAO sleutel voor deze medewerker-bedrijfskoppeling. Wordt gebruikt als contract/dienst geen specifiekere cao_key heeft; moet overeenkomen met default_cao_configuration_id wanneer die is gevuld."
+      "description": "Legacy/reference CAO sleutel voor deze medewerker-bedrijfskoppeling. Niet gebruiken als fallback voor arbeidscontracten: PersonnelContract.cao_key is verplicht voor planning/payroll."
     },
     "assignment_status": {
       "type": "string",
@@ -61,7 +61,8 @@
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "Legacy/reference configuratie. Niet gebruiken om een ontbrekende contract-CAO aan te vullen; contracten moeten zelf cao_key bevatten."
     },
     "future_contract_placeholder": {
       "type": [
