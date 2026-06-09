@@ -11,6 +11,7 @@ import { Button } from "@/components/ui/button";
 import { ThemeProvider, useTheme } from "next-themes";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
+import { motion, AnimatePresence } from "framer-motion";
 
 const LOGO_DARK = "/loq-logo-dark.png";
 const LOGO_LIGHT = "/loq-logo-light.png";
@@ -95,32 +96,40 @@ function UserProfileFooter({ onNavigate }) {
 
   return (
     <div ref={ref} className="relative border-t border-sidebar-border px-3 py-2.5">
-      {open && (
-        <div className="absolute bottom-full left-3 right-3 mb-1.5 z-50 rounded-lg border border-border bg-popover shadow-lg py-1 text-[13px]">
-          <button
-            onClick={() => handleNav("/EmployeePortal")}
-            className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent rounded-md transition-colors text-foreground"
+      <AnimatePresence>
+        {open && (
+          <motion.div
+            className="absolute bottom-full left-3 right-3 mb-1.5 z-50 rounded-lg border border-border bg-popover shadow-lg py-1 text-[13px]"
+            initial={{ opacity: 0, y: 8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: 8 }}
+            transition={{ duration: 0.15, ease: "easeOut" }}
           >
-            <UserCircle className="h-3.5 w-3.5 text-muted-foreground" />
-            Mijn profiel
-          </button>
-          <button
-            onClick={() => handleNav("/Companies")}
-            className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent rounded-md transition-colors text-foreground"
-          >
-            <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-            Mijn bedrijven
-          </button>
-          <div className="my-1 border-t border-border" />
-          <button
-            onClick={() => { setOpen(false); base44.auth.logout(); }}
-            className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent rounded-md transition-colors text-destructive"
-          >
-            <LogOut className="h-3.5 w-3.5" />
-            Uitloggen
-          </button>
-        </div>
-      )}
+            <button
+              onClick={() => handleNav("/EmployeePortal")}
+              className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent rounded-md transition-colors text-foreground"
+            >
+              <UserCircle className="h-3.5 w-3.5 text-muted-foreground" />
+              Mijn profiel
+            </button>
+            <button
+              onClick={() => handleNav("/Companies")}
+              className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent rounded-md transition-colors text-foreground"
+            >
+              <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+              Mijn bedrijven
+            </button>
+            <div className="my-1 border-t border-border" />
+            <button
+              onClick={() => { setOpen(false); base44.auth.logout(); }}
+              className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent rounded-md transition-colors text-destructive"
+            >
+              <LogOut className="h-3.5 w-3.5" />
+              Uitloggen
+            </button>
+          </motion.div>
+        )}
+      </AnimatePresence>
       <button
         onClick={() => setOpen(v => !v)}
         className="flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 hover:bg-sidebar-accent transition-colors"
