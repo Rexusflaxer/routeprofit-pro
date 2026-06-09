@@ -348,34 +348,32 @@ function LicenseCard({ license, muted }) {
   const documentName = license.document_download_filename || license.document_filename || "Document";
   return (
     <>
-      <div className={`rounded-lg border p-4 space-y-2 ${muted ? "border-border/50 opacity-70" : "border-border bg-card"}`}>
-        <div className="flex items-start justify-between gap-2">
-          <div className="flex items-center gap-2 flex-wrap">
-            <span className="text-sm font-semibold text-foreground">{license.license_type || "Onbekend type"}</span>
-            {license.license_number && <span className="text-sm text-muted-foreground">#{license.license_number}</span>}
+      <div className={`rounded-lg border px-4 py-3 ${muted ? "border-border/50 opacity-70" : "border-border bg-card"}`}>
+        <div className="flex items-center justify-between gap-2">
+          <div className="flex items-center gap-4 flex-1 min-w-0">
+            <span className="text-sm font-semibold text-foreground w-10 shrink-0">{license.license_type || "?"}</span>
+            {license.license_number && <span className="text-sm text-muted-foreground w-24 shrink-0">#{license.license_number}</span>}
             <LicenseStatusBadge license={license} />
+            <div className="flex gap-4 text-xs text-muted-foreground ml-2">
+              {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
+              {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
+            </div>
           </div>
           {license.document_file_url &&
-          <div className="flex items-center gap-1 shrink-0">
-            <Button
-              type="button"
-              variant="ghost"
-              size="icon"
-              onClick={() => setPreviewOpen(true)}
-              className="h-7 w-7 text-blue-600 hover:text-blue-700"
-              title="Vergunning bekijken"
-              aria-label="Vergunning bekijken"
-            >
-              <Eye className="w-3.5 h-3.5" />
-            </Button>
-          </div>
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            onClick={() => setPreviewOpen(true)}
+            className="h-7 w-7 text-blue-600 hover:text-blue-700 shrink-0"
+            title="Vergunning bekijken"
+            aria-label="Vergunning bekijken"
+          >
+            <Eye className="w-3.5 h-3.5" />
+          </Button>
           }
         </div>
-        <div className="flex gap-6 text-xs text-muted-foreground">
-          {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
-          {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
-        </div>
-        {license.notes && <p className="text-xs text-muted-foreground">{license.notes}</p>}
+        {license.notes && <p className="text-xs text-muted-foreground mt-1 pl-14">{license.notes}</p>}
       </div>
       <ManagedFilePreviewDialog
         open={previewOpen}
