@@ -117,7 +117,7 @@ function AppShell({ children, currentPageName }) {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-background text-foreground antialiased">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-72 border-r border-sidebar-border bg-sidebar lg:block">
+      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-sidebar-border bg-sidebar lg:block">
         <ContextNavigation currentPageName={currentPageName} />
       </aside>
 
@@ -144,7 +144,7 @@ function AppShell({ children, currentPageName }) {
         )}
       </header>
 
-      <main className="min-h-screen min-w-0 overflow-x-hidden lg:pl-72">
+      <main className="min-h-screen min-w-0 overflow-x-hidden lg:pl-64">
         <div className="px-4 py-3 sm:px-5 lg:px-6">
           {children}
         </div>
