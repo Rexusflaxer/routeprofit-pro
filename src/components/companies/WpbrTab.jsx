@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -57,6 +57,7 @@ function WizardSteps({ step }) {
 
 export default function WpbrTab({ companyId }) {
   const queryClient = useQueryClient();
+  const wizardRef = useRef(null);
   const [showWizard, setShowWizard] = useState(false);
   const [step, setStep] = useState(1);
   const [uploading, setUploading] = useState(false);
@@ -106,7 +107,7 @@ export default function WpbrTab({ companyId }) {
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">WPBR-vergunningen</h3>
         {!showWizard && (
-          <Button size="sm" variant="outline" onClick={() => setShowWizard(true)}>
+          <Button size="sm" variant="outline" onClick={() => { setShowWizard(true); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); }}>
             <Plus className="w-4 h-4 mr-1" /> Nieuwe vergunning
           </Button>
         )}
@@ -114,7 +115,7 @@ export default function WpbrTab({ companyId }) {
 
       {/* Wizard */}
       {showWizard && (
-        <div className="rounded-lg border border-primary/30 bg-muted/20 p-5">
+        <div ref={wizardRef} className="rounded-lg border border-primary/30 bg-muted/20 p-5">
           <WizardSteps step={step} />
 
           {/* Step 1: Kies type */}
