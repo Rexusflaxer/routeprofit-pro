@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import PageTransition from "@/components/ui-custom/PageTransition";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -184,7 +185,7 @@ export default function CollectiefPage() {
   const nested = collectieven.filter(c => !!c.parent_collectief_id);
 
   return (
-    <div className="space-y-6">
+    <PageTransition>
       <PageHeader
         title="Collectieven"
         subtitle="Beheer bedrijventerreinen, bedrijfsverzamelgebouwen en regio's"
@@ -262,6 +263,6 @@ export default function CollectiefPage() {
           onAction={() => setShowForm(true)}
         />
       )}
-    </div>
+    </PageTransition>
   );
 }

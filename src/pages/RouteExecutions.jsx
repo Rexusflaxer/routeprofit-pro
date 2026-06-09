@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import PageTransition from "@/components/ui-custom/PageTransition";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { Badge } from "@/components/ui/badge";
@@ -16,7 +17,7 @@ export default function RouteExecutions() {
   const visible = status === "all" ? executions : executions.filter(item => item.status === status);
 
   return (
-    <div className="space-y-6">
+    <PageTransition>
       <PageHeader title="Mobiele route-uitvoeringen" subtitle="Live voortgang van diensten, taken en mobiele sync" />
       <div className="flex flex-wrap gap-2">
         {["all", "planned", "active", "completed"].map(value => <Button key={value} variant={status === value ? "default" : "outline"} size="sm" onClick={() => setStatus(value)}>{value === "all" ? "Alles" : STATUS_LABELS[value]}</Button>)}
@@ -43,6 +44,6 @@ export default function RouteExecutions() {
           );
         })}
       </div>
-    </div>
+    </PageTransition>
   );
 }

@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import PageTransition from "@/components/ui-custom/PageTransition";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -112,7 +113,7 @@ export default function Customers() {
   }
 
   return (
-    <div className="space-y-6">
+    <PageTransition>
       <PageHeader
         title="Klanten"
         subtitle="Beheer particulieren en bedrijven die gekoppeld zijn aan objecten"
@@ -162,6 +163,6 @@ export default function Customers() {
           onAction={() => setShowWizard(true)}
         />
       )}
-    </div>
+    </PageTransition>
   );
 }

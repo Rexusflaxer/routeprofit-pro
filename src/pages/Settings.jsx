@@ -1,4 +1,5 @@
 import React, { useState, useEffect, useRef } from "react";
+import PageTransition from "@/components/ui-custom/PageTransition";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -120,7 +121,7 @@ export default function Settings() {
   }, []);
 
   return (
-    <div className="space-y-6">
+    <PageTransition>
       <div>
         <h1 className="text-2xl font-bold text-foreground">Instellingen</h1>
         <p className="text-sm text-muted-foreground mt-1">Beheer bedrijfsgegevens en kantoren</p>
@@ -324,6 +325,6 @@ export default function Settings() {
           </div>
         </CardContent>
       </Card>
-    </div>
+    </PageTransition>
   );
 }

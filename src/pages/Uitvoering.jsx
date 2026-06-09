@@ -1,4 +1,5 @@
 import React, { useMemo, useState } from "react";
+import PageTransition from "@/components/ui-custom/PageTransition";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import { ChevronLeft, ChevronRight } from "lucide-react";
@@ -23,7 +24,7 @@ export default function Uitvoering() {
   };
 
   return (
-    <div className="space-y-6">
+    <PageTransition>
       <PageHeader
         title="Uitvoering"
         subtitle="Routes uit de blauwdruk zijn automatisch doorgepland op hun weekdagen tot het einde van dit jaar."
@@ -55,6 +56,6 @@ export default function Uitvoering() {
           />
         ))}
       </div>
-    </div>
+    </PageTransition>
   );
 }

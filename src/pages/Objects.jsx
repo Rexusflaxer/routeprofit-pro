@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import PageTransition from "@/components/ui-custom/PageTransition";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -95,7 +96,7 @@ export default function Objects() {
   }
 
   return (
-    <div className="space-y-6">
+    <PageTransition>
       <PageHeader
         title="Objecten"
         subtitle="Beheer de te bewaken locaties"
@@ -136,6 +137,6 @@ export default function Objects() {
        ) : !showForm && (
          <EmptyState icon={MapPin} title="Geen objecten" description="Voeg uw eerste bewakingsobject toe om te beginnen." actionLabel="Object toevoegen" onAction={() => setShowForm(true)} />
        )}
-    </div>
-  );
-}
+       </PageTransition>
+       );
+       }

@@ -1,4 +1,5 @@
 import React from "react";
+import PageTransition from "@/components/ui-custom/PageTransition";
 import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import StatCard from "../components/ui-custom/StatCard";
@@ -108,7 +109,7 @@ export default function Dashboard() {
   ];
 
   return (
-    <div className="space-y-4 text-[13px]">
+    <PageTransition className="space-y-4 text-[13px]">
       <PageHeader
         title="Site Manager"
         subtitle="Operationele status, routes en mobiele uitvoering in een compacte beheerweergave."
@@ -284,6 +285,6 @@ export default function Dashboard() {
           </CardContent>
         </Card>
       )}
-    </div>
+    </PageTransition>
   );
 }

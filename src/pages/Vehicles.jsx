@@ -1,4 +1,5 @@
 import React, { useState } from "react";
+import PageTransition from "@/components/ui-custom/PageTransition";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { Button } from "@/components/ui/button";
@@ -98,7 +99,7 @@ export default function VehiclesPage() {
   }
 
   return (
-    <div>
+    <PageTransition className="space-y-0">
       <PageHeader
         title="Voertuigen"
         subtitle="Beheer uw voertuigen en voertuigkosten"
@@ -213,6 +214,6 @@ export default function VehiclesPage() {
         open={!!mileageVehicle} 
         onClose={() => setMileageVehicle(null)}
       />
-    </div>
+    </PageTransition>
   );
 }

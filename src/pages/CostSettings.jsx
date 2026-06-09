@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from "react";
+import PageTransition from "@/components/ui-custom/PageTransition";
 import { base44 } from "@/api/base44Client";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import PageHeader from "../components/ui-custom/PageHeader";
@@ -49,7 +50,7 @@ export default function CostSettings() {
   }
 
   return (
-    <div className="space-y-6">
+    <PageTransition>
       <PageHeader
         title="Overige kosten"
         subtitle="Beheer huisvesting, software en overige bedrijfskosten"
@@ -65,6 +66,6 @@ export default function CostSettings() {
         onSave={handleSave}
         isSaving={createMutation.isPending || updateMutation.isPending}
       />
-    </div>
+    </PageTransition>
   );
 }
