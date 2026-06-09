@@ -32,23 +32,29 @@ function LicenseStatusBadge({ license }) {
 // Step indicator
 function WizardSteps({ step }) {
   const steps = ["Type", "Gegevens", "Document"];
+  const CheckIcon = () => (
+    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
+      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+    </svg>
+  );
+
   return (
     <div className="flex items-center gap-1 mb-4">
       {steps.map((s, i) =>
       <React.Fragment key={s}>
           <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full transition-colors ${
         i + 1 === step ? "bg-primary text-primary-foreground" :
-        i + 1 < step ? "bg-muted text-muted-foreground line-through" :
+        i + 1 < step ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" :
         "text-muted-foreground"}`
         }>
             <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
           i + 1 === step ? "bg-primary-foreground text-primary" :
-          i + 1 < step ? "bg-muted-foreground/40 text-muted-foreground" :
+          i + 1 < step ? "text-green-700 dark:text-green-300" :
           "border border-muted-foreground/30 text-muted-foreground"}`
-          }>{i + 1}</span>
+          }>{i + 1 < step ? <CheckIcon /> : i + 1}</span>
             {s}
           </div>
-          {i < steps.length - 1 && <div className="h-px flex-1 bg-border" />}
+          {i < steps.length - 1 && <div className={`h-px flex-1 ${i + 1 < step ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />}
         </React.Fragment>
       )}
     </div>);
