@@ -1,14 +1,16 @@
-import React, { useState, useEffect } from "react";
-import { Link } from "react-router-dom";
+import React, { useState, useEffect, useRef } from "react";
+import { Link, useNavigate } from "react-router-dom";
 import { createPageUrl } from "./utils";
 import {
   LayoutDashboard, Users, Settings, Menu, X, CarFront, Smartphone,
-  Building2, Search, Route, MapPin, CalendarCheck,
+  Search, Route, MapPin, CalendarCheck,
   FileText, SlidersHorizontal,
-  Database, ChevronDown
+  Database, ChevronDown, Building2, UserCircle, LogOut
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeProvider, useTheme } from "next-themes";
+import { base44 } from "@/api/base44Client";
+import { useQuery } from "@tanstack/react-query";
 
 const LOGO_DARK = "/loq-logo-dark.png";
 const LOGO_LIGHT = "/loq-logo-light.png";
@@ -18,7 +20,6 @@ const CONTEXT_SECTIONS = [
     label: "Control Center",
     items: [
       { name: "Dashboard", icon: LayoutDashboard, page: "Dashboard" },
-      { name: "Bedrijven", icon: Building2, page: "Companies" },
       { name: "Personeel", icon: Users, page: "Personnel" },
     ],
   },
@@ -65,6 +66,78 @@ function isActive(currentPageName, item) {
   return item.page === currentPageName || item.pages?.includes(currentPageName);
 }
 
+function UserProfileFooter({ onNavigate }) {
+  const [open, setOpen] = useState(false);
+  const ref = useRef(null);
+  const navigate = useNavigate();
+
+  const { data: user } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: () => base44.auth.me(),
+    staleTime: 60_000,
+  });
+
+  useEffect(() => {
+    const handler = (e) => { if (ref.current && !ref.current.contains(e.target)) setOpen(false); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, []);
+
+  const initials = user?.full_name
+    ? user.full_name.split(" ").map(n => n[0]).slice(0, 2).join("").toUpperCase()
+    : "?";
+
+  const handleNav = (path) => {
+    setOpen(false);
+    onNavigate?.();
+    navigate(path);
+  };
+
+  return (
+    <div ref={ref} className="relative border-t border-sidebar-border px-3 py-2.5">
+      {open && (
+        <div className="absolute bottom-full left-3 right-3 mb-1.5 z-50 rounded-lg border border-border bg-popover shadow-lg py-1 text-[13px]">
+          <button
+            onClick={() => handleNav("/EmployeePortal")}
+            className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent rounded-md transition-colors text-foreground"
+          >
+            <UserCircle className="h-3.5 w-3.5 text-muted-foreground" />
+            Mijn profiel
+          </button>
+          <button
+            onClick={() => handleNav("/Companies")}
+            className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent rounded-md transition-colors text-foreground"
+          >
+            <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
+            Mijn bedrijven
+          </button>
+          <div className="my-1 border-t border-border" />
+          <button
+            onClick={() => { setOpen(false); base44.auth.logout(); }}
+            className="flex w-full items-center gap-2 px-3 py-2 hover:bg-accent rounded-md transition-colors text-destructive"
+          >
+            <LogOut className="h-3.5 w-3.5" />
+            Uitloggen
+          </button>
+        </div>
+      )}
+      <button
+        onClick={() => setOpen(v => !v)}
+        className="flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 hover:bg-sidebar-accent transition-colors"
+      >
+        <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1f7aff]/15 text-[#1f7aff] text-[11px] font-bold">
+          {initials}
+        </div>
+        <div className="min-w-0 flex-1 text-left">
+          <p className="truncate text-[13px] font-medium text-sidebar-foreground leading-tight">{user?.full_name || "Profiel"}</p>
+          <p className="truncate text-[11px] text-muted-foreground leading-tight">{user?.email || ""}</p>
+        </div>
+        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+      </button>
+    </div>
+  );
+}
+
 function ContextNavigation({ currentPageName, onNavigate }) {
   return (
     <div className="flex h-full flex-col">
@@ -108,6 +181,8 @@ function ContextNavigation({ currentPageName, onNavigate }) {
           </section>
         ))}
       </div>
+
+      <UserProfileFooter onNavigate={onNavigate} />
     </div>
   );
 }
