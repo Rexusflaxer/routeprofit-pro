@@ -195,7 +195,7 @@ export default function WpbrTab({ companyId }) {
                         <Input value={form.notes} onChange={(e) => set("notes", e.target.value)} className="h-8 text-sm" placeholder="Optioneel..." />
                       </div>
                       <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                         <Button size="sm" onClick={() => { setDirection(1); setStep(3); }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
                       </div>
                     </div>
@@ -227,7 +227,7 @@ export default function WpbrTab({ companyId }) {
                       )}
 
                       <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(2); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(2); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
                           <Button size="sm" onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending}>
