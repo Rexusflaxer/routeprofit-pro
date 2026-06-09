@@ -318,12 +318,11 @@ export default function WpbrTab({ companyId, company }) {
         <p className="text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
       ) : activeLicenses.length > 0 && (
         <div className="rounded-lg border border-border overflow-hidden">
-          <div className="grid grid-cols-[2.5rem_6rem_5rem_1fr_1fr] px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <div className="grid grid-cols-[2.5rem_6rem_5rem_1fr] px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <span>Type</span>
             <span>Nummer</span>
             <span>Status</span>
             <span>Geldigheid</span>
-            <span>Notities</span>
           </div>
           <div className="divide-y divide-border">
             {activeLicenses.map((l) => <LicenseCard key={l.id} license={l} />)}
@@ -361,7 +360,7 @@ function LicenseCard({ license, muted }) {
   return (
     <>
       <div
-        className={`grid grid-cols-[2.5rem_6rem_5rem_1fr_1fr] items-center px-4 py-3 ${license.document_file_url ? "cursor-pointer hover:bg-accent/50 transition-colors" : ""}`}
+        className={`grid grid-cols-[2.5rem_6rem_5rem_1fr] items-center px-4 py-3 ${license.document_file_url ? "cursor-pointer hover:bg-accent/50 transition-colors" : ""}`}
         onClick={license.document_file_url ? () => setPreviewOpen(true) : undefined}
         title={license.document_file_url ? "Klik om vergunning te bekijken" : undefined}
       >
@@ -372,7 +371,7 @@ function LicenseCard({ license, muted }) {
           {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
           {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
         </div>
-        <span className="text-xs text-muted-foreground truncate">{license.notes || ""}</span>
+
       </div>
       <ManagedFilePreviewDialog
         open={previewOpen}
