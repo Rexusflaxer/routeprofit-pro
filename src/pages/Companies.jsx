@@ -7,7 +7,7 @@ import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/u
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, Building2, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { motion, AnimatePresence } from "framer-motion";
+import PageTransition from "@/components/ui-custom/PageTransition";
 import CompanyForm from "@/components/companies/CompanyForm";
 import { attachManagedFilesToOwner, updateManagedFileSource } from "@/lib/managedFiles";
 
@@ -148,7 +148,7 @@ export default function Companies() {
   };
 
   return (
-    <div className="space-y-6">
+    <PageTransition>
       <div className="flex items-center justify-between flex-wrap gap-3">
         <div>
           <h1 className="text-2xl font-bold text-foreground">Bedrijven</h1>
@@ -261,6 +261,6 @@ export default function Companies() {
           />
         </DialogContent>
       </Dialog>
-    </div>
+    </PageTransition>
   );
 }
