@@ -178,7 +178,7 @@ export default function WpbrTab({ companyId, company }) {
   const historicLicenses = licenses.filter((l) => l.status !== "active");
 
   return (
-    <div className="space-y-4 p-6">
+    <div className="flex flex-col h-full">
 
       {/* Wizard */}
       <AnimatePresence>
@@ -189,7 +189,7 @@ export default function WpbrTab({ companyId, company }) {
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: -8 }}
             transition={{ duration: 0.2 }}
-            className="rounded-lg border border-primary/30 bg-muted/20 p-5 overflow-hidden"
+            className="rounded-none border-0 border-b border-primary/30 bg-muted/20 p-5 overflow-hidden"
           >
             <WizardSteps step={step} />
 
@@ -315,33 +315,25 @@ export default function WpbrTab({ companyId, company }) {
       </AnimatePresence>
 
       {/* Active licenses */}
-      {activeLicenses.length === 0 && !showWizard ? (
-        <div className="rounded-lg border border-border overflow-hidden">
-          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
-            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nog geen vergunning geregistreerd</span>
+      <div className="flex-1">
+        <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+          <span className="w-10 shrink-0">Type</span>
+          <span className="w-24 shrink-0">Nummer</span>
+          <span className="w-20 shrink-0">Status</span>
+          <span className="flex-1">Geldigheid</span>
+          {!showWizard && (
             <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
               <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
             </Button>
-          </div>
+          )}
         </div>
-      ) : activeLicenses.length > 0 && (
-        <div className="rounded-lg border border-border overflow-hidden">
-          <div className="grid grid-cols-[2.5rem_6rem_5rem_1fr_auto] px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground items-center">
-            <span>Type</span>
-            <span>Nummer</span>
-            <span>Status</span>
-            <span>Geldigheid</span>
-            {!showWizard && (
-              <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
-                <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
-              </Button>
-            )}
-          </div>
-          <div className="divide-y divide-border">
-            {activeLicenses.map((l) => <LicenseCard key={l.id} license={l} />)}
-          </div>
+        {activeLicenses.length === 0 && !showWizard && (
+          <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
+        )}
+        <div className="divide-y divide-border">
+          {activeLicenses.map((l) => <LicenseCard key={l.id} license={l} />)}
         </div>
-      )}
+      </div>
 
       {/* Historic licenses */}
       {historicLicenses.length > 0 &&
@@ -373,14 +365,14 @@ function LicenseCard({ license, muted }) {
   return (
     <>
       <div
-        className={`grid grid-cols-[2.5rem_6rem_5rem_1fr] items-center px-4 py-3 ${license.document_file_url ? "cursor-pointer hover:bg-accent/50 transition-colors" : ""}`}
+        className={`flex items-center px-4 py-3 ${license.document_file_url ? "cursor-pointer hover:bg-accent/50 transition-colors" : ""}`}
         onClick={license.document_file_url ? () => setPreviewOpen(true) : undefined}
         title={license.document_file_url ? "Klik om vergunning te bekijken" : undefined}
       >
-        <span className="text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
-        <span className="text-sm text-muted-foreground">{license.license_number ? `#${license.license_number}` : "—"}</span>
-        <div><LicenseStatusBadge license={license} /></div>
-        <div className="flex gap-4 text-xs text-muted-foreground">
+        <span className="w-10 shrink-0 text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
+        <span className="w-24 shrink-0 text-sm text-muted-foreground">{license.license_number ? `#${license.license_number}` : "—"}</span>
+        <div className="w-20 shrink-0"><LicenseStatusBadge license={license} /></div>
+        <div className="flex-1 flex gap-4 text-xs text-muted-foreground">
           {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
           {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
         </div>
