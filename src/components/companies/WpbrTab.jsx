@@ -5,9 +5,20 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Upload, Plus, X, Check, ExternalLink } from "lucide-react";
+import { FileText, Upload, Plus, X, Check, ExternalLink, Info } from "lucide-react";
+import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 
-const WPBR_TYPES = ["ND", "HND", "BD", "PAC", "VTC", "PGW", "POB", "other"];
+const WPBR_TYPES = ["ND", "HND", "BD", "PAC", "VTC", "PGW", "POB"];
+
+const WPBR_TYPE_INFO = {
+  ND:  "ND – Nationaal Dagdienst: reguliere beveiliging overdag",
+  HND: "HND – Hoofd Nationaal Dagdienst: leidinggevende dagbeveiliging",
+  BD:  "BD – Bijzondere Dienst: beveiliging bij bijzondere omstandigheden",
+  PAC: "PAC – Particulier Alarm Centralist: meldkamerfunctie",
+  VTC: "VTC – Vervoer Transport en Cash: geld- en waardetransport",
+  PGW: "PGW – Particulier Geld- en Waardetransport: specifiek waardetransport",
+  POB: "POB – Particulier Objectbeveiliging: bewaking van objecten",
+};
 
 function LicenseStatusBadge({ license }) {
   const today = new Date().toISOString().split("T")[0];
@@ -77,7 +88,21 @@ export default function WpbrTab({ companyId }) {
           <p className="text-sm font-medium text-foreground">Nieuwe vergunning toevoegen</p>
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-muted-foreground mb-1 block">Type</label>
+              <div className="flex items-center gap-1 mb-1">
+                <label className="text-xs text-muted-foreground">Type</label>
+                <TooltipProvider>
+                  <Tooltip>
+                    <TooltipTrigger asChild>
+                      <Info className="w-3.5 h-3.5 text-muted-foreground cursor-help" />
+                    </TooltipTrigger>
+                    <TooltipContent side="right" className="max-w-xs p-3 space-y-1">
+                      {Object.values(WPBR_TYPE_INFO).map(line => (
+                        <p key={line} className="text-xs">{line}</p>
+                      ))}
+                    </TooltipContent>
+                  </Tooltip>
+                </TooltipProvider>
+              </div>
               <Select value={form.license_type || "none"} onValueChange={v => set("license_type", v === "none" ? "" : v)}>
                 <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Kies type..." /></SelectTrigger>
                 <SelectContent>
