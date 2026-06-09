@@ -315,24 +315,31 @@ export default function WpbrTab({ companyId, company }) {
       </AnimatePresence>
 
       {/* Active licenses */}
-      {!showWizard && (
+      {activeLicenses.length === 0 && !showWizard ? (
+        <div className="rounded-lg border border-border overflow-hidden">
+          <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30">
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Nog geen vergunning geregistreerd</span>
+            <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
+              <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
+            </Button>
+          </div>
+        </div>
+      ) : activeLicenses.length > 0 && (
         <div className="rounded-lg border border-border overflow-hidden">
           <div className="grid grid-cols-[2.5rem_6rem_5rem_1fr_auto] px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground items-center">
             <span>Type</span>
             <span>Nummer</span>
             <span>Status</span>
             <span>Geldigheid</span>
-            <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
-              <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
-            </Button>
+            {!showWizard && (
+              <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-6 px-2 text-xs font-medium normal-case tracking-normal">
+                <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
+              </Button>
+            )}
           </div>
-          {activeLicenses.length === 0 ? (
-            <div className="px-4 py-3 text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</div>
-          ) : (
-            <div className="divide-y divide-border">
-              {activeLicenses.map((l) => <LicenseCard key={l.id} license={l} />)}
-            </div>
-          )}
+          <div className="divide-y divide-border">
+            {activeLicenses.map((l) => <LicenseCard key={l.id} license={l} />)}
+          </div>
         </div>
       )}
 
