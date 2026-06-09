@@ -7,13 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { FileText, Upload, Plus, X, Check, ExternalLink, ChevronRight, ChevronLeft } from "lucide-react";
 
 const WPBR_TYPES = [
-  { key: "ND",  label: "ND",  desc: "Nationaal Dagdienst" },
-  { key: "HND", label: "HND", desc: "Hoofd Nationaal Dagdienst" },
-  { key: "BD",  label: "BD",  desc: "Bijzondere Dienst" },
-  { key: "PAC", label: "PAC", desc: "Particulier Alarm Centralist" },
-  { key: "VTC", label: "VTC", desc: "Vervoer Transport en Cash" },
-  { key: "PGW", label: "PGW", desc: "Particulier Geld- en Waardetransport" },
-  { key: "POB", label: "POB", desc: "Particulier Objectbeveiliging" },
+  { key: "ND",  label: "ND — Particuliere beveiligingsorganisatie",  desc: "Een organisatie die voor derde partijen beveiligingswerkzaamheden gaat verrichten en daarvoor vooral personen gebruikt. Hieronder vallen ook persoonsbeveiliging en beveiliging door voetbalstewards." },
+  { key: "HND", label: "HND — Particulier beveiligingsbedrijf alleen voor horecabeveiliging", desc: "Een organisatie die voor derde partijen alleen in de horeca beveiligingswerkzaamheden gaat verrichten." },
+  { key: "BD",  label: "BD — Particuliere bedrijfsbeveiligingsdienst", desc: "Een bedrijfsbeveiligingsdienst die voor de eigen onderneming beveiligingswerkzaamheden verricht." },
+  { key: "HBD", label: "HBD — Particuliere bedrijfsbeveiligingsdienst voor de eigen horecaonderneming", desc: "Een bedrijfsbeveiligingsdienst die voor de eigen horecaonderneming(en) beveiligingswerkzaamheden verricht." },
+  { key: "POB", label: "POB — Particulier Recherchebureau", desc: "Organisatie die met winstoogmerk recherchewerkzaamheden voor derden uitvoert." },
+  { key: "PAC", label: "PAC — Particuliere Alarmcentrale", desc: "Een particuliere alarmcentrale die voor derden alarmsignalen ontvangt en beoordeelt. Indien nodig wordt assistentie gevraagd van de politie, andere overheidsinstanties of een particulier beveiligingsbedrijf." },
+  { key: "VTC", label: "VTC — Particuliere Video Toezicht Centrale", desc: "Een videotoezichtcentrale die voor derden videobeelden ontvangt en beoordeelt. Indien nodig wordt assistentie gevraagd van de politie, andere overheidsinstanties of particulieren." },
+  { key: "PGW", label: "PGW — Particulier Geld- en Waardentransportbedrijf", desc: "Een onderneming die voor derden geld en goederen van grote waarden vervoert." },
 ];
 
 const EMPTY_FORM = {
@@ -127,15 +128,15 @@ export default function WpbrTab({ companyId }) {
                   <button
                     key={t.key}
                     onClick={() => { set("license_type", t.key); setStep(2); }}
-                    className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent ${
+                    className={`flex items-start justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent ${
                       form.license_type === t.key ? "border-primary bg-accent" : "border-border bg-card"
                     }`}
                   >
-                    <div>
-                      <span className="text-sm font-semibold text-foreground">{t.label}</span>
-                      <span className="text-xs text-muted-foreground ml-2">{t.desc}</span>
+                    <div className="flex-1 pr-2">
+                      <p className="text-sm font-semibold text-foreground">{t.label}</p>
+                      <p className="text-xs text-muted-foreground mt-0.5">{t.desc}</p>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                    <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />
                   </button>
                 ))}
               </div>
