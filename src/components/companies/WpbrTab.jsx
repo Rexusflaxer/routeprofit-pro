@@ -134,31 +134,25 @@ export default function WpbrTab({ companyId }) {
           >
             <WizardSteps step={step} />
 
-            <div className="relative overflow-hidden">
-              <AnimatePresence mode="wait" custom={direction}>
+            <div className="relative">
+              <AnimatePresence mode="wait">
                 <motion.div
                   key={step}
-                  custom={direction}
-                  initial={{ opacity: 0, x: direction * 40 }}
-                  animate={{ opacity: 1, x: 0 }}
-                  exit={{ opacity: 0, x: direction * -40 }}
-                  transition={{ duration: 0.22, ease: "easeInOut" }}
+                  initial={{ opacity: 0, y: 6 }}
+                  animate={{ opacity: 1, y: 0 }}
+                  exit={{ opacity: 0, y: -6 }}
+                  transition={{ duration: 0.18, ease: "easeOut" }}
                 >
                   {/* Step 1: Kies type */}
                   {step === 1 && (
                     <div className="space-y-3">
                       <p className="text-sm font-medium text-foreground">Kies het vergunningstype</p>
                       <div className="grid grid-cols-1 gap-2">
-                        {WPBR_TYPES.map((t, idx) => (
-                          <motion.button
+                        {WPBR_TYPES.map((t) => (
+                          <button
                             key={t.key}
-                            initial={{ opacity: 0, y: 8 }}
-                            animate={{ opacity: 1, y: 0 }}
-                            transition={{ delay: idx * 0.04, duration: 0.18 }}
-                            whileHover={{ scale: 1.01 }}
-                            whileTap={{ scale: 0.98 }}
                             onClick={() => { set("license_type", t.key); setDirection(1); setStep(2); }}
-                            className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-colors hover:border-primary hover:bg-accent ${
+                            className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${
                               form.license_type === t.key ? "border-primary bg-accent" : "border-border bg-card"}`}
                           >
                             <div>
@@ -166,7 +160,7 @@ export default function WpbrTab({ companyId }) {
                               <span className="text-xs text-muted-foreground ml-2">{t.desc}</span>
                             </div>
                             <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                          </motion.button>
+                          </button>
                         ))}
                       </div>
                       <div className="flex justify-end pt-1">
