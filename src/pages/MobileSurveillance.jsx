@@ -1,7 +1,7 @@
 import React from "react";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
-import { CalendarCheck, ChevronRight, MapPin, Route, Users, Layers } from "lucide-react";
+import { CalendarCheck, ChevronRight, Grid3X3, MapPin, Route, Users, Layers } from "lucide-react";
 
 const TILES = [
   {
@@ -43,38 +43,48 @@ const TILES = [
 
 export default function MobileSurveillance() {
   return (
-    <div className="space-y-8">
-      <div>
-        <p className="mb-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Object control</p>
-        <h1 className="text-2xl font-semibold text-foreground">Surveillance</h1>
-        <p className="mt-1 text-sm text-muted-foreground">Beheer objecten, rondes en uitvoering vanuit een compacte cockpit.</p>
+    <div className="space-y-4 text-[13px]">
+      <div className="flex min-h-11 items-center justify-between border-b border-border pb-3">
+        <div>
+          <h1 className="text-[15px] font-semibold leading-5 text-foreground">Surveillance</h1>
+          <p className="mt-0.5 text-[12px] leading-5 text-muted-foreground">Objecten, rondes en uitvoering in een beheerweergave.</p>
+        </div>
+        <div className="hidden items-center rounded-md border border-border bg-card p-0.5 sm:flex">
+          <button className="flex h-7 items-center gap-1.5 rounded bg-[#1f7aff]/10 px-2.5 text-xs font-medium text-[#1f7aff]">
+            <Grid3X3 className="h-3.5 w-3.5" />
+            Modules
+          </button>
+        </div>
       </div>
 
-      <div className="grid grid-cols-1 gap-4 sm:grid-cols-2 xl:grid-cols-3">
-        {TILES.map(({ label, description, icon: Icon, page, metric }) => (
-          <Link key={page} to={createPageUrl(page)}>
-            <div className="group flex min-h-40 flex-col justify-between rounded-lg border border-border bg-card p-5 shadow-sm transition-all hover:-translate-y-0.5 hover:shadow-md">
-              <div className="flex items-start justify-between gap-4">
-                <div className="rounded-lg bg-secondary p-3">
-                  <Icon className="h-5 w-5 text-foreground" />
-                </div>
-                <span className="rounded-full border border-border px-2.5 py-1 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
-                  {metric}
+      <div className="overflow-x-auto rounded-md border border-border bg-card">
+        <div className="min-w-[760px]">
+          <div className="grid grid-cols-[minmax(180px,1fr)_180px_minmax(220px,1.2fr)_42px] border-b border-border px-4 py-2 text-[11px] font-semibold uppercase text-muted-foreground">
+            <span>Name</span>
+            <span>Category</span>
+            <span>Description</span>
+            <span />
+          </div>
+          {TILES.map(({ label, description, icon: Icon, page, metric }) => (
+            <Link
+              key={page}
+              to={createPageUrl(page)}
+              className="grid grid-cols-[minmax(180px,1fr)_180px_minmax(220px,1.2fr)_42px] items-center border-b border-border px-4 py-3 transition-colors last:border-b-0 hover:bg-accent/50"
+            >
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex h-7 w-7 items-center justify-center rounded-md bg-secondary text-muted-foreground">
+                  <Icon className="h-3.5 w-3.5" />
                 </span>
+                <span className="truncate font-medium text-foreground">{label}</span>
               </div>
-              <div className="mt-6">
-                <div className="flex items-center justify-between gap-3">
-                  <p className="text-lg font-semibold text-foreground">{label}</p>
-                  <ChevronRight className="h-4 w-4 text-muted-foreground transition-transform group-hover:translate-x-1" />
-                </div>
-                <p className="mt-1 text-sm leading-5 text-muted-foreground">{description}</p>
+              <span className="text-muted-foreground">{metric}</span>
+              <span className="truncate text-muted-foreground">{description}</span>
+              <div className="flex justify-end">
+                <ChevronRight className="h-4 w-4 text-muted-foreground" />
               </div>
-              <div className="mt-4 h-1 rounded-full bg-secondary">
-                <div className="h-1 w-1/3 rounded-full bg-primary" />
-              </div>
-            </div>
-          </Link>
-        ))}
+            </Link>
+          ))}
+        </div>
       </div>
     </div>
   );

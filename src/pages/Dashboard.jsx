@@ -3,7 +3,6 @@ import { base44 } from "@/api/base44Client";
 import { useQuery } from "@tanstack/react-query";
 import StatCard from "../components/ui-custom/StatCard";
 import RouteAnalysisCard from "../components/routes/RouteAnalysisCard";
-import EmptyState from "../components/ui-custom/EmptyState";
 import PageHeader from "../components/ui-custom/PageHeader";
 import { Link } from "react-router-dom";
 import { createPageUrl } from "../utils";
@@ -13,7 +12,7 @@ import { BarChart, Bar, XAxis, YAxis, Tooltip, ResponsiveContainer, CartesianGri
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   AlertTriangle, ArrowRight, CheckCircle2, Clock3, Euro,
-  LayoutDashboard, MapPin, Plus, RadioTower, Route, ShieldCheck, Users
+  MapPin, Plus, RadioTower, Route, ShieldCheck, Users
 } from "lucide-react";
 
 export default function Dashboard() {
@@ -100,88 +99,93 @@ export default function Dashboard() {
     },
   ].filter(Boolean);
 
+  const systemRows = [
+    { name: "Objecten", type: "Locaties", status: objects.length > 0 ? "Ready" : "Empty", value: objects.length, icon: MapPin },
+    { name: "Medewerkers", type: "Team", status: personnel.length > 0 ? "Ready" : "Empty", value: personnel.filter(p => p.is_active !== false).length, icon: Users },
+    { name: "Routes", type: "Blauwdrukken", status: routes.length > 0 ? "Ready" : "Empty", value: routes.length, icon: Route },
+    { name: "Diensten", type: "Uitvoering", status: activeExecutions.length > 0 ? "Live" : "Idle", value: activeExecutions.length, icon: ShieldCheck },
+    { name: "Mobiele taken", type: "Open", status: openTaskCount > 0 ? "Attention" : "Clear", value: openTaskCount, icon: Clock3 },
+  ];
+
   return (
-    <div className="space-y-8">
+    <div className="space-y-4 text-[13px]">
       <PageHeader
-        title="Operationeel overzicht"
-        subtitle="Live status, aandachtspunten en routekwaliteit voor de mobiele surveillance."
+        title="Site Manager"
+        subtitle="Operationele status, routes en mobiele uitvoering in een compacte beheerweergave."
         actions={
           <Link to={createPageUrl("Routes")}>
             <Button>
-              <Plus className="w-4 h-4 mr-1" /> Nieuwe route
+              <Plus className="mr-1 h-3.5 w-3.5" /> Nieuwe route
             </Button>
           </Link>
         }
       />
 
-      <section className="grid grid-cols-1 gap-4 xl:grid-cols-[1.5fr_1fr]">
-        <Card className="border border-border bg-card shadow-sm">
-          <CardHeader className="pb-3">
+      <section className="grid grid-cols-1 gap-3 xl:grid-cols-[1.55fr_1fr]">
+        <Card className="border-border bg-card">
+          <CardHeader className="border-b border-border pb-3">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <CardTitle className="text-base">Live diensten</CardTitle>
-                <p className="mt-1 text-sm text-muted-foreground">Actieve of klaargezette route-uitvoeringen.</p>
+                <CardTitle className="text-[13px]">Live diensten</CardTitle>
+                <p className="mt-1 text-[12px] text-muted-foreground">Actieve of klaargezette route-uitvoeringen.</p>
               </div>
-              <Badge variant="outline" className="gap-1.5">
+              <Badge variant="outline" className="h-6 gap-1.5 rounded-md border-border px-2 text-[11px]">
                 <span className="h-2 w-2 rounded-full bg-emerald-500" />
                 {activeExecutions.length} live
               </Badge>
             </div>
           </CardHeader>
-          <CardContent>
+          <CardContent className="p-0">
             {activeExecutions.length > 0 ? (
-              <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
+              <div className="divide-y divide-border">
                 {activeExecutions.map(route => {
                   const progress = taskProgressFor(route.id);
                   return (
-                    <Link key={route.id} to={`/RouteExecutionDetails?id=${route.id}`} className="rounded-lg border border-border bg-background/60 p-4 transition-colors hover:bg-accent/60">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate text-sm font-semibold text-foreground">{route.route_name || "Onbekende dienst"}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{route.employee_name || "Geen medewerker"} · {route.vehicle_license_plate || "Geen voertuig"}</p>
-                        </div>
-                        <Badge>{route.status}</Badge>
+                    <Link key={route.id} to={`/RouteExecutionDetails?id=${route.id}`} className="grid grid-cols-1 gap-2 px-4 py-3 transition-colors hover:bg-accent/50 sm:grid-cols-[1fr_140px_84px] sm:items-center sm:gap-4">
+                      <div className="min-w-0">
+                        <p className="truncate font-medium text-foreground">{route.route_name || "Onbekende dienst"}</p>
+                        <p className="mt-0.5 truncate text-[12px] text-muted-foreground">{route.employee_name || "Geen medewerker"} - {route.vehicle_license_plate || "Geen voertuig"}</p>
                       </div>
-                      <div className="mt-4">
-                        <div className="mb-1 flex items-center justify-between text-xs text-muted-foreground">
-                          <span>Taken afgerond</span>
-                          <span>{progress.done}/{progress.total}</span>
+                      <div>
+                        <div className="h-1.5 overflow-hidden rounded-full bg-secondary">
+                          <div className="h-full rounded-full bg-[#1f7aff]" style={{ width: `${progress.pct}%` }} />
                         </div>
-                        <div className="h-2 overflow-hidden rounded-full bg-secondary">
-                          <div className="h-full rounded-full bg-primary" style={{ width: `${progress.pct}%` }} />
-                        </div>
+                        <p className="mt-1 text-[11px] text-muted-foreground">{progress.done}/{progress.total} taken</p>
                       </div>
+                      <Badge variant="outline" className="justify-center rounded-md border-border text-[11px]">{route.status}</Badge>
                     </Link>
                   );
                 })}
               </div>
             ) : (
-              <div className="rounded-lg border border-dashed border-border bg-background/50 p-6 text-sm text-muted-foreground">
-                Geen actieve mobiele diensten. Start vanuit de uitvoeringkalender zodra de planning klaarstaat.
+              <div className="flex min-h-32 items-center px-5 py-6 text-[13px] text-muted-foreground sm:px-8">
+                <p className="max-w-full break-words">
+                  Geen actieve mobiele diensten. Start vanuit de uitvoeringkalender zodra de planning klaarstaat.
+                </p>
               </div>
             )}
           </CardContent>
         </Card>
 
-        <Card className="border border-border bg-card shadow-sm">
-          <CardHeader className="pb-3">
-            <CardTitle className="text-base">Aandacht</CardTitle>
-            <p className="text-sm text-muted-foreground">Wat de centralist als eerste moet zien.</p>
+        <Card className="border-border bg-card">
+          <CardHeader className="border-b border-border pb-3">
+            <CardTitle className="text-[13px]">Operational Integrity</CardTitle>
+            <p className="text-[12px] text-muted-foreground">Wat de centralist als eerste moet zien.</p>
           </CardHeader>
-          <CardContent className="space-y-3">
+          <CardContent className="space-y-2 p-3">
             {attentionItems.length > 0 ? attentionItems.map(({ label, detail, icon: Icon, tone }) => (
-              <div key={label} className={`flex items-start gap-3 rounded-lg border p-3 ${tone}`}>
+              <div key={label} className={`flex items-start gap-3 rounded-md border p-2.5 ${tone}`}>
                 <Icon className="mt-0.5 h-4 w-4 shrink-0" />
                 <div>
-                  <p className="text-sm font-semibold">{label}</p>
+                  <p className="text-[13px] font-medium">{label}</p>
                   <p className="mt-0.5 text-xs opacity-80">{detail}</p>
                 </div>
               </div>
             )) : (
-              <div className="flex items-start gap-3 rounded-lg border border-emerald-200 bg-emerald-50 p-3 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
+              <div className="flex items-start gap-3 rounded-md border border-emerald-200 bg-emerald-50 p-2.5 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/30 dark:text-emerald-300">
                 <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
                 <div>
-                  <p className="text-sm font-semibold">Geen directe aandachtspunten</p>
+                  <p className="text-[13px] font-medium">Geen directe aandachtspunten</p>
                   <p className="mt-0.5 text-xs opacity-80">Routes, taken en sync ogen rustig.</p>
                 </div>
               </div>
@@ -190,14 +194,11 @@ export default function Dashboard() {
         </Card>
       </section>
 
-      <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+      <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-6">
         <StatCard title="Objecten" value={objects.length} icon={MapPin} />
         <StatCard title="Medewerkers" value={personnel.filter(p => p.is_active !== false).length} icon={Users} />
         <StatCard title="Routeblauwdrukken" value={routes.length} icon={Route} />
         <StatCard title="Diensten afgerond" value={completedExecutions} icon={ShieldCheck} />
-      </div>
-
-      <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
         <StatCard title="Maandwinst" value={`€${totalProfit.toFixed(0)}`} icon={Euro}
           trend={totalRevenue > 0 ? Number(((totalProfit / totalRevenue) * 100).toFixed(1)) : 0}
           trendLabel="marge"
@@ -205,20 +206,51 @@ export default function Dashboard() {
         <StatCard title="Open mobiele taken" value={openTaskCount} icon={Clock3} />
       </div>
 
+      <Card className="border-border bg-card">
+        <CardHeader className="border-b border-border pb-3">
+          <CardTitle className="text-[13px]">System Overview</CardTitle>
+        </CardHeader>
+        <CardContent className="overflow-x-auto p-0">
+          <div className="min-w-[680px]">
+            <div className="grid grid-cols-[minmax(180px,1fr)_160px_120px_90px] border-b border-border px-4 py-2 text-[11px] font-semibold uppercase text-muted-foreground">
+              <span>Name</span>
+              <span>Type</span>
+              <span>Status</span>
+              <span className="text-right">Value</span>
+            </div>
+            <div className="divide-y divide-border">
+              {systemRows.map(row => (
+                <div key={row.name} className="grid grid-cols-[minmax(180px,1fr)_160px_120px_90px] items-center px-4 py-2.5 text-[13px]">
+                  <div className="flex items-center gap-2">
+                    <span className="flex h-6 w-6 items-center justify-center rounded-md bg-secondary text-muted-foreground">
+                      <row.icon className="h-3.5 w-3.5" />
+                    </span>
+                    <span className="font-medium text-foreground">{row.name}</span>
+                  </div>
+                  <span className="text-muted-foreground">{row.type}</span>
+                  <span className={row.status === "Attention" ? "text-amber-600" : row.status === "Live" ? "text-[#1f7aff]" : "text-muted-foreground"}>{row.status}</span>
+                  <span className="text-right font-medium text-foreground">{row.value}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
       {routes.length > 0 && cs && (
-        <Card className="border border-border shadow-sm">
-          <CardHeader>
-            <CardTitle className="text-base">Omzet vs. Kosten per route</CardTitle>
+        <Card className="border-border bg-card">
+          <CardHeader className="border-b border-border pb-3">
+            <CardTitle className="text-[13px]">Omzet vs. Kosten per route</CardTitle>
           </CardHeader>
-          <CardContent>
-            <div className="h-64">
+          <CardContent className="pt-4">
+            <div className="h-72">
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={routeData} barGap={4}>
                   <CartesianGrid strokeDasharray="3 3" stroke="hsl(var(--border))" />
                   <XAxis dataKey="name" tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" />
                   <YAxis tick={{ fontSize: 12 }} stroke="hsl(var(--muted-foreground))" tickFormatter={(v) => `€${v}`} />
                   <Tooltip formatter={(v) => `€${Number(v).toFixed(0)}`} contentStyle={{ borderRadius: 12, border: "none", boxShadow: "0 4px 12px rgba(0,0,0,0.08)" }} />
-                  <Bar dataKey="revenue" fill="hsl(var(--primary))" radius={[6, 6, 0, 0]} name="Omzet" />
+                  <Bar dataKey="revenue" fill="#1f7aff" radius={[4, 4, 0, 0]} name="Omzet" />
                   <Bar dataKey="costs" fill="hsl(var(--muted-foreground))" radius={[6, 6, 0, 0]} name="Kosten" />
                 </BarChart>
               </ResponsiveContainer>
@@ -230,27 +262,27 @@ export default function Dashboard() {
       {routes.length > 0 && cs ? (
         <div className="space-y-4">
           <div className="flex items-center justify-between">
-            <h2 className="text-lg font-semibold text-foreground">Route-analyses</h2>
+            <h2 className="text-[13px] font-semibold text-foreground">Route-analyses</h2>
             <Link to={createPageUrl("Routes")}>
               <Button variant="ghost" size="sm" className="text-muted-foreground">
-                Alle routes <ArrowRight className="w-3.5 h-3.5 ml-1" />
+                Alle routes <ArrowRight className="ml-1 h-3.5 w-3.5" />
               </Button>
             </Link>
           </div>
-          <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div className="grid grid-cols-1 gap-3 lg:grid-cols-2">
             {routes.map(route => (
               <RouteAnalysisCard key={route.id} route={route} objects={objects} personnel={personnel} costSettings={cs} />
             ))}
           </div>
         </div>
       ) : (
-        <EmptyState
-          icon={LayoutDashboard}
-          title="Welkom bij LOQ"
-          description="Begin met objecten, medewerkers en kosteninstellingen om het control center te vullen."
-          actionLabel="Objecten toevoegen"
-          onAction={() => window.location.href = createPageUrl("Objects")}
-        />
+        <Card className="min-h-[260px] border-border bg-card">
+          <CardContent className="flex h-full min-h-[260px] items-center px-8 py-6 text-[13px] text-muted-foreground">
+            <p className="max-w-full break-words">
+              Geen routegegevens voor deze weergave. Voeg objecten, medewerkers en kosteninstellingen toe om analyses te activeren.
+            </p>
+          </CardContent>
+        </Card>
       )}
     </div>
   );
