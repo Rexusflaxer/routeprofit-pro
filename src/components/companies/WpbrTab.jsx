@@ -318,8 +318,12 @@ export default function WpbrTab({ companyId, company }) {
         <p className="text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
       ) : activeLicenses.length > 0 && (
         <div className="rounded-lg border border-border overflow-hidden">
-          <div className="px-4 py-2 border-b border-border bg-muted/30">
-            <p className="text-xs text-muted-foreground">Klik op een rij om het vergunningsdocument te bekijken.</p>
+          <div className="grid grid-cols-[2.5rem_6rem_5rem_1fr_1fr] px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <span>Type</span>
+            <span>Nummer</span>
+            <span>Status</span>
+            <span>Geldigheid</span>
+            <span>Notities</span>
           </div>
           <div className="divide-y divide-border">
             {activeLicenses.map((l) => <LicenseCard key={l.id} license={l} />)}
@@ -369,7 +373,6 @@ function LicenseCard({ license, muted }) {
           {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
         </div>
         {license.notes && <span className="text-xs text-muted-foreground truncate">{license.notes}</span>}
-        {license.document_file_url && <Eye className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
       </div>
       <ManagedFilePreviewDialog
         open={previewOpen}
