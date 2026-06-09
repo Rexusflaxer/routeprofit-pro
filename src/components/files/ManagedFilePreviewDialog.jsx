@@ -107,7 +107,7 @@ export default function ManagedFilePreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="h-[90vh] max-h-[90vh] w-[calc(100vw-1rem)] max-w-5xl sm:w-[calc(100vw-2rem)] grid-rows-[auto,1fr] overflow-hidden p-4 sm:p-6">
+      <DialogContent className="h-[90vh] max-h-[90vh] w-[calc(100vw-1rem)] max-w-2xl sm:w-[calc(100vw-2rem)] grid-rows-[auto,1fr] overflow-hidden p-4 sm:p-6">
         <DialogHeader className="min-w-0 pr-12">
           <div className="flex min-w-0 items-start justify-between gap-4">
             <div className="min-w-0 space-y-1">
@@ -154,14 +154,12 @@ export default function ManagedFilePreviewDialog({
           )}
 
           {!loading && !error && preview && canPreviewPdf && (
-            <div className="flex h-full min-h-[22rem] justify-center overflow-auto bg-muted/30 p-2">
-              <div className="w-full max-w-[56vh] overflow-hidden rounded-sm bg-background shadow-sm" style={{ aspectRatio: "210 / 297" }}>
-                <iframe
-                  title={resolvedFilename}
-                  src={pdfViewerUrl(preview.url)}
-                  className="h-full w-full bg-background"
-                />
-              </div>
+            <div className="flex h-full min-h-[22rem] overflow-auto bg-muted/30 p-2">
+              <iframe
+                title={resolvedFilename}
+                src={pdfViewerUrl(preview.url)}
+                className="h-full w-full rounded-sm bg-background"
+              />
             </div>
           )}
 
