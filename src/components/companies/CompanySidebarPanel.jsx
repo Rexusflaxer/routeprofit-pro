@@ -1,11 +1,9 @@
 import React, { useState } from "react";
 import { Shield, BookOpen, MapPin, CreditCard } from "lucide-react";
 import WpbrTab from "./WpbrTab";
+import CaoTab from "./CaoTab";
 import LocationsTab from "./LocationsTab";
 import CompanyBankTab from "./CompanyBankTab";
-import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Check, Edit, X } from "lucide-react";
 
 const MENU_ITEMS = [
   { key: "wpbr", label: "WPBR-vergunning", icon: Shield },
@@ -14,10 +12,7 @@ const MENU_ITEMS = [
   { key: "bank", label: "Bank", icon: CreditCard },
 ];
 
-export default function CompanySidebarPanel({
-  companyId, editing, data, caoConfigurations, caoName,
-  set, startEdit, cancelEdit, saveMutation, form, companies, company,
-}) {
+export default function CompanySidebarPanel({ companyId, companies, company }) {
   const [active, setActive] = useState("wpbr");
 
   return (
@@ -55,41 +50,7 @@ export default function CompanySidebarPanel({
         )}
 
         {active === "cao" && (
-          <div className="p-6 space-y-3">
-            <h3 className="text-sm font-semibold text-foreground">Standaard CAO</h3>
-            <div className="flex flex-col sm:flex-row sm:items-center gap-3">
-              {editing ? (
-                <Select value={data.default_cao_configuration_id || "none"} onValueChange={v => set("default_cao_configuration_id", v === "none" ? null : v)}>
-                  <SelectTrigger className="h-8 text-sm w-72"><SelectValue placeholder="Geen" /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">— Geen standaard —</SelectItem>
-                    {caoConfigurations.map(c => (
-                      <SelectItem key={c.id} value={c.id} disabled={c.selectable === false}>
-                        {c.label || c.display_name || c.name}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              ) : (
-                <span className="text-sm font-medium text-foreground">
-                  {caoName ? (caoName.label || caoName.display_name || caoName.name) : <span className="text-muted-foreground">—</span>}
-                </span>
-              )}
-              {!editing && (
-                <Button size="sm" variant="outline" onClick={startEdit}>
-                  <Edit className="w-4 h-4 mr-1" /> Wijzigen
-                </Button>
-              )}
-              {editing && (
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={cancelEdit}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
-                  <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
-                    <Check className="w-4 h-4 mr-1" /> Opslaan
-                  </Button>
-                </div>
-              )}
-            </div>
-          </div>
+          <CaoTab companyId={companyId} />
         )}
       </div>
     </div>

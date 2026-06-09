@@ -398,15 +398,6 @@ export default function CompanyDetail() {
       {/* WPBR & CAO sectie met sidebar-menu */}
       <SidebarPanel
         companyId={companyId}
-        editing={editing}
-        data={data}
-        caoConfigurations={caoConfigurations}
-        caoName={caoName}
-        set={set}
-        startEdit={startEdit}
-        cancelEdit={cancelEdit}
-        saveMutation={saveMutation}
-        form={form}
         companies={companies}
         company={company}
       />
