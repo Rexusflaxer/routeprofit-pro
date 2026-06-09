@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 import { FileText, Upload, Plus, X, Check, ExternalLink, ChevronRight, ChevronLeft } from "lucide-react";
+import { motion, AnimatePresence } from "framer-motion";
 
 const WPBR_TYPES = [
 { key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
@@ -66,6 +67,7 @@ export default function WpbrTab({ companyId }) {
   const wizardRef = useRef(null);
   const [showWizard, setShowWizard] = useState(false);
   const [step, setStep] = useState(1);
+  const [direction, setDirection] = useState(1); // 1 = forward, -1 = backward
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
 
@@ -120,107 +122,133 @@ export default function WpbrTab({ companyId }) {
       </div>
 
       {/* Wizard */}
-      {showWizard &&
-      <div ref={wizardRef} className="rounded-lg border border-primary/30 bg-muted/20 p-5">
-          <WizardSteps step={step} />
+      <AnimatePresence>
+        {showWizard && (
+          <motion.div
+            ref={wizardRef}
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+            className="rounded-lg border border-primary/30 bg-muted/20 p-5 overflow-hidden"
+          >
+            <WizardSteps step={step} />
 
-          {/* Step 1: Kies type */}
-          {step === 1 &&
-        <div className="space-y-3">
-              <p className="text-sm font-medium text-foreground">Kies het vergunningstype</p>
-              <div className="grid grid-cols-1 gap-2">
-                {WPBR_TYPES.map((t) =>
-            <button
-              key={t.key}
-              onClick={() => {set("license_type", t.key);setStep(2);}}
-              className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent ${
-              form.license_type === t.key ? "border-primary bg-accent" : "border-border bg-card"}`
-              }>
-              
-                    <div>
-                      <span className="text-sm font-semibold text-foreground">{t.label}</span>
-                      <span className="text-xs text-muted-foreground ml-2">{t.desc}</span>
+            <div className="relative overflow-hidden">
+              <AnimatePresence mode="wait" custom={direction}>
+                <motion.div
+                  key={step}
+                  custom={direction}
+                  initial={{ opacity: 0, x: direction * 40 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  exit={{ opacity: 0, x: direction * -40 }}
+                  transition={{ duration: 0.22, ease: "easeInOut" }}
+                >
+                  {/* Step 1: Kies type */}
+                  {step === 1 && (
+                    <div className="space-y-3">
+                      <p className="text-sm font-medium text-foreground">Kies het vergunningstype</p>
+                      <div className="grid grid-cols-1 gap-2">
+                        {WPBR_TYPES.map((t, idx) => (
+                          <motion.button
+                            key={t.key}
+                            initial={{ opacity: 0, y: 8 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            transition={{ delay: idx * 0.04, duration: 0.18 }}
+                            whileHover={{ scale: 1.01 }}
+                            whileTap={{ scale: 0.98 }}
+                            onClick={() => { set("license_type", t.key); setDirection(1); setStep(2); }}
+                            className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-colors hover:border-primary hover:bg-accent ${
+                              form.license_type === t.key ? "border-primary bg-accent" : "border-border bg-card"}`}
+                          >
+                            <div>
+                              <span className="text-sm font-semibold text-foreground">{t.label}</span>
+                              <span className="text-xs text-muted-foreground ml-2">{t.desc}</span>
+                            </div>
+                            <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                          </motion.button>
+                        ))}
+                      </div>
+                      <div className="flex justify-end pt-1">
+                        <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
+                      </div>
                     </div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                  </button>
-            )}
-              </div>
-              <div className="flex justify-end pt-1">
-                <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
-              </div>
+                  )}
+
+                  {/* Step 2: Vergunningsgegevens */}
+                  {step === 2 && (
+                    <div className="space-y-3">
+                      <p className="text-sm font-medium text-foreground">
+                        Vergunningsgegevens — <span className="text-muted-foreground font-normal">{form.license_type}</span>
+                      </p>
+                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">Vergunningsnummer</label>
+                          <Input value={form.license_number} onChange={(e) => set("license_number", e.target.value)} className="h-8 text-sm" placeholder="Nummer..." />
+                        </div>
+                        <div className="sm:col-span-1" />
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf</label>
+                          <Input type="date" value={form.valid_from} onChange={(e) => set("valid_from", e.target.value)} className="h-8 text-sm" />
+                        </div>
+                        <div>
+                          <label className="text-xs text-muted-foreground mb-1 block">Geldig tot</label>
+                          <Input type="date" value={form.valid_until} onChange={(e) => set("valid_until", e.target.value)} className="h-8 text-sm" />
+                        </div>
+                      </div>
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">Opmerkingen</label>
+                        <Input value={form.notes} onChange={(e) => set("notes", e.target.value)} className="h-8 text-sm" placeholder="Optioneel..." />
+                      </div>
+                      <div className="flex justify-between pt-1">
+                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        <Button size="sm" onClick={() => { setDirection(1); setStep(3); }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Step 3: Document uploaden + opslaan */}
+                  {step === 3 && (
+                    <div className="space-y-4">
+                      <p className="text-sm font-medium text-foreground">Vergunningsdocument uploaden</p>
+                      <p className="text-xs text-muted-foreground">Upload optioneel het officiële vergunningsdocument (PDF of afbeelding).</p>
+
+                      {form.document_file_url ? (
+                        <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
+                          <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                          <a href={form.document_file_url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex-1 truncate">
+                            {form.document_filename || "Document"}
+                          </a>
+                          <button onClick={() => set("document_file_url", "")} className="text-muted-foreground hover:text-destructive">
+                            <X className="w-4 h-4" />
+                          </button>
+                        </div>
+                      ) : (
+                        <label className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed border-border hover:border-primary cursor-pointer transition-colors">
+                          <input type="file" accept=".pdf,image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
+                          <Upload className="w-6 h-6 text-muted-foreground" />
+                          <span className="text-sm text-muted-foreground">{uploading ? "Uploaden..." : "Klik om document te uploaden"}</span>
+                          <span className="text-xs text-muted-foreground">PDF of afbeelding</span>
+                        </label>
+                      )}
+
+                      <div className="flex justify-between pt-1">
+                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(2); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        <div className="flex gap-2">
+                          <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
+                          <Button size="sm" onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending}>
+                            <Check className="w-4 h-4 mr-1" /> {createMutation.isPending ? "Opslaan..." : "Vergunning opslaan"}
+                          </Button>
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                </motion.div>
+              </AnimatePresence>
             </div>
-        }
-
-          {/* Step 2: Vergunningsgegevens */}
-          {step === 2 &&
-        <div className="space-y-3">
-              <p className="text-sm font-medium text-foreground">
-                Vergunningsgegevens — <span className="text-muted-foreground font-normal">{form.license_type}</span>
-              </p>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Vergunningsnummer</label>
-                  <Input value={form.license_number} onChange={(e) => set("license_number", e.target.value)} className="h-8 text-sm" placeholder="Nummer..." />
-                </div>
-                <div className="sm:col-span-1" />
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf</label>
-                  <Input type="date" value={form.valid_from} onChange={(e) => set("valid_from", e.target.value)} className="h-8 text-sm" />
-                </div>
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Geldig tot</label>
-                  <Input type="date" value={form.valid_until} onChange={(e) => set("valid_until", e.target.value)} className="h-8 text-sm" />
-                </div>
-              </div>
-              <div>
-                <label className="text-xs text-muted-foreground mb-1 block">Opmerkingen</label>
-                <Input value={form.notes} onChange={(e) => set("notes", e.target.value)} className="h-8 text-sm" placeholder="Optioneel..." />
-              </div>
-              <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                <Button size="sm" onClick={() => setStep(3)}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
-              </div>
-            </div>
-        }
-
-          {/* Step 3: Document uploaden + opslaan */}
-          {step === 3 &&
-        <div className="space-y-4">
-              <p className="text-sm font-medium text-foreground">Vergunningsdocument uploaden</p>
-              <p className="text-xs text-muted-foreground">Upload optioneel het officiële vergunningsdocument (PDF of afbeelding).</p>
-
-              {form.document_file_url ?
-          <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
-                  <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                  <a href={form.document_file_url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex-1 truncate">
-                    {form.document_filename || "Document"}
-                  </a>
-                  <button onClick={() => set("document_file_url", "")} className="text-muted-foreground hover:text-destructive">
-                    <X className="w-4 h-4" />
-                  </button>
-                </div> :
-
-          <label className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed border-border hover:border-primary cursor-pointer transition-colors">
-                  <input type="file" accept=".pdf,image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
-                  <Upload className="w-6 h-6 text-muted-foreground" />
-                  <span className="text-sm text-muted-foreground">{uploading ? "Uploaden..." : "Klik om document te uploaden"}</span>
-                  <span className="text-xs text-muted-foreground">PDF of afbeelding</span>
-                </label>
-          }
-
-              <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                <div className="flex gap-2">
-                  <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
-                  <Button size="sm" onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending}>
-                    <Check className="w-4 h-4 mr-1" /> {createMutation.isPending ? "Opslaan..." : "Vergunning opslaan"}
-                  </Button>
-                </div>
-              </div>
-            </div>
-        }
-        </div>
-      }
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       {/* Active licenses */}
       {activeLicenses.length === 0 && !showWizard &&
