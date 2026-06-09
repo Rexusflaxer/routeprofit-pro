@@ -4,9 +4,10 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { FileText, Upload, Plus, X, Check, ExternalLink, ChevronRight, ChevronLeft } from "lucide-react";
+import { Eye, FileText, Upload, Plus, X, Check, ChevronRight, ChevronLeft } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import { downloadManagedFile, uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
+import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
+import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
 
 const WPBR_TYPES = [
 { key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
@@ -71,6 +72,7 @@ export default function WpbrTab({ companyId, company }) {
   const [step, setStep] = useState(1);
   const [direction, setDirection] = useState(1); // 1 = forward, -1 = backward
   const [uploading, setUploading] = useState(false);
+  const [formPreviewOpen, setFormPreviewOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
 
@@ -103,6 +105,7 @@ export default function WpbrTab({ companyId, company }) {
 
   const cancelWizard = () => {
     setShowWizard(false);
+    setFormPreviewOpen(false);
     setStep(1);
     setForm(EMPTY_FORM);
     setErrors({});
@@ -267,10 +270,10 @@ export default function WpbrTab({ companyId, company }) {
                       {form.document_file_url ? (
                         <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
                           <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                          <button type="button" onClick={() => downloadManagedFile({ managedFileId: form.document_file_id, fileUrl: form.document_file_url, filename: form.document_download_filename || form.document_filename })} className="text-sm text-blue-600 hover:underline flex-1 truncate text-left">
+                          <button type="button" onClick={() => setFormPreviewOpen(true)} className="text-sm text-blue-600 hover:underline flex-1 truncate text-left">
                             {form.document_download_filename || form.document_filename || "Document"}
                           </button>
-                          <button onClick={() => setForm((f) => ({ ...f, document_file_url: "", document_filename: "", document_file_id: "", document_download_filename: "", document_logical_path: "", document_metadata: null }))} className="text-muted-foreground hover:text-destructive">
+                          <button onClick={() => { setFormPreviewOpen(false); setForm((f) => ({ ...f, document_file_url: "", document_filename: "", document_file_id: "", document_download_filename: "", document_logical_path: "", document_metadata: null })); }} className="text-muted-foreground hover:text-destructive" title="Verwijderen">
                             <X className="w-4 h-4" />
                           </button>
                         </div>
@@ -318,33 +321,62 @@ export default function WpbrTab({ companyId, company }) {
         )}
         </div>
       }
+
+      <ManagedFilePreviewDialog
+        open={formPreviewOpen}
+        onOpenChange={setFormPreviewOpen}
+        managedFileId={form.document_file_id}
+        fileUrl={form.document_file_url}
+        filename={form.document_download_filename || form.document_filename || "Document"}
+        title="Vergunningsdocument bekijken"
+      />
     </div>);
 
 }
 
 function LicenseCard({ license, muted }) {
+  const [previewOpen, setPreviewOpen] = useState(false);
   const documentName = license.document_download_filename || license.document_filename || "Document";
   return (
-    <div className={`rounded-lg border p-4 space-y-2 ${muted ? "border-border/50 opacity-70" : "border-border bg-card"}`}>
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex items-center gap-2 flex-wrap">
-          <span className="text-sm font-semibold text-foreground">{license.license_type || "Onbekend type"}</span>
-          {license.license_number && <span className="text-sm text-muted-foreground">#{license.license_number}</span>}
-          <LicenseStatusBadge license={license} />
+    <>
+      <div className={`rounded-lg border p-4 space-y-2 ${muted ? "border-border/50 opacity-70" : "border-border bg-card"}`}>
+        <div className="flex items-start justify-between gap-2">
+          <div className="flex items-center gap-2 flex-wrap">
+            <span className="text-sm font-semibold text-foreground">{license.license_type || "Onbekend type"}</span>
+            {license.license_number && <span className="text-sm text-muted-foreground">#{license.license_number}</span>}
+            <LicenseStatusBadge license={license} />
+          </div>
+          {license.document_file_url &&
+          <div className="flex items-center gap-1 shrink-0">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              onClick={() => setPreviewOpen(true)}
+              className="h-7 max-w-72 px-2 text-xs text-blue-600 hover:text-blue-700"
+              title={documentName}
+            >
+              <Eye className="w-3.5 h-3.5" />
+              <span className="truncate">{documentName}</span>
+            </Button>
+          </div>
+          }
         </div>
-        {license.document_file_url &&
-        <button type="button"
-        onClick={() => downloadManagedFile({ managedFileId: license.document_file_id, fileUrl: license.document_file_url, filename: documentName })}
-        className="flex items-center gap-1 text-xs text-blue-600 hover:underline shrink-0">
-            <FileText className="w-3.5 h-3.5" /> <span className="max-w-64 truncate">{documentName}</span> <ExternalLink className="w-3 h-3" />
-          </button>
-        }
+        <div className="flex gap-6 text-xs text-muted-foreground">
+          {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
+          {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
+        </div>
+        {license.notes && <p className="text-xs text-muted-foreground">{license.notes}</p>}
       </div>
-      <div className="flex gap-6 text-xs text-muted-foreground">
-        {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
-        {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
-      </div>
-      {license.notes && <p className="text-xs text-muted-foreground">{license.notes}</p>}
-    </div>);
+      <ManagedFilePreviewDialog
+        open={previewOpen}
+        onOpenChange={setPreviewOpen}
+        managedFileId={license.document_file_id}
+        fileUrl={license.document_file_url}
+        filename={documentName}
+        title={`WPBR ${license.license_type || "vergunning"}`}
+        description={documentName}
+      />
+    </>);
 
 }

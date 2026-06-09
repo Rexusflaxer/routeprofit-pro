@@ -296,6 +296,44 @@ function triggerUrlDownload(url, filename) {
   a.remove();
 }
 
+function normalizeBlobMimeType(blob, mimeType) {
+  if (!mimeType || blob.type === mimeType) return blob;
+  return blob.slice(0, blob.size, mimeType);
+}
+
+async function createPlainManagedFilePreview({ fileUrl, filename, mimeType = null }) {
+  if (!fileUrl) throw new Error("Geen bestand beschikbaar om te bekijken.");
+
+  try {
+    const response = await fetch(fileUrl);
+    if (!response.ok) {
+      throw new Error(`Bestand kon niet worden opgehaald (${response.status}).`);
+    }
+
+    const blob = normalizeBlobMimeType(await response.blob(), mimeType);
+    return {
+      url: URL.createObjectURL(blob),
+      blob,
+      filename: filename || "document",
+      mimeType: blob.type || mimeType || null,
+      encrypted: false,
+      revoke: true,
+      external: false
+    };
+  } catch (error) {
+    console.warn("Managed file preview fetch failed; falling back to source URL:", error);
+    return {
+      url: fileUrl,
+      blob: null,
+      filename: filename || "document",
+      mimeType,
+      encrypted: false,
+      revoke: false,
+      external: true
+    };
+  }
+}
+
 function buildDescriptor(input) {
   const {
     file,
@@ -496,6 +534,57 @@ export async function uploadManagedFile(input) {
     folder_path: managed.folder_path,
     managed_file: managed
   };
+}
+
+export async function prepareManagedFilePreview({ managedFileId, fileUrl = null, filename = "document" }) {
+  if (!managedFileId) {
+    return createPlainManagedFilePreview({ fileUrl, filename });
+  }
+
+  const { data } = await base44.functions.invoke("unwrapManagedFileKey", {
+    managed_file_id: managedFileId
+  });
+
+  if (!data) throw new Error("Bestand kon niet worden voorbereid voor weergave.");
+
+  const resolvedFilename = data.download_filename || filename || "document";
+  const resolvedMimeType = data.mime_type || null;
+
+  if (!data.encrypted) {
+    return createPlainManagedFilePreview({
+      fileUrl: data.file_url || fileUrl,
+      filename: resolvedFilename,
+      mimeType: resolvedMimeType
+    });
+  }
+
+  const blob = await decryptManagedFile({
+    fileUrl: data.file_url,
+    rawKeyB64: data.raw_key_b64,
+    ivB64: data.encryption_iv,
+    mimeType: resolvedMimeType
+  });
+
+  return {
+    url: URL.createObjectURL(blob),
+    blob,
+    filename: resolvedFilename,
+    mimeType: blob.type || resolvedMimeType,
+    encrypted: true,
+    revoke: true,
+    external: false
+  };
+}
+
+export function revokeManagedFilePreview(preview) {
+  if (preview?.revoke && preview.url) {
+    URL.revokeObjectURL(preview.url);
+  }
+}
+
+export function downloadBlob(blob, filename = "document") {
+  if (!blob) return;
+  triggerBlobDownload(blob, filename);
 }
 
 export async function downloadManagedFile({ managedFileId, fileUrl = null, filename = "document" }) {
