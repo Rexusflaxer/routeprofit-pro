@@ -70,6 +70,7 @@ export default function WpbrTab({ companyId }) {
   const [direction, setDirection] = useState(1); // 1 = forward, -1 = backward
   const [uploading, setUploading] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [errors, setErrors] = useState({});
 
   const { data: licenses = [] } = useQuery({
     queryKey: ["wpbr-licenses", companyId],
@@ -79,8 +80,9 @@ export default function WpbrTab({ companyId }) {
 
   const createMutation = useMutation({
     mutationFn: async (data) => {
-      const active = licenses.filter((l) => l.status === "active");
-      await Promise.all(active.map((l) => base44.entities.CompanyWpbrLicense.update(l.id, { status: "superseded" })));
+      // Supersede only same-type active licenses
+      const sameTypeActive = licenses.filter((l) => l.status === "active" && l.license_type === data.license_type);
+      await Promise.all(sameTypeActive.map((l) => base44.entities.CompanyWpbrLicense.update(l.id, { status: "superseded" })));
       return base44.entities.CompanyWpbrLicense.create({ ...data, company_id: companyId, status: "active" });
     },
     onSuccess: () => {
@@ -93,6 +95,16 @@ export default function WpbrTab({ companyId }) {
     setShowWizard(false);
     setStep(1);
     setForm(EMPTY_FORM);
+    setErrors({});
+  };
+
+  const validateStep2 = () => {
+    const e = {};
+    if (!form.license_number.trim()) e.license_number = "Verplicht";
+    if (!form.valid_from) e.valid_from = "Verplicht";
+    if (!form.valid_until) e.valid_until = "Verplicht";
+    setErrors(e);
+    return Object.keys(e).length === 0;
   };
 
   const handleUpload = async (file) => {
@@ -180,22 +192,25 @@ export default function WpbrTab({ companyId }) {
                           <label className="text-xs text-muted-foreground mb-1 block">Vergunningsnummer</label>
                           <div className="flex items-center gap-0">
                             <span className="inline-flex items-center h-8 px-3 rounded-l-md border border-r-0 border-input bg-muted text-sm font-semibold text-foreground select-none">{form.license_type}</span>
-                            <Input value={form.license_number} onChange={(e) => set("license_number", e.target.value)} className="h-8 text-sm rounded-l-none" placeholder="Nummer..." />
+                            <Input value={form.license_number} onChange={(e) => { set("license_number", e.target.value); setErrors((er) => ({ ...er, license_number: undefined })); }} className={`h-8 text-sm rounded-l-none ${errors.license_number ? "border-destructive" : ""}`} placeholder="Nummer..." />
                           </div>
+                          {errors.license_number && <p className="text-xs text-destructive mt-1">{errors.license_number}</p>}
                         </div>
                         <div className="sm:col-span-1" />
                         <div>
                           <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf</label>
-                          <Input type="date" value={form.valid_from} onChange={(e) => set("valid_from", e.target.value)} className="h-8 text-sm" />
+                          <Input type="date" value={form.valid_from} onChange={(e) => { set("valid_from", e.target.value); setErrors((er) => ({ ...er, valid_from: undefined })); }} className={`h-8 text-sm ${errors.valid_from ? "border-destructive" : ""}`} />
+                          {errors.valid_from && <p className="text-xs text-destructive mt-1">{errors.valid_from}</p>}
                         </div>
                         <div>
                           <label className="text-xs text-muted-foreground mb-1 block">Geldig tot</label>
-                          <Input type="date" value={form.valid_until} onChange={(e) => set("valid_until", e.target.value)} className="h-8 text-sm" />
+                          <Input type="date" value={form.valid_until} onChange={(e) => { set("valid_until", e.target.value); setErrors((er) => ({ ...er, valid_until: undefined })); }} className={`h-8 text-sm ${errors.valid_until ? "border-destructive" : ""}`} />
+                          {errors.valid_until && <p className="text-xs text-destructive mt-1">{errors.valid_until}</p>}
                         </div>
                       </div>
                       <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                        <Button size="sm" onClick={() => { setDirection(1); setStep(3); }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); setErrors({}); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        <Button size="sm" onClick={() => { if (validateStep2()) { setDirection(1); setStep(3); } }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
                       </div>
                     </div>
                   )}
@@ -204,7 +219,7 @@ export default function WpbrTab({ companyId }) {
                   {step === 3 && (
                     <div className="space-y-4">
                       <p className="text-sm font-medium text-foreground">Vergunningsdocument uploaden</p>
-                      <p className="text-xs text-muted-foreground">Upload optioneel het officiële vergunningsdocument (PDF of afbeelding).</p>
+                      <p className="text-xs text-muted-foreground">Upload het officiële vergunningsdocument (PDF of afbeelding). <span className="text-destructive font-medium">Verplicht.</span></p>
 
                       {form.document_file_url ? (
                         <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
@@ -229,7 +244,7 @@ export default function WpbrTab({ companyId }) {
                         <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(2); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
-                          <Button size="sm" onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending}>
+                          <Button size="sm" onClick={() => createMutation.mutate(form)} disabled={createMutation.isPending || !form.document_file_url}>
                             <Check className="w-4 h-4 mr-1" /> {createMutation.isPending ? "Opslaan..." : "Vergunning opslaan"}
                           </Button>
                         </div>
