@@ -11,9 +11,9 @@ const WPBR_TYPES = [
 { key: "HND", label: "HND", desc: "Hoofd Nationaal Particulier beveiligingsbedrijf alleen voor horecabeveiliging" },
 { key: "BD", label: "BD", desc: "Particuliere bedrijfsbeveiligingsdienst" },
 { key: "PAC", label: "PAC", desc: "Particulier Alarm Centralist" },
-{ key: "VTC", label: "VTC", desc: "Vervoer Transport en Cash" },
-{ key: "PGW", label: "PGW", desc: "Particulier Geld- en Waardetransport" },
-{ key: "POB", label: "POB", desc: "Particulier Objectbeveiliging" }];
+{ key: "VTC", label: "VTC", desc: "Particuliere Video Toezicht Centrale" },
+{ key: "PGW", label: "PGW", desc: "Particulier Geld- en Waardentransportbedrijf" },
+{ key: "POB", label: "POB", desc: "Particuliere Alarmcentrale" }];
 
 
 const EMPTY_FORM = {
