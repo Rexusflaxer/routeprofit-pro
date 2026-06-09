@@ -314,20 +314,28 @@ export default function WpbrTab({ companyId, company }) {
       </AnimatePresence>
 
       {/* Active licenses */}
-      {activeLicenses.length === 0 && !showWizard &&
-      <p className="text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
-      }
-      {activeLicenses.map((l) =>
-      <LicenseCard key={l.id} license={l} />
+      {activeLicenses.length === 0 && !showWizard ? (
+        <p className="text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
+      ) : activeLicenses.length > 0 && (
+        <div className="rounded-lg border border-border overflow-hidden">
+          <div className="px-4 py-2 border-b border-border bg-muted/30">
+            <p className="text-xs text-muted-foreground">Klik op een rij om het vergunningsdocument te bekijken.</p>
+          </div>
+          <div className="divide-y divide-border">
+            {activeLicenses.map((l) => <LicenseCard key={l.id} license={l} />)}
+          </div>
+        </div>
       )}
 
       {/* Historic licenses */}
       {historicLicenses.length > 0 &&
       <div className="space-y-2 pt-2">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vorige vergunningen</p>
-          {historicLicenses.map((l) =>
-        <LicenseCard key={l.id} license={l} muted />
-        )}
+          <div className="rounded-lg border border-border overflow-hidden">
+            <div className="divide-y divide-border opacity-70">
+              {historicLicenses.map((l) => <LicenseCard key={l.id} license={l} muted />)}
+            </div>
+          </div>
         </div>
       }
 
@@ -348,32 +356,20 @@ function LicenseCard({ license, muted }) {
   const documentName = license.document_download_filename || license.document_filename || "Document";
   return (
     <>
-      <div className={`rounded-lg border px-4 py-3 ${muted ? "border-border/50 opacity-70" : "border-border bg-card"}`}>
-        <div className="flex items-center justify-between gap-2">
-          <div className="flex items-center gap-4 flex-1 min-w-0">
-            <span className="text-sm font-semibold text-foreground w-10 shrink-0">{license.license_type || "?"}</span>
-            {license.license_number && <span className="text-sm text-muted-foreground w-24 shrink-0">#{license.license_number}</span>}
-            <LicenseStatusBadge license={license} />
-            <div className="flex gap-4 text-xs text-muted-foreground ml-2">
-              {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
-              {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
-            </div>
-          </div>
-          {license.document_file_url &&
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            onClick={() => setPreviewOpen(true)}
-            className="h-7 w-7 text-blue-600 hover:text-blue-700 shrink-0"
-            title="Vergunning bekijken"
-            aria-label="Vergunning bekijken"
-          >
-            <Eye className="w-3.5 h-3.5" />
-          </Button>
-          }
+      <div
+        className={`px-4 py-3 flex items-center gap-4 ${license.document_file_url ? "cursor-pointer hover:bg-accent/50 transition-colors" : ""}`}
+        onClick={license.document_file_url ? () => setPreviewOpen(true) : undefined}
+        title={license.document_file_url ? "Klik om vergunning te bekijken" : undefined}
+      >
+        <span className="text-sm font-semibold text-foreground w-10 shrink-0">{license.license_type || "?"}</span>
+        {license.license_number && <span className="text-sm text-muted-foreground w-24 shrink-0">#{license.license_number}</span>}
+        <LicenseStatusBadge license={license} />
+        <div className="flex gap-4 text-xs text-muted-foreground flex-1">
+          {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
+          {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
         </div>
-        {license.notes && <p className="text-xs text-muted-foreground mt-1 pl-14">{license.notes}</p>}
+        {license.notes && <span className="text-xs text-muted-foreground truncate">{license.notes}</span>}
+        {license.document_file_url && <Eye className="w-3.5 h-3.5 text-muted-foreground shrink-0" />}
       </div>
       <ManagedFilePreviewDialog
         open={previewOpen}
