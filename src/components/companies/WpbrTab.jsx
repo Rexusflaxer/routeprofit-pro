@@ -7,14 +7,14 @@ import { Badge } from "@/components/ui/badge";
 import { FileText, Upload, Plus, X, Check, ExternalLink, ChevronRight, ChevronLeft } from "lucide-react";
 
 const WPBR_TYPES = [
-  { key: "ND",  label: "ND",  desc: "Nationaal Dagdienst" },
-  { key: "HND", label: "HND", desc: "Hoofd Nationaal Dagdienst" },
-  { key: "BD",  label: "BD",  desc: "Bijzondere Dienst" },
-  { key: "PAC", label: "PAC", desc: "Particulier Alarm Centralist" },
-  { key: "VTC", label: "VTC", desc: "Vervoer Transport en Cash" },
-  { key: "PGW", label: "PGW", desc: "Particulier Geld- en Waardetransport" },
-  { key: "POB", label: "POB", desc: "Particulier Objectbeveiliging" },
-];
+{ key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
+{ key: "HND", label: "HND", desc: "Hoofd Nationaal Particulier beveiligingsbedrijf alleen voor horecabeveiliging" },
+{ key: "BD", label: "BD", desc: "Particuliere bedrijfsbeveiligingsdienst" },
+{ key: "PAC", label: "PAC", desc: "Particulier Alarm Centralist" },
+{ key: "VTC", label: "VTC", desc: "Vervoer Transport en Cash" },
+{ key: "PGW", label: "PGW", desc: "Particulier Geld- en Waardetransport" },
+{ key: "POB", label: "POB", desc: "Particulier Objectbeveiliging" }];
+
 
 const EMPTY_FORM = {
   license_type: "", license_number: "", valid_from: "", valid_until: "",
@@ -34,25 +34,25 @@ function WizardSteps({ step }) {
   const steps = ["Type", "Gegevens", "Document"];
   return (
     <div className="flex items-center gap-1 mb-4">
-      {steps.map((s, i) => (
-        <React.Fragment key={s}>
+      {steps.map((s, i) =>
+      <React.Fragment key={s}>
           <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full transition-colors ${
-            i + 1 === step ? "bg-primary text-primary-foreground" :
-            i + 1 < step  ? "bg-muted text-muted-foreground line-through" :
-                            "text-muted-foreground"
-          }`}>
+        i + 1 === step ? "bg-primary text-primary-foreground" :
+        i + 1 < step ? "bg-muted text-muted-foreground line-through" :
+        "text-muted-foreground"}`
+        }>
             <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-              i + 1 === step ? "bg-primary-foreground text-primary" :
-              i + 1 < step  ? "bg-muted-foreground/40 text-muted-foreground" :
-                              "border border-muted-foreground/30 text-muted-foreground"
-            }`}>{i + 1}</span>
+          i + 1 === step ? "bg-primary-foreground text-primary" :
+          i + 1 < step ? "bg-muted-foreground/40 text-muted-foreground" :
+          "border border-muted-foreground/30 text-muted-foreground"}`
+          }>{i + 1}</span>
             {s}
           </div>
           {i < steps.length - 1 && <div className="h-px flex-1 bg-border" />}
         </React.Fragment>
-      ))}
-    </div>
-  );
+      )}
+    </div>);
+
 }
 
 export default function WpbrTab({ companyId }) {
@@ -66,19 +66,19 @@ export default function WpbrTab({ companyId }) {
   const { data: licenses = [] } = useQuery({
     queryKey: ["wpbr-licenses", companyId],
     queryFn: () => base44.entities.CompanyWpbrLicense.filter({ company_id: companyId }, "-created_date"),
-    enabled: !!companyId,
+    enabled: !!companyId
   });
 
   const createMutation = useMutation({
     mutationFn: async (data) => {
-      const active = licenses.filter(l => l.status === "active");
-      await Promise.all(active.map(l => base44.entities.CompanyWpbrLicense.update(l.id, { status: "superseded" })));
+      const active = licenses.filter((l) => l.status === "active");
+      await Promise.all(active.map((l) => base44.entities.CompanyWpbrLicense.update(l.id, { status: "superseded" })));
       return base44.entities.CompanyWpbrLicense.create({ ...data, company_id: companyId, status: "active" });
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["wpbr-licenses", companyId] });
       cancelWizard();
-    },
+    }
   });
 
   const cancelWizard = () => {
@@ -91,100 +91,100 @@ export default function WpbrTab({ companyId }) {
     setUploading(true);
     try {
       const { file_url } = await base44.integrations.Core.UploadFile({ file });
-      setForm(f => ({ ...f, document_file_url: file_url, document_filename: file.name }));
+      setForm((f) => ({ ...f, document_file_url: file_url, document_filename: file.name }));
     } finally {
       setUploading(false);
     }
   };
 
-  const set = (field, val) => setForm(f => ({ ...f, [field]: val }));
+  const set = (field, val) => setForm((f) => ({ ...f, [field]: val }));
 
-  const activeLicenses = licenses.filter(l => l.status === "active");
-  const historicLicenses = licenses.filter(l => l.status !== "active");
+  const activeLicenses = licenses.filter((l) => l.status === "active");
+  const historicLicenses = licenses.filter((l) => l.status !== "active");
 
   return (
     <div className="space-y-4 p-6">
       <div className="flex items-center justify-between">
         <h3 className="text-sm font-semibold text-foreground">WPBR-vergunningen</h3>
-        {!showWizard && (
-          <Button size="sm" variant="outline" onClick={() => { setShowWizard(true); setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50); }}>
+        {!showWizard &&
+        <Button size="sm" variant="outline" onClick={() => {setShowWizard(true);setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "nearest" }), 50);}}>
             <Plus className="w-4 h-4 mr-1" /> Nieuwe vergunning
           </Button>
-        )}
+        }
       </div>
 
       {/* Wizard */}
-      {showWizard && (
-        <div ref={wizardRef} className="rounded-lg border border-primary/30 bg-muted/20 p-5">
+      {showWizard &&
+      <div ref={wizardRef} className="rounded-lg border border-primary/30 bg-muted/20 p-5">
           <WizardSteps step={step} />
 
           {/* Step 1: Kies type */}
-          {step === 1 && (
-            <div className="space-y-3">
+          {step === 1 &&
+        <div className="space-y-3">
               <p className="text-sm font-medium text-foreground">Kies het vergunningstype</p>
               <div className="grid grid-cols-1 gap-2">
-                {WPBR_TYPES.map(t => (
-                  <button
-                    key={t.key}
-                    onClick={() => { set("license_type", t.key); setStep(2); }}
-                    className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent ${
-                      form.license_type === t.key ? "border-primary bg-accent" : "border-border bg-card"
-                    }`}
-                  >
+                {WPBR_TYPES.map((t) =>
+            <button
+              key={t.key}
+              onClick={() => {set("license_type", t.key);setStep(2);}}
+              className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent ${
+              form.license_type === t.key ? "border-primary bg-accent" : "border-border bg-card"}`
+              }>
+              
                     <div>
                       <span className="text-sm font-semibold text-foreground">{t.label}</span>
                       <span className="text-xs text-muted-foreground ml-2">{t.desc}</span>
                     </div>
                     <ChevronRight className="w-4 h-4 text-muted-foreground" />
                   </button>
-                ))}
+            )}
               </div>
               <div className="flex justify-end pt-1">
                 <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
               </div>
             </div>
-          )}
+        }
 
           {/* Step 2: Vergunningsgegevens */}
-          {step === 2 && (
-            <div className="space-y-3">
+          {step === 2 &&
+        <div className="space-y-3">
               <p className="text-sm font-medium text-foreground">
                 Vergunningsgegevens — <span className="text-muted-foreground font-normal">{form.license_type}</span>
               </p>
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Vergunningsnummer</label>
-                  <Input value={form.license_number} onChange={e => set("license_number", e.target.value)} className="h-8 text-sm" placeholder="Nummer..." />
+                  <Input value={form.license_number} onChange={(e) => set("license_number", e.target.value)} className="h-8 text-sm" placeholder="Nummer..." />
                 </div>
                 <div className="sm:col-span-1" />
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf</label>
-                  <Input type="date" value={form.valid_from} onChange={e => set("valid_from", e.target.value)} className="h-8 text-sm" />
+                  <Input type="date" value={form.valid_from} onChange={(e) => set("valid_from", e.target.value)} className="h-8 text-sm" />
                 </div>
                 <div>
                   <label className="text-xs text-muted-foreground mb-1 block">Geldig tot</label>
-                  <Input type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)} className="h-8 text-sm" />
+                  <Input type="date" value={form.valid_until} onChange={(e) => set("valid_until", e.target.value)} className="h-8 text-sm" />
                 </div>
               </div>
               <div>
                 <label className="text-xs text-muted-foreground mb-1 block">Opmerkingen</label>
-                <Input value={form.notes} onChange={e => set("notes", e.target.value)} className="h-8 text-sm" placeholder="Optioneel..." />
+                <Input value={form.notes} onChange={(e) => set("notes", e.target.value)} className="h-8 text-sm" placeholder="Optioneel..." />
               </div>
               <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <Button size="sm" onClick={() => setStep(3)}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
               </div>
             </div>
-          )}
+        }
 
           {/* Step 3: Document uploaden + opslaan */}
-          {step === 3 && (
-            <div className="space-y-4">
+          {step === 3 &&
+        <div className="space-y-4">
               <p className="text-sm font-medium text-foreground">Vergunningsdocument uploaden</p>
               <p className="text-xs text-muted-foreground">Upload optioneel het officiële vergunningsdocument (PDF of afbeelding).</p>
 
-              {form.document_file_url ? (
-                <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
+              {form.document_file_url ?
+          <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
                   <FileText className="w-4 h-4 text-blue-600 shrink-0" />
                   <a href={form.document_file_url} target="_blank" rel="noopener noreferrer" className="text-sm text-blue-600 hover:underline flex-1 truncate">
                     {form.document_filename || "Document"}
@@ -192,15 +192,15 @@ export default function WpbrTab({ companyId }) {
                   <button onClick={() => set("document_file_url", "")} className="text-muted-foreground hover:text-destructive">
                     <X className="w-4 h-4" />
                   </button>
-                </div>
-              ) : (
-                <label className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed border-border hover:border-primary cursor-pointer transition-colors">
-                  <input type="file" accept=".pdf,image/*" className="hidden" onChange={e => e.target.files?.[0] && handleUpload(e.target.files[0])} />
+                </div> :
+
+          <label className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed border-border hover:border-primary cursor-pointer transition-colors">
+                  <input type="file" accept=".pdf,image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
                   <Upload className="w-6 h-6 text-muted-foreground" />
                   <span className="text-sm text-muted-foreground">{uploading ? "Uploaden..." : "Klik om document te uploaden"}</span>
                   <span className="text-xs text-muted-foreground">PDF of afbeelding</span>
                 </label>
-              )}
+          }
 
               <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
@@ -212,29 +212,29 @@ export default function WpbrTab({ companyId }) {
                 </div>
               </div>
             </div>
-          )}
+        }
         </div>
-      )}
+      }
 
       {/* Active licenses */}
-      {activeLicenses.length === 0 && !showWizard && (
-        <p className="text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
+      {activeLicenses.length === 0 && !showWizard &&
+      <p className="text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
+      }
+      {activeLicenses.map((l) =>
+      <LicenseCard key={l.id} license={l} />
       )}
-      {activeLicenses.map(l => (
-        <LicenseCard key={l.id} license={l} />
-      ))}
 
       {/* Historic licenses */}
-      {historicLicenses.length > 0 && (
-        <div className="space-y-2 pt-2">
+      {historicLicenses.length > 0 &&
+      <div className="space-y-2 pt-2">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Vorige vergunningen</p>
-          {historicLicenses.map(l => (
-            <LicenseCard key={l.id} license={l} muted />
-          ))}
+          {historicLicenses.map((l) =>
+        <LicenseCard key={l.id} license={l} muted />
+        )}
         </div>
-      )}
-    </div>
-  );
+      }
+    </div>);
+
 }
 
 function LicenseCard({ license, muted }) {
@@ -246,18 +246,18 @@ function LicenseCard({ license, muted }) {
           {license.license_number && <span className="text-sm text-muted-foreground">#{license.license_number}</span>}
           <LicenseStatusBadge license={license} />
         </div>
-        {license.document_file_url && (
-          <a href={license.document_file_url} target="_blank" rel="noopener noreferrer"
-            className="flex items-center gap-1 text-xs text-blue-600 hover:underline shrink-0">
+        {license.document_file_url &&
+        <a href={license.document_file_url} target="_blank" rel="noopener noreferrer"
+        className="flex items-center gap-1 text-xs text-blue-600 hover:underline shrink-0">
             <FileText className="w-3.5 h-3.5" /> Document <ExternalLink className="w-3 h-3" />
           </a>
-        )}
+        }
       </div>
       <div className="flex gap-6 text-xs text-muted-foreground">
         {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
         {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
       </div>
       {license.notes && <p className="text-xs text-muted-foreground">{license.notes}</p>}
-    </div>
-  );
+    </div>);
+
 }
