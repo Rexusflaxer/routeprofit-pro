@@ -504,11 +504,13 @@ export default function CaoTab({ companyId }) {
         <span className="flex-1">CAO</span>
         <span className="w-24 shrink-0">Status</span>
         <span className="w-64 shrink-0">Functies</span>
-        {!showWizard && !deleteId && (
-          <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-            <Plus className="w-3 h-3 mr-1" /> Nieuwe koppeling
-          </Button>
-        )}
+        <div className="w-16 shrink-0 flex justify-end">
+          {!showWizard && !deleteId && (
+            <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
+              <Plus className="w-3 h-3 mr-1" /> Nieuwe koppeling
+            </Button>
+          )}
+        </div>
       </div>
 
       {assignments.length === 0 && !showWizard && (
@@ -533,7 +535,7 @@ export default function CaoTab({ companyId }) {
                 <div className="w-64 shrink-0 text-xs text-muted-foreground truncate">
                   {functions.map(functionLabel).join(", ")}
                 </div>
-                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                <div className="w-16 shrink-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(a)} title="Bewerken"><Edit className="w-3.5 h-3.5" /></Button>
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteId(a.id)} title="Verwijderen"><Trash2 className="w-3.5 h-3.5" /></Button>
                 </div>
