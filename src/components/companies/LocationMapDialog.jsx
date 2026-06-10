@@ -1,17 +1,27 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MapPin, Loader2 } from "lucide-react";
+import { base44 } from "@/api/base44Client";
+import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
+import "mapbox-gl/dist/mapbox-gl.css";
 
-const MAPBOX_TOKEN = "pk.eyJ1IjoibG9xYXBwIiwiYSI6ImNtYjRlODB3NjBiMHkya3B3YmdkbHlvcmgifQ.dHDNHKWtfRq1nVT1u3xAXg";
+function normalizeCoordinates(latitude, longitude) {
+  const lat = Number(latitude);
+  const lng = Number(longitude);
 
-async function geocodeAddress(address) {
-  const url = `https://api.mapbox.com/geocoding/v5/mapbox.places/${encodeURIComponent(address)}.json?country=NL&limit=1&access_token=${MAPBOX_TOKEN}`;
-  const res = await fetch(url);
-  const data = await res.json();
-  const feature = data.features?.[0];
-  if (!feature) return null;
-  const [lng, lat] = feature.center;
-  return { lng, lat };
+  if (!Number.isFinite(lat) || !Number.isFinite(lng)) return null;
+  if (lat > 40 && lat < 60 && lng > -10 && lng < 15) return { lat, lng };
+  if (lng > 40 && lng < 60 && lat > -10 && lat < 15) return { lat: lng, lng: lat };
+
+  return { lat, lng };
+}
+
+async function geocodeAddressWithPdok(address) {
+  const { data } = await base44.functions.invoke("searchAddress", { query: address });
+  const suggestion = data?.suggestions?.find((item) => item.latitude && item.longitude);
+
+  if (!suggestion) return null;
+  return normalizeCoordinates(suggestion.latitude, suggestion.longitude);
 }
 
 export default function LocationMapDialog({ open, onOpenChange, location }) {
@@ -31,26 +41,45 @@ export default function LocationMapDialog({ open, onOpenChange, location }) {
   // Resolve coords when dialog opens
   useEffect(() => {
     if (!open || !location) return;
+
+    let cancelled = false;
     setGeoError(false);
+    setLoading(false);
 
     const directLat = location.latitude;
     const directLng = location.longitude;
+    const directCoords = normalizeCoordinates(directLat, directLng);
 
-    if (directLat && directLng) {
-      setCoords({ lat: directLat, lng: directLng });
+    if (directCoords) {
+      setCoords(directCoords);
       return;
     }
 
-    if (!address) { setGeoError(true); return; }
+    if (!address) {
+      setCoords(null);
+      setGeoError(true);
+      return;
+    }
 
     setLoading(true);
     setCoords(null);
-    geocodeAddress(address).then((result) => {
-      setLoading(false);
-      if (result) setCoords(result);
-      else setGeoError(true);
-    });
-  }, [open, location?.id]);
+    geocodeAddressWithPdok(address)
+      .then((result) => {
+        if (cancelled) return;
+        if (result) setCoords(result);
+        else setGeoError(true);
+      })
+      .catch(() => {
+        if (!cancelled) setGeoError(true);
+      })
+      .finally(() => {
+        if (!cancelled) setLoading(false);
+      });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [open, location?.id, location?.latitude, location?.longitude, address]);
 
   // Init map once coords are known and container exists
   useEffect(() => {
@@ -67,16 +96,7 @@ export default function LocationMapDialog({ open, onOpenChange, location }) {
         if (cancelled || !mapContainerRef.current) return;
         const mapboxgl = mapboxglModule.default;
 
-        // Ensure CSS is loaded
-        if (!document.getElementById("mapbox-css")) {
-          const link = document.createElement("link");
-          link.id = "mapbox-css";
-          link.rel = "stylesheet";
-          link.href = "https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css";
-          document.head.appendChild(link);
-        }
-
-        mapboxgl.accessToken = MAPBOX_TOKEN;
+        mapboxgl.accessToken = MAPBOX_PUBLIC_TOKEN;
 
         map = new mapboxgl.Map({
           container: mapContainerRef.current,
@@ -121,6 +141,8 @@ export default function LocationMapDialog({ open, onOpenChange, location }) {
             .setLngLat([coords.lng, coords.lat])
             .addTo(map);
         });
+
+        requestAnimationFrame(() => map.resize());
       });
     };
 
