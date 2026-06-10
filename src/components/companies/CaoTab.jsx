@@ -84,8 +84,7 @@ function defaultFunctionsForCao(caoKey) {
 }
 
 function normalizeFunctionSelection(values, caoKey) {
-  const selected = uniqueStrings(values).filter(value => value !== "all");
-  return selected.length > 0 ? selected : defaultFunctionsForCao(caoKey);
+  return uniqueStrings(values).filter(value => value !== "all");
 }
 
 function caoOptionLabel(option) {
@@ -306,7 +305,7 @@ export default function CaoTab({ companyId }) {
                             ...f,
                             cao_configuration_id: null,
                             cao_key: c.cao_key || null,
-                            applies_to_activities: defaultFunctionsForCao(c.cao_key || null),
+                            applies_to_activities: [],
                           }));
                           setErrors({});
                           setStep(2);
