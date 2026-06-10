@@ -335,7 +335,7 @@ export default function CaoTab({ companyId }) {
                                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Operationele functies</p>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                                   {groups.operationeel.map(value => (
-                                    <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-accent text-foreground" : "border-border bg-card text-muted-foreground hover:border-primary/60"}`}>
+                                    <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-primary/10 text-foreground font-medium" : "border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50"}`}>
                                       <input type="checkbox" checked={selectedFunctions.includes(value)} onChange={() => toggleFunction(value)} className="rounded border-input" />
                                       {functionLabel(value)}
                                     </label>
@@ -348,7 +348,7 @@ export default function CaoTab({ companyId }) {
                                 <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Binnendienst functies</p>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                                   {groups.binnendienst.map(value => (
-                                    <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-accent text-foreground" : "border-border bg-card text-muted-foreground hover:border-primary/60"}`}>
+                                    <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-primary/10 text-foreground font-medium" : "border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50"}`}>
                                       <input type="checkbox" checked={selectedFunctions.includes(value)} onChange={() => toggleFunction(value)} className="rounded border-input" />
                                       {functionLabel(value)}
                                     </label>
@@ -362,7 +362,7 @@ export default function CaoTab({ companyId }) {
                       return (
                         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                           {knownFunctions.map(value => (
-                            <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-accent text-foreground" : "border-border bg-card text-muted-foreground hover:border-primary/60"}`}>
+                            <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-primary/10 text-foreground font-medium" : "border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50"}`}>
                               <input type="checkbox" checked={selectedFunctions.includes(value)} onChange={() => toggleFunction(value)} className="rounded border-input" />
                               {functionLabel(value)}
                             </label>
