@@ -459,7 +459,7 @@ export default function WpbrTab({ companyId, company }) {
           <span className="w-24 shrink-0">Nummer</span>
           <span className="w-32 shrink-0">Status</span>
           <span className="flex-1">Geldigheid</span>
-          {showArchive && <Badge variant="secondary" className="ml-2">Archief</Badge>}
+          {showArchive && <Badge className="ml-2 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
         </div>
         {!showWizard && !deleteId && (
           <div className="flex items-center gap-2">
