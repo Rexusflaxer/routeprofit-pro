@@ -543,14 +543,17 @@ function LicenseCard({ license, onEdit, onDelete, onRenew, muted }) {
       <div
         className={`relative flex items-center px-4 py-3 group transition-colors ${
           expired && onRenew
-            ? "cursor-pointer hover:bg-amber-50/40 dark:hover:bg-amber-950/20 border-l-2 border-l-amber-400"
+            ? "cursor-pointer hover:bg-accent/30"
             : license.document_file_url
             ? "cursor-pointer hover:bg-accent/50"
             : "hover:bg-accent/30"
         }`}
         onClick={handleRowClick}
       >
-        <span className="w-10 shrink-0 text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
+        <div className="w-10 shrink-0 flex items-center gap-1.5">
+          {expired && onRenew && <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />}
+          <span className="text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
+        </div>
         <span className="w-24 shrink-0 text-sm text-muted-foreground">{license.license_number ? `#${license.license_number}` : "—"}</span>
         <div className="w-28 shrink-0">
           <LicenseStatusBadge license={license} />
