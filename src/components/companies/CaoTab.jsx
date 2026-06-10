@@ -279,7 +279,7 @@ export default function CaoTab({ companyId }) {
   const currentGroups = CAO_FUNCTION_GROUPS[form.cao_key];
   const predefinedCategories = currentGroups ? [
     ...(currentGroups.operationeel.length > 0 ? ["Operationele functies"] : []),
-    ...(currentGroups.binnendienst.length > 0 ? ["Algemeen binnendienst functies"] : []),
+    ...(currentGroups.binnendienst.length > 0 ? ["Binnendienst functies"] : []),
   ] : [];
 
   const handleAddCustomFunction = (value, label, category) => {
@@ -391,7 +391,7 @@ export default function CaoTab({ companyId }) {
                             )}
                             {groups.binnendienst.length > 0 && (
                               <div>
-                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Algemeen binnendienst functies</p>
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Binnendienst functies</p>
                                 <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
                                   {groups.binnendienst.map(value => (
                                     <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-primary/10 text-foreground font-medium" : "border-border bg-card text-foreground hover:border-primary/50 hover:bg-accent/50"}`}>
