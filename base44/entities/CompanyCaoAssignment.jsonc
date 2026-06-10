@@ -11,14 +11,14 @@
         "string",
         "null"
       ],
-      "description": "Optionele technische CAO-configuratie. Voor bedrijfskoppelingen bij voorkeur leeg laten en oplossen via cao_key + datum, zodat alle CAO-perioden automatisch worden meegenomen."
+      "description": "Optionele technische CAO-configuratie."
     },
     "cao_key": {
       "type": [
         "string",
         "null"
       ],
-      "description": "Expliciete CAO sleutel voor deze bedrijfs-CAO-koppeling, bijv. cao_particuliere_beveiliging, cao_evenementen_horecabeveiliging, cao_verkeersregelaars of cao_veiligheidsdomein. Moet overeenkomen met de gekoppelde CAOConfiguration."
+      "description": "Expliciete CAO sleutel voor deze bedrijfs-CAO-koppeling."
     },
     "is_primary": {
       "type": "boolean",
@@ -32,7 +32,31 @@
       "items": {
         "type": "string"
       },
-      "description": "Functie-/diensttokens waarvoor deze CAO bij dit bedrijf gebruikt mag worden. Deze lijst voedt de functieopties bij arbeidscontracten. Voorbeelden: objectbeveiliger, receptie, surveillant, centralist, klantrelatie, verkeersregelaar."
+      "description": "Functie-/diensttokens waarvoor deze CAO bij dit bedrijf gebruikt mag worden."
+    },
+    "custom_function_defs": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "value": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "archived": {
+            "type": "boolean"
+          }
+        }
+      },
+      "description": "Handmatig toegevoegde functies per CAO-koppeling, inclusief label, categorie en archief-status."
     },
     "valid_from": {
       "type": [

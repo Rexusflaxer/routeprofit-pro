@@ -4,7 +4,8 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Plus, X, Check, ChevronRight, ChevronLeft, Edit, Trash2, AlertTriangle } from "lucide-react";
+import { Plus, Check, ChevronRight, ChevronLeft, Edit, Trash2, AlertTriangle } from "lucide-react";
+import CaoCustomFunctionsManager from "./CaoCustomFunctionsManager";
 import { motion, AnimatePresence } from "framer-motion";
 
 const CAO_KEY_LABELS = {
@@ -68,6 +69,7 @@ const EMPTY_FORM = {
   cao_configuration_id: null,
   cao_key: null,
   applies_to_activities: [],
+  custom_function_defs: [], // [{ value, label, category, archived }]
   notes: "",
 };
 
@@ -179,7 +181,6 @@ export default function CaoTab({ companyId }) {
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
-  const [customFunctionInput, setCustomFunctionInput] = useState("");
 
   useEffect(() => {
     if (showWizard) {
@@ -214,6 +215,7 @@ export default function CaoTab({ companyId }) {
         cao_key: data.cao_key || null,
         cao_configuration_id: data.cao_configuration_id || null,
         applies_to_activities: normalizeFunctionSelection(data.applies_to_activities, data.cao_key),
+        custom_function_defs: Array.isArray(data.custom_function_defs) ? data.custom_function_defs : [],
         valid_from: null,
         valid_until: null,
         notes: data.notes || null
@@ -228,7 +230,7 @@ export default function CaoTab({ companyId }) {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["cao-assignments", companyId] }); setDeleteId(null); },
   });
 
-  const cancelWizard = () => { setShowWizard(false); setStep(1); setForm(EMPTY_FORM); setErrors({}); setEditingId(null); setCustomFunctionInput(""); };
+  const cancelWizard = () => { setShowWizard(false); setStep(1); setForm(EMPTY_FORM); setErrors({}); setEditingId(null); };
 
   const startEdit = (a) => {
     const option = findCaoOption(caoOptions, a);
@@ -236,6 +238,7 @@ export default function CaoTab({ companyId }) {
       cao_configuration_id: a.cao_key ? null : a.cao_configuration_id || null,
       cao_key: a.cao_key || option?.cao_key || null,
       applies_to_activities: normalizeFunctionSelection(a.applies_to_activities, a.cao_key || option?.cao_key || null),
+      custom_function_defs: Array.isArray(a.custom_function_defs) ? a.custom_function_defs : [],
       notes: a.notes || ""
     });
     setEditingId(a.id);
@@ -258,20 +261,53 @@ export default function CaoTab({ companyId }) {
       : [...current, value];
     return { ...f, applies_to_activities: next };
   });
-  const addCustomFunction = (value) => {
-    const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
-    if (!normalized) return;
-    setForm((f) => ({
-      ...f,
-      applies_to_activities: uniqueStrings([...normalizeFunctionSelection(f.applies_to_activities, f.cao_key), normalized]),
-    }));
-  };
   const selectedCaoOption = findCaoOption(caoOptions, form);
   const assignmentToDelete = assignments.find(a => a.id === deleteId);
   const deleteLabel = assignmentToDelete ? caoOptionLabel(findCaoOption(caoOptions, assignmentToDelete) || assignmentToDelete) : "";
   const selectedFunctions = normalizeFunctionSelection(form.applies_to_activities, form.cao_key);
   const knownFunctions = defaultFunctionsForCao(form.cao_key);
-  const customFunctions = selectedFunctions.filter(value => !knownFunctions.includes(value));
+
+  // Custom function defs: active + archived
+  const customFunctionDefs = Array.isArray(form.custom_function_defs) ? form.custom_function_defs : [];
+  const activeCustomValues = customFunctionDefs.filter(f => !f.archived).map(f => f.value);
+  const existingCustomCategories = [...new Set(customFunctionDefs.map(f => f.category).filter(Boolean))];
+
+  const handleAddCustomFunction = (value, label, category) => {
+    if (!value) return;
+    setForm((f) => {
+      const defs = Array.isArray(f.custom_function_defs) ? f.custom_function_defs : [];
+      // Don't add duplicates
+      if (defs.some(d => d.value === value)) return f;
+      return {
+        ...f,
+        custom_function_defs: [...defs, { value, label, category, archived: false }],
+        applies_to_activities: uniqueStrings([...normalizeFunctionSelection(f.applies_to_activities, f.cao_key), value]),
+      };
+    });
+  };
+
+  const handleArchiveCustomFunction = (value) => {
+    setForm((f) => ({
+      ...f,
+      custom_function_defs: (f.custom_function_defs || []).map(d => d.value === value ? { ...d, archived: true } : d),
+      applies_to_activities: normalizeFunctionSelection(f.applies_to_activities, f.cao_key).filter(v => v !== value),
+    }));
+  };
+
+  const handleRestoreCustomFunction = (value) => {
+    setForm((f) => ({
+      ...f,
+      custom_function_defs: (f.custom_function_defs || []).map(d => d.value === value ? { ...d, archived: false } : d),
+    }));
+  };
+
+  const handleDeleteCustomFunction = (value) => {
+    setForm((f) => ({
+      ...f,
+      custom_function_defs: (f.custom_function_defs || []).filter(d => d.value !== value),
+      applies_to_activities: normalizeFunctionSelection(f.applies_to_activities, f.cao_key).filter(v => v !== value),
+    }));
+  };
 
   return (
     <div className="flex flex-col h-full">
@@ -370,42 +406,14 @@ export default function CaoTab({ companyId }) {
                         </div>
                       );
                     })()}
-                    <div className="space-y-2">
-                      <label className="text-xs text-muted-foreground block">Extra functie toevoegen</label>
-                      <div className="flex gap-2">
-                        <Input
-                          value={customFunctionInput}
-                          onChange={(e) => setCustomFunctionInput(e.target.value)}
-                          onKeyDown={(e) => {
-                            if (e.key === "Enter") {
-                              e.preventDefault();
-                              addCustomFunction(customFunctionInput);
-                              setCustomFunctionInput("");
-                            }
-                          }}
-                          placeholder="bijv. alarmopvolger"
-                          className="h-8 text-sm"
-                        />
-                        <Button type="button" variant="outline" size="sm" onClick={() => {
-                          addCustomFunction(customFunctionInput);
-                          setCustomFunctionInput("");
-                        }}>
-                          <Plus className="w-3.5 h-3.5 mr-1" /> Toevoegen
-                        </Button>
-                      </div>
-                      {customFunctions.length > 0 && (
-                        <div className="flex flex-wrap gap-2">
-                          {customFunctions.map(value => (
-                            <Badge key={value} variant="outline" className="gap-1 text-xs">
-                              {functionLabel(value)}
-                              <button type="button" onClick={() => toggleFunction(value)} className="ml-1 text-muted-foreground hover:text-foreground">
-                                <X className="w-3 h-3" />
-                              </button>
-                            </Badge>
-                          ))}
-                        </div>
-                      )}
-                    </div>
+                    <CaoCustomFunctionsManager
+                      customFunctions={customFunctionDefs}
+                      onAdd={handleAddCustomFunction}
+                      onArchive={handleArchiveCustomFunction}
+                      onRestore={handleRestoreCustomFunction}
+                      onDelete={handleDeleteCustomFunction}
+                      existingCategories={existingCustomCategories}
+                    />
                     <div className="flex justify-between pt-1">
                       <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                       <Button size="sm" onClick={() => setStep(3)}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
