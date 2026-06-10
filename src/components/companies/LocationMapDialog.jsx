@@ -7,11 +7,13 @@ import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
 import "mapbox-gl/dist/mapbox-gl.css";
 
 const TARGET_POINT_SOURCE_ID = "location-target-point";
+const TARGET_BUILDING_LAYER_ID = "location-target-building-fill";
 const LOCATION_INITIAL_ZOOM = 16.4;
 const LOCATION_FOCUS_ZOOM = 17.1;
 const LOCATION_MIN_ZOOM = 15.9;
 const LOCATION_MAX_ZOOM = 20.5;
 const LOCATION_MAX_BOUNDS_RADIUS_METERS = 650;
+const LOCATION_BUILDING_HIGHLIGHT_RADIUS_METERS = 28;
 const MAP_STYLES = {
   map: "mapbox://styles/mapbox/dark-v11",
   satellite: "mapbox://styles/mapbox/satellite-streets-v12",
@@ -59,8 +61,8 @@ function getLocationMaxBounds(coords) {
   ];
 }
 
-function lockMapInteractions(map) {
-  map.dragPan.disable();
+function configureMapInteractions(map) {
+  map.dragPan.enable();
   map.dragRotate.disable();
   map.boxZoom.disable();
   map.keyboard.disable();
@@ -83,6 +85,28 @@ function addLocationDetailLayers(map, coords, labelLayerId) {
       type: "geojson",
       data: featureCollection([targetPointFeature(coords)]),
     });
+  }
+
+  if (map.getSource("composite")) {
+    addLayerBeforeLabels(
+      map,
+      {
+        id: TARGET_BUILDING_LAYER_ID,
+        source: "composite",
+        "source-layer": "building",
+        type: "fill",
+        filter: [
+          "all",
+          ["<=", ["distance", { type: "Point", coordinates: [coords.lng, coords.lat] }], LOCATION_BUILDING_HIGHLIGHT_RADIUS_METERS],
+        ],
+        paint: {
+          "fill-color": "#087eff",
+          "fill-opacity": 0.52,
+          "fill-outline-color": "#bfdbfe",
+        },
+      },
+      labelLayerId
+    );
   }
 
   addLayerBeforeLabels(
@@ -257,7 +281,7 @@ export default function LocationMapDialog({ open, onOpenChange, location }) {
         });
 
         mapRef.current = map;
-        lockMapInteractions(map);
+        configureMapInteractions(map);
 
         map.on("load", () => {
           if (cancelled) return;
