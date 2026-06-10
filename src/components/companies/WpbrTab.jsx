@@ -4,7 +4,7 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Eye, FileText, Upload, Plus, X, Check, ChevronRight, ChevronLeft, Edit, Trash2, AlertTriangle } from "lucide-react";
+import { Eye, FileText, Upload, Plus, X, Check, ChevronRight, ChevronLeft, Edit, Trash2, AlertTriangle, Archive, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
@@ -27,11 +27,16 @@ const EMPTY_FORM = {
   document_download_filename: "", document_logical_path: "", document_metadata: null,
 };
 
-function LicenseStatusBadge({ license }) {
+function isExpiredLicense(license) {
   const today = new Date().toISOString().split("T")[0];
-  const isExpired = license.valid_until && license.valid_until < today;
+  return license.valid_until && license.valid_until < today;
+}
+
+function LicenseStatusBadge({ license }) {
   if (license.status === "superseded") return <Badge variant="outline" className="text-xs text-muted-foreground">Vervangen</Badge>;
-  if (isExpired || license.status === "expired") return <Badge variant="outline" className="text-xs text-amber-600 border-amber-300">Verlopen</Badge>;
+  if (license.status === "expired" || isExpiredLicense(license)) {
+    return <Badge variant="outline" className="text-xs text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/30">Actie vereist</Badge>;
+  }
   return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0">Actief</Badge>;
 }
 
@@ -65,7 +70,6 @@ function WizardSteps({ step }) {
   );
 }
 
-// Delete confirmation dialog
 function DeleteConfirmDialog({ license, onConfirm, onCancel, isPending }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -86,7 +90,6 @@ function DeleteConfirmDialog({ license, onConfirm, onCancel, isPending }) {
           <p className="text-sm font-semibold text-foreground">Vergunning verwijderen?</p>
           <p className="text-xs text-muted-foreground mt-0.5">
             Je staat op het punt de <strong>{license.license_type}</strong> vergunning #{license.license_number} te verwijderen.
-            Zonder geldige vergunning kunnen geen diensten worden gedraaid.
           </p>
         </div>
       </div>
@@ -119,13 +122,14 @@ export default function WpbrTab({ companyId, company }) {
   const wizardRef = useRef(null);
   const [showWizard, setShowWizard] = useState(false);
   const [editingId, setEditingId] = useState(null);
+  const [renewingExpiredId, setRenewingExpiredId] = useState(null); // ID of expired license being renewed
   const [step, setStep] = useState(1);
-  const [direction, setDirection] = useState(1);
   const [uploading, setUploading] = useState(false);
   const [formPreviewOpen, setFormPreviewOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [deleteId, setDeleteId] = useState(null);
+  const [showArchive, setShowArchive] = useState(false);
 
   useEffect(() => {
     if (showWizard) {
@@ -158,9 +162,9 @@ export default function WpbrTab({ companyId, company }) {
           document_metadata: data.document_metadata || null,
         });
       }
-      // Create: supersede same-type active licenses
-      const sameTypeActive = licenses.filter((l) => l.status === "active" && l.license_type === data.license_type);
-      await Promise.all(sameTypeActive.map((l) => base44.entities.CompanyWpbrLicense.update(l.id, { status: "superseded" })));
+      // Supersede all existing active/expired licenses of the same type (archive them)
+      const sameType = licenses.filter((l) => l.license_type === data.license_type && l.status !== "superseded");
+      await Promise.all(sameType.map((l) => base44.entities.CompanyWpbrLicense.update(l.id, { status: "superseded" })));
       const created = await base44.entities.CompanyWpbrLicense.create({ ...data, company_id: companyId, status: "active" });
       if (created?.id && data.document_file_id) {
         await updateManagedFileSource(data.document_file_id, {
@@ -189,6 +193,7 @@ export default function WpbrTab({ companyId, company }) {
     setShowWizard(false);
     setFormPreviewOpen(false);
     setEditingId(null);
+    setRenewingExpiredId(null);
     setStep(1);
     setForm(EMPTY_FORM);
     setErrors({});
@@ -209,7 +214,19 @@ export default function WpbrTab({ companyId, company }) {
       document_metadata: license.document_metadata || null,
     });
     setEditingId(license.id);
-    setStep(2); // Skip type selection when editing
+    setStep(2);
+    setShowWizard(true);
+  };
+
+  // Start renewal flow for an expired license — pre-fill type, clear dates/document
+  const startRenew = (license) => {
+    setForm({
+      ...EMPTY_FORM,
+      license_type: license.license_type || "",
+    });
+    setRenewingExpiredId(license.id);
+    setEditingId(null);
+    setStep(2);
     setShowWizard(true);
   };
 
@@ -261,10 +278,12 @@ export default function WpbrTab({ companyId, company }) {
 
   const set = (field, val) => setForm((f) => ({ ...f, [field]: val }));
 
-  const activeLicenses = licenses.filter((l) => l.status === "active");
-  const historicLicenses = licenses.filter((l) => l.status !== "active");
+  // Active = not superseded. Expired ones stay visible with "Actie vereist"
+  const activeLicenses = licenses.filter((l) => l.status !== "superseded");
+  const archivedLicenses = licenses.filter((l) => l.status === "superseded");
 
   const licenseToDelete = licenses.find((l) => l.id === deleteId);
+  const isRenewing = !!renewingExpiredId;
 
   return (
     <div className="flex flex-col h-full">
@@ -294,10 +313,9 @@ export default function WpbrTab({ companyId, company }) {
             transition={{ duration: 0.2 }}
             className="rounded-none border-0 border-b border-primary/30 bg-muted/20 p-5 overflow-hidden"
           >
-            {editingId && (
-              <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">Vergunning bewerken</p>
-            )}
-            <WizardSteps step={editingId ? step - 1 : step} />
+            {editingId && <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">Vergunning bewerken</p>}
+            {isRenewing && <p className="text-xs font-semibold text-amber-600 mb-3 uppercase tracking-wider">Vergunning vernieuwen — {form.license_type}</p>}
+            <WizardSteps step={editingId || isRenewing ? step - 1 : step} />
 
             <div className="relative">
               <AnimatePresence mode="wait">
@@ -308,15 +326,15 @@ export default function WpbrTab({ companyId, company }) {
                   exit={{ opacity: 0, y: -6 }}
                   transition={{ duration: 0.18, ease: "easeOut" }}
                 >
-                  {/* Step 1: Kies type (only for new) */}
-                  {step === 1 && !editingId && (
+                  {/* Step 1: Kies type (only for new, not edit/renew) */}
+                  {step === 1 && !editingId && !isRenewing && (
                     <div className="space-y-3">
                       <p className="text-sm font-medium text-foreground">Kies het vergunningstype</p>
                       <div className="grid grid-cols-1 gap-2">
                         {WPBR_TYPES.map((t) => (
                           <button
                             key={t.key}
-                            onClick={() => { set("license_type", t.key); setDirection(1); setStep(2); }}
+                            onClick={() => { set("license_type", t.key); setStep(2); }}
                             className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${
                               form.license_type === t.key ? "border-primary bg-accent" : "border-border bg-card"}`}
                           >
@@ -362,12 +380,12 @@ export default function WpbrTab({ companyId, company }) {
                         </div>
                       </div>
                       <div className="flex justify-between pt-1">
-                        {!editingId ? (
-                          <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        {!editingId && !isRenewing ? (
+                          <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                         ) : (
-                          <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
+                          <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
                         )}
-                        <Button size="sm" onClick={() => { if (validateStep2()) { setDirection(1); setStep(3); } }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                        <Button size="sm" onClick={() => { if (validateStep2()) setStep(3); }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
                       </div>
                     </div>
                   )}
@@ -399,11 +417,11 @@ export default function WpbrTab({ companyId, company }) {
                       )}
 
                       <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => { setDirection(-1); setStep(2); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
                           <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending || (!editingId && !form.document_file_url)}>
-                            <Check className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : (editingId ? "Wijzigingen opslaan" : "Vergunning opslaan")}
+                            <Check className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : (editingId ? "Wijzigingen opslaan" : isRenewing ? "Vergunning vernieuwen" : "Vergunning opslaan")}
                           </Button>
                         </div>
                       </div>
@@ -420,18 +438,32 @@ export default function WpbrTab({ companyId, company }) {
       <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         <span className="w-10 shrink-0">Type</span>
         <span className="w-24 shrink-0">Nummer</span>
-        <span className="w-20 shrink-0">Status</span>
+        <span className="w-32 shrink-0">Status</span>
         <span className="flex-1">Geldigheid</span>
         {!showWizard && !deleteId && (
-          <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-            <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
-          </Button>
+          <div className="flex items-center gap-2">
+            {archivedLicenses.length > 0 && (
+              <Button
+                size="sm"
+                variant={showArchive ? "secondary" : "outline"}
+                onClick={() => setShowArchive(v => !v)}
+                className="h-7 px-2 text-xs font-medium normal-case tracking-normal"
+              >
+                <Archive className="w-3 h-3 mr-1" /> Archief {showArchive ? "verbergen" : `(${archivedLicenses.length})`}
+              </Button>
+            )}
+            <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+              <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
+            </Button>
+          </div>
         )}
       </div>
 
       {activeLicenses.length === 0 && !showWizard && (
         <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
       )}
+
+      {/* Active + expired licenses */}
       <div className="divide-y divide-border">
         {activeLicenses.map((l) => (
           <LicenseCard
@@ -439,21 +471,33 @@ export default function WpbrTab({ companyId, company }) {
             license={l}
             onEdit={() => startEdit(l)}
             onDelete={() => setDeleteId(l.id)}
+            onRenew={isExpiredLicense(l) ? () => startRenew(l) : undefined}
           />
         ))}
       </div>
 
-      {/* Historic licenses */}
-      {historicLicenses.length > 0 && (
-        <div className="border-t border-border">
-          <p className="px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground bg-muted/20">Vorige vergunningen</p>
-          <div className="divide-y divide-border opacity-70">
-            {historicLicenses.map((l) => (
-              <LicenseCard key={l.id} license={l} onEdit={() => startEdit(l)} onDelete={() => setDeleteId(l.id)} muted />
-            ))}
-          </div>
-        </div>
-      )}
+      {/* Archive section */}
+      <AnimatePresence>
+        {showArchive && archivedLicenses.length > 0 && (
+          <motion.div
+            initial={{ opacity: 0, height: 0 }}
+            animate={{ opacity: 1, height: "auto" }}
+            exit={{ opacity: 0, height: 0 }}
+            transition={{ duration: 0.2, ease: "easeOut" }}
+            className="overflow-hidden border-t border-border"
+          >
+            <div className="flex items-center gap-2 px-4 py-2 bg-muted/20">
+              <Archive className="w-3.5 h-3.5 text-muted-foreground" />
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Archief — vervangen vergunningen</p>
+            </div>
+            <div className="divide-y divide-border opacity-60">
+              {archivedLicenses.map((l) => (
+                <LicenseCard key={l.id} license={l} onDelete={() => setDeleteId(l.id)} muted />
+              ))}
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <ManagedFilePreviewDialog
         open={formPreviewOpen}
@@ -467,27 +511,41 @@ export default function WpbrTab({ companyId, company }) {
   );
 }
 
-function LicenseCard({ license, onEdit, onDelete }) {
+function LicenseCard({ license, onEdit, onDelete, onRenew, muted }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const documentName = license.document_download_filename || license.document_filename || "Document";
+  const expired = isExpiredLicense(license);
+
   return (
     <>
       <div
-        className={`flex items-center px-4 py-3 group transition-colors ${license.document_file_url ? "cursor-pointer hover:bg-accent/50" : "hover:bg-accent/30"}`}
-        onClick={license.document_file_url ? () => setPreviewOpen(true) : undefined}
-        title={license.document_file_url ? "Klik om vergunning te bekijken" : undefined}
+        className={`flex items-center px-4 py-3 group transition-colors ${
+          expired && onRenew ? "cursor-pointer hover:bg-amber-50/50 dark:hover:bg-amber-950/20 border-l-2 border-l-amber-400" :
+          license.document_file_url ? "cursor-pointer hover:bg-accent/50" : "hover:bg-accent/30"
+        }`}
+        onClick={expired && onRenew ? onRenew : (license.document_file_url ? () => setPreviewOpen(true) : undefined)}
+        title={expired && onRenew ? "Klik om vergunning te vernieuwen" : license.document_file_url ? "Klik om vergunning te bekijken" : undefined}
       >
         <span className="w-10 shrink-0 text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
         <span className="w-24 shrink-0 text-sm text-muted-foreground">{license.license_number ? `#${license.license_number}` : "—"}</span>
-        <div className="w-20 shrink-0"><LicenseStatusBadge license={license} /></div>
+        <div className="w-32 shrink-0 flex items-center gap-1.5">
+          <LicenseStatusBadge license={license} />
+          {expired && onRenew && (
+            <span className="text-xs text-amber-600 flex items-center gap-0.5">
+              <RefreshCw className="w-3 h-3" /> Vernieuwen
+            </span>
+          )}
+        </div>
         <div className="flex-1 flex gap-4 text-xs text-muted-foreground">
           {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
           {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
         </div>
         <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
-          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} title="Bewerken">
-            <Edit className="w-3.5 h-3.5" />
-          </Button>
+          {onEdit && (
+            <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} title="Bewerken">
+              <Edit className="w-3.5 h-3.5" />
+            </Button>
+          )}
           <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={onDelete} title="Verwijderen">
             <Trash2 className="w-3.5 h-3.5" />
           </Button>
