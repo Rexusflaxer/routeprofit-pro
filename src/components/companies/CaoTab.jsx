@@ -24,7 +24,7 @@ const FUNCTION_LABELS = {
   brandwacht: "Brandwacht",
   geld_waardetransporteur: "Geld- en waardetransporteur",
   planner: "Planner",
-  binnendienst: "Binnendienst",
+  binnendienst: "Algemeen binnendienst",
   hr_manager: "HR-Manager",
   sales_manager: "Sales Manager",
   evenementenbeveiliger: "Evenementenbeveiliger",
