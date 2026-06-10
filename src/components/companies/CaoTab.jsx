@@ -183,6 +183,7 @@ export default function CaoTab({ companyId }) {
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
+  const [expandedId, setExpandedId] = useState(null);
   const [functionAddStep, setFunctionAddStep] = useState(1); // tracks internal step of CaoCustomFunctionsManager
   const [functionLabelDirty, setFunctionLabelDirty] = useState(false); // true when user has typed a name in the custom function input
 
@@ -516,19 +517,47 @@ export default function CaoTab({ companyId }) {
       <div className="divide-y divide-border">
         {assignments.map((a) => {
           const option = findCaoOption(caoOptions, a);
+          const functions = normalizeFunctionSelection(a.applies_to_activities, a.cao_key || option?.cao_key || null);
+          const isExpanded = expandedId === a.id;
           return (
-            <div key={a.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
-              <div className="flex-1 min-w-0">
-                <span className="text-sm font-medium text-foreground">{caoOptionLabel(option || a)}</span>
+            <div key={a.id}>
+              <div
+                className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors cursor-pointer"
+                onClick={() => setExpandedId(isExpanded ? null : a.id)}
+              >
+                <div className="flex items-center gap-2 flex-1 min-w-0">
+                  <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform ${isExpanded ? "rotate-90" : ""}`} />
+                  <span className="text-sm font-medium text-foreground">{caoOptionLabel(option || a)}</span>
+                </div>
+                <div className="w-24 shrink-0"><CaoStatusBadge assignment={a} /></div>
+                <div className="w-64 shrink-0 text-xs text-muted-foreground truncate">
+                  {functions.map(functionLabel).join(", ")}
+                </div>
+                <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                  <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(a)} title="Bewerken"><Edit className="w-3.5 h-3.5" /></Button>
+                  <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteId(a.id)} title="Verwijderen"><Trash2 className="w-3.5 h-3.5" /></Button>
+                </div>
               </div>
-              <div className="w-24 shrink-0"><CaoStatusBadge assignment={a} /></div>
-              <div className="w-64 shrink-0 text-xs text-muted-foreground truncate">
-                {normalizeFunctionSelection(a.applies_to_activities, a.cao_key || option?.cao_key || null).map(functionLabel).join(", ")}
-              </div>
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(a)} title="Bewerken"><Edit className="w-3.5 h-3.5" /></Button>
-                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteId(a.id)} title="Verwijderen"><Trash2 className="w-3.5 h-3.5" /></Button>
-              </div>
+              <AnimatePresence>
+                {isExpanded && (
+                  <motion.div
+                    initial={{ height: 0, opacity: 0 }}
+                    animate={{ height: "auto", opacity: 1 }}
+                    exit={{ height: 0, opacity: 0 }}
+                    transition={{ duration: 0.18, ease: "easeOut" }}
+                    className="overflow-hidden"
+                  >
+                    <div className="px-10 pb-3 flex flex-wrap gap-2">
+                      {functions.map(value => (
+                        <span key={value} className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-muted text-foreground border border-border">
+                          {functionLabel(value)}
+                        </span>
+                      ))}
+                      {functions.length === 0 && <span className="text-xs text-muted-foreground">Geen functies geselecteerd</span>}
+                    </div>
+                  </motion.div>
+                )}
+              </AnimatePresence>
             </div>
           );
         })}
