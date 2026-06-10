@@ -232,9 +232,16 @@ export default function WpbrTab({ companyId, company }) {
 
   const validateStep2 = () => {
     const e = {};
+    const today = new Date().toISOString().split("T")[0];
     if (!form.license_number.trim()) e.license_number = "Verplicht";
     if (!form.valid_from) e.valid_from = "Verplicht";
-    if (!form.valid_until) e.valid_until = "Verplicht";
+    if (!form.valid_until) {
+      e.valid_until = "Verplicht";
+    } else if (form.valid_from && form.valid_until <= form.valid_from) {
+      e.valid_until = "Geldig tot moet later zijn dan geldig vanaf";
+    } else if (form.valid_until < today) {
+      e.valid_until = "Geldig tot ligt in het verleden — gebruik het archief voor verlopen vergunningen";
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
