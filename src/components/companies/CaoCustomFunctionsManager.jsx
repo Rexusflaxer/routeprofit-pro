@@ -1,17 +1,15 @@
 import React, { useState } from "react";
-import { Plus, X, Archive, Trash2, RotateCcw, AlertTriangle, ChevronDown, ChevronRight } from "lucide-react";
+import { Plus, Archive, Trash2, RotateCcw, AlertTriangle, ChevronDown, ChevronRight, ArrowLeft } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
 
 const DELETE_CONFIRM_WORD = "verwijder";
 
-// Converts display label → snake_key
 function toKey(label) {
   return String(label || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
 }
 
-// Display label from key
 function toLabel(key) {
   return String(key || "").replace(/[_-]+/g, " ");
 }
@@ -70,38 +68,56 @@ function ArchiveDeleteBar({ value, onArchive, onDelete, onCancel }) {
 }
 
 export default function CaoCustomFunctionsManager({
-  customFunctions,       // [{ value, label, category, archived }]
-  onAdd,                 // (value, label, category) => void
-  onArchive,             // (value) => void
-  onRestore,             // (value) => void
-  onDelete,              // (value) => void
-  existingCategories,    // string[] — categories already in use
+  customFunctions,
+  onAdd,
+  onArchive,
+  onRestore,
+  onDelete,
+  existingCategories,
 }) {
+  // Step 1: enter name, Step 2: pick category
+  const [step, setStep] = useState(1);
   const [labelInput, setLabelInput] = useState("");
-  const [categoryInput, setCategoryInput] = useState("");
-  const [categoryMode, setCategoryMode] = useState("existing"); // "existing" | "new"
   const [selectedCategory, setSelectedCategory] = useState("");
+  const [newCategoryInput, setNewCategoryInput] = useState("");
+  const [categoryMode, setCategoryMode] = useState("existing"); // "existing" | "new"
   const [showArchive, setShowArchive] = useState(false);
   const [managingValue, setManagingValue] = useState(null);
 
   const active = customFunctions.filter(f => !f.archived);
   const archived = customFunctions.filter(f => f.archived);
 
-  const categories = [...new Set([
+  const allCategories = [...new Set([
     ...existingCategories,
     ...active.map(f => f.category).filter(Boolean),
   ])];
+
+  const handleNext = () => {
+    if (!labelInput.trim()) return;
+    // Pre-select first category if none selected
+    if (!selectedCategory && allCategories.length > 0) setSelectedCategory(allCategories[0]);
+    setCategoryMode(allCategories.length > 0 ? "existing" : "new");
+    setStep(2);
+  };
 
   const handleAdd = () => {
     const label = labelInput.trim();
     if (!label) return;
     const value = toKey(label);
     const category = categoryMode === "new"
-      ? categoryInput.trim() || "Overig"
-      : (selectedCategory || categories[0] || "Overig");
+      ? (newCategoryInput.trim() || "Overig")
+      : (selectedCategory || allCategories[0] || "Overig");
     onAdd(value, label, category);
+    // Reset
     setLabelInput("");
-    setCategoryInput("");
+    setSelectedCategory("");
+    setNewCategoryInput("");
+    setStep(1);
+    setCategoryMode("existing");
+  };
+
+  const handleBack = () => {
+    setStep(1);
   };
 
   // Group active functions by category
@@ -175,22 +191,10 @@ export default function CaoCustomFunctionsManager({
                       {f.category && <span className="text-xs text-muted-foreground ml-2">({f.category})</span>}
                     </div>
                     <div className="flex items-center gap-1">
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 text-xs px-2 text-muted-foreground hover:text-foreground"
-                        onClick={() => onRestore(f.value)}
-                        title="Herstellen"
-                      >
+                      <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-muted-foreground hover:text-foreground" onClick={() => onRestore(f.value)}>
                         <RotateCcw className="w-3 h-3 mr-1" /> Herstellen
                       </Button>
-                      <Button
-                        size="sm"
-                        variant="ghost"
-                        className="h-6 w-6 p-0 text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={() => setManagingValue(managingValue === f.value ? null : f.value)}
-                        title="Definitief verwijderen"
-                      >
+                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setManagingValue(managingValue === f.value ? null : f.value)}>
                         <Trash2 className="w-3 h-3" />
                       </Button>
                     </div>
@@ -199,9 +203,7 @@ export default function CaoCustomFunctionsManager({
                     <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-2 mx-2 mb-1">
                       <div className="flex items-start gap-2">
                         <AlertTriangle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
-                        <p className="text-xs text-muted-foreground">
-                          Bestaande contracten en diensten blijven intact. Nieuwe koppelingen zijn niet meer mogelijk.
-                        </p>
+                        <p className="text-xs text-muted-foreground">Bestaande contracten en diensten blijven intact. Nieuwe koppelingen zijn niet meer mogelijk.</p>
                       </div>
                       <div className="flex gap-2">
                         <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => { onDelete(f.value); setManagingValue(null); }}>
@@ -218,66 +220,116 @@ export default function CaoCustomFunctionsManager({
         </div>
       )}
 
-      {/* Add new custom function */}
+      {/* Add new custom function — 2-step flow */}
       <div className="space-y-2 pt-1 border-t border-border">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground pt-1">Functie toevoegen</p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-          <Input
-            value={labelInput}
-            onChange={(e) => setLabelInput(e.target.value)}
-            onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-            placeholder="bijv. Alarmopvolger"
-            className="h-8 text-sm"
-          />
-          <div className="flex gap-2">
-            {categories.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setCategoryMode(m => m === "existing" ? "new" : "existing")}
-                className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2 shrink-0 self-center"
-              >
-                {categoryMode === "existing" ? "+ Nieuwe categorie" : "Bestaande categorie"}
-              </button>
-            )}
-          </div>
-        </div>
 
-        {/* Category selection */}
-        {categoryMode === "existing" && categories.length > 0 ? (
-          <div className="flex flex-wrap gap-1.5">
-            {categories.map(cat => (
-              <button
-                key={cat}
-                type="button"
-                onClick={() => setSelectedCategory(cat)}
-                className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
-                  selectedCategory === cat
-                    ? "bg-primary text-primary-foreground border-primary"
-                    : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground bg-card"
-                }`}
-              >
-                {cat}
-              </button>
-            ))}
+        {step === 1 && (
+          <div className="flex gap-2">
+            <Input
+              value={labelInput}
+              onChange={(e) => setLabelInput(e.target.value)}
+              onKeyDown={(e) => e.key === "Enter" && handleNext()}
+              placeholder="bijv. Alarmopvolger"
+              className="h-8 text-sm"
+              autoFocus
+            />
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              onClick={handleNext}
+              disabled={!labelInput.trim()}
+            >
+              Volgende →
+            </Button>
           </div>
-        ) : (
-          <Input
-            value={categoryInput}
-            onChange={(e) => setCategoryInput(e.target.value)}
-            placeholder="Categorie naam, bijv. Operationele functies"
-            className="h-8 text-sm"
-          />
         )}
 
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          onClick={handleAdd}
-          disabled={!labelInput.trim()}
-        >
-          <Plus className="w-3.5 h-3.5 mr-1" /> Toevoegen
-        </Button>
+        {step === 2 && (
+          <div className="space-y-2">
+            <div className="flex items-center gap-2">
+              <button type="button" onClick={handleBack} className="text-muted-foreground hover:text-foreground">
+                <ArrowLeft className="w-3.5 h-3.5" />
+              </button>
+              <span className="text-sm font-medium text-foreground">{labelInput}</span>
+            </div>
+
+            {/* Toggle existing/new */}
+            {allCategories.length > 0 && (
+              <div className="flex gap-2 text-xs">
+                <button
+                  type="button"
+                  onClick={() => setCategoryMode("existing")}
+                  className={`px-2.5 py-1 rounded-full border transition-colors ${
+                    categoryMode === "existing"
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground bg-card"
+                  }`}
+                >
+                  Bestaande categorie
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setCategoryMode("new")}
+                  className={`px-2.5 py-1 rounded-full border transition-colors ${
+                    categoryMode === "new"
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground bg-card"
+                  }`}
+                >
+                  Nieuwe categorie
+                </button>
+              </div>
+            )}
+
+            {/* Existing categories as pills */}
+            {categoryMode === "existing" && allCategories.length > 0 && (
+              <div className="flex flex-wrap gap-1.5">
+                {allCategories.map(cat => (
+                  <button
+                    key={cat}
+                    type="button"
+                    onClick={() => setSelectedCategory(cat)}
+                    className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                      selectedCategory === cat
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground bg-card"
+                    }`}
+                  >
+                    {cat}
+                  </button>
+                ))}
+              </div>
+            )}
+
+            {/* New category input */}
+            {(categoryMode === "new" || allCategories.length === 0) && (
+              <Input
+                value={newCategoryInput}
+                onChange={(e) => setNewCategoryInput(e.target.value)}
+                onKeyDown={(e) => e.key === "Enter" && handleAdd()}
+                placeholder="Categorie naam, bijv. Operationele functies"
+                className="h-8 text-sm"
+                autoFocus
+              />
+            )}
+
+            <Button
+              type="button"
+              variant="default"
+              size="sm"
+              onClick={handleAdd}
+              disabled={
+                categoryMode === "existing"
+                  ? !selectedCategory && allCategories.length > 0
+                  : !newCategoryInput.trim() && allCategories.length > 0
+              }
+            >
+              <Plus className="w-3.5 h-3.5 mr-1" /> Toevoegen
+            </Button>
+          </div>
+        )}
       </div>
     </div>
   );
