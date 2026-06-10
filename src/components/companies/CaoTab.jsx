@@ -300,6 +300,7 @@ export default function CaoTab({ companyId }) {
                             applies_to_activities: defaultFunctionsForCao(c.cao_key || null),
                           }));
                           setErrors({});
+                          setStep(2);
                         }}
                           className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${form.cao_key === c.cao_key ? "border-primary bg-accent" : "border-border bg-card"}`}>
                           <div>
@@ -310,10 +311,6 @@ export default function CaoTab({ companyId }) {
                       ))}
                     </div>
                     {errors.cao_key && <p className="text-xs text-destructive">{errors.cao_key}</p>}
-                    <div className="flex justify-between pt-1">
-                      <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
-                      <Button size="sm" onClick={() => { if (validateStep1()) setStep(2); }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
-                    </div>
                   </div>
                 )}
 
