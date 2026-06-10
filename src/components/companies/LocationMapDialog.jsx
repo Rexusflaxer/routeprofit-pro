@@ -109,14 +109,18 @@ export default function LocationMapDialog({ open, onOpenChange, location }) {
 
   // Init map when we have coords and container
   useEffect(() => {
-    if (!open || !coords || !mapContainerRef.current) return;
+    if (!open || !coords) return;
 
-    // Small timeout to ensure the container is rendered
+    // Wait for dialog animation + DOM paint before init
     const timer = setTimeout(() => {
       if (!mapContainerRef.current) return;
+      if (mapRef.current) {
+        mapRef.current.remove();
+        mapRef.current = null;
+      }
       const map = initMap(mapContainerRef.current, coords.lng, coords.lat);
       mapRef.current = map;
-    }, 50);
+    }, 300);
 
     return () => {
       clearTimeout(timer);
