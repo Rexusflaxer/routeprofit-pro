@@ -260,61 +260,40 @@ export default function CaoCustomFunctionsManager({
               <span className="text-sm font-medium text-foreground">{labelInput}</span>
             </div>
 
-            {/* Toggle existing/new */}
-            {allCategories.length > 0 && (
-              <div className="flex gap-2 text-xs">
+            {/* Categories as pills + "Nieuwe categorie" option */}
+            <div className="flex flex-wrap gap-1.5">
+              {allCategories.map(cat => (
                 <button
+                  key={cat}
                   type="button"
-                  onClick={() => setCategoryMode("existing")}
-                  className={`px-2.5 py-1 rounded-full border transition-colors ${
-                    categoryMode === "existing"
+                  onClick={() => { setSelectedCategory(cat); setCategoryMode("existing"); }}
+                  className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
+                    categoryMode === "existing" && selectedCategory === cat
                       ? "bg-primary text-primary-foreground border-primary"
                       : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground bg-card"
                   }`}
                 >
-                  Bestaande categorie
+                  {cat}
                 </button>
+              ))}
+              {categoryMode !== "new" && (
                 <button
                   type="button"
-                  onClick={() => setCategoryMode("new")}
-                  className={`px-2.5 py-1 rounded-full border transition-colors ${
-                    categoryMode === "new"
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground bg-card"
-                  }`}
+                  onClick={() => { setCategoryMode("new"); setSelectedCategory(""); }}
+                  className="px-2.5 py-1 rounded-full text-xs border border-dashed border-border text-muted-foreground hover:border-primary/50 hover:text-foreground bg-card transition-colors"
                 >
-                  Nieuwe categorie
+                  + Nieuwe categorie
                 </button>
-              </div>
-            )}
+              )}
+            </div>
 
-            {/* Existing categories as pills */}
-            {categoryMode === "existing" && allCategories.length > 0 && (
-              <div className="flex flex-wrap gap-1.5">
-                {allCategories.map(cat => (
-                  <button
-                    key={cat}
-                    type="button"
-                    onClick={() => setSelectedCategory(cat)}
-                    className={`px-2.5 py-1 rounded-full text-xs border transition-colors ${
-                      selectedCategory === cat
-                        ? "bg-primary text-primary-foreground border-primary"
-                        : "border-border text-muted-foreground hover:border-primary/50 hover:text-foreground bg-card"
-                    }`}
-                  >
-                    {cat}
-                  </button>
-                ))}
-              </div>
-            )}
-
-            {/* New category input */}
-            {(categoryMode === "new" || allCategories.length === 0) && (
+            {/* New category inline input */}
+            {categoryMode === "new" && (
               <Input
                 value={newCategoryInput}
                 onChange={(e) => setNewCategoryInput(e.target.value)}
                 onKeyDown={(e) => e.key === "Enter" && handleAdd()}
-                placeholder="Categorie naam, bijv. Operationele functies"
+                placeholder="Naam nieuwe categorie"
                 className="h-8 text-sm"
                 autoFocus
               />
