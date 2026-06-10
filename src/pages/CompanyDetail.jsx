@@ -8,9 +8,8 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowLeft, Edit, Check, X, Building2, Phone, Mail, Globe, MapPin, FileText, Upload, Shield, BookOpen } from "lucide-react";
+import { ArrowLeft, Edit, Check, X, Building2, MapPin, FileText, Upload, Users } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import WpbrTab from "@/components/companies/WpbrTab";
 import SidebarPanel from "@/components/companies/CompanySidebarPanel";
 import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
 
@@ -229,6 +228,11 @@ export default function CompanyDetail() {
                   <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[company.status] || ""}`}>
                     {company.status === "active" ? "Actief" : company.status === "inactive" ? "Inactief" : "Gearchiveerd"}
                   </span>
+                  {company.teamhub_enabled && (
+                    <Badge variant="outline" className="gap-1 text-xs">
+                      <Users className="h-3 w-3" /> Teamhub
+                    </Badge>
+                  )}
                 </div>
                 {company.legal_name && company.legal_name !== company.display_name && (
                   <p className="text-sm text-muted-foreground mt-0.5">Handelsnaam: {company.legal_name}</p>

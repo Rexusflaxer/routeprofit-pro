@@ -234,6 +234,136 @@
         "null"
       ]
     },
+    "teamhub_enabled": {
+      "type": "boolean",
+      "default": false,
+      "description": "Of dit bedrijf zichtbaar is in LOQ Teamhub als beschikbare onderaannemer"
+    },
+    "teamhub_intro": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Korte publieke introductie voor LOQ Teamhub"
+    },
+    "teamhub_contact_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Publieke contactpersoon voor Teamhub-aanvragen"
+    },
+    "teamhub_contact_email": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Publiek Teamhub-contactmailadres"
+    },
+    "teamhub_contact_phone": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Publiek Teamhub-telefoonnummer"
+    },
+    "teamhub_service_types": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Diensten waarvoor dit bedrijf zich via LOQ Teamhub beschikbaar stelt"
+    },
+    "teamhub_capacity_note": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Publieke toelichting op capaciteit en beschikbaarheid"
+    },
+    "teamhub_available_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum vanaf wanneer het bedrijf diensten kan aannemen"
+    },
+    "teamhub_min_notice_hours": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Minimale aanlooptijd in uren voor Teamhub-aanvragen"
+    },
+    "teamhub_regions": {
+      "type": "array",
+      "default": [],
+      "description": "Regio's waar het bedrijf diensten wil aannemen via LOQ Teamhub",
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "selection_type": {
+            "type": "string",
+            "enum": [
+              "city_radius",
+              "municipality",
+              "province",
+              "custom_geojson"
+            ],
+            "default": "city_radius"
+          },
+          "city": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "province": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "country": {
+            "type": "string",
+            "default": "Nederland"
+          },
+          "latitude": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "longitude": {
+            "type": [
+              "number",
+              "null"
+            ]
+          },
+          "radius_km": {
+            "type": [
+              "number",
+              "null"
+            ],
+            "default": 25
+          },
+          "geojson": {
+            "type": [
+              "object",
+              "null"
+            ]
+          }
+        }
+      }
+    },
     "notes": {
       "type": [
         "string",

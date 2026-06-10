@@ -7,9 +7,10 @@ import { Textarea } from "@/components/ui/textarea";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
 import { Search, Upload, X, MapPin } from "lucide-react";
 import { createManagedUploadSession, uploadManagedFile } from "@/lib/managedFiles";
+import TeamhubRegionPicker from "./TeamhubRegionPicker";
 
 const ACTIVITIES = [
   { key: "private_security", label: "Particulier beveiligingsbedrijf" },
@@ -40,7 +41,10 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
     phone: "", email: "", website: "", logo_file_url: null, logo_file_id: null, logo_download_filename: null, logo_logical_path: null,
     letterhead_file_url: null, letterhead_file_id: null, letterhead_download_filename: null, letterhead_logical_path: null,
     default_cao_configuration_id: null, notes: "",
+    teamhub_enabled: false, teamhub_intro: "", teamhub_contact_name: "", teamhub_contact_email: "", teamhub_contact_phone: "",
+    teamhub_service_types: [], teamhub_capacity_note: "", teamhub_available_from: "", teamhub_min_notice_hours: "", teamhub_regions: [],
   });
+  const [activeTab, setActiveTab] = useState("identity");
 
   const [kvkSearch, setKvkSearch] = useState("");
   const [kvkResults, setKvkResults] = useState([]);
@@ -142,16 +146,36 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
     set("activities", current.includes(key) ? current.filter(a => a !== key) : [...current, key]);
   };
 
+  const toggleTeamhubService = (key) => {
+    const current = form.teamhub_service_types || [];
+    set("teamhub_service_types", current.includes(key) ? current.filter(a => a !== key) : [...current, key]);
+  };
+
+  const buildSavePayload = () => ({
+    ...form,
+    teamhub_intro: form.teamhub_intro?.trim() || null,
+    teamhub_contact_name: form.teamhub_contact_name?.trim() || null,
+    teamhub_contact_email: form.teamhub_contact_email?.trim() || null,
+    teamhub_contact_phone: form.teamhub_contact_phone?.trim() || null,
+    teamhub_service_types: form.teamhub_service_types || [],
+    teamhub_capacity_note: form.teamhub_capacity_note?.trim() || null,
+    teamhub_available_from: form.teamhub_available_from || null,
+    teamhub_min_notice_hours: form.teamhub_min_notice_hours === "" ? null : Number(form.teamhub_min_notice_hours),
+    teamhub_regions: form.teamhub_regions || [],
+    _managed_file_upload_session_id: uploadSessionId,
+  });
+
   const holdingOptions = companies.filter(c => c.id !== company?.id && c.company_role === "holding");
 
   return (
     <div className="space-y-4">
-      <Tabs defaultValue="identity">
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList className="flex flex-wrap h-auto gap-1 mb-2">
           <TabsTrigger value="identity">Identiteit</TabsTrigger>
           <TabsTrigger value="activities">Activiteiten</TabsTrigger>
           <TabsTrigger value="address">Adres & Contact</TabsTrigger>
           <TabsTrigger value="branding">Branding</TabsTrigger>
+          <TabsTrigger value="teamhub">LOQ Teamhub</TabsTrigger>
           <TabsTrigger value="cao">CAO's</TabsTrigger>
         </TabsList>
 
@@ -391,6 +415,79 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
           </div>
         </TabsContent>
 
+        {/* LOQ TEAMHUB */}
+        <TabsContent value="teamhub" className="space-y-5 pt-2">
+          <div className="flex items-center justify-between gap-4 rounded-md border border-border bg-muted/30 p-4">
+            <div>
+              <Label className="text-sm font-semibold">Weergeven in LOQ Teamhub</Label>
+              <p className="mt-1 text-xs text-muted-foreground">Maak dit bedrijf zichtbaar als beschikbare onderaannemer.</p>
+            </div>
+            <Switch checked={form.teamhub_enabled === true} onCheckedChange={checked => set("teamhub_enabled", checked)} />
+          </div>
+
+          <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div className="space-y-1 md:col-span-2">
+              <Label>Publieke introductie</Label>
+              <Textarea
+                value={form.teamhub_intro || ""}
+                onChange={e => set("teamhub_intro", e.target.value)}
+                rows={3}
+                placeholder="Korte omschrijving van specialisaties, werkgebied en inzetbaarheid"
+              />
+            </div>
+            <div className="space-y-1">
+              <Label>Contactpersoon</Label>
+              <Input value={form.teamhub_contact_name || ""} onChange={e => set("teamhub_contact_name", e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>Contactmail</Label>
+              <Input type="email" value={form.teamhub_contact_email || ""} onChange={e => set("teamhub_contact_email", e.target.value)} placeholder={form.email || ""} />
+            </div>
+            <div className="space-y-1">
+              <Label>Contacttelefoon</Label>
+              <Input value={form.teamhub_contact_phone || ""} onChange={e => set("teamhub_contact_phone", e.target.value)} placeholder={form.phone || ""} />
+            </div>
+            <div className="space-y-1">
+              <Label>Beschikbaar vanaf</Label>
+              <Input type="date" value={form.teamhub_available_from || ""} onChange={e => set("teamhub_available_from", e.target.value)} />
+            </div>
+            <div className="space-y-1">
+              <Label>Minimale aanlooptijd in uren</Label>
+              <Input type="number" min="0" step="1" value={form.teamhub_min_notice_hours ?? ""} onChange={e => set("teamhub_min_notice_hours", e.target.value)} />
+            </div>
+            <div className="space-y-1 md:col-span-2">
+              <Label>Capaciteit en beschikbaarheid</Label>
+              <Textarea
+                value={form.teamhub_capacity_note || ""}
+                onChange={e => set("teamhub_capacity_note", e.target.value)}
+                rows={2}
+              />
+            </div>
+          </div>
+
+          <div>
+            <Label className="mb-2 block">Diensten</Label>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+              {ACTIVITIES.map(a => (
+                <label key={a.key} className="flex items-center gap-2 text-sm cursor-pointer p-2 rounded hover:bg-muted/50">
+                  <Checkbox checked={(form.teamhub_service_types || []).includes(a.key)} onCheckedChange={() => toggleTeamhubService(a.key)} />
+                  {a.label}
+                </label>
+              ))}
+            </div>
+          </div>
+
+          <div className="space-y-2">
+            <Label>Werkregio's</Label>
+            {activeTab === "teamhub" && (
+              <TeamhubRegionPicker
+                value={form.teamhub_regions || []}
+                onChange={regions => set("teamhub_regions", regions)}
+              />
+            )}
+          </div>
+        </TabsContent>
+
         {/* CAO */}
         <TabsContent value="cao" className="space-y-4 pt-2">
           <div className="space-y-1">
@@ -412,7 +509,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
 
       <div className="flex justify-end gap-2 pt-2 border-t">
         <Button type="button" variant="outline" onClick={onCancel}>Annuleren</Button>
-        <Button type="button" onClick={() => onSave({ ...form, _managed_file_upload_session_id: uploadSessionId })}>Opslaan</Button>
+        <Button type="button" onClick={() => onSave(buildSavePayload())}>Opslaan</Button>
       </div>
     </div>
   );

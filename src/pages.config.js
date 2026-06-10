@@ -57,6 +57,7 @@ import Personnel from './pages/Personnel';
 import RouteDetails from './pages/RouteDetails';
 import Routes from './pages/Routes';
 import Settings from './pages/Settings';
+import Teamhub from './pages/Teamhub';
 import Vehicles from './pages/Vehicles';
 import __Layout from './Layout.jsx';
 
@@ -72,6 +73,7 @@ export const PAGES = {
     "RouteDetails": RouteDetails,
     "Routes": Routes,
     "Settings": Settings,
+    "Teamhub": Teamhub,
     "Vehicles": Vehicles,
 }
 

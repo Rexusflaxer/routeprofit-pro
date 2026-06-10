@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, Settings, Menu, X, CarFront, Smartphone,
   Search, Route, MapPin, CalendarCheck,
   FileText, SlidersHorizontal,
-  Database, ChevronDown, Building2, UserCircle, LogOut
+  Database, ChevronDown, Building2, UserCircle, LogOut, Handshake
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeProvider, useTheme } from "next-themes";
@@ -22,6 +22,7 @@ const CONTEXT_SECTIONS = [
     items: [
       { name: "Dashboard", icon: LayoutDashboard, page: "Dashboard" },
       { name: "Personeel", icon: Users, page: "Personnel" },
+      { name: "LOQ Teamhub", icon: Handshake, page: "Teamhub" },
     ],
   },
   {
