@@ -74,9 +74,12 @@ export default function CaoCustomFunctionsManager({
   onRestore,
   onDelete,
   existingCategories,
+  onStepChange,
 }) {
   // Step 1: enter name, Step 2: pick category
   const [step, setStep] = useState(1);
+
+  const goToStep = (s) => { setStep(s); onStepChange?.(s); };
   const [labelInput, setLabelInput] = useState("");
   const [selectedCategory, setSelectedCategory] = useState("");
   const [newCategoryInput, setNewCategoryInput] = useState("");
@@ -94,10 +97,9 @@ export default function CaoCustomFunctionsManager({
 
   const handleNext = () => {
     if (!labelInput.trim()) return;
-    // Pre-select first category if none selected
     if (!selectedCategory && allCategories.length > 0) setSelectedCategory(allCategories[0]);
     setCategoryMode(allCategories.length > 0 ? "existing" : "new");
-    setStep(2);
+    goToStep(2);
   };
 
   const handleAdd = () => {
@@ -108,16 +110,15 @@ export default function CaoCustomFunctionsManager({
       ? (newCategoryInput.trim() || "Overig")
       : (selectedCategory || allCategories[0] || "Overig");
     onAdd(value, label, category);
-    // Reset
     setLabelInput("");
     setSelectedCategory("");
     setNewCategoryInput("");
-    setStep(1);
+    goToStep(1);
     setCategoryMode("existing");
   };
 
   const handleBack = () => {
-    setStep(1);
+    goToStep(1);
   };
 
   // Group active functions by category

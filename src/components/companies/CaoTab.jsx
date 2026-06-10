@@ -181,6 +181,7 @@ export default function CaoTab({ companyId }) {
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
+  const [functionAddStep, setFunctionAddStep] = useState(1); // tracks internal step of CaoCustomFunctionsManager
 
   useEffect(() => {
     if (showWizard) {
@@ -413,10 +414,13 @@ export default function CaoTab({ companyId }) {
                       onRestore={handleRestoreCustomFunction}
                       onDelete={handleDeleteCustomFunction}
                       existingCategories={existingCustomCategories}
+                      onStepChange={setFunctionAddStep}
                     />
                     <div className="flex justify-between pt-1">
                       <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                      <Button size="sm" onClick={() => setStep(3)}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                      {functionAddStep === 1 && (
+                        <Button size="sm" onClick={() => setStep(3)}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                      )}
                     </div>
                   </div>
                 )}
