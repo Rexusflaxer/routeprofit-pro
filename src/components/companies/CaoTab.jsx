@@ -431,7 +431,7 @@ export default function CaoTab({ companyId }) {
                           }
                           setErrors(e => { const { applies_to_activities, ...rest } = e; return rest; });
                           setStep(3);
-                        }}>Aangepaste functie toevoegen <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                        }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
                       )}
                     </div>
                   </div>

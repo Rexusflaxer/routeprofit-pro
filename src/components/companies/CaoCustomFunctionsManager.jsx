@@ -244,7 +244,7 @@ export default function CaoCustomFunctionsManager({
               onClick={handleNext}
               disabled={!labelInput.trim()}
             >
-              Volgende →
+              Aangepaste functie toevoegen
             </Button>
           </div>
         )}
