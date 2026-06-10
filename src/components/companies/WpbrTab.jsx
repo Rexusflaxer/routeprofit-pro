@@ -449,6 +449,9 @@ export default function WpbrTab({ companyId, company }) {
         <span className="flex-1">Geldigheid</span>
         {!showWizard && !deleteId && (
           <div className="flex items-center gap-2">
+            <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+              <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
+            </Button>
             {archivedLicenses.length > 0 && (
               <Button
                 size="sm"
@@ -459,9 +462,6 @@ export default function WpbrTab({ companyId, company }) {
                 <Archive className="w-3 h-3 mr-1" /> Archief {showArchive ? "verbergen" : `(${archivedLicenses.length})`}
               </Button>
             )}
-            <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-              <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
-            </Button>
           </div>
         )}
       </div>
