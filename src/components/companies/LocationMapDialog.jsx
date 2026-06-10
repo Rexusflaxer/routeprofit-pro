@@ -10,9 +10,7 @@ const TARGET_POINT_SOURCE_ID = "location-target-point";
 const TARGET_BUILDING_LAYER_ID = "location-target-building-fill";
 const LOCATION_INITIAL_ZOOM = 16.4;
 const LOCATION_FOCUS_ZOOM = 17.1;
-const LOCATION_MIN_ZOOM = 12.0;
 const LOCATION_MAX_ZOOM = 20.5;
-const LOCATION_MAX_BOUNDS_RADIUS_METERS = 650;
 const LOCATION_BUILDING_HIGHLIGHT_RADIUS_METERS = 28;
 const MAP_STYLES = {
   map: "mapbox://styles/mapbox/dark-v11",
@@ -48,17 +46,6 @@ function targetPointFeature(coords) {
 
 function featureCollection(features) {
   return { type: "FeatureCollection", features };
-}
-
-function getLocationMaxBounds(coords) {
-  const latRadians = (coords.lat * Math.PI) / 180;
-  const latDelta = LOCATION_MAX_BOUNDS_RADIUS_METERS / 111_320;
-  const lngDelta = LOCATION_MAX_BOUNDS_RADIUS_METERS / (111_320 * Math.max(Math.cos(latRadians), 0.2));
-
-  return [
-    [coords.lng - lngDelta, coords.lat - latDelta],
-    [coords.lng + lngDelta, coords.lat + latDelta],
-  ];
 }
 
 function configureMapInteractions(map) {
@@ -269,9 +256,7 @@ export default function LocationMapDialog({ open, onOpenChange, location }) {
           style: getMapStyle(mapMode),
           center: [coords.lng, coords.lat],
           zoom: LOCATION_INITIAL_ZOOM,
-          minZoom: LOCATION_MIN_ZOOM,
           maxZoom: LOCATION_MAX_ZOOM,
-          maxBounds: getLocationMaxBounds(coords),
           pitch: 0,
           bearing: 0,
           pitchWithRotate: false,
