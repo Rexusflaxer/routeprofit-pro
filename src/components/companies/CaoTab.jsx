@@ -38,7 +38,7 @@ const FUNCTION_LABELS = {
 // Per CAO: welke functies zijn operationeel vs. binnendienst
 const CAO_FUNCTION_GROUPS = {
   cao_particuliere_beveiliging: {
-    operationeel: ["objectbeveiliger", "receptionist", "mobiel_surveillant", "winkelsurveillant", "centralist", "brandwacht", "geld_waardetransporteur"],
+    operationeel: ["objectbeveiliger", "receptionist", "mobiel_surveillant", "winkelsurveillant", "centralist", "brandwacht", "geld_waardetransporteur", "evenementenbeveiliger"],
     binnendienst: ["binnendienst", "planner", "hr_manager", "sales_manager"],
   },
   cao_evenementen_horecabeveiliging: {
@@ -58,7 +58,7 @@ const CAO_FUNCTION_GROUPS = {
 const CAO_FUNCTION_CATALOG = {
   cao_particuliere_beveiliging: [
     "objectbeveiliger", "receptionist", "mobiel_surveillant", "winkelsurveillant",
-    "centralist", "brandwacht", "geld_waardetransporteur", "binnendienst", "planner", "hr_manager", "sales_manager",
+    "centralist", "brandwacht", "geld_waardetransporteur", "evenementenbeveiliger", "binnendienst", "planner", "hr_manager", "sales_manager",
   ],
   cao_evenementen_horecabeveiliging: ["evenementenbeveiliger", "horecabeveiliger"],
   cao_verkeersregelaars: ["verkeersregelaar"],
