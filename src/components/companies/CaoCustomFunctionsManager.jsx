@@ -74,6 +74,7 @@ export default function CaoCustomFunctionsManager({
   onRestore,
   onDelete,
   existingCategories,
+  predefinedCategories = [],
   onStepChange,
   onLabelChange,
 }) {
@@ -92,6 +93,7 @@ export default function CaoCustomFunctionsManager({
   const archived = customFunctions.filter(f => f.archived);
 
   const allCategories = [...new Set([
+    ...predefinedCategories,
     ...existingCategories,
     ...active.map(f => f.category).filter(Boolean),
   ])];
