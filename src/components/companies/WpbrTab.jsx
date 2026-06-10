@@ -35,7 +35,7 @@ function isExpiredLicense(license) {
 function LicenseStatusBadge({ license }) {
   if (license.status === "superseded") return <Badge variant="outline" className="text-xs text-muted-foreground">Vervangen</Badge>;
   if (license.status === "expired" || isExpiredLicense(license)) {
-    return <Badge variant="outline" className="text-xs text-amber-600 border-amber-400 whitespace-nowrap">Actie vereist</Badge>;
+    return <Badge className="text-xs bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 border-0 whitespace-nowrap">Actie vereist</Badge>;
   }
   return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0">Actief</Badge>;
 }
@@ -550,10 +550,7 @@ function LicenseCard({ license, onEdit, onDelete, onRenew, muted }) {
         }`}
         onClick={handleRowClick}
       >
-        <div className="w-10 shrink-0 flex items-center gap-1.5">
-          {expired && onRenew && <span className="w-2 h-2 rounded-full bg-amber-400 shrink-0" />}
-          <span className="text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
-        </div>
+        <span className="w-10 shrink-0 text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
         <span className="w-24 shrink-0 text-sm text-muted-foreground">{license.license_number ? `#${license.license_number}` : "—"}</span>
         <div className="w-28 shrink-0">
           <LicenseStatusBadge license={license} />
