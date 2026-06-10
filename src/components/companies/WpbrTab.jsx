@@ -496,53 +496,38 @@ export default function WpbrTab({ companyId, company }) {
         )}
       </div>
 
-      {/* Active / Archive view with slide animation */}
-      <div className="relative overflow-hidden">
-        <AnimatePresence mode="wait" initial={false}>
-          {!showArchive ? (
-            <motion.div
-              key="active"
-              initial={{ x: "-100%", opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: "-100%", opacity: 0 }}
-              transition={{ duration: 0.25, ease: "easeInOut" }}
-            >
-              {activeLicenses.length === 0 && !showWizard && (
-                <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
-              )}
-              <div className="divide-y divide-border">
-                {activeLicenses.map((l) => (
-                  <LicenseCard
-                    key={l.id}
-                    license={l}
-                    onEdit={() => startEdit(l)}
-                    onDelete={() => setDeleteId(l.id)}
-                    onRenew={isExpiredLicense(l) ? () => startRenew(l) : undefined}
-                  />
-                ))}
-              </div>
-            </motion.div>
-          ) : (
-            <motion.div
-              key="archive"
-              initial={{ x: "100%", opacity: 0 }}
-              animate={{ x: 0, opacity: 1 }}
-              exit={{ x: "100%", opacity: 0 }}
-              transition={{ duration: 0.25, ease: "easeInOut" }}
-            >
-              <div className="divide-y divide-border">
-                {archivedLicenses.length === 0 ? (
-                  <p className="px-4 py-6 text-sm text-muted-foreground text-center">Geen vergunningen in het archief.</p>
-                ) : (
-                  archivedLicenses.map((l) => (
-                    <LicenseCard key={l.id} license={l} onDelete={() => setDeleteId(l.id)} muted />
-                  ))
-                )}
-              </div>
-            </motion.div>
+      {/* Active licenses table (hidden when archive is open) */}
+      {!showArchive && (
+        <>
+          {activeLicenses.length === 0 && !showWizard && (
+            <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen vergunning geregistreerd.</p>
           )}
-        </AnimatePresence>
-      </div>
+          <div className="divide-y divide-border">
+            {activeLicenses.map((l) => (
+              <LicenseCard
+                key={l.id}
+                license={l}
+                onEdit={() => startEdit(l)}
+                onDelete={() => setDeleteId(l.id)}
+                onRenew={isExpiredLicense(l) ? () => startRenew(l) : undefined}
+              />
+            ))}
+          </div>
+        </>
+      )}
+
+      {/* Archive view (replaces main table) */}
+      {showArchive && (
+        <div className="divide-y divide-border">
+          {archivedLicenses.length === 0 ? (
+            <p className="px-4 py-6 text-sm text-muted-foreground text-center">Geen vergunningen in het archief.</p>
+          ) : (
+            archivedLicenses.map((l) => (
+              <LicenseCard key={l.id} license={l} onDelete={() => setDeleteId(l.id)} muted />
+            ))
+          )}
+        </div>
+      )}
 
       <ManagedFilePreviewDialog
         open={formPreviewOpen}
