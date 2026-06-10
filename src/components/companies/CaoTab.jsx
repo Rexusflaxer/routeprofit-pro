@@ -25,6 +25,8 @@ const FUNCTION_LABELS = {
   geld_waardetransporteur: "Geld- en waardetransporteur",
   planner: "Planner",
   binnendienst: "Binnendienst",
+  hr_manager: "HR-Manager",
+  sales_manager: "Sales Manager",
   evenementenbeveiliger: "Evenementenbeveiliger",
   horecabeveiliger: "Horecabeveiliger",
   verkeersregelaar: "Verkeersregelaar",
@@ -37,7 +39,7 @@ const FUNCTION_LABELS = {
 const CAO_FUNCTION_GROUPS = {
   cao_particuliere_beveiliging: {
     operationeel: ["objectbeveiliger", "receptionist", "mobiel_surveillant", "winkelsurveillant", "centralist", "brandwacht", "geld_waardetransporteur"],
-    binnendienst: ["binnendienst", "planner"],
+    binnendienst: ["binnendienst", "planner", "hr_manager", "sales_manager"],
   },
   cao_evenementen_horecabeveiliging: {
     operationeel: ["evenementenbeveiliger", "horecabeveiliger"],
@@ -56,7 +58,7 @@ const CAO_FUNCTION_GROUPS = {
 const CAO_FUNCTION_CATALOG = {
   cao_particuliere_beveiliging: [
     "objectbeveiliger", "receptionist", "mobiel_surveillant", "winkelsurveillant",
-    "centralist", "brandwacht", "geld_waardetransporteur", "binnendienst", "planner",
+    "centralist", "brandwacht", "geld_waardetransporteur", "binnendienst", "planner", "hr_manager", "sales_manager",
   ],
   cao_evenementen_horecabeveiliging: ["evenementenbeveiliger", "horecabeveiliger"],
   cao_verkeersregelaars: ["verkeersregelaar"],
