@@ -453,7 +453,11 @@ export default function WpbrTab({ companyId, company }) {
       </AnimatePresence>
 
       {/* Table header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className={`flex items-center justify-between px-4 py-2 border-b text-xs font-semibold uppercase tracking-wider ${
+        showArchive 
+          ? "border-amber-200/50 bg-amber-50/60 dark:border-amber-900/50 dark:bg-amber-950/30 text-amber-700 dark:text-amber-300" 
+          : "border-border bg-muted/30 text-muted-foreground"
+      }`}>
         <div className="flex items-center gap-3">
           <span className="w-10 shrink-0">Type</span>
           <span className="w-24 shrink-0">Nummer</span>
@@ -467,13 +471,13 @@ export default function WpbrTab({ companyId, company }) {
               <>
                 <Button
                   size="sm"
-                  variant="outline"
+                  variant="ghost"
                   onClick={() => setShowArchive(false)}
-                  className="h-7 px-2 text-xs font-medium normal-case tracking-normal"
+                  className="h-7 px-2 text-xs font-medium normal-case tracking-normal text-amber-700 hover:bg-amber-100/50 dark:text-amber-300 dark:hover:bg-amber-900/30"
                 >
                   <ChevronLeft className="w-3 h-3 mr-1" /> Actieve vergunningen
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(true); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                <Button size="sm" variant="ghost" onClick={() => { setIsArchiveEntry(true); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal text-amber-700 hover:bg-amber-100/50 dark:text-amber-300 dark:hover:bg-amber-900/30">
                   <Plus className="w-3 h-3 mr-1" /> Voeg oude vergunning in archief
                 </Button>
               </>
