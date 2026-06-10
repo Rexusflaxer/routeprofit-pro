@@ -934,6 +934,48 @@ async function runPersonnelContractCaoFoundationScenarios() {
     mismatchResult.violations.some(violation => violation.rule_id === 'APP-CONTRACT-BASIS-COMPANY-CAO-LINK'),
     'Contract finalisation must block when selected CAO is not linked to the selected company'
   );
+
+  const functionScopeMismatchBase44 = {
+    asServiceRole: {
+      entities: {
+        CompanyCaoAssignment: {
+          filter: async () => [{
+            id: 'company-cao-pb-traffic-only',
+            company_id: 'company-a',
+            cao_key: 'cao_particuliere_beveiliging',
+            applies_to_activities: ['verkeersregelaar'],
+            valid_from: '2025-01-01',
+            valid_until: null
+          }]
+        },
+        PersonnelContract: {
+          filter: async () => []
+        }
+      }
+    }
+  };
+  const functionScopeMismatch = await contractRules.evaluateContractBasis(functionScopeMismatchBase44, {
+    body: {
+      personnel_id: 'person-3',
+      company_id: 'company-a',
+      cao_key: 'cao_particuliere_beveiliging',
+      contract_form: 'bepaalde_tijd',
+      contract_start_date: '2026-06-01',
+      function_type: 'objectbeveiliger',
+      allowed_function_types: ['objectbeveiliger'],
+      cao_function_group: 'objectbeveiliger_receptionist',
+      performs_security_work: true,
+      security_role_status: 'beveiliger'
+    },
+    personnel: { id: 'person-3' },
+    contract: { id: 'contract-objectbeveiliger' },
+    targetCaoKey: null
+  });
+  assert.equal(functionScopeMismatch.company_cao_link.status, 'blocked_company_cao_function_scope_not_linked');
+  assert.ok(
+    functionScopeMismatch.violations.some(violation => violation.rule_id === 'APP-CONTRACT-BASIS-COMPANY-CAO-LINK'),
+    'Contract finalisation must block when the company CAO is not enabled for the contract function'
+  );
 }
 
 function runProbationScenarios() {

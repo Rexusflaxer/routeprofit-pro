@@ -45,6 +45,8 @@ const FUNCTION_TYPES = [
   { value: "other", label: "Overig" },
 ];
 
+const FUNCTION_TYPE_LABELS = Object.fromEntries(FUNCTION_TYPES.map(option => [option.value, option.label]));
+
 const SECURITY_ROLE_OPTIONS = [
   { value: "aspirant_beveiliger", label: "Aspirant-beveiliger" },
   { value: "beveiliger", label: "Beveiliger" },
@@ -125,6 +127,28 @@ function buildCompanyCaoKeyOptions(assignments, referenceDate, caoOptions = []) 
     value,
     label: CAO_OPTION_LABELS[value] || value,
     assignment_count: activeAssignments.filter(assignment => resolveAssignmentCaoKey(assignment, caoOptions) === value).length,
+  }));
+}
+
+function readableFunctionLabel(value) {
+  return FUNCTION_TYPE_LABELS[value] || String(value || "").replace(/[_-]+/g, " ");
+}
+
+function buildCompanyFunctionOptions(assignments, referenceDate, caoKey, caoOptions = [], selectedValue = null) {
+  if (!caoKey) return FUNCTION_TYPES;
+  const activeAssignments = (assignments || []).filter(assignment => isDateWithinOptionRange(assignment, referenceDate));
+  const scopedAssignments = activeAssignments.filter(assignment => resolveAssignmentCaoKey(assignment, caoOptions) === caoKey);
+  const configuredFunctions = uniqueValues(scopedAssignments.flatMap(assignment => assignment.applies_to_activities || []))
+    .filter(value => value !== "all");
+  const values = configuredFunctions.length > 0
+    ? configuredFunctions
+    : FUNCTION_TYPES.map(option => option.value);
+  const withSelected = selectedValue && !values.includes(selectedValue)
+    ? [...values, selectedValue]
+    : values;
+  return withSelected.map(value => ({
+    value,
+    label: readableFunctionLabel(value),
   }));
 }
 
@@ -359,6 +383,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     () => companyCaoKeyOptions.map(option => option.value).join("|"),
     [companyCaoKeyOptions]
   );
+  const companyFunctionOptions = useMemo(
+    () => buildCompanyFunctionOptions(companyCaoAssignments, form.contract_start_date, form.cao_key, caoConfigurationOptions, form.function_type),
+    [caoConfigurationOptions, companyCaoAssignments, form.cao_key, form.contract_start_date, form.function_type]
+  );
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["personnel_contracts", personnel.id] });
@@ -559,7 +587,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 <SelectTrigger><SelectValue /></SelectTrigger>
                 <SelectContent>
                   <SelectItem value="none">Kies functie</SelectItem>
-                  {FUNCTION_TYPES.map(option => (
+                  {companyFunctionOptions.map(option => (
                     <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                   ))}
                 </SelectContent>

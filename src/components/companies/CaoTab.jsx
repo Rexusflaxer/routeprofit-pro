@@ -4,7 +4,6 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Plus, X, Check, ChevronRight, ChevronLeft, Edit, Trash2, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 
@@ -15,28 +14,69 @@ const CAO_KEY_LABELS = {
   cao_veiligheidsdomein: "CAO Veiligheidsdomein",
 };
 
-const ACTIVITY_OPTIONS = [
-  { value: "all", label: "Alle activiteiten" },
-  { value: "surveillant", label: "Surveillant" },
-  { value: "objectbeveiliger_receptionist", label: "Objectbeveiliger / Receptionist" },
-  { value: "event_hospitality_security", label: "Evenementen- / Horecabeveiliging" },
-  { value: "verkeersregelaar", label: "Verkeersregelaar" },
-  { value: "cash_value_logistics", label: "Geld- en Waardetransport" },
-];
+const FUNCTION_LABELS = {
+  objectbeveiliger: "Objectbeveiliger",
+  receptie: "Receptie",
+  surveillant: "Surveillant",
+  winkelsurveillant: "Winkelsurveillant",
+  centralist: "Centralist",
+  brandwacht: "Brandwacht",
+  geld_waardetransporteur: "Geld- en waardetransporteur",
+  klantrelatie: "Klantrelatie",
+  planner: "Planner",
+  binnendienst: "Binnendienst",
+  host: "Host / Hostess",
+  evenementenbeveiliger: "Evenementenbeveiliger",
+  horecabeveiliger: "Horecabeveiliger",
+  verkeersregelaar: "Verkeersregelaar",
+  toezichthouder: "Toezichthouder",
+  handhaver: "Handhaver",
+  boa: "BOA",
+};
+
+const CAO_FUNCTION_CATALOG = {
+  cao_particuliere_beveiliging: [
+    "objectbeveiliger",
+    "receptie",
+    "surveillant",
+    "winkelsurveillant",
+    "centralist",
+    "brandwacht",
+    "geld_waardetransporteur",
+    "klantrelatie",
+    "planner",
+    "binnendienst",
+    "host",
+  ],
+  cao_evenementen_horecabeveiliging: ["evenementenbeveiliger", "horecabeveiliger", "host"],
+  cao_verkeersregelaars: ["verkeersregelaar"],
+  cao_veiligheidsdomein: ["toezichthouder", "handhaver", "boa"],
+};
 
 const DELETE_PASSWORD = "verwijder";
 
 const EMPTY_FORM = {
   cao_configuration_id: null,
   cao_key: null,
-  applies_to_activities: ["all"],
-  valid_from: "",
-  valid_until: "",
+  applies_to_activities: [],
   notes: "",
 };
 
 function uniqueStrings(values) {
   return [...new Set((values || []).map(value => String(value || "").trim()).filter(Boolean))];
+}
+
+function functionLabel(value) {
+  return FUNCTION_LABELS[value] || String(value || "").replace(/[_-]+/g, " ");
+}
+
+function defaultFunctionsForCao(caoKey) {
+  return CAO_FUNCTION_CATALOG[caoKey] || [];
+}
+
+function normalizeFunctionSelection(values, caoKey) {
+  const selected = uniqueStrings(values).filter(value => value !== "all");
+  return selected.length > 0 ? selected : defaultFunctionsForCao(caoKey);
 }
 
 function caoOptionLabel(option) {
@@ -55,7 +95,7 @@ function findCaoOption(options, value) {
 }
 
 function WizardSteps({ step }) {
-  const steps = ["CAO kiezen", "Geldigheid", "Bevestigen"];
+  const steps = ["CAO kiezen", "Functies", "Bevestigen"];
   const CheckIcon = () => (
     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -131,6 +171,7 @@ export default function CaoTab({ companyId }) {
   const [errors, setErrors] = useState({});
   const [editingId, setEditingId] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
+  const [customFunctionInput, setCustomFunctionInput] = useState("");
 
   useEffect(() => {
     if (showWizard) {
@@ -164,8 +205,9 @@ export default function CaoTab({ companyId }) {
         company_id: companyId,
         cao_key: data.cao_key || null,
         cao_configuration_id: data.cao_configuration_id || null,
-        valid_from: data.valid_from || null,
-        valid_until: data.valid_until || null,
+        applies_to_activities: normalizeFunctionSelection(data.applies_to_activities, data.cao_key),
+        valid_from: null,
+        valid_until: null,
         notes: data.notes || null
       };
       return editingId ? base44.entities.CompanyCaoAssignment.update(editingId, payload) : base44.entities.CompanyCaoAssignment.create(payload);
@@ -178,16 +220,14 @@ export default function CaoTab({ companyId }) {
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["cao-assignments", companyId] }); setDeleteId(null); },
   });
 
-  const cancelWizard = () => { setShowWizard(false); setStep(1); setForm(EMPTY_FORM); setErrors({}); setEditingId(null); };
+  const cancelWizard = () => { setShowWizard(false); setStep(1); setForm(EMPTY_FORM); setErrors({}); setEditingId(null); setCustomFunctionInput(""); };
 
   const startEdit = (a) => {
     const option = findCaoOption(caoOptions, a);
     setForm({
       cao_configuration_id: a.cao_key ? null : a.cao_configuration_id || null,
       cao_key: a.cao_key || option?.cao_key || null,
-      applies_to_activities: a.applies_to_activities || ["all"],
-      valid_from: a.valid_from || "",
-      valid_until: a.valid_until || "",
+      applies_to_activities: normalizeFunctionSelection(a.applies_to_activities, a.cao_key || option?.cao_key || null),
       notes: a.notes || ""
     });
     setEditingId(a.id);
@@ -203,9 +243,27 @@ export default function CaoTab({ companyId }) {
   };
 
   const set = (field, val) => setForm((f) => ({ ...f, [field]: val }));
+  const toggleFunction = (value) => setForm((f) => {
+    const current = normalizeFunctionSelection(f.applies_to_activities, f.cao_key);
+    const next = current.includes(value)
+      ? current.filter(item => item !== value)
+      : [...current, value];
+    return { ...f, applies_to_activities: next };
+  });
+  const addCustomFunction = (value) => {
+    const normalized = String(value || "").trim().toLowerCase().replace(/[\s-]+/g, "_");
+    if (!normalized) return;
+    setForm((f) => ({
+      ...f,
+      applies_to_activities: uniqueStrings([...normalizeFunctionSelection(f.applies_to_activities, f.cao_key), normalized]),
+    }));
+  };
   const selectedCaoOption = findCaoOption(caoOptions, form);
   const assignmentToDelete = assignments.find(a => a.id === deleteId);
   const deleteLabel = assignmentToDelete ? caoOptionLabel(findCaoOption(caoOptions, assignmentToDelete) || assignmentToDelete) : "";
+  const selectedFunctions = normalizeFunctionSelection(form.applies_to_activities, form.cao_key);
+  const knownFunctions = defaultFunctionsForCao(form.cao_key);
+  const customFunctions = selectedFunctions.filter(value => !knownFunctions.includes(value));
 
   return (
     <div className="flex flex-col h-full">
@@ -234,7 +292,15 @@ export default function CaoTab({ companyId }) {
                     <div className="grid grid-cols-1 gap-2">
                       {caoOptions.length === 0 && <p className="text-sm text-muted-foreground">Geen actieve CAO's beschikbaar.</p>}
                       {caoOptions.map((c) => (
-                        <button key={c.id} onClick={() => { set("cao_configuration_id", null); set("cao_key", c.cao_key || null); setErrors({}); }}
+                        <button key={c.id} onClick={() => {
+                          setForm((f) => ({
+                            ...f,
+                            cao_configuration_id: null,
+                            cao_key: c.cao_key || null,
+                            applies_to_activities: defaultFunctionsForCao(c.cao_key || null),
+                          }));
+                          setErrors({});
+                        }}
                           className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${form.cao_key === c.cao_key ? "border-primary bg-accent" : "border-border bg-card"}`}>
                           <div>
                             <span className="text-sm font-semibold text-foreground">{caoOptionLabel(c)}</span>
@@ -253,23 +319,50 @@ export default function CaoTab({ companyId }) {
 
                 {step === 2 && (
                   <div className="space-y-3">
-                    <p className="text-sm font-medium text-foreground">Geldigheid bedrijfskoppeling — <span className="text-muted-foreground font-normal">{caoOptionLabel(selectedCaoOption)}</span></p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf</label>
-                        <Input type="date" value={form.valid_from} onChange={(e) => set("valid_from", e.target.value)} className="h-8 text-sm" />
-                      </div>
-                      <div>
-                        <label className="text-xs text-muted-foreground mb-1 block">Geldig tot</label>
-                        <Input type="date" value={form.valid_until} onChange={(e) => set("valid_until", e.target.value)} className="h-8 text-sm" />
-                      </div>
+                    <p className="text-sm font-medium text-foreground">Functies voor deze CAO — <span className="text-muted-foreground font-normal">{caoOptionLabel(selectedCaoOption)}</span></p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                      {knownFunctions.map(value => (
+                        <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-accent text-foreground" : "border-border bg-card text-muted-foreground hover:border-primary/60"}`}>
+                          <input type="checkbox" checked={selectedFunctions.includes(value)} onChange={() => toggleFunction(value)} className="rounded border-input" />
+                          {functionLabel(value)}
+                        </label>
+                      ))}
                     </div>
-                    <div>
-                      <label className="text-xs text-muted-foreground mb-1 block">Van toepassing op</label>
-                      <Select value={(form.applies_to_activities || ["all"])[0] || "all"} onValueChange={(v) => set("applies_to_activities", [v])}>
-                        <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                        <SelectContent>{ACTIVITY_OPTIONS.map(o => <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>)}</SelectContent>
-                      </Select>
+                    <div className="space-y-2">
+                      <label className="text-xs text-muted-foreground block">Extra functie toevoegen</label>
+                      <div className="flex gap-2">
+                        <Input
+                          value={customFunctionInput}
+                          onChange={(e) => setCustomFunctionInput(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") {
+                              e.preventDefault();
+                              addCustomFunction(customFunctionInput);
+                              setCustomFunctionInput("");
+                            }
+                          }}
+                          placeholder="bijv. alarmopvolger"
+                          className="h-8 text-sm"
+                        />
+                        <Button type="button" variant="outline" size="sm" onClick={() => {
+                          addCustomFunction(customFunctionInput);
+                          setCustomFunctionInput("");
+                        }}>
+                          <Plus className="w-3.5 h-3.5 mr-1" /> Toevoegen
+                        </Button>
+                      </div>
+                      {customFunctions.length > 0 && (
+                        <div className="flex flex-wrap gap-2">
+                          {customFunctions.map(value => (
+                            <Badge key={value} variant="outline" className="gap-1 text-xs">
+                              {functionLabel(value)}
+                              <button type="button" onClick={() => toggleFunction(value)} className="ml-1 text-muted-foreground hover:text-foreground">
+                                <X className="w-3 h-3" />
+                              </button>
+                            </Badge>
+                          ))}
+                        </div>
+                      )}
                     </div>
                     <div className="flex justify-between pt-1">
                       <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
@@ -283,9 +376,7 @@ export default function CaoTab({ companyId }) {
                     <p className="text-sm font-medium text-foreground">Controleer en bevestig</p>
                     <div className="rounded-lg border border-border bg-card p-4 space-y-2 text-sm">
                       <div className="flex justify-between"><span className="text-muted-foreground">CAO</span><span className="font-medium">{caoOptionLabel(selectedCaoOption)}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Geldig vanaf</span><span>{form.valid_from || "—"}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Geldig tot</span><span>{form.valid_until || "—"}</span></div>
-                      <div className="flex justify-between"><span className="text-muted-foreground">Activiteiten</span><span>{ACTIVITY_OPTIONS.find(o => o.value === (form.applies_to_activities || ["all"])[0])?.label || "Alle"}</span></div>
+                      <div className="flex justify-between gap-4"><span className="text-muted-foreground">Functies</span><span className="font-medium text-right">{selectedFunctions.map(functionLabel).join(", ") || "—"}</span></div>
                     </div>
                     <div className="flex justify-between pt-1">
                       <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
@@ -308,7 +399,7 @@ export default function CaoTab({ companyId }) {
       <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         <span className="flex-1">CAO</span>
         <span className="w-24 shrink-0">Status</span>
-        <span className="w-48 shrink-0">Geldigheid</span>
+        <span className="w-64 shrink-0">Functies</span>
         {!showWizard && !deleteId && (
           <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
             <Plus className="w-3 h-3 mr-1" /> Nieuwe koppeling
@@ -328,10 +419,8 @@ export default function CaoTab({ companyId }) {
                 <span className="text-sm font-medium text-foreground">{caoOptionLabel(option || a)}</span>
               </div>
               <div className="w-24 shrink-0"><CaoStatusBadge assignment={a} /></div>
-              <div className="w-48 shrink-0 flex gap-3 text-xs text-muted-foreground">
-                {a.valid_from && <span>Vanaf: <strong className="text-foreground">{a.valid_from}</strong></span>}
-                {a.valid_until && <span>Tot: <strong className="text-foreground">{a.valid_until}</strong></span>}
-                {!a.valid_from && !a.valid_until && <span>Geen einddatum</span>}
+              <div className="w-64 shrink-0 text-xs text-muted-foreground truncate">
+                {normalizeFunctionSelection(a.applies_to_activities, a.cao_key || option?.cao_key || null).map(functionLabel).join(", ")}
               </div>
               <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(a)} title="Bewerken"><Edit className="w-3.5 h-3.5" /></Button>

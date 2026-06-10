@@ -32,7 +32,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Activiteiten/diensttokens waarop deze CAO-koppeling geldt. Voorbeelden: all, surveillant, objectbeveiliger_receptionist, event_hospitality_security, cao_evenementen_horecabeveiliging, verkeersregelaar, cao_verkeersregelaars, cash_value_logistics."
+      "description": "Functie-/diensttokens waarvoor deze CAO bij dit bedrijf gebruikt mag worden. Deze lijst voedt de functieopties bij arbeidscontracten. Voorbeelden: objectbeveiliger, receptie, surveillant, centralist, klantrelatie, verkeersregelaar."
     },
     "valid_from": {
       "type": [

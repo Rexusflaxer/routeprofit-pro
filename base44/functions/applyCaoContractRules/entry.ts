@@ -1391,7 +1391,7 @@ function collectContractFunctionScopeTokens(contractLike = {}) {
   ].map(normalizeToken).filter(value => value && value !== 'unknown'));
 }
 
-async function evaluateCompanyCaoLink(base44, { companyId, caoKey, referenceDate }) {
+async function evaluateCompanyCaoLink(base44, { companyId, caoKey, referenceDate, contractScope }) {
   const entity = base44?.asServiceRole?.entities?.CompanyCaoAssignment;
   if (!entity?.filter || !companyId || !caoKey || !referenceDate) {
     return {
@@ -1412,6 +1412,13 @@ async function evaluateCompanyCaoLink(base44, { companyId, caoKey, referenceDate
     return { ...assignment, resolved_cao_key: config?.cao_key || null };
   }));
   const matchingAssignments = activeAssignmentsWithResolvedKeys.filter(assignment => assignment.resolved_cao_key === caoKey);
+  const contractFunctionTokens = collectContractFunctionScopeTokens(contractScope || {});
+  const functionScopedAssignments = matchingAssignments.filter(assignment => {
+    const configuredFunctions = normalizeArray(assignment.applies_to_activities).map(normalizeToken).filter(Boolean);
+    if (configuredFunctions.length === 0 || configuredFunctions.includes('all')) return true;
+    if (contractFunctionTokens.length === 0) return false;
+    return configuredFunctions.some(token => contractFunctionTokens.includes(token));
+  });
 
   if (activeAssignmentsWithResolvedKeys.length === 0) {
     return {
@@ -1431,10 +1438,19 @@ async function evaluateCompanyCaoLink(base44, { companyId, caoKey, referenceDate
     };
   }
 
+  if (functionScopedAssignments.length === 0) {
+    return {
+      status: 'blocked_company_cao_function_scope_not_linked',
+      active_assignments: activeAssignmentsWithResolvedKeys,
+      matching_assignments: matchingAssignments,
+      blocking_reason: `CAO ${caoKey} is gekoppeld aan bedrijf ${companyId}, maar niet voor de contractfunctie/scope (${contractFunctionTokens.join(', ') || 'functie onbekend'}).`
+    };
+  }
+
   return {
     status: 'linked',
     active_assignments: activeAssignmentsWithResolvedKeys,
-    matching_assignments: matchingAssignments,
+    matching_assignments: functionScopedAssignments,
     blocking_reason: null
   };
 }
@@ -2212,7 +2228,11 @@ async function evaluateContractBasis(base44, { body, personnel, contract, target
   const companyCaoLink = await evaluateCompanyCaoLink(base44, {
     companyId: explicitCompanyId,
     caoKey: explicitCaoKey,
-    referenceDate: contractStartDate
+    referenceDate: contractStartDate,
+    contractScope: {
+      ...contract,
+      ...body
+    }
   });
   if (companyCaoLink.blocking_reason) {
     violations.push({
