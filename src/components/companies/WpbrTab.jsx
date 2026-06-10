@@ -453,29 +453,44 @@ export default function WpbrTab({ companyId, company }) {
       </AnimatePresence>
 
       {/* Table header */}
-      <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="w-10 shrink-0">Type</span>
-        <span className="w-24 shrink-0">Nummer</span>
-        <span className="w-32 shrink-0">Status</span>
-        <span className="flex-1">Geldigheid</span>
+      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <div className="flex items-center gap-3">
+          <span className="w-10 shrink-0">Type</span>
+          <span className="w-24 shrink-0">Nummer</span>
+          <span className="w-32 shrink-0">Status</span>
+          <span className="flex-1">Geldigheid</span>
+          {showArchive && <Badge variant="secondary" className="ml-2">Archief</Badge>}
+        </div>
         {!showWizard && !deleteId && (
           <div className="flex items-center gap-2">
-            <Button
-              size="sm"
-              variant={showArchive ? "secondary" : "outline"}
-              onClick={() => setShowArchive(v => !v)}
-              className="h-7 px-2 text-xs font-medium normal-case tracking-normal"
-            >
-              <Archive className="w-3 h-3 mr-1" /> Archief {archivedLicenses.length > 0 ? `(${archivedLicenses.length})` : ""}
-            </Button>
             {showArchive ? (
-              <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(true); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-                <Plus className="w-3 h-3 mr-1" /> Voeg oude vergunning in archief
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowArchive(false)}
+                  className="h-7 px-2 text-xs font-medium normal-case tracking-normal"
+                >
+                  <ChevronLeft className="w-3 h-3 mr-1" /> Actieve vergunningen
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(true); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                  <Plus className="w-3 h-3 mr-1" /> Voeg oude vergunning in archief
+                </Button>
+              </>
             ) : (
-              <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(false); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-                <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
-              </Button>
+              <>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onClick={() => setShowArchive(true)}
+                  className="h-7 px-2 text-xs font-medium normal-case tracking-normal"
+                >
+                  <Archive className="w-3 h-3 mr-1" /> Archief {archivedLicenses.length > 0 ? `(${archivedLicenses.length})` : ""}
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(false); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                  <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
+                </Button>
+              </>
             )}
           </div>
         )}
