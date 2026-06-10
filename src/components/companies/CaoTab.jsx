@@ -16,16 +16,14 @@ const CAO_KEY_LABELS = {
 
 const FUNCTION_LABELS = {
   objectbeveiliger: "Objectbeveiliger",
-  receptie: "Receptie",
-  surveillant: "Surveillant",
+  receptionist: "Receptionist",
+  mobiel_surveillant: "Mobiel Surveillant",
   winkelsurveillant: "Winkelsurveillant",
   centralist: "Centralist",
   brandwacht: "Brandwacht",
   geld_waardetransporteur: "Geld- en waardetransporteur",
-  klantrelatie: "Klantrelatie",
   planner: "Planner",
   binnendienst: "Binnendienst",
-  host: "Host / Hostess",
   evenementenbeveiliger: "Evenementenbeveiliger",
   horecabeveiliger: "Horecabeveiliger",
   verkeersregelaar: "Verkeersregelaar",
@@ -34,21 +32,32 @@ const FUNCTION_LABELS = {
   boa: "BOA",
 };
 
+// Per CAO: welke functies zijn operationeel vs. binnendienst
+const CAO_FUNCTION_GROUPS = {
+  cao_particuliere_beveiliging: {
+    operationeel: ["objectbeveiliger", "receptionist", "mobiel_surveillant", "winkelsurveillant", "centralist", "brandwacht", "geld_waardetransporteur"],
+    binnendienst: ["binnendienst", "planner"],
+  },
+  cao_evenementen_horecabeveiliging: {
+    operationeel: ["evenementenbeveiliger", "horecabeveiliger"],
+    binnendienst: [],
+  },
+  cao_verkeersregelaars: {
+    operationeel: ["verkeersregelaar"],
+    binnendienst: [],
+  },
+  cao_veiligheidsdomein: {
+    operationeel: ["toezichthouder", "handhaver", "boa"],
+    binnendienst: [],
+  },
+};
+
 const CAO_FUNCTION_CATALOG = {
   cao_particuliere_beveiliging: [
-    "objectbeveiliger",
-    "receptie",
-    "surveillant",
-    "winkelsurveillant",
-    "centralist",
-    "brandwacht",
-    "geld_waardetransporteur",
-    "klantrelatie",
-    "planner",
-    "binnendienst",
-    "host",
+    "objectbeveiliger", "receptionist", "mobiel_surveillant", "winkelsurveillant",
+    "centralist", "brandwacht", "geld_waardetransporteur", "binnendienst", "planner",
   ],
-  cao_evenementen_horecabeveiliging: ["evenementenbeveiliger", "horecabeveiliger", "host"],
+  cao_evenementen_horecabeveiliging: ["evenementenbeveiliger", "horecabeveiliger"],
   cao_verkeersregelaars: ["verkeersregelaar"],
   cao_veiligheidsdomein: ["toezichthouder", "handhaver", "boa"],
 };
@@ -317,14 +326,51 @@ export default function CaoTab({ companyId }) {
                 {step === 2 && (
                   <div className="space-y-3">
                     <p className="text-sm font-medium text-foreground">Functies voor deze CAO — <span className="text-muted-foreground font-normal">{caoOptionLabel(selectedCaoOption)}</span></p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
-                      {knownFunctions.map(value => (
-                        <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-accent text-foreground" : "border-border bg-card text-muted-foreground hover:border-primary/60"}`}>
-                          <input type="checkbox" checked={selectedFunctions.includes(value)} onChange={() => toggleFunction(value)} className="rounded border-input" />
-                          {functionLabel(value)}
-                        </label>
-                      ))}
-                    </div>
+                    {(() => {
+                      const groups = CAO_FUNCTION_GROUPS[form.cao_key];
+                      if (groups && (groups.operationeel.length > 0 || groups.binnendienst.length > 0)) {
+                        return (
+                          <div className="space-y-4">
+                            {groups.operationeel.length > 0 && (
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Operationele functies</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                  {groups.operationeel.map(value => (
+                                    <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-accent text-foreground" : "border-border bg-card text-muted-foreground hover:border-primary/60"}`}>
+                                      <input type="checkbox" checked={selectedFunctions.includes(value)} onChange={() => toggleFunction(value)} className="rounded border-input" />
+                                      {functionLabel(value)}
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                            {groups.binnendienst.length > 0 && (
+                              <div>
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Binnendienst functies</p>
+                                <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                                  {groups.binnendienst.map(value => (
+                                    <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-accent text-foreground" : "border-border bg-card text-muted-foreground hover:border-primary/60"}`}>
+                                      <input type="checkbox" checked={selectedFunctions.includes(value)} onChange={() => toggleFunction(value)} className="rounded border-input" />
+                                      {functionLabel(value)}
+                                    </label>
+                                  ))}
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      }
+                      return (
+                        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                          {knownFunctions.map(value => (
+                            <label key={value} className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-accent text-foreground" : "border-border bg-card text-muted-foreground hover:border-primary/60"}`}>
+                              <input type="checkbox" checked={selectedFunctions.includes(value)} onChange={() => toggleFunction(value)} className="rounded border-input" />
+                              {functionLabel(value)}
+                            </label>
+                          ))}
+                        </div>
+                      );
+                    })()}
                     <div className="space-y-2">
                       <label className="text-xs text-muted-foreground block">Extra functie toevoegen</label>
                       <div className="flex gap-2">
