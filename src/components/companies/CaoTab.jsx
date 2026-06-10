@@ -447,12 +447,22 @@ export default function CaoTab({ companyId }) {
                 )}
 
                 {step === 3 && (
-                  <div className="space-y-3">
-                    <p className="text-sm font-medium text-foreground">Controleer en bevestig</p>
-                    <div className="rounded-lg border border-border bg-card p-4 space-y-2 text-sm">
-                      <div className="flex justify-between"><span className="text-muted-foreground">CAO</span><span className="font-medium">{caoOptionLabel(selectedCaoOption)}</span></div>
-                      <div className="flex justify-between gap-4"><span className="text-muted-foreground">Functies</span><span className="font-medium text-right">{selectedFunctions.map(functionLabel).join(", ") || "—"}</span></div>
-                    </div>
+                   <div className="space-y-3">
+                     <p className="text-sm font-medium text-foreground">Controleer en bevestig</p>
+                     <div className="rounded-lg border border-border bg-card p-4 space-y-3 text-sm">
+                       <div className="flex justify-between"><span className="text-muted-foreground">CAO</span><span className="font-medium">{caoOptionLabel(selectedCaoOption)}</span></div>
+                       <div>
+                         <span className="text-muted-foreground block mb-2">Functies</span>
+                         <ul className="space-y-1 ml-2">
+                           {selectedFunctions.map(value => (
+                             <li key={value} className="text-sm font-medium text-foreground flex items-center gap-2">
+                               <span className="w-1.5 h-1.5 rounded-full bg-primary"></span>
+                               {functionLabel(value)}
+                             </li>
+                           ))}
+                         </ul>
+                       </div>
+                     </div>
                     <div className="flex justify-between pt-1">
                       <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                       <div className="flex gap-2">
