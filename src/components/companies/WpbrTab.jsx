@@ -35,7 +35,7 @@ function isExpiredLicense(license) {
 function LicenseStatusBadge({ license }) {
   if (license.status === "superseded") return <Badge variant="outline" className="text-xs text-muted-foreground">Vervangen</Badge>;
   if (license.status === "expired" || isExpiredLicense(license)) {
-    return <Badge variant="outline" className="text-xs text-amber-600 border-amber-300 bg-amber-50 dark:bg-amber-950/30">Actie vereist</Badge>;
+    return <Badge variant="outline" className="text-xs text-amber-600 border-amber-400 whitespace-nowrap">Actie vereist</Badge>;
   }
   return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0">Actief</Badge>;
 }
@@ -513,28 +513,47 @@ export default function WpbrTab({ companyId, company }) {
 
 function LicenseCard({ license, onEdit, onDelete, onRenew, muted }) {
   const [previewOpen, setPreviewOpen] = useState(false);
+  const [contextMenu, setContextMenu] = useState(null); // { x, y }
+  const contextRef = useRef(null);
   const documentName = license.document_download_filename || license.document_filename || "Document";
   const expired = isExpiredLicense(license);
+
+  // Close context menu on outside click
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = (e) => {
+      if (contextRef.current && !contextRef.current.contains(e.target)) setContextMenu(null);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [contextMenu]);
+
+  const handleRowClick = (e) => {
+    if (expired && onRenew) {
+      // Show small context menu at click position
+      const rect = e.currentTarget.getBoundingClientRect();
+      setContextMenu({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    } else if (license.document_file_url) {
+      setPreviewOpen(true);
+    }
+  };
 
   return (
     <>
       <div
-        className={`flex items-center px-4 py-3 group transition-colors ${
-          expired && onRenew ? "cursor-pointer hover:bg-amber-50/50 dark:hover:bg-amber-950/20 border-l-2 border-l-amber-400" :
-          license.document_file_url ? "cursor-pointer hover:bg-accent/50" : "hover:bg-accent/30"
+        className={`relative flex items-center px-4 py-3 group transition-colors ${
+          expired && onRenew
+            ? "cursor-pointer hover:bg-amber-50/40 dark:hover:bg-amber-950/20 border-l-2 border-l-amber-400"
+            : license.document_file_url
+            ? "cursor-pointer hover:bg-accent/50"
+            : "hover:bg-accent/30"
         }`}
-        onClick={expired && onRenew ? onRenew : (license.document_file_url ? () => setPreviewOpen(true) : undefined)}
-        title={expired && onRenew ? "Klik om vergunning te vernieuwen" : license.document_file_url ? "Klik om vergunning te bekijken" : undefined}
+        onClick={handleRowClick}
       >
         <span className="w-10 shrink-0 text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
         <span className="w-24 shrink-0 text-sm text-muted-foreground">{license.license_number ? `#${license.license_number}` : "—"}</span>
-        <div className="w-32 shrink-0 flex items-center gap-1.5">
+        <div className="w-28 shrink-0">
           <LicenseStatusBadge license={license} />
-          {expired && onRenew && (
-            <span className="text-xs text-amber-600 flex items-center gap-0.5">
-              <RefreshCw className="w-3 h-3" /> Vernieuwen
-            </span>
-          )}
         </div>
         <div className="flex-1 flex gap-4 text-xs text-muted-foreground">
           {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
@@ -550,7 +569,41 @@ function LicenseCard({ license, onEdit, onDelete, onRenew, muted }) {
             <Trash2 className="w-3.5 h-3.5" />
           </Button>
         </div>
+
+        {/* Context menu for expired licenses */}
+        <AnimatePresence>
+          {contextMenu && (
+            <motion.div
+              ref={contextRef}
+              initial={{ opacity: 0, scale: 0.95 }}
+              animate={{ opacity: 1, scale: 1 }}
+              exit={{ opacity: 0, scale: 0.95 }}
+              transition={{ duration: 0.1 }}
+              style={{ left: contextMenu.x, top: contextMenu.y }}
+              className="absolute z-50 min-w-[180px] rounded-lg border border-border bg-popover shadow-lg py-1 text-sm"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <button
+                className="flex w-full items-center gap-2.5 px-3 py-2 hover:bg-accent transition-colors text-foreground"
+                onClick={() => { setContextMenu(null); onRenew(); }}
+              >
+                <RefreshCw className="w-3.5 h-3.5 text-amber-500" />
+                Vergunning vernieuwen
+              </button>
+              {license.document_file_url && (
+                <button
+                  className="flex w-full items-center gap-2.5 px-3 py-2 hover:bg-accent transition-colors text-foreground"
+                  onClick={() => { setContextMenu(null); setPreviewOpen(true); }}
+                >
+                  <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                  Document openen
+                </button>
+              )}
+            </motion.div>
+          )}
+        </AnimatePresence>
       </div>
+
       <ManagedFilePreviewDialog
         open={previewOpen}
         onOpenChange={setPreviewOpen}
