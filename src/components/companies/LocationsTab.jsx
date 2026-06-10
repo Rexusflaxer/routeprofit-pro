@@ -7,6 +7,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, Edit, MapPin, Check, X, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
+import LocationMapDialog from "./LocationMapDialog";
 
 const LOCATION_TYPES = {
   head_office: "Hoofdkantoor", branch: "Vestiging", warehouse: "Magazijn", other: "Overig",
@@ -51,6 +52,7 @@ export default function LocationsTab({ companies }) {
   const [addressSugg, setAddressSugg] = useState([]);
   const [showSugg, setShowSugg] = useState(false);
   const [deleteId, setDeleteId] = useState(null);
+  const [mapLocation, setMapLocation] = useState(null);
   const addrTimeout = useRef(null);
   const queryClient = useQueryClient();
 
@@ -164,7 +166,7 @@ export default function LocationsTab({ companies }) {
         {locations.map(loc => {
           const linkedCompanies = getCompaniesForLocation(loc.id);
           return (
-            <div key={loc.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
+            <div key={loc.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors cursor-pointer" onClick={() => setMapLocation(loc)}>
               <div className="w-28 shrink-0">
                 <Badge variant="secondary" className="text-xs">{LOCATION_TYPES[loc.location_type] || loc.location_type}</Badge>
               </div>
@@ -176,7 +178,7 @@ export default function LocationsTab({ companies }) {
                   </div>
                 )}
               </div>
-              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(loc)} title="Bewerken"><Edit className="w-3.5 h-3.5" /></Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteId(loc.id)} title="Verwijderen"><Trash2 className="w-3.5 h-3.5" /></Button>
               </div>
@@ -184,6 +186,12 @@ export default function LocationsTab({ companies }) {
           );
         })}
       </div>
+
+      <LocationMapDialog
+        open={!!mapLocation}
+        onOpenChange={(v) => { if (!v) setMapLocation(null); }}
+        location={mapLocation}
+      />
     </div>
   );
 }
