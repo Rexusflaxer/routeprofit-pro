@@ -522,7 +522,7 @@ export default function CaoTab({ companyId }) {
           return (
             <div key={a.id}>
               <div
-                className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors cursor-pointer"
+                className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors cursor-pointer overflow-hidden"
                 onClick={() => setExpandedId(isExpanded ? null : a.id)}
               >
                 <div className="flex items-center gap-2 flex-1 min-w-0">
@@ -547,7 +547,7 @@ export default function CaoTab({ companyId }) {
                     transition={{ duration: 0.18, ease: "easeOut" }}
                     className="overflow-hidden"
                   >
-                    <div className="px-10 pb-3 flex flex-wrap gap-2">
+                    <div className="px-10 pt-1 pb-3 flex flex-wrap gap-2">
                       {functions.map(value => (
                         <span key={value} className="inline-flex items-center px-2.5 py-1 rounded-md text-xs font-medium bg-muted text-foreground border border-border">
                           {functionLabel(value)}
