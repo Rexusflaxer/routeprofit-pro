@@ -443,7 +443,10 @@ export default function CaoTab({ companyId }) {
                       <p className="text-xs text-destructive">{errors.applies_to_activities}</p>
                     )}
                     <div className="flex justify-between pt-1">
-                      <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                      {editingId
+                        ? <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
+                        : <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                      }
                       {functionAddStep === 1 && !functionLabelDirty && (
                         <Button size="sm" onClick={() => {
                           if (selectedFunctions.length === 0) {
