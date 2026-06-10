@@ -450,7 +450,10 @@ export default function CaoTab({ companyId }) {
                    <div className="space-y-3">
                      <p className="text-sm font-medium text-foreground">Controleer en bevestig</p>
                      <div className="rounded-lg border border-border bg-card p-4 space-y-3 text-sm">
-                       <div className="flex justify-between"><span className="text-muted-foreground">CAO</span><span className="font-medium">{caoOptionLabel(selectedCaoOption)}</span></div>
+                       <div>
+                         <span className="text-muted-foreground block mb-1">CAO</span>
+                         <span className="font-medium">{caoOptionLabel(selectedCaoOption)}</span>
+                       </div>
                        <div>
                          <span className="text-muted-foreground block mb-2">Functies</span>
                          <ul className="space-y-1 ml-2">
