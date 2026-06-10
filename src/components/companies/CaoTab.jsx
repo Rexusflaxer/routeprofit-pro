@@ -246,7 +246,7 @@ export default function CaoTab({ companyId }) {
       notes: a.notes || ""
     });
     setEditingId(a.id);
-    setStep(1);
+    setStep(2);
     setShowWizard(true);
   };
 
