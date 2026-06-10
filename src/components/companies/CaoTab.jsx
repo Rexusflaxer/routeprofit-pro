@@ -182,6 +182,7 @@ export default function CaoTab({ companyId }) {
   const [editingId, setEditingId] = useState(null);
   const [deleteId, setDeleteId] = useState(null);
   const [functionAddStep, setFunctionAddStep] = useState(1); // tracks internal step of CaoCustomFunctionsManager
+  const [functionLabelDirty, setFunctionLabelDirty] = useState(false); // true when user has typed a name in the custom function input
 
   useEffect(() => {
     if (showWizard) {
@@ -415,13 +416,14 @@ export default function CaoTab({ companyId }) {
                       onDelete={handleDeleteCustomFunction}
                       existingCategories={existingCustomCategories}
                       onStepChange={setFunctionAddStep}
+                      onLabelChange={(val) => setFunctionLabelDirty(!!val.trim())}
                     />
                     {errors.applies_to_activities && (
                       <p className="text-xs text-destructive">{errors.applies_to_activities}</p>
                     )}
                     <div className="flex justify-between pt-1">
                       <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                      {functionAddStep === 1 && (
+                      {functionAddStep === 1 && !functionLabelDirty && (
                         <Button size="sm" onClick={() => {
                           if (selectedFunctions.length === 0) {
                             setErrors(e => ({ ...e, applies_to_activities: "Selecteer minimaal 1 functie." }));

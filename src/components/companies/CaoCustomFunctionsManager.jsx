@@ -75,6 +75,7 @@ export default function CaoCustomFunctionsManager({
   onDelete,
   existingCategories,
   onStepChange,
+  onLabelChange,
 }) {
   // Step 1: enter name, Step 2: pick category
   const [step, setStep] = useState(1);
@@ -115,6 +116,7 @@ export default function CaoCustomFunctionsManager({
     setNewCategoryInput("");
     goToStep(1);
     setCategoryMode("existing");
+    onLabelChange?.("");
   };
 
   const handleBack = () => {
@@ -229,7 +231,7 @@ export default function CaoCustomFunctionsManager({
           <div className="flex gap-2">
             <Input
               value={labelInput}
-              onChange={(e) => setLabelInput(e.target.value)}
+              onChange={(e) => { setLabelInput(e.target.value); onLabelChange?.(e.target.value); }}
               onKeyDown={(e) => e.key === "Enter" && handleNext()}
               placeholder="bijv. Alarmopvolger"
               className="h-8 text-sm"
