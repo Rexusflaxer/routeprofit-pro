@@ -1,8 +1,6 @@
 import React, { useEffect, useRef, useState } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { MapPin, Loader2 } from "lucide-react";
-import mapboxgl from "mapbox-gl";
-import "mapbox-gl/dist/mapbox-gl.css";
 
 const MAPBOX_TOKEN = "pk.eyJ1IjoibG9xYXBwIiwiYSI6ImNtYjRlODB3NjBiMHkya3B3YmdkbHlvcmgifQ.dHDNHKWtfRq1nVT1u3xAXg";
 
@@ -16,57 +14,12 @@ async function geocodeAddress(address) {
   return { lng, lat };
 }
 
-function initMap(container, lng, lat) {
-  mapboxgl.accessToken = MAPBOX_TOKEN;
-
-  const map = new mapboxgl.Map({
-    container,
-    style: "mapbox://styles/mapbox/dark-v11",
-    center: [lng, lat],
-    zoom: 17,
-    pitch: 55,
-    bearing: -20,
-    antialias: true,
-  });
-
-  map.on("load", () => {
-    const layers = map.getStyle().layers;
-    const labelLayerId = layers.find(
-      (l) => l.type === "symbol" && l.layout?.["text-field"]
-    )?.id;
-
-    map.addLayer(
-      {
-        id: "3d-buildings",
-        source: "composite",
-        "source-layer": "building",
-        filter: ["==", "extrude", "true"],
-        type: "fill-extrusion",
-        minzoom: 14,
-        paint: {
-          "fill-extrusion-color": "#1f7aff",
-          "fill-extrusion-height": ["get", "height"],
-          "fill-extrusion-base": ["get", "min_height"],
-          "fill-extrusion-opacity": 0.8,
-        },
-      },
-      labelLayerId
-    );
-
-    new mapboxgl.Marker({ color: "#1f7aff" })
-      .setLngLat([lng, lat])
-      .addTo(map);
-  });
-
-  return map;
-}
-
 export default function LocationMapDialog({ open, onOpenChange, location }) {
-  const mapRef = useRef(null);
   const mapContainerRef = useRef(null);
-  const [coords, setCoords] = useState(null); // { lat, lng }
+  const mapRef = useRef(null);
+  const [coords, setCoords] = useState(null);
   const [loading, setLoading] = useState(false);
-  const [error, setError] = useState(false);
+  const [geoError, setGeoError] = useState(false);
 
   const address = [
     location?.street_name,
@@ -75,54 +28,107 @@ export default function LocationMapDialog({ open, onOpenChange, location }) {
     location?.city,
   ].filter(Boolean).join(" ");
 
-  // Resolve coordinates when dialog opens
+  // Resolve coords when dialog opens
   useEffect(() => {
     if (!open || !location) return;
+    setGeoError(false);
 
     const directLat = location.latitude;
     const directLng = location.longitude;
 
     if (directLat && directLng) {
       setCoords({ lat: directLat, lng: directLng });
-      setError(false);
       return;
     }
 
-    if (!address) {
-      setError(true);
-      return;
-    }
+    if (!address) { setGeoError(true); return; }
 
     setLoading(true);
     setCoords(null);
-    setError(false);
-
     geocodeAddress(address).then((result) => {
       setLoading(false);
-      if (result) {
-        setCoords(result);
-      } else {
-        setError(true);
-      }
+      if (result) setCoords(result);
+      else setGeoError(true);
     });
-  }, [open, location]);
+  }, [open, location?.id]);
 
-  // Init map when we have coords and container
+  // Init map once coords are known and container exists
   useEffect(() => {
     if (!open || !coords) return;
 
-    // Wait for dialog animation + DOM paint before init
-    const timer = setTimeout(() => {
-      if (!mapContainerRef.current) return;
-      if (mapRef.current) {
-        mapRef.current.remove();
-        mapRef.current = null;
-      }
-      const map = initMap(mapContainerRef.current, coords.lng, coords.lat);
-      mapRef.current = map;
-    }, 300);
+    let map = null;
+    let cancelled = false;
+
+    const tryInit = () => {
+      if (cancelled || !mapContainerRef.current) return;
+
+      // Dynamically import mapbox to avoid SSR issues
+      import("mapbox-gl").then((mapboxglModule) => {
+        if (cancelled || !mapContainerRef.current) return;
+        const mapboxgl = mapboxglModule.default;
+
+        // Ensure CSS is loaded
+        if (!document.getElementById("mapbox-css")) {
+          const link = document.createElement("link");
+          link.id = "mapbox-css";
+          link.rel = "stylesheet";
+          link.href = "https://api.mapbox.com/mapbox-gl-js/v3.3.0/mapbox-gl.css";
+          document.head.appendChild(link);
+        }
+
+        mapboxgl.accessToken = MAPBOX_TOKEN;
+
+        map = new mapboxgl.Map({
+          container: mapContainerRef.current,
+          style: "mapbox://styles/mapbox/dark-v11",
+          center: [coords.lng, coords.lat],
+          zoom: 17,
+          pitch: 55,
+          bearing: -20,
+          antialias: true,
+        });
+
+        mapRef.current = map;
+
+        map.on("load", () => {
+          if (cancelled) return;
+          map.resize();
+
+          const layers = map.getStyle().layers;
+          const labelLayerId = layers.find(
+            (l) => l.type === "symbol" && l.layout?.["text-field"]
+          )?.id;
+
+          map.addLayer(
+            {
+              id: "3d-buildings",
+              source: "composite",
+              "source-layer": "building",
+              filter: ["==", "extrude", "true"],
+              type: "fill-extrusion",
+              minzoom: 14,
+              paint: {
+                "fill-extrusion-color": "#1f7aff",
+                "fill-extrusion-height": ["get", "height"],
+                "fill-extrusion-base": ["get", "min_height"],
+                "fill-extrusion-opacity": 0.8,
+              },
+            },
+            labelLayerId
+          );
+
+          new mapboxgl.Marker({ color: "#1f7aff" })
+            .setLngLat([coords.lng, coords.lat])
+            .addTo(map);
+        });
+      });
+    };
+
+    // Give dialog time to fully render before init
+    const timer = setTimeout(tryInit, 400);
 
     return () => {
+      cancelled = true;
       clearTimeout(timer);
       if (mapRef.current) {
         mapRef.current.remove();
@@ -130,14 +136,6 @@ export default function LocationMapDialog({ open, onOpenChange, location }) {
       }
     };
   }, [open, coords]);
-
-  // Cleanup on close
-  useEffect(() => {
-    if (!open && mapRef.current) {
-      mapRef.current.remove();
-      mapRef.current = null;
-    }
-  }, [open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
@@ -148,20 +146,25 @@ export default function LocationMapDialog({ open, onOpenChange, location }) {
             {address || "Vestiging"}
           </DialogTitle>
         </DialogHeader>
-        <div className="relative w-full h-[420px]">
+
+        <div className="relative" style={{ width: "100%", height: 420 }}>
           {loading && (
-            <div className="absolute inset-0 flex items-center justify-center bg-background/80 z-10">
+            <div className="absolute inset-0 flex items-center justify-center bg-background/60 z-10">
               <Loader2 className="w-6 h-6 animate-spin text-primary" />
             </div>
           )}
-          {error && !loading && (
+          {geoError && !loading && (
             <div className="flex flex-col items-center justify-center h-full text-muted-foreground gap-2">
               <MapPin className="w-8 h-8 opacity-40" />
               <p className="text-sm">Adres kon niet op de kaart worden gevonden.</p>
             </div>
           )}
-          {coords && !error && (
-            <div ref={mapContainerRef} className="w-full h-full" />
+          {/* Always render container when coords available so ref is ready */}
+          {coords && !geoError && (
+            <div
+              ref={mapContainerRef}
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%" }}
+            />
           )}
         </div>
       </DialogContent>
