@@ -467,13 +467,13 @@ export default function WpbrTab({ companyId, company }) {
               <>
                 <Button
                   size="sm"
-                  variant="secondary"
+                  variant="outline"
                   onClick={() => setShowArchive(false)}
-                  className="h-7 px-2 text-xs font-medium normal-case tracking-normal"
+                  className="h-7 px-2 text-xs font-medium normal-case tracking-normal bg-purple-100/50 border-purple-300 text-purple-800 hover:bg-purple-100 dark:bg-purple-950/40 dark:border-purple-700 dark:text-purple-300 dark:hover:bg-purple-950/60"
                 >
                   <ChevronLeft className="w-3 h-3 mr-1" /> Actieve vergunningen
                 </Button>
-                <Button size="sm" variant="secondary" onClick={() => { setIsArchiveEntry(true); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(true); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal bg-purple-100/50 border-purple-300 text-purple-800 hover:bg-purple-100 dark:bg-purple-950/40 dark:border-purple-700 dark:text-purple-300 dark:hover:bg-purple-950/60">
                   <Plus className="w-3 h-3 mr-1" /> Voeg oude vergunning in archief
                 </Button>
               </>
