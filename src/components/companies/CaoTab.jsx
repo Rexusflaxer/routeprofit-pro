@@ -374,6 +374,9 @@ export default function CaoTab({ companyId }) {
                        })}
                      </div>
                      {errors.cao_key && <p className="text-xs text-destructive">{errors.cao_key}</p>}
+                     <div className="flex justify-end pt-1">
+                       <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
+                     </div>
                    </div>
                  )}
 
