@@ -452,16 +452,14 @@ export default function WpbrTab({ companyId, company }) {
             <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
               <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
             </Button>
-            {archivedLicenses.length > 0 && (
-              <Button
-                size="sm"
-                variant={showArchive ? "secondary" : "outline"}
-                onClick={() => setShowArchive(v => !v)}
-                className="h-7 px-2 text-xs font-medium normal-case tracking-normal"
-              >
-                <Archive className="w-3 h-3 mr-1" /> Archief {showArchive ? "verbergen" : `(${archivedLicenses.length})`}
-              </Button>
-            )}
+            <Button
+              size="sm"
+              variant={showArchive ? "secondary" : "outline"}
+              onClick={() => setShowArchive(v => !v)}
+              className="h-7 px-2 text-xs font-medium normal-case tracking-normal"
+            >
+              <Archive className="w-3 h-3 mr-1" /> Archief {archivedLicenses.length > 0 ? `(${archivedLicenses.length})` : ""}
+            </Button>
           </div>
         )}
       </div>
