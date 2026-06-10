@@ -239,7 +239,7 @@ export default function CaoCustomFunctionsManager({
             />
             <Button
               type="button"
-              variant="outline"
+              variant={labelInput.trim() ? "default" : "outline"}
               size="sm"
               onClick={handleNext}
               disabled={!labelInput.trim()}
