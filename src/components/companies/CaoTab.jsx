@@ -341,32 +341,41 @@ export default function CaoTab({ companyId }) {
               <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
 
                 {step === 1 && (
-                  <div className="space-y-3">
-                    <p className="text-sm font-medium text-foreground">Kies de CAO</p>
-                    <div className="grid grid-cols-1 gap-2">
-                      {caoOptions.length === 0 && <p className="text-sm text-muted-foreground">Geen actieve CAO's beschikbaar.</p>}
-                      {caoOptions.map((c) => (
-                        <button key={c.id} onClick={() => {
-                          setForm((f) => ({
-                            ...f,
-                            cao_configuration_id: null,
-                            cao_key: c.cao_key || null,
-                            applies_to_activities: [],
-                          }));
-                          setErrors({});
-                          setStep(2);
-                        }}
-                          className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${form.cao_key === c.cao_key ? "border-primary bg-accent" : "border-border bg-card"}`}>
-                          <div>
-                            <span className="text-sm font-semibold text-foreground">{caoOptionLabel(c)}</span>
-                          </div>
-                          <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
-                        </button>
-                      ))}
-                    </div>
-                    {errors.cao_key && <p className="text-xs text-destructive">{errors.cao_key}</p>}
-                  </div>
-                )}
+                   <div className="space-y-3">
+                     <p className="text-sm font-medium text-foreground">Kies de CAO</p>
+                     <div className="grid grid-cols-1 gap-2">
+                       {caoOptions.length === 0 && <p className="text-sm text-muted-foreground">Geen actieve CAO's beschikbaar.</p>}
+                       {caoOptions.map((c) => {
+                         const alreadyUsed = assignments.some(a => a.cao_key === c.cao_key && a.id !== editingId);
+                         return (
+                           <button key={c.id} disabled={alreadyUsed} onClick={() => {
+                             if (alreadyUsed) return;
+                             setForm((f) => ({
+                               ...f,
+                               cao_configuration_id: null,
+                               cao_key: c.cao_key || null,
+                               applies_to_activities: [],
+                             }));
+                             setErrors({});
+                             setStep(2);
+                           }}
+                             className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all ${
+                               alreadyUsed
+                                 ? "border-border bg-muted/40 opacity-50 cursor-not-allowed"
+                                 : `hover:border-primary hover:bg-accent active:scale-[0.99] ${form.cao_key === c.cao_key ? "border-primary bg-accent" : "border-border bg-card"}`
+                             }`}>
+                             <div>
+                               <span className="text-sm font-semibold text-foreground">{caoOptionLabel(c)}</span>
+                               {alreadyUsed && <span className="block text-xs text-muted-foreground mt-0.5">Al gekoppeld aan dit bedrijf</span>}
+                             </div>
+                             <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
+                           </button>
+                         );
+                       })}
+                     </div>
+                     {errors.cao_key && <p className="text-xs text-destructive">{errors.cao_key}</p>}
+                   </div>
+                 )}
 
                 {step === 2 && (
                   <div className="space-y-3">
