@@ -257,6 +257,7 @@ export default function AccreditationsTab({ companyId, company }) {
       const payload = {
         ...data,
         company_id: companyId,
+        status: "active",
         issuer: data.issuer?.trim() || null,
         certificate_number: data.certificate_number?.trim() || null,
         valid_from: data.valid_from || null,
@@ -356,9 +357,18 @@ export default function AccreditationsTab({ companyId, company }) {
     setFormPreviewOpen(false);
   };
 
+  // True when the accreditation type is a known/predefined option (not free-form "other")
+  const isKnownType = (category, type) => {
+    const opts = OPTIONS_BY_CATEGORY[category] || OTHER_OPTIONS;
+    if (type === "other") return false;
+    return opts.some(o => o.key === type);
+  };
+
   const validateStep1 = () => {
     const e = {};
-    if (!form.name?.trim()) e.name = "Naam is verplicht";
+    if (!isKnownType(form.category, form.accreditation_type) && !form.name?.trim()) {
+      e.name = "Naam is verplicht";
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -401,7 +411,7 @@ export default function AccreditationsTab({ companyId, company }) {
 
   const itemToDelete = accreditations.find(item => item.id === deleteId);
   const isRenewing = !!renewingId;
-  const activeWithoutDocument = form.status === "active" && !form.document_file_url && wizardStep === 2;
+  const activeWithoutDocument = !form.document_file_url && wizardStep === 2 && !editingId;
 
   return (
     <div className="flex flex-col h-full">
@@ -439,63 +449,56 @@ export default function AccreditationsTab({ companyId, company }) {
 
                 {wizardStep === 1 && (
                   <div className="space-y-3">
-                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
-                      {!isRenewing && (
-                        <>
+                    {(() => {
+                      const knownType = isKnownType(form.category, form.accreditation_type);
+                      return (
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+                          {!isRenewing && (
+                            <>
+                              <div className="space-y-1">
+                                <Label>Categorie</Label>
+                                <Select value={form.category} onValueChange={setCategory}>
+                                  <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                  <SelectContent>{CATEGORY_OPTIONS.map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
+                                </Select>
+                              </div>
+                              <div className="space-y-1 lg:col-span-2">
+                                <Label>Type</Label>
+                                <Select value={form.accreditation_type} onValueChange={setType}>
+                                  <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                  <SelectContent>{(OPTIONS_BY_CATEGORY[form.category] || OTHER_OPTIONS).map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
+                                </Select>
+                              </div>
+                            </>
+                          )}
+                          {!knownType && (
+                            <div className="space-y-1 lg:col-span-2">
+                              <Label>Naam</Label>
+                              <Input className={`h-8 ${errors.name ? "border-destructive" : ""}`} value={form.name} onChange={e => { set("name", e.target.value); setErrors(er => ({ ...er, name: undefined })); }} />
+                              {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
+                            </div>
+                          )}
+                          {!knownType && (
+                            <div className="space-y-1">
+                              <Label>Uitgever / organisatie</Label>
+                              <Input className="h-8" value={form.issuer} onChange={e => set("issuer", e.target.value)} />
+                            </div>
+                          )}
                           <div className="space-y-1">
-                            <Label>Categorie</Label>
-                            <Select value={form.category} onValueChange={setCategory}>
-                              <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                              <SelectContent>{CATEGORY_OPTIONS.map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
-                            </Select>
+                            <Label>Nummer</Label>
+                            <Input className="h-8" value={form.certificate_number} onChange={e => set("certificate_number", e.target.value)} />
                           </div>
-                          <div className="space-y-1 lg:col-span-2">
-                            <Label>Type</Label>
-                            <Select value={form.accreditation_type} onValueChange={setType}>
-                              <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                              <SelectContent>{(OPTIONS_BY_CATEGORY[form.category] || OTHER_OPTIONS).map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
-                            </Select>
+                          <div className="space-y-1">
+                            <Label>Geldig vanaf</Label>
+                            <Input className="h-8" type="date" value={form.valid_from} onChange={e => set("valid_from", e.target.value)} />
                           </div>
-                        </>
-                      )}
-                      <div className="space-y-1">
-                        <Label>Status</Label>
-                        <Select value={form.status} onValueChange={v => set("status", v)}>
-                          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="active">Actief</SelectItem>
-                            <SelectItem value="pending_review">Actie nodig</SelectItem>
-                            <SelectItem value="suspended">Geschorst</SelectItem>
-                            <SelectItem value="expired">Verlopen</SelectItem>
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1 lg:col-span-2">
-                        <Label>Naam</Label>
-                        <Input className={`h-8 ${errors.name ? "border-destructive" : ""}`} value={form.name} onChange={e => { set("name", e.target.value); setErrors(er => ({ ...er, name: undefined })); }} />
-                        {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Uitgever / organisatie</Label>
-                        <Input className="h-8" value={form.issuer} onChange={e => set("issuer", e.target.value)} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Nummer</Label>
-                        <Input className="h-8" value={form.certificate_number} onChange={e => set("certificate_number", e.target.value)} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Geldig vanaf</Label>
-                        <Input className="h-8" type="date" value={form.valid_from} onChange={e => set("valid_from", e.target.value)} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Geldig tot</Label>
-                        <Input className="h-8" type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)} />
-                      </div>
-                      <div className="space-y-1 lg:col-span-4">
-                        <Label>Notities</Label>
-                        <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} />
-                      </div>
-                    </div>
+                          <div className="space-y-1">
+                            <Label>Geldig tot</Label>
+                            <Input className="h-8" type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)} />
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div className="flex justify-between pt-1">
                       <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
                       <Button size="sm" onClick={() => { if (validateStep1()) setWizardStep(2); }}>
@@ -510,8 +513,7 @@ export default function AccreditationsTab({ companyId, company }) {
                     <p className="text-sm font-medium text-foreground">Bewijsstuk {editingId ? "bijwerken" : "uploaden"}</p>
                     {!editingId && (
                       <p className="text-xs text-muted-foreground">
-                        Upload het officiële certificaat of erkenningsdocument (PDF of afbeelding).
-                        {form.status === "active" && <span className="text-destructive font-medium"> Verplicht bij status Actief.</span>}
+                        Upload het officiële certificaat of erkenningsdocument (PDF of afbeelding). <span className="text-destructive font-medium">Verplicht.</span>
                       </p>
                     )}
 
