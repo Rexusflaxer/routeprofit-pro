@@ -369,7 +369,7 @@ export default function AccreditationsTab({ companyId, company }) {
 
       <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         <span className="w-40 shrink-0">Categorie</span>
-        <span className="w-80 min-w-0">Erkenning</span>
+        <span className="w-64 shrink-0">Erkenning</span>
         <span className="w-28 shrink-0">Status</span>
         <span className="w-44 shrink-0">Geldigheid</span>
         <div className="flex-1 flex justify-end">
@@ -391,14 +391,14 @@ export default function AccreditationsTab({ companyId, company }) {
             <div className="w-40 shrink-0">
               <Badge variant="secondary" className="text-xs">{categoryLabel(item.category)}</Badge>
             </div>
-            <div className="w-80 min-w-0">
+            <div className="w-64 shrink-0 min-w-0">
               <p className="truncate text-sm font-medium text-foreground">{item.name || optionLabel(item.category, item.accreditation_type)}</p>
               <p className="truncate text-xs text-muted-foreground">
                 {[item.issuer, item.certificate_number].filter(Boolean).join(" - ") || optionLabel(item.category, item.accreditation_type)}
               </p>
             </div>
             <div className="w-28 shrink-0">{statusBadge(item)}</div>
-            <div className="w-44 shrink-0 text-xs text-muted-foreground">
+            <div className="w-44 shrink-0 text-xs text-muted-foreground truncate">
               {[item.valid_from && `Vanaf ${item.valid_from}`, item.valid_until && `Tot ${item.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum"}
             </div>
             <div className="flex-1 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">

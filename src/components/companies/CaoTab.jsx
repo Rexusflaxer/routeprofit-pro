@@ -491,10 +491,10 @@ export default function CaoTab({ companyId }) {
 
       {/* Table header */}
       <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="flex-1">CAO</span>
+        <span className="w-64 shrink-0">CAO</span>
         <span className="w-24 shrink-0">Status</span>
-        <span className="w-64 shrink-0">Functies</span>
-        <div className="w-16 shrink-0 flex justify-end">
+        <span className="flex-1 min-w-0">Functies</span>
+        <div className="w-24 shrink-0 flex justify-end">
           {!showWizard && !deleteId && (
             <Button size="sm" variant="outline" onClick={() => setShowWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
               <Plus className="w-3 h-3 mr-1" /> Nieuwe koppeling
@@ -517,15 +517,15 @@ export default function CaoTab({ companyId }) {
                 className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors cursor-pointer overflow-hidden"
                 onClick={() => setExpandedId(isExpanded ? null : a.id)}
               >
-                <div className="flex items-center gap-2 flex-1 min-w-0">
+                <div className="flex items-center gap-2 w-64 shrink-0 min-w-0">
                   <ChevronRight className={`w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform ${isExpanded ? "rotate-90" : ""}`} />
-                  <span className="text-sm font-medium text-foreground">{caoOptionLabel(option || a)}</span>
+                  <span className="text-sm font-medium text-foreground truncate">{caoOptionLabel(option || a)}</span>
                 </div>
                 <div className="w-24 shrink-0"><CaoStatusBadge assignment={a} /></div>
-                <div className="w-64 shrink-0 text-xs text-muted-foreground truncate">
+                <div className="flex-1 min-w-0 text-xs text-muted-foreground truncate">
                   {!isExpanded && functions.map(functionLabel).join(", ")}
                 </div>
-                <div className="w-16 shrink-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+                <div className="w-24 shrink-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
                   <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => startEdit(a)} title="Bewerken"><Edit className="w-3.5 h-3.5" /></Button>
                   <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setDeleteId(a.id)} title="Verwijderen"><Trash2 className="w-3.5 h-3.5" /></Button>
                 </div>
