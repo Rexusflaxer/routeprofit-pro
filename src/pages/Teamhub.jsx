@@ -4,7 +4,7 @@ import { base44 } from "@/api/base44Client";
 import PageTransition from "@/components/ui-custom/PageTransition";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Search, Users } from "lucide-react";
+import { Search } from "lucide-react";
 import { TEAMHUB_SERVICE_LABELS } from "@/lib/teamhubServiceRules";
 import TeamhubMap from "@/components/teamhub/TeamhubMap";
 
@@ -133,16 +133,16 @@ export default function Teamhub() {
         <p className="py-10 text-center text-sm text-muted-foreground">Laden...</p>
       )}
 
-      {!isLoading && !locationsLoading && filteredCompanies.length === 0 && (
-        <div className="rounded-md border border-border bg-card py-12 text-center">
-          <Users className="mx-auto mb-3 h-10 w-10 text-muted-foreground/50" />
-          <p className="text-sm font-medium text-foreground">Geen Teamhub-profielen gevonden</p>
-          <p className="mt-1 text-xs text-muted-foreground">Pas filters aan of zet een bedrijfsprofiel zichtbaar in LOQ Teamhub.</p>
-        </div>
-      )}
-
-      {!isLoading && !locationsLoading && filteredCompanies.length > 0 && (
-        <TeamhubMap companies={filteredCompanies} locations={locations} />
+      {!isLoading && !locationsLoading && (
+        <TeamhubMap
+          companies={filteredCompanies}
+          locations={locations}
+          emptyMessage={
+            visibleCompanies.length === 0
+              ? "Geen zichtbare Teamhub-profielen met kaartlocatie"
+              : "Geen bedrijven binnen deze filters"
+          }
+        />
       )}
     </PageTransition>
   );

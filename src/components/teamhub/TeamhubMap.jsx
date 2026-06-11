@@ -92,14 +92,24 @@ function createMarkerElement(company) {
   return element;
 }
 
-export default function TeamhubMap({ companies = [], locations = [], className = "" }) {
+export default function TeamhubMap({
+  companies = [],
+  locations = [],
+  className = "",
+  heightClassName = "h-[640px] min-h-[520px]",
+  defaultSelectedCompanyId = null,
+  lockSelection = false,
+  showProfileCount = true,
+  emptyMessage = "Geen zichtbare bedrijven met kaartlocatie",
+  effectiveWpbrLicenseType = null,
+}) {
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const mapboxRef = useRef(null);
   const markersRef = useRef([]);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState(false);
-  const [selectedCompanyId, setSelectedCompanyId] = useState(null);
+  const [selectedCompanyId, setSelectedCompanyId] = useState(defaultSelectedCompanyId);
 
   const locationById = useMemo(
     () => new Map((locations || []).filter(location => location?.id).map(location => [location.id, location])),
@@ -120,6 +130,10 @@ export default function TeamhubMap({ companies = [], locations = [], className =
     () => profiles.find(profile => profile.company.id === selectedCompanyId) || null,
     [profiles, selectedCompanyId]
   );
+
+  useEffect(() => {
+    setSelectedCompanyId(defaultSelectedCompanyId);
+  }, [defaultSelectedCompanyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -261,11 +275,13 @@ export default function TeamhubMap({ companies = [], locations = [], className =
     }
   }, [mapReady, selectedProfile]);
 
-  const closeSelected = () => setSelectedCompanyId(null);
+  const closeSelected = () => {
+    if (!lockSelection) setSelectedCompanyId(null);
+  };
 
   return (
     <div className={`relative overflow-hidden rounded-md border border-border bg-card ${className}`}>
-      <div className="relative h-[640px] min-h-[520px]">
+      <div className={`relative ${heightClassName}`}>
         <div ref={mapContainerRef} className="h-full w-full" />
 
         <style>{`
@@ -316,7 +332,7 @@ export default function TeamhubMap({ companies = [], locations = [], className =
         {profiles.length === 0 && mapReady && (
           <div className="absolute left-4 top-4 flex items-center gap-2 rounded-md border border-border bg-background/95 px-3 py-2 text-sm text-muted-foreground shadow-sm">
             <MapPin className="h-4 w-4" />
-            Geen zichtbare bedrijven met kaartlocatie
+            {emptyMessage}
           </div>
         )}
 
@@ -325,13 +341,14 @@ export default function TeamhubMap({ companies = [], locations = [], className =
             <TeamhubCompanyPreview
               company={selectedProfile.company}
               location={selectedProfile.location}
-              onClose={closeSelected}
+              effectiveWpbrLicenseType={effectiveWpbrLicenseType}
+              onClose={lockSelection ? null : closeSelected}
               compact
             />
           </div>
         )}
 
-        {!selectedProfile && profiles.length > 0 && (
+        {showProfileCount && !selectedProfile && profiles.length > 0 && (
           <div className="absolute left-4 top-4 rounded-md border border-border bg-background/95 px-3 py-2 text-xs text-muted-foreground shadow-sm">
             <span className="font-semibold text-foreground">{profiles.length}</span> bedrijven op de kaart
           </div>

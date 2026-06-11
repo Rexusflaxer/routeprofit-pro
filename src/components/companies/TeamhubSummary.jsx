@@ -2,7 +2,7 @@ import React, { useMemo } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Edit2 } from "lucide-react";
-import TeamhubCompanyPreview from "@/components/teamhub/TeamhubCompanyPreview";
+import TeamhubMap from "@/components/teamhub/TeamhubMap";
 
 export default function TeamhubSummary({ form, company, selectableTeamhubLocations, effectiveWpbrLicenseType, onEdit }) {
   const selectedLocation = useMemo(
@@ -33,9 +33,14 @@ export default function TeamhubSummary({ form, company, selectableTeamhubLocatio
         </Button>
       </div>
 
-      <TeamhubCompanyPreview
-        company={previewCompany}
-        location={selectedLocation}
+      <TeamhubMap
+        companies={[previewCompany]}
+        locations={selectedLocation ? [selectedLocation] : selectableTeamhubLocations}
+        defaultSelectedCompanyId={previewCompany.id}
+        lockSelection
+        showProfileCount={false}
+        heightClassName="h-[560px] min-h-[460px]"
+        emptyMessage="Selecteer een vestiging met coordinaten om de kaartpreview te tonen."
         effectiveWpbrLicenseType={effectiveWpbrLicenseType}
       />
     </div>
