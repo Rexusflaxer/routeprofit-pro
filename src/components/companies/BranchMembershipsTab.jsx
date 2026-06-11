@@ -41,7 +41,7 @@ const ASSOCIATION_OPTIONS = [
     label: "Branchevereniging Particuliere Onderzoeksbureaus (BPOB)",
     shortLabel: "BPOB",
     desc: "Particuliere onderzoeksbureaus en recherchewerkzaamheden",
-    logoUrl: "https://bpob.nl/wp-content/uploads/2024/10/BPOB_afkorting_Kleur_versie_1-300x139.png",
+    logoUrl: "https://media.base44.com/images/public/698e307ed3aa4cab3729bbf1/695cde5fc_BPOB_afkorting_Kleur_versie_1.png",
   },
   {
     key: "techniek_nederland",
