@@ -1,15 +1,17 @@
 import React, { useState } from "react";
-import { Award, Shield, BookOpen, MapPin, CreditCard, Users } from "lucide-react";
+import { Award, BookOpen, CreditCard, Handshake, MapPin, Shield, Users } from "lucide-react";
 import WpbrTab from "./WpbrTab";
 import CaoTab from "./CaoTab";
 import LocationsTab from "./LocationsTab";
 import CompanyBankTab from "./CompanyBankTab";
 import TeamhubTab from "./TeamhubTab";
 import AccreditationsTab from "./AccreditationsTab";
+import BranchMembershipsTab from "./BranchMembershipsTab";
 
 const MENU_ITEMS = [
   { key: "wpbr", label: "WPBR-vergunning", icon: Shield },
   { key: "cao", label: "CAO", icon: BookOpen },
+  { key: "branch_memberships", label: "Branchevereniging", icon: Handshake },
   { key: "accreditations", label: "Erkenningen", icon: Award },
   { key: "teamhub", label: "LOQ Teamhub", icon: Users },
   { key: "locations", label: "Vestigingen", icon: MapPin },
@@ -55,6 +57,10 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
 
         {active === "cao" && (
           <CaoTab companyId={companyId} />
+        )}
+
+        {active === "branch_memberships" && (
+          <BranchMembershipsTab companyId={companyId} company={company} />
         )}
 
         {active === "accreditations" && (

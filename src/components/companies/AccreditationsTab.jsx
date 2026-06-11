@@ -17,16 +17,8 @@ const DELETE_PASSWORD = "verwijder";
 
 const CATEGORY_OPTIONS = [
   { key: "technical_certification", label: "Technische erkenning" },
-  { key: "branch_membership", label: "Branchevereniging" },
   { key: "quality_mark", label: "Kwaliteitscertificaat" },
   { key: "other", label: "Overig" },
-];
-
-const BRANCH_OPTIONS = [
-  { key: "branche_nederlandse_veiligheidsbranche", label: "Nederlandse Veiligheidsbranche" },
-  { key: "branche_techniek_nederland", label: "Techniek Nederland" },
-  { key: "branche_veb", label: "VEB branchevereniging" },
-  { key: "other", label: "Andere branchevereniging" },
 ];
 
 const QUALITY_OPTIONS = [
@@ -37,12 +29,11 @@ const QUALITY_OPTIONS = [
 ];
 
 const OTHER_OPTIONS = [
-  { key: "other", label: "Overige erkenning" },
+  { key: "other", label: "Overige erkenning of certificering" },
 ];
 
 const OPTIONS_BY_CATEGORY = {
   technical_certification: TECHNICAL_ACCREDITATION_OPTIONS,
-  branch_membership: BRANCH_OPTIONS,
   quality_mark: QUALITY_OPTIONS,
   other: OTHER_OPTIONS,
 };
@@ -374,7 +365,7 @@ export default function AccreditationsTab({ companyId, company }) {
       </div>
 
       {accreditations.length === 0 && !showForm && (
-        <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen erkenningen, brancheverenigingen of certificaten geregistreerd.</p>
+        <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen erkenningen of certificaten geregistreerd.</p>
       )}
 
       <div className="divide-y divide-border">

@@ -1,76 +1,71 @@
 {
-  "name": "CompanyAccreditation",
+  "name": "CompanyBranchMembership",
   "type": "object",
   "properties": {
     "company_id": {
       "type": "string",
       "description": "ID van het bedrijf"
     },
-    "category": {
+    "association_type": {
       "type": "string",
       "enum": [
-        "technical_certification",
-        "quality_mark",
+        "nederlandse_veiligheidsbranche",
+        "veb",
+        "techniek_nederland",
         "other"
       ],
-      "default": "technical_certification"
+      "description": "Type branchevereniging"
     },
-    "accreditation_type": {
+    "association_name": {
       "type": "string",
-      "enum": [
-        "borg_e",
-        "borg_b",
-        "veb_4",
-        "ccv_bmi_leveren",
-        "ccv_bmi_onderhoud",
-        "ccv_bmi_oai_installeren",
-        "ccv_oai",
-        "iso_9001",
-        "iso_27001",
-        "vca",
-        "other_technical",
-        "other"
-      ]
+      "description": "Naam van de branchevereniging"
     },
-    "name": {
-      "type": "string",
-      "description": "Naam van de erkenning of certificering"
-    },
-    "issuer": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "certificate_number": {
-      "type": [
-        "string",
-        "null"
-      ]
-    },
-    "valid_from": {
+    "membership_number": {
       "type": [
         "string",
         "null"
       ],
-      "format": "date"
+      "description": "Lidnummer of registratienummer"
+    },
+    "membership_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Lidmaatschapstype of categorie"
+    },
+    "member_since": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Lid sinds"
     },
     "valid_until": {
       "type": [
         "string",
         "null"
       ],
-      "format": "date"
+      "format": "date",
+      "description": "Geldig tot of eerstvolgende hercontrole"
     },
     "status": {
       "type": "string",
       "enum": [
         "active",
         "pending_review",
-        "suspended",
-        "expired"
+        "expired",
+        "cancelled"
       ],
       "default": "active"
+    },
+    "public_profile_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Publieke ledenpagina of verificatielink"
     },
     "document_file_url": {
       "type": [
@@ -118,7 +113,7 @@
   },
   "required": [
     "company_id",
-    "accreditation_type",
-    "name"
+    "association_type",
+    "association_name"
   ]
 }
