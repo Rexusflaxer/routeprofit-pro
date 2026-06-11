@@ -1,6 +1,7 @@
 import React, { useState, useRef, useEffect } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { useDebouncedCallback } from "@/hooks/useDebouncedCallback";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -105,6 +106,21 @@ export default function CompanyBankTab({ companies }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [deleteId, setDeleteId] = useState(null);
+  const [lookingUpIban, setLookingUpIban] = useState(false);
+
+  const doIbanLookup = useDebouncedCallback(async (iban) => {
+    if (!iban || iban.length < 15) return;
+    setLookingUpIban(true);
+    try {
+      const res = await base44.functions.invoke('lookupIbanBic', { iban });
+      if (res.data?.bic) setForm((f) => ({ ...f, bic: res.data.bic }));
+      if (res.data?.bankName) setForm((f) => ({ ...f, bank_name: res.data.bankName }));
+    } catch (err) {
+      console.log('IBAN lookup failed:', err.message);
+    } finally {
+      setLookingUpIban(false);
+    }
+  }, 600);
 
   useEffect(() => {
     if (showWizard) {
@@ -369,8 +385,8 @@ export default function CompanyBankTab({ companies }) {
                       )}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="col-span-2 space-y-1">
-                          <Label>IBAN *</Label>
-                          <Input value={form.iban} onChange={(e) => { set("iban", formatIban(e.target.value)); setErrors((er) => ({ ...er, iban: undefined })); }} placeholder="NL91 ABNA 0417 1643 00" className={errors.iban ? "border-destructive" : ""} />
+                          <Label>IBAN * {lookingUpIban && <span className="text-xs text-muted-foreground ml-1">(gegevens ophalen...)</span>}</Label>
+                          <Input value={form.iban} onChange={(e) => { const formatted = formatIban(e.target.value); set("iban", formatted); setErrors((er) => ({ ...er, iban: undefined })); doIbanLookup(formatted); }} placeholder="NL91 ABNA 0417 1643 00" className={errors.iban ? "border-destructive" : ""} />
                           {errors.iban && <p className="text-xs text-destructive">{errors.iban}</p>}
                         </div>
                         <div className="space-y-1">
