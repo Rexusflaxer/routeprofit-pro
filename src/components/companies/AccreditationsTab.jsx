@@ -153,13 +153,9 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
   }, [contextMenu]);
 
   const handleRowClick = e => {
-    if (needsAction && item.document_file_url) {
-      // Show context menu only when there's also a document to open
+    if (needsAction) {
       const rect = e.currentTarget.getBoundingClientRect();
       setContextMenu({ x: e.clientX - rect.left, y: e.clientY - rect.top });
-    } else if (needsAction) {
-      // No document — go straight to renew
-      onRenew(item);
     } else if (item.document_file_url) {
       onPreview(item);
     }
@@ -476,7 +472,8 @@ export default function AccreditationsTab({ companyId, company }) {
                       </div>
                       <div className="space-y-1 lg:col-span-2">
                         <Label>Naam</Label>
-                        <Input className="h-8 bg-muted/50" value={form.name} readOnly disabled />
+                        <Input className={`h-8 ${errors.name ? "border-destructive" : ""}`} value={form.name} onChange={e => { set("name", e.target.value); setErrors(er => ({ ...er, name: undefined })); }} />
+                        {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
                       </div>
                       <div className="space-y-1">
                         <Label>Uitgever / organisatie</Label>
