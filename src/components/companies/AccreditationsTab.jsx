@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Edit, Eye, FileText, Plus, RefreshCw, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, Archive, Check, ChevronLeft, ChevronRight, Edit, Eye, FileText, Plus, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { TECHNICAL_ACCREDITATION_OPTIONS } from "@/lib/teamhubServiceRules";
@@ -234,6 +234,8 @@ export default function AccreditationsTab({ companyId, company }) {
   const [wizardStep, setWizardStep] = useState(1);
   const [editingId, setEditingId] = useState(null);
   const [renewingId, setRenewingId] = useState(null);
+  const [isArchiveEntry, setIsArchiveEntry] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [uploading, setUploading] = useState(false);
@@ -259,20 +261,37 @@ export default function AccreditationsTab({ companyId, company }) {
       const payload = {
         ...data,
         company_id: companyId,
-        status: "active",
         issuer: data.issuer?.trim() || null,
         certificate_number: data.certificate_number?.trim() || null,
         valid_from: data.valid_from || null,
         valid_until: data.valid_until || null,
         notes: data.notes?.trim() || null,
       };
-      const saved = editingId
-        ? await base44.entities.CompanyAccreditation.update(editingId, payload)
-        : await base44.entities.CompanyAccreditation.create(payload);
-      if (saved?.id && data.document_file_id) {
-        await updateManagedFileSource(data.document_file_id, { owner_id: companyId, company_id: companyId, source_entity_id: saved.id });
+
+      if (editingId) {
+        return base44.entities.CompanyAccreditation.update(editingId, { ...payload, status: data.status || "active" });
       }
-      return saved;
+
+      // Archive entry: save directly as superseded
+      if (isArchiveEntry) {
+        const created = await base44.entities.CompanyAccreditation.create({ ...payload, status: "superseded" });
+        if (created?.id && data.document_file_id) {
+          await updateManagedFileSource(data.document_file_id, { owner_id: companyId, company_id: companyId, source_entity_id: created.id });
+        }
+        return created;
+      }
+
+      // Renewal: supersede existing active/expired records of same type
+      if (renewingId) {
+        const sameType = accreditations.filter(a => a.accreditation_type === data.accreditation_type && a.status !== "superseded");
+        await Promise.all(sameType.map(a => base44.entities.CompanyAccreditation.update(a.id, { status: "superseded" })));
+      }
+
+      const created = await base44.entities.CompanyAccreditation.create({ ...payload, status: "active" });
+      if (created?.id && data.document_file_id) {
+        await updateManagedFileSource(data.document_file_id, { owner_id: companyId, company_id: companyId, source_entity_id: created.id });
+      }
+      return created;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["company-accreditations", companyId] });
@@ -353,6 +372,7 @@ export default function AccreditationsTab({ companyId, company }) {
     setShowWizard(false);
     setEditingId(null);
     setRenewingId(null);
+    setIsArchiveEntry(false);
     setWizardStep(1);
     setForm(EMPTY_FORM);
     setErrors({});
@@ -411,6 +431,8 @@ export default function AccreditationsTab({ companyId, company }) {
     }
   };
 
+  const activeAccreditations = accreditations.filter(a => a.status !== "superseded");
+  const archivedAccreditations = accreditations.filter(a => a.status === "superseded");
   const itemToDelete = accreditations.find(item => item.id === deleteId);
   const isRenewing = !!renewingId;
   const activeWithoutDocument = !form.document_file_url && wizardStep === 2 && !editingId;
@@ -569,31 +591,70 @@ export default function AccreditationsTab({ companyId, company }) {
         <span className="flex-1 min-w-0">Erkenning</span>
         <span className="w-28 shrink-0">Status</span>
         <span className="w-44 shrink-0">Geldigheid</span>
-        <div className="w-24 shrink-0 flex justify-end">
+        {showArchive && <Badge className="mr-2 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
+        <div className="shrink-0 flex items-center gap-2">
           {!showWizard && !deleteId && (
-            <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-              <Plus className="w-3 h-3 mr-1" /> Nieuwe erkenning
-            </Button>
+            showArchive ? (
+              <>
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                  <ChevronLeft className="w-3 h-3 mr-1" /> Actieve erkenningen
+                </Button>
+                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(true); setWizardStep(1); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                  <Plus className="w-3 h-3 mr-1" /> Voeg oude erkenning in archief
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                  <Archive className="w-3 h-3 mr-1" /> Archief {archivedAccreditations.length > 0 ? `(${archivedAccreditations.length})` : ""}
+                </Button>
+                <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                  <Plus className="w-3 h-3 mr-1" /> Nieuwe erkenning
+                </Button>
+              </>
+            )
           )}
         </div>
       </div>
 
-      {accreditations.length === 0 && !showWizard && (
-        <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen erkenningen of certificaten geregistreerd.</p>
+      {!showArchive && (
+        <>
+          {activeAccreditations.length === 0 && !showWizard && (
+            <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen erkenningen of certificaten geregistreerd.</p>
+          )}
+          <div className="divide-y divide-border">
+            {activeAccreditations.map(item => (
+              <AccreditationRow
+                key={item.id}
+                item={item}
+                onEdit={openEdit}
+                onDelete={setDeleteId}
+                onRenew={openRenew}
+                onPreview={setPreview}
+              />
+            ))}
+          </div>
+        </>
       )}
 
-      <div className="divide-y divide-border">
-        {accreditations.map(item => (
-          <AccreditationRow
-            key={item.id}
-            item={item}
-            onEdit={openEdit}
-            onDelete={setDeleteId}
-            onRenew={openRenew}
-            onPreview={setPreview}
-          />
-        ))}
-      </div>
+      {showArchive && (
+        <div className="divide-y divide-border">
+          {archivedAccreditations.length === 0 ? (
+            <p className="px-4 py-6 text-sm text-muted-foreground text-center">Geen erkenningen in het archief.</p>
+          ) : (
+            archivedAccreditations.map(item => (
+              <AccreditationRow
+                key={item.id}
+                item={item}
+                onEdit={openEdit}
+                onDelete={setDeleteId}
+                onRenew={undefined}
+                onPreview={setPreview}
+              />
+            ))
+          )}
+        </div>
+      )}
 
       <ManagedFilePreviewDialog
         open={formPreviewOpen}
