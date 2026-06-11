@@ -277,8 +277,7 @@ export default function Teamhub() {
         <TeamhubMap
           companies={filteredCompanies}
           locations={locations}
-          className="min-h-0 flex-1"
-          heightClassName="h-full min-h-[640px]"
+          heightClassName="h-[calc(100vh-12rem)] min-h-[640px]"
           selectedCompanyId={selectedCompanyId}
           onSelectedCompanyIdChange={setSelectedCompanyId}
           emptyMessage={

@@ -218,6 +218,8 @@ export default function TeamhubMap({
           },
         });
 
+        map.resize();
+        requestAnimationFrame(() => map.resize());
         setMapReady(true);
       });
 
@@ -314,7 +316,7 @@ export default function TeamhubMap({
   return (
     <div className={`relative overflow-hidden rounded-md border border-border bg-card ${className}`}>
       <div className={`relative ${heightClassName}`}>
-        <div ref={mapContainerRef} className="h-full w-full" />
+        <div ref={mapContainerRef} className="absolute inset-0" />
 
         <style>{`
           .teamhub-map-marker {
