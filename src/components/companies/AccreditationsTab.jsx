@@ -370,7 +370,7 @@ export default function AccreditationsTab({ companyId, company }) {
       <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         <span className="w-40 shrink-0">Categorie</span>
         <span className="flex-1">Erkenning</span>
-        <span className="w-28 shrink-0">Status</span>
+        <span className="w-28 shrink-0 text-left">Status</span>
         <span className="w-44 shrink-0">Geldigheid</span>
         {!showForm && !deleteId && (
           <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
@@ -395,7 +395,7 @@ export default function AccreditationsTab({ companyId, company }) {
                 {[item.issuer, item.certificate_number].filter(Boolean).join(" - ") || optionLabel(item.category, item.accreditation_type)}
               </p>
             </div>
-            <div className="w-28 shrink-0 flex items-center">{statusBadge(item)}</div>
+            <div className="w-28 shrink-0">{statusBadge(item)}</div>
             <div className="w-44 shrink-0 text-xs text-muted-foreground">
               {[item.valid_from && `Vanaf ${item.valid_from}`, item.valid_until && `Tot ${item.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum"}
             </div>
