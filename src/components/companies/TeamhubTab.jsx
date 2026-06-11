@@ -170,9 +170,6 @@ export default function TeamhubTab({ companyId, company }) {
     <div className="flex flex-col">
       <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/30 px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary">
-            <Users className="h-4 w-4" />
-          </div>
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <p className="truncate text-sm font-semibold text-foreground">LOQ Teamhub</p>
