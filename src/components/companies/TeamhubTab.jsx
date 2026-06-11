@@ -221,9 +221,9 @@ export default function TeamhubTab({ companyId, company }) {
           {activity.label}
         </button>
         {!allowed && disabledReason && (
-          <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-64 -translate-x-1/2 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md opacity-0 group-hover/pill:opacity-100 transition-opacity duration-150">
+          <div className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md opacity-0 group-hover/pill:opacity-100 transition-opacity duration-150">
             {disabledReason}
-            <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-border" />
+            <div className="absolute left-4 top-full border-4 border-transparent border-t-border" />
           </div>
         )}
       </div>
