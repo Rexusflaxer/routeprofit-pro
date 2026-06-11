@@ -588,11 +588,12 @@ export default function AccreditationsTab({ companyId, company }) {
 
       <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         <span className="w-40 shrink-0">Categorie</span>
-        <span className="flex-1 min-w-0">Erkenning</span>
+        <span className="flex-1 min-w-0 pr-4">Erkenning</span>
         <span className="w-28 shrink-0">Status</span>
         <span className="w-44 shrink-0">Geldigheid</span>
-        <span className="w-24 shrink-0"></span>
-        {showArchive && <Badge className="mr-2 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
+        <div className="w-24 shrink-0 flex justify-end items-center gap-2">
+          {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
+        </div>
         <div className="shrink-0 flex items-center gap-2">
           {!showWizard && !deleteId && (
             showArchive ? (
