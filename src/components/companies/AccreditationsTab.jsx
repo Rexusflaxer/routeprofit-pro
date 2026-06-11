@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -7,7 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Check, Edit, Eye, FileText, Plus, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Edit, Eye, FileText, Plus, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { TECHNICAL_ACCREDITATION_OPTIONS } from "@/lib/teamhubServiceRules";
@@ -69,11 +69,17 @@ const EMPTY_FORM = {
 
 function optionLabel(category, value) {
   return (OPTIONS_BY_CATEGORY[category] || [])
-    .find(option => option.key === value)?.label || value || "Erkenning";
+    .find(o => o.key === value)?.label || value || "Erkenning";
 }
 
 function categoryLabel(category) {
-  return CATEGORY_OPTIONS.find(option => option.key === category)?.label || category || "Erkenning";
+  return CATEGORY_OPTIONS.find(o => o.key === category)?.label || category || "Erkenning";
+}
+
+function isActionItem(item) {
+  const today = new Date().toISOString().split("T")[0];
+  return item.status === "expired" || item.status === "pending_review" ||
+    (item.valid_until && item.valid_until < today);
 }
 
 function statusBadge(item) {
@@ -88,15 +94,10 @@ function statusBadge(item) {
 function DeleteConfirmBar({ label, onConfirm, onCancel, isPending }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-
   const handleConfirm = () => {
-    if (password !== DELETE_PASSWORD) {
-      setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`);
-      return;
-    }
+    if (password !== DELETE_PASSWORD) { setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`); return; }
     onConfirm();
   };
-
   return (
     <div className="border-b border-destructive/20 bg-destructive/5 p-4">
       <div className="flex items-start gap-3 mb-3">
@@ -109,7 +110,7 @@ function DeleteConfirmBar({ label, onConfirm, onCancel, isPending }) {
       <div className="space-y-2">
         <label className="text-xs text-muted-foreground block">Typ <strong className="text-foreground font-mono">{DELETE_PASSWORD}</strong> om te bevestigen:</label>
         <div className="flex gap-2">
-          <Input value={password} onChange={(e) => { setPassword(e.target.value); setError(""); }} placeholder={DELETE_PASSWORD} className={`h-8 text-sm font-mono max-w-[200px] ${error ? "border-destructive" : ""}`} onKeyDown={(e) => e.key === "Enter" && handleConfirm()} autoFocus />
+          <Input value={password} onChange={e => { setPassword(e.target.value); setError(""); }} placeholder={DELETE_PASSWORD} className={`h-8 text-sm font-mono max-w-[200px] ${error ? "border-destructive" : ""}`} onKeyDown={e => e.key === "Enter" && handleConfirm()} autoFocus />
           <Button variant="destructive" size="sm" onClick={handleConfirm} disabled={isPending}><Trash2 className="w-3.5 h-3.5 mr-1" />{isPending ? "Verwijderen..." : "Verwijderen"}</Button>
           <Button variant="ghost" size="sm" onClick={onCancel}>Annuleren</Button>
         </div>
@@ -119,14 +120,131 @@ function DeleteConfirmBar({ label, onConfirm, onCancel, isPending }) {
   );
 }
 
+function WizardSteps({ step }) {
+  const steps = ["Gegevens", "Document"];
+  return (
+    <div className="flex items-center gap-1 mb-4">
+      {steps.map((s, i) => (
+        <React.Fragment key={s}>
+          <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full transition-colors ${i + 1 === step ? "bg-primary text-primary-foreground" : i + 1 < step ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" : "text-muted-foreground"}`}>
+            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${i + 1 === step ? "bg-primary-foreground text-primary" : i + 1 < step ? "text-green-700 dark:text-green-300" : "border border-muted-foreground/30 text-muted-foreground"}`}>
+              {i + 1 < step ? <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20"><path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" /></svg> : i + 1}
+            </span>
+            {s}
+          </div>
+          {i < steps.length - 1 && <div className={`h-px flex-1 ${i + 1 < step ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
+// Row with context menu for action/expired items, direct preview for items with document
+function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
+  const [contextMenu, setContextMenu] = useState(null);
+  const contextRef = useRef(null);
+  const needsAction = isActionItem(item);
+
+  useEffect(() => {
+    if (!contextMenu) return;
+    const handler = e => { if (contextRef.current && !contextRef.current.contains(e.target)) setContextMenu(null); };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [contextMenu]);
+
+  const handleRowClick = e => {
+    if (needsAction) {
+      const rect = e.currentTarget.getBoundingClientRect();
+      setContextMenu({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    } else if (item.document_file_url) {
+      onPreview(item);
+    }
+  };
+
+  const isClickable = needsAction || !!item.document_file_url;
+
+  return (
+    <div
+      className={`relative flex items-center px-4 py-3 group transition-colors ${isClickable ? "cursor-pointer hover:bg-accent/40" : "hover:bg-accent/30"}`}
+      onClick={handleRowClick}
+    >
+      <div className="w-40 shrink-0">
+        <Badge variant="secondary" className="text-xs">{categoryLabel(item.category)}</Badge>
+      </div>
+      <div className="flex-1 min-w-0 pr-4">
+        <p className="truncate text-sm font-medium text-foreground">{item.name || optionLabel(item.category, item.accreditation_type)}</p>
+        <p className="truncate text-xs text-muted-foreground">
+          {[item.issuer, item.certificate_number].filter(Boolean).join(" - ") || optionLabel(item.category, item.accreditation_type)}
+        </p>
+      </div>
+      <div className="w-28 shrink-0">{statusBadge(item)}</div>
+      <div className="w-44 shrink-0 text-xs text-muted-foreground truncate">
+        {[item.valid_from && `Vanaf ${item.valid_from}`, item.valid_until && `Tot ${item.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum"}
+      </div>
+      <div className="w-24 shrink-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+        {item.document_file_url && (
+          <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onPreview(item)} title="Document bekijken"><Eye className="h-3.5 w-3.5" /></Button>
+        )}
+        <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onEdit(item)} title="Bewerken"><Edit className="h-3.5 w-3.5" /></Button>
+        <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => onDelete(item.id)} title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></Button>
+      </div>
+
+      <AnimatePresence>
+        {contextMenu && (
+          <motion.div
+            ref={contextRef}
+            initial={{ opacity: 0, scale: 0.95 }}
+            animate={{ opacity: 1, scale: 1 }}
+            exit={{ opacity: 0, scale: 0.95 }}
+            transition={{ duration: 0.1 }}
+            style={{ left: contextMenu.x, top: contextMenu.y }}
+            className="absolute z-50 min-w-[200px] rounded-lg border border-border bg-popover shadow-lg py-1 text-sm"
+            onClick={e => e.stopPropagation()}
+          >
+            <button
+              className="flex w-full items-center gap-2.5 px-3 py-2 hover:bg-accent transition-colors text-foreground"
+              onClick={() => { setContextMenu(null); onRenew(item); }}
+            >
+              <RefreshCw className="w-3.5 h-3.5 text-amber-500" />
+              Erkenning vernieuwen
+            </button>
+            {item.document_file_url && (
+              <button
+                className="flex w-full items-center gap-2.5 px-3 py-2 hover:bg-accent transition-colors text-foreground"
+                onClick={() => { setContextMenu(null); onPreview(item); }}
+              >
+                <Eye className="w-3.5 h-3.5 text-muted-foreground" />
+                Document openen
+              </button>
+            )}
+          </motion.div>
+        )}
+      </AnimatePresence>
+    </div>
+  );
+}
+
 export default function AccreditationsTab({ companyId, company }) {
   const queryClient = useQueryClient();
-  const [showForm, setShowForm] = useState(false);
+  const wizardRef = useRef(null);
+
+  const [showWizard, setShowWizard] = useState(false);
+  const [wizardStep, setWizardStep] = useState(1);
   const [editingId, setEditingId] = useState(null);
-  const [deleteId, setDeleteId] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [preview, setPreview] = useState(null);
+  const [renewingId, setRenewingId] = useState(null);
   const [form, setForm] = useState(EMPTY_FORM);
+  const [errors, setErrors] = useState({});
+  const [uploading, setUploading] = useState(false);
+  const [formPreviewOpen, setFormPreviewOpen] = useState(false);
+  const [deleteId, setDeleteId] = useState(null);
+  const [preview, setPreview] = useState(null);
+
+  useEffect(() => {
+    if (showWizard) {
+      const timer = setTimeout(() => wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" }), 200);
+      return () => clearTimeout(timer);
+    }
+  }, [wizardStep, showWizard]);
 
   const { data: accreditations = [] } = useQuery({
     queryKey: ["company-accreditations", companyId],
@@ -149,17 +267,13 @@ export default function AccreditationsTab({ companyId, company }) {
         ? await base44.entities.CompanyAccreditation.update(editingId, payload)
         : await base44.entities.CompanyAccreditation.create(payload);
       if (saved?.id && data.document_file_id) {
-        await updateManagedFileSource(data.document_file_id, {
-          owner_id: companyId,
-          company_id: companyId,
-          source_entity_id: saved.id,
-        });
+        await updateManagedFileSource(data.document_file_id, { owner_id: companyId, company_id: companyId, source_entity_id: saved.id });
       }
       return saved;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["company-accreditations", companyId] });
-      cancel();
+      cancelWizard();
     },
   });
 
@@ -175,30 +289,25 @@ export default function AccreditationsTab({ companyId, company }) {
 
   const setCategory = (category) => {
     const firstOption = (OPTIONS_BY_CATEGORY[category] || OTHER_OPTIONS)[0];
-    setForm(current => ({
-      ...current,
-      category,
-      accreditation_type: firstOption.key,
-      name: firstOption.label,
-    }));
+    setForm(current => ({ ...current, category, accreditation_type: firstOption.key, name: firstOption.label }));
   };
 
   const setType = (type) => {
-    setForm(current => ({
-      ...current,
-      accreditation_type: type,
-      name: optionLabel(current.category, type),
-    }));
+    setForm(current => ({ ...current, accreditation_type: type, name: optionLabel(current.category, type) }));
   };
 
   const openNew = () => {
     setEditingId(null);
+    setRenewingId(null);
     setForm(EMPTY_FORM);
-    setShowForm(true);
+    setErrors({});
+    setWizardStep(1);
+    setShowWizard(true);
   };
 
   const openEdit = (item) => {
     setEditingId(item.id);
+    setRenewingId(null);
     setForm({
       category: item.category || "technical_certification",
       accreditation_type: item.accreditation_type || "other",
@@ -216,14 +325,42 @@ export default function AccreditationsTab({ companyId, company }) {
       document_metadata: item.document_metadata || null,
       notes: item.notes || "",
     });
-    setShowForm(true);
+    setErrors({});
+    setWizardStep(1);
+    setShowWizard(true);
   };
 
-  const cancel = () => {
-    setShowForm(false);
+  const openRenew = (item) => {
     setEditingId(null);
+    setRenewingId(item.id);
+    setForm({
+      ...EMPTY_FORM,
+      category: item.category || "technical_certification",
+      accreditation_type: item.accreditation_type || "other",
+      name: item.name || optionLabel(item.category, item.accreditation_type),
+      issuer: item.issuer || "",
+      status: "active",
+    });
+    setErrors({});
+    setWizardStep(1);
+    setShowWizard(true);
+  };
+
+  const cancelWizard = () => {
+    setShowWizard(false);
+    setEditingId(null);
+    setRenewingId(null);
+    setWizardStep(1);
     setForm(EMPTY_FORM);
-    setPreview(null);
+    setErrors({});
+    setFormPreviewOpen(false);
+  };
+
+  const validateStep1 = () => {
+    const e = {};
+    if (!form.name?.trim()) e.name = "Naam is verplicht";
+    setErrors(e);
+    return Object.keys(e).length === 0;
   };
 
   const handleUpload = async (file) => {
@@ -263,7 +400,8 @@ export default function AccreditationsTab({ companyId, company }) {
   };
 
   const itemToDelete = accreditations.find(item => item.id === deleteId);
-  const activeWithoutDocument = form.status === "active" && !form.document_file_url;
+  const isRenewing = !!renewingId;
+  const activeWithoutDocument = form.status === "active" && !form.document_file_url && wizardStep === 2;
 
   return (
     <div className="flex flex-col h-full">
@@ -281,88 +419,143 @@ export default function AccreditationsTab({ companyId, company }) {
       </AnimatePresence>
 
       <AnimatePresence>
-        {showForm && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.2 }} className="border-b border-primary/30 bg-muted/20 p-5">
-            <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">{editingId ? "Erkenning bewerken" : "Nieuwe erkenning"}</p>
-            <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
-              <div className="space-y-1">
-                <Label>Categorie</Label>
-                <Select value={form.category} onValueChange={setCategory}>
-                  <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                  <SelectContent>{CATEGORY_OPTIONS.map(option => <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1 lg:col-span-2">
-                <Label>Type</Label>
-                <Select value={form.accreditation_type} onValueChange={setType}>
-                  <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                  <SelectContent>{(OPTIONS_BY_CATEGORY[form.category] || OTHER_OPTIONS).map(option => <SelectItem key={option.key} value={option.key}>{option.label}</SelectItem>)}</SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Status</Label>
-                <Select value={form.status} onValueChange={value => set("status", value)}>
-                  <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="active">Actief</SelectItem>
-                    <SelectItem value="pending_review">Actie nodig</SelectItem>
-                    <SelectItem value="suspended">Geschorst</SelectItem>
-                    <SelectItem value="expired">Verlopen</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1 lg:col-span-2">
-                <Label>Naam</Label>
-                <Input className="h-8" value={form.name} onChange={event => set("name", event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>Uitgever / organisatie</Label>
-                <Input className="h-8" value={form.issuer} onChange={event => set("issuer", event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>Nummer</Label>
-                <Input className="h-8" value={form.certificate_number} onChange={event => set("certificate_number", event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>Geldig vanaf</Label>
-                <Input className="h-8" type="date" value={form.valid_from} onChange={event => set("valid_from", event.target.value)} />
-              </div>
-              <div className="space-y-1">
-                <Label>Geldig tot</Label>
-                <Input className="h-8" type="date" value={form.valid_until} onChange={event => set("valid_until", event.target.value)} />
-              </div>
-              <div className="space-y-1 lg:col-span-2">
-                <Label>Bewijsstuk</Label>
-                {form.document_file_url ? (
-                  <div className="flex h-8 items-center gap-2 rounded-md border border-border bg-card px-2">
-                    <FileText className="h-3.5 w-3.5 text-blue-600" />
-                    <span className="min-w-0 flex-1 truncate text-xs text-muted-foreground">{form.document_download_filename || form.document_filename || "Document"}</span>
-                    <Button type="button" variant="ghost" size="sm" onClick={() => setPreview(form)} className="h-6 px-2 text-xs"><Eye className="h-3 w-3" /></Button>
-                    <button type="button" onClick={() => setForm(current => ({ ...current, document_file_url: "", document_filename: "", document_file_id: "", document_download_filename: "", document_logical_path: "", document_metadata: null }))}>
-                      <X className="h-3.5 w-3.5 text-muted-foreground hover:text-destructive" />
-                    </button>
+        {showWizard && (
+          <motion.div
+            ref={wizardRef}
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+            className="border-b border-primary/30 bg-muted/20 p-5"
+          >
+            {editingId && <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">Erkenning bewerken</p>}
+            {isRenewing && <p className="text-xs font-semibold text-amber-600 mb-3 uppercase tracking-wider">Erkenning vernieuwen — {form.name}</p>}
+            {!editingId && !isRenewing && <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">Nieuwe erkenning</p>}
+
+            <WizardSteps step={wizardStep} />
+
+            <AnimatePresence mode="wait">
+              <motion.div key={wizardStep} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
+
+                {wizardStep === 1 && (
+                  <div className="space-y-3">
+                    <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+                      {!isRenewing && (
+                        <>
+                          <div className="space-y-1">
+                            <Label>Categorie</Label>
+                            <Select value={form.category} onValueChange={setCategory}>
+                              <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                              <SelectContent>{CATEGORY_OPTIONS.map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1 lg:col-span-2">
+                            <Label>Type</Label>
+                            <Select value={form.accreditation_type} onValueChange={setType}>
+                              <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                              <SelectContent>{(OPTIONS_BY_CATEGORY[form.category] || OTHER_OPTIONS).map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
+                            </Select>
+                          </div>
+                        </>
+                      )}
+                      <div className="space-y-1">
+                        <Label>Status</Label>
+                        <Select value={form.status} onValueChange={v => set("status", v)}>
+                          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="active">Actief</SelectItem>
+                            <SelectItem value="pending_review">Actie nodig</SelectItem>
+                            <SelectItem value="suspended">Geschorst</SelectItem>
+                            <SelectItem value="expired">Verlopen</SelectItem>
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1 lg:col-span-2">
+                        <Label>Naam</Label>
+                        <Input className={`h-8 ${errors.name ? "border-destructive" : ""}`} value={form.name} onChange={e => { set("name", e.target.value); setErrors(er => ({ ...er, name: undefined })); }} />
+                        {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Uitgever / organisatie</Label>
+                        <Input className="h-8" value={form.issuer} onChange={e => set("issuer", e.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Nummer</Label>
+                        <Input className="h-8" value={form.certificate_number} onChange={e => set("certificate_number", e.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Geldig vanaf</Label>
+                        <Input className="h-8" type="date" value={form.valid_from} onChange={e => set("valid_from", e.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Geldig tot</Label>
+                        <Input className="h-8" type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)} />
+                      </div>
+                      <div className="space-y-1 lg:col-span-4">
+                        <Label>Notities</Label>
+                        <Textarea value={form.notes} onChange={e => set("notes", e.target.value)} rows={2} />
+                      </div>
+                    </div>
+                    <div className="flex justify-between pt-1">
+                      <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
+                      <Button size="sm" onClick={() => { if (validateStep1()) setWizardStep(2); }}>
+                        Volgende <ChevronRight className="w-4 h-4 ml-1" />
+                      </Button>
+                    </div>
                   </div>
-                ) : (
-                  <label className="flex h-8 cursor-pointer items-center justify-center gap-2 rounded-md border border-dashed border-border text-xs text-muted-foreground hover:border-primary">
-                    <input type="file" accept=".pdf,image/*" className="hidden" onChange={event => event.target.files?.[0] && handleUpload(event.target.files[0])} />
-                    <Upload className="h-3.5 w-3.5" /> {uploading ? "Uploaden..." : "Upload bewijs"}
-                  </label>
                 )}
-              </div>
-              <div className="space-y-1 lg:col-span-4">
-                <Label>Notities</Label>
-                <Textarea value={form.notes} onChange={event => set("notes", event.target.value)} rows={2} />
-              </div>
-            </div>
-            <div className="mt-4 flex justify-end gap-2">
-              <Button variant="outline" size="sm" onClick={cancel}>Annuleren</Button>
-              <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending || !form.name?.trim() || activeWithoutDocument}>
-                <Check className="h-4 w-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : "Opslaan"}
-              </Button>
-            </div>
-            {activeWithoutDocument && (
-              <p className="mt-2 text-right text-xs text-destructive">Upload eerst een bewijsstuk voordat je de status Actief opslaat.</p>
-            )}
+
+                {wizardStep === 2 && (
+                  <div className="space-y-4">
+                    <p className="text-sm font-medium text-foreground">Bewijsstuk {editingId ? "bijwerken" : "uploaden"}</p>
+                    {!editingId && (
+                      <p className="text-xs text-muted-foreground">
+                        Upload het officiële certificaat of erkenningsdocument (PDF of afbeelding).
+                        {form.status === "active" && <span className="text-destructive font-medium"> Verplicht bij status Actief.</span>}
+                      </p>
+                    )}
+
+                    {form.document_file_url ? (
+                      <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
+                        <FileText className="w-4 h-4 text-blue-600 shrink-0" />
+                        <span className="text-sm text-muted-foreground flex-1 truncate">{form.document_download_filename || form.document_filename || "Document toegevoegd"}</span>
+                        <Button type="button" variant="ghost" size="sm" onClick={() => setFormPreviewOpen(true)} className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700">
+                          <Eye className="w-3.5 h-3.5" /> Bekijken
+                        </Button>
+                        <button onClick={() => { setFormPreviewOpen(false); setForm(f => ({ ...f, document_file_url: "", document_filename: "", document_file_id: "", document_download_filename: "", document_logical_path: "", document_metadata: null })); }} className="text-muted-foreground hover:text-destructive">
+                          <X className="w-4 h-4" />
+                        </button>
+                      </div>
+                    ) : (
+                      <label className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed border-border hover:border-primary cursor-pointer transition-colors">
+                        <input type="file" accept=".pdf,image/*" className="hidden" onChange={e => e.target.files?.[0] && handleUpload(e.target.files[0])} />
+                        <Upload className="w-6 h-6 text-muted-foreground" />
+                        <span className="text-sm text-muted-foreground">{uploading ? "Uploaden..." : "Klik om document te uploaden"}</span>
+                        <span className="text-xs text-muted-foreground">PDF of afbeelding</span>
+                      </label>
+                    )}
+
+                    {activeWithoutDocument && (
+                      <p className="text-xs text-destructive">Upload eerst een bewijsstuk voordat je de status Actief opslaat.</p>
+                    )}
+
+                    <div className="flex justify-between pt-1">
+                      <Button variant="ghost" size="sm" onClick={() => setWizardStep(1)}>
+                        <ChevronLeft className="w-4 h-4 mr-1" /> Terug
+                      </Button>
+                      <div className="flex gap-2">
+                        <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
+                        <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending || activeWithoutDocument}>
+                          <Check className="w-4 h-4 mr-1" />
+                          {saveMutation.isPending ? "Opslaan..." : (editingId ? "Wijzigingen opslaan" : isRenewing ? "Erkenning vernieuwen" : "Erkenning opslaan")}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+              </motion.div>
+            </AnimatePresence>
           </motion.div>
         )}
       </AnimatePresence>
@@ -373,7 +566,7 @@ export default function AccreditationsTab({ companyId, company }) {
         <span className="w-28 shrink-0">Status</span>
         <span className="w-44 shrink-0">Geldigheid</span>
         <div className="w-24 shrink-0 flex justify-end">
-          {!showForm && !deleteId && (
+          {!showWizard && !deleteId && (
             <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
               <Plus className="w-3 h-3 mr-1" /> Nieuwe erkenning
             </Button>
@@ -381,40 +574,34 @@ export default function AccreditationsTab({ companyId, company }) {
         </div>
       </div>
 
-      {accreditations.length === 0 && !showForm && (
+      {accreditations.length === 0 && !showWizard && (
         <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen erkenningen of certificaten geregistreerd.</p>
       )}
 
       <div className="divide-y divide-border">
         {accreditations.map(item => (
-          <div key={item.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
-            <div className="w-40 shrink-0">
-              <Badge variant="secondary" className="text-xs">{categoryLabel(item.category)}</Badge>
-            </div>
-            <div className="flex-1 min-w-0 pr-4">
-              <p className="truncate text-sm font-medium text-foreground">{item.name || optionLabel(item.category, item.accreditation_type)}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {[item.issuer, item.certificate_number].filter(Boolean).join(" - ") || optionLabel(item.category, item.accreditation_type)}
-              </p>
-            </div>
-            <div className="w-28 shrink-0">{statusBadge(item)}</div>
-            <div className="w-44 shrink-0 text-xs text-muted-foreground truncate">
-              {[item.valid_from && `Vanaf ${item.valid_from}`, item.valid_until && `Tot ${item.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum"}
-            </div>
-            <div className="w-24 shrink-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {item.document_file_url && (
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPreview(item)} title="Document bekijken"><Eye className="h-3.5 w-3.5" /></Button>
-              )}
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(item)} title="Bewerken"><Edit className="h-3.5 w-3.5" /></Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeleteId(item.id)} title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></Button>
-            </div>
-          </div>
+          <AccreditationRow
+            key={item.id}
+            item={item}
+            onEdit={openEdit}
+            onDelete={setDeleteId}
+            onRenew={openRenew}
+            onPreview={setPreview}
+          />
         ))}
       </div>
 
       <ManagedFilePreviewDialog
+        open={formPreviewOpen}
+        onOpenChange={setFormPreviewOpen}
+        managedFileId={form.document_file_id}
+        fileUrl={form.document_file_url}
+        filename={form.document_download_filename || form.document_filename || "Document"}
+        title="Erkenningsdocument bekijken"
+      />
+      <ManagedFilePreviewDialog
         open={!!preview}
-        onOpenChange={(open) => { if (!open) setPreview(null); }}
+        onOpenChange={open => { if (!open) setPreview(null); }}
         managedFileId={preview?.document_file_id}
         fileUrl={preview?.document_file_url}
         filename={preview?.document_download_filename || preview?.document_filename || "Document"}
