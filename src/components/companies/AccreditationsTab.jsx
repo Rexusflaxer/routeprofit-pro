@@ -153,9 +153,11 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
   }, [contextMenu]);
 
   const handleRowClick = e => {
-    if (needsAction) {
+    if (needsAction && item.document_file_url) {
       const rect = e.currentTarget.getBoundingClientRect();
       setContextMenu({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    } else if (needsAction && !item.document_file_url) {
+      onRenew(item);
     } else if (item.document_file_url) {
       onPreview(item);
     }
