@@ -347,34 +347,6 @@ export default function CompanyDetail() {
             </InfoRow>
           </div>
 
-          {/* Activiteiten */}
-          <div className="space-y-3">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Activiteiten</h3>
-            {editing
-              ? <div className="grid grid-cols-1 sm:grid-cols-2 gap-1.5">
-                  {ACTIVITIES.map(a => (
-                    <label key={a.key} className="flex items-center gap-2 text-sm cursor-pointer p-1.5 rounded hover:bg-muted/50">
-                      <Checkbox checked={(data.activities || []).includes(a.key)} onCheckedChange={() => toggleActivity(a.key)} />
-                      {a.label}
-                    </label>
-                  ))}
-                </div>
-              : <div className="flex flex-wrap gap-1.5">
-                  {(data.activities || []).length > 0
-                    ? (data.activities || []).map(a => <span key={a} className="text-xs bg-muted text-foreground px-2 py-1 rounded-md">{ACTIVITY_LABELS[a] || a}</span>)
-                    : <span className="text-sm text-muted-foreground">—</span>}
-                </div>}
-          </div>
-
-
-
-          {/* Notities */}
-          <div className="space-y-3 md:col-span-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notities</h3>
-            {editing
-              ? <Textarea value={data.notes || ""} onChange={e => set("notes", e.target.value)} rows={3} />
-              : data.notes ? <p className="text-sm text-foreground whitespace-pre-wrap">{data.notes}</p> : <span className="text-sm text-muted-foreground">—</span>}
-          </div>
 
           {/* Briefpapier */}
           {(data.letterhead_file_url || editing) && (
