@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Checkbox } from "@/components/ui/checkbox";
-import { ArrowLeft, Edit, Check, X, Building2, MapPin, FileText, Upload, Users } from "lucide-react";
+import { ArrowLeft, Edit, Check, X, Building2, MapPin, FileText, Upload, Handshake } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SidebarPanel from "@/components/companies/CompanySidebarPanel";
 import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
@@ -230,7 +230,7 @@ export default function CompanyDetail() {
                   </span>
                   {company.teamhub_enabled && (
                     <Badge variant="outline" className="gap-1 text-xs">
-                      <Users className="h-3 w-3" /> Teamhub
+                      <Handshake className="h-3 w-3" /> Teamhub
                     </Badge>
                   )}
                 </div>

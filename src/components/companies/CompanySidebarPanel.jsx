@@ -15,7 +15,7 @@ const MENU_ITEMS = [
   { key: "cao", label: "CAO", icon: BookOpen },
   { key: "branch_memberships", label: "Branchevereniging", icon: Handshake },
   { key: "accreditations", label: "Erkenningen", icon: Award },
-  { key: "teamhub", label: "LOQ Teamhub", icon: Users },
+  { key: "teamhub", label: "LOQ Teamhub", icon: Handshake },
   { key: "locations", label: "Vestigingen", icon: MapPin },
   { key: "bank", label: "Bank", icon: CreditCard },
 ];
