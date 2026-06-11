@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useTheme } from "next-themes";
 import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
 import TeamhubCompanyPreview from "./TeamhubCompanyPreview";
 import { Loader2, MapPin } from "lucide-react";
@@ -102,14 +103,30 @@ export default function TeamhubMap({
   showProfileCount = true,
   emptyMessage = "Geen zichtbare bedrijven met kaartlocatie",
   effectiveWpbrLicenseType = null,
+  interactive = true,
+  selectedCompanyId: controlledSelectedCompanyId,
+  onSelectedCompanyIdChange = null,
 }) {
+  const { resolvedTheme } = useTheme();
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
   const mapboxRef = useRef(null);
   const markersRef = useRef([]);
   const [mapReady, setMapReady] = useState(false);
   const [mapError, setMapError] = useState(false);
-  const [selectedCompanyId, setSelectedCompanyId] = useState(defaultSelectedCompanyId);
+  const [internalSelectedCompanyId, setInternalSelectedCompanyId] = useState(defaultSelectedCompanyId);
+  const selectedCompanyId = controlledSelectedCompanyId === undefined ? internalSelectedCompanyId : controlledSelectedCompanyId;
+  const isDarkMap = resolvedTheme === "dark" || (
+    typeof document !== "undefined" && document.documentElement.classList.contains("dark")
+  );
+  const mapStyle = isDarkMap ? "mapbox://styles/mapbox/dark-v11" : "mapbox://styles/mapbox/light-v11";
+
+  const setSelectedCompanyId = useCallback((companyId) => {
+    if (controlledSelectedCompanyId === undefined) {
+      setInternalSelectedCompanyId(companyId);
+    }
+    if (onSelectedCompanyIdChange) onSelectedCompanyIdChange(companyId);
+  }, [controlledSelectedCompanyId, onSelectedCompanyIdChange]);
 
   const locationById = useMemo(
     () => new Map((locations || []).filter(location => location?.id).map(location => [location.id, location])),
@@ -132,8 +149,10 @@ export default function TeamhubMap({
   );
 
   useEffect(() => {
-    setSelectedCompanyId(defaultSelectedCompanyId);
-  }, [defaultSelectedCompanyId]);
+    if (controlledSelectedCompanyId === undefined) {
+      setInternalSelectedCompanyId(defaultSelectedCompanyId);
+    }
+  }, [controlledSelectedCompanyId, defaultSelectedCompanyId]);
 
   useEffect(() => {
     let cancelled = false;
@@ -148,15 +167,18 @@ export default function TeamhubMap({
 
       map = new mapboxgl.Map({
         container: mapContainerRef.current,
-        style: "mapbox://styles/mapbox/light-v11",
+        style: mapStyle,
         center: NETHERLANDS_CENTER,
         zoom: 6.4,
         minZoom: 5.2,
+        interactive,
       });
 
-      map.dragRotate.disable();
-      map.touchZoomRotate.disableRotation();
-      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "bottom-right");
+      if (interactive) {
+        map.dragRotate.disable();
+        map.touchZoomRotate.disableRotation();
+        map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "bottom-right");
+      }
 
       map.on("load", () => {
         if (cancelled) return;
@@ -215,7 +237,17 @@ export default function TeamhubMap({
       mapRef.current = null;
       mapboxRef.current = null;
     };
-  }, []);
+  }, [interactive, mapStyle]);
+
+  useEffect(() => {
+    const map = mapRef.current;
+    const container = mapContainerRef.current;
+    if (!map || !container || typeof ResizeObserver === "undefined") return undefined;
+
+    const observer = new ResizeObserver(() => map.resize());
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [mapReady]);
 
   useEffect(() => {
     const map = mapRef.current;
@@ -225,7 +257,7 @@ export default function TeamhubMap({
     markersRef.current.forEach(marker => marker.remove());
     markersRef.current = [];
 
-    if (selectedProfile) return;
+    if (selectedProfile || !interactive) return;
 
     profiles.forEach(profile => {
       const element = createMarkerElement(profile.company);
@@ -236,7 +268,7 @@ export default function TeamhubMap({
         .addTo(map);
       markersRef.current.push(marker);
     });
-  }, [mapReady, profiles, selectedProfile]);
+  }, [interactive, mapReady, profiles, selectedProfile, setSelectedCompanyId]);
 
   useEffect(() => {
     const map = mapRef.current;

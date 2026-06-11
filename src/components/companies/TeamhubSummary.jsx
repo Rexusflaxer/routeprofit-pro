@@ -1,5 +1,4 @@
 import React, { useMemo } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Edit2 } from "lucide-react";
 import TeamhubMap from "@/components/teamhub/TeamhubMap";
@@ -15,14 +14,7 @@ export default function TeamhubSummary({ form, company, selectableTeamhubLocatio
     <div className="space-y-4">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="flex items-center gap-2">
-            <h3 className="text-lg font-semibold">Teamhub preview</h3>
-            {form.teamhub_enabled ? (
-              <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Zichtbaar</Badge>
-            ) : (
-              <Badge variant="secondary">Niet zichtbaar</Badge>
-            )}
-          </div>
+          <h3 className="text-lg font-semibold">Teamhub preview</h3>
           <p className="mt-1 text-sm text-muted-foreground">
             Zo wordt dit bedrijf getoond wanneer een hoofdaannemer het profiel op de kaart opent.
           </p>
@@ -42,6 +34,7 @@ export default function TeamhubSummary({ form, company, selectableTeamhubLocatio
         heightClassName="h-[560px] min-h-[460px]"
         emptyMessage="Selecteer een vestiging met coordinaten om de kaartpreview te tonen."
         effectiveWpbrLicenseType={effectiveWpbrLicenseType}
+        interactive={false}
       />
     </div>
   );
