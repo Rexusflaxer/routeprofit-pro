@@ -3,16 +3,14 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { ChevronRight, ChevronLeft, Check } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import TeamhubStep1Enable from "./teamhub-wizard/Step1Enable";
 import TeamhubStep2Location from "./teamhub-wizard/Step2Location";
 import TeamhubStep3Services from "./teamhub-wizard/Step3Services";
 import TeamhubStep4Regions from "./teamhub-wizard/Step4Regions";
 
 const STEPS = [
-  { id: 1, label: "Zichtbaarheid" },
-  { id: 2, label: "Vestiging" },
-  { id: 3, label: "Diensten" },
-  { id: 4, label: "Regio's" },
+  { id: 1, label: "Vestiging" },
+  { id: 2, label: "Diensten" },
+  { id: 3, label: "Regio's" },
 ];
 
 export default function TeamhubWizard({
@@ -34,10 +32,9 @@ export default function TeamhubWizard({
   const isLastStep = step === STEPS.length;
 
   const canContinue = useMemo(() => {
-    if (step === 1) return true;
-    if (step === 2) return form.teamhub_enabled ? !!form.teamhub_public_location_id : true;
+    if (step === 1) return form.teamhub_enabled ? !!form.teamhub_public_location_id : true;
+    if (step === 2) return true;
     if (step === 3) return true;
-    if (step === 4) return true;
     return false;
   }, [step, form]);
 
@@ -89,15 +86,14 @@ export default function TeamhubWizard({
             exit={{ opacity: 0, x: -10 }}
             transition={{ duration: 0.2 }}
           >
-            {step === 1 && <TeamhubStep1Enable form={form} set={set} />}
-            {step === 2 && (
+            {step === 1 && (
               <TeamhubStep2Location
                 form={form}
                 set={set}
                 selectableTeamhubLocations={selectableTeamhubLocations}
               />
             )}
-            {step === 3 && (
+            {step === 2 && (
               <TeamhubStep3Services
                 form={form}
                 set={set}
@@ -107,7 +103,7 @@ export default function TeamhubWizard({
                 qualificationDataLoading={qualificationDataLoading}
               />
             )}
-            {step === 4 && <TeamhubStep4Regions form={form} set={set} />}
+            {step === 3 && <TeamhubStep4Regions form={form} set={set} />}
           </motion.div>
         </AnimatePresence>
       </div>

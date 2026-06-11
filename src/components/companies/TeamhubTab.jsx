@@ -234,6 +234,15 @@ export default function TeamhubTab({ companyId, company }) {
             selectableTeamhubLocations={selectableTeamhubLocations}
             effectiveWpbrLicenseType={effectiveWpbrLicenseType}
             onEdit={() => setShowWizard(true)}
+            onToggleVisibility={() => {
+              const newEnabled = !form.teamhub_enabled;
+              set("teamhub_enabled", newEnabled);
+              saveMutation.mutate({
+                ...form,
+                teamhub_enabled: newEnabled,
+                teamhub_configured_at: form.teamhub_configured_at || new Date().toISOString()
+              });
+            }}
           />
         )}
       </div>
