@@ -385,6 +385,17 @@ function buildDescriptor(input) {
   };
 }
 
+export function buildManagedFileDescriptor(input) {
+  const fallbackName = input.filename || input.downloadFilename || "document.bin";
+  return buildDescriptor({
+    ...input,
+    file: input.file || {
+      name: fallbackName,
+      type: input.mimeType || null
+    }
+  });
+}
+
 function sensitivityDefaults(isSensitive) {
   return {
     access_scope: isSensitive ? "company" : "company",

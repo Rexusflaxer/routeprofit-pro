@@ -10,11 +10,11 @@ import { AlertTriangle, Archive, Check, ChevronLeft, ChevronRight, Edit, Eye, Fi
 import { AnimatePresence, motion } from "framer-motion";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { TECHNICAL_ACCREDITATION_OPTIONS } from "@/lib/teamhubServiceRules";
-import { updateManagedFileSource, uploadManagedFile } from "@/lib/managedFiles";
+import { buildManagedFileDescriptor, updateManagedFileSource, uploadManagedFile } from "@/lib/managedFiles";
 
 const DELETE_PASSWORD = "verwijder";
 // Header and rows share this grid so status, validity, and actions cannot drift out of alignment.
-const ACCREDITATION_TABLE_GRID = "grid grid-cols-[minmax(160px,180px)_minmax(260px,1fr)_minmax(112px,132px)_minmax(160px,190px)_minmax(360px,520px)] gap-4";
+const ACCREDITATION_TABLE_GRID = "grid grid-cols-[minmax(160px,180px)_minmax(220px,1fr)_minmax(112px,132px)_minmax(280px,320px)_minmax(360px,520px)] gap-4";
 
 const CATEGORY_OPTIONS = [
   { key: "technical_certification", label: "Technische erkenning" },
@@ -98,6 +98,18 @@ function statusBadge(item) {
   return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0">Actief</Badge>;
 }
 
+function ValidityText({ item }) {
+  const hasValidity = item.valid_from || item.valid_until;
+  if (!hasValidity) return <span className="text-xs text-muted-foreground">Geen einddatum</span>;
+
+  return (
+    <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
+      {item.valid_from && <span>Vanaf: <strong className="text-foreground">{item.valid_from}</strong></span>}
+      {item.valid_until && <span>Tot: <strong className="text-foreground">{item.valid_until}</strong></span>}
+    </div>
+  );
+}
+
 function DeleteConfirmBar({ label, onConfirm, onCancel, isPending }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
@@ -154,7 +166,6 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
   const categoryText = categoryLabel(item.category);
   const titleText = item.name || optionLabel(item.category, item.accreditation_type);
   const subtitleText = [item.issuer, item.certificate_number].filter(Boolean).join(" - ") || optionLabel(item.category, item.accreditation_type);
-  const validityText = [item.valid_from && `Vanaf: ${item.valid_from}`, item.valid_until && `Tot: ${item.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum";
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -193,8 +204,8 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
         <p className="truncate text-xs text-muted-foreground">{subtitleText}</p>
       </div>
       <div className="min-w-0">{statusBadge(item)}</div>
-      <div className="min-w-0 truncate text-xs text-muted-foreground" title={validityText}>
-        {validityText}
+      <div className="min-w-0">
+        <ValidityText item={item} />
       </div>
       <div className="min-w-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
         {item.document_file_url && (
@@ -269,40 +280,102 @@ export default function AccreditationsTab({ companyId, company }) {
     enabled: !!companyId,
   });
 
+  const getDocumentDescriptor = (data) => buildManagedFileDescriptor({
+    filename: data.document_download_filename || data.document_filename || "erkenningsdocument.pdf",
+    ownerType: "company",
+    ownerId: companyId,
+    companyId,
+    ownerLabel: company?.display_name || company?.legal_name || "Bedrijf",
+    domain: "compliance",
+    category: "company_accreditation",
+    documentLabel: data.name || optionLabel(data.category, data.accreditation_type),
+    documentNumber: data.certificate_number || null,
+    validFrom: data.valid_from || null,
+    validUntil: data.valid_until || null,
+    folderSegments: ["erkenningen", data.category, data.accreditation_type],
+  });
+
+  const withCurrentDocumentDescriptor = (data) => {
+    if (!data.document_file_url) return data;
+
+    const descriptor = getDocumentDescriptor(data);
+    return {
+      ...data,
+      document_filename: descriptor.download_filename,
+      document_download_filename: descriptor.download_filename,
+      document_logical_path: descriptor.logical_path,
+      document_metadata: {
+        ...(data.document_metadata || {}),
+        managed_file_id: data.document_file_id || data.document_metadata?.managed_file_id || null,
+        folder_path: descriptor.folder_path,
+        category: data.category,
+        accreditation_type: data.accreditation_type,
+      },
+    };
+  };
+
+  const syncManagedDocumentDescriptor = async (data, sourceEntityId) => {
+    if (!data.document_file_id) return;
+
+    const descriptor = getDocumentDescriptor(data);
+    await updateManagedFileSource(data.document_file_id, {
+      owner_id: companyId,
+      company_id: companyId,
+      source_entity_id: sourceEntityId,
+      display_filename: descriptor.display_filename,
+      download_filename: descriptor.download_filename,
+      logical_path: descriptor.logical_path,
+      folder_path: descriptor.folder_path,
+      document_label: data.name || optionLabel(data.category, data.accreditation_type),
+      document_number: data.certificate_number || null,
+      valid_from: data.valid_from || null,
+      valid_until: data.valid_until || null,
+      metadata: {
+        ...(data.document_metadata || {}),
+        managed_file_id: data.document_file_id,
+        folder_path: descriptor.folder_path,
+        category: data.category,
+        accreditation_type: data.accreditation_type,
+      },
+    });
+  };
+
   const saveMutation = useMutation({
     mutationFn: async (data) => {
+      const normalizedData = withCurrentDocumentDescriptor(data);
       const payload = {
-        ...data,
+        ...normalizedData,
         company_id: companyId,
-        issuer: data.issuer?.trim() || null,
-        certificate_number: data.certificate_number?.trim() || null,
-        valid_from: data.valid_from || null,
-        valid_until: data.valid_until || null,
-        notes: data.notes?.trim() || null,
+        issuer: normalizedData.issuer?.trim() || null,
+        certificate_number: normalizedData.certificate_number?.trim() || null,
+        valid_from: normalizedData.valid_from || null,
+        valid_until: normalizedData.valid_until || null,
+        notes: normalizedData.notes?.trim() || null,
       };
 
       if (editingId) {
-        return base44.entities.CompanyAccreditation.update(editingId, { ...payload, status: data.status || "active" });
+        await syncManagedDocumentDescriptor(normalizedData, editingId);
+        return base44.entities.CompanyAccreditation.update(editingId, { ...payload, status: normalizedData.status || "active" });
       }
 
       // Archive entry: save directly as superseded
       if (isArchiveEntry) {
         const created = await base44.entities.CompanyAccreditation.create({ ...payload, status: "superseded" });
-        if (created?.id && data.document_file_id) {
-          await updateManagedFileSource(data.document_file_id, { owner_id: companyId, company_id: companyId, source_entity_id: created.id });
+        if (created?.id && normalizedData.document_file_id) {
+          await syncManagedDocumentDescriptor(normalizedData, created.id);
         }
         return created;
       }
 
       // Renewal: supersede existing active/expired records of same type
       if (renewingId) {
-        const sameType = accreditations.filter(a => a.accreditation_type === data.accreditation_type && a.status !== "superseded");
+        const sameType = accreditations.filter(a => a.accreditation_type === normalizedData.accreditation_type && !isArchivedStatus(a.status));
         await Promise.all(sameType.map(a => base44.entities.CompanyAccreditation.update(a.id, { status: "superseded" })));
       }
 
       const created = await base44.entities.CompanyAccreditation.create({ ...payload, status: "active" });
-      if (created?.id && data.document_file_id) {
-        await updateManagedFileSource(data.document_file_id, { owner_id: companyId, company_id: companyId, source_entity_id: created.id });
+      if (created?.id && normalizedData.document_file_id) {
+        await syncManagedDocumentDescriptor(normalizedData, created.id);
       }
       return created;
     },
@@ -469,6 +542,8 @@ export default function AccreditationsTab({ companyId, company }) {
   const isRenewing = !!renewingId;
   const documentRequired = wizardStep === 2 && (isArchiveEntry || !editingId || form.status === "active");
   const missingRequiredDocument = documentRequired && !form.document_file_url;
+  const currentFormDocument = withCurrentDocumentDescriptor(form);
+  const currentFormDocumentFilename = currentFormDocument.document_download_filename || currentFormDocument.document_filename || "Document toegevoegd";
 
   return (
     <div className="flex flex-col h-full">
@@ -626,7 +701,7 @@ export default function AccreditationsTab({ companyId, company }) {
                     {form.document_file_url ? (
                       <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
                         <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                        <span className="text-sm text-muted-foreground flex-1 truncate">{form.document_download_filename || form.document_filename || "Document toegevoegd"}</span>
+                        <span className="text-sm text-muted-foreground flex-1 truncate">{currentFormDocumentFilename}</span>
                         <Button type="button" variant="ghost" size="sm" onClick={() => setFormPreviewOpen(true)} className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700">
                           <Eye className="w-3.5 h-3.5" /> Bekijken
                         </Button>
@@ -743,7 +818,7 @@ export default function AccreditationsTab({ companyId, company }) {
         onOpenChange={setFormPreviewOpen}
         managedFileId={form.document_file_id}
         fileUrl={form.document_file_url}
-        filename={form.document_download_filename || form.document_filename || "Document"}
+        filename={currentFormDocumentFilename}
         title="Erkenningsdocument bekijken"
       />
       <ManagedFilePreviewDialog
