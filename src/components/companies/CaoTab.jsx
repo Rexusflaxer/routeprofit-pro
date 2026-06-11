@@ -389,10 +389,13 @@ export default function CaoTab({ companyId }) {
                       const renderFunctionPills = (fns) => (
                         <div className="flex flex-wrap gap-2">
                           {fns.map(value => (
-                            <label key={value} className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs cursor-pointer transition-colors ${selectedFunctions.includes(value) ? "border-primary bg-primary/15 text-foreground font-semibold" : "border-border bg-card text-foreground hover:border-primary/40"}`}>
-                              <input type="checkbox" checked={selectedFunctions.includes(value)} onChange={() => toggleFunction(value)} className="rounded border-input" />
+                            <button
+                              key={value}
+                              onClick={() => toggleFunction(value)}
+                              className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors cursor-pointer ${selectedFunctions.includes(value) ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:border-primary/40"}`}
+                            >
                               {functionLabel(value)}
-                            </label>
+                            </button>
                           ))}
                         </div>
                       );

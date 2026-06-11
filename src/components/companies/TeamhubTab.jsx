@@ -183,25 +183,20 @@ export default function TeamhubTab({ companyId, company }) {
     const isSelected = (form.teamhub_service_types || []).includes(activity.key);
 
     return (
-      <label
+      <button
         key={activity.key}
         title={disabledReason}
-        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors cursor-pointer ${
+        onClick={() => allowed && toggleService(activity.key)}
+        className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
           isSelected 
-            ? "border-primary bg-primary/15 text-foreground font-semibold" 
+            ? "border-primary bg-primary text-primary-foreground" 
             : allowed 
-            ? "border-border bg-card text-foreground hover:border-primary/40" 
+            ? "border-border bg-card text-foreground hover:border-primary/40 cursor-pointer" 
             : "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"
         }`}
       >
-        <Checkbox
-          checked={isSelected}
-          disabled={!allowed}
-          onCheckedChange={() => toggleService(activity.key)}
-          className="h-3.5 w-3.5"
-        />
-        <span>{activity.label}</span>
-      </label>
+        {activity.label}
+      </button>
     );
   };
 
