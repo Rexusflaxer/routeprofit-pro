@@ -846,7 +846,7 @@ export default function BranchMembershipsTab({ companyId }) {
                   <span className="text-xs text-muted-foreground">Geen categorie</span>
                 )}
               </div>
-              <div className="flex w-24 shrink-0 justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="flex w-24 shrink-0 justify-end gap-1 transition-opacity">
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(membership)} title="Bewerken"><Edit className="h-3.5 w-3.5" /></Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeleteId(membership.id)} title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
