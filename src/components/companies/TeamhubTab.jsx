@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Building2, Check, ChevronDown, Clock, Mail, Phone, Save, Users } from "lucide-react";
+import { Check, ChevronDown, Clock, Save, Users } from "lucide-react";
 import {
   TEAMHUB_LICENSE_SERVICE_GROUPS,
   TEAMHUB_QUALIFICATION_SERVICE_KEYS,
@@ -36,10 +36,6 @@ function getInitialForm(company) {
 
   return {
     teamhub_enabled: company?.teamhub_enabled === true,
-    teamhub_intro: company?.teamhub_intro || "",
-    teamhub_contact_name: company?.teamhub_contact_name || "",
-    teamhub_contact_email: company?.teamhub_contact_email || "",
-    teamhub_contact_phone: company?.teamhub_contact_phone || "",
     teamhub_public_location_id: company?.teamhub_public_location_id || null,
     teamhub_service_types: serviceTypes
   };
@@ -179,10 +175,6 @@ export default function TeamhubTab({ companyId, company }) {
 
     saveMutation.mutate({
       teamhub_enabled: form.teamhub_enabled === true,
-      teamhub_intro: form.teamhub_intro?.trim() || null,
-      teamhub_contact_name: form.teamhub_contact_name?.trim() || null,
-      teamhub_contact_email: form.teamhub_contact_email?.trim() || null,
-      teamhub_contact_phone: form.teamhub_contact_phone?.trim() || null,
       teamhub_public_location_id: publicLocationId,
       teamhub_service_types: sanitizeTeamhubServiceTypes(
         effectiveWpbrLicenseType,
@@ -280,50 +272,7 @@ export default function TeamhubTab({ companyId, company }) {
           <Switch checked={form.teamhub_enabled} onCheckedChange={(checked) => set("teamhub_enabled", checked)} />
         </div>
 
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-          <div className="space-y-2">
-            <Label>Publieke introductie</Label>
-            <Textarea
-              value={form.teamhub_intro}
-              onChange={(e) => set("teamhub_intro", e.target.value)}
-              rows={5}
-              placeholder="Korte omschrijving van specialisaties, werkgebied en inzetbaarheid" />
-            
-          </div>
 
-          <div className="space-y-3 rounded-md border border-border p-4">
-            <div className="flex items-center gap-2">
-              <Building2 className="h-4 w-4 text-muted-foreground" />
-              <Label className="font-semibold">Publiek contact</Label>
-            </div>
-            <div className="space-y-2">
-              <Input
-                value={form.teamhub_contact_name}
-                onChange={(e) => set("teamhub_contact_name", e.target.value)}
-                placeholder="Contactpersoon" />
-              
-              <div className="relative">
-                <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  type="email"
-                  value={form.teamhub_contact_email}
-                  onChange={(e) => set("teamhub_contact_email", e.target.value)}
-                  placeholder={company?.email || "teamhub@bedrijf.nl"}
-                  className="pl-9" />
-                
-              </div>
-              <div className="relative">
-                <Phone className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
-                <Input
-                  value={form.teamhub_contact_phone}
-                  onChange={(e) => set("teamhub_contact_phone", e.target.value)}
-                  placeholder={company?.phone || "Telefoonnummer"}
-                  className="pl-9" />
-                
-              </div>
-            </div>
-          </div>
-        </div>
 
         <div className="space-y-2 rounded-md border border-border bg-background p-4">
           <Label>Vestiging</Label>
