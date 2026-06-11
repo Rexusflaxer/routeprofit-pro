@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Eye, FileText, Upload, Plus, X, Check, ChevronRight, ChevronLeft, Edit, Trash2, AlertTriangle, Archive, RefreshCw } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
-import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
+import { buildManagedFileDescriptor, syncManagedFileDescriptor, uploadManagedFile } from "@/lib/managedFiles";
 
 const WPBR_TYPES = [
   { key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
@@ -148,40 +148,111 @@ export default function WpbrTab({ companyId, company }) {
     enabled: !!companyId,
   });
 
+  const getDocumentDescriptor = (data) => {
+    const licenseNumber = [data.license_type, data.license_number].filter(Boolean).join("-");
+    const validYear = data.valid_until ? data.valid_until.slice(0, 4) : "zonder-einddatum";
+
+    return buildManagedFileDescriptor({
+      filename: data.document_download_filename || data.document_filename || "wpbr-vergunning.pdf",
+      ownerType: "company",
+      ownerId: companyId,
+      companyId,
+      ownerLabel: company?.display_name || company?.legal_name || "Bedrijf",
+      domain: "compliance",
+      category: "company_wpbr_license",
+      documentLabel: `WPBR ${data.license_type || "vergunning"}`,
+      documentNumber: licenseNumber || null,
+      validFrom: data.valid_from || null,
+      validUntil: data.valid_until || null,
+      folderSegments: ["wpbr", data.license_type || "onbekend", validYear],
+    });
+  };
+
+  const withCurrentDocumentDescriptor = (data) => {
+    if (!data.document_file_url) return data;
+
+    const descriptor = getDocumentDescriptor(data);
+    return {
+      ...data,
+      document_filename: descriptor.download_filename,
+      document_download_filename: descriptor.download_filename,
+      document_logical_path: descriptor.logical_path,
+      document_metadata: {
+        ...(data.document_metadata || {}),
+        managed_file_id: data.document_file_id || data.document_metadata?.managed_file_id || null,
+        folder_path: descriptor.folder_path,
+        license_type: data.license_type || null,
+        license_number: data.license_number || null,
+      },
+    };
+  };
+
+  const syncManagedDocumentDescriptor = async (data, sourceEntityId) => {
+    if (!data.document_file_id) return;
+
+    const licenseNumber = [data.license_type, data.license_number].filter(Boolean).join("-");
+    const validYear = data.valid_until ? data.valid_until.slice(0, 4) : "zonder-einddatum";
+
+    await syncManagedFileDescriptor(data.document_file_id, {
+      filename: data.document_download_filename || data.document_filename || "wpbr-vergunning.pdf",
+      ownerType: "company",
+      ownerId: companyId,
+      companyId,
+      ownerLabel: company?.display_name || company?.legal_name || "Bedrijf",
+      domain: "compliance",
+      category: "company_wpbr_license",
+      documentLabel: `WPBR ${data.license_type || "vergunning"}`,
+      documentNumber: licenseNumber || null,
+      validFrom: data.valid_from || null,
+      validUntil: data.valid_until || null,
+      folderSegments: ["wpbr", data.license_type || "onbekend", validYear],
+      metadata: {
+        ...(data.document_metadata || {}),
+        managed_file_id: data.document_file_id,
+        license_type: data.license_type || null,
+        license_number: data.license_number || null,
+      },
+    }, {
+      owner_id: companyId,
+      company_id: companyId,
+      source_entity: "CompanyWpbrLicense",
+      source_entity_id: sourceEntityId,
+      source_field: "document_file_url",
+    });
+  };
+
   const saveMutation = useMutation({
     mutationFn: async (data) => {
+      const normalizedData = withCurrentDocumentDescriptor(data);
       if (editingId) {
+        await syncManagedDocumentDescriptor(normalizedData, editingId);
         return base44.entities.CompanyWpbrLicense.update(editingId, {
-          license_type: data.license_type,
-          license_number: data.license_number,
-          valid_from: data.valid_from || null,
-          valid_until: data.valid_until || null,
-          document_file_url: data.document_file_url || null,
-          document_filename: data.document_filename || null,
-          document_file_id: data.document_file_id || null,
-          document_download_filename: data.document_download_filename || null,
-          document_logical_path: data.document_logical_path || null,
-          document_metadata: data.document_metadata || null,
+          license_type: normalizedData.license_type,
+          license_number: normalizedData.license_number,
+          valid_from: normalizedData.valid_from || null,
+          valid_until: normalizedData.valid_until || null,
+          document_file_url: normalizedData.document_file_url || null,
+          document_filename: normalizedData.document_filename || null,
+          document_file_id: normalizedData.document_file_id || null,
+          document_download_filename: normalizedData.document_download_filename || null,
+          document_logical_path: normalizedData.document_logical_path || null,
+          document_metadata: normalizedData.document_metadata || null,
         });
       }
       // For archive entries, save directly as superseded without touching existing licenses
       if (isArchiveEntry) {
-        const created = await base44.entities.CompanyWpbrLicense.create({ ...data, company_id: companyId, status: "superseded" });
-        if (created?.id && data.document_file_id) {
-          await updateManagedFileSource(data.document_file_id, { owner_id: companyId, company_id: companyId, source_entity_id: created.id });
+        const created = await base44.entities.CompanyWpbrLicense.create({ ...normalizedData, company_id: companyId, status: "superseded" });
+        if (created?.id && normalizedData.document_file_id) {
+          await syncManagedDocumentDescriptor(normalizedData, created.id);
         }
         return created;
       }
       // Supersede all existing active/expired licenses of the same type (archive them)
-      const sameType = licenses.filter((l) => l.license_type === data.license_type && l.status !== "superseded");
+      const sameType = licenses.filter((l) => l.license_type === normalizedData.license_type && l.status !== "superseded");
       await Promise.all(sameType.map((l) => base44.entities.CompanyWpbrLicense.update(l.id, { status: "superseded" })));
-      const created = await base44.entities.CompanyWpbrLicense.create({ ...data, company_id: companyId, status: "active" });
-      if (created?.id && data.document_file_id) {
-        await updateManagedFileSource(data.document_file_id, {
-          owner_id: companyId,
-          company_id: companyId,
-          source_entity_id: created.id,
-        });
+      const created = await base44.entities.CompanyWpbrLicense.create({ ...normalizedData, company_id: companyId, status: "active" });
+      if (created?.id && normalizedData.document_file_id) {
+        await syncManagedDocumentDescriptor(normalizedData, created.id);
       }
       return created;
     },
@@ -302,6 +373,8 @@ export default function WpbrTab({ companyId, company }) {
 
   const licenseToDelete = licenses.find((l) => l.id === deleteId);
   const isRenewing = !!renewingExpiredId;
+  const currentFormDocument = withCurrentDocumentDescriptor(form);
+  const currentFormDocumentFilename = currentFormDocument.document_download_filename || currentFormDocument.document_filename || "Document toegevoegd";
 
   return (
     <div className="flex flex-col h-full">
@@ -418,7 +491,7 @@ export default function WpbrTab({ companyId, company }) {
                       {form.document_file_url ? (
                         <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
                           <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                          <span className="text-sm text-muted-foreground flex-1 truncate">Document toegevoegd</span>
+                          <span className="text-sm text-muted-foreground flex-1 truncate">{currentFormDocumentFilename}</span>
                           <Button type="button" variant="ghost" size="sm" onClick={() => setFormPreviewOpen(true)} className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700">
                             <Eye className="w-3.5 h-3.5" /> Bekijken
                           </Button>
@@ -523,7 +596,7 @@ export default function WpbrTab({ companyId, company }) {
         onOpenChange={setFormPreviewOpen}
         managedFileId={form.document_file_id}
         fileUrl={form.document_file_url}
-        filename={form.document_download_filename || form.document_filename || "Document"}
+        filename={currentFormDocumentFilename}
         title="Vergunningsdocument bekijken"
       />
     </div>

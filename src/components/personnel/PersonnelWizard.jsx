@@ -14,7 +14,7 @@ import WizardStep7ICE from "./wizard/WizardStep7ICE";
 import WizardStep8Review from "./wizard/WizardStep8Review";
 import PersonnelAccessTab from "./PersonnelAccessTab";
 import PersonnelContractsTab from "./PersonnelContractsTab";
-import { attachManagedFilesToOwner, createManagedUploadSession, updateManagedFileSource } from "@/lib/managedFiles";
+import { attachManagedFilesToOwner, buildManagedFileDescriptorUpdate, createManagedUploadSession, syncManagedFileDescriptor } from "@/lib/managedFiles";
 import { prepareBankAccountSensitiveData, preparePersonnelSensitiveData } from "@/lib/sensitiveFields";
 
 const BASE_STEPS = [
@@ -29,6 +29,12 @@ const BASE_STEPS = [
 ];
 
 const NON_PROOF_SECURITY_ROLE_STATUSES = new Set(["unknown", "not_applicable"]);
+const ID_DOC_LABELS = {
+  passport: "Paspoort",
+  id_card: "Identiteitskaart",
+  residence_permit: "Verblijfsdocument",
+  other: "Identiteitsdocument"
+};
 
 function hasMeaningfulSecurityRoleStatus(value) {
   return !!value && !NON_PROOF_SECURITY_ROLE_STATUSES.has(value);
@@ -80,6 +86,182 @@ function withManagedDocumentPaths(doc, fileMap) {
   return next;
 }
 
+function personnelOwnerLabel(personnel) {
+  return personnel.name || `${personnel.first_name || ""} ${personnel.last_name || ""}`.trim() || "Medewerker";
+}
+
+function descriptorUpdate(input) {
+  return buildManagedFileDescriptorUpdate(input);
+}
+
+function personnelPhotoDescriptorInput({ personnel, personnelId, primaryCompanyId, uploadSessionId }) {
+  return {
+    filename: personnel.photo_download_filename || "pasfoto.jpg",
+    ownerType: "personnel",
+    ownerId: personnelId,
+    companyId: primaryCompanyId,
+    uploadSessionId,
+    ownerLabel: personnelOwnerLabel(personnel),
+    domain: "identity",
+    category: "personnel_photo",
+    documentLabel: "Pasfoto",
+    folderSegments: ["identity", "photo"]
+  };
+}
+
+function payrollTaxStatementDescriptorInput({ personnel, personnelId, primaryCompanyId, uploadSessionId }) {
+  return {
+    filename: personnel.payroll_tax_statement_download_filename || "loonheffingsverklaring.pdf",
+    ownerType: "personnel",
+    ownerId: personnelId,
+    companyId: primaryCompanyId,
+    uploadSessionId,
+    ownerLabel: personnelOwnerLabel(personnel),
+    domain: "payroll",
+    category: "payroll_tax_statement",
+    documentLabel: "Loonheffingsverklaring",
+    effectiveDate: personnel.payroll_tax_statement_signed_at || null,
+    folderSegments: ["payroll", "loonheffingsverklaring"]
+  };
+}
+
+function personnelDocumentFileDescriptorInput({ doc, side = null, personnel, personnelId, primaryCompanyId, uploadSessionId }) {
+  const ownerLabel = personnelOwnerLabel(personnel);
+
+  if (doc.category === "identity_document") {
+    const sideLabel = side === "front" ? "voorzijde" : "achterzijde";
+    const docLabel = ID_DOC_LABELS[doc.document_type] || "Identiteitsdocument";
+    return {
+      filename: side === "front" ? doc.front_download_filename || "identiteitsdocument-voorzijde.pdf" : doc.back_download_filename || "identiteitsdocument-achterzijde.pdf",
+      ownerType: "personnel",
+      ownerId: personnelId,
+      companyId: primaryCompanyId,
+      uploadSessionId,
+      ownerLabel,
+      domain: "identity",
+      category: `identity_document_${side}`,
+      documentLabel: `${docLabel} ${sideLabel}`,
+      documentNumber: doc.document_number || null,
+      validFrom: doc.valid_from || null,
+      validUntil: doc.valid_until || null,
+      folderSegments: ["identity", doc.document_type || "identity-document", side]
+    };
+  }
+
+  if (doc.category === "vog") {
+    return {
+      filename: doc.file_download_filename || "vog.pdf",
+      ownerType: "personnel",
+      ownerId: personnelId,
+      companyId: primaryCompanyId,
+      uploadSessionId,
+      ownerLabel,
+      domain: "compliance",
+      category: "vog",
+      documentLabel: "VOG",
+      documentNumber: doc.document_number || null,
+      validFrom: doc.valid_from || null,
+      validUntil: doc.valid_until || null,
+      folderSegments: ["compliance", "vog"]
+    };
+  }
+
+  if (doc.category === "cv") {
+    return {
+      filename: doc.file_download_filename || "cv.pdf",
+      ownerType: "personnel",
+      ownerId: personnelId,
+      companyId: primaryCompanyId,
+      uploadSessionId,
+      ownerLabel,
+      domain: "identity",
+      category: "cv",
+      documentLabel: "CV",
+      folderSegments: ["identity", "cv"]
+    };
+  }
+
+  return {
+    filename: doc.file_download_filename || "document.pdf",
+    ownerType: "personnel",
+    ownerId: personnelId,
+    companyId: primaryCompanyId,
+    uploadSessionId,
+    ownerLabel,
+    domain: "identity",
+    category: doc.category || "document",
+    documentLabel: doc.name || doc.category || "Document",
+    documentNumber: doc.document_number || null,
+    validFrom: doc.valid_from || null,
+    validUntil: doc.valid_until || null,
+    folderSegments: [doc.category || "documents"]
+  };
+}
+
+function bankProofDescriptorInput({ bankAccount, personnel, personnelId, primaryCompanyId, uploadSessionId }) {
+  const iban = String(bankAccount.iban || "").replace(/\s/g, "");
+  return {
+    filename: bankAccount._proof_download_filename || "bewijs-bankrekening.pdf",
+    ownerType: "personnel",
+    ownerId: personnelId,
+    companyId: primaryCompanyId,
+    uploadSessionId,
+    ownerLabel: personnelOwnerLabel(personnel),
+    domain: "payroll",
+    category: "bank_account_proof",
+    documentLabel: "Bewijs bankrekening",
+    documentNumber: iban ? `IBAN-${iban.slice(-4)}` : null,
+    validFrom: bankAccount.valid_from || null,
+    folderSegments: ["payroll", "bank"]
+  };
+}
+
+function applyCurrentDocumentDescriptor(doc, context) {
+  const next = { ...doc };
+  const targets = [];
+
+  const addTarget = ({ fileId, side = null, sourceField, apply }) => {
+    if (!fileId) return;
+    const input = personnelDocumentFileDescriptorInput({ doc: next, side, ...context });
+    const update = descriptorUpdate(input);
+    apply(update);
+    targets.push({ fileId, input, sourceField });
+  };
+
+  if (next.category === "identity_document") {
+    addTarget({
+      fileId: next.front_file_id,
+      side: "front",
+      sourceField: "front_file_url",
+      apply: update => {
+        next.front_download_filename = update.download_filename;
+        next.front_logical_path = update.logical_path;
+      }
+    });
+    addTarget({
+      fileId: next.back_file_id,
+      side: "back",
+      sourceField: "back_file_url",
+      apply: update => {
+        next.back_download_filename = update.download_filename;
+        next.back_logical_path = update.logical_path;
+      }
+    });
+    return { doc: next, targets };
+  }
+
+  addTarget({
+    fileId: next.file_id,
+    sourceField: "file_url",
+    apply: update => {
+      next.file_download_filename = update.download_filename;
+      next.file_logical_path = update.logical_path;
+    }
+  });
+
+  return { doc: next, targets };
+}
+
 export default function PersonnelWizard({ person, onClose }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(0);
@@ -119,28 +301,41 @@ export default function PersonnelWizard({ person, onClose }) {
 
       const primaryAssignment = data.assignments.find(a => a.is_primary) || data.assignments[0] || null;
       const primaryCompanyId = data.personnel.primary_company_id || primaryAssignment?.company_id || null;
+      const ownerLabel = personnelOwnerLabel(data.personnel);
       const attachedFiles = await attachManagedFilesToOwner({
         uploadSessionId: data.uploadSessionId,
         ownerType: "personnel",
         ownerId: personnelId,
         companyId: primaryCompanyId,
-        ownerLabel: data.personnel.name || `${data.personnel.first_name || ""} ${data.personnel.last_name || ""}`.trim() || "Medewerker"
+        ownerLabel
       });
       const attachedById = managedFileById(attachedFiles);
 
       const personnelFilePatch = {};
-      if (data.personnel.photo_file_id && attachedById[data.personnel.photo_file_id]) {
-        personnelFilePatch.photo_download_filename = attachedById[data.personnel.photo_file_id].download_filename;
-        personnelFilePatch.photo_logical_path = attachedById[data.personnel.photo_file_id].logical_path;
+      const personnelFileSyncs = [];
+      if (data.personnel.photo_file_id) {
+        const input = personnelPhotoDescriptorInput({ personnel: data.personnel, personnelId, primaryCompanyId, uploadSessionId: data.uploadSessionId });
+        const update = descriptorUpdate(input);
+        personnelFilePatch.photo_download_filename = update.download_filename;
+        personnelFilePatch.photo_logical_path = update.logical_path;
+        personnelFileSyncs.push({ fileId: data.personnel.photo_file_id, input, sourceField: "photo_file_url" });
       }
-      if (data.personnel.payroll_tax_statement_file_id && attachedById[data.personnel.payroll_tax_statement_file_id]) {
-        personnelFilePatch.payroll_tax_statement_download_filename = attachedById[data.personnel.payroll_tax_statement_file_id].download_filename;
-        personnelFilePatch.payroll_tax_statement_logical_path = attachedById[data.personnel.payroll_tax_statement_file_id].logical_path;
+      if (data.personnel.payroll_tax_statement_file_id) {
+        const input = payrollTaxStatementDescriptorInput({ personnel: data.personnel, personnelId, primaryCompanyId, uploadSessionId: data.uploadSessionId });
+        const update = descriptorUpdate(input);
+        personnelFilePatch.payroll_tax_statement_download_filename = update.download_filename;
+        personnelFilePatch.payroll_tax_statement_logical_path = update.logical_path;
+        personnelFileSyncs.push({ fileId: data.personnel.payroll_tax_statement_file_id, input, sourceField: "payroll_tax_statement_file_url" });
       }
 
       await Promise.all([
-        data.personnel.photo_file_id ? updateManagedFileSource(data.personnel.photo_file_id, { owner_id: personnelId, company_id: primaryCompanyId, source_entity_id: personnelId }) : null,
-        data.personnel.payroll_tax_statement_file_id ? updateManagedFileSource(data.personnel.payroll_tax_statement_file_id, { owner_id: personnelId, company_id: primaryCompanyId, source_entity_id: personnelId }) : null,
+        ...personnelFileSyncs.map(target => syncManagedFileDescriptor(target.fileId, target.input, {
+          owner_id: personnelId,
+          company_id: primaryCompanyId,
+          source_entity: "Personnel",
+          source_entity_id: personnelId,
+          source_field: target.sourceField
+        })),
         Object.keys(personnelFilePatch).length ? base44.entities.Personnel.update(personnelId, personnelFilePatch) : null
       ].filter(Boolean));
 
@@ -274,11 +469,17 @@ export default function PersonnelWizard({ person, onClose }) {
       for (const doc of docs) {
         if (doc.personnel_id) {
           const normalizedDoc = withManagedDocumentPaths(doc, attachedById);
-          const createdDoc = await base44.entities.PersonnelDocument.create(normalizedDoc);
+          const descriptorContext = { personnel: data.personnel, personnelId, primaryCompanyId, uploadSessionId: data.uploadSessionId };
+          const { doc: documentToSave, targets } = applyCurrentDocumentDescriptor(normalizedDoc, descriptorContext);
+          const createdDoc = await base44.entities.PersonnelDocument.create(documentToSave);
           await Promise.all([
-            normalizedDoc.file_id ? updateManagedFileSource(normalizedDoc.file_id, { owner_id: personnelId, company_id: primaryCompanyId, source_entity_id: createdDoc.id }) : null,
-            normalizedDoc.front_file_id ? updateManagedFileSource(normalizedDoc.front_file_id, { owner_id: personnelId, company_id: primaryCompanyId, source_entity_id: createdDoc.id }) : null,
-            normalizedDoc.back_file_id ? updateManagedFileSource(normalizedDoc.back_file_id, { owner_id: personnelId, company_id: primaryCompanyId, source_entity_id: createdDoc.id }) : null
+            ...targets.map(target => syncManagedFileDescriptor(target.fileId, target.input, {
+              owner_id: personnelId,
+              company_id: primaryCompanyId,
+              source_entity: "PersonnelDocument",
+              source_entity_id: createdDoc.id,
+              source_field: target.sourceField
+            }))
           ].filter(Boolean));
         }
       }
@@ -301,6 +502,8 @@ export default function PersonnelWizard({ person, onClose }) {
         } = preparedBankAccount;
         let proofDocumentId = null;
         const proofManagedFile = _proof_file_id ? attachedById[_proof_file_id] : null;
+        const proofInput = _proof_file_id ? bankProofDescriptorInput({ bankAccount: data.bankAccount, personnel: data.personnel, personnelId, primaryCompanyId, uploadSessionId: data.uploadSessionId }) : null;
+        const proofUpdate = proofInput ? descriptorUpdate(proofInput) : null;
         if (_proof_file_url || _proof_file_id) {
           const proofDoc = await base44.entities.PersonnelDocument.create({
             personnel_id: personnelId,
@@ -308,8 +511,8 @@ export default function PersonnelWizard({ person, onClose }) {
             category: "bank_account_proof",
             file_url: _proof_file_url || null,
             file_id: _proof_file_id || null,
-            file_download_filename: proofManagedFile?.download_filename || _proof_download_filename || null,
-            file_logical_path: proofManagedFile?.logical_path || _proof_logical_path || null,
+            file_download_filename: proofUpdate?.download_filename || proofManagedFile?.download_filename || _proof_download_filename || null,
+            file_logical_path: proofUpdate?.logical_path || proofManagedFile?.logical_path || _proof_logical_path || null,
             verification_status: ba.verification_status || "pending_review",
             is_sensitive: true,
             metadata: {
@@ -317,12 +520,13 @@ export default function PersonnelWizard({ person, onClose }) {
             }
           });
           proofDocumentId = proofDoc.id;
-          if (_proof_file_id) {
-            await updateManagedFileSource(_proof_file_id, {
+          if (_proof_file_id && proofInput) {
+            await syncManagedFileDescriptor(_proof_file_id, proofInput, {
               owner_id: personnelId,
               company_id: primaryCompanyId,
               source_entity: "PersonnelDocument",
-              source_entity_id: proofDoc.id
+              source_entity_id: proofDoc.id,
+              source_field: "file_url"
             });
           }
         }
@@ -331,8 +535,8 @@ export default function PersonnelWizard({ person, onClose }) {
           personnel_id: personnelId,
           proof_document_id: proofDocumentId,
           proof_file_id: _proof_file_id || null,
-          proof_download_filename: proofManagedFile?.download_filename || _proof_download_filename || null,
-          proof_logical_path: proofManagedFile?.logical_path || _proof_logical_path || null
+          proof_download_filename: proofUpdate?.download_filename || proofManagedFile?.download_filename || _proof_download_filename || null,
+          proof_logical_path: proofUpdate?.logical_path || proofManagedFile?.logical_path || _proof_logical_path || null
         });
       }
 

@@ -396,6 +396,48 @@ export function buildManagedFileDescriptor(input) {
   });
 }
 
+export function buildManagedFileDescriptorUpdate(input) {
+  const descriptor = buildManagedFileDescriptor(input);
+  const update = {
+    display_filename: descriptor.display_filename,
+    download_filename: descriptor.download_filename,
+    logical_path: descriptor.logical_path,
+    folder_path: descriptor.folder_path,
+    document_label: input.documentLabel || null,
+    document_number: input.documentNumber || null,
+    valid_from: input.validFrom || null,
+    valid_until: input.validUntil || null
+  };
+
+  if (input.metadata) {
+    update.metadata = {
+      ...input.metadata,
+      owner_label: input.ownerLabel || input.metadata.owner_label || null,
+      folder_segments: input.folderSegments || input.metadata.folder_segments || [],
+      ...(input.effectiveDate ? { effective_date: input.effectiveDate } : {})
+    };
+  }
+
+  return update;
+}
+
+export async function syncManagedFileDescriptor(fileId, input, updates = {}) {
+  if (!fileId) return null;
+
+  const descriptorUpdate = buildManagedFileDescriptorUpdate(input);
+  const { metadata: updateMetadata, ...restUpdates } = updates;
+  const shouldUpdateMetadata = descriptorUpdate.metadata || updateMetadata;
+  const metadata = shouldUpdateMetadata
+    ? { ...(descriptorUpdate.metadata || {}), ...(updateMetadata || {}) }
+    : undefined;
+
+  return updateManagedFileSource(fileId, {
+    ...descriptorUpdate,
+    ...restUpdates,
+    ...(metadata ? { metadata } : {})
+  });
+}
+
 function sensitivityDefaults(isSensitive) {
   return {
     access_scope: isSensitive ? "company" : "company",
@@ -684,12 +726,15 @@ export async function attachManagedFilesToOwner({
       company_id: merged.company_id,
       tenant_container_key: keys.tenant_container_key,
       owner_container_key: keys.owner_container_key,
+      display_filename: descriptor.display_filename,
+      download_filename: descriptor.download_filename,
       folder_path: descriptor.folder_path,
-      logical_path: `${descriptor.folder_path}/${file.download_filename}`,
+      logical_path: descriptor.logical_path,
       metadata: {
         ...(file.metadata || {}),
         attached_at: new Date().toISOString(),
-        attached_owner_id: ownerId
+        attached_owner_id: ownerId,
+        owner_label: merged.ownerLabel
       }
     };
 
