@@ -407,6 +407,22 @@ export default function AccreditationsTab({ companyId, company }) {
     if (!isKnownType(form.category, form.accreditation_type) && !form.name?.trim()) {
       e.name = "Naam is verplicht";
     }
+    const today = new Date().toISOString().slice(0, 10);
+    if (!isArchiveEntry) {
+      // New or renewal: valid_until must be today or in the future
+      if (form.valid_until && form.valid_until < today) {
+        e.valid_until = "Verlopen erkenningen kunnen alleen via het archief worden toegevoegd.";
+      }
+    } else {
+      // Archive entry: valid_until must be in the past
+      if (form.valid_until && form.valid_until >= today) {
+        e.valid_until = "Archief is alleen voor verlopen erkenningen (einddatum moet in het verleden liggen).";
+      }
+    }
+    // valid_from must not be after valid_until
+    if (form.valid_from && form.valid_until && form.valid_from > form.valid_until) {
+      e.valid_from = "Startdatum mag niet na de einddatum liggen.";
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -510,11 +526,13 @@ export default function AccreditationsTab({ companyId, company }) {
                         </div>
                         <div className="space-y-1">
                           <Label>Geldig vanaf</Label>
-                          <Input className="h-8" type="date" value={form.valid_from} onChange={e => set("valid_from", e.target.value)} />
+                          <Input className={`h-8 ${errors.valid_from ? "border-destructive" : ""}`} type="date" value={form.valid_from} onChange={e => { set("valid_from", e.target.value); setErrors(er => ({ ...er, valid_from: undefined })); }} />
+                          {errors.valid_from && <p className="text-xs text-destructive">{errors.valid_from}</p>}
                         </div>
                         <div className="space-y-1">
                           <Label>Geldig tot</Label>
-                          <Input className="h-8" type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)} />
+                          <Input className={`h-8 ${errors.valid_until ? "border-destructive" : ""}`} type="date" value={form.valid_until} onChange={e => { set("valid_until", e.target.value); setErrors(er => ({ ...er, valid_until: undefined })); }} />
+                          {errors.valid_until && <p className="text-xs text-destructive">{errors.valid_until}</p>}
                         </div>
                       </div>
                     ) : (
@@ -575,11 +593,13 @@ export default function AccreditationsTab({ companyId, company }) {
                             </div>
                             <div className="space-y-1">
                               <Label>Geldig vanaf</Label>
-                              <Input className="h-8" type="date" value={form.valid_from} onChange={e => set("valid_from", e.target.value)} />
+                              <Input className={`h-8 ${errors.valid_from ? "border-destructive" : ""}`} type="date" value={form.valid_from} onChange={e => { set("valid_from", e.target.value); setErrors(er => ({ ...er, valid_from: undefined })); }} />
+                              {errors.valid_from && <p className="text-xs text-destructive">{errors.valid_from}</p>}
                             </div>
                             <div className="space-y-1">
                               <Label>Geldig tot</Label>
-                              <Input className="h-8" type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)} />
+                              <Input className={`h-8 ${errors.valid_until ? "border-destructive" : ""}`} type="date" value={form.valid_until} onChange={e => { set("valid_until", e.target.value); setErrors(er => ({ ...er, valid_until: undefined })); }} />
+                              {errors.valid_until && <p className="text-xs text-destructive">{errors.valid_until}</p>}
                             </div>
                           </div>
                         );
