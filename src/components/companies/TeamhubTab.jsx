@@ -180,23 +180,27 @@ export default function TeamhubTab({ companyId, company }) {
     const disabledReason = qualificationCheckPending
       ? "Medewerkerscertificaten worden geladen."
       : getTeamhubServiceDisabledReason(effectiveWpbrLicenseType, activity.key, qualifiedServiceTypes);
+    const isSelected = (form.teamhub_service_types || []).includes(activity.key);
 
     return (
       <label
         key={activity.key}
         title={disabledReason}
-        className={`flex min-h-[56px] items-start gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm ${allowed ? "cursor-pointer hover:bg-accent/50" : "cursor-not-allowed opacity-55"}`}
+        className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs transition-colors cursor-pointer ${
+          isSelected 
+            ? "border-primary bg-primary/15 text-foreground font-semibold" 
+            : allowed 
+            ? "border-border bg-card text-foreground hover:border-primary/40" 
+            : "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"
+        }`}
       >
         <Checkbox
-          checked={(form.teamhub_service_types || []).includes(activity.key)}
+          checked={isSelected}
           disabled={!allowed}
           onCheckedChange={() => toggleService(activity.key)}
-          className="mt-0.5"
+          className="h-3.5 w-3.5"
         />
-        <span>
-          <span className="block">{activity.label}</span>
-          {!allowed && <span className="block text-[11px] leading-4 text-muted-foreground">{disabledReason}</span>}
-        </span>
+        <span>{activity.label}</span>
       </label>
     );
   };
@@ -323,11 +327,9 @@ export default function TeamhubTab({ companyId, company }) {
           <div className="space-y-3">
             <p className="text-sm font-semibold text-foreground">Vergunning-gebonden diensten</p>
             {TEAMHUB_LICENSE_SERVICE_GROUPS.map(group => (
-              <div key={group.key} className="overflow-hidden rounded-md border border-border bg-muted/20">
-                <div className="border-b border-border bg-muted/40 px-3 py-2">
-                  <p className="text-xs font-semibold text-muted-foreground">{group.title}</p>
-                </div>
-                <div className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3">
+              <div key={group.key}>
+                <p className="text-xs font-semibold text-muted-foreground mb-2">{group.title}</p>
+                <div className="flex flex-wrap gap-2">
                   {getTeamhubServicesByKeys(group.serviceKeys).map(renderServiceOption)}
                 </div>
               </div>
@@ -336,7 +338,7 @@ export default function TeamhubTab({ companyId, company }) {
 
           <div className="space-y-3 border-t border-border pt-4">
             <p className="text-sm font-semibold text-foreground">Kwalificatie-gebonden diensten</p>
-            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+            <div className="flex flex-wrap gap-2">
               {getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).map(renderServiceOption)}
             </div>
           </div>
