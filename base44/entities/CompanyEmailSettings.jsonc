@@ -1,0 +1,200 @@
+{
+  "name": "CompanyEmailSettings",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "description": "ID van het bedrijf waarvoor deze e-mailconfiguratie geldt"
+    },
+    "provider": {
+      "type": "string",
+      "enum": [
+        "platform",
+        "microsoft_365",
+        "google_workspace",
+        "smtp",
+        "other"
+      ],
+      "default": "platform",
+      "description": "Kanaal waarmee zakelijke e-mail wordt verzonden"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "pending_oauth",
+        "connected",
+        "action_required",
+        "disabled"
+      ],
+      "default": "draft",
+      "description": "Koppelstatus van deze e-mailconfiguratie"
+    },
+    "from_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Naam die ontvangers als afzender zien"
+    },
+    "from_email": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Zakelijk afzendadres"
+    },
+    "reply_to_email": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optioneel antwoordadres"
+    },
+    "bcc_email": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optioneel intern BCC-adres voor verzonden factuurmails"
+    },
+    "use_for_invoices": {
+      "type": "boolean",
+      "default": true,
+      "description": "Gebruik deze configuratie voor factuurmails"
+    },
+    "use_for_operational_mail": {
+      "type": "boolean",
+      "default": false,
+      "description": "Gebruik deze configuratie voor operationele berichten"
+    },
+    "save_to_sent_items": {
+      "type": "boolean",
+      "default": true,
+      "description": "Bewaar verzonden berichten in de mailbox wanneer de provider dit ondersteunt"
+    },
+    "require_manual_review_before_send": {
+      "type": "boolean",
+      "default": false,
+      "description": "Factuurmail eerst als concept/review laten passeren voordat er verzonden wordt"
+    },
+    "signature_text": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Standaard ondertekening voor zakelijke mails"
+    },
+    "invoice_subject_prefix": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Prefix voor factuuronderwerpen"
+    },
+    "oauth_tenant_hint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Microsoft tenant-id/domein of Google Workspace domein"
+    },
+    "oauth_account_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Provider account-id of mailbox-id na succesvolle OAuth-koppeling"
+    },
+    "oauth_scopes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Scopes die voor deze koppeling zijn aangevraagd"
+    },
+    "token_secret_reference": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Referentie naar server-side tokenopslag; bevat nooit tokens zelf"
+    },
+    "smtp_host": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "smtp_port": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "smtp_security": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "starttls",
+        "ssl_tls",
+        "none",
+        null
+      ],
+      "description": "SMTP transportbeveiliging"
+    },
+    "smtp_username": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "smtp_secret_reference": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Referentie naar server-side SMTP secret; bevat nooit wachtwoord of app password zelf"
+    },
+    "connected_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "last_checked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "last_send_test_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "last_error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "company_id",
+    "provider"
+  ]
+}

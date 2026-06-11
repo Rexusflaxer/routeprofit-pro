@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Award, BookOpen, CreditCard, Handshake, MapPin, Shield, Users } from "lucide-react";
+import { Award, BookOpen, CreditCard, Handshake, Mail, MapPin, Shield } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import WpbrTab from "./WpbrTab";
@@ -9,6 +9,7 @@ import CompanyBankTab from "./CompanyBankTab";
 import TeamhubTab from "./TeamhubTab";
 import AccreditationsTab from "./AccreditationsTab";
 import BranchMembershipsTab from "./BranchMembershipsTab";
+import CompanyEmailTab from "./CompanyEmailTab";
 
 const MENU_ITEMS = [
   { key: "wpbr", label: "WPBR-vergunning", icon: Shield },
@@ -18,6 +19,7 @@ const MENU_ITEMS = [
   { key: "locations", label: "Vestigingen", icon: MapPin },
   { key: "teamhub", label: "LOQ Teamhub", icon: Handshake },
   { key: "bank", label: "Bank", icon: CreditCard },
+  { key: "email", label: "E-mail", icon: Mail },
 ];
 
 export default function CompanySidebarPanel({ companyId, companies, company }) {
@@ -75,6 +77,10 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
 
         {active === "bank" && (
           <CompanyBankTab companies={company ? [company] : []} />
+        )}
+
+        {active === "email" && (
+          <CompanyEmailTab companyId={companyId} company={company} />
         )}
 
         {active === "cao" && (
