@@ -207,20 +207,26 @@ export default function TeamhubTab({ companyId, company }) {
     const isSelected = (form.teamhub_service_types || []).includes(activity.key);
 
     return (
-      <button
-        key={activity.key}
-        title={disabledReason}
-        onClick={() => allowed && toggleService(activity.key)}
-        className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-          isSelected 
-            ? "border-primary bg-primary text-primary-foreground" 
-            : allowed 
-            ? "border-border bg-card text-foreground hover:border-primary/40 cursor-pointer" 
-            : "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"
-        }`}
-      >
-        {activity.label}
-      </button>
+      <div key={activity.key} className="relative group/pill">
+        <button
+          onClick={() => allowed && toggleService(activity.key)}
+          className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+            isSelected 
+              ? "border-primary bg-primary text-primary-foreground" 
+              : allowed 
+              ? "border-border bg-card text-foreground hover:border-primary/40 cursor-pointer" 
+              : "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"
+          }`}
+        >
+          {activity.label}
+        </button>
+        {!allowed && disabledReason && (
+          <div className="pointer-events-none absolute bottom-full left-1/2 z-50 mb-2 w-64 -translate-x-1/2 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md opacity-0 group-hover/pill:opacity-100 transition-opacity duration-150">
+            {disabledReason}
+            <div className="absolute left-1/2 top-full -translate-x-1/2 border-4 border-transparent border-t-border" />
+          </div>
+        )}
+      </div>
     );
   };
 
