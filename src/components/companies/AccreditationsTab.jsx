@@ -14,7 +14,7 @@ import { updateManagedFileSource, uploadManagedFile } from "@/lib/managedFiles";
 
 const DELETE_PASSWORD = "verwijder";
 // Header and rows share this grid so status, validity, and actions cannot drift out of alignment.
-const ACCREDITATION_TABLE_GRID = "grid grid-cols-[minmax(160px,180px)_minmax(260px,1fr)_minmax(112px,132px)_minmax(160px,190px)_minmax(240px,360px)] gap-4";
+const ACCREDITATION_TABLE_GRID = "grid grid-cols-[minmax(160px,180px)_minmax(260px,1fr)_minmax(112px,132px)_minmax(160px,190px)_minmax(360px,520px)] gap-4";
 
 const CATEGORY_OPTIONS = [
   { key: "technical_certification", label: "Technische erkenning" },
@@ -77,13 +77,19 @@ function categoryLabel(category) {
   return CATEGORY_OPTIONS.find(o => o.key === category)?.label || category || "Erkenning";
 }
 
+function isArchivedStatus(status) {
+  return status === "superseded" || status === "archived";
+}
+
 function isActionItem(item) {
+  if (isArchivedStatus(item.status)) return false;
   const today = new Date().toISOString().split("T")[0];
   return item.status === "expired" || item.status === "pending_review" ||
     (item.valid_until && item.valid_until < today);
 }
 
 function statusBadge(item) {
+  if (isArchivedStatus(item.status)) return <Badge variant="outline" className="text-xs text-muted-foreground border-border">Gearchiveerd</Badge>;
   const today = new Date().toISOString().split("T")[0];
   const expiredByDate = item.valid_until && item.valid_until < today;
   if (item.status === "suspended") return <Badge variant="outline" className="text-xs text-destructive border-destructive/40">Geschorst</Badge>;
@@ -158,7 +164,9 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
   }, [contextMenu]);
 
   const handleRowClick = e => {
-    if (needsAction && item.document_file_url) {
+    if (item.status === "pending_review") {
+      onEdit(item);
+    } else if (needsAction && item.document_file_url) {
       const rect = e.currentTarget.getBoundingClientRect();
       setContextMenu({ x: e.clientX - rect.left, y: e.clientY - rect.top });
     } else if (needsAction && !item.document_file_url) {
@@ -326,6 +334,7 @@ export default function AccreditationsTab({ companyId, company }) {
   const openNew = () => {
     setEditingId(null);
     setRenewingId(null);
+    setIsArchiveEntry(false);
     setForm(EMPTY_FORM);
     setErrors({});
     setWizardStep(1);
@@ -335,6 +344,7 @@ export default function AccreditationsTab({ companyId, company }) {
   const openEdit = (item) => {
     setEditingId(item.id);
     setRenewingId(null);
+    setIsArchiveEntry(false);
     setForm({
       category: item.category || "technical_certification",
       accreditation_type: item.accreditation_type || "other",
@@ -343,7 +353,7 @@ export default function AccreditationsTab({ companyId, company }) {
       certificate_number: item.certificate_number || "",
       valid_from: item.valid_from || "",
       valid_until: item.valid_until || "",
-      status: item.status || "active",
+      status: item.status === "pending_review" ? "active" : item.status || "active",
       document_file_url: item.document_file_url || "",
       document_filename: item.document_filename || "",
       document_file_id: item.document_file_id || "",
@@ -360,6 +370,7 @@ export default function AccreditationsTab({ companyId, company }) {
   const openRenew = (item) => {
     setEditingId(null);
     setRenewingId(item.id);
+    setIsArchiveEntry(false);
     setForm({
       ...EMPTY_FORM,
       category: item.category || "technical_certification",
@@ -436,11 +447,12 @@ export default function AccreditationsTab({ companyId, company }) {
     }
   };
 
-  const activeAccreditations = accreditations.filter(a => a.status !== "superseded");
-  const archivedAccreditations = accreditations.filter(a => a.status === "superseded");
+  const activeAccreditations = accreditations.filter(a => !isArchivedStatus(a.status));
+  const archivedAccreditations = accreditations.filter(a => isArchivedStatus(a.status) && a.document_file_url);
   const itemToDelete = accreditations.find(item => item.id === deleteId);
   const isRenewing = !!renewingId;
-  const activeWithoutDocument = !form.document_file_url && wizardStep === 2 && !editingId;
+  const documentRequired = wizardStep === 2 && (isArchiveEntry || !editingId || form.status === "active");
+  const missingRequiredDocument = documentRequired && !form.document_file_url;
 
   return (
     <div className="flex flex-col h-full">
@@ -540,7 +552,7 @@ export default function AccreditationsTab({ companyId, company }) {
                 {wizardStep === 2 && (
                   <div className="space-y-4">
                     <p className="text-sm font-medium text-foreground">Bewijsstuk {editingId ? "bijwerken" : "uploaden"}</p>
-                    {!editingId && (
+                    {documentRequired && (
                       <p className="text-xs text-muted-foreground">
                         Upload het officiële certificaat of erkenningsdocument (PDF of afbeelding). <span className="text-destructive font-medium">Verplicht.</span>
                       </p>
@@ -566,7 +578,7 @@ export default function AccreditationsTab({ companyId, company }) {
                       </label>
                     )}
 
-                    {activeWithoutDocument && (
+                    {missingRequiredDocument && (
                       <p className="text-xs text-destructive">Upload eerst een bewijsstuk voordat je de status Actief opslaat.</p>
                     )}
 
@@ -576,7 +588,7 @@ export default function AccreditationsTab({ companyId, company }) {
                       </Button>
                       <div className="flex gap-2">
                         <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
-                        <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending || activeWithoutDocument}>
+                        <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending || missingRequiredDocument}>
                           <Check className="w-4 h-4 mr-1" />
                           {saveMutation.isPending ? "Opslaan..." : (editingId ? "Wijzigingen opslaan" : isRenewing ? "Erkenning vernieuwen" : "Erkenning opslaan")}
                         </Button>
@@ -596,7 +608,7 @@ export default function AccreditationsTab({ companyId, company }) {
         <span className="min-w-0">Erkenning</span>
         <span className="min-w-0">Status</span>
         <span className="min-w-0">Geldigheid</span>
-        <div className="min-w-0 flex flex-wrap items-center justify-end gap-2">
+        <div className="min-w-0 flex flex-nowrap items-center justify-end gap-2">
           {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse mr-1">Archief</Badge>}
           {!showWizard && !deleteId && (
             showArchive ? (

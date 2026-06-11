@@ -457,6 +457,7 @@ export default function BranchMembershipsTab({ companyId }) {
 
   const existingAccreditationKeys = useMemo(() => new Set(
     accreditations
+      .filter(item => item.status !== "superseded" && item.status !== "archived")
       .map(item => item.category && item.accreditation_type ? `${item.category}:${item.accreditation_type}` : null)
       .filter(Boolean)
   ), [accreditations]);
@@ -469,6 +470,7 @@ export default function BranchMembershipsTab({ companyId }) {
     const actions = getAccreditationActionsForSelection(data.association_type, data.membership_types);
     const currentKeys = new Set(
       accreditations
+        .filter(item => item.status !== "superseded" && item.status !== "archived")
         .map(item => item.category && item.accreditation_type ? `${item.category}:${item.accreditation_type}` : null)
         .filter(Boolean)
     );
