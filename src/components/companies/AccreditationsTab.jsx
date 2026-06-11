@@ -170,7 +170,7 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
       className={`relative flex items-center px-4 py-3 group transition-colors ${isClickable ? "cursor-pointer hover:bg-accent/40" : "hover:bg-accent/30"}`}
       onClick={handleRowClick}
     >
-      <div className="w-40 shrink-0">
+      <div className="w-[140px] shrink-0">
         <Badge variant="secondary" className="text-xs">{categoryLabel(item.category)}</Badge>
       </div>
       <div className="flex-1 min-w-0 pr-4">
@@ -179,11 +179,11 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
           {[item.issuer, item.certificate_number].filter(Boolean).join(" - ") || optionLabel(item.category, item.accreditation_type)}
         </p>
       </div>
-      <div className="w-28 shrink-0">{statusBadge(item)}</div>
-      <div className="w-44 shrink-0 text-xs text-muted-foreground truncate">
-        {[item.valid_from && `Vanaf ${item.valid_from}`, item.valid_until && `Tot ${item.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum"}
+      <div className="w-[110px] shrink-0">{statusBadge(item)}</div>
+      <div className="w-[160px] shrink-0 text-xs text-muted-foreground">
+        {[item.valid_from && `Vanaf: ${item.valid_from}`, item.valid_until && `Tot: ${item.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum"}
       </div>
-      <div className="w-24 shrink-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+      <div className="w-[96px] shrink-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
         {item.document_file_url && (
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onPreview(item)} title="Document bekijken"><Eye className="h-3.5 w-3.5" /></Button>
         )}
@@ -587,12 +587,12 @@ export default function AccreditationsTab({ companyId, company }) {
       </AnimatePresence>
 
       <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="w-40 shrink-0">Categorie</span>
+        <span className="w-[140px] shrink-0">Categorie</span>
         <span className="flex-1 min-w-0 pr-4">Erkenning</span>
-        <span className="w-28 shrink-0">Status</span>
-        <span className="w-44 shrink-0">Geldigheid</span>
-        <div className="w-24 shrink-0 flex justify-end items-center gap-2">
-          {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
+        <span className="w-[110px] shrink-0">Status</span>
+        <span className="w-[160px] shrink-0">Geldigheid</span>
+        <div className="shrink-0 flex items-center gap-2">
+          {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse mr-1">Archief</Badge>}
         </div>
         <div className="shrink-0 flex items-center gap-2">
           {!showWizard && !deleteId && (
