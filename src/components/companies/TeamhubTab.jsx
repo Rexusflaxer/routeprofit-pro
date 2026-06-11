@@ -345,9 +345,9 @@ export default function TeamhubTab({ companyId, company }) {
               )}
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground hidden">
-            Alleen vestigingen die aan dit bedrijfsprofiel zijn gekoppeld kunnen later op de publieke kaart worden getoond.
-          </p>
+          
+
+          
         </div>
 
         <div className="space-y-3 rounded-md border border-border bg-background p-4">
