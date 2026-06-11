@@ -372,7 +372,7 @@ export default function AccreditationsTab({ companyId, company }) {
         <span className="w-80 min-w-0">Erkenning</span>
         <span className="w-28 shrink-0">Status</span>
         <span className="w-44 shrink-0">Geldigheid</span>
-        <div className="w-24 shrink-0 flex justify-end">
+        <div className="flex-1 flex justify-end">
           {!showForm && !deleteId && (
             <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
               <Plus className="w-3 h-3 mr-1" /> Nieuwe erkenning
@@ -401,7 +401,7 @@ export default function AccreditationsTab({ companyId, company }) {
             <div className="w-44 shrink-0 text-xs text-muted-foreground">
               {[item.valid_from && `Vanaf ${item.valid_from}`, item.valid_until && `Tot ${item.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum"}
             </div>
-            <div className="w-24 shrink-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+            <div className="flex-1 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
               {item.document_file_url && (
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPreview(item)} title="Document bekijken"><Eye className="h-3.5 w-3.5" /></Button>
               )}
