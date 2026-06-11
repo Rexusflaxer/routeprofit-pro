@@ -153,9 +153,13 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
   }, [contextMenu]);
 
   const handleRowClick = e => {
-    if (needsAction) {
+    if (needsAction && item.document_file_url) {
+      // Show context menu only when there's also a document to open
       const rect = e.currentTarget.getBoundingClientRect();
       setContextMenu({ x: e.clientX - rect.left, y: e.clientY - rect.top });
+    } else if (needsAction) {
+      // No document — go straight to renew
+      onRenew(item);
     } else if (item.document_file_url) {
       onPreview(item);
     }
