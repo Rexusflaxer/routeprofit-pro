@@ -52,15 +52,12 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
                 ${active === item.key
                   ? "bg-background text-foreground border-r-2 border-primary"
                   : hasAlert
-                    ? "text-amber-600 dark:text-amber-400 hover:bg-background/60"
+                    ? "border-r-2 border-amber-500 text-amber-600 dark:text-amber-400 hover:bg-background/60"
                     : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
                 }`}
             >
               <item.icon className={`w-4 h-4 shrink-0 ${hasAlert && active !== item.key ? "text-amber-500" : ""}`} />
               <span className="flex-1">{item.label}</span>
-              {hasAlert && active !== item.key && (
-                <span className="w-2 h-2 rounded-full bg-amber-500 shrink-0" />
-              )}
             </button>
           );
         })}
