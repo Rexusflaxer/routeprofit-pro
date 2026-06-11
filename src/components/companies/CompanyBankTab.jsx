@@ -21,7 +21,7 @@ const DELETE_PASSWORD = "verwijder";
 
 const EMPTY_FORM = {
   company_id: "",
-  account_type: "normal",
+  account_type: "",
   iban: "",
   account_holder_name: "",
   bank_name: "",
