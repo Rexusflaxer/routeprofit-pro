@@ -329,7 +329,7 @@ export default function TeamhubTab({ companyId, company }) {
         </div>
 
         <div className="space-y-2 rounded-md border border-border bg-background p-4">
-          <Label>Vestiging op publieke kaart</Label>
+          <Label>Vestiging</Label>
           <Select
             value={form.teamhub_public_location_id || ""}
             onValueChange={(value) => set("teamhub_public_location_id", value || null)}>
