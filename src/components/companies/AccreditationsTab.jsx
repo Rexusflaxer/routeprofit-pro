@@ -591,6 +591,7 @@ export default function AccreditationsTab({ companyId, company }) {
         <span className="flex-1 min-w-0">Erkenning</span>
         <span className="w-28 shrink-0">Status</span>
         <span className="w-44 shrink-0">Geldigheid</span>
+        <span className="w-24 shrink-0"></span>
         {showArchive && <Badge className="mr-2 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
         <div className="shrink-0 flex items-center gap-2">
           {!showWizard && !deleteId && (
