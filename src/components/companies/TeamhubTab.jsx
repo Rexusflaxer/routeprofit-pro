@@ -320,6 +320,7 @@ export default function TeamhubTab({ companyId, company }) {
             Beveiligingsdiensten worden vrijgegeven op basis van vergunning: {effectiveWpbrLicenseType ? `${effectiveWpbrLicenseType} - ${getWpbrLicenseLabel(effectiveWpbrLicenseType)}` : "geen actieve WPBR-vergunning gevonden"}. Kwalificatiediensten worden vrijgegeven op basis van geldige medewerkerscertificaten.
           </p>
 
+          <div className="space-y-3">
           <div className="overflow-hidden rounded-md border border-border">
             <div className="border-b border-border bg-muted/40 px-3 py-2">
               <p className="text-xs font-semibold text-muted-foreground">Vergunning-gebonden diensten</p>
@@ -350,7 +351,13 @@ export default function TeamhubTab({ companyId, company }) {
                 </div>
               );
             })}
-            <div className="border-t border-border">
+          </div>
+
+          <div className="overflow-hidden rounded-md border border-border">
+            <div className="border-b border-border bg-muted/40 px-3 py-2">
+              <p className="text-xs font-semibold text-muted-foreground">Kwalificatie-gebonden diensten</p>
+            </div>
+            <div>
               <button
                 type="button"
                 onClick={() => setExpandedGroups(prev => ({ ...prev, __qualifications: !prev.__qualifications }))}
@@ -371,6 +378,7 @@ export default function TeamhubTab({ companyId, company }) {
                 </div>
               )}
             </div>
+          </div>
           </div>
         </div>
 
