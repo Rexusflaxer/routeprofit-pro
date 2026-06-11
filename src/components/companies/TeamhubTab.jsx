@@ -9,7 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Building2, Check, Clock, Mail, Phone, Save, Users } from "lucide-react";
+import { Building2, Check, ChevronDown, Clock, Mail, Phone, Save, Users } from "lucide-react";
 import {
   TEAMHUB_LICENSE_SERVICE_GROUPS,
   TEAMHUB_QUALIFICATION_SERVICE_KEYS,
@@ -30,9 +30,9 @@ import {
 import TeamhubRegionPicker from "./TeamhubRegionPicker";
 
 function getInitialForm(company) {
-  const serviceTypes = Array.isArray(company?.teamhub_service_types) && company.teamhub_service_types.length > 0
+  const serviceTypes = Array.isArray(company?.teamhub_service_types)
     ? company.teamhub_service_types
-    : (company?.activities || []);
+    : [];
 
   return {
     teamhub_enabled: company?.teamhub_enabled === true,
@@ -49,6 +49,7 @@ function getInitialForm(company) {
 export default function TeamhubTab({ companyId, company }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState(() => getInitialForm(company));
+  const [expandedGroups, setExpandedGroups] = useState({});
 
   const { data: wpbrLicenses = [] } = useQuery({
     queryKey: ["wpbr-licenses", companyId],
@@ -319,22 +320,56 @@ export default function TeamhubTab({ companyId, company }) {
             Beveiligingsdiensten worden vrijgegeven op basis van vergunning: {effectiveWpbrLicenseType ? `${effectiveWpbrLicenseType} - ${getWpbrLicenseLabel(effectiveWpbrLicenseType)}` : "geen actieve WPBR-vergunning gevonden"}. Kwalificatiediensten worden vrijgegeven op basis van geldige medewerkerscertificaten.
           </p>
 
-          <div className="space-y-3">
-            <p className="text-sm font-semibold text-foreground">Vergunning-gebonden diensten</p>
-            {TEAMHUB_LICENSE_SERVICE_GROUPS.map(group => (
-              <div key={group.key}>
-                <p className="text-xs font-semibold text-muted-foreground mb-2">{group.title}</p>
-                <div className="flex flex-wrap gap-2">
-                  {getTeamhubServicesByKeys(group.serviceKeys).map(renderServiceOption)}
+          <div className="overflow-hidden rounded-md border border-border">
+            <div className="border-b border-border bg-muted/40 px-3 py-2">
+              <p className="text-xs font-semibold text-muted-foreground">Vergunning-gebonden diensten</p>
+            </div>
+            {TEAMHUB_LICENSE_SERVICE_GROUPS.map((group, idx) => {
+              const isOpen = !!expandedGroups[group.key];
+              const selectedCount = getTeamhubServicesByKeys(group.serviceKeys).filter(a => (form.teamhub_service_types || []).includes(a.key)).length;
+              return (
+                <div key={group.key} className={idx > 0 ? "border-t border-border" : ""}>
+                  <button
+                    type="button"
+                    onClick={() => setExpandedGroups(prev => ({ ...prev, [group.key]: !prev[group.key] }))}
+                    className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted/30 transition-colors"
+                  >
+                    <span className="text-xs font-medium text-foreground">{group.title}</span>
+                    <div className="flex items-center gap-2">
+                      {selectedCount > 0 && (
+                        <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">{selectedCount}</span>
+                      )}
+                      <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="flex flex-wrap gap-2 border-t border-border/50 bg-muted/10 px-3 py-3">
+                      {getTeamhubServicesByKeys(group.serviceKeys).map(renderServiceOption)}
+                    </div>
+                  )}
                 </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="space-y-3 border-t border-border pt-4">
-            <p className="text-sm font-semibold text-foreground">Kwalificatie-gebonden diensten</p>
-            <div className="flex flex-wrap gap-2">
-              {getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).map(renderServiceOption)}
+              );
+            })}
+            <div className="border-t border-border">
+              <button
+                type="button"
+                onClick={() => setExpandedGroups(prev => ({ ...prev, __qualifications: !prev.__qualifications }))}
+                className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted/30 transition-colors"
+              >
+                <span className="text-xs font-medium text-foreground">Kwalificatie-gebonden diensten</span>
+                <div className="flex items-center gap-2">
+                  {(() => {
+                    const cnt = getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).filter(a => (form.teamhub_service_types || []).includes(a.key)).length;
+                    return cnt > 0 ? <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">{cnt}</span> : null;
+                  })()}
+                  <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${expandedGroups.__qualifications ? "rotate-180" : ""}`} />
+                </div>
+              </button>
+              {expandedGroups.__qualifications && (
+                <div className="flex flex-wrap gap-2 border-t border-border/50 bg-muted/10 px-3 py-3">
+                  {getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).map(renderServiceOption)}
+                </div>
+              )}
             </div>
           </div>
         </div>
