@@ -1,0 +1,128 @@
+{
+  "name": "CompanyAccreditation",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "description": "ID van het bedrijf"
+    },
+    "category": {
+      "type": "string",
+      "enum": [
+        "technical_certification",
+        "branch_membership",
+        "quality_mark",
+        "other"
+      ],
+      "default": "technical_certification"
+    },
+    "accreditation_type": {
+      "type": "string",
+      "enum": [
+        "borg_e",
+        "borg_b",
+        "veb_4",
+        "ccv_bmi_leveren",
+        "ccv_bmi_onderhoud",
+        "ccv_bmi_oai_installeren",
+        "ccv_oai",
+        "branche_nederlandse_veiligheidsbranche",
+        "branche_techniek_nederland",
+        "branche_veb",
+        "iso_9001",
+        "iso_27001",
+        "vca",
+        "other_technical",
+        "other"
+      ]
+    },
+    "name": {
+      "type": "string",
+      "description": "Naam van de erkenning, certificering of branchevereniging"
+    },
+    "issuer": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "certificate_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "pending_review",
+        "suspended",
+        "expired"
+      ],
+      "default": "active"
+    },
+    "document_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "company_id",
+    "accreditation_type",
+    "name"
+  ]
+}

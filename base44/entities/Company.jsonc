@@ -291,7 +291,7 @@
         ]
       },
       "default": [],
-      "description": "Zelfverklaarde technische erkenningen/certificeringen voor Teamhub-diensten zoals BORG, VEB en CCV BMI/OAI"
+      "description": "Legacy cache voor technische Teamhub-erkenningen. Nieuwe registratie loopt via CompanyAccreditation."
     },
     "teamhub_service_types": {
       "type": "array",

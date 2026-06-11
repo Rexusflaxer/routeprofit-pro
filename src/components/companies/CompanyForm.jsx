@@ -13,7 +13,6 @@ import { createManagedUploadSession, uploadManagedFile } from "@/lib/managedFile
 import {
   TEAMHUB_LICENSE_SERVICE_GROUPS,
   TEAMHUB_QUALIFICATION_SERVICE_KEYS,
-  TEAMHUB_TECHNICAL_CERTIFICATION_OPTIONS,
   TEAMHUB_TECHNICAL_SERVICE_GROUPS,
   getTeamhubServicesByKeys,
   getTeamhubServiceDisabledReason,
@@ -53,7 +52,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
     letterhead_file_url: null, letterhead_file_id: null, letterhead_download_filename: null, letterhead_logical_path: null,
     default_cao_configuration_id: null, notes: "",
     teamhub_enabled: false, teamhub_intro: "", teamhub_contact_name: "", teamhub_contact_email: "", teamhub_contact_phone: "",
-    teamhub_technical_certifications: [], teamhub_service_types: [], teamhub_regions: [],
+    teamhub_service_types: [], teamhub_regions: [],
   });
   const [activeTab, setActiveTab] = useState("identity");
 
@@ -163,11 +162,6 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
     set("teamhub_service_types", current.includes(key) ? current.filter(a => a !== key) : [...current, key]);
   };
 
-  const toggleTechnicalCertification = (key) => {
-    const current = form.teamhub_technical_certifications || [];
-    set("teamhub_technical_certifications", current.includes(key) ? current.filter(a => a !== key) : [...current, key]);
-  };
-
   useEffect(() => {
     setForm(current => {
       const sanitized = sanitizeTeamhubServiceTypes(
@@ -187,7 +181,6 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
     teamhub_contact_name: form.teamhub_contact_name?.trim() || null,
     teamhub_contact_email: form.teamhub_contact_email?.trim() || null,
     teamhub_contact_phone: form.teamhub_contact_phone?.trim() || null,
-    teamhub_technical_certifications: form.teamhub_technical_certifications || [],
     teamhub_service_types: sanitizeTeamhubServiceTypes(form.wpbr_license_type, form.teamhub_service_types || [], [], form.teamhub_technical_certifications || []),
     teamhub_regions: form.teamhub_regions || [],
     _managed_file_upload_session_id: uploadSessionId,
@@ -503,33 +496,8 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
           <div className="space-y-4">
             <Label className="mb-2 block">Diensten</Label>
             <p className="mb-2 text-xs text-muted-foreground">
-              Beveiligingsdiensten worden vrijgegeven op basis van vergunning: {form.wpbr_license_type ? `${form.wpbr_license_type} - ${getWpbrLicenseLabel(form.wpbr_license_type)}` : "geen WPBR-vergunningstype gekozen"}. Kwalificatie- en techniekdiensten worden beschikbaar nadat er geldige medewerkerscertificaten en technische erkenningen zijn gekoppeld.
+              Beveiligingsdiensten worden vrijgegeven op basis van vergunning: {form.wpbr_license_type ? `${form.wpbr_license_type} - ${getWpbrLicenseLabel(form.wpbr_license_type)}` : "geen WPBR-vergunningstype gekozen"}. Techniekdiensten beheer je bij het bedrijfsprofiel onder Erkenningen.
             </p>
-            <div className="rounded-md border border-border bg-muted/20 p-3">
-              <Label className="text-xs font-semibold text-muted-foreground">Technische erkenningen</Label>
-              <p className="mt-1 text-xs text-muted-foreground">
-                BORG, VEB en CCV BMI/OAI zijn geen WPBR-vergunningen, maar technische erkenningen voor installatiewerk.
-              </p>
-              <div className="mt-3 flex flex-wrap gap-2">
-                {TEAMHUB_TECHNICAL_CERTIFICATION_OPTIONS.map(certification => {
-                  const selected = (form.teamhub_technical_certifications || []).includes(certification.key);
-                  return (
-                    <button
-                      type="button"
-                      key={certification.key}
-                      onClick={() => toggleTechnicalCertification(certification.key)}
-                      className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                        selected
-                          ? "border-primary bg-primary text-primary-foreground"
-                          : "border-border bg-background text-foreground hover:border-primary/40"
-                      }`}
-                    >
-                      {certification.label}
-                    </button>
-                  );
-                })}
-              </div>
-            </div>
             <div className="space-y-3">
               <p className="text-sm font-semibold text-foreground">Vergunning-gebonden diensten</p>
               {TEAMHUB_LICENSE_SERVICE_GROUPS.map(group => (

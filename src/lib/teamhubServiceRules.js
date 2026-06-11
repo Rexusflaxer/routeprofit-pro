@@ -94,7 +94,7 @@ const QUALIFICATION_REQUIREMENTS_BY_SERVICE = {
   },
 };
 
-export const TEAMHUB_TECHNICAL_CERTIFICATION_OPTIONS = [
+export const TECHNICAL_ACCREDITATION_OPTIONS = [
   { key: "borg_e", label: "BORG-E elektronische inbraakbeveiliging" },
   { key: "borg_b", label: "BORG-B bouwkundige inbraakbeveiliging" },
   { key: "veb_4", label: "VEB 4 kwaliteitsregeling" },
@@ -104,6 +104,8 @@ export const TEAMHUB_TECHNICAL_CERTIFICATION_OPTIONS = [
   { key: "ccv_oai", label: "CCV Ontruimingsalarminstallaties" },
   { key: "other_technical", label: "Overige technische erkenning" },
 ];
+
+export const TEAMHUB_TECHNICAL_CERTIFICATION_OPTIONS = TECHNICAL_ACCREDITATION_OPTIONS;
 
 const TECHNICAL_CERTIFICATION_REQUIREMENTS_BY_SERVICE = {
   security_installation: {
@@ -192,6 +194,19 @@ function hasRequiredTechnicalCertification(serviceKey, technicalCertificationTyp
   const requirement = TECHNICAL_CERTIFICATION_REQUIREMENTS_BY_SERVICE[serviceKey];
   if (!requirement) return true;
   return requirement.types.some(type => (technicalCertificationTypes || []).includes(type));
+}
+
+export function getActiveTeamhubTechnicalCertificationTypes(accreditations = [], legacyCertificationTypes = [], referenceDate = null) {
+  const today = referenceDate || new Date().toISOString().split("T")[0];
+  const activeAccreditationTypes = (accreditations || [])
+    .filter(accreditation => accreditation?.category === "technical_certification")
+    .filter(accreditation => accreditation.status !== "suspended" && accreditation.status !== "expired")
+    .filter(accreditation => !accreditation.valid_from || accreditation.valid_from <= today)
+    .filter(accreditation => !accreditation.valid_until || accreditation.valid_until >= today)
+    .map(accreditation => accreditation.accreditation_type)
+    .filter(Boolean);
+
+  return [...new Set([...(legacyCertificationTypes || []), ...activeAccreditationTypes])];
 }
 
 export function isTechnicalControlledTeamhubService(serviceKey) {
