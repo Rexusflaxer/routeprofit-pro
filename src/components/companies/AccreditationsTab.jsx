@@ -520,33 +520,53 @@ export default function AccreditationsTab({ companyId, company }) {
                     ) : (
                       (() => {
                         const knownType = isKnownType(form.category, form.accreditation_type);
+                        const isEditing = !!editingId;
                         return (
                           <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
                             <div className="space-y-1">
-                              <Label>Categorie</Label>
-                              <Select value={form.category} onValueChange={setCategory}>
-                                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                <SelectContent>{CATEGORY_OPTIONS.map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
-                              </Select>
+                              <Label className={isEditing ? "text-muted-foreground" : ""}>Categorie</Label>
+                              {isEditing ? (
+                                <div className="h-8 flex items-center px-3 rounded-md bg-muted/50 border border-border text-sm text-muted-foreground">
+                                  {categoryLabel(form.category)}
+                                </div>
+                              ) : (
+                                <Select value={form.category} onValueChange={setCategory}>
+                                  <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                  <SelectContent>{CATEGORY_OPTIONS.map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
+                                </Select>
+                              )}
                             </div>
                             <div className="space-y-1 lg:col-span-2">
-                              <Label>Type</Label>
-                              <Select value={form.accreditation_type} onValueChange={setType}>
-                                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                <SelectContent>{(OPTIONS_BY_CATEGORY[form.category] || OTHER_OPTIONS).map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
-                              </Select>
+                              <Label className={isEditing ? "text-muted-foreground" : ""}>Type</Label>
+                              {isEditing ? (
+                                <div className="h-8 flex items-center px-3 rounded-md bg-muted/50 border border-border text-sm text-muted-foreground">
+                                  {optionLabel(form.category, form.accreditation_type) || form.name}
+                                </div>
+                              ) : (
+                                <Select value={form.accreditation_type} onValueChange={setType}>
+                                  <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                  <SelectContent>{(OPTIONS_BY_CATEGORY[form.category] || OTHER_OPTIONS).map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
+                                </Select>
+                              )}
                             </div>
-                            {!knownType && (
+                            {!knownType && !isEditing && (
                               <div className="space-y-1 lg:col-span-2">
                                 <Label>Naam</Label>
                                 <Input className={`h-8 ${errors.name ? "border-destructive" : ""}`} value={form.name} onChange={e => { set("name", e.target.value); setErrors(er => ({ ...er, name: undefined })); }} />
                                 {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
                               </div>
                             )}
-                            {!knownType && (
+                            {!knownType && !isEditing && (
                               <div className="space-y-1">
                                 <Label>Uitgever / organisatie</Label>
                                 <Input className="h-8" value={form.issuer} onChange={e => set("issuer", e.target.value)} />
+                              </div>
+                            )}
+                            {!knownType && isEditing && (
+                              <div className="space-y-1 lg:col-span-2">
+                                <Label>Naam</Label>
+                                <Input className={`h-8 ${errors.name ? "border-destructive" : ""}`} value={form.name} onChange={e => { set("name", e.target.value); setErrors(er => ({ ...er, name: undefined })); }} />
+                                {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
                               </div>
                             )}
                             <div className="space-y-1">
