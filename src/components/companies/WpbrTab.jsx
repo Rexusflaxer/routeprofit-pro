@@ -454,24 +454,17 @@ export default function WpbrTab({ companyId, company }) {
       </AnimatePresence>
 
       {/* Table header */}
-      <div className="flex items-center justify-between px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <div className="flex items-center gap-3">
-          <span className="w-10 shrink-0">Type</span>
-          <span className="w-24 shrink-0">Nummer</span>
-          <span className="w-28 shrink-0">Status</span>
-          <span className="flex-1">Geldigheid</span>
-          {showArchive && <Badge className="ml-2 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
-        </div>
+      <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="w-10 shrink-0">Type</span>
+        <span className="w-24 shrink-0">Nummer</span>
+        <span className="w-28 shrink-0">Status</span>
+        <span className="flex-1 min-w-0">Geldigheid</span>
+        {showArchive && <Badge className="mr-2 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
         {!showWizard && !deleteId && (
-          <div className="flex items-center gap-2">
+          <div className="shrink-0 flex items-center gap-2">
             {showArchive ? (
               <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setShowArchive(false)}
-                  className="h-7 px-2 text-xs font-medium normal-case tracking-normal"
-                >
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
                   <ChevronLeft className="w-3 h-3 mr-1" /> Actieve vergunningen
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(true); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
@@ -480,12 +473,7 @@ export default function WpbrTab({ companyId, company }) {
               </>
             ) : (
               <>
-                <Button
-                  size="sm"
-                  variant="outline"
-                  onClick={() => setShowArchive(true)}
-                  className="h-7 px-2 text-xs font-medium normal-case tracking-normal"
-                >
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
                   <Archive className="w-3 h-3 mr-1" /> Archief {archivedLicenses.length > 0 ? `(${archivedLicenses.length})` : ""}
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(false); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
@@ -590,7 +578,7 @@ function LicenseCard({ license, onEdit, onDelete, onRenew, muted }) {
           {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
           {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
         </div>
-        <div className="flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+        <div className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
           {onEdit && (
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} title="Bewerken">
               <Edit className="w-3.5 h-3.5" />

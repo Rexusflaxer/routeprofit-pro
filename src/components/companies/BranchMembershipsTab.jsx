@@ -806,11 +806,11 @@ export default function BranchMembershipsTab({ companyId }) {
       </AnimatePresence>
 
       <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="flex-1">Branchevereniging</span>
+        <span className="flex-1 min-w-0">Branchevereniging</span>
         <span className="w-36 shrink-0">Lidnummer</span>
         <span className="w-36 shrink-0">Lid sinds</span>
         <span className="w-80 shrink-0">Categorieen</span>
-        <div className="w-44 shrink-0 flex justify-end">
+        <div className="w-24 shrink-0 flex justify-end">
           {!showWizard && !deleteId && (
             <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
               <Plus className="w-3 h-3 mr-1" /> Nieuwe vereniging
