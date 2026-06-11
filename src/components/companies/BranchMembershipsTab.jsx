@@ -18,21 +18,49 @@ const ASSOCIATION_OPTIONS = [
   {
     key: "nederlandse_veiligheidsbranche",
     label: "Nederlandse Veiligheidsbranche",
-    desc: "Brancheorganisatie voor particuliere beveiligingsbedrijven",
+    shortLabel: "NVB",
+    desc: "Particuliere beveiliging, EHB, GWT, PAC en POB",
+    logoUrl: "https://d1p3jfjj2ztqji.cloudfront.net/wp-content/uploads/2019/12/06115338/logo-nvb-300x136.jpg",
+  },
+  {
+    key: "vereniging_veiligheidsdomein_nederland",
+    label: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+    shortLabel: "VVNL",
+    desc: "Reguliere beveiliging, horeca/evenementen, verkeersregelaars, brandwachten en alarmdiensten",
+    logoUrl: "https://veiligheidsdomein.nl/wp-content/uploads/2022/07/VVNL_Logo_Blauw_L-300x162.png",
   },
   {
     key: "veb",
     label: "Vereniging Erkende Beveiligingsbedrijven (VEB)",
-    desc: "Branchevereniging voor erkende beveiligingsbedrijven",
+    shortLabel: "VEB",
+    desc: "Technische beveiligingsbedrijven, particuliere beveiligingsorganisaties en PAC",
+    logoUrl: "https://veb.nl/wp-content/uploads/2024/10/VEB-Logo.png",
+  },
+  {
+    key: "bpob",
+    label: "Branchevereniging Particuliere Onderzoeksbureaus (BPOB)",
+    shortLabel: "BPOB",
+    desc: "Particuliere onderzoeksbureaus en recherchewerkzaamheden",
+    logoUrl: "https://bpob.nl/wp-content/uploads/2024/10/BPOB_afkorting_Kleur_versie_1-300x139.png",
   },
   {
     key: "techniek_nederland",
     label: "Techniek Nederland",
-    desc: "Brancheorganisatie voor technische installatiebedrijven",
+    shortLabel: "TN",
+    desc: "Brand- en beveiligingstechniek en technische installatiebedrijven",
+    logoUrl: "https://www.technieknederland.nl/media/quvnnxsy/logo-techniek-nederland.svg",
+  },
+  {
+    key: "nvb_bhv",
+    label: "Nederlandse Vereniging Bedrijfshulpverlening (NVB-BHV)",
+    shortLabel: "BHV",
+    desc: "BHV-organisaties, BHV-opleiders en BHV-instructeurs",
+    logoUrl: "https://nvb-bhv.nl/wp-content/themes/nvb/img/nvb_logo.svg",
   },
   {
     key: "other",
     label: "Andere branchevereniging",
+    shortLabel: "Anders",
     desc: "Gebruik dit voor een eigen vereniging of niche-brancheorganisatie",
   },
 ];
@@ -59,8 +87,43 @@ function associationLabel(value) {
   return ASSOCIATION_OPTIONS.find(option => option.key === value)?.label || value || "Branchevereniging";
 }
 
+function associationMeta(value) {
+  return ASSOCIATION_OPTIONS.find(option => option.key === value) || {
+    key: value || "other",
+    label: value || "Branchevereniging",
+    shortLabel: "Org",
+    desc: "",
+  };
+}
+
 function effectiveAssociationName(membership) {
   return membership.association_name || associationLabel(membership.association_type);
+}
+
+function AssociationLogo({ associationType, className = "" }) {
+  const [failed, setFailed] = useState(false);
+  const association = associationMeta(associationType);
+  const fallback = association.shortLabel || association.label?.slice(0, 3) || "Org";
+
+  if (!association.logoUrl || failed) {
+    return (
+      <div className={`flex items-center justify-center rounded-md border border-border bg-muted text-[10px] font-semibold text-muted-foreground ${className}`}>
+        {fallback}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex items-center justify-center rounded-md border border-border bg-white p-1 ${className}`}>
+      <img
+        src={association.logoUrl}
+        alt={`${association.label} logo`}
+        className="max-h-full max-w-full object-contain"
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
 }
 
 function isExpired(membership) {
@@ -357,7 +420,8 @@ export default function BranchMembershipsTab({ companyId, company }) {
                             form.association_type === association.key ? "border-primary bg-accent" : "border-border bg-card"
                           }`}
                         >
-                          <div className="min-w-0">
+                          <AssociationLogo associationType={association.key} className="mr-3 h-12 w-20 shrink-0" />
+                          <div className="min-w-0 flex-1">
                             <span className="text-sm font-semibold text-foreground">{association.label}</span>
                             <span className="block text-xs text-muted-foreground mt-0.5">{association.desc}</span>
                           </div>
@@ -465,11 +529,16 @@ export default function BranchMembershipsTab({ companyId, company }) {
                     )}
 
                     <div className="rounded-lg border border-border bg-card p-4 text-sm">
-                      <span className="text-muted-foreground block mb-1">Branchevereniging</span>
-                      <span className="font-medium text-foreground">{form.association_name || associationLabel(form.association_type)}</span>
-                      {(form.membership_number || form.membership_type) && (
-                        <p className="mt-1 text-xs text-muted-foreground">{[form.membership_number && `Lidnummer ${form.membership_number}`, form.membership_type].filter(Boolean).join(" - ")}</p>
-                      )}
+                      <div className="flex items-center gap-3">
+                        <AssociationLogo associationType={form.association_type} className="h-12 w-20 shrink-0" />
+                        <div className="min-w-0">
+                          <span className="text-muted-foreground block mb-1">Branchevereniging</span>
+                          <span className="font-medium text-foreground">{form.association_name || associationLabel(form.association_type)}</span>
+                          {(form.membership_number || form.membership_type) && (
+                            <p className="mt-1 text-xs text-muted-foreground">{[form.membership_number && `Lidnummer ${form.membership_number}`, form.membership_type].filter(Boolean).join(" - ")}</p>
+                          )}
+                        </div>
+                      </div>
                     </div>
 
                     <div className="flex justify-between pt-1">
@@ -510,11 +579,14 @@ export default function BranchMembershipsTab({ companyId, company }) {
       <div className="divide-y divide-border">
         {memberships.map(membership => (
           <div key={membership.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
-            <div className="min-w-0 flex-1">
-              <p className="truncate text-sm font-medium text-foreground">{effectiveAssociationName(membership)}</p>
-              <p className="truncate text-xs text-muted-foreground">
-                {[membership.membership_type, membership.public_profile_url].filter(Boolean).join(" - ") || associationLabel(membership.association_type)}
-              </p>
+            <div className="flex min-w-0 flex-1 items-center gap-3">
+              <AssociationLogo associationType={membership.association_type} className="h-10 w-16 shrink-0" />
+              <div className="min-w-0">
+                <p className="truncate text-sm font-medium text-foreground">{effectiveAssociationName(membership)}</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {[membership.membership_type, membership.public_profile_url].filter(Boolean).join(" - ") || associationLabel(membership.association_type)}
+                </p>
+              </div>
             </div>
             <div className="w-28 shrink-0"><StatusBadge membership={membership} /></div>
             <div className="w-40 shrink-0 text-sm text-muted-foreground">{membership.membership_number || "-"}</div>

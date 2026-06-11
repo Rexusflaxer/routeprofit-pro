@@ -10,8 +10,11 @@
       "type": "string",
       "enum": [
         "nederlandse_veiligheidsbranche",
+        "vereniging_veiligheidsdomein_nederland",
         "veb",
+        "bpob",
         "techniek_nederland",
+        "nvb_bhv",
         "other"
       ],
       "description": "Type branchevereniging"
