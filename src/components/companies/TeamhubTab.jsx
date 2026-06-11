@@ -354,30 +354,25 @@ export default function TeamhubTab({ companyId, company }) {
           </div>
 
           <div className="overflow-hidden rounded-md border border-border">
-            <div className="border-b border-border bg-muted/40 px-3 py-2">
+            <button
+              type="button"
+              onClick={() => setExpandedGroups(prev => ({ ...prev, __qualifications: !prev.__qualifications }))}
+              className="flex w-full items-center justify-between bg-muted/40 px-3 py-2 text-left hover:bg-muted/60 transition-colors"
+            >
               <p className="text-xs font-semibold text-muted-foreground">Kwalificatie-gebonden diensten</p>
-            </div>
-            <div>
-              <button
-                type="button"
-                onClick={() => setExpandedGroups(prev => ({ ...prev, __qualifications: !prev.__qualifications }))}
-                className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted/30 transition-colors"
-              >
-                <span className="text-xs font-medium text-foreground">Kwalificatie-gebonden diensten</span>
-                <div className="flex items-center gap-2">
-                  {(() => {
-                    const cnt = getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).filter(a => (form.teamhub_service_types || []).includes(a.key)).length;
-                    return cnt > 0 ? <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">{cnt}</span> : null;
-                  })()}
-                  <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${expandedGroups.__qualifications ? "rotate-180" : ""}`} />
-                </div>
-              </button>
-              {expandedGroups.__qualifications && (
-                <div className="flex flex-wrap gap-2 border-t border-border/50 bg-muted/10 px-3 py-3">
-                  {getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).map(renderServiceOption)}
-                </div>
-              )}
-            </div>
+              <div className="flex items-center gap-2">
+                {(() => {
+                  const cnt = getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).filter(a => (form.teamhub_service_types || []).includes(a.key)).length;
+                  return cnt > 0 ? <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">{cnt}</span> : null;
+                })()}
+                <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${expandedGroups.__qualifications ? "rotate-180" : ""}`} />
+              </div>
+            </button>
+            {expandedGroups.__qualifications && (
+              <div className="flex flex-wrap gap-2 border-t border-border/50 bg-muted/10 px-3 py-3">
+                {getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).map(renderServiceOption)}
+              </div>
+            )}
           </div>
           </div>
         </div>
