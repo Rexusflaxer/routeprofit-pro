@@ -164,23 +164,6 @@ export default function TeamhubTab({ companyId, company }) {
     setForm((current) => ({ ...current, [field]: value }));
   };
 
-  const resetTeamhub = () => {
-    const emptyForm = {
-      teamhub_enabled: false,
-      teamhub_configured_at: null,
-      teamhub_intro: "",
-      teamhub_contact_name: "",
-      teamhub_contact_email: "",
-      teamhub_contact_phone: "",
-      teamhub_public_location_id: null,
-      teamhub_service_types: [],
-      teamhub_regions: []
-    };
-    setForm(emptyForm);
-    saveMutation.mutate(emptyForm);
-    setShowWizard(true);
-  };
-
   const save = () => {
     if (teamhubReferencesLoading) return;
     const publicLocationId = form.teamhub_public_location_id && selectableTeamhubLocationIds.has(form.teamhub_public_location_id) ?
@@ -228,14 +211,7 @@ export default function TeamhubTab({ companyId, company }) {
         </div>
       </div>
 
-      <div className="p-4 space-y-4">
-        {hasTeamhubConfiguration(company) && !showWizard && (
-          <div className="text-xs">
-            <button onClick={resetTeamhub} className="text-destructive hover:text-destructive/80 font-medium">
-              LOQ Teamhub configuratie verwijderen
-            </button>
-          </div>
-        )}
+      <div className="p-4">
         {showWizard ? (
           <TeamhubWizard
             form={form}
