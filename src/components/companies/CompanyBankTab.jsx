@@ -239,11 +239,19 @@ export default function CompanyBankTab({ companies }) {
     setShowWizard(true);
   };
 
+  const formatIban = (value) => {
+    const cleaned = value.replace(/\s/g, "").toUpperCase();
+    const chunks = cleaned.match(/.{1,4}/g) || [];
+    return chunks.join(" ");
+  };
+
   const validateStep2 = () => {
     const e = {};
-    const ibanPattern = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{1,30}$/;
-    if (!form.iban.trim()) e.iban = "Verplicht";
-    else if (!ibanPattern.test(form.iban.replace(/\s/g, ""))) e.iban = "Ongeldig IBAN formaat";
+    const cleanIban = form.iban.replace(/\s/g, "");
+    const ibanPattern = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{18,34}$/;
+    if (!cleanIban) e.iban = "Verplicht";
+    else if (cleanIban.length < 15) e.iban = "IBAN te kort";
+    else if (!ibanPattern.test(cleanIban)) e.iban = "Ongeldig IBAN formaat";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -362,7 +370,7 @@ export default function CompanyBankTab({ companies }) {
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="col-span-2 space-y-1">
                           <Label>IBAN *</Label>
-                          <Input value={form.iban} onChange={(e) => { set("iban", e.target.value); setErrors((er) => ({ ...er, iban: undefined })); }} placeholder="NL00 BANK 0000 0000 00" className={errors.iban ? "border-destructive" : ""} />
+                          <Input value={form.iban} onChange={(e) => { set("iban", formatIban(e.target.value)); setErrors((er) => ({ ...er, iban: undefined })); }} placeholder="NL91 ABNA 0417 1643 00" className={errors.iban ? "border-destructive" : ""} />
                           {errors.iban && <p className="text-xs text-destructive">{errors.iban}</p>}
                         </div>
                         <div className="space-y-1">
