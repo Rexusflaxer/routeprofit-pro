@@ -4,7 +4,6 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { AlertTriangle, Archive, Check, ChevronLeft, ChevronRight, Edit, Eye, FileText, Plus, RefreshCw, Trash2, Upload, X } from "lucide-react";
@@ -14,6 +13,8 @@ import { TECHNICAL_ACCREDITATION_OPTIONS } from "@/lib/teamhubServiceRules";
 import { updateManagedFileSource, uploadManagedFile } from "@/lib/managedFiles";
 
 const DELETE_PASSWORD = "verwijder";
+// Header and rows share this grid so status, validity, and actions cannot drift out of alignment.
+const ACCREDITATION_TABLE_GRID = "grid grid-cols-[minmax(160px,180px)_minmax(260px,1fr)_minmax(112px,132px)_minmax(160px,190px)_minmax(240px,360px)] gap-4";
 
 const CATEGORY_OPTIONS = [
   { key: "technical_certification", label: "Technische erkenning" },
@@ -144,6 +145,10 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
   const [contextMenu, setContextMenu] = useState(null);
   const contextRef = useRef(null);
   const needsAction = isActionItem(item);
+  const categoryText = categoryLabel(item.category);
+  const titleText = item.name || optionLabel(item.category, item.accreditation_type);
+  const subtitleText = [item.issuer, item.certificate_number].filter(Boolean).join(" - ") || optionLabel(item.category, item.accreditation_type);
+  const validityText = [item.valid_from && `Vanaf: ${item.valid_from}`, item.valid_until && `Tot: ${item.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum";
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -167,23 +172,23 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
 
   return (
     <div
-      className={`relative flex items-center px-4 py-3 group transition-colors ${isClickable ? "cursor-pointer hover:bg-accent/40" : "hover:bg-accent/30"}`}
+      className={`relative ${ACCREDITATION_TABLE_GRID} items-center px-4 py-3 group transition-colors ${isClickable ? "cursor-pointer hover:bg-accent/40" : "hover:bg-accent/30"}`}
       onClick={handleRowClick}
     >
-      <div className="w-[140px] shrink-0">
-        <Badge variant="secondary" className="text-xs">{categoryLabel(item.category)}</Badge>
+      <div className="min-w-0">
+        <Badge variant="secondary" className="max-w-full text-xs">
+          <span className="truncate">{categoryText}</span>
+        </Badge>
       </div>
-      <div className="flex-1 min-w-0 pr-4">
-        <p className="truncate text-sm font-medium text-foreground">{item.name || optionLabel(item.category, item.accreditation_type)}</p>
-        <p className="truncate text-xs text-muted-foreground">
-          {[item.issuer, item.certificate_number].filter(Boolean).join(" - ") || optionLabel(item.category, item.accreditation_type)}
-        </p>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-medium text-foreground">{titleText}</p>
+        <p className="truncate text-xs text-muted-foreground">{subtitleText}</p>
       </div>
-      <div className="w-[110px] shrink-0">{statusBadge(item)}</div>
-      <div className="w-[160px] shrink-0 text-xs text-muted-foreground">
-        {[item.valid_from && `Vanaf: ${item.valid_from}`, item.valid_until && `Tot: ${item.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum"}
+      <div className="min-w-0">{statusBadge(item)}</div>
+      <div className="min-w-0 truncate text-xs text-muted-foreground" title={validityText}>
+        {validityText}
       </div>
-      <div className="w-[96px] shrink-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
+      <div className="min-w-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
         {item.document_file_url && (
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onPreview(item)} title="Document bekijken"><Eye className="h-3.5 w-3.5" /></Button>
         )}
@@ -586,31 +591,29 @@ export default function AccreditationsTab({ companyId, company }) {
         )}
       </AnimatePresence>
 
-      <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="w-[140px] shrink-0">Categorie</span>
-        <span className="flex-1 min-w-0 pr-4">Erkenning</span>
-        <span className="w-[110px] shrink-0">Status</span>
-        <span className="w-[160px] shrink-0">Geldigheid</span>
-        <div className="shrink-0 flex items-center gap-2">
+      <div className={`${ACCREDITATION_TABLE_GRID} items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+        <span className="min-w-0">Categorie</span>
+        <span className="min-w-0">Erkenning</span>
+        <span className="min-w-0">Status</span>
+        <span className="min-w-0">Geldigheid</span>
+        <div className="min-w-0 flex flex-wrap items-center justify-end gap-2">
           {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse mr-1">Archief</Badge>}
-        </div>
-        <div className="shrink-0 flex items-center gap-2">
           {!showWizard && !deleteId && (
             showArchive ? (
               <>
-                <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <ChevronLeft className="w-3 h-3 mr-1" /> Actieve erkenningen
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(true); setWizardStep(1); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(true); setWizardStep(1); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <Plus className="w-3 h-3 mr-1" /> Voeg oude erkenning in archief
                 </Button>
               </>
             ) : (
               <>
-                <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <Archive className="w-3 h-3 mr-1" /> Archief {archivedAccreditations.length > 0 ? `(${archivedAccreditations.length})` : ""}
                 </Button>
-                <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <Plus className="w-3 h-3 mr-1" /> Nieuwe erkenning
                 </Button>
               </>
