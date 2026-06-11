@@ -11,7 +11,9 @@ import { Switch } from "@/components/ui/switch";
 import { Search, Upload, X, MapPin } from "lucide-react";
 import { createManagedUploadSession, uploadManagedFile } from "@/lib/managedFiles";
 import {
-  TEAMHUB_SERVICE_OPTIONS,
+  TEAMHUB_LICENSE_SERVICE_GROUPS,
+  TEAMHUB_QUALIFICATION_SERVICE_KEYS,
+  getTeamhubServicesByKeys,
   getTeamhubServiceDisabledReason,
   getWpbrLicenseLabel,
   isTeamhubServiceAllowedForLicense,
@@ -179,6 +181,29 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
   });
 
   const holdingOptions = companies.filter(c => c.id !== company?.id && c.company_role === "holding");
+  const renderTeamhubServiceOption = (activity) => {
+    const allowed = isTeamhubServiceAllowedForLicense(form.wpbr_license_type, activity.key);
+    const disabledReason = getTeamhubServiceDisabledReason(form.wpbr_license_type, activity.key);
+
+    return (
+      <label
+        key={activity.key}
+        title={disabledReason}
+        className={`flex min-h-[56px] items-start gap-2 text-sm p-2 rounded border border-border ${allowed ? "cursor-pointer hover:bg-muted/50" : "cursor-not-allowed opacity-55"}`}
+      >
+        <Checkbox
+          checked={(form.teamhub_service_types || []).includes(activity.key)}
+          disabled={!allowed}
+          onCheckedChange={() => toggleTeamhubService(activity.key)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="block">{activity.label}</span>
+          {!allowed && <span className="block text-[11px] leading-4 text-muted-foreground">{disabledReason}</span>}
+        </span>
+      </label>
+    );
+  };
 
   return (
     <div className="space-y-4">
@@ -462,34 +487,30 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
             </div>
           </div>
 
-          <div>
+          <div className="space-y-4">
             <Label className="mb-2 block">Diensten</Label>
             <p className="mb-2 text-xs text-muted-foreground">
               Beveiligingsdiensten worden vrijgegeven op basis van vergunning: {form.wpbr_license_type ? `${form.wpbr_license_type} - ${getWpbrLicenseLabel(form.wpbr_license_type)}` : "geen WPBR-vergunningstype gekozen"}. Kwalificatiediensten worden beschikbaar nadat er geldige medewerkerscertificaten zijn gekoppeld.
             </p>
-            <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {TEAMHUB_SERVICE_OPTIONS.map(a => {
-                const allowed = isTeamhubServiceAllowedForLicense(form.wpbr_license_type, a.key);
-                const disabledReason = getTeamhubServiceDisabledReason(form.wpbr_license_type, a.key);
-                return (
-                <label
-                  key={a.key}
-                  title={disabledReason}
-                  className={`flex items-start gap-2 text-sm p-2 rounded border border-border ${allowed ? "cursor-pointer hover:bg-muted/50" : "cursor-not-allowed opacity-55"}`}
-                >
-                  <Checkbox
-                    checked={(form.teamhub_service_types || []).includes(a.key)}
-                    disabled={!allowed}
-                    onCheckedChange={() => toggleTeamhubService(a.key)}
-                    className="mt-0.5"
-                  />
-                  <span>
-                    <span className="block">{a.label}</span>
-                    {!allowed && <span className="block text-[11px] leading-4 text-muted-foreground">{disabledReason}</span>}
-                  </span>
-                </label>
-                );
-              })}
+            <div className="space-y-3">
+              <p className="text-sm font-semibold text-foreground">Vergunning-gebonden diensten</p>
+              {TEAMHUB_LICENSE_SERVICE_GROUPS.map(group => (
+                <div key={group.key} className="overflow-hidden rounded-md border border-border bg-muted/20">
+                  <div className="border-b border-border bg-muted/40 px-3 py-2">
+                    <p className="text-xs font-semibold text-muted-foreground">{group.title}</p>
+                  </div>
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 p-3">
+                    {getTeamhubServicesByKeys(group.serviceKeys).map(renderTeamhubServiceOption)}
+                  </div>
+                </div>
+              ))}
+            </div>
+
+            <div className="space-y-3 border-t border-border pt-4">
+              <p className="text-sm font-semibold text-foreground">Kwalificatie-gebonden diensten</p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                {getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).map(renderTeamhubServiceOption)}
+              </div>
             </div>
           </div>
 

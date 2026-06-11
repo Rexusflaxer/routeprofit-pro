@@ -44,7 +44,7 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
         )}
 
         {active === "locations" && (
-          <LocationsTab companies={companies} companyId={companyId} />
+          <LocationsTab companies={companies} companyId={companyId} company={company} />
         )}
 
         {active === "bank" && (

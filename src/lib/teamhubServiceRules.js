@@ -65,8 +65,56 @@ const QUALIFICATION_REQUIREMENTS_BY_SERVICE = {
   },
 };
 
+export const TEAMHUB_LICENSE_SERVICE_GROUPS = [
+  {
+    key: "ND",
+    title: "ND - Particuliere beveiligingsorganisatie",
+    serviceKeys: ALLOWED_SERVICES_BY_WPBR_TYPE.ND,
+  },
+  {
+    key: "HND",
+    title: "HND - Horecabeveiliging voor derden",
+    serviceKeys: ALLOWED_SERVICES_BY_WPBR_TYPE.HND,
+  },
+  {
+    key: "PAC",
+    title: "PAC - Particuliere alarmcentrale",
+    serviceKeys: ALLOWED_SERVICES_BY_WPBR_TYPE.PAC,
+  },
+  {
+    key: "VTC",
+    title: "VTC - Video toezicht centrale",
+    serviceKeys: ALLOWED_SERVICES_BY_WPBR_TYPE.VTC,
+  },
+  {
+    key: "PGW",
+    title: "PGW - Geld- en waardentransport",
+    serviceKeys: ALLOWED_SERVICES_BY_WPBR_TYPE.PGW,
+  },
+  {
+    key: "POB",
+    title: "POB - Particulier recherchebureau",
+    serviceKeys: ALLOWED_SERVICES_BY_WPBR_TYPE.POB,
+  },
+  {
+    key: "other",
+    title: "Overige vergunningen / handmatig beoordelen",
+    serviceKeys: ["security_installation", "other"],
+  },
+];
+
+export const TEAMHUB_QUALIFICATION_SERVICE_KEYS = Object.keys(QUALIFICATION_REQUIREMENTS_BY_SERVICE);
+
+const TEAMHUB_SERVICE_OPTIONS_BY_KEY = Object.fromEntries(
+  TEAMHUB_SERVICE_OPTIONS.map(service => [service.key, service])
+);
+
 export function getWpbrLicenseLabel(licenseType) {
   return WPBR_LICENSE_LABELS[licenseType] || licenseType || "Geen WPBR-vergunning";
+}
+
+export function getTeamhubServicesByKeys(serviceKeys = []) {
+  return (serviceKeys || []).map(serviceKey => TEAMHUB_SERVICE_OPTIONS_BY_KEY[serviceKey]).filter(Boolean);
 }
 
 export function getAllowedTeamhubServiceTypes(licenseType, qualifiedServiceTypes = []) {

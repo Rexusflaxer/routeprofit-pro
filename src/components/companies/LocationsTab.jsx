@@ -8,6 +8,11 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Trash2, Edit, MapPin, Check, X, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
 import LocationMapDialog from "./LocationMapDialog";
+import {
+  getCompanyLocationAddressLabel,
+  getCompanyProfileLocations,
+  hasCompanyLocationAssignment,
+} from "@/lib/companyLocationScope";
 
 const LOCATION_TYPES = {
   head_office: "Hoofdkantoor", branch: "Vestiging", warehouse: "Magazijn", other: "Overig",
@@ -45,7 +50,7 @@ function DeleteConfirmBar({ label, onConfirm, onCancel, isPending }) {
   );
 }
 
-export default function LocationsTab({ companies, companyId = null }) {
+export default function LocationsTab({ companies, companyId = null, company = null }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_LOC);
@@ -58,20 +63,28 @@ export default function LocationsTab({ companies, companyId = null }) {
 
   const { data: locations = [] } = useQuery({ queryKey: ["company-locations"], queryFn: () => base44.entities.CompanyLocation.list() });
   const { data: assignments = [] } = useQuery({ queryKey: ["company-location-assignments"], queryFn: () => base44.entities.CompanyLocationAssignment.list() });
+  const profileLocations = getCompanyProfileLocations({ companyId, company, locations, assignments });
+
+  const ensureCompanyLocationAssignment = async (locationId) => {
+    if (!companyId || !locationId || hasCompanyLocationAssignment(assignments, companyId, locationId)) return;
+    await base44.entities.CompanyLocationAssignment.create({
+      company_id: companyId,
+      location_id: locationId,
+      usage_type: "operational_branch",
+      is_primary: false,
+    });
+  };
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
-      if (editingId) return base44.entities.CompanyLocation.update(editingId, data);
+      if (editingId) {
+        const updated = await base44.entities.CompanyLocation.update(editingId, data);
+        await ensureCompanyLocationAssignment(editingId);
+        return updated;
+      }
 
       const created = await base44.entities.CompanyLocation.create(data);
-      if (companyId && created?.id) {
-        await base44.entities.CompanyLocationAssignment.create({
-          company_id: companyId,
-          location_id: created.id,
-          usage_type: "operational_branch",
-          is_primary: false,
-        });
-      }
+      await ensureCompanyLocationAssignment(created?.id);
       return created;
     },
     onSuccess: () => {
@@ -113,7 +126,7 @@ export default function LocationsTab({ companies, companyId = null }) {
     return assignments.filter(a => a.location_id === locId).map(a => companies.find(c => c.id === a.company_id)).filter(Boolean);
   };
 
-  const locToDelete = locations.find(l => l.id === deleteId);
+  const locToDelete = profileLocations.find(l => l.id === deleteId);
 
   return (
     <div className="flex flex-col h-full">
@@ -176,12 +189,12 @@ export default function LocationsTab({ companies, companyId = null }) {
         )}
       </div>
 
-      {locations.length === 0 && !showForm && (
+      {profileLocations.length === 0 && !showForm && (
         <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen vestigingen aangemaakt.</p>
       )}
 
       <div className="divide-y divide-border">
-        {locations.map(loc => {
+        {profileLocations.map(loc => {
           const linkedCompanies = getCompaniesForLocation(loc.id);
           return (
             <div key={loc.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors cursor-pointer" onClick={() => setMapLocation(loc)}>
@@ -189,7 +202,7 @@ export default function LocationsTab({ companies, companyId = null }) {
                 <Badge variant="secondary" className="text-xs">{LOCATION_TYPES[loc.location_type] || loc.location_type}</Badge>
               </div>
               <div className="flex-1 min-w-0">
-                <p className="text-sm text-foreground">{[loc.street_name, loc.house_number, loc.postal_code, loc.city].filter(Boolean).join(" ")}</p>
+                <p className="text-sm text-foreground">{getCompanyLocationAddressLabel(loc)}</p>
                 {linkedCompanies.length > 0 && (
                   <div className="flex flex-wrap gap-1 mt-0.5">
                     {linkedCompanies.map(c => <span key={c.id} className="text-xs bg-muted rounded px-1.5 py-0.5 text-muted-foreground">{c.display_name}</span>)}

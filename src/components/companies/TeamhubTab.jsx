@@ -11,15 +11,22 @@ import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Building2, Check, Clock, Mail, Phone, Save, Users } from "lucide-react";
 import {
-  TEAMHUB_SERVICE_OPTIONS,
+  TEAMHUB_LICENSE_SERVICE_GROUPS,
+  TEAMHUB_QUALIFICATION_SERVICE_KEYS,
   getEffectiveWpbrLicenseType,
   getQualifiedTeamhubServiceTypes,
+  getTeamhubServicesByKeys,
   getTeamhubServiceDisabledReason,
   getWpbrLicenseLabel,
   isQualificationControlledTeamhubService,
   isTeamhubServiceAllowedForLicense,
   sanitizeTeamhubServiceTypes,
 } from "@/lib/teamhubServiceRules";
+import {
+  getCompanyLocationLabel,
+  getCompanyProfileLocations,
+  hasCompanyLocationAssignment,
+} from "@/lib/companyLocationScope";
 import TeamhubRegionPicker from "./TeamhubRegionPicker";
 
 function getInitialForm(company) {
@@ -68,8 +75,8 @@ export default function TeamhubTab({ companyId, company }) {
   });
 
   const { data: companyLocationAssignments = [], isLoading: companyLocationAssignmentsLoading } = useQuery({
-    queryKey: ["company-location-assignments", companyId],
-    queryFn: () => base44.entities.CompanyLocationAssignment.filter({ company_id: companyId }),
+    queryKey: ["company-location-assignments"],
+    queryFn: () => base44.entities.CompanyLocationAssignment.list(),
     enabled: !!companyId,
   });
 
@@ -88,17 +95,29 @@ export default function TeamhubTab({ companyId, company }) {
     assignments: personnelCompanyAssignments,
     qualifications: personnelQualifications,
   }), [companyId, personnel, personnelCompanyAssignments, personnelQualifications]);
-  const linkedTeamhubLocations = useMemo(() => {
-    const locationIds = new Set((companyLocationAssignments || []).map(assignment => assignment.location_id).filter(Boolean));
-    return (companyLocations || [])
-      .filter(location => location.is_active !== false)
-      .filter(location => locationIds.has(location.id))
+  const selectableTeamhubLocations = useMemo(() => {
+    return getCompanyProfileLocations({
+      companyId,
+      company,
+      locations: companyLocations,
+      assignments: companyLocationAssignments,
+    })
       .sort((a, b) => String(a.name || a.city || "").localeCompare(String(b.name || b.city || ""), "nl"));
-  }, [companyLocations, companyLocationAssignments]);
-  const linkedTeamhubLocationIds = useMemo(
-    () => new Set(linkedTeamhubLocations.map(location => location.id)),
-    [linkedTeamhubLocations]
+  }, [companyId, company, companyLocations, companyLocationAssignments]);
+  const selectableTeamhubLocationIds = useMemo(
+    () => new Set(selectableTeamhubLocations.map(location => location.id)),
+    [selectableTeamhubLocations]
   );
+
+  const ensurePublicLocationAssignment = async (locationId) => {
+    if (!companyId || !locationId || hasCompanyLocationAssignment(companyLocationAssignments, companyId, locationId)) return;
+    await base44.entities.CompanyLocationAssignment.create({
+      company_id: companyId,
+      location_id: locationId,
+      usage_type: "operational_branch",
+      is_primary: false,
+    });
+  };
 
   useEffect(() => {
     setForm(getInitialForm(company));
@@ -114,9 +133,13 @@ export default function TeamhubTab({ companyId, company }) {
   }, [effectiveWpbrLicenseType, qualificationDataLoading, qualifiedServiceTypes, company?.id]);
 
   const saveMutation = useMutation({
-    mutationFn: (payload) => base44.entities.Company.update(companyId, payload),
+    mutationFn: async (payload) => {
+      await ensurePublicLocationAssignment(payload.teamhub_public_location_id);
+      return base44.entities.Company.update(companyId, payload);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
+      queryClient.invalidateQueries({ queryKey: ["company-location-assignments"] });
     },
   });
 
@@ -135,18 +158,47 @@ export default function TeamhubTab({ companyId, company }) {
 
   const save = () => {
     if (teamhubReferencesLoading) return;
+    const publicLocationId = form.teamhub_public_location_id && selectableTeamhubLocationIds.has(form.teamhub_public_location_id)
+      ? form.teamhub_public_location_id
+      : null;
+
     saveMutation.mutate({
       teamhub_enabled: form.teamhub_enabled === true,
       teamhub_intro: form.teamhub_intro?.trim() || null,
       teamhub_contact_name: form.teamhub_contact_name?.trim() || null,
       teamhub_contact_email: form.teamhub_contact_email?.trim() || null,
       teamhub_contact_phone: form.teamhub_contact_phone?.trim() || null,
-      teamhub_public_location_id: form.teamhub_public_location_id && linkedTeamhubLocationIds.has(form.teamhub_public_location_id)
-        ? form.teamhub_public_location_id
-        : null,
+      teamhub_public_location_id: publicLocationId,
       teamhub_service_types: sanitizeTeamhubServiceTypes(effectiveWpbrLicenseType, form.teamhub_service_types || [], qualifiedServiceTypes),
       teamhub_regions: form.teamhub_regions || [],
     });
+  };
+
+  const renderServiceOption = (activity) => {
+    const qualificationCheckPending = qualificationDataLoading && isQualificationControlledTeamhubService(activity.key);
+    const allowed = !qualificationCheckPending && isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, activity.key, qualifiedServiceTypes);
+    const disabledReason = qualificationCheckPending
+      ? "Medewerkerscertificaten worden geladen."
+      : getTeamhubServiceDisabledReason(effectiveWpbrLicenseType, activity.key, qualifiedServiceTypes);
+
+    return (
+      <label
+        key={activity.key}
+        title={disabledReason}
+        className={`flex min-h-[56px] items-start gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm ${allowed ? "cursor-pointer hover:bg-accent/50" : "cursor-not-allowed opacity-55"}`}
+      >
+        <Checkbox
+          checked={(form.teamhub_service_types || []).includes(activity.key)}
+          disabled={!allowed}
+          onCheckedChange={() => toggleService(activity.key)}
+          className="mt-0.5"
+        />
+        <span>
+          <span className="block">{activity.label}</span>
+          {!allowed && <span className="block text-[11px] leading-4 text-muted-foreground">{disabledReason}</span>}
+        </span>
+      </label>
+    );
   };
 
   return (
@@ -250,9 +302,9 @@ export default function TeamhubTab({ companyId, company }) {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="none">Geen vestiging tonen</SelectItem>
-              {linkedTeamhubLocations.map(location => (
+              {selectableTeamhubLocations.map(location => (
                 <SelectItem key={location.id} value={location.id}>
-                  {location.name || [location.street_name, location.house_number, location.city].filter(Boolean).join(" ") || "Vestiging"}
+                  {getCompanyLocationLabel(location)}
                 </SelectItem>
               ))}
             </SelectContent>
@@ -262,37 +314,31 @@ export default function TeamhubTab({ companyId, company }) {
           </p>
         </div>
 
-        <div className="space-y-3">
+        <div className="space-y-4">
           <Label>Diensten</Label>
           <p className="text-xs text-muted-foreground">
             Beveiligingsdiensten worden vrijgegeven op basis van vergunning: {effectiveWpbrLicenseType ? `${effectiveWpbrLicenseType} - ${getWpbrLicenseLabel(effectiveWpbrLicenseType)}` : "geen actieve WPBR-vergunning gevonden"}. Kwalificatiediensten worden vrijgegeven op basis van geldige medewerkerscertificaten.
           </p>
-          <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {TEAMHUB_SERVICE_OPTIONS.map(activity => {
-              const qualificationCheckPending = qualificationDataLoading && isQualificationControlledTeamhubService(activity.key);
-              const allowed = !qualificationCheckPending && isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, activity.key, qualifiedServiceTypes);
-              const disabledReason = qualificationCheckPending
-                ? "Medewerkerscertificaten worden geladen."
-                : getTeamhubServiceDisabledReason(effectiveWpbrLicenseType, activity.key, qualifiedServiceTypes);
-              return (
-              <label
-                key={activity.key}
-                title={disabledReason}
-                className={`flex items-start gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm ${allowed ? "cursor-pointer hover:bg-accent/50" : "cursor-not-allowed opacity-55"}`}
-              >
-                <Checkbox
-                  checked={(form.teamhub_service_types || []).includes(activity.key)}
-                  disabled={!allowed}
-                  onCheckedChange={() => toggleService(activity.key)}
-                  className="mt-0.5"
-                />
-                <span>
-                  <span className="block">{activity.label}</span>
-                  {!allowed && <span className="block text-[11px] leading-4 text-muted-foreground">{disabledReason}</span>}
-                </span>
-              </label>
-              );
-            })}
+
+          <div className="space-y-3">
+            <p className="text-sm font-semibold text-foreground">Vergunning-gebonden diensten</p>
+            {TEAMHUB_LICENSE_SERVICE_GROUPS.map(group => (
+              <div key={group.key} className="overflow-hidden rounded-md border border-border bg-muted/20">
+                <div className="border-b border-border bg-muted/40 px-3 py-2">
+                  <p className="text-xs font-semibold text-muted-foreground">{group.title}</p>
+                </div>
+                <div className="grid grid-cols-1 gap-2 p-3 sm:grid-cols-2 lg:grid-cols-3">
+                  {getTeamhubServicesByKeys(group.serviceKeys).map(renderServiceOption)}
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="space-y-3 border-t border-border pt-4">
+            <p className="text-sm font-semibold text-foreground">Kwalificatie-gebonden diensten</p>
+            <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+              {getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).map(renderServiceOption)}
+            </div>
           </div>
         </div>
 
