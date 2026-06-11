@@ -193,7 +193,7 @@ export default function Companies() {
                 <TableHead>Rol</TableHead>
                 <TableHead>Activiteiten</TableHead>
                 <TableHead>CAO</TableHead>
-                <TableHead>Status</TableHead>
+                <TableHead>LOQ Teamhub</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -235,9 +235,9 @@ export default function Companies() {
                     {company.default_cao_configuration_id ? getCaoName(company.default_cao_configuration_id) : "—"}
                   </TableCell>
                   <TableCell>
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${STATUS_COLORS[company.status] || "bg-slate-100 text-slate-600"}`}>
-                      {company.status === "active" ? "Actief" : company.status === "inactive" ? "Inactief" : "Gearchiveerd"}
-                    </span>
+                    <Badge className={company.teamhub_enabled ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"}>
+                      {company.teamhub_enabled ? "Zichtbaar" : "Niet zichtbaar"}
+                    </Badge>
                   </TableCell>
                 </TableRow>
               ))}
