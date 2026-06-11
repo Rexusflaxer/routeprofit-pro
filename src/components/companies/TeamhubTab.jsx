@@ -28,6 +28,7 @@ import {
   getCompanyProfileLocations,
   hasCompanyLocationAssignment } from
 "@/lib/companyLocationScope";
+import TeamhubRegionPicker from "./TeamhubRegionPicker";
 
 function getInitialForm(company) {
   const serviceTypes = Array.isArray(company?.teamhub_service_types) ?
@@ -37,7 +38,8 @@ function getInitialForm(company) {
   return {
     teamhub_enabled: company?.teamhub_enabled === true,
     teamhub_public_location_id: company?.teamhub_public_location_id || null,
-    teamhub_service_types: serviceTypes
+    teamhub_service_types: serviceTypes,
+    teamhub_regions: Array.isArray(company?.teamhub_regions) ? company.teamhub_regions : []
   };
 }
 
@@ -181,7 +183,8 @@ export default function TeamhubTab({ companyId, company }) {
         form.teamhub_service_types || [],
         qualifiedServiceTypes,
         technicalCertificationTypes
-      )
+      ),
+      teamhub_regions: form.teamhub_regions || []
     });
   };
 
@@ -378,7 +381,9 @@ export default function TeamhubTab({ companyId, company }) {
           </div>
         </div>
 
-
+        <TeamhubRegionPicker
+          value={form.teamhub_regions}
+          onChange={(regions) => set("teamhub_regions", regions)} />
       </div>
     </div>);
 
