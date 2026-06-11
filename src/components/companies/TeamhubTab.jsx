@@ -21,19 +21,19 @@ import {
   getWpbrLicenseLabel,
   isQualificationControlledTeamhubService,
   isTeamhubServiceAllowedForLicense,
-  sanitizeTeamhubServiceTypes,
-} from "@/lib/teamhubServiceRules";
+  sanitizeTeamhubServiceTypes } from
+"@/lib/teamhubServiceRules";
 import {
   getCompanyLocationLabel,
   getCompanyProfileLocations,
-  hasCompanyLocationAssignment,
-} from "@/lib/companyLocationScope";
+  hasCompanyLocationAssignment } from
+"@/lib/companyLocationScope";
 import TeamhubRegionPicker from "./TeamhubRegionPicker";
 
 function getInitialForm(company) {
-  const serviceTypes = Array.isArray(company?.teamhub_service_types)
-    ? company.teamhub_service_types
-    : [];
+  const serviceTypes = Array.isArray(company?.teamhub_service_types) ?
+  company.teamhub_service_types :
+  [];
 
   return {
     teamhub_enabled: company?.teamhub_enabled === true,
@@ -44,7 +44,7 @@ function getInitialForm(company) {
     teamhub_public_location_id: company?.teamhub_public_location_id || null,
     teamhub_technical_certifications: Array.isArray(company?.teamhub_technical_certifications) ? company.teamhub_technical_certifications : [],
     teamhub_service_types: serviceTypes,
-    teamhub_regions: Array.isArray(company?.teamhub_regions) ? company.teamhub_regions : [],
+    teamhub_regions: Array.isArray(company?.teamhub_regions) ? company.teamhub_regions : []
   };
 }
 
@@ -56,37 +56,37 @@ export default function TeamhubTab({ companyId, company }) {
   const { data: wpbrLicenses = [] } = useQuery({
     queryKey: ["wpbr-licenses", companyId],
     queryFn: () => base44.entities.CompanyWpbrLicense.filter({ company_id: companyId }, "-created_date"),
-    enabled: !!companyId,
+    enabled: !!companyId
   });
 
   const { data: personnel = [], isLoading: personnelLoading } = useQuery({
     queryKey: ["personnel"],
     queryFn: () => base44.entities.Personnel.list(),
-    enabled: !!companyId,
+    enabled: !!companyId
   });
 
   const { data: personnelCompanyAssignments = [], isLoading: personnelCompanyAssignmentsLoading } = useQuery({
     queryKey: ["personnel-company-assignments", companyId],
     queryFn: () => base44.entities.PersonnelCompanyAssignment.filter({ company_id: companyId }),
-    enabled: !!companyId,
+    enabled: !!companyId
   });
 
   const { data: companyLocations = [], isLoading: companyLocationsLoading } = useQuery({
     queryKey: ["company-locations"],
     queryFn: () => base44.entities.CompanyLocation.list(),
-    enabled: !!companyId,
+    enabled: !!companyId
   });
 
   const { data: companyLocationAssignments = [], isLoading: companyLocationAssignmentsLoading } = useQuery({
     queryKey: ["company-location-assignments"],
     queryFn: () => base44.entities.CompanyLocationAssignment.list(),
-    enabled: !!companyId,
+    enabled: !!companyId
   });
 
   const { data: personnelQualifications = [], isLoading: personnelQualificationsLoading } = useQuery({
     queryKey: ["personnel-qualifications", companyId],
     queryFn: () => base44.entities.PersonnelQualification.list(),
-    enabled: !!companyId,
+    enabled: !!companyId
   });
 
   const effectiveWpbrLicenseType = getEffectiveWpbrLicenseType(company, wpbrLicenses);
@@ -96,19 +96,19 @@ export default function TeamhubTab({ companyId, company }) {
     companyId,
     personnel,
     assignments: personnelCompanyAssignments,
-    qualifications: personnelQualifications,
+    qualifications: personnelQualifications
   }), [companyId, personnel, personnelCompanyAssignments, personnelQualifications]);
   const selectableTeamhubLocations = useMemo(() => {
     return getCompanyProfileLocations({
       companyId,
       company,
       locations: companyLocations,
-      assignments: companyLocationAssignments,
-    })
-      .sort((a, b) => String(a.name || a.city || "").localeCompare(String(b.name || b.city || ""), "nl"));
+      assignments: companyLocationAssignments
+    }).
+    sort((a, b) => String(a.name || a.city || "").localeCompare(String(b.name || b.city || ""), "nl"));
   }, [companyId, company, companyLocations, companyLocationAssignments]);
   const selectableTeamhubLocationIds = useMemo(
-    () => new Set(selectableTeamhubLocations.map(location => location.id)),
+    () => new Set(selectableTeamhubLocations.map((location) => location.id)),
     [selectableTeamhubLocations]
   );
 
@@ -118,7 +118,7 @@ export default function TeamhubTab({ companyId, company }) {
       company_id: companyId,
       location_id: locationId,
       usage_type: "operational_branch",
-      is_primary: false,
+      is_primary: false
     });
   };
 
@@ -128,7 +128,7 @@ export default function TeamhubTab({ companyId, company }) {
 
   useEffect(() => {
     if (qualificationDataLoading) return;
-    setForm(current => {
+    setForm((current) => {
       const sanitized = sanitizeTeamhubServiceTypes(
         effectiveWpbrLicenseType,
         current.teamhub_service_types || [],
@@ -148,11 +148,11 @@ export default function TeamhubTab({ companyId, company }) {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
       queryClient.invalidateQueries({ queryKey: ["company-location-assignments"] });
-    },
+    }
   });
 
   const set = (field, value) => {
-    setForm(current => ({ ...current, [field]: value }));
+    setForm((current) => ({ ...current, [field]: value }));
   };
 
   const toggleService = (key) => {
@@ -160,15 +160,15 @@ export default function TeamhubTab({ companyId, company }) {
     const current = form.teamhub_service_types || [];
     set(
       "teamhub_service_types",
-      current.includes(key) ? current.filter(item => item !== key) : [...current, key]
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
     );
   };
 
   const save = () => {
     if (teamhubReferencesLoading) return;
-    const publicLocationId = form.teamhub_public_location_id && selectableTeamhubLocationIds.has(form.teamhub_public_location_id)
-      ? form.teamhub_public_location_id
-      : null;
+    const publicLocationId = form.teamhub_public_location_id && selectableTeamhubLocationIds.has(form.teamhub_public_location_id) ?
+    form.teamhub_public_location_id :
+    null;
 
     saveMutation.mutate({
       teamhub_enabled: form.teamhub_enabled === true,
@@ -184,7 +184,7 @@ export default function TeamhubTab({ companyId, company }) {
         qualifiedServiceTypes,
         form.teamhub_technical_certifications || []
       ),
-      teamhub_regions: form.teamhub_regions || [],
+      teamhub_regions: form.teamhub_regions || []
     });
   };
 
@@ -196,14 +196,14 @@ export default function TeamhubTab({ companyId, company }) {
       qualifiedServiceTypes,
       form.teamhub_technical_certifications || []
     );
-    const disabledReason = qualificationCheckPending
-      ? "Medewerkerscertificaten worden geladen."
-      : getTeamhubServiceDisabledReason(
-        effectiveWpbrLicenseType,
-        activity.key,
-        qualifiedServiceTypes,
-        form.teamhub_technical_certifications || []
-      );
+    const disabledReason = qualificationCheckPending ?
+    "Medewerkerscertificaten worden geladen." :
+    getTeamhubServiceDisabledReason(
+      effectiveWpbrLicenseType,
+      activity.key,
+      qualifiedServiceTypes,
+      form.teamhub_technical_certifications || []
+    );
     const isSelected = (form.teamhub_service_types || []).includes(activity.key);
 
     return (
@@ -211,30 +211,30 @@ export default function TeamhubTab({ companyId, company }) {
         <button
           onClick={() => allowed && toggleService(activity.key)}
           className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-            isSelected 
-              ? "border-primary bg-primary text-primary-foreground" 
-              : allowed 
-              ? "border-border bg-card text-foreground hover:border-primary/40 cursor-pointer" 
-              : "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"
-          }`}
-        >
+          isSelected ?
+          "border-primary bg-primary text-primary-foreground" :
+          allowed ?
+          "border-border bg-card text-foreground hover:border-primary/40 cursor-pointer" :
+          "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"}`
+          }>
+          
           {activity.label}
         </button>
-        {!allowed && disabledReason && (
-          <div className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md opacity-0 group-hover/pill:opacity-100 transition-opacity duration-150">
+        {!allowed && disabledReason &&
+        <div className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md opacity-0 group-hover/pill:opacity-100 transition-opacity duration-150">
             {disabledReason}
             <div className="absolute left-4 top-full border-4 border-transparent border-t-border" />
           </div>
-        )}
-      </div>
-    );
+        }
+      </div>);
+
   };
 
   const toggleTechnicalCertification = (key) => {
     const current = form.teamhub_technical_certifications || [];
     set(
       "teamhub_technical_certifications",
-      current.includes(key) ? current.filter(item => item !== key) : [...current, key]
+      current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
     );
   };
 
@@ -248,29 +248,29 @@ export default function TeamhubTab({ companyId, company }) {
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <p className="truncate text-sm font-semibold text-foreground">LOQ Teamhub</p>
-              {form.teamhub_enabled ? (
-                <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Zichtbaar</Badge>
-              ) : (
-                <Badge variant="secondary">Niet zichtbaar</Badge>
-              )}
+              {form.teamhub_enabled ?
+              <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Zichtbaar</Badge> :
+
+              <Badge variant="secondary">Niet zichtbaar</Badge>
+              }
             </div>
             <p className="truncate text-xs text-muted-foreground">Onderaannemersprofiel voor diensten van hoofdaannemers</p>
           </div>
         </div>
         <Button size="sm" onClick={save} disabled={saveMutation.isPending || teamhubReferencesLoading}>
-          {saveMutation.isPending || teamhubReferencesLoading ? (
-            <>
+          {saveMutation.isPending || teamhubReferencesLoading ?
+          <>
               <Clock className="mr-1 h-4 w-4" /> {teamhubReferencesLoading ? "Laden..." : "Opslaan..."}
-            </>
-          ) : saveMutation.isSuccess ? (
-            <>
+            </> :
+          saveMutation.isSuccess ?
+          <>
               <Check className="mr-1 h-4 w-4" /> Opgeslagen
-            </>
-          ) : (
-            <>
+            </> :
+
+          <>
               <Save className="mr-1 h-4 w-4" /> Opslaan
             </>
-          )}
+          }
         </Button>
       </div>
 
@@ -280,7 +280,7 @@ export default function TeamhubTab({ companyId, company }) {
             <Label className="text-sm font-semibold">Weergeven in LOQ Teamhub</Label>
             <p className="mt-1 text-xs text-muted-foreground">Publiceer dit bedrijfsprofiel als beschikbare onderaannemer.</p>
           </div>
-          <Switch checked={form.teamhub_enabled} onCheckedChange={checked => set("teamhub_enabled", checked)} />
+          <Switch checked={form.teamhub_enabled} onCheckedChange={(checked) => set("teamhub_enabled", checked)} />
         </div>
 
         <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
@@ -288,10 +288,10 @@ export default function TeamhubTab({ companyId, company }) {
             <Label>Publieke introductie</Label>
             <Textarea
               value={form.teamhub_intro}
-              onChange={e => set("teamhub_intro", e.target.value)}
+              onChange={(e) => set("teamhub_intro", e.target.value)}
               rows={5}
-              placeholder="Korte omschrijving van specialisaties, werkgebied en inzetbaarheid"
-            />
+              placeholder="Korte omschrijving van specialisaties, werkgebied en inzetbaarheid" />
+            
           </div>
 
           <div className="space-y-3 rounded-md border border-border p-4">
@@ -302,27 +302,27 @@ export default function TeamhubTab({ companyId, company }) {
             <div className="space-y-2">
               <Input
                 value={form.teamhub_contact_name}
-                onChange={e => set("teamhub_contact_name", e.target.value)}
-                placeholder="Contactpersoon"
-              />
+                onChange={(e) => set("teamhub_contact_name", e.target.value)}
+                placeholder="Contactpersoon" />
+              
               <div className="relative">
                 <Mail className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   type="email"
                   value={form.teamhub_contact_email}
-                  onChange={e => set("teamhub_contact_email", e.target.value)}
+                  onChange={(e) => set("teamhub_contact_email", e.target.value)}
                   placeholder={company?.email || "teamhub@bedrijf.nl"}
-                  className="pl-9"
-                />
+                  className="pl-9" />
+                
               </div>
               <div className="relative">
                 <Phone className="absolute left-3 top-2.5 h-4 w-4 text-muted-foreground" />
                 <Input
                   value={form.teamhub_contact_phone}
-                  onChange={e => set("teamhub_contact_phone", e.target.value)}
+                  onChange={(e) => set("teamhub_contact_phone", e.target.value)}
                   placeholder={company?.phone || "Telefoonnummer"}
-                  className="pl-9"
-                />
+                  className="pl-9" />
+                
               </div>
             </div>
           </div>
@@ -332,20 +332,20 @@ export default function TeamhubTab({ companyId, company }) {
           <Label>Vestiging op publieke kaart</Label>
           <Select
             value={form.teamhub_public_location_id || ""}
-            onValueChange={value => set("teamhub_public_location_id", value || null)}
-          >
+            onValueChange={(value) => set("teamhub_public_location_id", value || null)}>
+            
             <SelectTrigger>
               <SelectValue placeholder="Kies een vestiging (verplicht)" />
             </SelectTrigger>
             <SelectContent>
-              {selectableTeamhubLocations.map(location => (
-                <SelectItem key={location.id} value={location.id}>
+              {selectableTeamhubLocations.map((location) =>
+              <SelectItem key={location.id} value={location.id}>
                   {getCompanyLocationLabel(location)}
                 </SelectItem>
-              ))}
+              )}
             </SelectContent>
           </Select>
-          <p className="text-xs text-muted-foreground">
+          <p className="text-xs text-muted-foreground hidden">
             Alleen vestigingen die aan dit bedrijfsprofiel zijn gekoppeld kunnen later op de publieke kaart worden getoond.
           </p>
         </div>
@@ -358,7 +358,7 @@ export default function TeamhubTab({ companyId, company }) {
             </p>
           </div>
           <div className="flex flex-wrap gap-2">
-            {TEAMHUB_TECHNICAL_CERTIFICATION_OPTIONS.map(certification => {
+            {TEAMHUB_TECHNICAL_CERTIFICATION_OPTIONS.map((certification) => {
               const selected = (form.teamhub_technical_certifications || []).includes(certification.key);
               return (
                 <button
@@ -366,14 +366,14 @@ export default function TeamhubTab({ companyId, company }) {
                   key={certification.key}
                   onClick={() => toggleTechnicalCertification(certification.key)}
                   className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-                    selected
-                      ? "border-primary bg-primary text-primary-foreground"
-                      : "border-border bg-card text-foreground hover:border-primary/40"
-                  }`}
-                >
+                  selected ?
+                  "border-primary bg-primary text-primary-foreground" :
+                  "border-border bg-card text-foreground hover:border-primary/40"}`
+                  }>
+                  
                   {certification.label}
-                </button>
-              );
+                </button>);
+
             })}
           </div>
         </div>
@@ -390,31 +390,31 @@ export default function TeamhubTab({ companyId, company }) {
               <p className="text-xs font-semibold text-muted-foreground">Vergunning-gebonden diensten</p>
             </div>
             {TEAMHUB_LICENSE_SERVICE_GROUPS.map((group, idx) => {
-              const isOpen = !!expandedGroups[group.key];
-              const selectedCount = getTeamhubServicesByKeys(group.serviceKeys).filter(a => (form.teamhub_service_types || []).includes(a.key)).length;
-              return (
-                <div key={group.key} className={idx > 0 ? "border-t border-border" : ""}>
+                const isOpen = !!expandedGroups[group.key];
+                const selectedCount = getTeamhubServicesByKeys(group.serviceKeys).filter((a) => (form.teamhub_service_types || []).includes(a.key)).length;
+                return (
+                  <div key={group.key} className={idx > 0 ? "border-t border-border" : ""}>
                   <button
-                    type="button"
-                    onClick={() => setExpandedGroups(prev => ({ ...prev, [group.key]: !prev[group.key] }))}
-                    className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted/30 transition-colors"
-                  >
+                      type="button"
+                      onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                      className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted/30 transition-colors">
+                      
                     <span className="text-xs font-medium text-foreground">{group.title}</span>
                     <div className="flex items-center gap-2">
-                      {selectedCount > 0 && (
+                      {selectedCount > 0 &&
                         <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">{selectedCount}</span>
-                      )}
+                        }
                       <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
                     </div>
                   </button>
-                  {isOpen && (
+                  {isOpen &&
                     <div className="flex flex-wrap gap-2 border-t border-border/50 bg-muted/10 px-3 py-3">
                       {getTeamhubServicesByKeys(group.serviceKeys).map(renderServiceOption)}
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                    }
+                </div>);
+
+              })}
           </div>
 
           <div className="overflow-hidden rounded-md border border-border">
@@ -431,31 +431,31 @@ export default function TeamhubTab({ companyId, company }) {
               <p className="text-xs font-semibold text-muted-foreground">Techniek & brandveiligheid</p>
             </div>
             {TEAMHUB_TECHNICAL_SERVICE_GROUPS.map((group, idx) => {
-              const isOpen = !!expandedGroups[group.key];
-              const selectedCount = getTeamhubServicesByKeys(group.serviceKeys).filter(activity => (form.teamhub_service_types || []).includes(activity.key)).length;
-              return (
-                <div key={group.key} className={idx > 0 ? "border-t border-border" : ""}>
+                const isOpen = !!expandedGroups[group.key];
+                const selectedCount = getTeamhubServicesByKeys(group.serviceKeys).filter((activity) => (form.teamhub_service_types || []).includes(activity.key)).length;
+                return (
+                  <div key={group.key} className={idx > 0 ? "border-t border-border" : ""}>
                   <button
-                    type="button"
-                    onClick={() => setExpandedGroups(prev => ({ ...prev, [group.key]: !prev[group.key] }))}
-                    className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted/30 transition-colors"
-                  >
+                      type="button"
+                      onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
+                      className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted/30 transition-colors">
+                      
                     <span className="text-xs font-medium text-foreground">{group.title}</span>
                     <div className="flex items-center gap-2">
-                      {selectedCount > 0 && (
+                      {selectedCount > 0 &&
                         <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">{selectedCount}</span>
-                      )}
+                        }
                       <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
                     </div>
                   </button>
-                  {isOpen && (
+                  {isOpen &&
                     <div className="flex flex-wrap gap-2 border-t border-border/50 bg-muted/10 px-3 py-3">
                       {getTeamhubServicesByKeys(group.serviceKeys).map(renderServiceOption)}
                     </div>
-                  )}
-                </div>
-              );
-            })}
+                    }
+                </div>);
+
+              })}
           </div>
           </div>
         </div>
@@ -464,10 +464,10 @@ export default function TeamhubTab({ companyId, company }) {
           <Label>Werkregio's</Label>
           <TeamhubRegionPicker
             value={form.teamhub_regions}
-            onChange={regions => set("teamhub_regions", regions)}
-          />
+            onChange={(regions) => set("teamhub_regions", regions)} />
+          
         </div>
       </div>
-    </div>
-  );
+    </div>);
+
 }
