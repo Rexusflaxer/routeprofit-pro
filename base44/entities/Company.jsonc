@@ -275,6 +275,24 @@
       ],
       "description": "CompanyLocation ID van de vestiging die later op de publieke Teamhub-kaart getoond mag worden"
     },
+    "teamhub_technical_certifications": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "borg_e",
+          "borg_b",
+          "veb_4",
+          "ccv_bmi_leveren",
+          "ccv_bmi_onderhoud",
+          "ccv_bmi_oai_installeren",
+          "ccv_oai",
+          "other_technical"
+        ]
+      },
+      "default": [],
+      "description": "Zelfverklaarde technische erkenningen/certificeringen voor Teamhub-diensten zoals BORG, VEB en CCV BMI/OAI"
+    },
     "teamhub_service_types": {
       "type": "array",
       "items": {

@@ -8,7 +8,10 @@ export const TEAMHUB_SERVICE_OPTIONS = [
   { key: "video_surveillance_center", label: "Videotoezicht" },
   { key: "cash_value_transport", label: "Geld- en waardetransport" },
   { key: "private_investigation", label: "Recherche" },
-  { key: "security_installation", label: "Beveiligingsinstallaties" },
+  { key: "security_installation", label: "Inbraakbeveiligingsinstallaties" },
+  { key: "fire_alarm_installation", label: "Brandmeldinstallaties (BMI/OAI)" },
+  { key: "fire_alarm_panel_bmc", label: "BMC / brandmeldcentrales" },
+  { key: "technical_security_other", label: "Overige technische beveiliging" },
   { key: "traffic_controller", label: "Verkeersregelaars" },
   { key: "fire_watch", label: "Brandwacht" },
   { key: "bhv", label: "BHV" },
@@ -63,6 +66,62 @@ const QUALIFICATION_REQUIREMENTS_BY_SERVICE = {
     label: "geldig BHV-certificaat",
     types: ["bhv"],
   },
+  security_installation: {
+    label: "geldig MBV/TBV- of alarminstallateur-diploma",
+    types: ["alarminstallateur", "mbv", "tbv"],
+  },
+  fire_alarm_installation: {
+    label: "geldig BMI/OAI-diploma",
+    types: [
+      "basis_brandmeldtechniek",
+      "projecteringsdeskundige_bmi",
+      "installatiedeskundige_bmi_oai",
+      "onderhoudsdeskundige_bmi",
+    ],
+  },
+  fire_alarm_panel_bmc: {
+    label: "geldig BMI/BMC-diploma",
+    types: [
+      "beheerder_brandmeldinstallatie",
+      "projecteringsdeskundige_bmi",
+      "installatiedeskundige_bmi_oai",
+      "onderhoudsdeskundige_bmi",
+    ],
+  },
+  technical_security_other: {
+    label: "relevant technisch beveiligingscertificaat",
+    types: ["alarminstallateur", "mbv", "tbv", "technisch_beveiligingsspecialist"],
+  },
+};
+
+export const TEAMHUB_TECHNICAL_CERTIFICATION_OPTIONS = [
+  { key: "borg_e", label: "BORG-E elektronische inbraakbeveiliging" },
+  { key: "borg_b", label: "BORG-B bouwkundige inbraakbeveiliging" },
+  { key: "veb_4", label: "VEB 4 kwaliteitsregeling" },
+  { key: "ccv_bmi_leveren", label: "CCV Leveren brandmeldinstallaties" },
+  { key: "ccv_bmi_onderhoud", label: "CCV Onderhoud brandmeldinstallaties" },
+  { key: "ccv_bmi_oai_installeren", label: "CCV Installeren BMI/OAI" },
+  { key: "ccv_oai", label: "CCV Ontruimingsalarminstallaties" },
+  { key: "other_technical", label: "Overige technische erkenning" },
+];
+
+const TECHNICAL_CERTIFICATION_REQUIREMENTS_BY_SERVICE = {
+  security_installation: {
+    label: "BORG-E, BORG-B, VEB 4 of vergelijkbare technische erkenning",
+    types: ["borg_e", "borg_b", "veb_4", "other_technical"],
+  },
+  fire_alarm_installation: {
+    label: "CCV-certificering voor leveren, onderhoud of installeren van BMI/OAI",
+    types: ["ccv_bmi_leveren", "ccv_bmi_onderhoud", "ccv_bmi_oai_installeren", "ccv_oai", "other_technical"],
+  },
+  fire_alarm_panel_bmc: {
+    label: "CCV-certificering voor BMI/OAI of brandmeldcentrale-werkzaamheden",
+    types: ["ccv_bmi_leveren", "ccv_bmi_onderhoud", "ccv_bmi_oai_installeren", "ccv_oai", "other_technical"],
+  },
+  technical_security_other: {
+    label: "relevante technische erkenning",
+    types: ["borg_e", "borg_b", "veb_4", "ccv_bmi_leveren", "ccv_bmi_onderhoud", "ccv_bmi_oai_installeren", "ccv_oai", "other_technical"],
+  },
 };
 
 export const TEAMHUB_LICENSE_SERVICE_GROUPS = [
@@ -96,14 +155,26 @@ export const TEAMHUB_LICENSE_SERVICE_GROUPS = [
     title: "POB - Particulier recherchebureau",
     serviceKeys: ALLOWED_SERVICES_BY_WPBR_TYPE.POB,
   },
-  {
-    key: "other",
-    title: "Overige vergunningen / handmatig beoordelen",
-    serviceKeys: ["security_installation", "other"],
-  },
 ];
 
-export const TEAMHUB_QUALIFICATION_SERVICE_KEYS = Object.keys(QUALIFICATION_REQUIREMENTS_BY_SERVICE);
+export const TEAMHUB_QUALIFICATION_SERVICE_KEYS = ["traffic_controller", "fire_watch", "bhv"];
+export const TEAMHUB_TECHNICAL_SERVICE_GROUPS = [
+  {
+    key: "intrusion",
+    title: "Inbraakbeveiliging",
+    serviceKeys: ["security_installation"],
+  },
+  {
+    key: "fire",
+    title: "Brandveiligheidstechniek",
+    serviceKeys: ["fire_alarm_installation", "fire_alarm_panel_bmc"],
+  },
+  {
+    key: "technical_other",
+    title: "Overige technische beveiliging",
+    serviceKeys: ["technical_security_other"],
+  },
+];
 
 const TEAMHUB_SERVICE_OPTIONS_BY_KEY = Object.fromEntries(
   TEAMHUB_SERVICE_OPTIONS.map(service => [service.key, service])
@@ -117,10 +188,20 @@ export function getTeamhubServicesByKeys(serviceKeys = []) {
   return (serviceKeys || []).map(serviceKey => TEAMHUB_SERVICE_OPTIONS_BY_KEY[serviceKey]).filter(Boolean);
 }
 
-export function getAllowedTeamhubServiceTypes(licenseType, qualifiedServiceTypes = []) {
+function hasRequiredTechnicalCertification(serviceKey, technicalCertificationTypes = []) {
+  const requirement = TECHNICAL_CERTIFICATION_REQUIREMENTS_BY_SERVICE[serviceKey];
+  if (!requirement) return true;
+  return requirement.types.some(type => (technicalCertificationTypes || []).includes(type));
+}
+
+export function isTechnicalControlledTeamhubService(serviceKey) {
+  return Boolean(TECHNICAL_CERTIFICATION_REQUIREMENTS_BY_SERVICE[serviceKey]);
+}
+
+export function getAllowedTeamhubServiceTypes(licenseType, qualifiedServiceTypes = [], technicalCertificationTypes = []) {
   return [...new Set([
     ...(ALLOWED_SERVICES_BY_WPBR_TYPE[licenseType] || []),
-    ...(qualifiedServiceTypes || []),
+    ...(qualifiedServiceTypes || []).filter(serviceKey => hasRequiredTechnicalCertification(serviceKey, technicalCertificationTypes)),
   ])];
 }
 
@@ -128,17 +209,21 @@ export function isQualificationControlledTeamhubService(serviceKey) {
   return Boolean(QUALIFICATION_REQUIREMENTS_BY_SERVICE[serviceKey]);
 }
 
-export function isTeamhubServiceAllowedForLicense(licenseType, serviceKey, qualifiedServiceTypes = []) {
-  return getAllowedTeamhubServiceTypes(licenseType, qualifiedServiceTypes).includes(serviceKey);
+export function isTeamhubServiceAllowedForLicense(licenseType, serviceKey, qualifiedServiceTypes = [], technicalCertificationTypes = []) {
+  return getAllowedTeamhubServiceTypes(licenseType, qualifiedServiceTypes, technicalCertificationTypes).includes(serviceKey);
 }
 
-export function sanitizeTeamhubServiceTypes(licenseType, serviceTypes = [], qualifiedServiceTypes = []) {
-  const allowed = new Set(getAllowedTeamhubServiceTypes(licenseType, qualifiedServiceTypes));
+export function sanitizeTeamhubServiceTypes(licenseType, serviceTypes = [], qualifiedServiceTypes = [], technicalCertificationTypes = []) {
+  const allowed = new Set(getAllowedTeamhubServiceTypes(licenseType, qualifiedServiceTypes, technicalCertificationTypes));
   return (serviceTypes || []).filter(service => allowed.has(service));
 }
 
-export function getTeamhubServiceDisabledReason(licenseType, serviceKey, qualifiedServiceTypes = []) {
-  if (isTeamhubServiceAllowedForLicense(licenseType, serviceKey, qualifiedServiceTypes)) return "";
+export function getTeamhubServiceDisabledReason(licenseType, serviceKey, qualifiedServiceTypes = [], technicalCertificationTypes = []) {
+  if (isTeamhubServiceAllowedForLicense(licenseType, serviceKey, qualifiedServiceTypes, technicalCertificationTypes)) return "";
+  const technicalRequirement = TECHNICAL_CERTIFICATION_REQUIREMENTS_BY_SERVICE[serviceKey];
+  if (technicalRequirement && !hasRequiredTechnicalCertification(serviceKey, technicalCertificationTypes)) {
+    return `${TEAMHUB_SERVICE_LABELS[serviceKey] || "Deze dienst"} is alleen selecteerbaar wanneer het bedrijfsprofiel ${technicalRequirement.label} bevat.`;
+  }
   const qualificationRequirement = QUALIFICATION_REQUIREMENTS_BY_SERVICE[serviceKey];
   if (qualificationRequirement) {
     return `${TEAMHUB_SERVICE_LABELS[serviceKey] || "Deze dienst"} is alleen selecteerbaar wanneer er minimaal één actieve medewerker met een ${qualificationRequirement.label} in het personeelsbestand staat.`;

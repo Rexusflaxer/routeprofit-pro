@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
-import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -13,6 +12,8 @@ import { Building2, Check, ChevronDown, Clock, Mail, Phone, Save, Users } from "
 import {
   TEAMHUB_LICENSE_SERVICE_GROUPS,
   TEAMHUB_QUALIFICATION_SERVICE_KEYS,
+  TEAMHUB_TECHNICAL_CERTIFICATION_OPTIONS,
+  TEAMHUB_TECHNICAL_SERVICE_GROUPS,
   getEffectiveWpbrLicenseType,
   getQualifiedTeamhubServiceTypes,
   getTeamhubServicesByKeys,
@@ -41,6 +42,7 @@ function getInitialForm(company) {
     teamhub_contact_email: company?.teamhub_contact_email || "",
     teamhub_contact_phone: company?.teamhub_contact_phone || "",
     teamhub_public_location_id: company?.teamhub_public_location_id || null,
+    teamhub_technical_certifications: Array.isArray(company?.teamhub_technical_certifications) ? company.teamhub_technical_certifications : [],
     teamhub_service_types: serviceTypes,
     teamhub_regions: Array.isArray(company?.teamhub_regions) ? company.teamhub_regions : [],
   };
@@ -127,11 +129,16 @@ export default function TeamhubTab({ companyId, company }) {
   useEffect(() => {
     if (qualificationDataLoading) return;
     setForm(current => {
-      const sanitized = sanitizeTeamhubServiceTypes(effectiveWpbrLicenseType, current.teamhub_service_types || [], qualifiedServiceTypes);
+      const sanitized = sanitizeTeamhubServiceTypes(
+        effectiveWpbrLicenseType,
+        current.teamhub_service_types || [],
+        qualifiedServiceTypes,
+        current.teamhub_technical_certifications || []
+      );
       if (sanitized.length === (current.teamhub_service_types || []).length) return current;
       return { ...current, teamhub_service_types: sanitized };
     });
-  }, [effectiveWpbrLicenseType, qualificationDataLoading, qualifiedServiceTypes, company?.id]);
+  }, [effectiveWpbrLicenseType, qualificationDataLoading, qualifiedServiceTypes, form.teamhub_technical_certifications, company?.id]);
 
   const saveMutation = useMutation({
     mutationFn: async (payload) => {
@@ -149,7 +156,7 @@ export default function TeamhubTab({ companyId, company }) {
   };
 
   const toggleService = (key) => {
-    if (!isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, key, qualifiedServiceTypes)) return;
+    if (!isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, key, qualifiedServiceTypes, form.teamhub_technical_certifications || [])) return;
     const current = form.teamhub_service_types || [];
     set(
       "teamhub_service_types",
@@ -170,17 +177,33 @@ export default function TeamhubTab({ companyId, company }) {
       teamhub_contact_email: form.teamhub_contact_email?.trim() || null,
       teamhub_contact_phone: form.teamhub_contact_phone?.trim() || null,
       teamhub_public_location_id: publicLocationId,
-      teamhub_service_types: sanitizeTeamhubServiceTypes(effectiveWpbrLicenseType, form.teamhub_service_types || [], qualifiedServiceTypes),
+      teamhub_technical_certifications: form.teamhub_technical_certifications || [],
+      teamhub_service_types: sanitizeTeamhubServiceTypes(
+        effectiveWpbrLicenseType,
+        form.teamhub_service_types || [],
+        qualifiedServiceTypes,
+        form.teamhub_technical_certifications || []
+      ),
       teamhub_regions: form.teamhub_regions || [],
     });
   };
 
   const renderServiceOption = (activity) => {
     const qualificationCheckPending = qualificationDataLoading && isQualificationControlledTeamhubService(activity.key);
-    const allowed = !qualificationCheckPending && isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, activity.key, qualifiedServiceTypes);
+    const allowed = !qualificationCheckPending && isTeamhubServiceAllowedForLicense(
+      effectiveWpbrLicenseType,
+      activity.key,
+      qualifiedServiceTypes,
+      form.teamhub_technical_certifications || []
+    );
     const disabledReason = qualificationCheckPending
       ? "Medewerkerscertificaten worden geladen."
-      : getTeamhubServiceDisabledReason(effectiveWpbrLicenseType, activity.key, qualifiedServiceTypes);
+      : getTeamhubServiceDisabledReason(
+        effectiveWpbrLicenseType,
+        activity.key,
+        qualifiedServiceTypes,
+        form.teamhub_technical_certifications || []
+      );
     const isSelected = (form.teamhub_service_types || []).includes(activity.key);
 
     return (
@@ -198,6 +221,14 @@ export default function TeamhubTab({ companyId, company }) {
       >
         {activity.label}
       </button>
+    );
+  };
+
+  const toggleTechnicalCertification = (key) => {
+    const current = form.teamhub_technical_certifications || [];
+    set(
+      "teamhub_technical_certifications",
+      current.includes(key) ? current.filter(item => item !== key) : [...current, key]
     );
   };
 
@@ -314,10 +345,38 @@ export default function TeamhubTab({ companyId, company }) {
           </p>
         </div>
 
+        <div className="space-y-3 rounded-md border border-border bg-background p-4">
+          <div>
+            <Label>Technische erkenningen</Label>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Gebruik dit voor BORG, VEB en CCV BMI/OAI. Dit zijn geen WPBR-vergunningen, maar bepalen wel of technische diensten in de hub selecteerbaar zijn.
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {TEAMHUB_TECHNICAL_CERTIFICATION_OPTIONS.map(certification => {
+              const selected = (form.teamhub_technical_certifications || []).includes(certification.key);
+              return (
+                <button
+                  type="button"
+                  key={certification.key}
+                  onClick={() => toggleTechnicalCertification(certification.key)}
+                  className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
+                    selected
+                      ? "border-primary bg-primary text-primary-foreground"
+                      : "border-border bg-card text-foreground hover:border-primary/40"
+                  }`}
+                >
+                  {certification.label}
+                </button>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="space-y-4">
           <Label>Diensten</Label>
           <p className="text-xs text-muted-foreground">
-            Beveiligingsdiensten worden vrijgegeven op basis van vergunning: {effectiveWpbrLicenseType ? `${effectiveWpbrLicenseType} - ${getWpbrLicenseLabel(effectiveWpbrLicenseType)}` : "geen actieve WPBR-vergunning gevonden"}. Kwalificatiediensten worden vrijgegeven op basis van geldige medewerkerscertificaten.
+            Beveiligingsdiensten worden vrijgegeven op basis van vergunning: {effectiveWpbrLicenseType ? `${effectiveWpbrLicenseType} - ${getWpbrLicenseLabel(effectiveWpbrLicenseType)}` : "geen actieve WPBR-vergunning gevonden"}. Kwalificatie- en techniekdiensten worden vrijgegeven op basis van geldige medewerkerscertificaten en technische erkenningen.
           </p>
 
           <div className="space-y-3">
@@ -360,6 +419,28 @@ export default function TeamhubTab({ companyId, company }) {
             <div className="flex flex-wrap gap-2 px-3 py-3">
               {getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).map(renderServiceOption)}
             </div>
+          </div>
+
+          <div className="overflow-hidden rounded-md border border-border">
+            <div className="border-b border-border bg-muted/40 px-3 py-2">
+              <p className="text-xs font-semibold text-muted-foreground">Techniek & brandveiligheid</p>
+            </div>
+            {TEAMHUB_TECHNICAL_SERVICE_GROUPS.map((group, idx) => {
+              const selectedCount = getTeamhubServicesByKeys(group.serviceKeys).filter(activity => (form.teamhub_service_types || []).includes(activity.key)).length;
+              return (
+                <div key={group.key} className={idx > 0 ? "border-t border-border" : ""}>
+                  <div className="flex items-center justify-between px-3 py-2.5">
+                    <span className="text-xs font-medium text-foreground">{group.title}</span>
+                    {selectedCount > 0 && (
+                      <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">{selectedCount}</span>
+                    )}
+                  </div>
+                  <div className="flex flex-wrap gap-2 border-t border-border/50 bg-muted/10 px-3 py-3">
+                    {getTeamhubServicesByKeys(group.serviceKeys).map(renderServiceOption)}
+                  </div>
+                </div>
+              );
+            })}
           </div>
           </div>
         </div>

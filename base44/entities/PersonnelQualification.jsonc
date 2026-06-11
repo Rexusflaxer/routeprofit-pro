@@ -43,6 +43,16 @@
         "leidinggeven_pb",
         "branchediploma_coordinator_beveiliging",
         "alarminstallateur",
+        "mbv",
+        "tbv",
+        "technisch_beveiligingsspecialist",
+        "basis_brandmeldtechniek",
+        "beheerder_brandmeldinstallatie",
+        "projecteringsdeskundige_bmi",
+        "installatiedeskundige_bmi_oai",
+        "onderhoudsdeskundige_bmi",
+        "projecteringsdeskundige_cctv_vss",
+        "installatiedeskundige_cctv_vss",
         "particulier_onderzoeker",
         "other"
       ]
