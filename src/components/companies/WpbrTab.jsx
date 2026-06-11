@@ -11,12 +11,13 @@ import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
 
 const WPBR_TYPES = [
   { key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
-  { key: "HND", label: "HND", desc: "Hoofd Nationaal Particulier beveiligingsbedrijf alleen voor horecabeveiliging" },
+  { key: "HND", label: "HND", desc: "Particulier beveiligingsbedrijf alleen voor horecabeveiliging" },
   { key: "BD", label: "BD", desc: "Particuliere bedrijfsbeveiligingsdienst" },
-  { key: "PAC", label: "PAC", desc: "Particulier Alarm Centralist" },
+  { key: "HBD", label: "HBD", desc: "Particuliere bedrijfsbeveiligingsdienst voor eigen horecaonderneming" },
+  { key: "PAC", label: "PAC", desc: "Particuliere Alarmcentrale" },
   { key: "VTC", label: "VTC", desc: "Particuliere Video Toezicht Centrale" },
   { key: "PGW", label: "PGW", desc: "Particulier Geld- en Waardentransportbedrijf" },
-  { key: "POB", label: "POB", desc: "Particuliere Alarmcentrale" },
+  { key: "POB", label: "POB", desc: "Particulier Recherchebureau" },
 ];
 
 const DELETE_PASSWORD = "verwijder";

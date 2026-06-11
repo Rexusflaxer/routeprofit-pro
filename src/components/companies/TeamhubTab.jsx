@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from "react";
-import { useMutation, useQueryClient } from "@tanstack/react-query";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -9,25 +9,15 @@ import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
 import { Building2, Check, Clock, Mail, Phone, Save, Users } from "lucide-react";
+import {
+  TEAMHUB_SERVICE_OPTIONS,
+  getEffectiveWpbrLicenseType,
+  getTeamhubServiceDisabledReason,
+  getWpbrLicenseLabel,
+  isTeamhubServiceAllowedForLicense,
+  sanitizeTeamhubServiceTypes,
+} from "@/lib/teamhubServiceRules";
 import TeamhubRegionPicker from "./TeamhubRegionPicker";
-
-const ACTIVITY_LABELS = {
-  private_security: "Particuliere beveiliging",
-  event_hospitality_security: "Evenementen/horeca",
-  object_security: "Objectbeveiliging",
-  mobile_surveillance: "Mobiele surveillance",
-  alarm_center: "Alarmcentrale",
-  video_surveillance_center: "Videotoezicht",
-  security_installation: "Beveiligingsinstallaties",
-  traffic_controller: "Verkeersregelaars",
-  fire_watch: "Brandwacht",
-  bhv: "BHV",
-  private_investigation: "Recherche",
-  reception_host: "Receptie/host",
-  other: "Overig",
-};
-
-const ACTIVITIES = Object.entries(ACTIVITY_LABELS).map(([key, label]) => ({ key, label }));
 
 function getInitialForm(company) {
   const serviceTypes = Array.isArray(company?.teamhub_service_types) && company.teamhub_service_types.length > 0
@@ -41,9 +31,6 @@ function getInitialForm(company) {
     teamhub_contact_email: company?.teamhub_contact_email || "",
     teamhub_contact_phone: company?.teamhub_contact_phone || "",
     teamhub_service_types: serviceTypes,
-    teamhub_capacity_note: company?.teamhub_capacity_note || "",
-    teamhub_available_from: company?.teamhub_available_from || "",
-    teamhub_min_notice_hours: company?.teamhub_min_notice_hours ?? "",
     teamhub_regions: Array.isArray(company?.teamhub_regions) ? company.teamhub_regions : [],
   };
 }
@@ -52,9 +39,25 @@ export default function TeamhubTab({ companyId, company }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState(() => getInitialForm(company));
 
+  const { data: wpbrLicenses = [] } = useQuery({
+    queryKey: ["wpbr-licenses", companyId],
+    queryFn: () => base44.entities.CompanyWpbrLicense.filter({ company_id: companyId }, "-created_date"),
+    enabled: !!companyId,
+  });
+
+  const effectiveWpbrLicenseType = getEffectiveWpbrLicenseType(company, wpbrLicenses);
+
   useEffect(() => {
     setForm(getInitialForm(company));
   }, [company?.id]);
+
+  useEffect(() => {
+    setForm(current => {
+      const sanitized = sanitizeTeamhubServiceTypes(effectiveWpbrLicenseType, current.teamhub_service_types || []);
+      if (sanitized.length === (current.teamhub_service_types || []).length) return current;
+      return { ...current, teamhub_service_types: sanitized };
+    });
+  }, [effectiveWpbrLicenseType, company?.id]);
 
   const saveMutation = useMutation({
     mutationFn: (payload) => base44.entities.Company.update(companyId, payload),
@@ -68,6 +71,7 @@ export default function TeamhubTab({ companyId, company }) {
   };
 
   const toggleService = (key) => {
+    if (!isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, key)) return;
     const current = form.teamhub_service_types || [];
     set(
       "teamhub_service_types",
@@ -82,10 +86,7 @@ export default function TeamhubTab({ companyId, company }) {
       teamhub_contact_name: form.teamhub_contact_name?.trim() || null,
       teamhub_contact_email: form.teamhub_contact_email?.trim() || null,
       teamhub_contact_phone: form.teamhub_contact_phone?.trim() || null,
-      teamhub_service_types: form.teamhub_service_types || [],
-      teamhub_capacity_note: form.teamhub_capacity_note?.trim() || null,
-      teamhub_available_from: form.teamhub_available_from || null,
-      teamhub_min_notice_hours: form.teamhub_min_notice_hours === "" ? null : Number(form.teamhub_min_notice_hours),
+      teamhub_service_types: sanitizeTeamhubServiceTypes(effectiveWpbrLicenseType, form.teamhub_service_types || []),
       teamhub_regions: form.teamhub_regions || [],
     });
   };
@@ -182,50 +183,32 @@ export default function TeamhubTab({ companyId, company }) {
 
         <div className="space-y-3">
           <Label>Diensten</Label>
+          <p className="text-xs text-muted-foreground">
+            Selectie op basis van vergunning: {effectiveWpbrLicenseType ? `${effectiveWpbrLicenseType} - ${getWpbrLicenseLabel(effectiveWpbrLicenseType)}` : "geen actieve WPBR-vergunning gevonden"}.
+          </p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {ACTIVITIES.map(activity => (
+            {TEAMHUB_SERVICE_OPTIONS.map(activity => {
+              const allowed = isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, activity.key);
+              const disabledReason = getTeamhubServiceDisabledReason(effectiveWpbrLicenseType, activity.key);
+              return (
               <label
                 key={activity.key}
-                className="flex cursor-pointer items-center gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm hover:bg-accent/50"
+                title={disabledReason}
+                className={`flex items-start gap-2 rounded-md border border-border bg-background px-3 py-2 text-sm ${allowed ? "cursor-pointer hover:bg-accent/50" : "cursor-not-allowed opacity-55"}`}
               >
                 <Checkbox
                   checked={(form.teamhub_service_types || []).includes(activity.key)}
+                  disabled={!allowed}
                   onCheckedChange={() => toggleService(activity.key)}
+                  className="mt-0.5"
                 />
-                <span>{activity.label}</span>
+                <span>
+                  <span className="block">{activity.label}</span>
+                  {!allowed && <span className="block text-[11px] leading-4 text-muted-foreground">{disabledReason}</span>}
+                </span>
               </label>
-            ))}
-          </div>
-        </div>
-
-        <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_240px_240px]">
-          <div className="space-y-2">
-            <Label>Capaciteit en beschikbaarheid</Label>
-            <Textarea
-              value={form.teamhub_capacity_note}
-              onChange={e => set("teamhub_capacity_note", e.target.value)}
-              rows={3}
-              placeholder="Bijvoorbeeld nachtdiensten, weekenden, vaste objectbeveiliging of ad-hoc inzet"
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Beschikbaar vanaf</Label>
-            <Input
-              type="date"
-              value={form.teamhub_available_from}
-              onChange={e => set("teamhub_available_from", e.target.value)}
-            />
-          </div>
-          <div className="space-y-2">
-            <Label>Minimale aanlooptijd</Label>
-            <Input
-              type="number"
-              min="0"
-              step="1"
-              value={form.teamhub_min_notice_hours}
-              onChange={e => set("teamhub_min_notice_hours", e.target.value)}
-              placeholder="Uren"
-            />
+              );
+            })}
           </div>
         </div>
 

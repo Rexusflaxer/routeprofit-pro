@@ -7,42 +7,19 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
 import { Building2, Globe, Mail, MapPin, Phone, Search, ShieldCheck, Users } from "lucide-react";
-
-const ACTIVITY_LABELS = {
-  private_security: "Particuliere beveiliging",
-  event_hospitality_security: "Evenementen/horeca",
-  object_security: "Objectbeveiliging",
-  mobile_surveillance: "Mobiele surveillance",
-  alarm_center: "Alarmcentrale",
-  video_surveillance_center: "Videotoezicht",
-  security_installation: "Beveiligingsinstallaties",
-  traffic_controller: "Verkeersregelaars",
-  fire_watch: "Brandwacht",
-  bhv: "BHV",
-  private_investigation: "Recherche",
-  reception_host: "Receptie/host",
-  other: "Overig",
-};
+import { TEAMHUB_SERVICE_LABELS } from "@/lib/teamhubServiceRules";
 
 function normalizeSearch(value) {
   return String(value || "").trim().toLowerCase();
 }
 
 function serviceLabel(key) {
-  return ACTIVITY_LABELS[key] || key;
+  return TEAMHUB_SERVICE_LABELS[key] || key;
 }
 
 function regionLabel(region) {
   if (!region) return null;
-  const radius = region.radius_km ? ` (${region.radius_km} km)` : "";
-  return `${region.label || region.city || "Regio"}${radius}`;
-}
-
-function formatDate(value) {
-  if (!value) return null;
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return value;
-  return date.toLocaleDateString("nl-NL", { day: "2-digit", month: "short", year: "numeric" });
+  return region.label || region.city || "Regio";
 }
 
 function normalizeWebsite(url) {
@@ -73,7 +50,6 @@ function TeamhubCompanyCard({ company }) {
   const services = company.teamhub_service_types?.length ? company.teamhub_service_types : company.activities || [];
   const regions = Array.isArray(company.teamhub_regions) ? company.teamhub_regions : [];
   const website = normalizeWebsite(company.website);
-  const availableFrom = formatDate(company.teamhub_available_from);
 
   return (
     <article className="rounded-md border border-border bg-card p-4 shadow-sm">
@@ -123,16 +99,6 @@ function TeamhubCompanyCard({ company }) {
           </div>
         </div>
       </div>
-
-      {(company.teamhub_capacity_note || availableFrom || company.teamhub_min_notice_hours != null) && (
-        <div className="mt-4 rounded-md border border-border bg-muted/20 p-3">
-          {company.teamhub_capacity_note && <p className="text-sm text-foreground">{company.teamhub_capacity_note}</p>}
-          <div className="mt-2 flex flex-wrap gap-2 text-xs text-muted-foreground">
-            {availableFrom && <span>Beschikbaar vanaf {availableFrom}</span>}
-            {company.teamhub_min_notice_hours != null && <span>Min. {company.teamhub_min_notice_hours} uur aanlooptijd</span>}
-          </div>
-        </div>
-      )}
 
       <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-border pt-3">
         {company.wpbr_license_type && company.wpbr_license_type !== "none" && (

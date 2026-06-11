@@ -94,6 +94,7 @@
         "ND",
         "HND",
         "BD",
+        "HBD",
         "PAC",
         "VTC",
         "PGW",
@@ -275,37 +276,22 @@
       "default": [],
       "description": "Diensten waarvoor dit bedrijf zich via LOQ Teamhub beschikbaar stelt"
     },
-    "teamhub_capacity_note": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "description": "Publieke toelichting op capaciteit en beschikbaarheid"
-    },
-    "teamhub_available_from": {
-      "type": [
-        "string",
-        "null"
-      ],
-      "format": "date",
-      "description": "Datum vanaf wanneer het bedrijf diensten kan aannemen"
-    },
-    "teamhub_min_notice_hours": {
-      "type": [
-        "number",
-        "null"
-      ],
-      "description": "Minimale aanlooptijd in uren voor Teamhub-aanvragen"
-    },
     "teamhub_regions": {
       "type": "array",
       "default": [],
-      "description": "Regio's waar het bedrijf diensten wil aannemen via LOQ Teamhub",
+      "description": "Klikbaar geselecteerde regio's waar het bedrijf diensten wil aannemen via LOQ Teamhub",
       "items": {
         "type": "object",
         "properties": {
           "id": {
             "type": "string"
+          },
+          "region_code": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "description": "Broncode van het geselecteerde gebied, bijvoorbeeld een CBS-gemeentecode"
           },
           "label": {
             "type": "string"
@@ -313,12 +299,11 @@
           "selection_type": {
             "type": "string",
             "enum": [
-              "city_radius",
               "municipality",
               "province",
               "custom_geojson"
             ],
-            "default": "city_radius"
+            "default": "municipality"
           },
           "city": {
             "type": [
@@ -347,13 +332,6 @@
               "number",
               "null"
             ]
-          },
-          "radius_km": {
-            "type": [
-              "number",
-              "null"
-            ],
-            "default": 25
           },
           "geojson": {
             "type": [

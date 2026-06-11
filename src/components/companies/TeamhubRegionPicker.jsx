@@ -3,16 +3,19 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Slider } from "@/components/ui/slider";
 import { MAPBOX_PUBLIC_TOKEN } from "@/components/navigation/mapboxConfig";
-import { Loader2, MapPin, Plus, Trash2 } from "lucide-react";
+import { Loader2, MapPin, MousePointer2, Trash2 } from "lucide-react";
 import "mapbox-gl/dist/mapbox-gl.css";
 
-const REGION_SOURCE_ID = "teamhub-regions";
-const REGION_FILL_LAYER_ID = "teamhub-regions-fill";
-const REGION_LINE_LAYER_ID = "teamhub-regions-line";
+const MUNICIPALITY_SOURCE_ID = "teamhub-municipalities";
+const SELECTED_SOURCE_ID = "teamhub-selected-regions";
+const MUNICIPALITY_FILL_LAYER_ID = "teamhub-municipalities-fill";
+const MUNICIPALITY_LINE_LAYER_ID = "teamhub-municipalities-line";
+const MUNICIPALITY_HOVER_LAYER_ID = "teamhub-municipalities-hover";
+const SELECTED_FILL_LAYER_ID = "teamhub-selected-regions-fill";
+const SELECTED_LINE_LAYER_ID = "teamhub-selected-regions-line";
 const NETHERLANDS_CENTER = [5.2913, 52.1326];
-const DEFAULT_RADIUS_KM = 25;
+const MUNICIPALITY_GEOJSON_URL = "https://cartomap.github.io/nl/wgs84/gemeente_2026.geojson";
 
 function normalizeCoordinates(latitude, longitude) {
   const lat = Number(latitude);
@@ -25,88 +28,112 @@ function normalizeCoordinates(latitude, longitude) {
   return { lat, lng };
 }
 
-function createCirclePolygon(longitude, latitude, radiusKm, steps = 72) {
-  const coords = [];
-  const earthRadiusKm = 6371;
-  const latRad = latitude * Math.PI / 180;
-  const lonRad = longitude * Math.PI / 180;
-  const distance = Math.max(Number(radiusKm) || DEFAULT_RADIUS_KM, 1) / earthRadiusKm;
-
-  for (let i = 0; i <= steps; i += 1) {
-    const bearing = (i / steps) * 2 * Math.PI;
-    const pointLat = Math.asin(
-      Math.sin(latRad) * Math.cos(distance)
-      + Math.cos(latRad) * Math.sin(distance) * Math.cos(bearing)
-    );
-    const pointLon = lonRad + Math.atan2(
-      Math.sin(bearing) * Math.sin(distance) * Math.cos(latRad),
-      Math.cos(distance) - Math.sin(latRad) * Math.sin(pointLat)
-    );
-    coords.push([pointLon * 180 / Math.PI, pointLat * 180 / Math.PI]);
-  }
-
-  return coords;
+function featureCollection(features = []) {
+  return { type: "FeatureCollection", features };
 }
 
-function regionFeature(region) {
-  const coords = normalizeCoordinates(region.latitude, region.longitude);
-  if (!coords) return null;
+function getRegionCode(feature) {
+  return feature?.properties?.statcode || feature?.properties?.jrstatcode || feature?.properties?.id;
+}
+
+function getRegionLabel(feature) {
+  return feature?.properties?.statnaam || feature?.properties?.name || "Gemeente";
+}
+
+function walkCoordinates(coords, visitor) {
+  if (!Array.isArray(coords)) return;
+  if (typeof coords[0] === "number" && typeof coords[1] === "number") {
+    visitor(coords[0], coords[1]);
+    return;
+  }
+  coords.forEach(item => walkCoordinates(item, visitor));
+}
+
+function geometryCenter(geometry) {
+  const bounds = {
+    minLng: Infinity,
+    minLat: Infinity,
+    maxLng: -Infinity,
+    maxLat: -Infinity,
+  };
+
+  walkCoordinates(geometry?.coordinates, (lng, lat) => {
+    bounds.minLng = Math.min(bounds.minLng, lng);
+    bounds.minLat = Math.min(bounds.minLat, lat);
+    bounds.maxLng = Math.max(bounds.maxLng, lng);
+    bounds.maxLat = Math.max(bounds.maxLat, lat);
+  });
+
+  if (!Number.isFinite(bounds.minLng) || !Number.isFinite(bounds.minLat)) return null;
+  return {
+    lng: (bounds.minLng + bounds.maxLng) / 2,
+    lat: (bounds.minLat + bounds.maxLat) / 2,
+  };
+}
+
+function storedRegionFeature(region) {
+  if (!region?.geojson) return null;
 
   return {
     type: "Feature",
     properties: {
       id: region.id,
+      region_code: region.region_code || region.id,
       label: region.label || region.city || "Regio",
     },
-    geometry: {
-      type: "Polygon",
-      coordinates: [createCirclePolygon(coords.lng, coords.lat, region.radius_km || DEFAULT_RADIUS_KM)],
-    },
+    geometry: region.geojson,
   };
 }
 
-function featureCollection(features) {
-  return { type: "FeatureCollection", features };
+function buildStoredRegion(feature) {
+  const regionCode = getRegionCode(feature);
+  const label = getRegionLabel(feature);
+  const center = geometryCenter(feature.geometry);
+
+  return {
+    id: `municipality:${regionCode || label}`,
+    region_code: regionCode || null,
+    label,
+    selection_type: "municipality",
+    city: label,
+    province: null,
+    country: "Nederland",
+    latitude: center?.lat || null,
+    longitude: center?.lng || null,
+    geojson: feature.geometry,
+  };
 }
 
-function createMarkerElement(label) {
-  const marker = document.createElement("div");
-  marker.className = "teamhub-region-marker";
-  marker.style.width = "28px";
-  marker.style.height = "28px";
-  marker.style.borderRadius = "999px";
-  marker.style.background = "#1f7aff";
-  marker.style.border = "2px solid #dbeafe";
-  marker.style.boxShadow = "0 10px 24px rgba(0, 0, 0, 0.35), 0 0 0 8px rgba(31, 122, 255, 0.18)";
-  marker.style.display = "flex";
-  marker.style.alignItems = "center";
-  marker.style.justifyContent = "center";
-  marker.title = label || "Teamhub-regio";
-
-  const dot = document.createElement("div");
-  dot.style.width = "8px";
-  dot.style.height = "8px";
-  dot.style.borderRadius = "999px";
-  dot.style.background = "#eff6ff";
-  marker.appendChild(dot);
-
-  return marker;
+function selectedFeatures(regions) {
+  return featureCollection((regions || []).map(storedRegionFeature).filter(Boolean));
 }
 
 function getSuggestionLabel(suggestion) {
-  return suggestion.city || suggestion.municipality || suggestion.address || "Nieuwe regio";
+  return suggestion.city || suggestion.municipality || suggestion.address || "Locatie";
 }
 
 export default function TeamhubRegionPicker({ value = [], onChange }) {
   const regions = Array.isArray(value) ? value : [];
   const mapContainerRef = useRef(null);
   const mapRef = useRef(null);
-  const markersRef = useRef([]);
+  const featuresByCodeRef = useRef(new Map());
   const searchTimeout = useRef(null);
+  const regionsRef = useRef(regions);
+  const onChangeRef = useRef(onChange);
   const [mapReady, setMapReady] = useState(false);
+  const [boundariesReady, setBoundariesReady] = useState(false);
+  const [boundaryError, setBoundaryError] = useState(false);
   const [query, setQuery] = useState("");
   const [suggestions, setSuggestions] = useState([]);
-  const [loading, setLoading] = useState(false);
+  const [loadingSearch, setLoadingSearch] = useState(false);
+
+  useEffect(() => {
+    regionsRef.current = regions;
+  }, [regions]);
+
+  useEffect(() => {
+    onChangeRef.current = onChange;
+  }, [onChange]);
 
   useEffect(() => {
     let cancelled = false;
@@ -119,17 +146,114 @@ export default function TeamhubRegionPicker({ value = [], onChange }) {
       mapboxgl.accessToken = MAPBOX_PUBLIC_TOKEN;
       map = new mapboxgl.Map({
         container: mapContainerRef.current,
-        style: "mapbox://styles/mapbox/dark-v11",
+        style: "mapbox://styles/mapbox/light-v11",
         center: NETHERLANDS_CENTER,
-        zoom: 6.4,
-        minZoom: 5,
+        zoom: 6.45,
+        minZoom: 5.2,
       });
 
       map.dragRotate.disable();
       map.touchZoomRotate.disableRotation();
-      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "top-right");
-      map.on("load", () => {
-        if (!cancelled) setMapReady(true);
+      map.addControl(new mapboxgl.NavigationControl({ showCompass: false }), "bottom-right");
+      map.on("load", async () => {
+        if (cancelled) return;
+        setMapReady(true);
+
+        try {
+          const response = await fetch(MUNICIPALITY_GEOJSON_URL);
+          if (!response.ok) throw new Error(`Gemeentegrenzen laden mislukt (${response.status})`);
+          const data = await response.json();
+          if (cancelled || !map) return;
+
+          featuresByCodeRef.current = new Map(
+            (data.features || []).map(feature => [getRegionCode(feature), feature]).filter(([code]) => code)
+          );
+
+          map.addSource(MUNICIPALITY_SOURCE_ID, { type: "geojson", data });
+          map.addSource(SELECTED_SOURCE_ID, { type: "geojson", data: selectedFeatures(regionsRef.current) });
+
+          map.addLayer({
+            id: MUNICIPALITY_FILL_LAYER_ID,
+            type: "fill",
+            source: MUNICIPALITY_SOURCE_ID,
+            paint: {
+              "fill-color": "#f8fafc",
+              "fill-opacity": 0.08,
+            },
+          });
+
+          map.addLayer({
+            id: MUNICIPALITY_HOVER_LAYER_ID,
+            type: "fill",
+            source: MUNICIPALITY_SOURCE_ID,
+            paint: {
+              "fill-color": "#1f7aff",
+              "fill-opacity": 0.2,
+            },
+            filter: ["==", ["get", "statcode"], ""],
+          });
+
+          map.addLayer({
+            id: SELECTED_FILL_LAYER_ID,
+            type: "fill",
+            source: SELECTED_SOURCE_ID,
+            paint: {
+              "fill-color": "#1f7aff",
+              "fill-opacity": 0.36,
+            },
+          });
+
+          map.addLayer({
+            id: MUNICIPALITY_LINE_LAYER_ID,
+            type: "line",
+            source: MUNICIPALITY_SOURCE_ID,
+            paint: {
+              "line-color": "#111827",
+              "line-opacity": 0.8,
+              "line-width": ["interpolate", ["linear"], ["zoom"], 5, 0.8, 8, 1.4, 10, 2],
+            },
+          });
+
+          map.addLayer({
+            id: SELECTED_LINE_LAYER_ID,
+            type: "line",
+            source: SELECTED_SOURCE_ID,
+            paint: {
+              "line-color": "#0f5fd7",
+              "line-width": ["interpolate", ["linear"], ["zoom"], 5, 1.6, 8, 2.4, 10, 3],
+            },
+          });
+
+          map.on("mousemove", MUNICIPALITY_FILL_LAYER_ID, (event) => {
+            map.getCanvas().style.cursor = "pointer";
+            const feature = event.features?.[0];
+            map.setFilter(MUNICIPALITY_HOVER_LAYER_ID, ["==", ["get", "statcode"], getRegionCode(feature) || ""]);
+          });
+
+          map.on("mouseleave", MUNICIPALITY_FILL_LAYER_ID, () => {
+            map.getCanvas().style.cursor = "";
+            map.setFilter(MUNICIPALITY_HOVER_LAYER_ID, ["==", ["get", "statcode"], ""]);
+          });
+
+          map.on("click", MUNICIPALITY_FILL_LAYER_ID, (event) => {
+            const feature = event.features?.[0];
+            const regionCode = getRegionCode(feature);
+            if (!feature || !regionCode) return;
+
+            const current = regionsRef.current || [];
+            const exists = current.some(region => region.region_code === regionCode || region.id === `municipality:${regionCode}`);
+            const sourceFeature = featuresByCodeRef.current.get(regionCode) || feature;
+            const next = exists
+              ? current.filter(region => region.region_code !== regionCode && region.id !== `municipality:${regionCode}`)
+              : [...current, buildStoredRegion(sourceFeature)];
+
+            onChangeRef.current(next);
+          });
+
+          setBoundariesReady(true);
+        } catch {
+          if (!cancelled) setBoundaryError(true);
+        }
       });
 
       mapRef.current = map;
@@ -138,8 +262,8 @@ export default function TeamhubRegionPicker({ value = [], onChange }) {
     return () => {
       cancelled = true;
       setMapReady(false);
-      markersRef.current.forEach(marker => marker.remove());
-      markersRef.current = [];
+      setBoundariesReady(false);
+      featuresByCodeRef.current = new Map();
       if (map) map.remove();
       mapRef.current = null;
     };
@@ -147,50 +271,8 @@ export default function TeamhubRegionPicker({ value = [], onChange }) {
 
   useEffect(() => {
     const map = mapRef.current;
-    if (!map || !mapReady || !map.isStyleLoaded()) return;
-
-    const features = regions.map(regionFeature).filter(Boolean);
-    const data = featureCollection(features);
-
-    if (map.getSource(REGION_SOURCE_ID)) {
-      map.getSource(REGION_SOURCE_ID).setData(data);
-    } else {
-      map.addSource(REGION_SOURCE_ID, { type: "geojson", data });
-      map.addLayer({
-        id: REGION_FILL_LAYER_ID,
-        type: "fill",
-        source: REGION_SOURCE_ID,
-        paint: {
-          "fill-color": "#1f7aff",
-          "fill-opacity": 0.2,
-        },
-      });
-      map.addLayer({
-        id: REGION_LINE_LAYER_ID,
-        type: "line",
-        source: REGION_SOURCE_ID,
-        paint: {
-          "line-color": "#60a5fa",
-          "line-width": 2,
-          "line-opacity": 0.9,
-        },
-      });
-    }
-
-    markersRef.current.forEach(marker => marker.remove());
-    markersRef.current = [];
-
-    import("mapbox-gl").then((mapboxglModule) => {
-      const mapboxgl = mapboxglModule.default;
-      regions.forEach((region) => {
-        const coords = normalizeCoordinates(region.latitude, region.longitude);
-        if (!coords) return;
-        const marker = new mapboxgl.Marker({ element: createMarkerElement(region.label) })
-          .setLngLat([coords.lng, coords.lat])
-          .addTo(map);
-        markersRef.current.push(marker);
-      });
-    });
+    if (!map || !mapReady || !map.getSource(SELECTED_SOURCE_ID)) return;
+    map.getSource(SELECTED_SOURCE_ID).setData(selectedFeatures(regions));
   }, [regions, mapReady]);
 
   const search = (nextQuery) => {
@@ -202,47 +284,23 @@ export default function TeamhubRegionPicker({ value = [], onChange }) {
     }
 
     searchTimeout.current = setTimeout(async () => {
-      setLoading(true);
+      setLoadingSearch(true);
       try {
         const { data } = await base44.functions.invoke("searchAddress", { query: nextQuery });
         setSuggestions((data?.suggestions || []).filter(item => item.latitude && item.longitude).slice(0, 8));
       } finally {
-        setLoading(false);
+        setLoadingSearch(false);
       }
     }, 300);
   };
 
-  const addRegion = (suggestion) => {
+  const flyToSuggestion = (suggestion) => {
     const coords = normalizeCoordinates(suggestion.latitude, suggestion.longitude);
     if (!coords) return;
 
-    const label = getSuggestionLabel(suggestion);
-    const nextRegion = {
-      id: `teamhub-region-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
-      label,
-      selection_type: "city_radius",
-      city: suggestion.city || label,
-      province: suggestion.province || null,
-      country: suggestion.country || "Nederland",
-      latitude: coords.lat,
-      longitude: coords.lng,
-      radius_km: DEFAULT_RADIUS_KM,
-      geojson: null,
-    };
-
-    const next = [...regions, nextRegion];
-    onChange(next);
     setQuery("");
     setSuggestions([]);
-
-    const map = mapRef.current;
-    if (map) {
-      map.flyTo({ center: [coords.lng, coords.lat], zoom: 8.5, essential: true });
-    }
-  };
-
-  const updateRegion = (id, patch) => {
-    onChange(regions.map(region => region.id === id ? { ...region, ...patch } : region));
+    mapRef.current?.flyTo({ center: [coords.lng, coords.lat], zoom: 9.3, essential: true });
   };
 
   const removeRegion = (id) => {
@@ -258,10 +316,10 @@ export default function TeamhubRegionPicker({ value = [], onChange }) {
             <Input
               value={query}
               onChange={e => search(e.target.value)}
-              placeholder="Zoek op plaats, gemeente of adres"
+              placeholder="Zoek plaats of adres om naar de kaart te zoomen"
               autoComplete="off"
             />
-            {loading && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />}
+            {loadingSearch && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />}
           </div>
         </div>
         {suggestions.length > 0 && (
@@ -270,7 +328,7 @@ export default function TeamhubRegionPicker({ value = [], onChange }) {
               <button
                 key={`${suggestion.address}-${index}`}
                 type="button"
-                onClick={() => addRegion(suggestion)}
+                onClick={() => flyToSuggestion(suggestion)}
                 className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-accent"
               >
                 <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
@@ -278,20 +336,30 @@ export default function TeamhubRegionPicker({ value = [], onChange }) {
                   <span className="block truncate font-medium">{getSuggestionLabel(suggestion)}</span>
                   <span className="block truncate text-xs text-muted-foreground">{suggestion.address}</span>
                 </span>
-                <Plus className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
               </button>
             ))}
           </div>
         )}
       </div>
 
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_320px]">
-        <div className="relative h-[340px] overflow-hidden rounded-md border border-border bg-muted">
+      <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
+        <div className="relative h-[480px] overflow-hidden rounded-md border border-border bg-muted">
           <div ref={mapContainerRef} className="h-full w-full" />
-          {!mapReady && (
+          {(!mapReady || !boundariesReady) && !boundaryError && (
             <div className="absolute inset-0 flex items-center justify-center bg-background/70 text-sm text-muted-foreground">
               <Loader2 className="mr-2 h-4 w-4 animate-spin" />
-              Kaart laden
+              Gemeentegrenzen laden
+            </div>
+          )}
+          {boundaryError && (
+            <div className="absolute inset-x-4 top-4 rounded-md border border-destructive/30 bg-background/95 px-3 py-2 text-sm text-destructive shadow-sm">
+              Gemeentegrenzen konden niet worden geladen.
+            </div>
+          )}
+          {boundariesReady && (
+            <div className="absolute left-3 top-3 flex items-center gap-2 rounded-md border border-border bg-background/90 px-3 py-2 text-xs text-foreground shadow-sm">
+              <MousePointer2 className="h-3.5 w-3.5 text-primary" />
+              Klik op een gemeente om de hele regio te selecteren
             </div>
           )}
         </div>
@@ -300,40 +368,27 @@ export default function TeamhubRegionPicker({ value = [], onChange }) {
           <div className="border-b border-border bg-muted/30 px-3 py-2">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">Geselecteerde regio's</p>
           </div>
-          <div className="max-h-[292px] space-y-3 overflow-y-auto p-3">
+          <div className="max-h-[432px] space-y-2 overflow-y-auto p-3">
             {regions.length === 0 && (
-              <p className="text-sm text-muted-foreground">Nog geen regio's geselecteerd.</p>
+              <p className="text-sm text-muted-foreground">Klik op de kaart om regio's te selecteren.</p>
             )}
             {regions.map(region => (
-              <div key={region.id} className="space-y-2 rounded-md border border-border bg-background p-3">
-                <div className="flex items-start gap-2">
-                  <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                  <div className="min-w-0 flex-1">
-                    <Input
-                      value={region.label || ""}
-                      onChange={e => updateRegion(region.id, { label: e.target.value })}
-                      className="h-8 text-sm font-medium"
-                    />
-                    <p className="mt-1 text-xs text-muted-foreground">Radius {region.radius_km || DEFAULT_RADIUS_KM} km</p>
-                  </div>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => removeRegion(region.id)}
-                    title="Regio verwijderen"
-                  >
-                    <Trash2 className="h-4 w-4" />
-                  </Button>
+              <div key={region.id} className="flex items-center gap-2 rounded-md border border-border bg-background p-3">
+                <MapPin className="h-4 w-4 shrink-0 text-primary" />
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{region.label || region.city || "Regio"}</p>
+                  <p className="text-xs text-muted-foreground">Gemeentegebied</p>
                 </div>
-                <Slider
-                  value={[Number(region.radius_km) || DEFAULT_RADIUS_KM]}
-                  min={5}
-                  max={100}
-                  step={5}
-                  onValueChange={([radius]) => updateRegion(region.id, { radius_km: radius })}
-                />
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8 shrink-0 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={() => removeRegion(region.id)}
+                  title="Regio verwijderen"
+                >
+                  <Trash2 className="h-4 w-4" />
+                </Button>
               </div>
             ))}
           </div>

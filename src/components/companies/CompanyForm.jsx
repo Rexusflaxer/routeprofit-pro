@@ -1,4 +1,4 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -10,6 +10,13 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
 import { Search, Upload, X, MapPin } from "lucide-react";
 import { createManagedUploadSession, uploadManagedFile } from "@/lib/managedFiles";
+import {
+  TEAMHUB_SERVICE_OPTIONS,
+  getTeamhubServiceDisabledReason,
+  getWpbrLicenseLabel,
+  isTeamhubServiceAllowedForLicense,
+  sanitizeTeamhubServiceTypes,
+} from "@/lib/teamhubServiceRules";
 import TeamhubRegionPicker from "./TeamhubRegionPicker";
 
 const ACTIVITIES = [
@@ -29,7 +36,7 @@ const ACTIVITIES = [
 ];
 
 const LEGAL_FORMS = ["BV", "NV", "VOF", "CV", "Eenmanszaak", "Maatschap", "Stichting", "Coöperatie", "Anders"];
-const WPBR_TYPES = ["ND", "HND", "BD", "PAC", "VTC", "PGW", "POB", "none", "other"];
+const WPBR_TYPES = ["ND", "HND", "BD", "HBD", "PAC", "VTC", "PGW", "POB", "none", "other"];
 
 export default function CompanyForm({ company, companies = [], caoConfigurations = [], onSave, onCancel }) {
   const [uploadSessionId] = useState(() => createManagedUploadSession("company"));
@@ -42,7 +49,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
     letterhead_file_url: null, letterhead_file_id: null, letterhead_download_filename: null, letterhead_logical_path: null,
     default_cao_configuration_id: null, notes: "",
     teamhub_enabled: false, teamhub_intro: "", teamhub_contact_name: "", teamhub_contact_email: "", teamhub_contact_phone: "",
-    teamhub_service_types: [], teamhub_capacity_note: "", teamhub_available_from: "", teamhub_min_notice_hours: "", teamhub_regions: [],
+    teamhub_service_types: [], teamhub_regions: [],
   });
   const [activeTab, setActiveTab] = useState("identity");
 
@@ -147,9 +154,18 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
   };
 
   const toggleTeamhubService = (key) => {
+    if (!isTeamhubServiceAllowedForLicense(form.wpbr_license_type, key)) return;
     const current = form.teamhub_service_types || [];
     set("teamhub_service_types", current.includes(key) ? current.filter(a => a !== key) : [...current, key]);
   };
+
+  useEffect(() => {
+    setForm(current => {
+      const sanitized = sanitizeTeamhubServiceTypes(current.wpbr_license_type, current.teamhub_service_types || []);
+      if (sanitized.length === (current.teamhub_service_types || []).length) return current;
+      return { ...current, teamhub_service_types: sanitized };
+    });
+  }, [form.wpbr_license_type, form.teamhub_service_types]);
 
   const buildSavePayload = () => ({
     ...form,
@@ -157,10 +173,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
     teamhub_contact_name: form.teamhub_contact_name?.trim() || null,
     teamhub_contact_email: form.teamhub_contact_email?.trim() || null,
     teamhub_contact_phone: form.teamhub_contact_phone?.trim() || null,
-    teamhub_service_types: form.teamhub_service_types || [],
-    teamhub_capacity_note: form.teamhub_capacity_note?.trim() || null,
-    teamhub_available_from: form.teamhub_available_from || null,
-    teamhub_min_notice_hours: form.teamhub_min_notice_hours === "" ? null : Number(form.teamhub_min_notice_hours),
+    teamhub_service_types: sanitizeTeamhubServiceTypes(form.wpbr_license_type, form.teamhub_service_types || []),
     teamhub_regions: form.teamhub_regions || [],
     _managed_file_upload_session_id: uploadSessionId,
   });
@@ -447,33 +460,36 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
               <Label>Contacttelefoon</Label>
               <Input value={form.teamhub_contact_phone || ""} onChange={e => set("teamhub_contact_phone", e.target.value)} placeholder={form.phone || ""} />
             </div>
-            <div className="space-y-1">
-              <Label>Beschikbaar vanaf</Label>
-              <Input type="date" value={form.teamhub_available_from || ""} onChange={e => set("teamhub_available_from", e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label>Minimale aanlooptijd in uren</Label>
-              <Input type="number" min="0" step="1" value={form.teamhub_min_notice_hours ?? ""} onChange={e => set("teamhub_min_notice_hours", e.target.value)} />
-            </div>
-            <div className="space-y-1 md:col-span-2">
-              <Label>Capaciteit en beschikbaarheid</Label>
-              <Textarea
-                value={form.teamhub_capacity_note || ""}
-                onChange={e => set("teamhub_capacity_note", e.target.value)}
-                rows={2}
-              />
-            </div>
           </div>
 
           <div>
             <Label className="mb-2 block">Diensten</Label>
+            <p className="mb-2 text-xs text-muted-foreground">
+              Selectie op basis van vergunning: {form.wpbr_license_type ? `${form.wpbr_license_type} - ${getWpbrLicenseLabel(form.wpbr_license_type)}` : "geen WPBR-vergunningstype gekozen"}.
+            </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-              {ACTIVITIES.map(a => (
-                <label key={a.key} className="flex items-center gap-2 text-sm cursor-pointer p-2 rounded hover:bg-muted/50">
-                  <Checkbox checked={(form.teamhub_service_types || []).includes(a.key)} onCheckedChange={() => toggleTeamhubService(a.key)} />
-                  {a.label}
+              {TEAMHUB_SERVICE_OPTIONS.map(a => {
+                const allowed = isTeamhubServiceAllowedForLicense(form.wpbr_license_type, a.key);
+                const disabledReason = getTeamhubServiceDisabledReason(form.wpbr_license_type, a.key);
+                return (
+                <label
+                  key={a.key}
+                  title={disabledReason}
+                  className={`flex items-start gap-2 text-sm p-2 rounded border border-border ${allowed ? "cursor-pointer hover:bg-muted/50" : "cursor-not-allowed opacity-55"}`}
+                >
+                  <Checkbox
+                    checked={(form.teamhub_service_types || []).includes(a.key)}
+                    disabled={!allowed}
+                    onCheckedChange={() => toggleTeamhubService(a.key)}
+                    className="mt-0.5"
+                  />
+                  <span>
+                    <span className="block">{a.label}</span>
+                    {!allowed && <span className="block text-[11px] leading-4 text-muted-foreground">{disabledReason}</span>}
+                  </span>
                 </label>
-              ))}
+                );
+              })}
             </div>
           </div>
 
