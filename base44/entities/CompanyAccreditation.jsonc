@@ -28,6 +28,17 @@
         "iso_9001",
         "iso_27001",
         "vca",
+        "veb_pbo_kwaliteitsregeling",
+        "nvb_keurmerk_beveiliging",
+        "nvb_keurmerk_evenementenbeveiliging",
+        "nvb_keurmerk_horecabeveiliging",
+        "nvb_keurmerk_gwt",
+        "nvb_keurmerk_pob",
+        "vvnl_kwaliteitslabel_regulier",
+        "vvnl_kwaliteitslabel_ehb",
+        "vvnl_kwaliteitslabel_verkeersregelaars",
+        "bpob_keurmerk_particulier_onderzoeksbureau",
+        "nvb_bhv_opleidingsinstituut",
         "other_technical",
         "other"
       ]

@@ -25,6 +25,17 @@ const QUALITY_OPTIONS = [
   { key: "iso_9001", label: "ISO 9001" },
   { key: "iso_27001", label: "ISO 27001" },
   { key: "vca", label: "VCA" },
+  { key: "veb_pbo_kwaliteitsregeling", label: "VEB PBO Kwaliteitsregeling" },
+  { key: "nvb_keurmerk_beveiliging", label: "Nederlandse Veiligheidsbranche Keurmerk Beveiliging" },
+  { key: "nvb_keurmerk_evenementenbeveiliging", label: "Nederlandse Veiligheidsbranche Keurmerk Evenementenbeveiliging" },
+  { key: "nvb_keurmerk_horecabeveiliging", label: "Nederlandse Veiligheidsbranche Keurmerk Horecabeveiliging" },
+  { key: "nvb_keurmerk_gwt", label: "Nederlandse Veiligheidsbranche Keurmerk GWT" },
+  { key: "nvb_keurmerk_pob", label: "Nederlandse Veiligheidsbranche Keurmerk POB" },
+  { key: "vvnl_kwaliteitslabel_regulier", label: "VVNL Kwaliteitslabel Reguliere beveiliging" },
+  { key: "vvnl_kwaliteitslabel_ehb", label: "VVNL Kwaliteitslabel Evenementen-/horecabeveiliging" },
+  { key: "vvnl_kwaliteitslabel_verkeersregelaars", label: "VVNL Kwaliteitslabel Verkeersregelaars" },
+  { key: "bpob_keurmerk_particulier_onderzoeksbureau", label: "BPOB Keurmerk Particulier Onderzoeksbureau" },
+  { key: "nvb_bhv_opleidingsinstituut", label: "NVB-BHV Opleidingsinstituut / instructeursregistratie" },
   { key: "other", label: "Ander kwaliteitscertificaat" },
 ];
 
@@ -69,7 +80,7 @@ function statusBadge(item) {
   const today = new Date().toISOString().split("T")[0];
   const expiredByDate = item.valid_until && item.valid_until < today;
   if (item.status === "suspended") return <Badge variant="outline" className="text-xs text-destructive border-destructive/40">Geschorst</Badge>;
-  if (item.status === "pending_review") return <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">Controle</Badge>;
+  if (item.status === "pending_review") return <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">Actie nodig</Badge>;
   if (item.status === "expired" || expiredByDate) return <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">Verlopen</Badge>;
   return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0">Actief</Badge>;
 }
@@ -252,6 +263,7 @@ export default function AccreditationsTab({ companyId, company }) {
   };
 
   const itemToDelete = accreditations.find(item => item.id === deleteId);
+  const activeWithoutDocument = form.status === "active" && !form.document_file_url;
 
   return (
     <div className="flex flex-col h-full">
@@ -293,7 +305,7 @@ export default function AccreditationsTab({ companyId, company }) {
                   <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="active">Actief</SelectItem>
-                    <SelectItem value="pending_review">Te controleren</SelectItem>
+                    <SelectItem value="pending_review">Actie nodig</SelectItem>
                     <SelectItem value="suspended">Geschorst</SelectItem>
                     <SelectItem value="expired">Verlopen</SelectItem>
                   </SelectContent>
@@ -344,10 +356,13 @@ export default function AccreditationsTab({ companyId, company }) {
             </div>
             <div className="mt-4 flex justify-end gap-2">
               <Button variant="outline" size="sm" onClick={cancel}>Annuleren</Button>
-              <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending || !form.name?.trim()}>
+              <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending || !form.name?.trim() || activeWithoutDocument}>
                 <Check className="h-4 w-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : "Opslaan"}
               </Button>
             </div>
+            {activeWithoutDocument && (
+              <p className="mt-2 text-right text-xs text-destructive">Upload eerst een bewijsstuk voordat je de status Actief opslaat.</p>
+            )}
           </motion.div>
         )}
       </AnimatePresence>

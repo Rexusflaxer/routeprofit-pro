@@ -1,18 +1,95 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Textarea } from "@/components/ui/textarea";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Check, ChevronLeft, ChevronRight, Edit, Eye, FileText, Plus, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronLeft, ChevronRight, Edit, Plus, Trash2 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
-import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
-import { updateManagedFileSource, uploadManagedFile } from "@/lib/managedFiles";
 
 const DELETE_PASSWORD = "verwijder";
+
+const ACCREDITATION_TEMPLATES = {
+  veb_4: {
+    category: "technical_certification",
+    accreditation_type: "veb_4",
+    name: "VEB 4 Kwaliteitsregeling",
+    issuer: "Vereniging Erkende Beveiligingsbedrijven (VEB)",
+  },
+  veb_pbo: {
+    category: "quality_mark",
+    accreditation_type: "veb_pbo_kwaliteitsregeling",
+    name: "VEB PBO Kwaliteitsregeling",
+    issuer: "Vereniging Erkende Beveiligingsbedrijven (VEB)",
+  },
+  nvb_beveiliging: {
+    category: "quality_mark",
+    accreditation_type: "nvb_keurmerk_beveiliging",
+    name: "Nederlandse Veiligheidsbranche Keurmerk Beveiliging",
+    issuer: "Nederlandse Veiligheidsbranche",
+  },
+  nvb_evenementen: {
+    category: "quality_mark",
+    accreditation_type: "nvb_keurmerk_evenementenbeveiliging",
+    name: "Nederlandse Veiligheidsbranche Keurmerk Evenementenbeveiliging",
+    issuer: "Nederlandse Veiligheidsbranche",
+  },
+  nvb_horeca: {
+    category: "quality_mark",
+    accreditation_type: "nvb_keurmerk_horecabeveiliging",
+    name: "Nederlandse Veiligheidsbranche Keurmerk Horecabeveiliging",
+    issuer: "Nederlandse Veiligheidsbranche",
+  },
+  nvb_gwt: {
+    category: "quality_mark",
+    accreditation_type: "nvb_keurmerk_gwt",
+    name: "Nederlandse Veiligheidsbranche Keurmerk Geld- en Waardetransport",
+    issuer: "Nederlandse Veiligheidsbranche",
+  },
+  nvb_pob: {
+    category: "quality_mark",
+    accreditation_type: "nvb_keurmerk_pob",
+    name: "Nederlandse Veiligheidsbranche Keurmerk Particulier Onderzoeksbureau",
+    issuer: "Nederlandse Veiligheidsbranche",
+  },
+  vvnl_regulier: {
+    category: "quality_mark",
+    accreditation_type: "vvnl_kwaliteitslabel_regulier",
+    name: "VVNL Kwaliteitslabel Reguliere beveiliging",
+    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+  },
+  vvnl_ehb: {
+    category: "quality_mark",
+    accreditation_type: "vvnl_kwaliteitslabel_ehb",
+    name: "VVNL Kwaliteitslabel Evenementen-/horecabeveiliging",
+    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+  },
+  vvnl_verkeersregelaars: {
+    category: "quality_mark",
+    accreditation_type: "vvnl_kwaliteitslabel_verkeersregelaars",
+    name: "VVNL Kwaliteitslabel Verkeersregelaars",
+    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+  },
+  bpob_keurmerk: {
+    category: "quality_mark",
+    accreditation_type: "bpob_keurmerk_particulier_onderzoeksbureau",
+    name: "BPOB Keurmerk Particulier Onderzoeksbureau",
+    issuer: "Branchevereniging Particuliere Onderzoeksbureaus (BPOB)",
+  },
+  techniek_kwaliteit: {
+    category: "technical_certification",
+    accreditation_type: "other_technical",
+    name: "Techniek Nederland kwaliteitsbewijs beveiligingsinstallatie",
+    issuer: "Techniek Nederland",
+  },
+  nvb_bhv_opleider: {
+    category: "quality_mark",
+    accreditation_type: "nvb_bhv_opleidingsinstituut",
+    name: "NVB-BHV Opleidingsinstituut / instructeursregistratie",
+    issuer: "Nederlandse Vereniging Bedrijfshulpverlening (NVB-BHV)",
+  },
+};
 
 const ASSOCIATION_OPTIONS = [
   {
@@ -21,20 +98,95 @@ const ASSOCIATION_OPTIONS = [
     shortLabel: "NVB",
     desc: "Particuliere beveiliging, EHB, GWT, PAC en POB",
     logoUrl: "https://d1p3jfjj2ztqji.cloudfront.net/wp-content/uploads/2019/12/06115338/logo-nvb-300x136.jpg",
+    defaultPublicProfileUrl: "https://www.veiligheidsbranche.nl/over-ons/leden/",
+    membershipTypes: [
+      {
+        key: "mkb",
+        label: "MKB - particuliere beveiliging",
+        desc: "Object-, mobiele en reguliere particuliere beveiliging.",
+        actions: [ACCREDITATION_TEMPLATES.nvb_beveiliging],
+      },
+      {
+        key: "ehb",
+        label: "EHB - evenementen en horeca",
+        desc: "Evenementenbeveiliging en horecabeveiliging.",
+        actions: [ACCREDITATION_TEMPLATES.nvb_evenementen, ACCREDITATION_TEMPLATES.nvb_horeca],
+      },
+      {
+        key: "gwt",
+        label: "GWT - geld- en waardetransport",
+        desc: "Geld- en waardetransportbedrijven.",
+        actions: [ACCREDITATION_TEMPLATES.nvb_gwt],
+      },
+      {
+        key: "pac",
+        label: "PAC - particuliere alarmcentrales",
+        desc: "Particuliere alarmcentrales.",
+        actions: [],
+      },
+      {
+        key: "pob",
+        label: "POB - particulier onderzoeksbureau",
+        desc: "Particuliere onderzoeksbureaus.",
+        actions: [ACCREDITATION_TEMPLATES.nvb_pob],
+      },
+    ],
   },
   {
     key: "vereniging_veiligheidsdomein_nederland",
     label: "Vereniging Veiligheidsdomein Nederland (VVNL)",
     shortLabel: "VVNL",
-    desc: "Reguliere beveiliging, horeca/evenementen, verkeersregelaars, brandwachten en alarmdiensten",
+    desc: "Reguliere beveiliging, horeca/evenementen, verkeersregelaars, brandwachten en BHV",
     logoUrl: "https://veiligheidsdomein.nl/wp-content/uploads/2022/07/VVNL_Logo_Blauw_L-300x162.png",
+    defaultPublicProfileUrl: "https://veiligheidsdomein.nl/",
+    membershipTypes: [
+      {
+        key: "reguliere_beveiliging",
+        label: "Reguliere beveiliging",
+        desc: "Reguliere particuliere beveiligingsdiensten.",
+        actions: [ACCREDITATION_TEMPLATES.vvnl_regulier],
+      },
+      {
+        key: "evenementen_horeca",
+        label: "Evenementen-/horecabeveiliging",
+        desc: "Crowdmanagement, evenementen en horeca.",
+        actions: [ACCREDITATION_TEMPLATES.vvnl_ehb],
+      },
+      {
+        key: "verkeersregelaars",
+        label: "Verkeersregelaars",
+        desc: "Verkeersregelaarsbedrijven binnen het veiligheidsdomein.",
+        actions: [ACCREDITATION_TEMPLATES.vvnl_verkeersregelaars],
+      },
+      {
+        key: "brandwachten_bhv",
+        label: "Brandwachten en BHV",
+        desc: "Brandwachten, basishulpverlening en aanverwante veiligheidsdiensten.",
+        actions: [],
+      },
+    ],
   },
   {
     key: "veb",
     label: "Vereniging Erkende Beveiligingsbedrijven (VEB)",
     shortLabel: "VEB",
-    desc: "Technische beveiligingsbedrijven, particuliere beveiligingsorganisaties en PAC",
+    desc: "Technische beveiligingsbedrijven en particuliere beveiligingsorganisaties",
     logoUrl: "https://veb.nl/wp-content/uploads/2024/10/VEB-Logo.png",
+    defaultPublicProfileUrl: "https://veb.nl/",
+    membershipTypes: [
+      {
+        key: "techniek",
+        label: "Techniek",
+        desc: "Technische beveiligingsbedrijven en installateurs.",
+        actions: [ACCREDITATION_TEMPLATES.veb_4],
+      },
+      {
+        key: "pbo",
+        label: "PBO",
+        desc: "Particuliere beveiligingsorganisaties.",
+        actions: [ACCREDITATION_TEMPLATES.veb_pbo],
+      },
+    ],
   },
   {
     key: "bpob",
@@ -42,6 +194,15 @@ const ASSOCIATION_OPTIONS = [
     shortLabel: "BPOB",
     desc: "Particuliere onderzoeksbureaus en recherchewerkzaamheden",
     logoUrl: "https://media.base44.com/images/public/698e307ed3aa4cab3729bbf1/695cde5fc_BPOB_afkorting_Kleur_versie_1.png",
+    defaultPublicProfileUrl: "https://bpob.nl/",
+    membershipTypes: [
+      {
+        key: "particulier_onderzoeksbureau",
+        label: "Particulier onderzoeksbureau",
+        desc: "Recherchewerkzaamheden met POB-vergunning.",
+        actions: [ACCREDITATION_TEMPLATES.bpob_keurmerk],
+      },
+    ],
   },
   {
     key: "techniek_nederland",
@@ -49,6 +210,15 @@ const ASSOCIATION_OPTIONS = [
     shortLabel: "TN",
     desc: "Brand- en beveiligingstechniek en technische installatiebedrijven",
     logoUrl: "https://www.technieknederland.nl/media/quvnnxsy/logo-techniek-nederland.svg",
+    defaultPublicProfileUrl: "https://www.technieknederland.nl/ledenzoek-resultaat",
+    membershipTypes: [
+      {
+        key: "brand_en_beveiligingstechniek",
+        label: "Brand- en beveiligingstechniek",
+        desc: "Technische installaties met aantoonbare certificering of erkenning.",
+        actions: [ACCREDITATION_TEMPLATES.techniek_kwaliteit],
+      },
+    ],
   },
   {
     key: "nvb_bhv",
@@ -56,12 +226,40 @@ const ASSOCIATION_OPTIONS = [
     shortLabel: "BHV",
     desc: "BHV-organisaties, BHV-opleiders en BHV-instructeurs",
     logoUrl: "https://nvb-bhv.nl/wp-content/themes/nvb/img/nvb_logo.svg",
+    defaultPublicProfileUrl: "https://nvb-bhv.nl/",
+    membershipTypes: [
+      {
+        key: "bedrijf_instelling",
+        label: "Bedrijf / instelling",
+        desc: "Organisatie met eigen BHV-inrichting.",
+        actions: [],
+      },
+      {
+        key: "vol_lid",
+        label: "VOL-lid",
+        desc: "Volwaardig lidmaatschap binnen NVB-BHV.",
+        actions: [],
+      },
+      {
+        key: "zzp_lid",
+        label: "ZZP-lid",
+        desc: "Zelfstandig BHV-professional of instructeur.",
+        actions: [],
+      },
+      {
+        key: "opleidingsinstituut_instructeur",
+        label: "Opleidingsinstituut / instructeur",
+        desc: "BHV-opleiding, instructeur of opleidingsorganisatie.",
+        actions: [ACCREDITATION_TEMPLATES.nvb_bhv_opleider],
+      },
+    ],
   },
   {
     key: "other",
     label: "Andere branchevereniging",
     shortLabel: "Anders",
     desc: "Gebruik dit voor een eigen vereniging of niche-brancheorganisatie",
+    membershipTypes: [],
   },
 ];
 
@@ -69,18 +267,11 @@ const EMPTY_FORM = {
   association_type: "",
   association_name: "",
   membership_number: "",
+  membership_types: [],
   membership_type: "",
   member_since: "",
-  valid_until: "",
   status: "active",
   public_profile_url: "",
-  document_file_url: "",
-  document_filename: "",
-  document_file_id: "",
-  document_download_filename: "",
-  document_logical_path: "",
-  document_metadata: null,
-  notes: "",
 };
 
 function associationLabel(value) {
@@ -93,6 +284,7 @@ function associationMeta(value) {
     label: value || "Branchevereniging",
     shortLabel: "Org",
     desc: "",
+    membershipTypes: [],
   };
 }
 
@@ -126,20 +318,8 @@ function AssociationLogo({ associationType, className = "" }) {
   );
 }
 
-function isExpired(membership) {
-  const today = new Date().toISOString().split("T")[0];
-  return membership.valid_until && membership.valid_until < today;
-}
-
-function StatusBadge({ membership }) {
-  if (membership.status === "cancelled") return <Badge variant="outline" className="text-xs text-muted-foreground">Beeindigd</Badge>;
-  if (membership.status === "pending_review") return <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">Controle</Badge>;
-  if (membership.status === "expired" || isExpired(membership)) return <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">Verlopen</Badge>;
-  return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0">Actief</Badge>;
-}
-
 function WizardSteps({ step }) {
-  const steps = ["Vereniging", "Gegevens", "Bewijs"];
+  const steps = ["Vereniging", "Gegevens", "Erkenningen"];
   const CheckIcon = () => (
     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -202,7 +382,52 @@ function DeleteConfirmBar({ label, onConfirm, onCancel, isPending }) {
   );
 }
 
-export default function BranchMembershipsTab({ companyId, company }) {
+function getMembershipTypeOptions(associationType) {
+  return associationMeta(associationType).membershipTypes || [];
+}
+
+function getSelectedMembershipTypeOptions(associationType, membershipTypes = []) {
+  const options = getMembershipTypeOptions(associationType);
+  const byKey = new Map(options.map(option => [option.key, option]));
+  return (membershipTypes || []).map(typeKey => byKey.get(typeKey) || { key: typeKey, label: typeKey, desc: "", actions: [] });
+}
+
+function getMembershipTypeLabels(membership) {
+  const typeKeys = Array.isArray(membership.membership_types) ? membership.membership_types : [];
+  if (typeKeys.length > 0) {
+    return getSelectedMembershipTypeOptions(membership.association_type, typeKeys).map(option => option.label);
+  }
+  if (membership.membership_type) {
+    return membership.membership_type.split(",").map(label => label.trim()).filter(Boolean);
+  }
+  return [];
+}
+
+function uniqueAccreditationActions(actions) {
+  const byType = new Map();
+  actions.forEach(action => {
+    const key = `${action.category}:${action.accreditation_type}`;
+    if (!byType.has(key)) byType.set(key, action);
+  });
+  return [...byType.values()];
+}
+
+function getAccreditationActionsForSelection(associationType, membershipTypes = []) {
+  const selectedTypes = getSelectedMembershipTypeOptions(associationType, membershipTypes);
+  return uniqueAccreditationActions(selectedTypes.flatMap(type => (
+    type.actions || []
+  ).map(action => ({
+    ...action,
+    source_membership_type: type.key,
+    source_membership_label: type.label,
+  }))));
+}
+
+function actionKey(action) {
+  return `${action.category}:${action.accreditation_type}`;
+}
+
+export default function BranchMembershipsTab({ companyId }) {
   const queryClient = useQueryClient();
   const wizardRef = useRef(null);
   const [showWizard, setShowWizard] = useState(false);
@@ -211,8 +436,6 @@ export default function BranchMembershipsTab({ companyId, company }) {
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [deleteId, setDeleteId] = useState(null);
-  const [uploading, setUploading] = useState(false);
-  const [preview, setPreview] = useState(null);
 
   useEffect(() => {
     if (!showWizard) return undefined;
@@ -226,39 +449,70 @@ export default function BranchMembershipsTab({ companyId, company }) {
     enabled: !!companyId,
   });
 
+  const { data: accreditations = [] } = useQuery({
+    queryKey: ["company-accreditations", companyId],
+    queryFn: () => base44.entities.CompanyAccreditation.filter({ company_id: companyId }, "-created_date"),
+    enabled: !!companyId,
+  });
+
+  const existingAccreditationKeys = useMemo(() => new Set(
+    accreditations
+      .map(item => item.category && item.accreditation_type ? `${item.category}:${item.accreditation_type}` : null)
+      .filter(Boolean)
+  ), [accreditations]);
+
+  const membershipTypeOptions = getMembershipTypeOptions(form.association_type);
+  const selectedMembershipTypeOptions = getSelectedMembershipTypeOptions(form.association_type, form.membership_types);
+  const accreditationActions = getAccreditationActionsForSelection(form.association_type, form.membership_types);
+
+  const createMissingAccreditationActions = async (data) => {
+    const actions = getAccreditationActionsForSelection(data.association_type, data.membership_types);
+    const currentKeys = new Set(
+      accreditations
+        .map(item => item.category && item.accreditation_type ? `${item.category}:${item.accreditation_type}` : null)
+        .filter(Boolean)
+    );
+    const missingActions = actions.filter(action => !currentKeys.has(actionKey(action)));
+    await Promise.all(missingActions.map(action => base44.entities.CompanyAccreditation.create({
+      company_id: companyId,
+      category: action.category,
+      accreditation_type: action.accreditation_type,
+      name: action.name,
+      issuer: action.issuer,
+      certificate_number: null,
+      valid_from: null,
+      valid_until: null,
+      status: "pending_review",
+      notes: `Aangemaakt vanuit branchevereniging ${associationLabel(data.association_type)} (${action.source_membership_label}). Vul nummer, geldigheid en bewijsstuk aan.`,
+    })));
+  };
+
   const saveMutation = useMutation({
     mutationFn: async (data) => {
+      const association = associationMeta(data.association_type);
+      const selectedTypeLabels = getSelectedMembershipTypeOptions(data.association_type, data.membership_types).map(option => option.label);
       const payload = {
-        ...data,
         company_id: companyId,
+        association_type: data.association_type,
         association_name: data.association_name?.trim() || associationLabel(data.association_type),
-        membership_number: data.membership_number?.trim() || null,
-        membership_type: data.membership_type?.trim() || null,
-        member_since: data.member_since || null,
-        valid_until: data.valid_until || null,
-        public_profile_url: data.public_profile_url?.trim() || null,
-        document_file_url: data.document_file_url || null,
-        document_filename: data.document_filename || null,
-        document_file_id: data.document_file_id || null,
-        document_download_filename: data.document_download_filename || null,
-        document_logical_path: data.document_logical_path || null,
-        document_metadata: data.document_metadata || null,
-        notes: data.notes?.trim() || null,
+        membership_number: data.membership_number.trim(),
+        membership_types: data.membership_types || [],
+        membership_type: selectedTypeLabels.join(", ") || null,
+        member_since: data.member_since,
+        valid_until: null,
+        status: data.status || "active",
+        public_profile_url: data.public_profile_url || association.defaultPublicProfileUrl || null,
+        notes: null,
       };
       const saved = editingId
         ? await base44.entities.CompanyBranchMembership.update(editingId, payload)
         : await base44.entities.CompanyBranchMembership.create(payload);
-      if (saved?.id && data.document_file_id) {
-        await updateManagedFileSource(data.document_file_id, {
-          owner_id: companyId,
-          company_id: companyId,
-          source_entity_id: saved.id,
-        });
-      }
+      await createMissingAccreditationActions(data);
       return saved;
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["company-branch-memberships", companyId] });
+      queryClient.invalidateQueries({ queryKey: ["company-accreditations", companyId] });
       cancelWizard();
     },
   });
@@ -271,16 +525,30 @@ export default function BranchMembershipsTab({ companyId, company }) {
     },
   });
 
-  const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
+  const setField = (field, value) => setForm(current => ({ ...current, [field]: value }));
 
   const selectAssociation = (association) => {
     setForm({
       ...EMPTY_FORM,
       association_type: association.key,
       association_name: association.key === "other" ? "" : association.label,
+      public_profile_url: association.defaultPublicProfileUrl || "",
     });
     setErrors({});
     setStep(2);
+  };
+
+  const toggleMembershipType = (typeKey) => {
+    setForm(current => {
+      const selected = new Set(current.membership_types || []);
+      if (selected.has(typeKey)) {
+        selected.delete(typeKey);
+      } else {
+        selected.add(typeKey);
+      }
+      return { ...current, membership_types: [...selected] };
+    });
+    setErrors(current => ({ ...current, membership_types: undefined }));
   };
 
   const openNew = () => {
@@ -297,18 +565,11 @@ export default function BranchMembershipsTab({ companyId, company }) {
       association_type: membership.association_type || "other",
       association_name: membership.association_name || associationLabel(membership.association_type),
       membership_number: membership.membership_number || "",
+      membership_types: Array.isArray(membership.membership_types) ? membership.membership_types : [],
       membership_type: membership.membership_type || "",
       member_since: membership.member_since || "",
-      valid_until: membership.valid_until || "",
       status: membership.status || "active",
       public_profile_url: membership.public_profile_url || "",
-      document_file_url: membership.document_file_url || "",
-      document_filename: membership.document_filename || "",
-      document_file_id: membership.document_file_id || "",
-      document_download_filename: membership.document_download_filename || "",
-      document_logical_path: membership.document_logical_path || "",
-      document_metadata: membership.document_metadata || null,
-      notes: membership.notes || "",
     });
     setErrors({});
     setStep(2);
@@ -321,58 +582,19 @@ export default function BranchMembershipsTab({ companyId, company }) {
     setStep(1);
     setForm(EMPTY_FORM);
     setErrors({});
-    setPreview(null);
   };
 
   const validateStep2 = () => {
     const nextErrors = {};
     if (!form.association_type) nextErrors.association_type = "Kies een branchevereniging.";
     if (!form.association_name?.trim()) nextErrors.association_name = "Naam is verplicht.";
-    if (form.member_since && form.valid_until && form.valid_until <= form.member_since) {
-      nextErrors.valid_until = "Geldig tot moet later zijn dan lid sinds.";
+    if (!form.membership_number?.trim()) nextErrors.membership_number = "Lidnummer is verplicht.";
+    if (!form.member_since) nextErrors.member_since = "Lid sinds is verplicht.";
+    if (membershipTypeOptions.length > 0 && !form.membership_types?.length) {
+      nextErrors.membership_types = "Kies minimaal 1 categorie.";
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
-  };
-
-  const handleUpload = async (file) => {
-    setUploading(true);
-    try {
-      const validYear = form.valid_until ? form.valid_until.slice(0, 4) : "zonder-einddatum";
-      const result = await uploadManagedFile({
-        file,
-        ownerType: "company",
-        ownerId: companyId,
-        companyId,
-        ownerLabel: company?.display_name || company?.legal_name || "Bedrijf",
-        domain: "compliance",
-        category: "company_branch_membership",
-        sourceEntity: "CompanyBranchMembership",
-        sourceEntityId: editingId || null,
-        sourceField: "document_file_url",
-        documentLabel: form.association_name || associationLabel(form.association_type),
-        documentNumber: form.membership_number || null,
-        validFrom: form.member_since || null,
-        validUntil: form.valid_until || null,
-        isSensitive: true,
-        folderSegments: ["brancheverenigingen", form.association_type || "onbekend", validYear],
-        metadata: {
-          association_type: form.association_type || null,
-          membership_number: form.membership_number || null,
-        },
-      });
-      setForm(current => ({
-        ...current,
-        document_file_url: result.file_url,
-        document_filename: result.download_filename,
-        document_file_id: result.managed_file_id,
-        document_download_filename: result.download_filename,
-        document_logical_path: result.logical_path,
-        document_metadata: { managed_file_id: result.managed_file_id, folder_path: result.folder_path },
-      }));
-    } finally {
-      setUploading(false);
-    }
   };
 
   const membershipToDelete = memberships.find(membership => membership.id === deleteId);
@@ -437,7 +659,7 @@ export default function BranchMembershipsTab({ companyId, company }) {
                 )}
 
                 {step === 2 && (
-                  <div className="space-y-3">
+                  <div className="space-y-4">
                     <p className="text-sm font-medium text-foreground">
                       Lidmaatschapsgegevens <span className="text-muted-foreground font-normal">- {form.association_name || associationLabel(form.association_type)}</span>
                     </p>
@@ -448,7 +670,7 @@ export default function BranchMembershipsTab({ companyId, company }) {
                           <Input
                             className={`h-8 ${errors.association_name ? "border-destructive" : ""}`}
                             value={form.association_name}
-                            onChange={event => { set("association_name", event.target.value); setErrors(current => ({ ...current, association_name: undefined })); }}
+                            onChange={event => { setField("association_name", event.target.value); setErrors(current => ({ ...current, association_name: undefined })); }}
                             placeholder="Naam van de branchevereniging"
                           />
                           {errors.association_name && <p className="text-xs text-destructive">{errors.association_name}</p>}
@@ -456,41 +678,55 @@ export default function BranchMembershipsTab({ companyId, company }) {
                       )}
                       <div className="space-y-1">
                         <Label>Lidnummer</Label>
-                        <Input className="h-8" value={form.membership_number} onChange={event => set("membership_number", event.target.value)} placeholder="Optioneel" />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Lidmaatschapstype</Label>
-                        <Input className="h-8" value={form.membership_type} onChange={event => set("membership_type", event.target.value)} placeholder="Bijv. lid, aspirant, partner" />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Status</Label>
-                        <Select value={form.status} onValueChange={value => set("status", value)}>
-                          <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="active">Actief</SelectItem>
-                            <SelectItem value="pending_review">Te controleren</SelectItem>
-                            <SelectItem value="expired">Verlopen</SelectItem>
-                            <SelectItem value="cancelled">Beeindigd</SelectItem>
-                          </SelectContent>
-                        </Select>
+                        <Input
+                          className={`h-8 ${errors.membership_number ? "border-destructive" : ""}`}
+                          value={form.membership_number}
+                          onChange={event => { setField("membership_number", event.target.value); setErrors(current => ({ ...current, membership_number: undefined })); }}
+                          placeholder="Verplicht"
+                        />
+                        {errors.membership_number && <p className="text-xs text-destructive">{errors.membership_number}</p>}
                       </div>
                       <div className="space-y-1">
                         <Label>Lid sinds</Label>
-                        <Input className="h-8" type="date" value={form.member_since} onChange={event => { set("member_since", event.target.value); setErrors(current => ({ ...current, valid_until: undefined })); }} />
+                        <Input
+                          className={`h-8 ${errors.member_since ? "border-destructive" : ""}`}
+                          type="date"
+                          value={form.member_since}
+                          onChange={event => { setField("member_since", event.target.value); setErrors(current => ({ ...current, member_since: undefined })); }}
+                        />
+                        {errors.member_since && <p className="text-xs text-destructive">{errors.member_since}</p>}
                       </div>
-                      <div className="space-y-1">
-                        <Label>Geldig tot / hercontrole</Label>
-                        <Input className={`h-8 ${errors.valid_until ? "border-destructive" : ""}`} type="date" value={form.valid_until} onChange={event => { set("valid_until", event.target.value); setErrors(current => ({ ...current, valid_until: undefined })); }} />
-                        {errors.valid_until && <p className="text-xs text-destructive">{errors.valid_until}</p>}
-                      </div>
-                      <div className="space-y-1 lg:col-span-2">
-                        <Label>Publieke ledenpagina</Label>
-                        <Input className="h-8" value={form.public_profile_url} onChange={event => set("public_profile_url", event.target.value)} placeholder="https://..." />
-                      </div>
-                      <div className="space-y-1 lg:col-span-4">
-                        <Label>Notities</Label>
-                        <Textarea value={form.notes} onChange={event => set("notes", event.target.value)} rows={2} placeholder="Interne opmerkingen, contactpersoon of controle-informatie" />
-                      </div>
+                      {membershipTypeOptions.length > 0 && (
+                        <div className="space-y-2 lg:col-span-4">
+                          <Label>Categorie / sectie</Label>
+                          <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                            {membershipTypeOptions.map(type => {
+                              const selected = form.membership_types?.includes(type.key);
+                              return (
+                                <button
+                                  key={type.key}
+                                  type="button"
+                                  onClick={() => toggleMembershipType(type.key)}
+                                  className={`flex min-h-[74px] items-start gap-3 rounded-lg border px-3 py-3 text-left transition-colors ${
+                                    selected ? "border-primary bg-primary/5" : "border-border bg-card hover:border-primary/60"
+                                  }`}
+                                >
+                                  <span className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border ${
+                                    selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-background"
+                                  }`}>
+                                    {selected && <Check className="h-3 w-3" />}
+                                  </span>
+                                  <span className="min-w-0">
+                                    <span className="block text-sm font-medium text-foreground">{type.label}</span>
+                                    <span className="mt-0.5 block text-xs text-muted-foreground">{type.desc}</span>
+                                  </span>
+                                </button>
+                              );
+                            })}
+                          </div>
+                          {errors.membership_types && <p className="text-xs text-destructive">{errors.membership_types}</p>}
+                        </div>
+                      )}
                     </div>
                     <div className="flex justify-between pt-1">
                       {editingId ? (
@@ -505,40 +741,51 @@ export default function BranchMembershipsTab({ companyId, company }) {
 
                 {step === 3 && (
                   <div className="space-y-4">
-                    <p className="text-sm font-medium text-foreground">Bewijsstuk of ledenbewijs</p>
-                    <p className="text-xs text-muted-foreground">Upload optioneel een ledenbewijs, bevestigingsmail, certificaat of schermafbeelding van de ledenpagina.</p>
-
-                    {form.document_file_url ? (
-                      <div className="flex items-center gap-2 rounded-lg border border-border bg-card p-3">
-                        <FileText className="w-4 h-4 shrink-0 text-blue-600" />
-                        <span className="flex-1 truncate text-sm text-muted-foreground">{form.document_download_filename || form.document_filename || "Document toegevoegd"}</span>
-                        <Button type="button" variant="ghost" size="sm" onClick={() => setPreview(form)} className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700">
-                          <Eye className="w-3.5 h-3.5" /> Bekijken
-                        </Button>
-                        <button type="button" onClick={() => setForm(current => ({ ...current, document_file_url: "", document_filename: "", document_file_id: "", document_download_filename: "", document_logical_path: "", document_metadata: null }))} className="text-muted-foreground hover:text-destructive">
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-                    ) : (
-                      <label className="flex cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border p-6 transition-colors hover:border-primary">
-                        <input type="file" accept=".pdf,image/*" className="hidden" onChange={event => event.target.files?.[0] && handleUpload(event.target.files[0])} />
-                        <Upload className="w-6 h-6 text-muted-foreground" />
-                        <span className="text-sm text-muted-foreground">{uploading ? "Uploaden..." : "Klik om bewijs te uploaden"}</span>
-                        <span className="text-xs text-muted-foreground">PDF of afbeelding</span>
-                      </label>
-                    )}
-
                     <div className="rounded-lg border border-border bg-card p-4 text-sm">
                       <div className="flex items-center gap-3">
                         <AssociationLogo associationType={form.association_type} className="h-12 w-20 shrink-0" />
                         <div className="min-w-0">
                           <span className="text-muted-foreground block mb-1">Branchevereniging</span>
                           <span className="font-medium text-foreground">{form.association_name || associationLabel(form.association_type)}</span>
-                          {(form.membership_number || form.membership_type) && (
-                            <p className="mt-1 text-xs text-muted-foreground">{[form.membership_number && `Lidnummer ${form.membership_number}`, form.membership_type].filter(Boolean).join(" - ")}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {[form.membership_number && `Lidnummer ${form.membership_number}`, form.member_since && `Lid sinds ${form.member_since}`].filter(Boolean).join(" - ")}
+                          </p>
+                          {selectedMembershipTypeOptions.length > 0 && (
+                            <div className="mt-2 flex flex-wrap gap-1">
+                              {selectedMembershipTypeOptions.map(type => (
+                                <Badge key={type.key} variant="secondary" className="text-xs normal-case">{type.label}</Badge>
+                              ))}
+                            </div>
                           )}
                         </div>
                       </div>
+                    </div>
+
+                    <div className="space-y-2">
+                      <p className="text-sm font-medium text-foreground">Erkenningen die worden klaargezet</p>
+                      {accreditationActions.length === 0 ? (
+                        <div className="rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground">
+                          Voor deze categorie staat geen vaste erkenningsactie klaar. Eventuele certificaten kunnen handmatig onder Erkenningen worden toegevoegd.
+                        </div>
+                      ) : (
+                        <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
+                          {accreditationActions.map(action => {
+                            const alreadyExists = existingAccreditationKeys.has(actionKey(action));
+                            return (
+                              <div key={actionKey(action)} className="rounded-lg border border-border bg-card p-3">
+                                <div className="mb-1 flex items-start justify-between gap-2">
+                                  <p className="text-sm font-medium text-foreground">{action.name}</p>
+                                  <Badge variant={alreadyExists ? "secondary" : "outline"} className="shrink-0 text-xs">
+                                    {alreadyExists ? "Bestaat al" : "Actie nodig"}
+                                  </Badge>
+                                </div>
+                                <p className="text-xs text-muted-foreground">{action.issuer}</p>
+                                <p className="mt-1 text-xs text-muted-foreground">Uit categorie: {action.source_membership_label}</p>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
                     </div>
 
                     <div className="flex justify-between pt-1">
@@ -560,10 +807,10 @@ export default function BranchMembershipsTab({ companyId, company }) {
 
       <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
         <span className="flex-1">Branchevereniging</span>
-        <span className="w-28 shrink-0">Status</span>
-        <span className="w-40 shrink-0">Lidnummer</span>
-        <span className="w-44 shrink-0">Lidmaatschap</span>
-        <div className="w-40 shrink-0 flex justify-end">
+        <span className="w-36 shrink-0">Lidnummer</span>
+        <span className="w-36 shrink-0">Lid sinds</span>
+        <span className="w-80 shrink-0">Categorieen</span>
+        <div className="w-44 shrink-0 flex justify-end">
           {!showWizard && !deleteId && (
             <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
               <Plus className="w-3 h-3 mr-1" /> Nieuwe vereniging
@@ -577,41 +824,36 @@ export default function BranchMembershipsTab({ companyId, company }) {
       )}
 
       <div className="divide-y divide-border">
-        {memberships.map(membership => (
-          <div key={membership.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
-            <div className="flex min-w-0 flex-1 items-center gap-3">
-              <AssociationLogo associationType={membership.association_type} className="h-10 w-16 shrink-0" />
-              <div className="min-w-0">
-                <p className="truncate text-sm font-medium text-foreground">{effectiveAssociationName(membership)}</p>
-                <p className="truncate text-xs text-muted-foreground">
-                  {[membership.membership_type, membership.public_profile_url].filter(Boolean).join(" - ") || associationLabel(membership.association_type)}
-                </p>
+        {memberships.map(membership => {
+          const membershipTypeLabels = getMembershipTypeLabels(membership);
+          return (
+            <div key={membership.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
+              <div className="flex min-w-0 flex-1 items-center gap-3">
+                <AssociationLogo associationType={membership.association_type} className="h-10 w-16 shrink-0" />
+                <div className="min-w-0">
+                  <p className="truncate text-sm font-medium text-foreground">{effectiveAssociationName(membership)}</p>
+                  <p className="truncate text-xs text-muted-foreground">{associationLabel(membership.association_type)}</p>
+                </div>
+              </div>
+              <div className="w-36 shrink-0 text-sm text-muted-foreground">{membership.membership_number || "-"}</div>
+              <div className="w-36 shrink-0 text-sm text-muted-foreground">{membership.member_since || "-"}</div>
+              <div className="w-80 shrink-0">
+                {membershipTypeLabels.length > 0 ? (
+                  <div className="flex flex-wrap gap-1">
+                    {membershipTypeLabels.map(label => <Badge key={label} variant="secondary" className="text-xs normal-case">{label}</Badge>)}
+                  </div>
+                ) : (
+                  <span className="text-xs text-muted-foreground">Geen categorie</span>
+                )}
+              </div>
+              <div className="flex w-24 shrink-0 justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(membership)} title="Bewerken"><Edit className="h-3.5 w-3.5" /></Button>
+                <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeleteId(membership.id)} title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
             </div>
-            <div className="w-28 shrink-0"><StatusBadge membership={membership} /></div>
-            <div className="w-40 shrink-0 text-sm text-muted-foreground">{membership.membership_number || "-"}</div>
-            <div className="w-44 shrink-0 text-xs text-muted-foreground">
-              {[membership.member_since && `Sinds ${membership.member_since}`, membership.valid_until && `Tot ${membership.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum"}
-            </div>
-            <div className="flex w-40 shrink-0 justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-              {membership.document_file_url && (
-                <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPreview(membership)} title="Document bekijken"><Eye className="h-3.5 w-3.5" /></Button>
-              )}
-              <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(membership)} title="Bewerken"><Edit className="h-3.5 w-3.5" /></Button>
-              <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeleteId(membership.id)} title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></Button>
-            </div>
-          </div>
-        ))}
+          );
+        })}
       </div>
-
-      <ManagedFilePreviewDialog
-        open={!!preview}
-        onOpenChange={(open) => { if (!open) setPreview(null); }}
-        managedFileId={preview?.document_file_id}
-        fileUrl={preview?.document_file_url}
-        filename={preview?.document_download_filename || preview?.document_filename || "Document"}
-        title="Ledenbewijs bekijken"
-      />
     </div>
   );
 }

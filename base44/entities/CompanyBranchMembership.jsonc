@@ -35,7 +35,18 @@
         "string",
         "null"
       ],
-      "description": "Lidmaatschapstype of categorie"
+      "description": "Legacy tekstweergave van geselecteerde lidmaatschapscategorieen"
+    },
+    "membership_types": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Geselecteerde lidmaatschapscategorieen of secties binnen de branchevereniging"
     },
     "member_since": {
       "type": [
@@ -117,6 +128,8 @@
   "required": [
     "company_id",
     "association_type",
-    "association_name"
+    "association_name",
+    "membership_number",
+    "member_since"
   ]
 }
