@@ -395,7 +395,7 @@ export default function AccreditationsTab({ companyId, company }) {
                 {[item.issuer, item.certificate_number].filter(Boolean).join(" - ") || optionLabel(item.category, item.accreditation_type)}
               </p>
             </div>
-            <div className="w-28 shrink-0">{statusBadge(item)}</div>
+            <div className="w-28 shrink-0 flex items-center">{statusBadge(item)}</div>
             <div className="w-44 shrink-0 text-xs text-muted-foreground">
               {[item.valid_from && `Vanaf ${item.valid_from}`, item.valid_until && `Tot ${item.valid_until}`].filter(Boolean).join("  ") || "Geen einddatum"}
             </div>
