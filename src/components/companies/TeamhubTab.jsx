@@ -1,34 +1,20 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { Button } from "@/components/ui/button";
-import { Input } from "@/components/ui/input";
-import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Switch } from "@/components/ui/switch";
-import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
-import { Check, ChevronDown, Clock, Save, Users } from "lucide-react";
+import { Users } from "lucide-react";
 import {
-  TEAMHUB_LICENSE_SERVICE_GROUPS,
-  TEAMHUB_QUALIFICATION_SERVICE_KEYS,
-  TEAMHUB_TECHNICAL_SERVICE_GROUPS,
   getEffectiveWpbrLicenseType,
   getActiveTeamhubTechnicalCertificationTypes,
   getQualifiedTeamhubServiceTypes,
-  getTeamhubServicesByKeys,
-  getTeamhubServiceDisabledReason,
-  getWpbrLicenseLabel,
-  isQualificationControlledTeamhubService,
-  isTeamhubServiceAllowedForLicense,
   sanitizeTeamhubServiceTypes } from
 "@/lib/teamhubServiceRules";
 import {
-  getCompanyLocationLabel,
   getCompanyProfileLocations,
   hasCompanyLocationAssignment } from
 "@/lib/companyLocationScope";
-import TeamhubRegionPicker from "./TeamhubRegionPicker";
+import TeamhubWizard from "./TeamhubWizard";
+import TeamhubSummary from "./TeamhubSummary";
 
 function getInitialForm(company) {
   const serviceTypes = Array.isArray(company?.teamhub_service_types) ?
@@ -46,7 +32,7 @@ function getInitialForm(company) {
 export default function TeamhubTab({ companyId, company }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState(() => getInitialForm(company));
-  const [expandedGroups, setExpandedGroups] = useState({});
+  const [showWizard, setShowWizard] = useState(false);
 
   const { data: wpbrLicenses = [] } = useQuery({
     queryKey: ["wpbr-licenses", companyId],
@@ -160,15 +146,6 @@ export default function TeamhubTab({ companyId, company }) {
     setForm((current) => ({ ...current, [field]: value }));
   };
 
-  const toggleService = (key) => {
-    if (!isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, key, qualifiedServiceTypes, technicalCertificationTypes)) return;
-    const current = form.teamhub_service_types || [];
-    set(
-      "teamhub_service_types",
-      current.includes(key) ? current.filter((item) => item !== key) : [...current, key]
-    );
-  };
-
   const save = () => {
     if (teamhubReferencesLoading) return;
     const publicLocationId = form.teamhub_public_location_id && selectableTeamhubLocationIds.has(form.teamhub_public_location_id) ?
@@ -186,48 +163,7 @@ export default function TeamhubTab({ companyId, company }) {
       ),
       teamhub_regions: form.teamhub_regions || []
     });
-  };
-
-  const renderServiceOption = (activity) => {
-    const qualificationCheckPending = qualificationDataLoading && isQualificationControlledTeamhubService(activity.key);
-    const allowed = !qualificationCheckPending && isTeamhubServiceAllowedForLicense(
-      effectiveWpbrLicenseType,
-      activity.key,
-      qualifiedServiceTypes,
-      technicalCertificationTypes
-    );
-    const disabledReason = qualificationCheckPending ?
-    "Medewerkerscertificaten worden geladen." :
-    getTeamhubServiceDisabledReason(
-        effectiveWpbrLicenseType,
-        activity.key,
-        qualifiedServiceTypes,
-        technicalCertificationTypes
-      );
-    const isSelected = (form.teamhub_service_types || []).includes(activity.key);
-
-    return (
-      <div key={activity.key} className="relative group/pill">
-        <button
-          onClick={() => allowed && toggleService(activity.key)}
-          className={`inline-flex items-center rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${
-          isSelected ?
-          "border-primary bg-primary text-primary-foreground" :
-          allowed ?
-          "border-border bg-card text-foreground hover:border-primary/40 cursor-pointer" :
-          "border-border/50 bg-muted/30 text-muted-foreground opacity-50 cursor-not-allowed"}`
-          }>
-          
-          {activity.label}
-        </button>
-        {!allowed && disabledReason &&
-        <div className="pointer-events-none absolute bottom-full left-0 z-50 mb-2 w-72 rounded-md border border-border bg-popover px-3 py-2 text-xs text-popover-foreground shadow-md opacity-0 group-hover/pill:opacity-100 transition-opacity duration-150">
-            {disabledReason}
-            <div className="absolute left-4 top-full border-4 border-transparent border-t-border" />
-          </div>
-        }
-      </div>);
-
+    setShowWizard(false);
   };
 
   return (
@@ -249,141 +185,32 @@ export default function TeamhubTab({ companyId, company }) {
             <p className="truncate text-xs text-muted-foreground">Onderaannemersprofiel voor diensten van hoofdaannemers</p>
           </div>
         </div>
-        <Button size="sm" onClick={save} disabled={saveMutation.isPending || teamhubReferencesLoading}>
-          {saveMutation.isPending || teamhubReferencesLoading ?
-          <>
-              <Clock className="mr-1 h-4 w-4" /> {teamhubReferencesLoading ? "Laden..." : "Opslaan..."}
-            </> :
-          saveMutation.isSuccess ?
-          <>
-              <Check className="mr-1 h-4 w-4" /> Opgeslagen
-            </> :
-
-          <>
-              <Save className="mr-1 h-4 w-4" /> Opslaan
-            </>
-          }
-        </Button>
       </div>
 
-      <div className="space-y-5 p-4">
-        <div className="flex items-center justify-between gap-4 rounded-md border border-border bg-background p-4">
-          <div className="min-w-0">
-            <Label className="text-sm font-semibold">Weergeven in LOQ Teamhub</Label>
-            <p className="mt-1 text-xs text-muted-foreground">Publiceer dit bedrijfsprofiel als beschikbare onderaannemer.</p>
-          </div>
-          <Switch checked={form.teamhub_enabled} onCheckedChange={(checked) => set("teamhub_enabled", checked)} />
-        </div>
-
-
-
-        <div className="space-y-2 rounded-md border border-border bg-background p-4">
-          <Label>Vestiging</Label>
-          <Select
-            value={form.teamhub_public_location_id || ""}
-            onValueChange={(value) => set("teamhub_public_location_id", value || null)}>
-            
-            <SelectTrigger>
-              <SelectValue placeholder="Kies een vestiging (verplicht)" />
-            </SelectTrigger>
-            <SelectContent>
-              {selectableTeamhubLocations.map((location) =>
-              <SelectItem key={location.id} value={location.id}>
-                  {getCompanyLocationLabel(location)}
-                </SelectItem>
-              )}
-            </SelectContent>
-          </Select>
-          
-
-          
-        </div>
-
-        <div className="space-y-4">
-          <Label>Diensten</Label>
-          <p className="text-xs text-muted-foreground">
-            Beveiligingsdiensten worden vrijgegeven op basis van vergunning: {effectiveWpbrLicenseType ? `${effectiveWpbrLicenseType} - ${getWpbrLicenseLabel(effectiveWpbrLicenseType)}` : "geen actieve WPBR-vergunning gevonden"}. Kwalificatie- en techniekdiensten worden vrijgegeven op basis van geldige medewerkerscertificaten en de tab Erkenningen.
-          </p>
-
-          <div className="space-y-3">
-          <div className="overflow-hidden rounded-md border border-border">
-            <div className="border-b border-border bg-muted/40 px-3 py-2">
-              <p className="text-xs font-semibold text-muted-foreground">Vergunning-gebonden diensten</p>
-            </div>
-            {TEAMHUB_LICENSE_SERVICE_GROUPS.map((group, idx) => {
-                const isOpen = !!expandedGroups[group.key];
-                const selectedCount = getTeamhubServicesByKeys(group.serviceKeys).filter((a) => (form.teamhub_service_types || []).includes(a.key)).length;
-                return (
-                  <div key={group.key} className={idx > 0 ? "border-t border-border" : ""}>
-                  <button
-                      type="button"
-                      onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
-                      className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted/30 transition-colors">
-                      
-                    <span className="text-xs font-medium text-foreground">{group.title}</span>
-                    <div className="flex items-center gap-2">
-                      {selectedCount > 0 &&
-                        <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">{selectedCount}</span>
-                        }
-                      <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
-                    </div>
-                  </button>
-                  {isOpen &&
-                    <div className="flex flex-wrap gap-2 border-t border-border/50 bg-muted/10 px-3 py-3">
-                      {getTeamhubServicesByKeys(group.serviceKeys).map(renderServiceOption)}
-                    </div>
-                    }
-                </div>);
-
-              })}
-          </div>
-
-          <div className="overflow-hidden rounded-md border border-border">
-            <div className="border-b border-border bg-muted/40 px-3 py-2">
-              <p className="text-xs font-semibold text-muted-foreground">Kwalificatie-gebonden diensten</p>
-            </div>
-            <div className="flex flex-wrap gap-2 px-3 py-3">
-              {getTeamhubServicesByKeys(TEAMHUB_QUALIFICATION_SERVICE_KEYS).map(renderServiceOption)}
-            </div>
-          </div>
-
-          <div className="overflow-hidden rounded-md border border-border">
-            <div className="border-b border-border bg-muted/40 px-3 py-2">
-              <p className="text-xs font-semibold text-muted-foreground">Techniek & brandveiligheid</p>
-            </div>
-            {TEAMHUB_TECHNICAL_SERVICE_GROUPS.map((group, idx) => {
-                const isOpen = !!expandedGroups[group.key];
-                const selectedCount = getTeamhubServicesByKeys(group.serviceKeys).filter((activity) => (form.teamhub_service_types || []).includes(activity.key)).length;
-                return (
-                  <div key={group.key} className={idx > 0 ? "border-t border-border" : ""}>
-                  <button
-                      type="button"
-                      onClick={() => setExpandedGroups((prev) => ({ ...prev, [group.key]: !prev[group.key] }))}
-                      className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted/30 transition-colors">
-                      
-                    <span className="text-xs font-medium text-foreground">{group.title}</span>
-                    <div className="flex items-center gap-2">
-                      {selectedCount > 0 &&
-                        <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">{selectedCount}</span>
-                        }
-                      <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
-                    </div>
-                  </button>
-                  {isOpen &&
-                    <div className="flex flex-wrap gap-2 border-t border-border/50 bg-muted/10 px-3 py-3">
-                      {getTeamhubServicesByKeys(group.serviceKeys).map(renderServiceOption)}
-                    </div>
-                    }
-                </div>);
-
-              })}
-          </div>
-          </div>
-        </div>
-
-        <TeamhubRegionPicker
-          value={form.teamhub_regions}
-          onChange={(regions) => set("teamhub_regions", regions)} />
+      <div className="p-4">
+        {showWizard ? (
+          <TeamhubWizard
+            form={form}
+            set={set}
+            save={save}
+            isSaving={saveMutation.isPending}
+            selectableTeamhubLocations={selectableTeamhubLocations}
+            selectableTeamhubLocationIds={selectableTeamhubLocationIds}
+            effectiveWpbrLicenseType={effectiveWpbrLicenseType}
+            qualifiedServiceTypes={qualifiedServiceTypes}
+            technicalCertificationTypes={technicalCertificationTypes}
+            qualificationDataLoading={qualificationDataLoading}
+            teamhubReferencesLoading={teamhubReferencesLoading}
+          />
+        ) : (
+          <TeamhubSummary
+            form={form}
+            company={company}
+            selectableTeamhubLocations={selectableTeamhubLocations}
+            effectiveWpbrLicenseType={effectiveWpbrLicenseType}
+            onEdit={() => setShowWizard(true)}
+          />
+        )}
       </div>
     </div>);
 
