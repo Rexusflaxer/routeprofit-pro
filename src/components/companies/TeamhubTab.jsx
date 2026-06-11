@@ -432,18 +432,28 @@ export default function TeamhubTab({ companyId, company }) {
               <p className="text-xs font-semibold text-muted-foreground">Techniek & brandveiligheid</p>
             </div>
             {TEAMHUB_TECHNICAL_SERVICE_GROUPS.map((group, idx) => {
+              const isOpen = !!expandedGroups[group.key];
               const selectedCount = getTeamhubServicesByKeys(group.serviceKeys).filter(activity => (form.teamhub_service_types || []).includes(activity.key)).length;
               return (
                 <div key={group.key} className={idx > 0 ? "border-t border-border" : ""}>
-                  <div className="flex items-center justify-between px-3 py-2.5">
+                  <button
+                    type="button"
+                    onClick={() => setExpandedGroups(prev => ({ ...prev, [group.key]: !prev[group.key] }))}
+                    className="flex w-full items-center justify-between px-3 py-2.5 text-left hover:bg-muted/30 transition-colors"
+                  >
                     <span className="text-xs font-medium text-foreground">{group.title}</span>
-                    {selectedCount > 0 && (
-                      <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">{selectedCount}</span>
-                    )}
-                  </div>
-                  <div className="flex flex-wrap gap-2 border-t border-border/50 bg-muted/10 px-3 py-3">
-                    {getTeamhubServicesByKeys(group.serviceKeys).map(renderServiceOption)}
-                  </div>
+                    <div className="flex items-center gap-2">
+                      {selectedCount > 0 && (
+                        <span className="rounded-full bg-primary px-2 py-0.5 text-[10px] font-semibold text-primary-foreground">{selectedCount}</span>
+                      )}
+                      <ChevronDown className={`h-3.5 w-3.5 text-muted-foreground transition-transform ${isOpen ? "rotate-180" : ""}`} />
+                    </div>
+                  </button>
+                  {isOpen && (
+                    <div className="flex flex-wrap gap-2 border-t border-border/50 bg-muted/10 px-3 py-3">
+                      {getTeamhubServicesByKeys(group.serviceKeys).map(renderServiceOption)}
+                    </div>
+                  )}
                 </div>
               );
             })}
