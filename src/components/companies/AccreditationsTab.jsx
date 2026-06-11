@@ -80,7 +80,7 @@ function statusBadge(item) {
   const today = new Date().toISOString().split("T")[0];
   const expiredByDate = item.valid_until && item.valid_until < today;
   if (item.status === "suspended") return <Badge variant="outline" className="text-xs text-destructive border-destructive/40">Geschorst</Badge>;
-  if (item.status === "pending_review") return <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">Actie nodig</Badge>;
+  if (item.status === "pending_review") return <Badge className="text-xs bg-yellow-100 text-yellow-800 dark:bg-yellow-900 dark:text-yellow-200 border-0">Actie nodig</Badge>;
   if (item.status === "expired" || expiredByDate) return <Badge variant="outline" className="text-xs text-amber-700 border-amber-300">Verlopen</Badge>;
   return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0">Actief</Badge>;
 }
