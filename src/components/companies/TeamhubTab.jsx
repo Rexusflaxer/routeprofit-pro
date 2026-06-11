@@ -2,7 +2,6 @@ import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Badge } from "@/components/ui/badge";
-import { Users } from "lucide-react";
 import {
   getEffectiveWpbrLicenseType,
   getActiveTeamhubTechnicalCertificationTypes,
@@ -23,16 +22,34 @@ function getInitialForm(company) {
 
   return {
     teamhub_enabled: company?.teamhub_enabled === true,
+    teamhub_configured_at: company?.teamhub_configured_at || null,
+    teamhub_intro: company?.teamhub_intro || "",
+    teamhub_contact_name: company?.teamhub_contact_name || "",
+    teamhub_contact_email: company?.teamhub_contact_email || "",
+    teamhub_contact_phone: company?.teamhub_contact_phone || "",
     teamhub_public_location_id: company?.teamhub_public_location_id || null,
     teamhub_service_types: serviceTypes,
     teamhub_regions: Array.isArray(company?.teamhub_regions) ? company.teamhub_regions : []
   };
 }
 
+function hasTeamhubConfiguration(company) {
+  return Boolean(
+    company?.teamhub_configured_at ||
+    company?.teamhub_public_location_id ||
+    company?.teamhub_intro ||
+    company?.teamhub_contact_name ||
+    company?.teamhub_contact_email ||
+    company?.teamhub_contact_phone ||
+    (Array.isArray(company?.teamhub_service_types) && company.teamhub_service_types.length > 0) ||
+    (Array.isArray(company?.teamhub_regions) && company.teamhub_regions.length > 0)
+  );
+}
+
 export default function TeamhubTab({ companyId, company }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState(() => getInitialForm(company));
-  const [showWizard, setShowWizard] = useState(false);
+  const [showWizard, setShowWizard] = useState(() => !hasTeamhubConfiguration(company));
 
   const { data: wpbrLicenses = [] } = useQuery({
     queryKey: ["wpbr-licenses", companyId],
@@ -115,6 +132,7 @@ export default function TeamhubTab({ companyId, company }) {
 
   useEffect(() => {
     setForm(getInitialForm(company));
+    setShowWizard(!hasTeamhubConfiguration(company));
   }, [company?.id]);
 
   useEffect(() => {
@@ -151,9 +169,15 @@ export default function TeamhubTab({ companyId, company }) {
     const publicLocationId = form.teamhub_public_location_id && selectableTeamhubLocationIds.has(form.teamhub_public_location_id) ?
     form.teamhub_public_location_id :
     null;
+    const configuredAt = form.teamhub_configured_at || new Date().toISOString();
 
-    saveMutation.mutate({
+    const payload = {
       teamhub_enabled: form.teamhub_enabled === true,
+      teamhub_configured_at: configuredAt,
+      teamhub_intro: form.teamhub_intro?.trim() || null,
+      teamhub_contact_name: form.teamhub_contact_name?.trim() || null,
+      teamhub_contact_email: form.teamhub_contact_email?.trim() || null,
+      teamhub_contact_phone: form.teamhub_contact_phone?.trim() || null,
       teamhub_public_location_id: publicLocationId,
       teamhub_service_types: sanitizeTeamhubServiceTypes(
         effectiveWpbrLicenseType,
@@ -162,7 +186,10 @@ export default function TeamhubTab({ companyId, company }) {
         technicalCertificationTypes
       ),
       teamhub_regions: form.teamhub_regions || []
-    });
+    };
+
+    setForm((current) => ({ ...current, ...payload }));
+    saveMutation.mutate(payload);
     setShowWizard(false);
   };
 
@@ -198,6 +225,7 @@ export default function TeamhubTab({ companyId, company }) {
             technicalCertificationTypes={technicalCertificationTypes}
             qualificationDataLoading={qualificationDataLoading}
             teamhubReferencesLoading={teamhubReferencesLoading}
+            company={company}
           />
         ) : (
           <TeamhubSummary
