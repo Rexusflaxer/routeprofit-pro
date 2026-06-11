@@ -309,38 +309,6 @@ export default function TeamhubRegionPicker({ value = [], onChange }) {
 
   return (
     <div className="space-y-3">
-      <div className="relative">
-        <Label>Regio zoeken</Label>
-        <div className="mt-1 flex gap-2">
-          <div className="relative flex-1">
-            <Input
-              value={query}
-              onChange={e => search(e.target.value)}
-              placeholder="Zoek plaats of adres om naar de kaart te zoomen"
-              autoComplete="off"
-            />
-            {loadingSearch && <Loader2 className="absolute right-3 top-2.5 h-4 w-4 animate-spin text-muted-foreground" />}
-          </div>
-        </div>
-        {suggestions.length > 0 && (
-          <div className="absolute z-[80] mt-1 w-full overflow-hidden rounded-md border border-border bg-popover shadow-lg">
-            {suggestions.map((suggestion, index) => (
-              <button
-                key={`${suggestion.address}-${index}`}
-                type="button"
-                onClick={() => flyToSuggestion(suggestion)}
-                className="flex w-full items-start gap-2 px-3 py-2 text-left text-sm text-foreground hover:bg-accent"
-              >
-                <MapPin className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" />
-                <span className="min-w-0 flex-1">
-                  <span className="block truncate font-medium">{getSuggestionLabel(suggestion)}</span>
-                  <span className="block truncate text-xs text-muted-foreground">{suggestion.address}</span>
-                </span>
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
 
       <div className="grid grid-cols-1 gap-3 lg:grid-cols-[minmax(0,1fr)_300px]">
         <div className="relative h-[480px] overflow-hidden rounded-md border border-border bg-muted">
