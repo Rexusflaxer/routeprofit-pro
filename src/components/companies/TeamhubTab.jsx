@@ -331,14 +331,13 @@ export default function TeamhubTab({ companyId, company }) {
         <div className="space-y-2 rounded-md border border-border bg-background p-4">
           <Label>Vestiging op publieke kaart</Label>
           <Select
-            value={form.teamhub_public_location_id || "none"}
-            onValueChange={value => set("teamhub_public_location_id", value === "none" ? null : value)}
+            value={form.teamhub_public_location_id || ""}
+            onValueChange={value => set("teamhub_public_location_id", value || null)}
           >
             <SelectTrigger>
-              <SelectValue placeholder="Kies vestiging" />
+              <SelectValue placeholder="Kies een vestiging (verplicht)" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="none">Geen vestiging tonen</SelectItem>
               {selectableTeamhubLocations.map(location => (
                 <SelectItem key={location.id} value={location.id}>
                   {getCompanyLocationLabel(location)}
