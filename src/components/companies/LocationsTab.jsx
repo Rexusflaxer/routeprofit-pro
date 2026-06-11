@@ -45,7 +45,7 @@ function DeleteConfirmBar({ label, onConfirm, onCancel, isPending }) {
   );
 }
 
-export default function LocationsTab({ companies }) {
+export default function LocationsTab({ companies, companyId = null }) {
   const [showForm, setShowForm] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [form, setForm] = useState(EMPTY_LOC);
@@ -60,8 +60,26 @@ export default function LocationsTab({ companies }) {
   const { data: assignments = [] } = useQuery({ queryKey: ["company-location-assignments"], queryFn: () => base44.entities.CompanyLocationAssignment.list() });
 
   const saveMutation = useMutation({
-    mutationFn: (data) => editingId ? base44.entities.CompanyLocation.update(editingId, data) : base44.entities.CompanyLocation.create(data),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["company-locations"] }); cancel(); },
+    mutationFn: async (data) => {
+      if (editingId) return base44.entities.CompanyLocation.update(editingId, data);
+
+      const created = await base44.entities.CompanyLocation.create(data);
+      if (companyId && created?.id) {
+        await base44.entities.CompanyLocationAssignment.create({
+          company_id: companyId,
+          location_id: created.id,
+          usage_type: "operational_branch",
+          is_primary: false,
+        });
+      }
+      return created;
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["company-locations"] });
+      queryClient.invalidateQueries({ queryKey: ["company-location-assignments"] });
+      if (companyId) queryClient.invalidateQueries({ queryKey: ["company-location-assignments", companyId] });
+      cancel();
+    },
   });
 
   const deleteMutation = useMutation({

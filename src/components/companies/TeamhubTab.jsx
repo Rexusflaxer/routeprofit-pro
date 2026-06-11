@@ -1,10 +1,11 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Switch } from "@/components/ui/switch";
 import { Textarea } from "@/components/ui/textarea";
 import { Badge } from "@/components/ui/badge";
@@ -12,8 +13,10 @@ import { Building2, Check, Clock, Mail, Phone, Save, Users } from "lucide-react"
 import {
   TEAMHUB_SERVICE_OPTIONS,
   getEffectiveWpbrLicenseType,
+  getQualifiedTeamhubServiceTypes,
   getTeamhubServiceDisabledReason,
   getWpbrLicenseLabel,
+  isQualificationControlledTeamhubService,
   isTeamhubServiceAllowedForLicense,
   sanitizeTeamhubServiceTypes,
 } from "@/lib/teamhubServiceRules";
@@ -30,6 +33,7 @@ function getInitialForm(company) {
     teamhub_contact_name: company?.teamhub_contact_name || "",
     teamhub_contact_email: company?.teamhub_contact_email || "",
     teamhub_contact_phone: company?.teamhub_contact_phone || "",
+    teamhub_public_location_id: company?.teamhub_public_location_id || null,
     teamhub_service_types: serviceTypes,
     teamhub_regions: Array.isArray(company?.teamhub_regions) ? company.teamhub_regions : [],
   };
@@ -45,19 +49,69 @@ export default function TeamhubTab({ companyId, company }) {
     enabled: !!companyId,
   });
 
+  const { data: personnel = [], isLoading: personnelLoading } = useQuery({
+    queryKey: ["personnel"],
+    queryFn: () => base44.entities.Personnel.list(),
+    enabled: !!companyId,
+  });
+
+  const { data: personnelCompanyAssignments = [], isLoading: personnelCompanyAssignmentsLoading } = useQuery({
+    queryKey: ["personnel-company-assignments", companyId],
+    queryFn: () => base44.entities.PersonnelCompanyAssignment.filter({ company_id: companyId }),
+    enabled: !!companyId,
+  });
+
+  const { data: companyLocations = [], isLoading: companyLocationsLoading } = useQuery({
+    queryKey: ["company-locations"],
+    queryFn: () => base44.entities.CompanyLocation.list(),
+    enabled: !!companyId,
+  });
+
+  const { data: companyLocationAssignments = [], isLoading: companyLocationAssignmentsLoading } = useQuery({
+    queryKey: ["company-location-assignments", companyId],
+    queryFn: () => base44.entities.CompanyLocationAssignment.filter({ company_id: companyId }),
+    enabled: !!companyId,
+  });
+
+  const { data: personnelQualifications = [], isLoading: personnelQualificationsLoading } = useQuery({
+    queryKey: ["personnel-qualifications", companyId],
+    queryFn: () => base44.entities.PersonnelQualification.list(),
+    enabled: !!companyId,
+  });
+
   const effectiveWpbrLicenseType = getEffectiveWpbrLicenseType(company, wpbrLicenses);
+  const qualificationDataLoading = personnelLoading || personnelCompanyAssignmentsLoading || personnelQualificationsLoading;
+  const teamhubReferencesLoading = qualificationDataLoading || companyLocationsLoading || companyLocationAssignmentsLoading;
+  const qualifiedServiceTypes = useMemo(() => getQualifiedTeamhubServiceTypes({
+    companyId,
+    personnel,
+    assignments: personnelCompanyAssignments,
+    qualifications: personnelQualifications,
+  }), [companyId, personnel, personnelCompanyAssignments, personnelQualifications]);
+  const linkedTeamhubLocations = useMemo(() => {
+    const locationIds = new Set((companyLocationAssignments || []).map(assignment => assignment.location_id).filter(Boolean));
+    return (companyLocations || [])
+      .filter(location => location.is_active !== false)
+      .filter(location => locationIds.has(location.id))
+      .sort((a, b) => String(a.name || a.city || "").localeCompare(String(b.name || b.city || ""), "nl"));
+  }, [companyLocations, companyLocationAssignments]);
+  const linkedTeamhubLocationIds = useMemo(
+    () => new Set(linkedTeamhubLocations.map(location => location.id)),
+    [linkedTeamhubLocations]
+  );
 
   useEffect(() => {
     setForm(getInitialForm(company));
   }, [company?.id]);
 
   useEffect(() => {
+    if (qualificationDataLoading) return;
     setForm(current => {
-      const sanitized = sanitizeTeamhubServiceTypes(effectiveWpbrLicenseType, current.teamhub_service_types || []);
+      const sanitized = sanitizeTeamhubServiceTypes(effectiveWpbrLicenseType, current.teamhub_service_types || [], qualifiedServiceTypes);
       if (sanitized.length === (current.teamhub_service_types || []).length) return current;
       return { ...current, teamhub_service_types: sanitized };
     });
-  }, [effectiveWpbrLicenseType, company?.id]);
+  }, [effectiveWpbrLicenseType, qualificationDataLoading, qualifiedServiceTypes, company?.id]);
 
   const saveMutation = useMutation({
     mutationFn: (payload) => base44.entities.Company.update(companyId, payload),
@@ -71,7 +125,7 @@ export default function TeamhubTab({ companyId, company }) {
   };
 
   const toggleService = (key) => {
-    if (!isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, key)) return;
+    if (!isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, key, qualifiedServiceTypes)) return;
     const current = form.teamhub_service_types || [];
     set(
       "teamhub_service_types",
@@ -80,13 +134,17 @@ export default function TeamhubTab({ companyId, company }) {
   };
 
   const save = () => {
+    if (teamhubReferencesLoading) return;
     saveMutation.mutate({
       teamhub_enabled: form.teamhub_enabled === true,
       teamhub_intro: form.teamhub_intro?.trim() || null,
       teamhub_contact_name: form.teamhub_contact_name?.trim() || null,
       teamhub_contact_email: form.teamhub_contact_email?.trim() || null,
       teamhub_contact_phone: form.teamhub_contact_phone?.trim() || null,
-      teamhub_service_types: sanitizeTeamhubServiceTypes(effectiveWpbrLicenseType, form.teamhub_service_types || []),
+      teamhub_public_location_id: form.teamhub_public_location_id && linkedTeamhubLocationIds.has(form.teamhub_public_location_id)
+        ? form.teamhub_public_location_id
+        : null,
+      teamhub_service_types: sanitizeTeamhubServiceTypes(effectiveWpbrLicenseType, form.teamhub_service_types || [], qualifiedServiceTypes),
       teamhub_regions: form.teamhub_regions || [],
     });
   };
@@ -110,10 +168,10 @@ export default function TeamhubTab({ companyId, company }) {
             <p className="truncate text-xs text-muted-foreground">Onderaannemersprofiel voor diensten van hoofdaannemers</p>
           </div>
         </div>
-        <Button size="sm" onClick={save} disabled={saveMutation.isPending}>
-          {saveMutation.isPending ? (
+        <Button size="sm" onClick={save} disabled={saveMutation.isPending || teamhubReferencesLoading}>
+          {saveMutation.isPending || teamhubReferencesLoading ? (
             <>
-              <Clock className="mr-1 h-4 w-4" /> Opslaan...
+              <Clock className="mr-1 h-4 w-4" /> {teamhubReferencesLoading ? "Laden..." : "Opslaan..."}
             </>
           ) : saveMutation.isSuccess ? (
             <>
@@ -181,15 +239,41 @@ export default function TeamhubTab({ companyId, company }) {
           </div>
         </div>
 
+        <div className="space-y-2 rounded-md border border-border bg-background p-4">
+          <Label>Vestiging op publieke kaart</Label>
+          <Select
+            value={form.teamhub_public_location_id || "none"}
+            onValueChange={value => set("teamhub_public_location_id", value === "none" ? null : value)}
+          >
+            <SelectTrigger>
+              <SelectValue placeholder="Kies vestiging" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="none">Geen vestiging tonen</SelectItem>
+              {linkedTeamhubLocations.map(location => (
+                <SelectItem key={location.id} value={location.id}>
+                  {location.name || [location.street_name, location.house_number, location.city].filter(Boolean).join(" ") || "Vestiging"}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+          <p className="text-xs text-muted-foreground">
+            Alleen vestigingen die aan dit bedrijfsprofiel zijn gekoppeld kunnen later op de publieke kaart worden getoond.
+          </p>
+        </div>
+
         <div className="space-y-3">
           <Label>Diensten</Label>
           <p className="text-xs text-muted-foreground">
-            Selectie op basis van vergunning: {effectiveWpbrLicenseType ? `${effectiveWpbrLicenseType} - ${getWpbrLicenseLabel(effectiveWpbrLicenseType)}` : "geen actieve WPBR-vergunning gevonden"}.
+            Beveiligingsdiensten worden vrijgegeven op basis van vergunning: {effectiveWpbrLicenseType ? `${effectiveWpbrLicenseType} - ${getWpbrLicenseLabel(effectiveWpbrLicenseType)}` : "geen actieve WPBR-vergunning gevonden"}. Kwalificatiediensten worden vrijgegeven op basis van geldige medewerkerscertificaten.
           </p>
           <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {TEAMHUB_SERVICE_OPTIONS.map(activity => {
-              const allowed = isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, activity.key);
-              const disabledReason = getTeamhubServiceDisabledReason(effectiveWpbrLicenseType, activity.key);
+              const qualificationCheckPending = qualificationDataLoading && isQualificationControlledTeamhubService(activity.key);
+              const allowed = !qualificationCheckPending && isTeamhubServiceAllowedForLicense(effectiveWpbrLicenseType, activity.key, qualifiedServiceTypes);
+              const disabledReason = qualificationCheckPending
+                ? "Medewerkerscertificaten worden geladen."
+                : getTeamhubServiceDisabledReason(effectiveWpbrLicenseType, activity.key, qualifiedServiceTypes);
               return (
               <label
                 key={activity.key}

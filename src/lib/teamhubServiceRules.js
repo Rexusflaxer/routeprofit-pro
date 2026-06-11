@@ -45,25 +45,56 @@ const ALLOWED_SERVICES_BY_WPBR_TYPE = {
 
 const OWN_COMPANY_ONLY_LICENSES = new Set(["BD", "HBD"]);
 
+const QUALIFICATION_REQUIREMENTS_BY_SERVICE = {
+  traffic_controller: {
+    label: "geldig verkeersregelaar-certificaat",
+    types: ["verkeersregelaar"],
+  },
+  fire_watch: {
+    label: "geldig brandwacht-diploma",
+    types: [
+      "brandwacht",
+      "rijksdiploma_brandwacht",
+      "rijksdiploma_brandwacht_1e_klas",
+      "rijksdiploma_hoofdbrandwacht",
+    ],
+  },
+  bhv: {
+    label: "geldig BHV-certificaat",
+    types: ["bhv"],
+  },
+};
+
 export function getWpbrLicenseLabel(licenseType) {
   return WPBR_LICENSE_LABELS[licenseType] || licenseType || "Geen WPBR-vergunning";
 }
 
-export function getAllowedTeamhubServiceTypes(licenseType) {
-  return ALLOWED_SERVICES_BY_WPBR_TYPE[licenseType] || [];
+export function getAllowedTeamhubServiceTypes(licenseType, qualifiedServiceTypes = []) {
+  return [...new Set([
+    ...(ALLOWED_SERVICES_BY_WPBR_TYPE[licenseType] || []),
+    ...(qualifiedServiceTypes || []),
+  ])];
 }
 
-export function isTeamhubServiceAllowedForLicense(licenseType, serviceKey) {
-  return getAllowedTeamhubServiceTypes(licenseType).includes(serviceKey);
+export function isQualificationControlledTeamhubService(serviceKey) {
+  return Boolean(QUALIFICATION_REQUIREMENTS_BY_SERVICE[serviceKey]);
 }
 
-export function sanitizeTeamhubServiceTypes(licenseType, serviceTypes = []) {
-  const allowed = new Set(getAllowedTeamhubServiceTypes(licenseType));
+export function isTeamhubServiceAllowedForLicense(licenseType, serviceKey, qualifiedServiceTypes = []) {
+  return getAllowedTeamhubServiceTypes(licenseType, qualifiedServiceTypes).includes(serviceKey);
+}
+
+export function sanitizeTeamhubServiceTypes(licenseType, serviceTypes = [], qualifiedServiceTypes = []) {
+  const allowed = new Set(getAllowedTeamhubServiceTypes(licenseType, qualifiedServiceTypes));
   return (serviceTypes || []).filter(service => allowed.has(service));
 }
 
-export function getTeamhubServiceDisabledReason(licenseType, serviceKey) {
-  if (isTeamhubServiceAllowedForLicense(licenseType, serviceKey)) return "";
+export function getTeamhubServiceDisabledReason(licenseType, serviceKey, qualifiedServiceTypes = []) {
+  if (isTeamhubServiceAllowedForLicense(licenseType, serviceKey, qualifiedServiceTypes)) return "";
+  const qualificationRequirement = QUALIFICATION_REQUIREMENTS_BY_SERVICE[serviceKey];
+  if (qualificationRequirement) {
+    return `${TEAMHUB_SERVICE_LABELS[serviceKey] || "Deze dienst"} is alleen selecteerbaar wanneer er minimaal één actieve medewerker met een ${qualificationRequirement.label} in het personeelsbestand staat.`;
+  }
   if (!licenseType || licenseType === "none") return "Voeg eerst een WPBR-vergunningstype toe.";
   if (OWN_COMPANY_ONLY_LICENSES.has(licenseType)) {
     return `${licenseType} is alleen voor beveiliging van de eigen onderneming en daarom niet selecteerbaar voor Teamhub-onderaanneming.`;
@@ -74,6 +105,56 @@ export function getTeamhubServiceDisabledReason(licenseType, serviceKey) {
 function isExpiredLicense(license) {
   const today = new Date().toISOString().split("T")[0];
   return license?.valid_until && license.valid_until < today;
+}
+
+function isWithinDateRange(record, referenceDate) {
+  if (record?.valid_from && record.valid_from > referenceDate) return false;
+  if (record?.valid_until && record.valid_until < referenceDate) return false;
+  return true;
+}
+
+function isActiveCompanyAssignment(assignment, referenceDate) {
+  if (!assignment || assignment.assignment_status === "ended") return false;
+  if (assignment.available_for_planning === false) return false;
+  return isWithinDateRange(assignment, referenceDate);
+}
+
+function isValidQualification(qualification, referenceDate) {
+  if (!qualification || qualification.verification_status !== "verified") return false;
+  return isWithinDateRange(qualification, referenceDate);
+}
+
+export function getQualifiedTeamhubServiceTypes({ companyId, personnel = [], assignments = [], qualifications = [], referenceDate = null }) {
+  if (!companyId) return [];
+
+  const today = referenceDate || new Date().toISOString().split("T")[0];
+  const activeAssignedPersonnelIds = new Set(
+    (assignments || [])
+      .filter(assignment => assignment.company_id === companyId && isActiveCompanyAssignment(assignment, today))
+      .map(assignment => assignment.personnel_id)
+      .filter(Boolean)
+  );
+
+  const activePersonnelIds = new Set(
+    (personnel || [])
+      .filter(person => person?.status === "active")
+      .filter(person => person.primary_company_id === companyId || activeAssignedPersonnelIds.has(person.id))
+      .map(person => person.id)
+      .filter(Boolean)
+  );
+
+  const validQualificationTypes = new Set(
+    (qualifications || [])
+      .filter(qualification => isValidQualification(qualification, today))
+      .filter(qualification => activePersonnelIds.has(qualification.personnel_id))
+      .filter(qualification => !qualification.company_id || qualification.company_id === companyId)
+      .map(qualification => qualification.qualification_type)
+      .filter(Boolean)
+  );
+
+  return Object.entries(QUALIFICATION_REQUIREMENTS_BY_SERVICE)
+    .filter(([, requirement]) => requirement.types.some(type => validQualificationTypes.has(type)))
+    .map(([serviceKey]) => serviceKey);
 }
 
 export function getEffectiveWpbrLicenseType(company, licenses = []) {

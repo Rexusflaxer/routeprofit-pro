@@ -465,7 +465,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
           <div>
             <Label className="mb-2 block">Diensten</Label>
             <p className="mb-2 text-xs text-muted-foreground">
-              Selectie op basis van vergunning: {form.wpbr_license_type ? `${form.wpbr_license_type} - ${getWpbrLicenseLabel(form.wpbr_license_type)}` : "geen WPBR-vergunningstype gekozen"}.
+              Beveiligingsdiensten worden vrijgegeven op basis van vergunning: {form.wpbr_license_type ? `${form.wpbr_license_type} - ${getWpbrLicenseLabel(form.wpbr_license_type)}` : "geen WPBR-vergunningstype gekozen"}. Kwalificatiediensten worden beschikbaar nadat er geldige medewerkerscertificaten zijn gekoppeld.
             </p>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
               {TEAMHUB_SERVICE_OPTIONS.map(a => {
