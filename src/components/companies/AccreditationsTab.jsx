@@ -476,8 +476,7 @@ export default function AccreditationsTab({ companyId, company }) {
                       </div>
                       <div className="space-y-1 lg:col-span-2">
                         <Label>Naam</Label>
-                        <Input className={`h-8 ${errors.name ? "border-destructive" : ""}`} value={form.name} onChange={e => { set("name", e.target.value); setErrors(er => ({ ...er, name: undefined })); }} />
-                        {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
+                        <Input className="h-8 bg-muted/50" value={form.name} readOnly disabled />
                       </div>
                       <div className="space-y-1">
                         <Label>Uitgever / organisatie</Label>
