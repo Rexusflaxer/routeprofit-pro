@@ -134,87 +134,72 @@ export default function CaoCustomFunctionsManager({
   }, {});
 
   return (
-    <div className="space-y-4">
-      {/* Active custom functions grouped by category */}
+    <div className="space-y-2">
+      {/* Active custom functions as pills */}
       {active.length > 0 && (
-        <div className="space-y-3">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Handmatig toegevoegde functies</p>
-          {Object.entries(grouped).map(([cat, fns]) => (
-            <div key={cat}>
-              <p className="text-xs text-muted-foreground mb-1.5 font-medium">{cat}</p>
-              <div className="space-y-1">
-                {fns.map(f => (
-                  <div key={f.value}>
-                    <div className="flex items-center justify-between rounded-lg border border-border bg-card px-3 py-2">
-                      <span className="text-sm text-foreground">{f.label || toLabel(f.value)}</span>
-                      <div className="flex items-center gap-1">
-                        <Badge variant="outline" className="text-[10px] text-muted-foreground mr-1">Aangepast</Badge>
-                        <Button
-                          size="sm"
-                          variant="ghost"
-                          className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-                          onClick={() => setManagingValue(managingValue === f.value ? null : f.value)}
-                        >
-                          <ChevronDown className={`w-3.5 h-3.5 transition-transform ${managingValue === f.value ? "rotate-180" : ""}`} />
-                        </Button>
-                      </div>
-                    </div>
-                    {managingValue === f.value && (
-                      <ArchiveDeleteBar
-                        value={f.value}
-                        onArchive={(v) => { onArchive(v); setManagingValue(null); }}
-                        onDelete={(v) => { onDelete(v); setManagingValue(null); }}
-                        onCancel={() => setManagingValue(null)}
-                      />
-                    )}
-                  </div>
-                ))}
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Aangepaste functies</p>
+          <div className="flex flex-wrap gap-1.5">
+            {active.map(f => (
+              <div key={f.value} className="relative group">
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs bg-secondary/50 text-foreground border border-secondary font-medium">
+                  {f.label || toLabel(f.value)}
+                  <button
+                    onClick={() => setManagingValue(managingValue === f.value ? null : f.value)}
+                    className="text-muted-foreground hover:text-foreground transition-colors"
+                    title="Beheer"
+                  >
+                    <ChevronDown className={`w-3 h-3 transition-transform ${managingValue === f.value ? "rotate-180" : ""}`} />
+                  </button>
+                </span>
+                {managingValue === f.value && (
+                  <ArchiveDeleteBar
+                    value={f.value}
+                    onArchive={(v) => { onArchive(v); setManagingValue(null); }}
+                    onDelete={(v) => { onDelete(v); setManagingValue(null); }}
+                    onCancel={() => setManagingValue(null)}
+                  />
+                )}
               </div>
-            </div>
-          ))}
+            ))}
+          </div>
         </div>
       )}
 
-      {/* Archived functions */}
+      {/* Archived functions — compact collapsible */}
       {archived.length > 0 && (
-        <div>
+        <div className="pt-1 border-t border-border">
           <button
             onClick={() => setShowArchive(v => !v)}
-            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors mb-2"
+            className="flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
           >
             {showArchive ? <ChevronDown className="w-3.5 h-3.5" /> : <ChevronRight className="w-3.5 h-3.5" />}
             <Archive className="w-3.5 h-3.5" />
-            Archief ({archived.length})
+            <span className="font-medium">Archief ({archived.length})</span>
           </button>
           {showArchive && (
-            <div className="space-y-1 border border-border rounded-lg p-2 bg-muted/20">
+            <div className="flex flex-wrap gap-1.5 mt-2">
               {archived.map(f => (
-                <div key={f.value}>
-                  <div className="flex items-center justify-between rounded-md px-2 py-1.5">
-                    <div>
-                      <span className="text-sm text-muted-foreground line-through">{f.label || toLabel(f.value)}</span>
-                      {f.category && <span className="text-xs text-muted-foreground ml-2">({f.category})</span>}
-                    </div>
-                    <div className="flex items-center gap-1">
-                      <Button size="sm" variant="ghost" className="h-6 text-xs px-2 text-muted-foreground hover:text-foreground" onClick={() => onRestore(f.value)}>
-                        <RotateCcw className="w-3 h-3 mr-1" /> Herstellen
-                      </Button>
-                      <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setManagingValue(managingValue === f.value ? null : f.value)}>
-                        <Trash2 className="w-3 h-3" />
-                      </Button>
-                    </div>
-                  </div>
+                <div key={f.value} className="relative group">
+                  <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full text-xs bg-muted text-muted-foreground border border-border line-through font-medium">
+                    {f.label || toLabel(f.value)}
+                    <button
+                      onClick={() => setManagingValue(managingValue === f.value ? null : f.value)}
+                      className="hover:text-foreground transition-colors"
+                      title="Beheer"
+                    >
+                      <ChevronDown className={`w-3 h-3 transition-transform ${managingValue === f.value ? "rotate-180" : ""}`} />
+                    </button>
+                  </span>
                   {managingValue === f.value && (
-                    <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-3 space-y-2 mx-2 mb-1">
-                      <div className="flex items-start gap-2">
-                        <AlertTriangle className="w-4 h-4 text-destructive shrink-0 mt-0.5" />
-                        <p className="text-xs text-muted-foreground">Bestaande contracten en diensten blijven intact. Nieuwe koppelingen zijn niet meer mogelijk.</p>
-                      </div>
-                      <div className="flex gap-2">
-                        <Button size="sm" variant="destructive" className="h-7 text-xs" onClick={() => { onDelete(f.value); setManagingValue(null); }}>
-                          <Trash2 className="w-3 h-3 mr-1" /> Definitief verwijderen
+                    <div className="absolute top-full left-0 mt-1 z-10 bg-card border border-border rounded-lg p-2 w-max shadow-sm">
+                      <div className="flex gap-1">
+                        <Button size="sm" variant="ghost" className="h-6 text-xs px-1.5 text-muted-foreground hover:text-foreground" onClick={() => onRestore(f.value)}>
+                          <RotateCcw className="w-3 h-3 mr-1" /> Herstellen
                         </Button>
-                        <Button size="sm" variant="ghost" className="h-7 text-xs" onClick={() => setManagingValue(null)}>Annuleren</Button>
+                        <Button size="sm" variant="ghost" className="h-6 w-6 p-0 text-destructive hover:text-destructive hover:bg-destructive/10" onClick={() => setManagingValue(managingValue === f.value ? null : f.value)}>
+                          <Trash2 className="w-3 h-3" />
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -226,17 +211,15 @@ export default function CaoCustomFunctionsManager({
       )}
 
       {/* Add new custom function — 2-step flow */}
-      <div className="space-y-2 pt-1 border-t border-border">
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground pt-1">Functie toevoegen</p>
-
+      <div className="pt-2 border-t border-border">
         {step === 1 && (
           <div className="flex gap-2">
             <Input
               value={labelInput}
               onChange={(e) => { setLabelInput(e.target.value); onLabelChange?.(e.target.value); }}
               onKeyDown={(e) => e.key === "Enter" && handleNext()}
-              placeholder="bijv. Alarmopvolger"
-              className="h-8 text-sm"
+              placeholder="Bijv. Alarmopvolger"
+              className="h-7 text-xs flex-1"
               autoFocus
             />
             <Button
@@ -245,8 +228,9 @@ export default function CaoCustomFunctionsManager({
               size="sm"
               onClick={handleNext}
               disabled={!labelInput.trim()}
+              className="h-7 text-xs whitespace-nowrap"
             >
-              Aangepaste functie toevoegen
+              <Plus className="w-3 h-3 mr-1" /> Toevoegen
             </Button>
           </div>
         )}
