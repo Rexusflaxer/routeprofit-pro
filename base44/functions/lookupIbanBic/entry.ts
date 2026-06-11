@@ -11,10 +11,10 @@ Deno.serve(async (req) => {
 
     const cleanIban = iban.replace(/\s/g, '').toUpperCase();
     
-    // Validate IBAN format
-    const ibanPattern = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{18,34}$/;
+    // Validate IBAN format (min 15 chars)
+    const ibanPattern = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/;
     if (!ibanPattern.test(cleanIban)) {
-      return Response.json({ error: 'Invalid IBAN format' }, { status: 400 });
+      return Response.json({ error: 'Invalid IBAN format', received: cleanIban, length: cleanIban.length }, { status: 400 });
     }
 
     // Try to lookup using free IBAN API (ibanapi.com or fallback to basic extraction)

@@ -109,18 +109,21 @@ export default function CompanyBankTab({ companies }) {
   const [lookingUpIban, setLookingUpIban] = useState(false);
 
   const doIbanLookup = useDebouncedCallback(async (iban) => {
-    if (!iban || iban.length < 15) return;
+    const cleanIban = iban.replace(/\s/g, '');
+    if (!cleanIban || cleanIban.length < 15) return;
     setLookingUpIban(true);
     try {
-      const res = await base44.functions.invoke('lookupIbanBic', { iban });
-      if (res.data?.bic) setForm((f) => ({ ...f, bic: res.data.bic }));
-      if (res.data?.bankName) setForm((f) => ({ ...f, bank_name: res.data.bankName }));
+      const res = await base44.functions.invoke('lookupIbanBic', { iban: cleanIban });
+      if (res.data?.status === 'found' || res.data?.status === 'partial') {
+        if (res.data.bic) setForm((f) => ({ ...f, bic: res.data.bic }));
+        if (res.data.bankName) setForm((f) => ({ ...f, bank_name: res.data.bankName }));
+      }
     } catch (err) {
-      console.log('IBAN lookup failed:', err.message);
+      console.log('IBAN lookup error:', err.message);
     } finally {
       setLookingUpIban(false);
     }
-  }, 600);
+  }, 800);
 
   useEffect(() => {
     if (showWizard) {
