@@ -563,30 +563,14 @@ function membershipTypeKeysForRequirement(membership, associationRequirements) {
   });
 }
 
-function isoIssuerOptionsFromAccreditations(accreditations = []) {
+function customIssuerOptionsFromAccreditations(accreditations = []) {
   const byKey = new Map();
 
   (accreditations || []).forEach(item => {
-    if (!isIsoAccreditationType(item.accreditation_type)) return;
+    if (!usesCustomIssuerField(item.category, item.accreditation_type)) return;
 
     const issuer = normalizeIssuerName(item.issuer || "");
     if (!issuer || isGenericIsoIssuer(issuer)) return;
-
-    const key = issuer.toLowerCase();
-    if (!byKey.has(key)) byKey.set(key, issuer);
-  });
-
-  return [...byKey.values()].sort((a, b) => a.localeCompare(b, "nl"));
-}
-
-function manualIssuerOptionsFromAccreditations(accreditations = []) {
-  const byKey = new Map();
-
-  (accreditations || []).forEach(item => {
-    if (!isManualAccreditationType(item.category, item.accreditation_type)) return;
-
-    const issuer = normalizeIssuerName(item.issuer || "");
-    if (!issuer) return;
 
     const key = issuer.toLowerCase();
     if (!byKey.has(key)) byKey.set(key, issuer);
@@ -1105,13 +1089,8 @@ export default function AccreditationsTab({ companyId, company }) {
     [branchRequiredActions]
   );
 
-  const isoIssuerOptions = useMemo(
-    () => isoIssuerOptionsFromAccreditations(accreditations),
-    [accreditations]
-  );
-
-  const manualIssuerOptions = useMemo(
-    () => manualIssuerOptionsFromAccreditations(accreditations),
+  const customIssuerOptions = useMemo(
+    () => customIssuerOptionsFromAccreditations(accreditations),
     [accreditations]
   );
 
@@ -1481,7 +1460,6 @@ export default function AccreditationsTab({ companyId, company }) {
   const isIsoForm = isIsoAccreditationType(form.accreditation_type);
   const isManualForm = isManualAccreditationType(form.category, form.accreditation_type);
   const hasCustomIssuerField = usesCustomIssuerField(form.category, form.accreditation_type);
-  const issuerOptions = isIsoForm ? isoIssuerOptions : manualIssuerOptions;
 
   return (
     <div className="flex flex-col h-full">
@@ -1585,7 +1563,7 @@ export default function AccreditationsTab({ companyId, company }) {
                             <div className="space-y-1">
                               <IssuerSelectField
                                 value={form.issuer}
-                                options={issuerOptions}
+                                options={customIssuerOptions}
                                 creating={creatingIssuer}
                                 onSelect={selectIssuer}
                                 onCustomChange={setIssuer}
