@@ -57,20 +57,20 @@ const ACCREDITATION_TEMPLATES = {
   vvnl_regulier: {
     category: "quality_mark",
     accreditation_type: "vvnl_kwaliteitslabel_regulier",
-    name: "VVNL Kwaliteitslabel Reguliere beveiliging",
-    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+    name: "Kwaliteitslabel Veiligheidsdomein - Reguliere beveiliging",
+    issuer: "Sociaal Fonds Veiligheidsdomein (SFV)",
   },
   vvnl_ehb: {
     category: "quality_mark",
     accreditation_type: "vvnl_kwaliteitslabel_ehb",
-    name: "VVNL Kwaliteitslabel Evenementen-/horecabeveiliging",
-    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+    name: "Kwaliteitslabel Veiligheidsdomein - Horeca- en evenementenbeveiliging",
+    issuer: "Sociaal Fonds Veiligheidsdomein (SFV)",
   },
   vvnl_verkeersregelaars: {
     category: "quality_mark",
     accreditation_type: "vvnl_kwaliteitslabel_verkeersregelaars",
-    name: "VVNL Kwaliteitslabel Verkeersregelaars",
-    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+    name: "Kwaliteitslabel Veiligheidsdomein - Verkeersregelaars",
+    issuer: "Sociaal Fonds Veiligheidsdomein (SFV)",
   },
   bpob_keurmerk: {
     category: "quality_mark",
@@ -137,7 +137,7 @@ const ASSOCIATION_OPTIONS = [
     key: "vereniging_veiligheidsdomein_nederland",
     label: "Vereniging Veiligheidsdomein Nederland (VVNL)",
     shortLabel: "VVNL",
-    desc: "Reguliere beveiliging, horeca/evenementen, verkeersregelaars, brandwachten en BHV",
+    desc: "Reguliere beveiliging, horeca/evenementen, brandwachten en BHV",
     logoUrl: "https://veiligheidsdomein.nl/wp-content/uploads/2022/07/VVNL_Logo_Blauw_L-300x162.png",
     defaultPublicProfileUrl: "https://veiligheidsdomein.nl/",
     membershipTypes: [
@@ -156,8 +156,8 @@ const ASSOCIATION_OPTIONS = [
       {
         key: "verkeersregelaars",
         label: "Verkeersregelaars",
-        desc: "Verkeersregelaarsbedrijven binnen het veiligheidsdomein.",
-        actions: [ACCREDITATION_TEMPLATES.vvnl_verkeersregelaars],
+        desc: "Verkeersregelaarsbedrijven binnen het veiligheidsdomein. Dit zet geen vast kwaliteitslabel klaar.",
+        actions: [],
       },
       {
         key: "brandwachten_bhv",
@@ -200,8 +200,8 @@ const ASSOCIATION_OPTIONS = [
       {
         key: "particulier_onderzoeksbureau",
         label: "Particulier onderzoeksbureau",
-        desc: "Recherchewerkzaamheden met POB-vergunning.",
-        actions: [ACCREDITATION_TEMPLATES.bpob_keurmerk],
+        desc: "Recherchewerkzaamheden met POB-vergunning. Een eventueel keurmerk kan later bij Erkenningen worden toegevoegd.",
+        actions: [],
       },
     ],
   },
@@ -216,8 +216,8 @@ const ASSOCIATION_OPTIONS = [
       {
         key: "brand_en_beveiligingstechniek",
         label: "Brand- en beveiligingstechniek",
-        desc: "Technische installaties met aantoonbare certificering of erkenning.",
-        actions: [ACCREDITATION_TEMPLATES.techniek_kwaliteit],
+        desc: "Technische installaties; kies concrete BORG-, VEB- of CCV-certificaten bij Erkenningen.",
+        actions: [],
       },
     ],
   },

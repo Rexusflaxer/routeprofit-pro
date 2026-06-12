@@ -24,7 +24,7 @@ const CATEGORY_OPTIONS = [
 
 const QUALITY_OPTIONS = [
   { key: "iso_9001", label: "ISO 9001" },
-  { key: "iso_27001", label: "ISO 27001" },
+  { key: "iso_27001", label: "ISO/IEC 27001" },
   { key: "vca", label: "VCA" },
   { key: "veb_pbo_kwaliteitsregeling", label: "VEB PBO Kwaliteitsregeling" },
   { key: "nvb_keurmerk_beveiliging", label: "Nederlandse Veiligheidsbranche Keurmerk Beveiliging" },
@@ -32,9 +32,8 @@ const QUALITY_OPTIONS = [
   { key: "nvb_keurmerk_horecabeveiliging", label: "Nederlandse Veiligheidsbranche Keurmerk Horecabeveiliging" },
   { key: "nvb_keurmerk_gwt", label: "Nederlandse Veiligheidsbranche Keurmerk GWT" },
   { key: "nvb_keurmerk_pob", label: "Nederlandse Veiligheidsbranche Keurmerk POB" },
-  { key: "vvnl_kwaliteitslabel_regulier", label: "VVNL Kwaliteitslabel Reguliere beveiliging" },
-  { key: "vvnl_kwaliteitslabel_ehb", label: "VVNL Kwaliteitslabel Evenementen-/horecabeveiliging" },
-  { key: "vvnl_kwaliteitslabel_verkeersregelaars", label: "VVNL Kwaliteitslabel Verkeersregelaars" },
+  { key: "vvnl_kwaliteitslabel_regulier", label: "Kwaliteitslabel Veiligheidsdomein - Reguliere beveiliging" },
+  { key: "vvnl_kwaliteitslabel_ehb", label: "Kwaliteitslabel Veiligheidsdomein - Horeca- en evenementenbeveiliging" },
   { key: "bpob_keurmerk_particulier_onderzoeksbureau", label: "BPOB Keurmerk Particulier Onderzoeksbureau" },
   { key: "nvb_bhv_opleidingsinstituut", label: "NVB-BHV Opleidingsinstituut / instructeursregistratie" },
   { key: "other", label: "Ander kwaliteitscertificaat" },
@@ -68,6 +67,94 @@ const EMPTY_FORM = {
   notes: "",
 };
 
+const LEGACY_ACCREDITATION_LABELS = {
+  "quality_mark:vvnl_kwaliteitslabel_verkeersregelaars": "Kwaliteitslabel Veiligheidsdomein - Verkeersregelaars",
+};
+
+const ISSUER_LOGO_RULES = [
+  {
+    shortLabel: "VEB",
+    logoUrl: "https://veb.nl/wp-content/uploads/2024/10/VEB-Logo.png",
+    match: ({ issuer, accreditationType }) => /vereniging erkende beveiligingsbedrijven|veb/i.test(issuer) || ["veb_4", "veb_pbo_kwaliteitsregeling"].includes(accreditationType),
+  },
+  {
+    shortLabel: "NVB",
+    logoUrl: "https://d1p3jfjj2ztqji.cloudfront.net/wp-content/uploads/2019/12/06115338/logo-nvb-300x136.jpg",
+    match: ({ issuer, accreditationType }) => /nederlandse veiligheidsbranche/i.test(issuer) || accreditationType?.startsWith("nvb_keurmerk"),
+  },
+  {
+    shortLabel: "SFV",
+    logoUrl: "https://veiligheidsdomein.nl/wp-content/uploads/2022/07/VVNL_Logo_Blauw_L-300x162.png",
+    match: ({ issuer, accreditationType, label }) => /veiligheidsdomein|sociaal fonds|sfv|vvnl/i.test(`${issuer} ${label}`) || accreditationType?.startsWith("vvnl_"),
+  },
+  {
+    shortLabel: "BPOB",
+    logoUrl: "https://media.base44.com/images/public/698e307ed3aa4cab3729bbf1/695cde5fc_BPOB_afkorting_Kleur_versie_1.png",
+    match: ({ issuer, accreditationType }) => /bpob|particuliere onderzoeksbureaus/i.test(issuer) || accreditationType === "bpob_keurmerk_particulier_onderzoeksbureau",
+  },
+  {
+    shortLabel: "BHV",
+    logoUrl: "https://nvb-bhv.nl/wp-content/themes/nvb/img/nvb_logo.svg",
+    match: ({ issuer, accreditationType }) => /nvb-bhv|bedrijfshulpverlening/i.test(issuer) || accreditationType === "nvb_bhv_opleidingsinstituut",
+  },
+  {
+    shortLabel: "CCV",
+    logoUrl: "https://www.hetccv.nl/app/themes/ccv/assets/images/logo.svg",
+    match: ({ issuer, accreditationType }) => /ccv/i.test(issuer) || accreditationType?.startsWith("borg_") || accreditationType?.startsWith("ccv_"),
+  },
+  {
+    shortLabel: "TN",
+    logoUrl: "https://www.technieknederland.nl/media/quvnnxsy/logo-techniek-nederland.svg",
+    match: ({ issuer }) => /techniek nederland/i.test(issuer),
+  },
+  {
+    shortLabel: "ISO",
+    match: ({ accreditationType, label }) => accreditationType?.startsWith("iso_") || /iso/i.test(label),
+  },
+  {
+    shortLabel: "VCA",
+    match: ({ accreditationType, label }) => accreditationType === "vca" || /vca/i.test(label),
+  },
+];
+
+function issuerVisual({ issuer = "", accreditationType = "", label = "" }) {
+  return ISSUER_LOGO_RULES.find(rule => rule.match({ issuer, accreditationType, label })) || {
+    shortLabel: issuer?.slice(0, 3)?.toUpperCase() || "ORG",
+  };
+}
+
+function issuerForDisplay(issuer = "", accreditationType = "") {
+  if (accreditationType?.startsWith("vvnl_")) return "Sociaal Fonds Veiligheidsdomein (SFV)";
+  if (accreditationType?.startsWith("iso_")) return "Erkende certificatie-instelling";
+  if (accreditationType === "vca") return "SSVV / erkende certificatie-instelling";
+  return issuer || "";
+}
+
+function IssuerLogo({ issuer, accreditationType, label, className = "" }) {
+  const [failed, setFailed] = useState(false);
+  const visual = issuerVisual({ issuer, accreditationType, label });
+
+  if (!visual.logoUrl || failed) {
+    return (
+      <div className={`flex items-center justify-center rounded-md border border-border bg-muted text-[10px] font-semibold text-muted-foreground ${className}`}>
+        {visual.shortLabel}
+      </div>
+    );
+  }
+
+  return (
+    <div className={`flex items-center justify-center rounded-md border border-border bg-white p-1 ${className}`}>
+      <img
+        src={visual.logoUrl}
+        alt={`${visual.shortLabel} logo`}
+        className="max-h-full max-w-full object-contain"
+        loading="lazy"
+        onError={() => setFailed(true)}
+      />
+    </div>
+  );
+}
+
 const ACCREDITATION_PRESETS = [
   {
     category: "quality_mark",
@@ -92,8 +179,8 @@ const ACCREDITATION_PRESETS = [
   {
     category: "quality_mark",
     accreditation_type: "vvnl_kwaliteitslabel_regulier",
-    label: "VVNL Kwaliteitslabel Reguliere beveiliging",
-    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+    label: "Kwaliteitslabel Veiligheidsdomein - Reguliere beveiliging",
+    issuer: "Sociaal Fonds Veiligheidsdomein (SFV)",
     group: "Particuliere beveiliging",
     licenseTypes: ["ND", "BD"],
     activityKeys: ["private_security", "object_security", "mobile_surveillance", "reception_host"],
@@ -122,8 +209,8 @@ const ACCREDITATION_PRESETS = [
   {
     category: "quality_mark",
     accreditation_type: "vvnl_kwaliteitslabel_ehb",
-    label: "VVNL Kwaliteitslabel Evenementen-/horecabeveiliging",
-    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+    label: "Kwaliteitslabel Veiligheidsdomein - Horeca- en evenementenbeveiliging",
+    issuer: "Sociaal Fonds Veiligheidsdomein (SFV)",
     group: "Evenementen en horeca",
     licenseTypes: ["ND", "HND", "HBD"],
     activityKeys: ["event_hospitality_security"],
@@ -158,16 +245,6 @@ const ACCREDITATION_PRESETS = [
     licenseTypes: ["POB"],
     activityKeys: ["private_investigation"],
     description: "Voor particuliere recherche en onderzoeksbureaus.",
-  },
-  {
-    category: "quality_mark",
-    accreditation_type: "vvnl_kwaliteitslabel_verkeersregelaars",
-    label: "VVNL Kwaliteitslabel Verkeersregelaars",
-    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
-    group: "Aanvullende diensten",
-    licenseTypes: [],
-    activityKeys: ["traffic_controller"],
-    description: "Voor bedrijven met verkeersregelaarsdiensten.",
   },
   {
     category: "quality_mark",
@@ -251,6 +328,38 @@ const ACCREDITATION_PRESETS = [
   },
 ];
 
+const GENERAL_ACCREDITATION_PRESETS = [
+  {
+    category: "quality_mark",
+    accreditation_type: "iso_9001",
+    label: "ISO 9001",
+    issuer: "Erkende certificatie-instelling",
+    group: "Algemene ISO-certificeringen",
+    description: "Kwaliteitsmanagementsysteem voor consistente dienstverlening en procesborging.",
+    defaultReasons: ["Optioneel"],
+    alwaysSuggest: true,
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "iso_27001",
+    label: "ISO/IEC 27001",
+    issuer: "Erkende certificatie-instelling",
+    group: "Algemene ISO-certificeringen",
+    description: "Informatiebeveiligingsmanagement voor organisaties die gevoelige klant- of objectinformatie verwerken.",
+    defaultReasons: ["Optioneel"],
+    alwaysSuggest: true,
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "vca",
+    label: "VCA",
+    issuer: "SSVV / erkende certificatie-instelling",
+    group: "Veilig werken",
+    activityKeys: ["security_installation", "fire_alarm_installation", "fire_alarm_panel_bmc", "technical_security_other", "traffic_controller", "fire_watch"],
+    description: "Veiligheid, gezondheid en milieu voor risicovol uitvoerend werk.",
+  },
+];
+
 const MANUAL_ACCREDITATION_PRESET = {
   category: "other",
   accreditation_type: "other",
@@ -263,7 +372,7 @@ const MANUAL_ACCREDITATION_PRESET = {
 
 function optionLabel(category, value) {
   return (OPTIONS_BY_CATEGORY[category] || [])
-    .find(o => o.key === value)?.label || value || "Erkenning";
+    .find(o => o.key === value)?.label || LEGACY_ACCREDITATION_LABELS[`${category}:${value}`] || value || "Erkenning";
 }
 
 function categoryLabel(category) {
@@ -283,7 +392,7 @@ function companyActivityKeys(company) {
 }
 
 function presetRelevanceReasons(preset, activityKeys, licenseType) {
-  const reasons = [];
+  const reasons = [...(preset.defaultReasons || [])];
   if (licenseType && preset.licenseTypes?.includes(licenseType)) {
     reasons.push(`${licenseType} - ${getWpbrLicenseLabel(licenseType)}`);
   }
@@ -292,6 +401,11 @@ function presetRelevanceReasons(preset, activityKeys, licenseType) {
     reasons.push("Past bij activiteiten");
   }
   return reasons;
+}
+
+function presetForType(category, type) {
+  return [...ACCREDITATION_PRESETS, ...GENERAL_ACCREDITATION_PRESETS]
+    .find(preset => preset.category === category && preset.accreditation_type === type);
 }
 
 function relevantAccreditationPresets(company, licenseType, activeAccreditations = []) {
@@ -314,40 +428,51 @@ function relevantAccreditationPresets(company, licenseType, activeAccreditations
       return a.group.localeCompare(b.group, "nl") || a.label.localeCompare(b.label, "nl");
     });
 
-  if (relevant.length > 0) return relevant;
+  const general = GENERAL_ACCREDITATION_PRESETS
+    .map(preset => ({
+      ...preset,
+      relevanceReasons: presetRelevanceReasons(preset, activityKeys, licenseType),
+      alreadyRegistered: existingKeys.has(presetKey(preset)),
+    }))
+    .filter(preset => preset.alwaysSuggest || preset.relevanceReasons.length > 0)
+    .sort((a, b) => {
+      if (a.alreadyRegistered !== b.alreadyRegistered) return a.alreadyRegistered ? 1 : -1;
+      return a.group.localeCompare(b.group, "nl") || a.label.localeCompare(b.label, "nl");
+    });
 
-  return [
-    {
-      category: "quality_mark",
-      accreditation_type: "iso_9001",
-      label: "ISO 9001",
-      issuer: "",
-      group: "Algemeen",
-      description: "Algemeen kwaliteitsmanagementcertificaat.",
-      relevanceReasons: ["Algemeen toepasbaar"],
-      alreadyRegistered: existingKeys.has("quality_mark:iso_9001"),
-    },
-    {
-      category: "quality_mark",
-      accreditation_type: "iso_27001",
-      label: "ISO 27001",
-      issuer: "",
-      group: "Algemeen",
-      description: "Informatiebeveiliging en kwaliteitsborging.",
-      relevanceReasons: ["Algemeen toepasbaar"],
-      alreadyRegistered: existingKeys.has("quality_mark:iso_27001"),
-    },
-    {
-      category: "quality_mark",
-      accreditation_type: "vca",
-      label: "VCA",
-      issuer: "",
-      group: "Algemeen",
-      description: "Veiligheid, gezondheid en milieu op de werkvloer.",
-      relevanceReasons: ["Algemeen toepasbaar"],
-      alreadyRegistered: existingKeys.has("quality_mark:vca"),
-    },
-  ];
+  return [...relevant, ...general];
+}
+
+function displayAccreditationName(item) {
+  const label = optionLabel(item.category, item.accreditation_type);
+  const hasKnownLabel = label && label !== item.accreditation_type;
+  return hasKnownLabel && item.accreditation_type !== "other" ? label : item.name || label;
+}
+
+function accreditationNumberMeta(form) {
+  const type = form.accreditation_type || "";
+  if (type.startsWith("iso_") || type === "vca" || type.startsWith("borg_") || type.startsWith("ccv_")) {
+    return {
+      label: "Certificaatnummer",
+      help: "Gebruik het certificaatnummer van de uitgevende certificatie-instelling.",
+    };
+  }
+  if (type.startsWith("nvb_keurmerk") || type.startsWith("vvnl_") || type === "bpob_keurmerk_particulier_onderzoeksbureau") {
+    return {
+      label: "Keurmerknummer / registratienummer",
+      help: "Gebruik het nummer uit het keurmerk- of kwaliteitslabelregister als dat beschikbaar is.",
+    };
+  }
+  if (type === "nvb_bhv_opleidingsinstituut") {
+    return {
+      label: "Registratienummer",
+      help: "Gebruik het opleidingsinstituut- of instructeursregistratienummer.",
+    };
+  }
+  return {
+    label: "Certificaatnummer / registratienummer",
+    help: "Gebruik het nummer op het certificaat of in het officiële register. Laat leeg als er geen nummer is.",
+  };
 }
 
 function groupPresets(presets) {
@@ -469,6 +594,12 @@ function AccreditationPresetRow({ preset, selected, onSelect }) {
             ? <Check className="h-3 w-3 text-primary-foreground" />
             : null}
       </div>
+      <IssuerLogo
+        issuer={preset.issuer}
+        accreditationType={preset.accreditation_type}
+        label={preset.label}
+        className="h-9 w-12 shrink-0"
+      />
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-foreground truncate">{preset.label}</p>
         <p className="text-xs text-muted-foreground truncate">{preset.issuer || preset.description}</p>
@@ -552,8 +683,9 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
   const contextRef = useRef(null);
   const needsAction = isActionItem(item);
   const categoryText = categoryLabel(item.category);
-  const titleText = item.name || optionLabel(item.category, item.accreditation_type);
-  const subtitleText = [item.issuer, item.certificate_number].filter(Boolean).join(" - ") || optionLabel(item.category, item.accreditation_type);
+  const titleText = displayAccreditationName(item);
+  const displayIssuer = issuerForDisplay(item.issuer, item.accreditation_type);
+  const subtitleText = [displayIssuer, item.certificate_number].filter(Boolean).join(" - ") || optionLabel(item.category, item.accreditation_type);
 
   useEffect(() => {
     if (!contextMenu) return;
@@ -587,9 +719,17 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
           <span className="truncate">{categoryText}</span>
         </Badge>
       </div>
-      <div className="min-w-0">
-        <p className="truncate text-sm font-medium text-foreground">{titleText}</p>
-        <p className="truncate text-xs text-muted-foreground">{subtitleText}</p>
+      <div className="flex min-w-0 items-center gap-2">
+        <IssuerLogo
+          issuer={displayIssuer}
+          accreditationType={item.accreditation_type}
+          label={titleText}
+          className="h-8 w-11 shrink-0"
+        />
+        <div className="min-w-0">
+          <p className="truncate text-sm font-medium text-foreground">{titleText}</p>
+          <p className="truncate text-xs text-muted-foreground">{subtitleText}</p>
+        </div>
       </div>
       <div className="min-w-0">{statusBadge(item)}</div>
       <div className="min-w-0">
@@ -795,7 +935,15 @@ export default function AccreditationsTab({ companyId, company }) {
   };
 
   const setType = (type) => {
-    setForm(current => ({ ...current, accreditation_type: type, name: optionLabel(current.category, type) }));
+    setForm(current => {
+      const preset = presetForType(current.category, type);
+      return {
+        ...current,
+        accreditation_type: type,
+        name: preset?.label || optionLabel(current.category, type),
+        issuer: preset?.issuer || current.issuer,
+      };
+    });
   };
 
   const selectPreset = (preset) => {
@@ -804,7 +952,7 @@ export default function AccreditationsTab({ companyId, company }) {
       category: preset.category,
       accreditation_type: preset.accreditation_type,
       name: presetKey(preset) === presetKey(MANUAL_ACCREDITATION_PRESET) ? "" : preset.label,
-      issuer: preset.issuer || "",
+      issuer: issuerForDisplay(preset.issuer || "", preset.accreditation_type),
     }));
     setErrors(current => ({ ...current, accreditation_type: undefined, name: undefined }));
   };
@@ -836,8 +984,8 @@ export default function AccreditationsTab({ companyId, company }) {
     setForm({
       category: item.category || "technical_certification",
       accreditation_type: item.accreditation_type || "other",
-      name: item.name || optionLabel(item.category, item.accreditation_type),
-      issuer: item.issuer || "",
+      name: displayAccreditationName(item),
+      issuer: issuerForDisplay(item.issuer, item.accreditation_type),
       certificate_number: item.certificate_number || "",
       valid_from: item.valid_from || "",
       valid_until: item.valid_until || "",
@@ -863,8 +1011,8 @@ export default function AccreditationsTab({ companyId, company }) {
       ...EMPTY_FORM,
       category: item.category || "technical_certification",
       accreditation_type: item.accreditation_type || "other",
-      name: item.name || optionLabel(item.category, item.accreditation_type),
-      issuer: item.issuer || "",
+      name: displayAccreditationName(item),
+      issuer: issuerForDisplay(item.issuer, item.accreditation_type),
       status: "active",
     });
     setErrors({});
@@ -971,6 +1119,8 @@ export default function AccreditationsTab({ companyId, company }) {
   const missingRequiredDocument = documentRequired && !form.document_file_url;
   const currentFormDocument = withCurrentDocumentDescriptor(form);
   const currentFormDocumentFilename = currentFormDocument.document_download_filename || currentFormDocument.document_filename || "Document toegevoegd";
+  const numberFieldMeta = accreditationNumberMeta(form);
+  const currentIssuer = issuerForDisplay(form.issuer, form.accreditation_type);
 
   return (
     <div className="flex flex-col h-full">
@@ -1042,8 +1192,9 @@ export default function AccreditationsTab({ companyId, company }) {
                           </div>
                         </div>
                         <div className="space-y-1">
-                          <Label>Nummer</Label>
-                          <Input className="h-8" value={form.certificate_number} onChange={e => set("certificate_number", e.target.value)} />
+                          <Label>{numberFieldMeta.label}</Label>
+                          <Input className="h-8" value={form.certificate_number} onChange={e => set("certificate_number", e.target.value)} placeholder="Optioneel" />
+                          <p className="text-[11px] text-muted-foreground">{numberFieldMeta.help}</p>
                         </div>
                         <div className="space-y-1">
                           <Label>Geldig vanaf</Label>
@@ -1088,6 +1239,20 @@ export default function AccreditationsTab({ companyId, company }) {
                                 </Select>
                               )}
                             </div>
+                            {knownType && (
+                              <div className="space-y-1">
+                                <Label className="text-muted-foreground">Uitgevende instantie</Label>
+                                <div className="h-8 flex items-center gap-2 px-3 rounded-md bg-muted/50 border border-border text-sm text-muted-foreground">
+                                  <IssuerLogo
+                                    issuer={currentIssuer}
+                                    accreditationType={form.accreditation_type}
+                                    label={form.name}
+                                    className="h-5 w-8 shrink-0"
+                                  />
+                                  <span className="truncate">{currentIssuer || "-"}</span>
+                                </div>
+                              </div>
+                            )}
                             {!knownType && !isEditing && (
                               <div className="space-y-1 lg:col-span-2">
                                 <Label>Naam</Label>
@@ -1109,8 +1274,9 @@ export default function AccreditationsTab({ companyId, company }) {
                               </div>
                             )}
                             <div className="space-y-1">
-                              <Label>Nummer</Label>
-                              <Input className="h-8" value={form.certificate_number} onChange={e => set("certificate_number", e.target.value)} />
+                              <Label>{numberFieldMeta.label}</Label>
+                              <Input className="h-8" value={form.certificate_number} onChange={e => set("certificate_number", e.target.value)} placeholder="Optioneel" />
+                              <p className="text-[11px] text-muted-foreground">{numberFieldMeta.help}</p>
                             </div>
                             <div className="space-y-1">
                               <Label>Geldig vanaf</Label>
