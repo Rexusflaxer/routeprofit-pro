@@ -2,6 +2,8 @@ import React, { useState } from "react";
 import { Award, BookOpen, CreditCard, Handshake, Mail, MapPin, Shield } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { getCompanyProfileLocations } from "@/lib/companyLocationScope";
+import { getActiveWpbrLicenseType } from "@/lib/teamhubServiceRules";
 import WpbrTab from "./WpbrTab";
 import CaoTab from "./CaoTab";
 import LocationsTab from "./LocationsTab";
@@ -22,12 +24,47 @@ const MENU_ITEMS = [
   { key: "email", label: "E-mail", icon: Mail },
 ];
 
+function hasTeamhubConfiguration(company) {
+  return Boolean(
+    company?.teamhub_configured_at ||
+    company?.teamhub_public_location_id ||
+    company?.teamhub_intro ||
+    company?.teamhub_contact_name ||
+    company?.teamhub_contact_email ||
+    company?.teamhub_contact_phone ||
+    (Array.isArray(company?.teamhub_service_types) && company.teamhub_service_types.length > 0) ||
+    (Array.isArray(company?.teamhub_regions) && company.teamhub_regions.length > 0)
+  );
+}
+
+function isExpiredLicense(license, today) {
+  return license?.valid_until && license.valid_until < today;
+}
+
 export default function CompanySidebarPanel({ companyId, companies, company }) {
   const [active, setActive] = useState("wpbr");
 
   const { data: accreditations = [] } = useQuery({
     queryKey: ["company-accreditations", companyId],
     queryFn: () => base44.entities.CompanyAccreditation.filter({ company_id: companyId }),
+    enabled: !!companyId,
+  });
+
+  const { data: wpbrLicenses = [], isLoading: wpbrLicensesLoading } = useQuery({
+    queryKey: ["wpbr-licenses", companyId],
+    queryFn: () => base44.entities.CompanyWpbrLicense.filter({ company_id: companyId }, "-created_date"),
+    enabled: !!companyId,
+  });
+
+  const { data: companyLocations = [], isLoading: companyLocationsLoading } = useQuery({
+    queryKey: ["company-locations"],
+    queryFn: () => base44.entities.CompanyLocation.list(),
+    enabled: !!companyId,
+  });
+
+  const { data: companyLocationAssignments = [], isLoading: companyLocationAssignmentsLoading } = useQuery({
+    queryKey: ["company-location-assignments"],
+    queryFn: () => base44.entities.CompanyLocationAssignment.list(),
     enabled: !!companyId,
   });
 
@@ -39,13 +76,39 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
       (a.valid_until && a.valid_until < today)
     )
   );
+  const hasWpbrAction = wpbrLicenses.some(license =>
+    license.status !== "superseded" && (
+      license.status === "expired" ||
+      isExpiredLicense(license, today)
+    )
+  );
+  const activeWpbrLicenseType = getActiveWpbrLicenseType(wpbrLicenses);
+  const teamhubLocationIds = new Set(
+    getCompanyProfileLocations({
+      companyId,
+      company,
+      locations: companyLocations,
+      assignments: companyLocationAssignments,
+    }).map(location => location.id)
+  );
+  const hasValidTeamhubLocation = !!company?.teamhub_public_location_id && teamhubLocationIds.has(company.teamhub_public_location_id);
+  const hasTeamhubServices = Array.isArray(company?.teamhub_service_types) && company.teamhub_service_types.length > 0;
+  const teamhubActionDataLoading = wpbrLicensesLoading || companyLocationsLoading || companyLocationAssignmentsLoading;
+  const hasTeamhubAction = !teamhubActionDataLoading && hasTeamhubConfiguration(company) && (
+    !activeWpbrLicenseType ||
+    !hasValidTeamhubLocation ||
+    !hasTeamhubServices
+  );
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden flex min-h-[200px]">
       {/* Left sidebar menu */}
       <div className="w-48 shrink-0 border-r border-border bg-muted/30 py-3">
         {MENU_ITEMS.map(item => {
-          const hasAlert = item.key === "accreditations" && hasAccreditationAction;
+          const hasAlert =
+            (item.key === "wpbr" && hasWpbrAction) ||
+            (item.key === "accreditations" && hasAccreditationAction) ||
+            (item.key === "teamhub" && hasTeamhubAction);
           return (
             <button
               key={item.key}
