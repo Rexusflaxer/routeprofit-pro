@@ -187,7 +187,7 @@ export default function TeamhubTab({ companyId, company }) {
     const nextLocationId = hasValidPublicLocation ? form.teamhub_public_location_id : null;
     const nextServices = sanitizedTeamhubServiceTypes;
     const currentServices = form.teamhub_service_types || [];
-    const shouldDisableVisibility = form.teamhub_enabled === true;
+    const shouldDisableVisibility = !teamhubSetupReady && form.teamhub_enabled === true;
     const shouldClearLocation = form.teamhub_public_location_id !== nextLocationId;
     const shouldSyncServices =
       nextServices.length !== currentServices.length ||
