@@ -1036,126 +1036,100 @@ export default function CompanyEmailTab({ companyId, company }) {
               <tbody>
                 {settings ? (
                   <>
-                  <tr className="border-t border-border">
-                    <td className="px-4 py-4">
-                      <div className="flex min-w-0 items-center gap-3">
-                        <div className="min-w-0">
-                          <p className="truncate font-medium text-foreground">
-                            {settings.provider === "platform" ? "LOQ standaardmail" : settings.from_email || "Geen e-mailadres"}
-                          </p>
-                          <p className="truncate text-xs text-muted-foreground">{getConnectionSummary(settings)}</p>
-                        </div>
-                      </div>
-                    </td>
-                    <td className="px-4 py-4 text-muted-foreground">{savedProvider?.authLabel || "-"}</td>
-                    <td className="px-4 py-4">
-                      <ChannelBadges channels={configuredChannels} muted={!configuredChannels.length} />
-                    </td>
-                    <td className="px-4 py-4">
-                      <Badge className={STATUS_CLASSES[settings.status] || STATUS_CLASSES.draft}>
-                        {STATUS_LABELS[settings.status] || settings.status}
-                      </Badge>
-                    </td>
-                    <td className="px-4 py-4 text-muted-foreground">{settings.from_name || "-"}</td>
-                    <td className="px-4 py-4 text-right">
-                      <div className="flex justify-end gap-2">
-                        {isOauthProvider(settings.provider) && settings.status === "pending_oauth" && (
-                          <Button size="sm" variant="default" onClick={connectExisting}>
-                            <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-                            Account koppelen
-                          </Button>
-                        )}
-                        <Button size="sm" variant="outline" onClick={() => openWizard(1)}>
-                          <Edit className="mr-1.5 h-3.5 w-3.5" />
-                          Wijzigen
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={openTestMail}
-                          disabled={settings.status !== "connected" || testMailMutation.isPending}
-                        >
-                          <Send className="mr-1.5 h-3.5 w-3.5" />
-                          Testmail
-                        </Button>
-                        <Button
-                          size="sm"
-                          variant="outline"
-                          onClick={deleteSettings}
-                          disabled={deleteMutation.isPending}
-                          className="text-destructive hover:text-destructive"
-                          aria-label="E-mailinstelling verwijderen"
-                        >
-                          <Trash2 className="h-3.5 w-3.5" />
-                        </Button>
-                      </div>
-                    </td>
-                  </tr>
-                  {testMailOpen && (
-                     <tr className={`border-t ${testMailStatus.type === "success" ? "border-green-200 bg-green-50 dark:border-green-900 dark:bg-green-950/40" : "border-primary/20 bg-primary/5"}`}>
-                       <td colSpan={6} className="px-4 py-4">
+                  <tr className={`border-t border-border ${testMailOpen && testMailStatus.type === "success" ? "bg-green-50 dark:bg-green-950/40" : testMailOpen ? "bg-primary/5" : ""}`}>
+                     {testMailOpen ? (
+                       <td colSpan={6} className="px-4 py-3">
                          {testMailStatus.type === "success" ? (
                            <div className="flex items-center gap-3">
-                             <CheckCircle2 className="h-5 w-5 shrink-0 text-green-600 dark:text-green-400" />
+                             <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
                              <p className="text-sm font-medium text-green-800 dark:text-green-200">{testMailStatus.message}</p>
                            </div>
                          ) : (
-                         <div className="space-y-3">
-                           <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
-                             <div className="min-w-0">
-                               <p className="text-sm font-semibold text-foreground">Naar wie mag de testmail?</p>
-                               <p className="mt-0.5 text-xs text-muted-foreground">
-                                 LOQ verzendt een korte controlemail via {settings.provider === "platform" ? "de LOQ standaardmail" : settings.from_email || "de gekoppelde mailbox"}.
-                                 {settings.last_send_test_at && (
-                                   <> Laatste test: {formatDateTime(settings.last_send_test_at)}.</>
-                                 )}
-                               </p>
-                             </div>
-                             <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
-                               <Input
-                                 type="email"
-                                 value={testRecipient}
-                                 onChange={(event) => {
-                                   setTestRecipient(event.target.value);
-                                   if (testMailStatus.type === "error") {
-                                     setTestMailStatus({ type: "idle", message: "" });
-                                   }
-                                 }}
-                                 onKeyDown={(event) => {
-                                   if (event.key === "Enter") {
-                                     event.preventDefault();
-                                     sendTestMail();
-                                   }
-                                 }}
-                                 placeholder="naam@bedrijf.nl"
-                                 className="h-9 min-w-[240px] sm:w-[320px]"
-                                 autoFocus
-                               />
-                               <Button size="sm" onClick={sendTestMail} disabled={testMailMutation.isPending}>
-                                 {testMailMutation.isPending ? (
-                                   <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
-                                 ) : (
-                                   <Send className="mr-1.5 h-3.5 w-3.5" />
-                                 )}
-                                 {testMailMutation.isPending ? "Verzenden..." : "Versturen"}
-                               </Button>
-                               <Button size="sm" variant="ghost" onClick={closeTestMail} disabled={testMailMutation.isPending}>
-                                 <X className="mr-1.5 h-3.5 w-3.5" />
-                                 Sluiten
-                               </Button>
-                             </div>
+                           <div className="flex flex-wrap items-center gap-2">
+                             <span className="text-sm font-medium text-foreground shrink-0">Testmail naar:</span>
+                             <Input
+                               type="email"
+                               value={testRecipient}
+                               onChange={(event) => {
+                                 setTestRecipient(event.target.value);
+                                 if (testMailStatus.type === "error") setTestMailStatus({ type: "idle", message: "" });
+                               }}
+                               onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); sendTestMail(); } }}
+                               placeholder="naam@bedrijf.nl"
+                               className="h-8 w-[260px]"
+                               autoFocus
+                             />
+                             <Button size="sm" onClick={sendTestMail} disabled={testMailMutation.isPending}>
+                               {testMailMutation.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}
+                               {testMailMutation.isPending ? "Verzenden..." : "Versturen"}
+                             </Button>
+                             <Button size="sm" variant="ghost" onClick={closeTestMail} disabled={testMailMutation.isPending}>
+                               <X className="h-3.5 w-3.5" />
+                             </Button>
+                             {testMailStatus.type === "error" && testMailStatus.message && (
+                               <span className="flex items-center gap-1 text-xs text-destructive">
+                                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />{testMailStatus.message}
+                               </span>
+                             )}
                            </div>
-                           {testMailStatus.type === "error" && testMailStatus.message && (
-                             <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-                               <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                               <p>{testMailStatus.message}</p>
-                             </div>
-                           )}
-                         </div>
                          )}
                        </td>
-                     </tr>
-                   )}
+                     ) : (
+                       <>
+                         <td className="px-4 py-4">
+                           <div className="min-w-0">
+                             <p className="truncate font-medium text-foreground">
+                               {settings.provider === "platform" ? "LOQ standaardmail" : settings.from_email || "Geen e-mailadres"}
+                             </p>
+                             <p className="truncate text-xs text-muted-foreground">{getConnectionSummary(settings)}</p>
+                           </div>
+                         </td>
+                         <td className="px-4 py-4 text-muted-foreground">{savedProvider?.authLabel || "-"}</td>
+                         <td className="px-4 py-4">
+                           <ChannelBadges channels={configuredChannels} muted={!configuredChannels.length} />
+                         </td>
+                         <td className="px-4 py-4">
+                           <Badge className={STATUS_CLASSES[settings.status] || STATUS_CLASSES.draft}>
+                             {STATUS_LABELS[settings.status] || settings.status}
+                           </Badge>
+                         </td>
+                         <td className="px-4 py-4 text-muted-foreground">{settings.from_name || "-"}</td>
+                         <td className="px-4 py-4 text-right">
+                           <div className="flex justify-end gap-2">
+                             {isOauthProvider(settings.provider) && settings.status === "pending_oauth" && (
+                               <Button size="sm" variant="default" onClick={connectExisting}>
+                                 <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                                 Account koppelen
+                               </Button>
+                             )}
+                             <Button size="sm" variant="outline" onClick={() => openWizard(1)}>
+                               <Edit className="mr-1.5 h-3.5 w-3.5" />
+                               Wijzigen
+                             </Button>
+                             <Button
+                               size="sm"
+                               variant="outline"
+                               onClick={openTestMail}
+                               disabled={settings.status !== "connected" || testMailMutation.isPending}
+                             >
+                               <Send className="mr-1.5 h-3.5 w-3.5" />
+                               Testmail
+                             </Button>
+                             <Button
+                               size="sm"
+                               variant="outline"
+                               onClick={deleteSettings}
+                               disabled={deleteMutation.isPending}
+                               className="text-destructive hover:text-destructive"
+                               aria-label="E-mailinstelling verwijderen"
+                             >
+                               <Trash2 className="h-3.5 w-3.5" />
+                             </Button>
+                           </div>
+                         </td>
+                       </>
+                     )}
+                   </tr>
                   </>
                 ) : (
                   <tr className="border-t border-border">
