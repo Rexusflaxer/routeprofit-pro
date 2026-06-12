@@ -962,43 +962,32 @@ export default function CompanyEmailTab({ companyId, company }) {
   return (
     <div className="flex h-full flex-col">
       <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/30 px-4 py-3">
-        <div className="flex min-w-0 items-center gap-3">
-          <Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <p className="truncate text-sm font-semibold text-foreground">Zakelijke e-mail</p>
-              {settings && (
-                <Badge className={STATUS_CLASSES[displayStatus] || STATUS_CLASSES.draft}>
-                  {STATUS_LABELS[displayStatus] || displayStatus}
-                </Badge>
-              )}
-            </div>
-            <p className="truncate text-xs text-muted-foreground">
-              Laat de applicatie uitgaande mail verzenden vanuit het domein van dit bedrijf.
-            </p>
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <p className="truncate text-sm font-semibold text-foreground">Zakelijke e-mail</p>
+            {settings && (
+              <Badge className={STATUS_CLASSES[displayStatus] || STATUS_CLASSES.draft}>
+                {STATUS_LABELS[displayStatus] || displayStatus}
+              </Badge>
+            )}
           </div>
+          <p className="truncate text-xs text-muted-foreground">
+            Laat de applicatie uitgaande mail verzenden vanuit het domein van dit bedrijf.
+          </p>
         </div>
+        <Button size="sm" variant={showWizard ? "outline" : "default"} onClick={() => showWizard ? closeWizard() : openWizard(1)}>
+          {showWizard ? (
+            "Sluiten"
+          ) : (
+            <>
+              <Plus className="mr-1.5 h-3.5 w-3.5" />
+              Toevoegen
+            </>
+          )}
+        </Button>
       </div>
 
       <div className="overflow-hidden rounded-lg border border-border bg-card">
-          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
-            <div className="min-w-0">
-              <p className="text-sm font-semibold text-foreground">E-mailadressen</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">
-                Beheer het adres waarmee LOQ namens dit bedrijf e-mails mag verzenden.
-              </p>
-            </div>
-            <Button size="sm" variant={showWizard ? "outline" : "default"} onClick={() => showWizard ? closeWizard() : openWizard(1)}>
-              {showWizard ? (
-                "Sluiten"
-              ) : (
-                <>
-                  <Plus className="mr-1.5 h-3.5 w-3.5" />
-                  Toevoegen
-                </>
-              )}
-            </Button>
-          </div>
 
           {emailNeedsAction && (
             <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/40">
