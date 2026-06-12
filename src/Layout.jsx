@@ -70,13 +70,15 @@ function isActive(currentPageName, item) {
 
 function ViewportSizeWarning({ className = "" }) {
   return (
-    <div className={`rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200 ${className}`}>
-      <div className="flex items-start gap-2">
-        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+    <div className={`rounded-md border border-sidebar-border bg-sidebar/95 px-3 py-2 text-sidebar-foreground shadow-[0_10px_30px_rgba(15,23,42,0.08)] backdrop-blur dark:shadow-[0_10px_30px_rgba(0,0,0,0.35)] ${className}`}>
+      <div className="flex items-start gap-2.5">
+        <div className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-md bg-[#1f7aff]/10 text-[#1f7aff]">
+          <AlertTriangle className="h-3.5 w-3.5" />
+        </div>
         <div className="min-w-0">
-          <p className="text-[12px] font-semibold leading-tight">Kleine weergave</p>
-          <p className="mt-0.5 text-[11px] leading-snug">
-            Vergroot het venster voor alle tabellen en knoppen.
+          <p className="text-[12px] font-semibold leading-tight">Venster te smal</p>
+          <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground">
+            Niet alles past in beeld. Vergroot het venster om tabellen en knoppen volledig te zien.
           </p>
         </div>
       </div>
