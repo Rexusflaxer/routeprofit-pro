@@ -9,6 +9,7 @@ import { AlertTriangle, Check, ChevronLeft, ChevronRight, Edit, Plus, Trash2 } f
 import { AnimatePresence, motion } from "framer-motion";
 
 const DELETE_PASSWORD = "verwijder";
+const BRANCH_MEMBERSHIP_TABLE_GRID = "grid grid-cols-[minmax(220px,1fr)_minmax(96px,120px)_minmax(100px,120px)_minmax(140px,240px)_minmax(150px,180px)] gap-3 xl:gap-4";
 
 const ACCREDITATION_TEMPLATES = {
   veb_4: {
@@ -807,12 +808,12 @@ export default function BranchMembershipsTab({ companyId }) {
         )}
       </AnimatePresence>
 
-      <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="flex-1 min-w-0">Branchevereniging</span>
-        <span className="w-36 shrink-0">Lidnummer</span>
-        <span className="w-36 shrink-0">Lid sinds</span>
-        <span className="w-80 shrink-0">Categorieen</span>
-        <div className="w-24 shrink-0 flex justify-end">
+      <div className={`${BRANCH_MEMBERSHIP_TABLE_GRID} items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+        <span className="min-w-0 truncate">Branchevereniging</span>
+        <span className="min-w-0 truncate">Lidnummer</span>
+        <span className="min-w-0 truncate">Lid sinds</span>
+        <span className="min-w-0 truncate">Categorieen</span>
+        <div className="min-w-0 flex justify-end">
           {!showWizard && !deleteId && (
             <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
               <Plus className="w-3 h-3 mr-1" /> Nieuwe vereniging
@@ -829,17 +830,17 @@ export default function BranchMembershipsTab({ companyId }) {
         {memberships.map(membership => {
           const membershipTypeLabels = getMembershipTypeLabels(membership);
           return (
-            <div key={membership.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
-              <div className="flex min-w-0 flex-1 items-center gap-3">
+            <div key={membership.id} className={`${BRANCH_MEMBERSHIP_TABLE_GRID} items-center px-4 py-3 group hover:bg-accent/30 transition-colors`}>
+              <div className="flex min-w-0 items-center gap-3">
                 <AssociationLogo associationType={membership.association_type} className="h-10 w-16 shrink-0" />
                 <div className="min-w-0">
                   <p className="truncate text-sm font-medium text-foreground">{effectiveAssociationName(membership)}</p>
                   <p className="truncate text-xs text-muted-foreground">{associationLabel(membership.association_type)}</p>
                 </div>
               </div>
-              <div className="w-36 shrink-0 text-sm text-muted-foreground">{membership.membership_number || "-"}</div>
-              <div className="w-36 shrink-0 text-sm text-muted-foreground">{membership.member_since || "-"}</div>
-              <div className="w-80 shrink-0">
+              <div className="min-w-0 truncate text-sm text-muted-foreground">{membership.membership_number || "-"}</div>
+              <div className="min-w-0 truncate text-sm text-muted-foreground">{membership.member_since || "-"}</div>
+              <div className="min-w-0">
                 {membershipTypeLabels.length > 0 ? (
                   <div className="flex flex-wrap gap-1">
                     {membershipTypeLabels.map(label => <Badge key={label} variant="secondary" className="text-xs normal-case">{label}</Badge>)}
@@ -848,7 +849,7 @@ export default function BranchMembershipsTab({ companyId }) {
                   <span className="text-xs text-muted-foreground">Geen categorie</span>
                 )}
               </div>
-              <div className="flex w-24 shrink-0 justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+              <div className="min-w-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
                 <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => openEdit(membership)} title="Bewerken"><Edit className="h-3.5 w-3.5" /></Button>
                 <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive" onClick={() => setDeleteId(membership.id)} title="Verwijderen"><Trash2 className="h-3.5 w-3.5" /></Button>
               </div>
