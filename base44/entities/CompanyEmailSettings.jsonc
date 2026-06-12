@@ -68,6 +68,30 @@
       "default": false,
       "description": "Gebruik deze configuratie voor operationele berichten"
     },
+    "use_for_reports": {
+      "type": "boolean",
+      "default": false,
+      "description": "Gebruik deze configuratie voor rapportage- en formuliermails"
+    },
+    "channel_delivery_status": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Per verzendkanaal de beschikbaarheid, hold-status en reden waarom verzending wel of niet mag starten"
+    },
+    "delivery_hold_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Algemene reden waarom uitgaande verzending voor dit bedrijf op hold staat"
+    },
+    "action_required_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Korte reden die in de bedrijfsinstellingen als actiepunt getoond kan worden"
+    },
     "save_to_sent_items": {
       "type": "boolean",
       "default": true,

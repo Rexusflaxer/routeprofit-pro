@@ -8,12 +8,14 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import {
   AlertCircle,
+  AlertTriangle,
   Check,
   ChevronLeft,
   ChevronRight,
   Edit,
   ExternalLink,
   Mail,
+  PauseCircle,
   Plus,
   Server,
   ShieldCheck,
@@ -82,6 +84,29 @@ const STATUS_CLASSES = {
   disabled: "bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-300",
 };
 
+const DELETE_PASSWORD = "verwijder";
+
+const MAIL_CHANNELS = [
+  {
+    key: "invoices",
+    label: "Facturen",
+    description: "Facturen, betalingsherinneringen en financiele e-mails",
+    enabledField: "use_for_invoices",
+  },
+  {
+    key: "reports",
+    label: "Rapportages",
+    description: "Rapportages en formulieren naar klanten",
+    enabledField: "use_for_reports",
+  },
+  {
+    key: "operational",
+    label: "Operationeel",
+    description: "Planning, uitvoering en operationele meldingen",
+    enabledField: "use_for_operational_mail",
+  },
+];
+
 function getProvider(key) {
   if (key === "other") return LEGACY_OTHER_PROVIDER;
   return PROVIDERS.find(provider => provider.key === key) || PROVIDERS[0];
@@ -98,6 +123,10 @@ function getInitialForm(company) {
     bcc_email: "",
     use_for_invoices: false,
     use_for_operational_mail: false,
+    use_for_reports: false,
+    channel_delivery_status: {},
+    delivery_hold_reason: "",
+    action_required_reason: "",
     save_to_sent_items: true,
     require_manual_review_before_send: false,
     signature_text: "",
@@ -125,6 +154,109 @@ function getStatusForProvider(provider) {
   return "draft";
 }
 
+function getChannelHoldReason(status, providerKey) {
+  if (status === "connected") return null;
+  if (providerKey === "platform") return "Er is geen zakelijk e-mailadres ingesteld.";
+  if (isOauthProvider(providerKey)) return "Rond de Microsoft- of Google-koppeling af voordat dit kanaal kan verzenden.";
+  if (isSmtpProvider(providerKey)) return "Rond de SMTP-configuratie af voordat dit kanaal kan verzenden.";
+  return "Deze verzendfunctie is nog niet klaar voor gebruik.";
+}
+
+function getConfiguredChannels(settings) {
+  if (!settings) return [];
+  const deliveryStatus = settings.channel_delivery_status || {};
+
+  return MAIL_CHANNELS.filter(channel =>
+    Boolean(settings[channel.enabledField] || deliveryStatus[channel.key]?.enabled)
+  );
+}
+
+function getHeldChannels(settings) {
+  if (!settings) return [];
+  const deliveryStatus = settings.channel_delivery_status || {};
+
+  return getConfiguredChannels(settings).filter(channel =>
+    settings.status === "action_required" ||
+    deliveryStatus[channel.key]?.status === "hold"
+  );
+}
+
+function hasEmailAction(settings) {
+  return settings?.status === "action_required" || getHeldChannels(settings).length > 0;
+}
+
+function buildChannelDeliveryStatus(form, nextStatus) {
+  const existingStatus = form.channel_delivery_status || {};
+  const providerKey = form.provider || "platform";
+  const holdReason = getChannelHoldReason(nextStatus, providerKey);
+
+  return MAIL_CHANNELS.reduce((result, channel) => {
+    const existing = existingStatus[channel.key] || {};
+    const enabled = Boolean(form[channel.enabledField] || existing.enabled);
+    if (!enabled) return result;
+
+    result[channel.key] = {
+      ...existing,
+      enabled: true,
+      status: nextStatus === "connected" ? "ready" : "hold",
+      hold_reason: nextStatus === "connected" ? null : holdReason,
+      updated_at: new Date().toISOString(),
+    };
+    return result;
+  }, {});
+}
+
+function buildDeletedMailHoldPayload(settings, companyId, impactedChannels) {
+  const now = new Date().toISOString();
+  const previousStatus = settings.channel_delivery_status || {};
+  const channelDeliveryStatus = impactedChannels.reduce((result, channel) => {
+    result[channel.key] = {
+      ...(previousStatus[channel.key] || {}),
+      enabled: true,
+      status: "hold",
+      hold_reason: "Het gekoppelde e-mailadres is verwijderd. Stel een nieuw e-mailadres in om verzending te hervatten.",
+      previous_email: settings.from_email || null,
+      blocked_at: now,
+      updated_at: now,
+    };
+    return result;
+  }, {});
+
+  return {
+    company_id: companyId,
+    provider: "platform",
+    status: "action_required",
+    from_name: settings.from_name || null,
+    from_email: null,
+    reply_to_email: null,
+    bcc_email: null,
+    use_for_invoices: impactedChannels.some(channel => channel.enabledField === "use_for_invoices"),
+    use_for_reports: impactedChannels.some(channel => channel.enabledField === "use_for_reports"),
+    use_for_operational_mail: impactedChannels.some(channel => channel.enabledField === "use_for_operational_mail"),
+    channel_delivery_status: channelDeliveryStatus,
+    delivery_hold_reason: "Het gekoppelde e-mailadres is verwijderd.",
+    action_required_reason: "Stel een nieuw zakelijk e-mailadres in om uitgaande verzending te hervatten.",
+    save_to_sent_items: false,
+    require_manual_review_before_send: false,
+    signature_text: null,
+    invoice_subject_prefix: null,
+    oauth_tenant_hint: null,
+    oauth_account_id: null,
+    oauth_scopes: [],
+    token_secret_reference: null,
+    smtp_host: null,
+    smtp_port: null,
+    smtp_security: null,
+    smtp_username: null,
+    smtp_secret_reference: null,
+    connected_at: null,
+    last_checked_at: null,
+    last_send_test_at: settings.last_send_test_at || null,
+    last_error: "Uitgaande mail staat op hold omdat het mailadres is verwijderd.",
+    notes: settings.notes || null,
+  };
+}
+
 function isOauthProvider(provider) {
   return provider === "microsoft_365" || provider === "google_workspace";
 }
@@ -146,17 +278,26 @@ function normalizePayload(form, companyId) {
   const isSmtp = isSmtpProvider(providerKey);
   const email = form.from_email?.trim() || null;
   const domain = getEmailDomain(email);
+  const status = form.status || getStatusForProvider(providerKey);
+  const channelDeliveryStatus = buildChannelDeliveryStatus({ ...form, provider: providerKey }, status);
+  const hasHeldChannels = Object.values(channelDeliveryStatus).some(channel => channel.status === "hold");
 
   return {
     company_id: companyId,
     provider: providerKey,
-    status: form.status || getStatusForProvider(providerKey),
+    status,
     from_name: form.from_name?.trim() || null,
     from_email: email,
     reply_to_email: email,
     bcc_email: null,
-    use_for_invoices: false,
-    use_for_operational_mail: false,
+    use_for_invoices: Boolean(form.use_for_invoices),
+    use_for_operational_mail: Boolean(form.use_for_operational_mail),
+    use_for_reports: Boolean(form.use_for_reports),
+    channel_delivery_status: channelDeliveryStatus,
+    delivery_hold_reason: hasHeldChannels ? getChannelHoldReason(status, providerKey) : null,
+    action_required_reason: status === "action_required" || hasHeldChannels
+      ? "Rond de zakelijke e-mailkoppeling af om uitgaande verzending vrij te geven."
+      : null,
     save_to_sent_items: providerKey !== "platform",
     require_manual_review_before_send: false,
     signature_text: null,
@@ -376,12 +517,100 @@ function ProviderCard({ provider, selected, onSelect }) {
   );
 }
 
+function ChannelBadges({ channels, muted = false }) {
+  if (!channels.length) {
+    return <span className="text-xs text-muted-foreground">Nog niet gekoppeld aan verzendfuncties</span>;
+  }
+
+  return (
+    <div className="flex flex-wrap gap-1.5">
+      {channels.map(channel => (
+        <Badge
+          key={channel.key}
+          variant="outline"
+          className={muted ? "text-muted-foreground" : "bg-muted text-foreground"}
+        >
+          {channel.label}
+        </Badge>
+      ))}
+    </div>
+  );
+}
+
+function DeleteEmailImpactBar({ emailSettings, impactedChannels, onConfirm, onCancel, isPending }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const hasImpact = impactedChannels.length > 0;
+
+  const handleConfirm = () => {
+    if (password !== DELETE_PASSWORD) {
+      setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`);
+      return;
+    }
+    onConfirm();
+  };
+
+  return (
+    <div className={`border-b p-4 ${hasImpact ? "border-amber-200 bg-amber-50 dark:border-amber-900 dark:bg-amber-950/40" : "border-destructive/20 bg-destructive/5"}`}>
+      <div className="mb-3 flex items-start gap-3">
+        {hasImpact ? (
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-300" />
+        ) : (
+          <Trash2 className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+        )}
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">E-mailinstelling verwijderen?</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {hasImpact ? (
+              <>
+                <strong>{emailSettings?.from_email || "Dit mailadres"}</strong> wordt gebruikt voor uitgaande functies. Als je doorgaat, worden deze functies op hold gezet en blijft de E-mailtab als actiepunt zichtbaar.
+              </>
+            ) : (
+              <>
+                <strong>{emailSettings?.from_email || "Dit mailadres"}</strong> wordt verwijderd. Er zijn nu geen verzendfuncties aan gekoppeld.
+              </>
+            )}
+          </p>
+          {hasImpact && (
+            <div className="mt-2">
+              <ChannelBadges channels={impactedChannels} />
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="space-y-2">
+        <label className="block text-xs text-muted-foreground">
+          Typ <strong className="font-mono text-foreground">{DELETE_PASSWORD}</strong> om te bevestigen:
+        </label>
+        <div className="flex flex-wrap gap-2">
+          <Input
+            value={password}
+            onChange={(event) => { setPassword(event.target.value); setError(""); }}
+            placeholder={DELETE_PASSWORD}
+            className={`h-8 max-w-[200px] font-mono text-sm ${error ? "border-destructive" : ""}`}
+            onKeyDown={(event) => event.key === "Enter" && handleConfirm()}
+            autoFocus
+          />
+          <Button variant={hasImpact ? "default" : "destructive"} size="sm" onClick={handleConfirm} disabled={isPending}>
+            {hasImpact ? <PauseCircle className="mr-1.5 h-3.5 w-3.5" /> : <Trash2 className="mr-1.5 h-3.5 w-3.5" />}
+            {isPending ? "Verwerken..." : hasImpact ? "Verwijderen en op hold zetten" : "Verwijderen"}
+          </Button>
+          <Button variant="ghost" size="sm" onClick={onCancel}>Annuleren</Button>
+        </div>
+        {error && <p className="text-xs text-destructive">{error}</p>}
+      </div>
+    </div>
+  );
+}
+
 export default function CompanyEmailTab({ companyId, company }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState(() => getInitialForm(company));
   const [step, setStep] = useState(1);
   const [showWizard, setShowWizard] = useState(false);
   const [errors, setErrors] = useState({});
+  const [deleteRequest, setDeleteRequest] = useState(null);
 
   const { data: settingsList = [], isLoading } = useQuery({
     queryKey: ["company-email-settings", companyId],
@@ -393,6 +622,9 @@ export default function CompanyEmailTab({ companyId, company }) {
   const savedProvider = settings ? getProvider(settings.provider) : null;
   const selectedProvider = form.provider ? getProvider(form.provider) : null;
   const displayStatus = settings?.status || "draft";
+  const configuredChannels = getConfiguredChannels(settings);
+  const heldChannels = getHeldChannels(settings);
+  const emailNeedsAction = hasEmailAction(settings);
 
   useEffect(() => {
     if (!companyId) return;
@@ -468,17 +700,34 @@ export default function CompanyEmailTab({ companyId, company }) {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.CompanyEmailSettings.delete(id),
-    onSuccess: (_, id) => {
+    mutationFn: async ({ item, impactedChannels }) => {
+      if (impactedChannels.length > 0) {
+        const saved = await base44.entities.CompanyEmailSettings.update(
+          item.id,
+          buildDeletedMailHoldPayload(item, companyId, impactedChannels)
+        );
+        return { mode: "hold", saved };
+      }
+
+      await base44.entities.CompanyEmailSettings.delete(item.id);
+      return { mode: "delete", id: item.id };
+    },
+    onSuccess: (result) => {
       queryClient.setQueryData(["company-email-settings", companyId], (old = []) => {
         const list = Array.isArray(old) ? old : [];
-        return list.filter(item => item.id !== id);
+        if (result.mode === "hold" && result.saved) {
+          return [result.saved, ...list.filter(item => item.id !== result.saved.id)];
+        }
+        return list.filter(item => item.id !== result.id);
       });
       queryClient.invalidateQueries({ queryKey: ["company-email-settings", companyId] });
       setShowWizard(false);
+      setDeleteRequest(null);
       setStep(1);
       setErrors({});
-      setForm(getInitialForm(company));
+      if (result.mode === "delete") {
+        setForm(getInitialForm(company));
+      }
     },
   });
 
@@ -541,6 +790,7 @@ export default function CompanyEmailTab({ companyId, company }) {
 
   const closeWizard = () => {
     setShowWizard(false);
+    setDeleteRequest(null);
     setStep(1);
     setErrors({});
     setForm({
@@ -579,13 +829,17 @@ export default function CompanyEmailTab({ companyId, company }) {
 
   const save = ({ connectAfterSave = false } = {}) => {
     const email = form.from_email?.trim() || "";
+    const nextStatus = settings?.status === "connected" && settings.provider === form.provider
+      ? "connected"
+      : getStatusForProvider(form.provider);
     const payload = {
       ...form,
-      status: getStatusForProvider(form.provider),
+      status: nextStatus,
       reply_to_email: email || null,
       bcc_email: null,
-      use_for_invoices: false,
-      use_for_operational_mail: false,
+      use_for_invoices: Boolean(form.use_for_invoices),
+      use_for_operational_mail: Boolean(form.use_for_operational_mail),
+      use_for_reports: Boolean(form.use_for_reports),
       save_to_sent_items: form.provider !== "platform",
       require_manual_review_before_send: false,
       signature_text: null,
@@ -614,11 +868,16 @@ export default function CompanyEmailTab({ companyId, company }) {
 
   const deleteSettings = () => {
     if (!settings?.id || deleteMutation.isPending) return;
-    const confirmed = typeof window === "undefined"
-      ? true
-      : window.confirm("Weet je zeker dat je deze e-mailinstelling wilt verwijderen?");
-    if (!confirmed) return;
-    deleteMutation.mutate(settings.id);
+    setShowWizard(false);
+    setDeleteRequest({
+      item: settings,
+      impactedChannels: getConfiguredChannels(settings),
+    });
+  };
+
+  const confirmDeleteSettings = () => {
+    if (!deleteRequest?.item || deleteMutation.isPending) return;
+    deleteMutation.mutate(deleteRequest);
   };
 
   if (isLoading) {
@@ -630,6 +889,9 @@ export default function CompanyEmailTab({ companyId, company }) {
       ? "Account koppelen"
       : "SMTP instellen"
     : "Account koppelen";
+  const shouldConnectAfterSave = isOauthProvider(form.provider) && !(
+    settings?.status === "connected" && settings.provider === form.provider
+  );
 
   return (
     <div className="flex h-full flex-col">
@@ -673,12 +935,42 @@ export default function CompanyEmailTab({ companyId, company }) {
             </Button>
           </div>
 
+          {emailNeedsAction && (
+            <div className="border-b border-amber-200 bg-amber-50 px-4 py-3 dark:border-amber-900 dark:bg-amber-950/40">
+              <div className="flex items-start gap-3">
+                <AlertCircle className="mt-0.5 h-4 w-4 shrink-0 text-amber-700 dark:text-amber-300" />
+                <div className="min-w-0">
+                  <p className="text-sm font-semibold text-amber-950 dark:text-amber-100">Uitgaande mail staat op hold</p>
+                  <p className="mt-0.5 text-xs text-amber-900/80 dark:text-amber-200/80">
+                    Stel een nieuw zakelijk e-mailadres in of rond de koppeling af voordat gekoppelde functies e-mail kunnen verzenden.
+                  </p>
+                  {heldChannels.length > 0 && (
+                    <div className="mt-2">
+                      <ChannelBadges channels={heldChannels} />
+                    </div>
+                  )}
+                </div>
+              </div>
+            </div>
+          )}
+
+          {deleteRequest && (
+            <DeleteEmailImpactBar
+              emailSettings={deleteRequest.item}
+              impactedChannels={deleteRequest.impactedChannels}
+              onConfirm={confirmDeleteSettings}
+              onCancel={() => setDeleteRequest(null)}
+              isPending={deleteMutation.isPending}
+            />
+          )}
+
           <div className="overflow-x-auto">
-            <table className="w-full min-w-[760px] text-sm">
+            <table className="w-full min-w-[900px] text-sm">
               <thead className="bg-muted/50 text-xs uppercase tracking-wider text-muted-foreground">
                 <tr>
                   <th className="px-4 py-3 text-left font-semibold">E-mail</th>
                   <th className="px-4 py-3 text-left font-semibold">Authenticatie</th>
+                  <th className="px-4 py-3 text-left font-semibold">Functies</th>
                   <th className="px-4 py-3 text-left font-semibold">Status</th>
                   <th className="px-4 py-3 text-left font-semibold">Afzendernaam</th>
                   <th className="px-4 py-3 text-right font-semibold">Actie</th>
@@ -699,6 +991,9 @@ export default function CompanyEmailTab({ companyId, company }) {
                       </div>
                     </td>
                     <td className="px-4 py-4 text-muted-foreground">{savedProvider?.authLabel || "-"}</td>
+                    <td className="px-4 py-4">
+                      <ChannelBadges channels={configuredChannels} muted={!configuredChannels.length} />
+                    </td>
                     <td className="px-4 py-4">
                       <Badge className={STATUS_CLASSES[settings.status] || STATUS_CLASSES.draft}>
                         {STATUS_LABELS[settings.status] || settings.status}
@@ -732,7 +1027,7 @@ export default function CompanyEmailTab({ companyId, company }) {
                   </tr>
                 ) : (
                   <tr className="border-t border-border">
-                    <td colSpan={5} className="px-4 py-8 text-center">
+                    <td colSpan={6} className="px-4 py-8 text-center">
                       <Mail className="mx-auto h-6 w-6 text-muted-foreground" />
                       <p className="mt-2 text-sm font-medium text-foreground">Nog geen e-mailadres gekoppeld.</p>
                       <p className="mt-1 text-xs text-muted-foreground">
@@ -959,7 +1254,7 @@ export default function CompanyEmailTab({ companyId, company }) {
                     </>
                   )}
                 </div>
-                {isOauthProvider(form.provider) && (
+                {isOauthProvider(form.provider) && shouldConnectAfterSave && (
                   <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                     <p>
@@ -1006,17 +1301,17 @@ export default function CompanyEmailTab({ companyId, company }) {
                   Terug
                 </Button>
                 <Button
-                  onClick={() => save({ connectAfterSave: isOauthProvider(form.provider) })}
+                  onClick={() => save({ connectAfterSave: shouldConnectAfterSave })}
                   disabled={saveMutation.isPending}
                 >
-                  {isOauthProvider(form.provider) ? (
+                  {shouldConnectAfterSave ? (
                     <ExternalLink className="mr-1.5 h-4 w-4" />
                   ) : (
                     <Check className="mr-1.5 h-4 w-4" />
                   )}
                   {saveMutation.isPending
                     ? "Opslaan..."
-                    : isOauthProvider(form.provider)
+                    : shouldConnectAfterSave
                       ? "Opslaan en account koppelen"
                       : "Opslaan"}
                 </Button>

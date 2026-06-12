@@ -41,6 +41,12 @@ function isExpiredLicense(license, today) {
   return license?.valid_until && license.valid_until < today;
 }
 
+function hasEmailSettingsAction(settings) {
+  if (!settings) return false;
+  if (settings.status === "action_required") return true;
+  return Object.values(settings.channel_delivery_status || {}).some(channel => channel?.status === "hold");
+}
+
 export default function CompanySidebarPanel({ companyId, companies, company }) {
   const [active, setActive] = useState("wpbr");
 
@@ -53,6 +59,12 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
   const { data: wpbrLicenses = [], isLoading: wpbrLicensesLoading } = useQuery({
     queryKey: ["wpbr-licenses", companyId],
     queryFn: () => base44.entities.CompanyWpbrLicense.filter({ company_id: companyId }, "-created_date"),
+    enabled: !!companyId,
+  });
+
+  const { data: emailSettingsList = [] } = useQuery({
+    queryKey: ["company-email-settings", companyId],
+    queryFn: () => base44.entities.CompanyEmailSettings.filter({ company_id: companyId }),
     enabled: !!companyId,
   });
 
@@ -99,6 +111,7 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
     !hasValidTeamhubLocation ||
     !hasTeamhubServices
   );
+  const hasEmailAction = emailSettingsList.some(hasEmailSettingsAction);
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden flex min-h-[200px]">
@@ -108,7 +121,8 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
           const hasAlert =
             (item.key === "wpbr" && hasWpbrAction) ||
             (item.key === "accreditations" && hasAccreditationAction) ||
-            (item.key === "teamhub" && hasTeamhubAction);
+            (item.key === "teamhub" && hasTeamhubAction) ||
+            (item.key === "email" && hasEmailAction);
           return (
             <button
               key={item.key}
