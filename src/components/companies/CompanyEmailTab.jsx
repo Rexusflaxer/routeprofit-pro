@@ -1039,9 +1039,6 @@ export default function CompanyEmailTab({ companyId, company }) {
                   <tr className="border-t border-border">
                     <td className="px-4 py-4">
                       <div className="flex min-w-0 items-center gap-3">
-                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40">
-                          <Mail className="h-4 w-4 text-muted-foreground" />
-                        </span>
                         <div className="min-w-0">
                           <p className="truncate font-medium text-foreground">
                             {settings.provider === "platform" ? "LOQ standaardmail" : settings.from_email || "Geen e-mailadres"}
