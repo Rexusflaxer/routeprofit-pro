@@ -444,32 +444,41 @@ function SummaryRow({ label, value }) {
 }
 
 function ProviderVisual({ providerKey }) {
+  if (providerKey === "platform") {
+    return (
+      <div className="flex h-9 w-12 items-center justify-center rounded-md border border-border bg-background px-1.5">
+        <img src="/loq-logo-dark.png" alt="LOQ" className="h-4 w-auto object-contain dark:hidden" />
+        <img src="/loq-logo-light.png" alt="LOQ" className="hidden h-4 w-auto object-contain dark:block" />
+      </div>
+    );
+  }
+
   if (providerKey === "microsoft_365") {
     return (
-      <div className="grid h-11 w-11 grid-cols-2 gap-0.5">
-        <span className="bg-[#f25022]" />
-        <span className="bg-[#7fba00]" />
-        <span className="bg-[#00a4ef]" />
-        <span className="bg-[#ffb900]" />
+      <div className="flex h-9 w-12 items-center justify-center rounded-md border border-border bg-background">
+        <div className="grid h-5 w-5 grid-cols-2 gap-0.5">
+          <span className="bg-[#f25022]" />
+          <span className="bg-[#7fba00]" />
+          <span className="bg-[#00a4ef]" />
+          <span className="bg-[#ffb900]" />
+        </div>
       </div>
     );
   }
 
   if (providerKey === "google_workspace") {
     return (
-      <div className="flex h-11 items-center text-3xl font-semibold tracking-normal">
-        <span className="text-[#4285f4]">G</span>
-        <span className="text-[#ea4335]">m</span>
-        <span className="text-[#fbbc05]">a</span>
-        <span className="text-[#4285f4]">i</span>
-        <span className="text-[#34a853]">l</span>
+      <div className="flex h-9 w-12 items-center justify-center rounded-md border border-border bg-background">
+        <div className="flex items-center text-2xl font-semibold leading-none tracking-normal">
+          <span className="text-[#4285f4]">G</span>
+        </div>
       </div>
     );
   }
 
   return (
-    <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
-      <Mail className="h-7 w-7" />
+    <div className="flex h-9 w-12 items-center justify-center rounded-md border border-border bg-background text-primary">
+      <Mail className="h-5 w-5" />
     </div>
   );
 }
@@ -780,6 +789,7 @@ export default function CompanyEmailTab({ companyId, company }) {
   }
 
   const openWizard = (targetStep = 1) => {
+    const isProviderChoiceStep = targetStep === 1;
     const nextForm = {
       ...getInitialForm(company),
       ...(settings || {}),
@@ -788,9 +798,10 @@ export default function CompanyEmailTab({ companyId, company }) {
         ? settings.oauth_scopes
         : getProvider(settings?.provider || "microsoft_365").scopes,
     };
-    if (!settings) {
+    if (isProviderChoiceStep || !settings) {
       nextForm.provider = "";
       nextForm.status = "draft";
+      nextForm.oauth_scopes = [];
     }
     setForm(nextForm);
     setStep(targetStep);
