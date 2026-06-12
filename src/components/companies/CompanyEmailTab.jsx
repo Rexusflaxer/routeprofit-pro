@@ -1351,12 +1351,10 @@ export default function CompanyEmailTab({ companyId, company }) {
                            </div>
                          ) : (
                            <div className="flex flex-wrap items-center gap-2">
-                             <div className="flex items-center gap-2 shrink-0">
-                               <span className="text-sm font-medium text-foreground">Testmail naar:</span>
-                               <span className="text-xs text-muted-foreground border border-border rounded px-2 py-1 bg-muted/40">
-                                 via {settings.provider === "platform" ? "LOQ standaardmail" : settings.from_email || "-"}
-                               </span>
-                             </div>
+                             <span className="text-xs text-muted-foreground border border-border rounded px-2 py-1 bg-muted/40 shrink-0">
+                               {settings.provider === "platform" ? "LOQ standaardmail" : settings.from_email || "-"}
+                             </span>
+                             <span className="text-sm font-medium text-foreground shrink-0">Testmail naar:</span>
                              <Input
                                type="email"
                                value={testRecipient}
