@@ -6,7 +6,8 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Check, ChevronLeft, ChevronRight, Edit, Mail, X } from "lucide-react";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { AlertCircle, Check, ChevronLeft, ChevronRight, Edit, Mail, Server, ShieldCheck, X } from "lucide-react";
 
 const PROVIDERS = [
   {
@@ -72,12 +73,12 @@ function getInitialForm(company) {
     from_email: company?.email || "",
     reply_to_email: company?.email || "",
     bcc_email: "",
-    use_for_invoices: true,
+    use_for_invoices: false,
     use_for_operational_mail: false,
     save_to_sent_items: true,
     require_manual_review_before_send: false,
     signature_text: "",
-    invoice_subject_prefix: "Factuur",
+    invoice_subject_prefix: "",
     oauth_tenant_hint: "",
     oauth_account_id: "",
     oauth_scopes: getProvider("microsoft_365").scopes,
@@ -101,9 +102,17 @@ function getStatusForProvider(provider) {
   return "draft";
 }
 
+function isOauthProvider(provider) {
+  return provider === "microsoft_365" || provider === "google_workspace";
+}
+
+function isSmtpProvider(provider) {
+  return provider === "smtp" || provider === "other";
+}
+
 function normalizePayload(form, companyId) {
   const provider = getProvider(form.provider);
-  const isSmtp = form.provider === "smtp";
+  const isSmtp = isSmtpProvider(form.provider);
   const email = form.from_email?.trim() || null;
 
   return {
@@ -112,14 +121,14 @@ function normalizePayload(form, companyId) {
     status: form.status || getStatusForProvider(form.provider),
     from_name: form.from_name?.trim() || null,
     from_email: email,
-    reply_to_email: form.reply_to_email?.trim() || email,
-    bcc_email: form.bcc_email?.trim() || null,
-    use_for_invoices: form.use_for_invoices !== false,
-    use_for_operational_mail: !!form.use_for_operational_mail,
-    save_to_sent_items: form.save_to_sent_items !== false,
-    require_manual_review_before_send: !!form.require_manual_review_before_send,
-    signature_text: form.signature_text?.trim() || null,
-    invoice_subject_prefix: form.invoice_subject_prefix?.trim() || "Factuur",
+    reply_to_email: email,
+    bcc_email: null,
+    use_for_invoices: false,
+    use_for_operational_mail: false,
+    save_to_sent_items: form.provider !== "platform",
+    require_manual_review_before_send: false,
+    signature_text: null,
+    invoice_subject_prefix: null,
     oauth_tenant_hint: form.oauth_tenant_hint?.trim() || null,
     oauth_account_id: form.oauth_account_id?.trim() || null,
     oauth_scopes: provider.scopes || [],
@@ -142,7 +151,7 @@ function isValidEmail(value) {
 }
 
 function WizardSteps({ step }) {
-  const steps = ["Provider", "Mailadres", "Bevestigen"];
+  const steps = ["Provider", "Afzender", "Koppeling", "Bevestigen"];
   const CheckIcon = () => (
     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -177,6 +186,15 @@ function WizardSteps({ step }) {
 function ProviderBadge({ providerKey }) {
   const provider = getProvider(providerKey);
   return <Badge variant="outline" className="text-xs">{provider.label}</Badge>;
+}
+
+function SummaryRow({ label, value }) {
+  return (
+    <div className="flex items-center justify-between gap-3 px-4 py-3">
+      <span className="text-xs text-muted-foreground">{label}</span>
+      <span className="text-sm font-medium text-foreground text-right truncate">{value || "—"}</span>
+    </div>
+  );
 }
 
 export default function CompanyEmailTab({ companyId, company }) {
@@ -236,14 +254,20 @@ export default function CompanyEmailTab({ companyId, company }) {
         const selectedProvider = getProvider(value);
         next.oauth_scopes = selectedProvider.scopes;
         next.status = getStatusForProvider(value);
-        if (value !== "smtp") {
+        if (!isSmtpProvider(value)) {
           next.smtp_host = "";
           next.smtp_username = "";
           next.smtp_secret_reference = "";
         }
+        if (isSmtpProvider(value) && !next.smtp_username) {
+          next.smtp_username = current.from_email || "";
+        }
       }
       if (field === "from_email" && (!current.reply_to_email || current.reply_to_email === current.from_email)) {
         next.reply_to_email = value;
+      }
+      if (field === "from_email" && isSmtpProvider(current.provider) && (!current.smtp_username || current.smtp_username === current.from_email)) {
+        next.smtp_username = value;
       }
       return next;
     });
@@ -271,8 +295,23 @@ export default function CompanyEmailTab({ companyId, company }) {
 
   const validateAddressStep = () => {
     const nextErrors = {};
-    if (!form.from_name?.trim()) nextErrors.from_name = "Vul een afzendernaam in";
-    if (!isValidEmail(form.from_email)) nextErrors.from_email = "Vul een geldig e-mailadres in";
+    if (form.provider !== "platform") {
+      if (!form.from_name?.trim()) nextErrors.from_name = "Vul een afzendernaam in";
+      if (!isValidEmail(form.from_email)) nextErrors.from_email = "Vul een geldig e-mailadres in";
+    }
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const validateConnectionStep = () => {
+    const nextErrors = {};
+    if (isSmtpProvider(form.provider)) {
+      if (!form.smtp_host?.trim()) nextErrors.smtp_host = "Vul de SMTP-server in";
+      const port = Number(form.smtp_port);
+      if (!port || port < 1 || port > 65535) nextErrors.smtp_port = "Vul een geldige poort in";
+      if (!form.smtp_username?.trim()) nextErrors.smtp_username = "Vul de SMTP-gebruikersnaam in";
+      if (!form.smtp_secret_reference?.trim()) nextErrors.smtp_secret_reference = "Vul de secret-referentie in";
+    }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
   };
@@ -301,10 +340,14 @@ export default function CompanyEmailTab({ companyId, company }) {
     const payload = {
       ...form,
       status: getStatusForProvider(form.provider),
-      reply_to_email: form.reply_to_email || form.from_email,
-      use_for_invoices: true,
-      invoice_subject_prefix: form.invoice_subject_prefix || "Factuur",
+      reply_to_email: form.from_email || null,
+      bcc_email: null,
+      use_for_invoices: false,
+      use_for_operational_mail: false,
       save_to_sent_items: form.provider !== "platform",
+      require_manual_review_before_send: false,
+      signature_text: null,
+      invoice_subject_prefix: null,
     };
     setForm(payload);
     saveMutation.mutate(payload);
@@ -313,6 +356,12 @@ export default function CompanyEmailTab({ companyId, company }) {
   if (isLoading) {
     return <div className="p-6 text-sm text-muted-foreground">E-mailinstellingen laden...</div>;
   }
+
+  const connectionSummary = form.provider === "platform"
+    ? "Nog niet gekoppeld"
+    : isSmtpProvider(form.provider)
+      ? [form.smtp_host, form.smtp_port].filter(Boolean).join(":") || "SMTP niet volledig"
+      : form.oauth_tenant_hint || "OAuth nog afronden";
 
   return (
     <div className="flex flex-col h-full">
@@ -326,7 +375,7 @@ export default function CompanyEmailTab({ companyId, company }) {
                 {STATUS_LABELS[status] || status}
               </Badge>
             </div>
-            <p className="truncate text-xs text-muted-foreground">Afzender voor facturen en klantmails</p>
+            <p className="truncate text-xs text-muted-foreground">Uitgaande mail verzenden vanuit het domein van dit bedrijf</p>
           </div>
         </div>
       </div>
@@ -385,8 +434,14 @@ export default function CompanyEmailTab({ companyId, company }) {
                   {step === 2 && (
                     <div className="space-y-3">
                       <p className="text-sm font-medium text-foreground">
-                        Mailadres — <span className="text-muted-foreground font-normal">{provider.label}</span>
+                        Afzender — <span className="text-muted-foreground font-normal">{provider.label}</span>
                       </p>
+                      {form.provider === "platform" && (
+                        <div className="flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+                          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <p>Je slaat hiermee alleen vast dat de mailbox later wordt gekoppeld. Afzendergegevens zijn dan nog optioneel.</p>
+                        </div>
+                      )}
                       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                         <div className="space-y-1">
                           <Label>Afzendernaam</Label>
@@ -421,32 +476,157 @@ export default function CompanyEmailTab({ companyId, company }) {
 
                   {step === 3 && (
                     <div className="space-y-4">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Koppeling en verzenden</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">Vul de gegevens in die nodig zijn om mail namens dit bedrijf te kunnen verzenden.</p>
+                      </div>
+
+                      {form.provider === "platform" && (
+                        <div className="flex items-start gap-2 rounded-lg border border-border bg-card px-3 py-3 text-sm text-muted-foreground">
+                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                          <p>Er wordt nog geen mailbox gekoppeld. De instelling wordt als concept opgeslagen zodat je later Outlook, Gmail of SMTP kunt kiezen.</p>
+                        </div>
+                      )}
+
+                      {isOauthProvider(form.provider) && (
+                        <div className="rounded-lg border border-border bg-card p-3">
+                          <div className="mb-3 flex items-start gap-2">
+                            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                            <div>
+                              <p className="text-sm font-medium text-foreground">OAuth-koppeling</p>
+                              <p className="text-xs text-muted-foreground">Deze provider vereist een veilige inlogkoppeling voordat er echt verzonden kan worden.</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label>{form.provider === "microsoft_365" ? "Tenant of domein" : "Workspace domein"}</Label>
+                              <Input
+                                value={form.oauth_tenant_hint || ""}
+                                onChange={(event) => set("oauth_tenant_hint", event.target.value)}
+                                placeholder={form.from_email?.split("@")[1] || "bedrijf.nl"}
+                              />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Mailbox/account-id</Label>
+                              <Input
+                                value={form.oauth_account_id || ""}
+                                onChange={(event) => set("oauth_account_id", event.target.value)}
+                                placeholder={form.from_email || "Wordt na koppelen gevuld"}
+                              />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {isSmtpProvider(form.provider) && (
+                        <div className="rounded-lg border border-border bg-card p-3">
+                          <div className="mb-3 flex items-start gap-2">
+                            <Server className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
+                            <div>
+                              <p className="text-sm font-medium text-foreground">SMTP-server</p>
+                              <p className="text-xs text-muted-foreground">Gebruik de verzendserver van de mailprovider. Wachtwoorden worden als server-side secret-referentie opgeslagen.</p>
+                            </div>
+                          </div>
+                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                            <div className="space-y-1">
+                              <Label>SMTP-server</Label>
+                              <Input
+                                value={form.smtp_host || ""}
+                                onChange={(event) => { set("smtp_host", event.target.value); setErrors(current => ({ ...current, smtp_host: undefined })); }}
+                                placeholder="smtp.provider.nl"
+                                className={errors.smtp_host ? "border-destructive" : ""}
+                              />
+                              {errors.smtp_host && <p className="text-xs text-destructive">{errors.smtp_host}</p>}
+                            </div>
+                            <div className="grid grid-cols-[110px_1fr] gap-3">
+                              <div className="space-y-1">
+                                <Label>Poort</Label>
+                                <Input
+                                  type="number"
+                                  value={form.smtp_port || ""}
+                                  onChange={(event) => { set("smtp_port", event.target.value); setErrors(current => ({ ...current, smtp_port: undefined })); }}
+                                  placeholder="587"
+                                  className={errors.smtp_port ? "border-destructive" : ""}
+                                />
+                                {errors.smtp_port && <p className="text-xs text-destructive">{errors.smtp_port}</p>}
+                              </div>
+                              <div className="space-y-1">
+                                <Label>Beveiliging</Label>
+                                <Select value={form.smtp_security || "starttls"} onValueChange={(value) => set("smtp_security", value)}>
+                                  <SelectTrigger><SelectValue /></SelectTrigger>
+                                  <SelectContent>
+                                    <SelectItem value="starttls">STARTTLS</SelectItem>
+                                    <SelectItem value="ssl_tls">SSL/TLS</SelectItem>
+                                    <SelectItem value="none">Geen</SelectItem>
+                                  </SelectContent>
+                                </Select>
+                              </div>
+                            </div>
+                            <div className="space-y-1">
+                              <Label>SMTP-gebruikersnaam</Label>
+                              <Input
+                                value={form.smtp_username || ""}
+                                onChange={(event) => { set("smtp_username", event.target.value); setErrors(current => ({ ...current, smtp_username: undefined })); }}
+                                placeholder={form.from_email || "mailbox@bedrijf.nl"}
+                                className={errors.smtp_username ? "border-destructive" : ""}
+                              />
+                              {errors.smtp_username && <p className="text-xs text-destructive">{errors.smtp_username}</p>}
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Secret-referentie</Label>
+                              <Input
+                                value={form.smtp_secret_reference || ""}
+                                onChange={(event) => { set("smtp_secret_reference", event.target.value); setErrors(current => ({ ...current, smtp_secret_reference: undefined })); }}
+                                placeholder="company-mail-smtp-password"
+                                className={errors.smtp_secret_reference ? "border-destructive" : ""}
+                              />
+                              {errors.smtp_secret_reference && <p className="text-xs text-destructive">{errors.smtp_secret_reference}</p>}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      <div className="flex justify-between pt-1">
+                        <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        <Button size="sm" onClick={() => { if (validateConnectionStep()) setStep(4); }}>
+                          Volgende <ChevronRight className="w-4 h-4 ml-1" />
+                        </Button>
+                      </div>
+                    </div>
+                  )}
+
+                  {step === 4 && (
+                    <div className="space-y-4">
                       <p className="text-sm font-medium text-foreground">Controleer de instelling</p>
                       <div className="rounded-lg border border-border bg-card divide-y divide-border">
-                        <div className="flex items-center justify-between gap-3 px-4 py-3">
-                          <span className="text-xs text-muted-foreground">Provider</span>
-                          <span className="text-sm font-medium text-foreground">{provider.label}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-3 px-4 py-3">
-                          <span className="text-xs text-muted-foreground">Afzender</span>
-                          <span className="text-sm font-medium text-foreground text-right">{form.from_name}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-3 px-4 py-3">
-                          <span className="text-xs text-muted-foreground">Mailadres</span>
-                          <span className="text-sm font-medium text-foreground text-right">{form.from_email}</span>
-                        </div>
-                        <div className="flex items-center justify-between gap-3 px-4 py-3">
-                          <span className="text-xs text-muted-foreground">Gebruik</span>
-                          <span className="text-sm font-medium text-foreground text-right">Factuurmails</span>
-                        </div>
+                        <SummaryRow label="Provider" value={provider.label} />
+                        <SummaryRow label="Status na opslaan" value={STATUS_LABELS[getStatusForProvider(form.provider)] || getStatusForProvider(form.provider)} />
+                        <SummaryRow label="Afzender" value={form.from_name} />
+                        <SummaryRow label="Mailadres" value={form.from_email} />
+                        {isOauthProvider(form.provider) && (
+                          <>
+                            <SummaryRow label="Domein/tenant" value={form.oauth_tenant_hint} />
+                            <SummaryRow label="Scopes" value={(provider.scopes || []).join(", ")} />
+                          </>
+                        )}
+                        {isSmtpProvider(form.provider) && (
+                          <>
+                            <SummaryRow label="SMTP-server" value={`${form.smtp_host || "-"}:${form.smtp_port || "-"}`} />
+                            <SummaryRow label="Beveiliging" value={form.smtp_security === "ssl_tls" ? "SSL/TLS" : form.smtp_security === "none" ? "Geen" : "STARTTLS"} />
+                            <SummaryRow label="SMTP-gebruiker" value={form.smtp_username} />
+                            <SummaryRow label="Secret" value={form.smtp_secret_reference ? "Referentie ingevuld" : "Niet ingevuld"} />
+                          </>
+                        )}
                       </div>
                       <p className="text-xs text-muted-foreground">
                         {form.provider === "platform"
-                          ? "Je kunt later alsnog Outlook, Gmail of een andere provider koppelen."
-                          : "De veilige mailboxkoppeling wordt later via een aparte inlogstap afgerond."}
+                          ? "Er wordt nog geen mailbox gekoppeld."
+                          : isOauthProvider(form.provider)
+                            ? "Na opslaan moet de OAuth-koppeling nog worden afgerond voordat de status Verbonden kan worden."
+                            : "Na opslaan moeten de secret-referentie en testmail server-side worden gecontroleerd voordat de status Verbonden kan worden."}
                       </p>
                       <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                        <Button variant="ghost" size="sm" onClick={() => setStep(3)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                         <div className="flex gap-2">
                           <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
                           <Button size="sm" onClick={save} disabled={saveMutation.isPending}>
@@ -481,16 +661,16 @@ export default function CompanyEmailTab({ companyId, company }) {
               </div>
               <div className="grid grid-cols-1 sm:grid-cols-3 text-sm">
                 <div className="px-4 py-3">
-                  <p className="text-xs text-muted-foreground">Gebruik</p>
-                  <p className="font-medium text-foreground">Factuurmails</p>
-                </div>
-                <div className="px-4 py-3">
                   <p className="text-xs text-muted-foreground">Status</p>
                   <p className="font-medium text-foreground">{STATUS_LABELS[status] || status}</p>
                 </div>
                 <div className="px-4 py-3">
-                  <p className="text-xs text-muted-foreground">Antwoorden naar</p>
-                  <p className="font-medium text-foreground truncate">{form.reply_to_email || form.from_email || "—"}</p>
+                  <p className="text-xs text-muted-foreground">Koppeling</p>
+                  <p className="font-medium text-foreground truncate">{connectionSummary}</p>
+                </div>
+                <div className="px-4 py-3">
+                  <p className="text-xs text-muted-foreground">Afzendernaam</p>
+                  <p className="font-medium text-foreground truncate">{form.from_name || "—"}</p>
                 </div>
               </div>
             </div>
