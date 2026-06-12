@@ -1187,24 +1187,24 @@ export default function AccreditationsTab({ companyId, company }) {
         <span className="min-w-0">Erkenning</span>
         <span className="min-w-0">Status</span>
         <span className="min-w-0">Geldigheid</span>
-        <div className="min-w-0 flex flex-nowrap items-center justify-end gap-2 overflow-x-auto">
-          {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse mr-1 shrink-0">Archief</Badge>}
+        <div className="min-w-0 flex flex-nowrap items-center justify-end gap-2">
+          {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse mr-1">Archief</Badge>}
           {!showWizard && !deleteId && (
             showArchive ? (
               <>
-                <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap shrink-0">
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <ChevronLeft className="w-3 h-3 mr-1" /> Actieve erkenningen
                 </Button>
-                <Button size="sm" variant="outline" onClick={openArchiveEntry} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap shrink-0">
+                <Button size="sm" variant="outline" onClick={openArchiveEntry} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <Plus className="w-3 h-3 mr-1" /> Voeg oude erkenning in archief
                 </Button>
               </>
             ) : (
               <>
-                <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap shrink-0">
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <Archive className="w-3 h-3 mr-1" /> Archief {archivedAccreditations.length > 0 ? `(${archivedAccreditations.length})` : ""}
                 </Button>
-                <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap shrink-0">
+                <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <Plus className="w-3 h-3 mr-1" /> Nieuwe erkenning
                 </Button>
               </>
