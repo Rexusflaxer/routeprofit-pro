@@ -980,8 +980,7 @@ export default function CompanyEmailTab({ companyId, company }) {
         </div>
       </div>
 
-      <div className="p-4">
-        <div className="overflow-hidden rounded-lg border border-border bg-card">
+      <div className="overflow-hidden rounded-lg border border-border bg-card">
           <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
             <div className="min-w-0">
               <p className="text-sm font-semibold text-foreground">E-mailadressen</p>
@@ -1470,7 +1469,6 @@ export default function CompanyEmailTab({ companyId, company }) {
           </div>
 
 
-        </div>
       </div>
     </div>
   );
