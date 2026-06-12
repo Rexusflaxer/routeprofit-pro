@@ -1,45 +1,66 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { motion, AnimatePresence } from "framer-motion";
 import { base44 } from "@/api/base44Client";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { AlertCircle, Check, ChevronLeft, ChevronRight, Edit, Mail, Server, ShieldCheck, X } from "lucide-react";
+import {
+  AlertCircle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Edit,
+  Mail,
+  Plus,
+  Server,
+  ShieldCheck,
+} from "lucide-react";
 
 const PROVIDERS = [
   {
     key: "microsoft_365",
-    label: "Outlook",
-    desc: "Zakelijke Microsoft 365-mailbox",
+    label: "Office 365 (Microsoft)",
+    shortLabel: "Microsoft 365",
+    desc: "Koppel veilig met een Microsoft-account",
+    authLabel: "OAuth - Microsoft",
     scopes: ["Mail.Send", "offline_access", "User.Read"],
   },
   {
     key: "google_workspace",
-    label: "Gmail",
-    desc: "Google Workspace of Gmail",
+    label: "Google Workspace",
+    shortLabel: "Google Workspace",
+    desc: "Koppel veilig met een Google-account",
+    authLabel: "OAuth - Google",
     scopes: ["https://www.googleapis.com/auth/gmail.send"],
   },
   {
     key: "smtp",
-    label: "Andere provider",
-    desc: "Bijvoorbeeld eigen domeinprovider",
+    label: "Overige",
+    shortLabel: "Overige",
+    desc: "Gebruik SMTP-gegevens van de mailprovider",
+    authLabel: "SMTP",
     scopes: [],
   },
   {
     key: "platform",
     label: "Later instellen",
+    shortLabel: "Later instellen",
     desc: "Nog geen mailbox koppelen",
+    authLabel: "Niet gekoppeld",
     scopes: [],
   },
 ];
 
+const PROVIDER_CARDS = PROVIDERS.filter(provider => provider.key !== "platform");
+
 const LEGACY_OTHER_PROVIDER = {
   key: "other",
-  label: "Andere provider",
-  desc: "Bijvoorbeeld eigen domeinprovider",
+  label: "Overige",
+  shortLabel: "Overige",
+  desc: "Gebruik SMTP-gegevens van de mailprovider",
+  authLabel: "SMTP",
   scopes: [],
 };
 
@@ -67,7 +88,7 @@ function getProvider(key) {
 function getInitialForm(company) {
   return {
     company_id: company?.id || "",
-    provider: "microsoft_365",
+    provider: "",
     status: "draft",
     from_name: company?.display_name || company?.legal_name || "",
     from_email: company?.email || "",
@@ -110,28 +131,37 @@ function isSmtpProvider(provider) {
   return provider === "smtp" || provider === "other";
 }
 
+function getEmailDomain(email) {
+  const value = String(email || "").trim();
+  const [, domain] = value.split("@");
+  return domain || "";
+}
+
 function normalizePayload(form, companyId) {
-  const provider = getProvider(form.provider);
-  const isSmtp = isSmtpProvider(form.provider);
+  const providerKey = form.provider || "platform";
+  const provider = getProvider(providerKey);
+  const isOauth = isOauthProvider(providerKey);
+  const isSmtp = isSmtpProvider(providerKey);
   const email = form.from_email?.trim() || null;
+  const domain = getEmailDomain(email);
 
   return {
     company_id: companyId,
-    provider: form.provider,
-    status: form.status || getStatusForProvider(form.provider),
+    provider: providerKey,
+    status: form.status || getStatusForProvider(providerKey),
     from_name: form.from_name?.trim() || null,
     from_email: email,
     reply_to_email: email,
     bcc_email: null,
     use_for_invoices: false,
     use_for_operational_mail: false,
-    save_to_sent_items: form.provider !== "platform",
+    save_to_sent_items: providerKey !== "platform",
     require_manual_review_before_send: false,
     signature_text: null,
     invoice_subject_prefix: null,
-    oauth_tenant_hint: form.oauth_tenant_hint?.trim() || null,
-    oauth_account_id: form.oauth_account_id?.trim() || null,
-    oauth_scopes: provider.scopes || [],
+    oauth_tenant_hint: isOauth ? form.oauth_tenant_hint?.trim() || domain || null : null,
+    oauth_account_id: isOauth ? form.oauth_account_id?.trim() || email : null,
+    oauth_scopes: isOauth ? provider.scopes || [] : [],
     token_secret_reference: form.token_secret_reference?.trim() || null,
     smtp_host: isSmtp ? form.smtp_host?.trim() || null : null,
     smtp_port: isSmtp ? Number(form.smtp_port) || null : null,
@@ -150,61 +180,123 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 }
 
-function WizardSteps({ step }) {
-  const steps = ["Provider", "Afzender", "Koppeling", "Bevestigen"];
-  const CheckIcon = () => (
-    <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
-      <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-    </svg>
-  );
-
-  return (
-    <div className="flex items-center gap-1 mb-4">
-      {steps.map((label, index) => (
-        <React.Fragment key={label}>
-          <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full transition-colors ${
-            index + 1 === step ? "bg-primary text-primary-foreground" :
-            index + 1 < step ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" :
-            "text-muted-foreground"
-          }`}>
-            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-              index + 1 === step ? "bg-primary-foreground text-primary" :
-              index + 1 < step ? "text-green-700 dark:text-green-300" :
-              "border border-muted-foreground/30 text-muted-foreground"
-            }`}>
-              {index + 1 < step ? <CheckIcon /> : index + 1}
-            </span>
-            {label}
-          </div>
-          {index < steps.length - 1 && <div className={`h-px flex-1 ${index + 1 < step ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />}
-        </React.Fragment>
-      ))}
-    </div>
-  );
+function getConnectionSummary(settings) {
+  if (!settings) return "Nog niet ingesteld";
+  if (settings.provider === "platform") return "Nog niet gekoppeld";
+  if (isSmtpProvider(settings.provider)) {
+    return [settings.smtp_host, settings.smtp_port].filter(Boolean).join(":") || "SMTP niet volledig";
+  }
+  return settings.oauth_tenant_hint || getEmailDomain(settings.from_email) || "OAuth nog afronden";
 }
 
-function ProviderBadge({ providerKey }) {
-  const provider = getProvider(providerKey);
-  return <Badge variant="outline" className="text-xs">{provider.label}</Badge>;
+function WizardSteps({ step }) {
+  const steps = ["Provider", "Gegevens", "Bevestigen"];
+
+  return (
+    <div className="flex items-center gap-2">
+      {steps.map((label, index) => {
+        const number = index + 1;
+        const isActive = number === step;
+        const isDone = number < step;
+        return (
+          <React.Fragment key={label}>
+            <div className={`flex items-center gap-2 rounded-full px-2.5 py-1 text-xs font-medium transition-colors ${
+              isActive
+                ? "bg-primary text-primary-foreground"
+                : isDone
+                  ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300"
+                  : "text-muted-foreground"
+            }`}>
+              <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${
+                isActive
+                  ? "bg-primary-foreground text-primary"
+                  : isDone
+                    ? "text-green-700 dark:text-green-300"
+                    : "border border-muted-foreground/30 text-muted-foreground"
+              }`}>
+                {isDone ? <Check className="h-3 w-3" /> : number}
+              </span>
+              {label}
+            </div>
+            {index < steps.length - 1 && (
+              <div className={`h-px flex-1 ${isDone ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
 }
 
 function SummaryRow({ label, value }) {
   return (
     <div className="flex items-center justify-between gap-3 px-4 py-3">
       <span className="text-xs text-muted-foreground">{label}</span>
-      <span className="text-sm font-medium text-foreground text-right truncate">{value || "—"}</span>
+      <span className="truncate text-right text-sm font-medium text-foreground">{value || "-"}</span>
     </div>
+  );
+}
+
+function ProviderVisual({ providerKey }) {
+  if (providerKey === "microsoft_365") {
+    return (
+      <div className="grid h-11 w-11 grid-cols-2 gap-0.5">
+        <span className="bg-[#f25022]" />
+        <span className="bg-[#7fba00]" />
+        <span className="bg-[#00a4ef]" />
+        <span className="bg-[#ffb900]" />
+      </div>
+    );
+  }
+
+  if (providerKey === "google_workspace") {
+    return (
+      <div className="flex h-11 items-center text-3xl font-semibold tracking-normal">
+        <span className="text-[#4285f4]">G</span>
+        <span className="text-[#ea4335]">m</span>
+        <span className="text-[#fbbc05]">a</span>
+        <span className="text-[#4285f4]">i</span>
+        <span className="text-[#34a853]">l</span>
+      </div>
+    );
+  }
+
+  return (
+    <div className="flex h-11 w-11 items-center justify-center rounded-lg bg-primary/10 text-primary">
+      <Mail className="h-7 w-7" />
+    </div>
+  );
+}
+
+function ProviderCard({ provider, selected, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(provider.key)}
+      className={`flex min-h-[142px] flex-col items-center justify-between rounded-lg border bg-card p-4 text-center transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${
+        selected ? "border-primary ring-1 ring-primary" : "border-border"
+      }`}
+    >
+      <div className="flex h-16 items-center justify-center">
+        <ProviderVisual providerKey={provider.key} />
+      </div>
+      <div className="space-y-1">
+        <p className="text-sm font-semibold text-foreground">{provider.label}</p>
+        <p className="text-xs text-muted-foreground">{provider.desc}</p>
+      </div>
+      <span className={`mt-3 h-5 w-5 rounded-full border ${
+        selected ? "border-primary bg-primary shadow-[inset_0_0_0_4px_hsl(var(--card))]" : "border-muted-foreground/50"
+      }`} />
+    </button>
   );
 }
 
 export default function CompanyEmailTab({ companyId, company }) {
   const queryClient = useQueryClient();
-  const wizardRef = useRef(null);
   const [form, setForm] = useState(() => getInitialForm(company));
   const [step, setStep] = useState(1);
   const [showWizard, setShowWizard] = useState(false);
   const [errors, setErrors] = useState({});
-  const [didAutoOpen, setDidAutoOpen] = useState(false);
 
   const { data: settingsList = [], isLoading } = useQuery({
     queryKey: ["company-email-settings", companyId],
@@ -213,12 +305,9 @@ export default function CompanyEmailTab({ companyId, company }) {
   });
 
   const settings = settingsList[0] || null;
-  const provider = getProvider(form.provider);
-  const status = form.status || "draft";
-
-  useEffect(() => {
-    setDidAutoOpen(false);
-  }, [companyId]);
+  const savedProvider = settings ? getProvider(settings.provider) : null;
+  const selectedProvider = form.provider ? getProvider(form.provider) : null;
+  const displayStatus = settings?.status || "draft";
 
   useEffect(() => {
     if (!companyId) return;
@@ -233,26 +322,12 @@ export default function CompanyEmailTab({ companyId, company }) {
     setErrors({});
   }, [company, companyId, settings]);
 
-  useEffect(() => {
-    if (isLoading || didAutoOpen) return;
-    setShowWizard(!settings);
-    setDidAutoOpen(true);
-  }, [didAutoOpen, isLoading, settings]);
-
-  useEffect(() => {
-    if (!showWizard) return;
-    const timer = setTimeout(() => {
-      wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    }, 200);
-    return () => clearTimeout(timer);
-  }, [showWizard, step]);
-
   const set = (field, value) => {
     setForm(current => {
       const next = { ...current, [field]: value };
       if (field === "provider") {
-        const selectedProvider = getProvider(value);
-        next.oauth_scopes = selectedProvider.scopes;
+        const provider = getProvider(value);
+        next.oauth_scopes = provider.scopes;
         next.status = getStatusForProvider(value);
         if (!isSmtpProvider(value)) {
           next.smtp_host = "";
@@ -263,11 +338,17 @@ export default function CompanyEmailTab({ companyId, company }) {
           next.smtp_username = current.from_email || "";
         }
       }
-      if (field === "from_email" && (!current.reply_to_email || current.reply_to_email === current.from_email)) {
-        next.reply_to_email = value;
-      }
-      if (field === "from_email" && isSmtpProvider(current.provider) && (!current.smtp_username || current.smtp_username === current.from_email)) {
-        next.smtp_username = value;
+      if (field === "from_email") {
+        if (!current.reply_to_email || current.reply_to_email === current.from_email) {
+          next.reply_to_email = value;
+        }
+        if (isOauthProvider(current.provider)) {
+          next.oauth_tenant_hint = getEmailDomain(value);
+          next.oauth_account_id = value;
+        }
+        if (isSmtpProvider(current.provider) && (!current.smtp_username || current.smtp_username === current.from_email)) {
+          next.smtp_username = value;
+        }
       }
       return next;
     });
@@ -293,36 +374,26 @@ export default function CompanyEmailTab({ companyId, company }) {
     },
   });
 
-  const validateAddressStep = () => {
-    const nextErrors = {};
-    if (form.provider !== "platform") {
-      if (!form.from_name?.trim()) nextErrors.from_name = "Vul een afzendernaam in";
-      if (!isValidEmail(form.from_email)) nextErrors.from_email = "Vul een geldig e-mailadres in";
+  const openWizard = (targetStep = 1) => {
+    const nextForm = {
+      ...getInitialForm(company),
+      ...(settings || {}),
+      company_id: companyId,
+      oauth_scopes: settings?.oauth_scopes?.length
+        ? settings.oauth_scopes
+        : getProvider(settings?.provider || "microsoft_365").scopes,
+    };
+    if (!settings) {
+      nextForm.provider = "";
+      nextForm.status = "draft";
     }
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
-  };
-
-  const validateConnectionStep = () => {
-    const nextErrors = {};
-    if (isSmtpProvider(form.provider)) {
-      if (!form.smtp_host?.trim()) nextErrors.smtp_host = "Vul de SMTP-server in";
-      const port = Number(form.smtp_port);
-      if (!port || port < 1 || port > 65535) nextErrors.smtp_port = "Vul een geldige poort in";
-      if (!form.smtp_username?.trim()) nextErrors.smtp_username = "Vul de SMTP-gebruikersnaam in";
-      if (!form.smtp_secret_reference?.trim()) nextErrors.smtp_secret_reference = "Vul de secret-referentie in";
-    }
-    setErrors(nextErrors);
-    return Object.keys(nextErrors).length === 0;
-  };
-
-  const openWizard = () => {
-    setStep(1);
+    setForm(nextForm);
+    setStep(targetStep);
     setErrors({});
     setShowWizard(true);
   };
 
-  const cancelWizard = () => {
+  const closeWizard = () => {
     setShowWizard(false);
     setStep(1);
     setErrors({});
@@ -336,11 +407,36 @@ export default function CompanyEmailTab({ companyId, company }) {
     });
   };
 
+  const validateProviderStep = () => {
+    if (form.provider) return true;
+    setErrors({ provider: "Kies eerst een e-mailservice" });
+    return false;
+  };
+
+  const validateDetailsStep = () => {
+    const nextErrors = {};
+    if (!form.provider) nextErrors.provider = "Kies eerst een e-mailservice";
+    if (form.provider !== "platform") {
+      if (!form.from_name?.trim()) nextErrors.from_name = "Vul een afzendernaam in";
+      if (!isValidEmail(form.from_email)) nextErrors.from_email = "Vul een geldig e-mailadres in";
+    }
+    if (isSmtpProvider(form.provider)) {
+      if (!form.smtp_host?.trim()) nextErrors.smtp_host = "Vul de SMTP-server in";
+      const port = Number(form.smtp_port);
+      if (!port || port < 1 || port > 65535) nextErrors.smtp_port = "Vul een geldige poort in";
+      if (!form.smtp_username?.trim()) nextErrors.smtp_username = "Vul de SMTP-gebruikersnaam in";
+      if (!form.smtp_secret_reference?.trim()) nextErrors.smtp_secret_reference = "Vul de secret-referentie in";
+    }
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
   const save = () => {
+    const email = form.from_email?.trim() || "";
     const payload = {
       ...form,
       status: getStatusForProvider(form.provider),
-      reply_to_email: form.from_email || null,
+      reply_to_email: email || null,
       bcc_email: null,
       use_for_invoices: false,
       use_for_operational_mail: false,
@@ -348,6 +444,8 @@ export default function CompanyEmailTab({ companyId, company }) {
       require_manual_review_before_send: false,
       signature_text: null,
       invoice_subject_prefix: null,
+      oauth_tenant_hint: isOauthProvider(form.provider) ? form.oauth_tenant_hint || getEmailDomain(email) : null,
+      oauth_account_id: isOauthProvider(form.provider) ? form.oauth_account_id || email : null,
     };
     setForm(payload);
     saveMutation.mutate(payload);
@@ -357,334 +455,373 @@ export default function CompanyEmailTab({ companyId, company }) {
     return <div className="p-6 text-sm text-muted-foreground">E-mailinstellingen laden...</div>;
   }
 
-  const connectionSummary = form.provider === "platform"
-    ? "Nog niet gekoppeld"
-    : isSmtpProvider(form.provider)
-      ? [form.smtp_host, form.smtp_port].filter(Boolean).join(":") || "SMTP niet volledig"
-      : form.oauth_tenant_hint || "OAuth nog afronden";
+  const providerActionLabel = form.provider
+    ? isOauthProvider(form.provider)
+      ? "Account koppelen"
+      : "SMTP instellen"
+    : "Account koppelen";
 
   return (
-    <div className="flex flex-col h-full">
+    <div className="flex h-full flex-col">
       <div className="flex items-center justify-between gap-3 border-b border-border bg-muted/30 px-4 py-3">
         <div className="flex min-w-0 items-center gap-3">
           <Mail className="h-4 w-4 shrink-0 text-muted-foreground" />
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <p className="truncate text-sm font-semibold text-foreground">Zakelijke e-mail</p>
-              <Badge className={STATUS_CLASSES[status] || STATUS_CLASSES.draft}>
-                {STATUS_LABELS[status] || status}
-              </Badge>
+              {settings && (
+                <Badge className={STATUS_CLASSES[displayStatus] || STATUS_CLASSES.draft}>
+                  {STATUS_LABELS[displayStatus] || displayStatus}
+                </Badge>
+              )}
             </div>
-            <p className="truncate text-xs text-muted-foreground">Uitgaande mail verzenden vanuit het domein van dit bedrijf</p>
+            <p className="truncate text-xs text-muted-foreground">
+              Laat de applicatie uitgaande mail verzenden vanuit het domein van dit bedrijf.
+            </p>
           </div>
         </div>
       </div>
 
-      <AnimatePresence>
-        {showWizard && (
-          <motion.div
-            ref={wizardRef}
-            initial={{ opacity: 0, y: -8 }}
-            animate={{ opacity: 1, y: 0 }}
-            exit={{ opacity: 0, y: -8 }}
-            transition={{ duration: 0.2 }}
-            className="rounded-none border-0 border-b border-primary/30 bg-muted/20 p-5 overflow-hidden"
-          >
-            <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
-              {settings ? "E-mailinstelling wijzigen" : "E-mail instellen"}
-            </p>
-            <WizardSteps step={step} />
-
-            <div className="relative">
-              <AnimatePresence mode="wait">
-                <motion.div
-                  key={step}
-                  initial={{ opacity: 0, y: 6 }}
-                  animate={{ opacity: 1, y: 0 }}
-                  exit={{ opacity: 0, y: -6 }}
-                  transition={{ duration: 0.18, ease: "easeOut" }}
-                >
-                  {step === 1 && (
-                    <div className="space-y-3">
-                      <p className="text-sm font-medium text-foreground">Waarmee wil je zakelijke e-mail koppelen?</p>
-                      <div className="grid grid-cols-1 gap-2">
-                        {PROVIDERS.map(item => (
-                          <button
-                            key={item.key}
-                            type="button"
-                            onClick={() => { set("provider", item.key); setStep(2); }}
-                            className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${
-                              form.provider === item.key ? "border-primary bg-accent" : "border-border bg-card"
-                            }`}
-                          >
-                            <div>
-                              <span className="text-sm font-semibold text-foreground">{item.label}</span>
-                              <span className="text-xs text-muted-foreground ml-2">{item.desc}</span>
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                          </button>
-                        ))}
-                      </div>
-                      <div className="flex justify-end pt-1">
-                        <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {step === 2 && (
-                    <div className="space-y-3">
-                      <p className="text-sm font-medium text-foreground">
-                        Afzender — <span className="text-muted-foreground font-normal">{provider.label}</span>
-                      </p>
-                      {form.provider === "platform" && (
-                        <div className="flex items-start gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-                          <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                          <p>Je slaat hiermee alleen vast dat de mailbox later wordt gekoppeld. Afzendergegevens zijn dan nog optioneel.</p>
-                        </div>
-                      )}
-                      <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        <div className="space-y-1">
-                          <Label>Afzendernaam</Label>
-                          <Input
-                            value={form.from_name || ""}
-                            onChange={(event) => { set("from_name", event.target.value); setErrors(current => ({ ...current, from_name: undefined })); }}
-                            placeholder={company?.display_name || "Bedrijfsnaam"}
-                            className={errors.from_name ? "border-destructive" : ""}
-                          />
-                          {errors.from_name && <p className="text-xs text-destructive">{errors.from_name}</p>}
-                        </div>
-                        <div className="space-y-1">
-                          <Label>Zakelijk e-mailadres</Label>
-                          <Input
-                            type="email"
-                            value={form.from_email || ""}
-                            onChange={(event) => { set("from_email", event.target.value); setErrors(current => ({ ...current, from_email: undefined })); }}
-                            placeholder="facturen@bedrijf.nl"
-                            className={errors.from_email ? "border-destructive" : ""}
-                          />
-                          {errors.from_email && <p className="text-xs text-destructive">{errors.from_email}</p>}
-                        </div>
-                      </div>
-                      <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                        <Button size="sm" onClick={() => { if (validateAddressStep()) setStep(3); }}>
-                          Volgende <ChevronRight className="w-4 h-4 ml-1" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {step === 3 && (
-                    <div className="space-y-4">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">Koppeling en verzenden</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">Vul de gegevens in die nodig zijn om mail namens dit bedrijf te kunnen verzenden.</p>
-                      </div>
-
-                      {form.provider === "platform" && (
-                        <div className="flex items-start gap-2 rounded-lg border border-border bg-card px-3 py-3 text-sm text-muted-foreground">
-                          <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                          <p>Er wordt nog geen mailbox gekoppeld. De instelling wordt als concept opgeslagen zodat je later Outlook, Gmail of SMTP kunt kiezen.</p>
-                        </div>
-                      )}
-
-                      {isOauthProvider(form.provider) && (
-                        <div className="rounded-lg border border-border bg-card p-3">
-                          <div className="mb-3 flex items-start gap-2">
-                            <ShieldCheck className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                            <div>
-                              <p className="text-sm font-medium text-foreground">OAuth-koppeling</p>
-                              <p className="text-xs text-muted-foreground">Deze provider vereist een veilige inlogkoppeling voordat er echt verzonden kan worden.</p>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                              <Label>{form.provider === "microsoft_365" ? "Tenant of domein" : "Workspace domein"}</Label>
-                              <Input
-                                value={form.oauth_tenant_hint || ""}
-                                onChange={(event) => set("oauth_tenant_hint", event.target.value)}
-                                placeholder={form.from_email?.split("@")[1] || "bedrijf.nl"}
-                              />
-                            </div>
-                            <div className="space-y-1">
-                              <Label>Mailbox/account-id</Label>
-                              <Input
-                                value={form.oauth_account_id || ""}
-                                onChange={(event) => set("oauth_account_id", event.target.value)}
-                                placeholder={form.from_email || "Wordt na koppelen gevuld"}
-                              />
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      {isSmtpProvider(form.provider) && (
-                        <div className="rounded-lg border border-border bg-card p-3">
-                          <div className="mb-3 flex items-start gap-2">
-                            <Server className="mt-0.5 h-4 w-4 shrink-0 text-primary" />
-                            <div>
-                              <p className="text-sm font-medium text-foreground">SMTP-server</p>
-                              <p className="text-xs text-muted-foreground">Gebruik de verzendserver van de mailprovider. Wachtwoorden worden als server-side secret-referentie opgeslagen.</p>
-                            </div>
-                          </div>
-                          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            <div className="space-y-1">
-                              <Label>SMTP-server</Label>
-                              <Input
-                                value={form.smtp_host || ""}
-                                onChange={(event) => { set("smtp_host", event.target.value); setErrors(current => ({ ...current, smtp_host: undefined })); }}
-                                placeholder="smtp.provider.nl"
-                                className={errors.smtp_host ? "border-destructive" : ""}
-                              />
-                              {errors.smtp_host && <p className="text-xs text-destructive">{errors.smtp_host}</p>}
-                            </div>
-                            <div className="grid grid-cols-[110px_1fr] gap-3">
-                              <div className="space-y-1">
-                                <Label>Poort</Label>
-                                <Input
-                                  type="number"
-                                  value={form.smtp_port || ""}
-                                  onChange={(event) => { set("smtp_port", event.target.value); setErrors(current => ({ ...current, smtp_port: undefined })); }}
-                                  placeholder="587"
-                                  className={errors.smtp_port ? "border-destructive" : ""}
-                                />
-                                {errors.smtp_port && <p className="text-xs text-destructive">{errors.smtp_port}</p>}
-                              </div>
-                              <div className="space-y-1">
-                                <Label>Beveiliging</Label>
-                                <Select value={form.smtp_security || "starttls"} onValueChange={(value) => set("smtp_security", value)}>
-                                  <SelectTrigger><SelectValue /></SelectTrigger>
-                                  <SelectContent>
-                                    <SelectItem value="starttls">STARTTLS</SelectItem>
-                                    <SelectItem value="ssl_tls">SSL/TLS</SelectItem>
-                                    <SelectItem value="none">Geen</SelectItem>
-                                  </SelectContent>
-                                </Select>
-                              </div>
-                            </div>
-                            <div className="space-y-1">
-                              <Label>SMTP-gebruikersnaam</Label>
-                              <Input
-                                value={form.smtp_username || ""}
-                                onChange={(event) => { set("smtp_username", event.target.value); setErrors(current => ({ ...current, smtp_username: undefined })); }}
-                                placeholder={form.from_email || "mailbox@bedrijf.nl"}
-                                className={errors.smtp_username ? "border-destructive" : ""}
-                              />
-                              {errors.smtp_username && <p className="text-xs text-destructive">{errors.smtp_username}</p>}
-                            </div>
-                            <div className="space-y-1">
-                              <Label>Secret-referentie</Label>
-                              <Input
-                                value={form.smtp_secret_reference || ""}
-                                onChange={(event) => { set("smtp_secret_reference", event.target.value); setErrors(current => ({ ...current, smtp_secret_reference: undefined })); }}
-                                placeholder="company-mail-smtp-password"
-                                className={errors.smtp_secret_reference ? "border-destructive" : ""}
-                              />
-                              {errors.smtp_secret_reference && <p className="text-xs text-destructive">{errors.smtp_secret_reference}</p>}
-                            </div>
-                          </div>
-                        </div>
-                      )}
-
-                      <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                        <Button size="sm" onClick={() => { if (validateConnectionStep()) setStep(4); }}>
-                          Volgende <ChevronRight className="w-4 h-4 ml-1" />
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {step === 4 && (
-                    <div className="space-y-4">
-                      <p className="text-sm font-medium text-foreground">Controleer de instelling</p>
-                      <div className="rounded-lg border border-border bg-card divide-y divide-border">
-                        <SummaryRow label="Provider" value={provider.label} />
-                        <SummaryRow label="Status na opslaan" value={STATUS_LABELS[getStatusForProvider(form.provider)] || getStatusForProvider(form.provider)} />
-                        <SummaryRow label="Afzender" value={form.from_name} />
-                        <SummaryRow label="Mailadres" value={form.from_email} />
-                        {isOauthProvider(form.provider) && (
-                          <>
-                            <SummaryRow label="Domein/tenant" value={form.oauth_tenant_hint} />
-                            <SummaryRow label="Scopes" value={(provider.scopes || []).join(", ")} />
-                          </>
-                        )}
-                        {isSmtpProvider(form.provider) && (
-                          <>
-                            <SummaryRow label="SMTP-server" value={`${form.smtp_host || "-"}:${form.smtp_port || "-"}`} />
-                            <SummaryRow label="Beveiliging" value={form.smtp_security === "ssl_tls" ? "SSL/TLS" : form.smtp_security === "none" ? "Geen" : "STARTTLS"} />
-                            <SummaryRow label="SMTP-gebruiker" value={form.smtp_username} />
-                            <SummaryRow label="Secret" value={form.smtp_secret_reference ? "Referentie ingevuld" : "Niet ingevuld"} />
-                          </>
-                        )}
-                      </div>
-                      <p className="text-xs text-muted-foreground">
-                        {form.provider === "platform"
-                          ? "Er wordt nog geen mailbox gekoppeld."
-                          : isOauthProvider(form.provider)
-                            ? "Na opslaan moet de OAuth-koppeling nog worden afgerond voordat de status Verbonden kan worden."
-                            : "Na opslaan moeten de secret-referentie en testmail server-side worden gecontroleerd voordat de status Verbonden kan worden."}
-                      </p>
-                      <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => setStep(3)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
-                          <Button size="sm" onClick={save} disabled={saveMutation.isPending}>
-                            <Check className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : "Instelling opslaan"}
-                          </Button>
-                        </div>
-                      </div>
-                    </div>
-                  )}
-                </motion.div>
-              </AnimatePresence>
+      <div className="p-4">
+        <div className="overflow-hidden rounded-lg border border-border bg-card">
+          <div className="flex items-center justify-between gap-3 border-b border-border px-4 py-3">
+            <div className="min-w-0">
+              <p className="text-sm font-semibold text-foreground">E-mailadressen</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">
+                Beheer het adres waarmee LOQ namens dit bedrijf e-mails mag verzenden.
+              </p>
             </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
+            <Button size="sm" variant={showWizard ? "outline" : "default"} onClick={() => showWizard ? closeWizard() : openWizard(1)}>
+              {showWizard ? (
+                "Sluiten"
+              ) : (
+                <>
+                  {settings ? <Edit className="mr-1.5 h-3.5 w-3.5" /> : <Plus className="mr-1.5 h-3.5 w-3.5" />}
+                  {settings ? "Wijzigen" : "Toevoegen"}
+                </>
+              )}
+            </Button>
+          </div>
 
-      {!showWizard && (
-        <div className="p-4">
-          {settings ? (
-            <div className="rounded-lg border border-border bg-card divide-y divide-border">
-              <div className="flex items-center justify-between gap-3 px-4 py-3">
-                <div className="min-w-0">
-                  <div className="flex items-center gap-2">
-                    <p className="truncate text-sm font-semibold text-foreground">{form.from_email || "Geen e-mailadres"}</p>
-                    <ProviderBadge providerKey={form.provider} />
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[760px] text-sm">
+              <thead className="bg-muted/50 text-xs uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold">E-mail</th>
+                  <th className="px-4 py-3 text-left font-semibold">Authenticatie</th>
+                  <th className="px-4 py-3 text-left font-semibold">Status</th>
+                  <th className="px-4 py-3 text-left font-semibold">Afzendernaam</th>
+                  <th className="px-4 py-3 text-right font-semibold">Actie</th>
+                </tr>
+              </thead>
+              <tbody>
+                {settings ? (
+                  <tr className="border-t border-border">
+                    <td className="px-4 py-4">
+                      <div className="flex min-w-0 items-center gap-3">
+                        <span className="flex h-8 w-8 shrink-0 items-center justify-center rounded-md border border-border bg-muted/40">
+                          <Mail className="h-4 w-4 text-muted-foreground" />
+                        </span>
+                        <div className="min-w-0">
+                          <p className="truncate font-medium text-foreground">{settings.from_email || "Geen e-mailadres"}</p>
+                          <p className="truncate text-xs text-muted-foreground">{getConnectionSummary(settings)}</p>
+                        </div>
+                      </div>
+                    </td>
+                    <td className="px-4 py-4 text-muted-foreground">{savedProvider?.authLabel || "-"}</td>
+                    <td className="px-4 py-4">
+                      <Badge className={STATUS_CLASSES[settings.status] || STATUS_CLASSES.draft}>
+                        {STATUS_LABELS[settings.status] || settings.status}
+                      </Badge>
+                    </td>
+                    <td className="px-4 py-4 text-muted-foreground">{settings.from_name || "-"}</td>
+                    <td className="px-4 py-4 text-right">
+                      <Button size="sm" variant="outline" onClick={() => openWizard(1)}>
+                        <Edit className="mr-1.5 h-3.5 w-3.5" />
+                        Wijzigen
+                      </Button>
+                    </td>
+                  </tr>
+                ) : (
+                  <tr className="border-t border-border">
+                    <td colSpan={5} className="px-4 py-8 text-center">
+                      <Mail className="mx-auto h-6 w-6 text-muted-foreground" />
+                      <p className="mt-2 text-sm font-medium text-foreground">Nog geen e-mailadres gekoppeld.</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Voeg een zakelijk mailadres toe om later rapportages, facturen en meldingen vanuit het eigen domein te verzenden.
+                      </p>
+                      {!showWizard && (
+                        <Button size="sm" className="mt-3" onClick={() => openWizard(1)}>
+                          <Plus className="mr-1.5 h-3.5 w-3.5" />
+                          E-mailadres toevoegen
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+          {showWizard && (
+            <div className="border-t border-primary/30 bg-muted/20">
+              <div className="border-b border-border px-4 py-4 sm:px-6">
+                <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+                  {settings ? "E-mailadres wijzigen" : "Nieuw e-mailadres"}
+                </p>
+                <p className="mt-1 text-sm text-muted-foreground">
+                  {settings ? "Wijzig de uitgaande mailbox voor dit bedrijf." : "Voeg een uitgaande mailbox toe voor dit bedrijf."}
+                </p>
+              </div>
+
+              <div className="space-y-5 px-4 py-5 sm:px-6">
+                <WizardSteps step={step} />
+
+            {step === 1 && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Van welke e-mailservice maak je gebruik?</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Kies de provider. Voor Microsoft en Google loopt de koppeling via een veilige inlogmachtiging.
+                  </p>
+                </div>
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                  {PROVIDER_CARDS.map(provider => (
+                    <ProviderCard
+                      key={provider.key}
+                      provider={provider}
+                      selected={form.provider === provider.key || (form.provider === "other" && provider.key === "smtp")}
+                      onSelect={(providerKey) => { set("provider", providerKey); setErrors(current => ({ ...current, provider: undefined })); }}
+                    />
+                  ))}
+                </div>
+                {errors.provider && (
+                  <p className="text-xs text-destructive">{errors.provider}</p>
+                )}
+              </div>
+            )}
+
+            {step === 2 && selectedProvider && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">
+                    {isOauthProvider(form.provider) ? "Account koppelen" : "SMTP-gegevens instellen"}
+                  </p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    {isOauthProvider(form.provider)
+                      ? "Vul het afzendadres in. Na opslaan staat de koppeling klaar om via de provider te worden gemachtigd."
+                      : "Vul de afzender en de verzendserver van de mailprovider in."}
+                  </p>
+                </div>
+
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>Afzendernaam</Label>
+                    <Input
+                      value={form.from_name || ""}
+                      onChange={(event) => { set("from_name", event.target.value); setErrors(current => ({ ...current, from_name: undefined })); }}
+                      placeholder={company?.display_name || "Bedrijfsnaam"}
+                      className={errors.from_name ? "border-destructive" : ""}
+                    />
+                    {errors.from_name && <p className="text-xs text-destructive">{errors.from_name}</p>}
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">{form.from_name || company?.display_name || "Afzender niet ingevuld"}</p>
+                  <div className="space-y-1">
+                    <Label>Zakelijk e-mailadres</Label>
+                    <Input
+                      type="email"
+                      value={form.from_email || ""}
+                      onChange={(event) => { set("from_email", event.target.value); setErrors(current => ({ ...current, from_email: undefined })); }}
+                      placeholder="no-reply@bedrijf.nl"
+                      className={errors.from_email ? "border-destructive" : ""}
+                    />
+                    {errors.from_email && <p className="text-xs text-destructive">{errors.from_email}</p>}
+                  </div>
                 </div>
-                <Button size="sm" variant="outline" onClick={openWizard}>
-                  <Edit className="w-3.5 h-3.5 mr-1" /> Wijzigen
+
+                {isOauthProvider(form.provider) && (
+                  <div className="rounded-lg border border-border bg-card p-4">
+                    <div className="flex items-start gap-3">
+                      <ShieldCheck className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+                      <div className="min-w-0 space-y-3">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">{selectedProvider.label}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            LOQ vraagt alleen toestemming om namens dit e-mailadres uitgaande mail te verzenden. Het wachtwoord wordt niet opgeslagen.
+                          </p>
+                        </div>
+                        <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-3">
+                          <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2">
+                            <Check className="h-3.5 w-3.5 text-green-600" />
+                            Basisprofiel bekijken
+                          </div>
+                          <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2">
+                            <Check className="h-3.5 w-3.5 text-green-600" />
+                            Toegang onderhouden
+                          </div>
+                          <div className="flex items-center gap-2 rounded-md bg-muted/50 px-3 py-2">
+                            <Check className="h-3.5 w-3.5 text-green-600" />
+                            E-mail verzenden
+                          </div>
+                        </div>
+                        <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
+                          Domein: <span className="font-medium text-foreground">{getEmailDomain(form.from_email) || "wordt afgeleid uit het e-mailadres"}</span>
+                        </div>
+                      </div>
+                    </div>
+                  </div>
+                )}
+
+                {isSmtpProvider(form.provider) && (
+                  <div className="rounded-lg border border-border bg-card p-4">
+                    <div className="mb-3 flex items-start gap-3">
+                      <Server className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">SMTP-server</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Gebruik de verzendserver van de provider. Het wachtwoord zelf hoort als beveiligde server-side secret te worden opgeslagen.
+                        </p>
+                      </div>
+                    </div>
+                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label>SMTP-server</Label>
+                        <Input
+                          value={form.smtp_host || ""}
+                          onChange={(event) => { set("smtp_host", event.target.value); setErrors(current => ({ ...current, smtp_host: undefined })); }}
+                          placeholder="smtp.provider.nl"
+                          className={errors.smtp_host ? "border-destructive" : ""}
+                        />
+                        {errors.smtp_host && <p className="text-xs text-destructive">{errors.smtp_host}</p>}
+                      </div>
+                      <div className="grid grid-cols-[110px_1fr] gap-3">
+                        <div className="space-y-1">
+                          <Label>Poort</Label>
+                          <Input
+                            type="number"
+                            value={form.smtp_port || ""}
+                            onChange={(event) => { set("smtp_port", event.target.value); setErrors(current => ({ ...current, smtp_port: undefined })); }}
+                            placeholder="587"
+                            className={errors.smtp_port ? "border-destructive" : ""}
+                          />
+                          {errors.smtp_port && <p className="text-xs text-destructive">{errors.smtp_port}</p>}
+                        </div>
+                        <div className="space-y-1">
+                          <Label>Beveiliging</Label>
+                          <Select value={form.smtp_security || "starttls"} onValueChange={(value) => set("smtp_security", value)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="starttls">STARTTLS</SelectItem>
+                              <SelectItem value="ssl_tls">SSL/TLS</SelectItem>
+                              <SelectItem value="none">Geen</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>SMTP-gebruikersnaam</Label>
+                        <Input
+                          value={form.smtp_username || ""}
+                          onChange={(event) => { set("smtp_username", event.target.value); setErrors(current => ({ ...current, smtp_username: undefined })); }}
+                          placeholder={form.from_email || "mailbox@bedrijf.nl"}
+                          className={errors.smtp_username ? "border-destructive" : ""}
+                        />
+                        {errors.smtp_username && <p className="text-xs text-destructive">{errors.smtp_username}</p>}
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Secret-referentie</Label>
+                        <Input
+                          value={form.smtp_secret_reference || ""}
+                          onChange={(event) => { set("smtp_secret_reference", event.target.value); setErrors(current => ({ ...current, smtp_secret_reference: undefined })); }}
+                          placeholder="company-mail-smtp-password"
+                          className={errors.smtp_secret_reference ? "border-destructive" : ""}
+                        />
+                        {errors.smtp_secret_reference && <p className="text-xs text-destructive">{errors.smtp_secret_reference}</p>}
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {step === 3 && selectedProvider && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">Controleer de instelling</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Sla deze instelling op. Daarna staat het e-mailadres als uitgaande mailbox in het bedrijfsprofiel.
+                  </p>
+                </div>
+                <div className="rounded-lg border border-border bg-card divide-y divide-border">
+                  <SummaryRow label="E-mailservice" value={selectedProvider.label} />
+                  <SummaryRow label="Authenticatie" value={selectedProvider.authLabel} />
+                  <SummaryRow label="Status na opslaan" value={STATUS_LABELS[getStatusForProvider(form.provider)] || getStatusForProvider(form.provider)} />
+                  <SummaryRow label="Afzendernaam" value={form.from_name} />
+                  <SummaryRow label="E-mailadres" value={form.from_email} />
+                  {isOauthProvider(form.provider) && (
+                    <>
+                      <SummaryRow label="Domein" value={form.oauth_tenant_hint || getEmailDomain(form.from_email)} />
+                      <SummaryRow label="Machtiging" value="E-mail verzenden als afzender" />
+                    </>
+                  )}
+                  {isSmtpProvider(form.provider) && (
+                    <>
+                      <SummaryRow label="SMTP-server" value={`${form.smtp_host || "-"}:${form.smtp_port || "-"}`} />
+                      <SummaryRow label="Beveiliging" value={form.smtp_security === "ssl_tls" ? "SSL/TLS" : form.smtp_security === "none" ? "Geen" : "STARTTLS"} />
+                      <SummaryRow label="SMTP-gebruiker" value={form.smtp_username} />
+                    </>
+                  )}
+                </div>
+                {isOauthProvider(form.provider) && (
+                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <p>
+                      De instelling wordt opgeslagen als klaar voor koppeling. De echte Microsoft- of Google-machtiging moet daarna via de beveiligde provider-login worden afgerond.
+                    </p>
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+
+              <div className="flex items-center justify-between border-t border-border px-4 py-4 sm:px-6">
+            {step === 1 && (
+              <>
+                <Button variant="outline" onClick={closeWizard}>Annuleren</Button>
+                <Button onClick={() => { if (validateProviderStep()) setStep(2); }} disabled={!form.provider}>
+                  {providerActionLabel}
+                  <ChevronRight className="ml-1.5 h-4 w-4" />
                 </Button>
+              </>
+            )}
+            {step === 2 && (
+              <>
+                <Button variant="ghost" onClick={() => setStep(1)}>
+                  <ChevronLeft className="mr-1.5 h-4 w-4" />
+                  Terug
+                </Button>
+                <Button onClick={() => { if (validateDetailsStep()) setStep(3); }}>
+                  Volgende
+                  <ChevronRight className="ml-1.5 h-4 w-4" />
+                </Button>
+              </>
+            )}
+            {step === 3 && (
+              <>
+                <Button variant="ghost" onClick={() => setStep(2)}>
+                  <ChevronLeft className="mr-1.5 h-4 w-4" />
+                  Terug
+                </Button>
+                <Button onClick={save} disabled={saveMutation.isPending}>
+                  <Check className="mr-1.5 h-4 w-4" />
+                  {saveMutation.isPending ? "Opslaan..." : "Opslaan"}
+                </Button>
+              </>
+            )}
               </div>
-              <div className="grid grid-cols-1 sm:grid-cols-3 text-sm">
-                <div className="px-4 py-3">
-                  <p className="text-xs text-muted-foreground">Status</p>
-                  <p className="font-medium text-foreground">{STATUS_LABELS[status] || status}</p>
-                </div>
-                <div className="px-4 py-3">
-                  <p className="text-xs text-muted-foreground">Koppeling</p>
-                  <p className="font-medium text-foreground truncate">{connectionSummary}</p>
-                </div>
-                <div className="px-4 py-3">
-                  <p className="text-xs text-muted-foreground">Afzendernaam</p>
-                  <p className="font-medium text-foreground truncate">{form.from_name || "—"}</p>
-                </div>
-              </div>
-            </div>
-          ) : (
-            <div className="rounded-lg border border-dashed border-border bg-muted/20 px-4 py-6 text-center">
-              <Mail className="mx-auto h-6 w-6 text-muted-foreground" />
-              <p className="mt-2 text-sm font-medium text-foreground">Nog geen zakelijke e-mail ingesteld.</p>
-              <Button size="sm" className="mt-3" onClick={openWizard}>
-                E-mail instellen
-              </Button>
             </div>
           )}
         </div>
-      )}
+      </div>
     </div>
   );
 }
