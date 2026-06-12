@@ -1,0 +1,155 @@
+{
+  "name": "CompanyInsurancePolicy",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "description": "ID van het bedrijf"
+    },
+    "insurance_type": {
+      "type": "string",
+      "enum": [
+        "company_liability",
+        "professional_liability",
+        "employer_liability",
+        "vehicle_fleet",
+        "cyber",
+        "equipment_inventory",
+        "legal_assistance",
+        "sickness_absence",
+        "accident",
+        "directors_liability",
+        "other"
+      ],
+      "description": "Soort verzekering"
+    },
+    "insurance_name": {
+      "type": "string",
+      "description": "Weergavenaam van de verzekering"
+    },
+    "insurer_name": {
+      "type": "string",
+      "description": "Naam van de verzekeraar"
+    },
+    "broker_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Naam van adviseur, intermediair of tussenpersoon"
+    },
+    "policy_number": {
+      "type": "string",
+      "description": "Polisnummer"
+    },
+    "coverage_amount": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Dekking of verzekerd bedrag zoals vermeld op de polis"
+    },
+    "deductible_amount": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Eigen risico"
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "has_no_expiry": {
+      "type": "boolean",
+      "default": false,
+      "description": "Gebruik wanneer de polis geen vaste einddatum heeft"
+    },
+    "renewal_notice_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum waarop de polis opnieuw gecontroleerd moet worden"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "action_required",
+        "expired",
+        "cancelled",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "required_reason": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Reden waarom deze verzekering extra belangrijk of verplicht is"
+    },
+    "document_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "company_id",
+    "insurance_type",
+    "insurance_name",
+    "insurer_name",
+    "policy_number"
+  ]
+}

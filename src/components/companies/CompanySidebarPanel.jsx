@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { Award, BookOpen, CreditCard, Handshake, Mail, MapPin, Shield } from "lucide-react";
+import { Award, BookOpen, CreditCard, Handshake, Mail, MapPin, Shield, ShieldCheck } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { getCompanyProfileLocations } from "@/lib/companyLocationScope";
@@ -12,12 +12,14 @@ import TeamhubTab from "./TeamhubTab";
 import AccreditationsTab from "./AccreditationsTab";
 import BranchMembershipsTab from "./BranchMembershipsTab";
 import CompanyEmailTab from "./CompanyEmailTab";
+import CompanyInsurancesTab from "./CompanyInsurancesTab";
 
 const MENU_ITEMS = [
   { key: "wpbr", label: "WPBR-vergunning", icon: Shield },
   { key: "cao", label: "CAO", icon: BookOpen },
   { key: "branch_memberships", label: "Branchevereniging", icon: Handshake },
   { key: "accreditations", label: "Erkenningen", icon: Award },
+  { key: "insurances", label: "Verzekeringen", icon: ShieldCheck },
   { key: "locations", label: "Vestigingen", icon: MapPin },
   { key: "teamhub", label: "LOQ Teamhub", icon: Handshake },
   { key: "bank", label: "Bank", icon: CreditCard },
@@ -47,6 +49,12 @@ function hasEmailSettingsAction(settings) {
   return Object.values(settings.channel_delivery_status || {}).some(channel => channel?.status === "hold");
 }
 
+function hasInsuranceAction(policy, today) {
+  if (!policy || policy.status === "archived" || policy.status === "cancelled") return false;
+  if (policy.status === "action_required" || policy.status === "expired") return true;
+  return Boolean(policy.valid_until && policy.valid_until < today);
+}
+
 export default function CompanySidebarPanel({ companyId, companies, company }) {
   const getInitialActiveTab = () => {
     if (typeof window === "undefined") return "wpbr";
@@ -71,6 +79,12 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
   const { data: emailSettingsList = [] } = useQuery({
     queryKey: ["company-email-settings", companyId],
     queryFn: () => base44.entities.CompanyEmailSettings.filter({ company_id: companyId }),
+    enabled: !!companyId,
+  });
+
+  const { data: insurancePolicies = [] } = useQuery({
+    queryKey: ["company-insurance-policies", companyId],
+    queryFn: () => base44.entities.CompanyInsurancePolicy.filter({ company_id: companyId }),
     enabled: !!companyId,
   });
 
@@ -118,6 +132,7 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
     !hasTeamhubServices
   );
   const hasEmailAction = emailSettingsList.some(hasEmailSettingsAction);
+  const hasInsuranceAlert = insurancePolicies.some(policy => hasInsuranceAction(policy, today));
 
   return (
     <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden flex min-h-[200px]">
@@ -127,6 +142,7 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
           const hasAlert =
             (item.key === "wpbr" && hasWpbrAction) ||
             (item.key === "accreditations" && hasAccreditationAction) ||
+            (item.key === "insurances" && hasInsuranceAlert) ||
             (item.key === "teamhub" && hasTeamhubAction) ||
             (item.key === "email" && hasEmailAction);
           return (
@@ -164,6 +180,10 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
 
         {active === "email" && (
           <CompanyEmailTab companyId={companyId} company={company} />
+        )}
+
+        {active === "insurances" && (
+          <CompanyInsurancesTab companyId={companyId} company={company} />
         )}
 
         {active === "cao" && (
