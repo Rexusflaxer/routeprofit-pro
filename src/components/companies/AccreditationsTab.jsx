@@ -14,7 +14,7 @@ import { buildManagedFileDescriptor, updateManagedFileSource, uploadManagedFile 
 
 const DELETE_PASSWORD = "verwijder";
 // Header and rows share this grid so status, validity, and actions cannot drift out of alignment.
-const ACCREDITATION_TABLE_GRID = "grid grid-cols-[minmax(160px,180px)_minmax(220px,1fr)_minmax(112px,132px)_minmax(280px,320px)_minmax(360px,520px)] gap-4";
+const ACCREDITATION_TABLE_GRID = "grid grid-cols-[minmax(120px,160px)_minmax(190px,1fr)_minmax(96px,116px)_minmax(180px,260px)_minmax(250px,360px)] gap-3 xl:gap-4";
 
 const CATEGORY_OPTIONS = [
   { key: "technical_certification", label: "Technische erkenning" },
