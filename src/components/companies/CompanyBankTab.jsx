@@ -368,7 +368,7 @@ export default function CompanyBankTab({ companies }) {
                         </div>
                         <div className="col-span-2 space-y-1">
                           <Label>Referentienaam <span className="font-normal text-muted-foreground">(optioneel)</span></Label>
-                          <Input value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Bijv. Hoofdrekening, G-rekening loonheffingen of incasso" />
+                           <Input value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Bijv. Hoofdrekening, loonheffingen of incasso" />
                           <p className="text-xs text-muted-foreground">Gebruik dit om de bankrekening later makkelijk te herkennen.</p>
                         </div>
                       </div>
