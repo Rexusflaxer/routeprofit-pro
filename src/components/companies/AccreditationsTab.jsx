@@ -71,6 +71,9 @@ const EMPTY_FORM = {
   notes: "",
 };
 
+const CUSTOM_ISSUER_NEW_VALUE = "__new_issuer__";
+const ISO_GENERIC_ISSUER = "Erkende certificatie-instelling";
+
 const LEGACY_ACCREDITATION_LABELS = {
   "quality_mark:vvnl_kwaliteitslabel_verkeersregelaars": "Kwaliteitslabel Veiligheidsdomein - Verkeersregelaars",
 };
@@ -127,11 +130,46 @@ function issuerVisual({ issuer = "", accreditationType = "", label = "" }) {
   };
 }
 
+function isIsoAccreditationType(accreditationType = "") {
+  return accreditationType?.startsWith("iso_");
+}
+
+function manualTypeForCategory(category = "") {
+  return category === "technical_certification" ? "other_technical" : "other";
+}
+
+function isManualAccreditationType(category = "", accreditationType = "") {
+  return category === "other" || accreditationType === "other" || accreditationType === "other_technical";
+}
+
+function usesCustomIssuerField(category = "", accreditationType = "") {
+  return isIsoAccreditationType(accreditationType) || isManualAccreditationType(category, accreditationType);
+}
+
+function normalizeIssuerName(issuer = "") {
+  return issuer.trim().replace(/\s+/g, " ");
+}
+
+function isGenericIsoIssuer(issuer = "") {
+  return normalizeIssuerName(issuer).toLowerCase() === ISO_GENERIC_ISSUER.toLowerCase();
+}
+
 function issuerForDisplay(issuer = "", accreditationType = "") {
   if (accreditationType?.startsWith("vvnl_")) return "Sociaal Fonds Veiligheidsdomein (SFV)";
-  if (accreditationType?.startsWith("iso_")) return "Erkende certificatie-instelling";
+  if (isIsoAccreditationType(accreditationType)) {
+    const normalizedIssuer = normalizeIssuerName(issuer);
+    return normalizedIssuer || ISO_GENERIC_ISSUER;
+  }
   if (accreditationType === "vca") return "SSVV / erkende certificatie-instelling";
   return issuer || "";
+}
+
+function issuerForForm(issuer = "", accreditationType = "") {
+  if (isIsoAccreditationType(accreditationType)) {
+    const normalizedIssuer = normalizeIssuerName(issuer);
+    return isGenericIsoIssuer(normalizedIssuer) ? "" : normalizedIssuer;
+  }
+  return issuerForDisplay(issuer, accreditationType);
 }
 
 function IssuerLogo({ issuer, accreditationType, label, className = "" }) {
@@ -525,6 +563,38 @@ function membershipTypeKeysForRequirement(membership, associationRequirements) {
   });
 }
 
+function isoIssuerOptionsFromAccreditations(accreditations = []) {
+  const byKey = new Map();
+
+  (accreditations || []).forEach(item => {
+    if (!isIsoAccreditationType(item.accreditation_type)) return;
+
+    const issuer = normalizeIssuerName(item.issuer || "");
+    if (!issuer || isGenericIsoIssuer(issuer)) return;
+
+    const key = issuer.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, issuer);
+  });
+
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b, "nl"));
+}
+
+function manualIssuerOptionsFromAccreditations(accreditations = []) {
+  const byKey = new Map();
+
+  (accreditations || []).forEach(item => {
+    if (!isManualAccreditationType(item.category, item.accreditation_type)) return;
+
+    const issuer = normalizeIssuerName(item.issuer || "");
+    if (!issuer) return;
+
+    const key = issuer.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, issuer);
+  });
+
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b, "nl"));
+}
+
 function requiredAccreditationActionsForMemberships(memberships = []) {
   const byKey = new Map();
 
@@ -593,7 +663,7 @@ function relevantAccreditationPresets(company, licenseType, activeAccreditations
 function displayAccreditationName(item) {
   const label = optionLabel(item.category, item.accreditation_type);
   const hasKnownLabel = label && label !== item.accreditation_type;
-  return hasKnownLabel && item.accreditation_type !== "other" ? label : item.name || label;
+  return hasKnownLabel && !isManualAccreditationType(item.category, item.accreditation_type) ? label : item.name || label;
 }
 
 function accreditationNumberMeta(form) {
@@ -841,6 +911,46 @@ function AccreditationPresetStep({ presets, manualPreset, selectedKey, onSelect,
   );
 }
 
+function IssuerSelectField({ value, options, creating, onSelect, onCustomChange, error, mode = "manual" }) {
+  const selectValue = creating
+    ? CUSTOM_ISSUER_NEW_VALUE
+    : options.some(option => option === value)
+      ? value
+      : "";
+  const isIso = mode === "iso";
+
+  return (
+    <div className="space-y-1">
+      <Label>Uitgevende instantie</Label>
+      <Select value={selectValue} onValueChange={onSelect}>
+        <SelectTrigger className={`h-8 ${error ? "border-destructive" : ""}`}>
+          <SelectValue placeholder={isIso ? "Kies certificatie-instelling" : "Kies instantie"} />
+        </SelectTrigger>
+        <SelectContent>
+          {options.map(option => (
+            <SelectItem key={option} value={option}>{option}</SelectItem>
+          ))}
+          <SelectItem value={CUSTOM_ISSUER_NEW_VALUE}>Nieuwe instantie toevoegen</SelectItem>
+        </SelectContent>
+      </Select>
+      {creating && (
+        <Input
+          className={`h-8 ${error ? "border-destructive" : ""}`}
+          value={value}
+          onChange={e => onCustomChange(e.target.value)}
+          placeholder={isIso ? "Naam certificatie-instelling" : "Naam uitgevende instantie"}
+        />
+      )}
+      <p className="text-[11px] text-muted-foreground">
+        {isIso
+          ? "Gebruik de certificerende partij die op het ISO-certificaat staat."
+          : "Gebruik de organisatie of instantie die de erkenning afgeeft."}
+      </p>
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
 // Row with context menu for action/expired items, direct preview for items with document
 function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
   const [contextMenu, setContextMenu] = useState(null);
@@ -958,6 +1068,7 @@ export default function AccreditationsTab({ companyId, company }) {
   const [formPreviewOpen, setFormPreviewOpen] = useState(false);
   const [deleteId, setDeleteId] = useState(null);
   const [preview, setPreview] = useState(null);
+  const [creatingIssuer, setCreatingIssuer] = useState(false);
 
   useEffect(() => {
     if (showWizard) {
@@ -992,6 +1103,16 @@ export default function AccreditationsTab({ companyId, company }) {
   const branchRequiredActionByKey = useMemo(
     () => new Map(branchRequiredActions.map(action => [presetKey(action), action])),
     [branchRequiredActions]
+  );
+
+  const isoIssuerOptions = useMemo(
+    () => isoIssuerOptionsFromAccreditations(accreditations),
+    [accreditations]
+  );
+
+  const manualIssuerOptions = useMemo(
+    () => manualIssuerOptionsFromAccreditations(accreditations),
+    [accreditations]
   );
 
   const getDocumentDescriptor = (data) => buildManagedFileDescriptor({
@@ -1140,39 +1261,44 @@ export default function AccreditationsTab({ companyId, company }) {
 
   const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
 
+  const setIssuer = (value) => {
+    setForm(current => ({ ...current, issuer: value }));
+    setErrors(current => ({ ...current, issuer: undefined }));
+  };
+
+  const selectIssuer = (value) => {
+    if (value === CUSTOM_ISSUER_NEW_VALUE) {
+      setCreatingIssuer(true);
+      setIssuer("");
+      return;
+    }
+
+    setCreatingIssuer(false);
+    setIssuer(value);
+  };
+
   const setCategory = (category) => {
-    const firstOption = (OPTIONS_BY_CATEGORY[category] || OTHER_OPTIONS)[0];
-    const preset = presetForType(category, firstOption.key);
+    const accreditationType = manualTypeForCategory(category);
     setForm(current => ({
       ...current,
       category,
-      accreditation_type: firstOption.key,
-      name: preset?.label || firstOption.label,
-      issuer: preset ? issuerForDisplay(preset.issuer, firstOption.key) : "",
+      accreditation_type: accreditationType,
     }));
-  };
-
-  const setType = (type) => {
-    setForm(current => {
-      const preset = presetForType(current.category, type);
-      return {
-        ...current,
-        accreditation_type: type,
-        name: preset?.label || optionLabel(current.category, type),
-        issuer: preset ? issuerForDisplay(preset.issuer, type) : current.issuer,
-      };
-    });
+    setErrors(current => ({ ...current, accreditation_type: undefined }));
   };
 
   const selectPreset = (preset) => {
+    const presetIsManual = presetKey(preset) === presetKey(MANUAL_ACCREDITATION_PRESET);
+    const presetIsIso = isIsoAccreditationType(preset.accreditation_type);
+    setCreatingIssuer(presetIsManual);
     setForm(current => ({
       ...current,
       category: preset.category,
       accreditation_type: preset.accreditation_type,
-      name: presetKey(preset) === presetKey(MANUAL_ACCREDITATION_PRESET) ? "" : preset.label,
-      issuer: issuerForDisplay(preset.issuer || "", preset.accreditation_type),
+      name: presetIsManual ? "" : preset.label,
+      issuer: presetIsIso || presetIsManual ? "" : issuerForDisplay(preset.issuer || "", preset.accreditation_type),
     }));
-    setErrors(current => ({ ...current, accreditation_type: undefined, name: undefined }));
+    setErrors(current => ({ ...current, accreditation_type: undefined, name: undefined, issuer: undefined }));
   };
 
   const openNew = () => {
@@ -1181,6 +1307,7 @@ export default function AccreditationsTab({ companyId, company }) {
     setIsArchiveEntry(false);
     setForm(EMPTY_FORM);
     setErrors({});
+    setCreatingIssuer(false);
     setWizardStep(1);
     setShowWizard(true);
   };
@@ -1191,6 +1318,7 @@ export default function AccreditationsTab({ companyId, company }) {
     setIsArchiveEntry(true);
     setForm(EMPTY_FORM);
     setErrors({});
+    setCreatingIssuer(false);
     setWizardStep(1);
     setShowWizard(true);
   };
@@ -1203,7 +1331,7 @@ export default function AccreditationsTab({ companyId, company }) {
       category: item.category || "technical_certification",
       accreditation_type: item.accreditation_type || "other",
       name: displayAccreditationName(item),
-      issuer: issuerForDisplay(item.issuer, item.accreditation_type),
+      issuer: issuerForForm(item.issuer, item.accreditation_type),
       certificate_number: item.certificate_number || "",
       valid_from: item.valid_from || "",
       valid_until: item.valid_until || "",
@@ -1216,6 +1344,7 @@ export default function AccreditationsTab({ companyId, company }) {
       document_metadata: item.document_metadata || null,
       notes: item.notes || "",
     });
+    setCreatingIssuer(false);
     setErrors({});
     setWizardStep(2);
     setShowWizard(true);
@@ -1230,9 +1359,10 @@ export default function AccreditationsTab({ companyId, company }) {
       category: item.category || "technical_certification",
       accreditation_type: item.accreditation_type || "other",
       name: displayAccreditationName(item),
-      issuer: issuerForDisplay(item.issuer, item.accreditation_type),
+      issuer: issuerForForm(item.issuer, item.accreditation_type),
       status: "active",
     });
+    setCreatingIssuer(false);
     setErrors({});
     setWizardStep(2);
     setShowWizard(true);
@@ -1246,13 +1376,14 @@ export default function AccreditationsTab({ companyId, company }) {
     setWizardStep(1);
     setForm(EMPTY_FORM);
     setErrors({});
+    setCreatingIssuer(false);
     setFormPreviewOpen(false);
   };
 
   // True when the accreditation type is a known/predefined option (not free-form "other")
   const isKnownType = (category, type) => {
     const opts = OPTIONS_BY_CATEGORY[category] || OTHER_OPTIONS;
-    if (type === "other") return false;
+    if (isManualAccreditationType(category, type)) return false;
     return opts.some(o => o.key === type);
   };
 
@@ -1263,6 +1394,11 @@ export default function AccreditationsTab({ companyId, company }) {
     }
     if (!isKnownType(form.category, form.accreditation_type) && !form.name?.trim()) {
       e.name = "Naam is verplicht";
+    }
+    if (usesCustomIssuerField(form.category, form.accreditation_type) && !normalizeIssuerName(form.issuer)) {
+      e.issuer = isIsoAccreditationType(form.accreditation_type)
+        ? "Kies een bestaande certificatie-instelling of voeg een nieuwe instantie toe."
+        : "Kies een bestaande instantie of voeg een nieuwe instantie toe.";
     }
     const today = new Date().toISOString().slice(0, 10);
     if (!isArchiveEntry) {
@@ -1331,6 +1467,9 @@ export default function AccreditationsTab({ companyId, company }) {
     [company, effectiveWpbrLicenseType, activeAccreditations, branchRequiredActions]
   );
   const selectedPresetKey = form.category && form.accreditation_type ? `${form.category}:${form.accreditation_type}` : "";
+  const selectedWizardPresetKey = isManualAccreditationType(form.category, form.accreditation_type)
+    ? presetKey(MANUAL_ACCREDITATION_PRESET)
+    : selectedPresetKey;
   const itemToDelete = accreditations.find(item => item.id === deleteId);
   const isRenewing = !!renewingId;
   const documentRequired = wizardStep === 3 && (isArchiveEntry || !editingId || form.status === "active");
@@ -1339,6 +1478,10 @@ export default function AccreditationsTab({ companyId, company }) {
   const currentFormDocumentFilename = currentFormDocument.document_download_filename || currentFormDocument.document_filename || "Document toegevoegd";
   const numberFieldMeta = accreditationNumberMeta(form);
   const currentIssuer = issuerForDisplay(form.issuer, form.accreditation_type);
+  const isIsoForm = isIsoAccreditationType(form.accreditation_type);
+  const isManualForm = isManualAccreditationType(form.category, form.accreditation_type);
+  const hasCustomIssuerField = usesCustomIssuerField(form.category, form.accreditation_type);
+  const issuerOptions = isIsoForm ? isoIssuerOptions : manualIssuerOptions;
 
   return (
     <div className="flex flex-col h-full">
@@ -1379,7 +1522,7 @@ export default function AccreditationsTab({ companyId, company }) {
                     <AccreditationPresetStep
                       presets={suggestedPresets}
                       manualPreset={MANUAL_ACCREDITATION_PRESET}
-                      selectedKey={selectedPresetKey}
+                      selectedKey={selectedWizardPresetKey}
                       onSelect={selectPreset}
                       licenseType={effectiveWpbrLicenseType}
                     />
@@ -1395,121 +1538,94 @@ export default function AccreditationsTab({ companyId, company }) {
 
                 {wizardStep === 2 && (
                   <div className="space-y-3">
-                    {isRenewing ? (
-                      <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
-                        <div className="space-y-1 lg:col-span-2">
-                          <Label className="text-muted-foreground">Erkenning</Label>
-                          <div className="h-8 flex items-center px-3 rounded-md bg-muted/50 border border-border text-sm text-foreground">
-                            {form.name}
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          <Label className="text-muted-foreground">Categorie</Label>
-                          <div className="h-8 flex items-center px-3 rounded-md bg-muted/50 border border-border text-sm text-muted-foreground">
-                            {categoryLabel(form.category)}
-                          </div>
-                        </div>
-                        <div className="space-y-1">
-                          <Label>{numberFieldMeta.label}</Label>
-                          <Input className="h-8" value={form.certificate_number} onChange={e => set("certificate_number", e.target.value)} placeholder="Optioneel" />
-                          <p className="text-[11px] text-muted-foreground">{numberFieldMeta.help}</p>
-                        </div>
-                        <div className="space-y-1">
-                          <Label>Geldig vanaf</Label>
-                          <Input className={`h-8 ${errors.valid_from ? "border-destructive" : ""}`} type="date" value={form.valid_from} onChange={e => { set("valid_from", e.target.value); setErrors(er => ({ ...er, valid_from: undefined })); }} />
-                          {errors.valid_from && <p className="text-xs text-destructive">{errors.valid_from}</p>}
-                        </div>
-                        <div className="space-y-1">
-                          <Label>Geldig tot</Label>
-                          <Input className={`h-8 ${errors.valid_until ? "border-destructive" : ""}`} type="date" value={form.valid_until} onChange={e => { set("valid_until", e.target.value); setErrors(er => ({ ...er, valid_until: undefined })); }} />
-                          {errors.valid_until && <p className="text-xs text-destructive">{errors.valid_until}</p>}
-                        </div>
-                      </div>
-                    ) : (
-                      (() => {
-                        const knownType = isKnownType(form.category, form.accreditation_type);
-                        const isEditing = !!editingId;
-                        return (
-                          <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+                    {(() => {
+                      const showManualCategoryPicker = isManualForm && !isRenewing;
+                      return (
+                        <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
+                          {showManualCategoryPicker && (
                             <div className="space-y-1">
-                              <Label className={isEditing ? "text-muted-foreground" : ""}>Categorie</Label>
-                              {isEditing ? (
-                                <div className="h-8 flex items-center px-3 rounded-md bg-muted/50 border border-border text-sm text-muted-foreground">
-                                  {categoryLabel(form.category)}
-                                </div>
-                              ) : (
-                                <Select value={form.category} onValueChange={setCategory}>
-                                  <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                  <SelectContent>{CATEGORY_OPTIONS.map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
-                                </Select>
-                              )}
+                              <Label>Categorie</Label>
+                              <Select value={form.category} onValueChange={setCategory}>
+                                <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
+                                <SelectContent>
+                                  {CATEGORY_OPTIONS.map(o => (
+                                    <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>
+                                  ))}
+                                </SelectContent>
+                              </Select>
                             </div>
+                          )}
+
+                          {isManualForm ? (
                             <div className="space-y-1 lg:col-span-2">
-                              <Label className={isEditing ? "text-muted-foreground" : ""}>Type</Label>
-                              {isEditing ? (
-                                <div className="h-8 flex items-center px-3 rounded-md bg-muted/50 border border-border text-sm text-muted-foreground">
-                                  {optionLabel(form.category, form.accreditation_type) || form.name}
-                                </div>
-                              ) : (
-                                <Select value={form.accreditation_type} onValueChange={setType}>
-                                  <SelectTrigger className="h-8"><SelectValue /></SelectTrigger>
-                                  <SelectContent>{(OPTIONS_BY_CATEGORY[form.category] || OTHER_OPTIONS).map(o => <SelectItem key={o.key} value={o.key}>{o.label}</SelectItem>)}</SelectContent>
-                                </Select>
-                              )}
+                              <Label>Naam</Label>
+                              <Input
+                                className={`h-8 ${errors.name ? "border-destructive" : ""}`}
+                                value={form.name}
+                                onChange={e => { set("name", e.target.value); setErrors(er => ({ ...er, name: undefined })); }}
+                              />
+                              {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
                             </div>
-                            {knownType && (
-                              <div className="space-y-1">
-                                <Label className="text-muted-foreground">Uitgevende instantie</Label>
-                                <div className="h-8 flex items-center gap-2 px-3 rounded-md bg-muted/50 border border-border text-sm text-muted-foreground">
-                                  <IssuerLogo
-                                    issuer={currentIssuer}
-                                    accreditationType={form.accreditation_type}
-                                    label={form.name}
-                                    className="h-5 w-8 shrink-0"
-                                  />
-                                  <span className="truncate">{currentIssuer || "-"}</span>
-                                </div>
+                          ) : (
+                            <div className="space-y-1 lg:col-span-2">
+                              <Label className="text-muted-foreground">Erkenning</Label>
+                              <div className="h-8 flex items-center gap-2 px-3 rounded-md bg-muted/50 border border-border text-sm text-foreground">
+                                <IssuerLogo
+                                  issuer={currentIssuer}
+                                  accreditationType={form.accreditation_type}
+                                  label={form.name}
+                                  className="h-5 w-8 shrink-0"
+                                />
+                                <span className="truncate">{form.name}</span>
                               </div>
-                            )}
-                            {!knownType && !isEditing && (
-                              <div className="space-y-1 lg:col-span-2">
-                                <Label>Naam</Label>
-                                <Input className={`h-8 ${errors.name ? "border-destructive" : ""}`} value={form.name} onChange={e => { set("name", e.target.value); setErrors(er => ({ ...er, name: undefined })); }} />
-                                {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
-                              </div>
-                            )}
-                            {!knownType && !isEditing && (
-                              <div className="space-y-1">
-                                <Label>Uitgever / organisatie</Label>
-                                <Input className="h-8" value={form.issuer} onChange={e => set("issuer", e.target.value)} />
-                              </div>
-                            )}
-                            {!knownType && isEditing && (
-                              <div className="space-y-1 lg:col-span-2">
-                                <Label>Naam</Label>
-                                <Input className={`h-8 ${errors.name ? "border-destructive" : ""}`} value={form.name} onChange={e => { set("name", e.target.value); setErrors(er => ({ ...er, name: undefined })); }} />
-                                {errors.name && <p className="text-xs text-destructive">{errors.name}</p>}
-                              </div>
-                            )}
+                            </div>
+                          )}
+
+                          {hasCustomIssuerField ? (
                             <div className="space-y-1">
-                              <Label>{numberFieldMeta.label}</Label>
-                              <Input className="h-8" value={form.certificate_number} onChange={e => set("certificate_number", e.target.value)} placeholder="Optioneel" />
-                              <p className="text-[11px] text-muted-foreground">{numberFieldMeta.help}</p>
+                              <IssuerSelectField
+                                value={form.issuer}
+                                options={issuerOptions}
+                                creating={creatingIssuer}
+                                onSelect={selectIssuer}
+                                onCustomChange={setIssuer}
+                                error={errors.issuer}
+                                mode={isIsoForm ? "iso" : "manual"}
+                              />
                             </div>
+                          ) : (
                             <div className="space-y-1">
-                              <Label>Geldig vanaf</Label>
-                              <Input className={`h-8 ${errors.valid_from ? "border-destructive" : ""}`} type="date" value={form.valid_from} onChange={e => { set("valid_from", e.target.value); setErrors(er => ({ ...er, valid_from: undefined })); }} />
-                              {errors.valid_from && <p className="text-xs text-destructive">{errors.valid_from}</p>}
+                              <Label className="text-muted-foreground">Uitgevende instantie</Label>
+                              <div className="h-8 flex items-center gap-2 px-3 rounded-md bg-muted/50 border border-border text-sm text-muted-foreground">
+                                <IssuerLogo
+                                  issuer={currentIssuer}
+                                  accreditationType={form.accreditation_type}
+                                  label={form.name}
+                                  className="h-5 w-8 shrink-0"
+                                />
+                                <span className="truncate">{currentIssuer || "-"}</span>
+                              </div>
                             </div>
-                            <div className="space-y-1">
-                              <Label>Geldig tot</Label>
-                              <Input className={`h-8 ${errors.valid_until ? "border-destructive" : ""}`} type="date" value={form.valid_until} onChange={e => { set("valid_until", e.target.value); setErrors(er => ({ ...er, valid_until: undefined })); }} />
-                              {errors.valid_until && <p className="text-xs text-destructive">{errors.valid_until}</p>}
-                            </div>
+                          )}
+
+                          <div className="space-y-1">
+                            <Label>{numberFieldMeta.label}</Label>
+                            <Input className="h-8" value={form.certificate_number} onChange={e => set("certificate_number", e.target.value)} placeholder="Optioneel" />
+                            <p className="text-[11px] text-muted-foreground">{numberFieldMeta.help}</p>
                           </div>
-                        );
-                      })()
-                    )}
+                          <div className="space-y-1">
+                            <Label>Geldig vanaf</Label>
+                            <Input className={`h-8 ${errors.valid_from ? "border-destructive" : ""}`} type="date" value={form.valid_from} onChange={e => { set("valid_from", e.target.value); setErrors(er => ({ ...er, valid_from: undefined })); }} />
+                            {errors.valid_from && <p className="text-xs text-destructive">{errors.valid_from}</p>}
+                          </div>
+                          <div className="space-y-1">
+                            <Label>Geldig tot</Label>
+                            <Input className={`h-8 ${errors.valid_until ? "border-destructive" : ""}`} type="date" value={form.valid_until} onChange={e => { set("valid_until", e.target.value); setErrors(er => ({ ...er, valid_until: undefined })); }} />
+                            {errors.valid_until && <p className="text-xs text-destructive">{errors.valid_until}</p>}
+                          </div>
+                        </div>
+                      );
+                    })()}
                     <div className="flex justify-between pt-1">
                       <div className="flex gap-2">
                         {!editingId && !isRenewing && (
