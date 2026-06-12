@@ -5,7 +5,7 @@ import {
   LayoutDashboard, Users, Settings, Menu, X, CarFront, Smartphone,
   Search, Route, MapPin, CalendarCheck,
   FileText, SlidersHorizontal,
-  Database, ChevronDown, Building2, UserCircle, LogOut, Handshake
+  Database, ChevronDown, Building2, UserCircle, LogOut, Handshake, AlertTriangle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeProvider, useTheme } from "next-themes";
@@ -66,6 +66,22 @@ function LOQLogo({ className = "h-5 w-auto" }) {
 
 function isActive(currentPageName, item) {
   return item.page === currentPageName || item.pages?.includes(currentPageName);
+}
+
+function ViewportSizeWarning({ className = "" }) {
+  return (
+    <div className={`rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-900 shadow-sm dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200 ${className}`}>
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+        <div className="min-w-0">
+          <p className="text-[12px] font-semibold leading-tight">Kleine weergave</p>
+          <p className="mt-0.5 text-[11px] leading-snug">
+            Vergroot het venster voor alle tabellen en knoppen.
+          </p>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function UserProfileFooter({ onNavigate }) {
@@ -192,6 +208,10 @@ function ContextNavigation({ currentPageName, onNavigate }) {
         ))}
       </div>
 
+      <div className="hidden border-t border-sidebar-border px-3 py-2.5 lg:block 2xl:hidden">
+        <ViewportSizeWarning />
+      </div>
+
       <UserProfileFooter onNavigate={onNavigate} />
     </div>
   );
@@ -234,6 +254,10 @@ function AppShell({ children, currentPageName }) {
           {children}
         </div>
       </main>
+
+      <div className="pointer-events-none fixed bottom-3 left-3 right-3 z-50 lg:hidden">
+        <ViewportSizeWarning className="mx-auto max-w-sm" />
+      </div>
     </div>
   );
 }
