@@ -7,7 +7,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Building2, List, Map as MapIcon, Search } from "lucide-react";
-import { TEAMHUB_SERVICE_LABELS } from "@/lib/teamhubServiceRules";
+import { TEAMHUB_SERVICE_LABELS, getActiveWpbrLicenseType } from "@/lib/teamhubServiceRules";
 import TeamhubMap from "@/components/teamhub/TeamhubMap";
 import TeamhubCompanyPreview from "@/components/teamhub/TeamhubCompanyPreview";
 
@@ -91,21 +91,50 @@ export default function Teamhub() {
     queryKey: ["company-locations"],
     queryFn: () => base44.entities.CompanyLocation.list(),
   });
-
-  const visibleCompanies = useMemo(
-    () => companies.filter(company => company.status === "active" && company.teamhub_enabled === true),
-    [companies]
-  );
+  const { data: wpbrLicenses = [], isLoading: wpbrLicensesLoading } = useQuery({
+    queryKey: ["wpbr-licenses"],
+    queryFn: () => base44.entities.CompanyWpbrLicense.list(),
+  });
 
   const locationById = useMemo(
     () => new Map((locations || []).filter(location => location?.id).map(location => [location.id, location])),
     [locations]
   );
 
+  const activeWpbrLicenseCompanyIds = useMemo(() => {
+    const licensesByCompany = new Map();
+    (wpbrLicenses || []).forEach(license => {
+      if (!license?.company_id) return;
+      const current = licensesByCompany.get(license.company_id) || [];
+      current.push(license);
+      licensesByCompany.set(license.company_id, current);
+    });
+    return new Set(
+      [...licensesByCompany.entries()]
+        .filter(([, licenses]) => !!getActiveWpbrLicenseType(licenses))
+        .map(([companyId]) => companyId)
+    );
+  }, [wpbrLicenses]);
+
+  const visibleCompanies = useMemo(
+    () => companies.filter(company => {
+      const serviceTypes = Array.isArray(company.teamhub_service_types) ? company.teamhub_service_types : [];
+      return (
+        company.status === "active" &&
+        company.teamhub_enabled === true &&
+        activeWpbrLicenseCompanyIds.has(company.id) &&
+        !!company.teamhub_public_location_id &&
+        locationById.has(company.teamhub_public_location_id) &&
+        serviceTypes.length > 0
+      );
+    }),
+    [activeWpbrLicenseCompanyIds, companies, locationById]
+  );
+
   const serviceOptions = useMemo(() => {
     const keys = new Set();
     visibleCompanies.forEach(company => {
-      const services = company.teamhub_service_types?.length ? company.teamhub_service_types : company.activities || [];
+      const services = Array.isArray(company.teamhub_service_types) ? company.teamhub_service_types : [];
       services.forEach(service => keys.add(service));
     });
     return [...keys].sort((a, b) => serviceLabel(a).localeCompare(serviceLabel(b), "nl"));
@@ -126,7 +155,7 @@ export default function Teamhub() {
     const term = normalizeSearch(search);
 
     return visibleCompanies.filter(company => {
-      const services = company.teamhub_service_types?.length ? company.teamhub_service_types : company.activities || [];
+      const services = Array.isArray(company.teamhub_service_types) ? company.teamhub_service_types : [];
       const regions = company.teamhub_regions || [];
       const searchable = normalizeSearch([
         company.display_name,
@@ -269,11 +298,11 @@ export default function Teamhub() {
         </ToggleGroup>
       </div>
 
-      {(isLoading || locationsLoading) && (
+      {(isLoading || locationsLoading || wpbrLicensesLoading) && (
         <p className="py-10 text-center text-sm text-muted-foreground">Laden...</p>
       )}
 
-      {!isLoading && !locationsLoading && viewMode === "map" && (
+      {!isLoading && !locationsLoading && !wpbrLicensesLoading && viewMode === "map" && (
         <TeamhubMap
           companies={filteredCompanies}
           locations={locations}
@@ -288,7 +317,7 @@ export default function Teamhub() {
         />
       )}
 
-      {!isLoading && !locationsLoading && viewMode === "list" && (
+      {!isLoading && !locationsLoading && !wpbrLicensesLoading && viewMode === "list" && (
         <TeamhubListView
           companies={filteredCompanies}
           locationById={locationById}

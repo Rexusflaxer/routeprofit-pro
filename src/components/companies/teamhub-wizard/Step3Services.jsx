@@ -1,6 +1,5 @@
 import React, { useState } from "react";
-import { Label } from "@/components/ui/label";
-import { ChevronDown } from "lucide-react";
+import { AlertTriangle, ChevronDown } from "lucide-react";
 import {
   TEAMHUB_LICENSE_SERVICE_GROUPS,
   TEAMHUB_QUALIFICATION_SERVICE_KEYS,
@@ -19,16 +18,19 @@ export default function TeamhubStep3Services({
   qualifiedServiceTypes,
   technicalCertificationTypes,
   qualificationDataLoading,
+  hasActiveWpbrLicense,
+  hasSelectedTeamhubServices,
 }) {
   const [expandedGroups, setExpandedGroups] = useState({});
 
   const isTeamhubServiceAllowed = (key) =>
-    isTeamhubServiceAllowedForLicense(
-      effectiveWpbrLicenseType,
-      key,
-      qualifiedServiceTypes,
-      technicalCertificationTypes
-    );
+    hasActiveWpbrLicense &&
+      isTeamhubServiceAllowedForLicense(
+        effectiveWpbrLicenseType,
+        key,
+        qualifiedServiceTypes,
+        technicalCertificationTypes
+      );
 
   const toggleService = (key) => {
     if (!isTeamhubServiceAllowed(key)) return;
@@ -42,7 +44,9 @@ export default function TeamhubStep3Services({
   const renderServiceOption = (activity) => {
     const qualificationCheckPending = qualificationDataLoading && isQualificationControlledTeamhubService(activity.key);
     const allowed = !qualificationCheckPending && isTeamhubServiceAllowed(activity.key);
-    const disabledReason = qualificationCheckPending
+    const disabledReason = !hasActiveWpbrLicense
+      ? "Voeg eerst een actieve WPBR-vergunning toe."
+      : qualificationCheckPending
       ? "Medewerkerscertificaten worden geladen."
       : getTeamhubServiceDisabledReason(
           effectiveWpbrLicenseType,
@@ -84,6 +88,26 @@ export default function TeamhubStep3Services({
           Vergunning: {effectiveWpbrLicenseType ? `${effectiveWpbrLicenseType} - ${getWpbrLicenseLabel(effectiveWpbrLicenseType)}` : "Geen actieve WPBR-vergunning"}
         </p>
       </div>
+
+      {!hasActiveWpbrLicense && (
+        <div className="flex gap-3 rounded-md border border-amber-200 bg-amber-50 p-3 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold">Diensten vereisen een actieve WPBR-vergunning</p>
+            <p className="mt-0.5 text-xs">Zonder actieve vergunning kan dit profiel niet zichtbaar worden in Teamhub.</p>
+          </div>
+        </div>
+      )}
+
+      {hasActiveWpbrLicense && !hasSelectedTeamhubServices && (
+        <div className="flex gap-3 rounded-md border border-border bg-muted/30 p-3 text-muted-foreground">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+          <div>
+            <p className="text-sm font-semibold text-foreground">Kies minimaal één dienst</p>
+            <p className="mt-0.5 text-xs">Alleen diensten die passen bij de vergunning en kwalificaties kunnen worden geselecteerd.</p>
+          </div>
+        </div>
+      )}
 
       <div className="space-y-3">
         {/* License-based services */}

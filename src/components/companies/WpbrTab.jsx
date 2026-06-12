@@ -263,9 +263,25 @@ export default function WpbrTab({ companyId, company }) {
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.CompanyWpbrLicense.delete(id),
+    mutationFn: async (id) => {
+      await base44.entities.CompanyWpbrLicense.delete(id);
+      const remainingActiveLicenses = licenses.filter((license) =>
+        license.id !== id &&
+        license.status !== "superseded" &&
+        license.status !== "expired" &&
+        !isExpiredLicense(license)
+      );
+
+      if (company?.teamhub_enabled === true && remainingActiveLicenses.length === 0) {
+        await base44.entities.Company.update(companyId, {
+          teamhub_enabled: false,
+          teamhub_service_types: [],
+        });
+      }
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["wpbr-licenses", companyId] });
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
       setDeleteId(null);
     },
   });

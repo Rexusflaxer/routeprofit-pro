@@ -3,7 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Badge } from "@/components/ui/badge";
 import {
-  getEffectiveWpbrLicenseType,
+  getActiveWpbrLicenseType,
   getActiveTeamhubTechnicalCertificationTypes,
   getQualifiedTeamhubServiceTypes,
   sanitizeTeamhubServiceTypes } from
@@ -93,7 +93,9 @@ export default function TeamhubTab({ companyId, company }) {
     enabled: !!companyId
   });
 
-  const effectiveWpbrLicenseType = getEffectiveWpbrLicenseType(company, wpbrLicenses);
+  const activeWpbrLicenseType = getActiveWpbrLicenseType(wpbrLicenses);
+  const hasActiveWpbrLicense = !!activeWpbrLicenseType;
+  const effectiveWpbrLicenseType = activeWpbrLicenseType;
   const qualificationDataLoading = personnelLoading || personnelCompanyAssignmentsLoading || personnelQualificationsLoading;
   const teamhubReferencesLoading = qualificationDataLoading || companyLocationsLoading || companyLocationAssignmentsLoading || companyAccreditationsLoading;
   const qualifiedServiceTypes = useMemo(() => getQualifiedTeamhubServiceTypes({
@@ -119,6 +121,22 @@ export default function TeamhubTab({ companyId, company }) {
     () => new Set(selectableTeamhubLocations.map((location) => location.id)),
     [selectableTeamhubLocations]
   );
+  const hasSelectableTeamhubLocations = selectableTeamhubLocations.length > 0;
+  const hasValidPublicLocation = !!form.teamhub_public_location_id && selectableTeamhubLocationIds.has(form.teamhub_public_location_id);
+  const sanitizedTeamhubServiceTypes = useMemo(() => (
+    hasActiveWpbrLicense ?
+      sanitizeTeamhubServiceTypes(
+        effectiveWpbrLicenseType,
+        form.teamhub_service_types || [],
+        qualifiedServiceTypes,
+        technicalCertificationTypes
+      ) :
+      []
+  ), [hasActiveWpbrLicense, effectiveWpbrLicenseType, form.teamhub_service_types, qualifiedServiceTypes, technicalCertificationTypes]);
+  const hasSelectedTeamhubServices = sanitizedTeamhubServiceTypes.length > 0;
+  const teamhubSetupReady = hasActiveWpbrLicense && hasValidPublicLocation && hasSelectedTeamhubServices;
+  const hasStoredTeamhubConfiguration = hasTeamhubConfiguration(company) || hasTeamhubConfiguration(form);
+  const needsTeamhubSetup = !teamhubReferencesLoading && hasStoredTeamhubConfiguration && !teamhubSetupReady;
 
   const ensurePublicLocationAssignment = async (locationId) => {
     if (!companyId || !locationId || hasCompanyLocationAssignment(companyLocationAssignments, companyId, locationId)) return;
@@ -138,16 +156,18 @@ export default function TeamhubTab({ companyId, company }) {
   useEffect(() => {
     if (qualificationDataLoading) return;
     setForm((current) => {
-      const sanitized = sanitizeTeamhubServiceTypes(
-        effectiveWpbrLicenseType,
-        current.teamhub_service_types || [],
-        qualifiedServiceTypes,
-        technicalCertificationTypes
-      );
+      const sanitized = hasActiveWpbrLicense ?
+        sanitizeTeamhubServiceTypes(
+          effectiveWpbrLicenseType,
+          current.teamhub_service_types || [],
+          qualifiedServiceTypes,
+          technicalCertificationTypes
+        ) :
+        [];
       if (sanitized.length === (current.teamhub_service_types || []).length) return current;
       return { ...current, teamhub_service_types: sanitized };
     });
-  }, [effectiveWpbrLicenseType, qualificationDataLoading, qualifiedServiceTypes, technicalCertificationTypes, company?.id]);
+  }, [hasActiveWpbrLicense, effectiveWpbrLicenseType, qualificationDataLoading, qualifiedServiceTypes, technicalCertificationTypes, company?.id]);
 
   const saveMutation = useMutation({
     mutationFn: async (payload) => {
@@ -160,6 +180,41 @@ export default function TeamhubTab({ companyId, company }) {
     }
   });
 
+  useEffect(() => {
+    if (teamhubReferencesLoading || saveMutation.isPending || !hasStoredTeamhubConfiguration) return;
+    if (!teamhubSetupReady) setShowWizard(true);
+
+    const nextLocationId = hasValidPublicLocation ? form.teamhub_public_location_id : null;
+    const nextServices = sanitizedTeamhubServiceTypes;
+    const currentServices = form.teamhub_service_types || [];
+    const shouldDisableVisibility = form.teamhub_enabled === true;
+    const shouldClearLocation = form.teamhub_public_location_id !== nextLocationId;
+    const shouldSyncServices =
+      nextServices.length !== currentServices.length ||
+      nextServices.some((service, index) => service !== currentServices[index]);
+
+    if (!shouldDisableVisibility && !shouldClearLocation && !shouldSyncServices) return;
+
+    const payload = {
+      ...(shouldDisableVisibility ? { teamhub_enabled: false } : {}),
+      ...(shouldClearLocation ? { teamhub_public_location_id: nextLocationId } : {}),
+      ...(shouldSyncServices ? { teamhub_service_types: nextServices } : {}),
+    };
+
+    setForm((current) => ({ ...current, ...payload }));
+    saveMutation.mutate(payload);
+  }, [
+    form.teamhub_enabled,
+    form.teamhub_public_location_id,
+    form.teamhub_service_types,
+    hasStoredTeamhubConfiguration,
+    hasValidPublicLocation,
+    sanitizedTeamhubServiceTypes,
+    saveMutation,
+    teamhubReferencesLoading,
+    teamhubSetupReady,
+  ]);
+
   const set = (field, value) => {
     setForm((current) => ({ ...current, [field]: value }));
   };
@@ -169,6 +224,26 @@ export default function TeamhubTab({ companyId, company }) {
     const publicLocationId = form.teamhub_public_location_id && selectableTeamhubLocationIds.has(form.teamhub_public_location_id) ?
     form.teamhub_public_location_id :
     null;
+    const serviceTypes = hasActiveWpbrLicense ?
+      sanitizeTeamhubServiceTypes(
+        effectiveWpbrLicenseType,
+        form.teamhub_service_types || [],
+        qualifiedServiceTypes,
+        technicalCertificationTypes
+      ) :
+      [];
+
+    if (!hasActiveWpbrLicense || !publicLocationId || serviceTypes.length === 0) {
+      setShowWizard(true);
+      setForm((current) => ({
+        ...current,
+        teamhub_enabled: false,
+        teamhub_public_location_id: publicLocationId,
+        teamhub_service_types: serviceTypes,
+      }));
+      return;
+    }
+
     const configuredAt = form.teamhub_configured_at || new Date().toISOString();
 
     const payload = {
@@ -179,12 +254,7 @@ export default function TeamhubTab({ companyId, company }) {
       teamhub_contact_email: form.teamhub_contact_email?.trim() || null,
       teamhub_contact_phone: form.teamhub_contact_phone?.trim() || null,
       teamhub_public_location_id: publicLocationId,
-      teamhub_service_types: sanitizeTeamhubServiceTypes(
-        effectiveWpbrLicenseType,
-        form.teamhub_service_types || [],
-        qualifiedServiceTypes,
-        technicalCertificationTypes
-      ),
+      teamhub_service_types: serviceTypes,
       teamhub_regions: form.teamhub_regions || []
     };
 
@@ -200,11 +270,12 @@ export default function TeamhubTab({ companyId, company }) {
           <div className="min-w-0">
             <div className="flex items-center gap-2">
               <p className="truncate text-sm font-semibold text-foreground">LOQ Teamhub</p>
-              {form.teamhub_enabled ?
+              {form.teamhub_enabled && teamhubSetupReady ?
               <Badge className="bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200">Zichtbaar</Badge> :
 
               <Badge variant="secondary">Niet zichtbaar</Badge>
               }
+              {needsTeamhubSetup && <Badge className="bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200">Instellen nodig</Badge>}
             </div>
             <p className="truncate text-xs text-muted-foreground">Onderaannemersprofiel voor diensten van hoofdaannemers</p>
           </div>
@@ -225,6 +296,10 @@ export default function TeamhubTab({ companyId, company }) {
             technicalCertificationTypes={technicalCertificationTypes}
             qualificationDataLoading={qualificationDataLoading}
             teamhubReferencesLoading={teamhubReferencesLoading}
+            hasActiveWpbrLicense={hasActiveWpbrLicense}
+            hasSelectableTeamhubLocations={hasSelectableTeamhubLocations}
+            hasValidPublicLocation={hasValidPublicLocation}
+            hasSelectedTeamhubServices={hasSelectedTeamhubServices}
             company={company}
           />
         ) : (
@@ -235,6 +310,10 @@ export default function TeamhubTab({ companyId, company }) {
             effectiveWpbrLicenseType={effectiveWpbrLicenseType}
             onEdit={() => setShowWizard(true)}
             onToggleVisibility={() => {
+              if (!teamhubSetupReady) {
+                setShowWizard(true);
+                return;
+              }
               const newEnabled = !form.teamhub_enabled;
               set("teamhub_enabled", newEnabled);
               saveMutation.mutate({

@@ -255,6 +255,16 @@ function isExpiredLicense(license) {
   return license?.valid_until && license.valid_until < today;
 }
 
+export function getActiveWpbrLicense(licenses = []) {
+  return (licenses || [])
+    .filter(license => license?.status !== "superseded" && license?.status !== "expired" && !isExpiredLicense(license) && license.license_type)
+    .sort((a, b) => String(b.valid_until || "").localeCompare(String(a.valid_until || "")))[0] || null;
+}
+
+export function getActiveWpbrLicenseType(licenses = []) {
+  return getActiveWpbrLicense(licenses)?.license_type || null;
+}
+
 function isWithinDateRange(record, referenceDate) {
   if (record?.valid_from && record.valid_from > referenceDate) return false;
   if (record?.valid_until && record.valid_until < referenceDate) return false;
@@ -306,9 +316,7 @@ export function getQualifiedTeamhubServiceTypes({ companyId, personnel = [], ass
 }
 
 export function getEffectiveWpbrLicenseType(company, licenses = []) {
-  const activeLicense = (licenses || [])
-    .filter(license => license?.status !== "superseded" && license?.status !== "expired" && !isExpiredLicense(license) && license.license_type)
-    .sort((a, b) => String(b.valid_until || "").localeCompare(String(a.valid_until || "")))[0];
+  const activeLicense = getActiveWpbrLicense(licenses);
 
   return activeLicense?.license_type || company?.wpbr_license_type || null;
 }

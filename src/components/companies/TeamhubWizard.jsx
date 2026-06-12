@@ -25,18 +25,31 @@ export default function TeamhubWizard({
   technicalCertificationTypes,
   qualificationDataLoading,
   teamhubReferencesLoading,
+  hasActiveWpbrLicense,
+  hasSelectableTeamhubLocations,
+  hasValidPublicLocation,
+  hasSelectedTeamhubServices,
   company,
 }) {
   const [step, setStep] = useState(1);
   const isFirstStep = step === 1;
   const isLastStep = step === STEPS.length;
+  const locationStepComplete = hasActiveWpbrLicense && hasSelectableTeamhubLocations && hasValidPublicLocation;
+  const servicesStepComplete = locationStepComplete && hasSelectedTeamhubServices;
 
   const canContinue = useMemo(() => {
-    if (step === 1) return form.teamhub_enabled ? !!form.teamhub_public_location_id : true;
-    if (step === 2) return true;
-    if (step === 3) return true;
+    if (step === 1) return locationStepComplete;
+    if (step === 2) return servicesStepComplete;
+    if (step === 3) return servicesStepComplete;
     return false;
-  }, [step, form]);
+  }, [step, locationStepComplete, servicesStepComplete]);
+
+  const canOpenStep = (targetStep) => {
+    if (targetStep === 1) return true;
+    if (targetStep === 2) return locationStepComplete;
+    if (targetStep === 3) return servicesStepComplete;
+    return false;
+  };
 
   const handleNext = () => {
     if (!canContinue) return;
@@ -58,7 +71,8 @@ export default function TeamhubWizard({
         {STEPS.map((s, idx) => (
           <div key={s.id} className="flex items-center gap-2">
             <button
-              onClick={() => setStep(s.id)}
+              onClick={() => canOpenStep(s.id) && setStep(s.id)}
+              disabled={!canOpenStep(s.id)}
               className={`flex h-10 w-10 items-center justify-center rounded-md text-sm font-medium transition-colors ${
                 step === s.id
                   ? "bg-primary text-primary-foreground"
@@ -91,6 +105,8 @@ export default function TeamhubWizard({
                 form={form}
                 set={set}
                 selectableTeamhubLocations={selectableTeamhubLocations}
+                hasActiveWpbrLicense={hasActiveWpbrLicense}
+                hasSelectableTeamhubLocations={hasSelectableTeamhubLocations}
               />
             )}
             {step === 2 && (
@@ -101,6 +117,8 @@ export default function TeamhubWizard({
                 qualifiedServiceTypes={qualifiedServiceTypes}
                 technicalCertificationTypes={technicalCertificationTypes}
                 qualificationDataLoading={qualificationDataLoading}
+                hasActiveWpbrLicense={hasActiveWpbrLicense}
+                hasSelectedTeamhubServices={hasSelectedTeamhubServices}
               />
             )}
             {step === 3 && <TeamhubStep4Regions form={form} set={set} />}

@@ -96,8 +96,20 @@ export default function LocationsTab({ companies, companyId = null, company = nu
   });
 
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.CompanyLocation.delete(id),
-    onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["company-locations"] }); setDeleteId(null); },
+    mutationFn: async (id) => {
+      await base44.entities.CompanyLocation.delete(id);
+      if (company?.teamhub_public_location_id === id) {
+        await base44.entities.Company.update(companyId, {
+          teamhub_enabled: false,
+          teamhub_public_location_id: null,
+        });
+      }
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["company-locations"] });
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      setDeleteId(null);
+    },
   });
 
   const openNew = () => { setEditingId(null); setForm(EMPTY_LOC); setShowForm(true); };
