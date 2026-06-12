@@ -985,8 +985,8 @@ export default function CompanyEmailTab({ companyId, company }) {
                 "Sluiten"
               ) : (
                 <>
-                  {settings ? <Edit className="mr-1.5 h-3.5 w-3.5" /> : <Plus className="mr-1.5 h-3.5 w-3.5" />}
-                  {settings ? "Wijzigen" : "Toevoegen"}
+                  <Plus className="mr-1.5 h-3.5 w-3.5" />
+                  Toevoegen
                 </>
               )}
             </Button>
