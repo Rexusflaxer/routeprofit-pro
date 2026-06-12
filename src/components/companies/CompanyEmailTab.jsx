@@ -10,16 +10,20 @@ import {
   AlertCircle,
   AlertTriangle,
   Check,
+  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   Edit,
   ExternalLink,
+  Loader2,
   Mail,
   PauseCircle,
   Plus,
+  Send,
   Server,
   ShieldCheck,
   Trash2,
+  X,
 } from "lucide-react";
 
 const PROVIDERS = [
@@ -327,6 +331,59 @@ function isValidEmail(value) {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(String(value || "").trim());
 }
 
+function escapeHtml(value) {
+  return String(value || "")
+    .replace(/&/g, "&amp;")
+    .replace(/</g, "&lt;")
+    .replace(/>/g, "&gt;")
+    .replace(/"/g, "&quot;")
+    .replace(/'/g, "&#039;");
+}
+
+function formatDateTime(value) {
+  if (!value) return "";
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return "";
+  return date.toLocaleString("nl-NL", {
+    day: "2-digit",
+    month: "2-digit",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
+}
+
+function buildTestMailPayload({ companyId, company, settings, recipient }) {
+  const companyName = company?.display_name || company?.legal_name || "dit bedrijf";
+  const senderLabel = settings?.provider === "platform"
+    ? "LOQ standaardmail"
+    : settings?.from_email || "de gekoppelde mailbox";
+  const subject = `LOQ testmail - ${companyName}`;
+
+  return {
+    company_id: companyId,
+    to: recipient,
+    channel: "operational",
+    subject,
+    text: [
+      `Dit is een testmail vanuit LOQ voor ${companyName}.`,
+      "",
+      `Afzender: ${senderLabel}`,
+      "Als deze mail binnenkomt, werkt de uitgaande e-mailkoppeling.",
+    ].join("\n"),
+    html: `
+      <div style="font-family: Arial, sans-serif; color: #111827; line-height: 1.5;">
+        <h2 style="margin: 0 0 12px; font-size: 18px;">LOQ testmail</h2>
+        <p>Dit is een testmail vanuit LOQ voor <strong>${escapeHtml(companyName)}</strong>.</p>
+        <p style="margin: 16px 0; padding: 12px; border-radius: 8px; background: #f3f4f6;">
+          Afzender: <strong>${escapeHtml(senderLabel)}</strong>
+        </p>
+        <p>Als deze mail binnenkomt, werkt de uitgaande e-mailkoppeling.</p>
+      </div>
+    `,
+  };
+}
+
 function getConnectionSummary(settings) {
   if (!settings) return "Nog niet ingesteld";
   if (settings.provider === "platform") return "LOQ Mail Service";
@@ -534,6 +591,9 @@ export default function CompanyEmailTab({ companyId, company }) {
   const [showWizard, setShowWizard] = useState(false);
   const [errors, setErrors] = useState({});
   const [deleteRequest, setDeleteRequest] = useState(null);
+  const [testMailOpen, setTestMailOpen] = useState(false);
+  const [testRecipient, setTestRecipient] = useState("");
+  const [testMailStatus, setTestMailStatus] = useState({ type: "idle", message: "" });
 
   const { data: settingsList = [], isLoading } = useQuery({
     queryKey: ["company-email-settings", companyId],
@@ -561,6 +621,12 @@ export default function CompanyEmailTab({ companyId, company }) {
     });
     setErrors({});
   }, [company, companyId, settings]);
+
+  useEffect(() => {
+    setTestMailOpen(false);
+    setTestRecipient("");
+    setTestMailStatus({ type: "idle", message: "" });
+  }, [companyId, settings?.id]);
 
   const set = (field, value) => {
     setForm(current => {
@@ -649,6 +715,42 @@ export default function CompanyEmailTab({ companyId, company }) {
     },
   });
 
+  const testMailMutation = useMutation({
+    mutationFn: async ({ recipient }) => {
+      const payload = buildTestMailPayload({ companyId, company, settings, recipient });
+      await base44.functions.invoke("sendCompanyEmail", payload);
+      const now = new Date().toISOString();
+      const saved = settings?.id
+        ? await base44.entities.CompanyEmailSettings.update(settings.id, {
+            last_send_test_at: now,
+            last_checked_at: now,
+            last_error: null,
+          })
+        : null;
+      return { saved, recipient, sentAt: now };
+    },
+    onSuccess: ({ saved, recipient, sentAt }) => {
+      if (saved) {
+        queryClient.setQueryData(["company-email-settings", companyId], (old = []) => {
+          const list = Array.isArray(old) ? old : [];
+          return [saved, ...list.filter(item => item.id !== saved.id)];
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["company-email-settings", companyId] });
+      setTestMailStatus({
+        type: "success",
+        message: `Testmail verzonden naar ${recipient} om ${formatDateTime(sentAt)}.`,
+      });
+    },
+    onError: (error) => {
+      const message = error?.response?.data?.detail
+        || error?.response?.data?.error
+        || error?.message
+        || "Testmail verzenden mislukt.";
+      setTestMailStatus({ type: "error", message });
+    },
+  });
+
   async function startOAuthRedirect(providerOverride) {
     const providerKey = providerOverride || form.provider;
     try {
@@ -689,6 +791,8 @@ export default function CompanyEmailTab({ companyId, company }) {
     setForm(nextForm);
     setStep(targetStep);
     setErrors({});
+    setTestMailOpen(false);
+    setTestMailStatus({ type: "idle", message: "" });
     setShowWizard(true);
   };
 
@@ -801,6 +905,8 @@ export default function CompanyEmailTab({ companyId, company }) {
   const deleteSettings = () => {
     if (!settings?.id || deleteMutation.isPending) return;
     setShowWizard(false);
+    setTestMailOpen(false);
+    setTestMailStatus({ type: "idle", message: "" });
     setDeleteRequest({
       item: settings,
       impactedChannels: getConfiguredChannels(settings),
@@ -810,6 +916,30 @@ export default function CompanyEmailTab({ companyId, company }) {
   const confirmDeleteSettings = () => {
     if (!deleteRequest?.item || deleteMutation.isPending) return;
     deleteMutation.mutate(deleteRequest);
+  };
+
+  const openTestMail = () => {
+    if (!settings || settings.status !== "connected") return;
+    setShowWizard(false);
+    setDeleteRequest(null);
+    setTestRecipient(company?.email || settings.from_email || "");
+    setTestMailStatus({ type: "idle", message: "" });
+    setTestMailOpen(true);
+  };
+
+  const closeTestMail = () => {
+    setTestMailOpen(false);
+    setTestMailStatus({ type: "idle", message: "" });
+  };
+
+  const sendTestMail = () => {
+    const recipient = testRecipient.trim();
+    if (!isValidEmail(recipient)) {
+      setTestMailStatus({ type: "error", message: "Vul een geldig e-mailadres in." });
+      return;
+    }
+    setTestMailStatus({ type: "idle", message: "" });
+    testMailMutation.mutate({ recipient });
   };
 
   if (isLoading) {
@@ -901,6 +1031,7 @@ export default function CompanyEmailTab({ companyId, company }) {
               </thead>
               <tbody>
                 {settings ? (
+                  <>
                   <tr className="border-t border-border">
                     <td className="px-4 py-4">
                       <div className="flex min-w-0 items-center gap-3">
@@ -940,6 +1071,15 @@ export default function CompanyEmailTab({ companyId, company }) {
                         <Button
                           size="sm"
                           variant="outline"
+                          onClick={openTestMail}
+                          disabled={settings.status !== "connected" || testMailMutation.isPending}
+                        >
+                          <Send className="mr-1.5 h-3.5 w-3.5" />
+                          Testmail
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
                           onClick={deleteSettings}
                           disabled={deleteMutation.isPending}
                           className="text-destructive hover:text-destructive"
@@ -950,6 +1090,73 @@ export default function CompanyEmailTab({ companyId, company }) {
                       </div>
                     </td>
                   </tr>
+                  {testMailOpen && (
+                    <tr className="border-t border-primary/20 bg-primary/5">
+                      <td colSpan={6} className="px-4 py-4">
+                        <div className="space-y-3">
+                          <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+                            <div className="min-w-0">
+                              <p className="text-sm font-semibold text-foreground">Naar wie mag de testmail?</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">
+                                LOQ verzendt een korte controlemail via {settings.provider === "platform" ? "de LOQ standaardmail" : settings.from_email || "de gekoppelde mailbox"}.
+                                {settings.last_send_test_at && (
+                                  <> Laatste test: {formatDateTime(settings.last_send_test_at)}.</>
+                                )}
+                              </p>
+                            </div>
+                            <div className="flex flex-col gap-2 sm:flex-row sm:items-center">
+                              <Input
+                                type="email"
+                                value={testRecipient}
+                                onChange={(event) => {
+                                  setTestRecipient(event.target.value);
+                                  if (testMailStatus.type === "error") {
+                                    setTestMailStatus({ type: "idle", message: "" });
+                                  }
+                                }}
+                                onKeyDown={(event) => {
+                                  if (event.key === "Enter") {
+                                    event.preventDefault();
+                                    sendTestMail();
+                                  }
+                                }}
+                                placeholder="naam@bedrijf.nl"
+                                className="h-9 min-w-[240px] sm:w-[320px]"
+                                autoFocus
+                              />
+                              <Button size="sm" onClick={sendTestMail} disabled={testMailMutation.isPending}>
+                                {testMailMutation.isPending ? (
+                                  <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" />
+                                ) : (
+                                  <Send className="mr-1.5 h-3.5 w-3.5" />
+                                )}
+                                {testMailMutation.isPending ? "Verzenden..." : "Versturen"}
+                              </Button>
+                              <Button size="sm" variant="ghost" onClick={closeTestMail} disabled={testMailMutation.isPending}>
+                                <X className="mr-1.5 h-3.5 w-3.5" />
+                                Sluiten
+                              </Button>
+                            </div>
+                          </div>
+                          {testMailStatus.message && (
+                            <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
+                              testMailStatus.type === "success"
+                                ? "border-green-200 bg-green-50 text-green-800 dark:border-green-900 dark:bg-green-950/40 dark:text-green-200"
+                                : "border-destructive/30 bg-destructive/10 text-destructive"
+                            }`}>
+                              {testMailStatus.type === "success" ? (
+                                <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                              ) : (
+                                <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                              )}
+                              <p>{testMailStatus.message}</p>
+                            </div>
+                          )}
+                        </div>
+                      </td>
+                    </tr>
+                  )}
+                  </>
                 ) : (
                   <tr className="border-t border-border">
                     <td colSpan={6} className="px-4 py-8 text-center">
