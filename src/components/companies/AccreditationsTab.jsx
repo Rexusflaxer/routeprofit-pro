@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from "react";
+import React, { useState, useRef, useEffect, useMemo } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -6,10 +6,10 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Archive, Check, ChevronLeft, ChevronRight, Edit, Eye, FileText, Plus, RefreshCw, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, Archive, Check, ChevronLeft, ChevronRight, Edit, Eye, FileText, Plus, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
-import { TECHNICAL_ACCREDITATION_OPTIONS } from "@/lib/teamhubServiceRules";
+import { getEffectiveWpbrLicenseType, getWpbrLicenseLabel, TECHNICAL_ACCREDITATION_OPTIONS } from "@/lib/teamhubServiceRules";
 import { buildManagedFileDescriptor, updateManagedFileSource, uploadManagedFile } from "@/lib/managedFiles";
 
 const DELETE_PASSWORD = "verwijder";
@@ -51,9 +51,9 @@ const OPTIONS_BY_CATEGORY = {
 };
 
 const EMPTY_FORM = {
-  category: "technical_certification",
-  accreditation_type: "borg_e",
-  name: "BORG-E elektronische inbraakbeveiliging",
+  category: "",
+  accreditation_type: "",
+  name: "",
   issuer: "",
   certificate_number: "",
   valid_from: "",
@@ -68,6 +68,199 @@ const EMPTY_FORM = {
   notes: "",
 };
 
+const ACCREDITATION_PRESETS = [
+  {
+    category: "quality_mark",
+    accreditation_type: "veb_pbo_kwaliteitsregeling",
+    label: "VEB PBO Kwaliteitsregeling",
+    issuer: "Vereniging Erkende Beveiligingsbedrijven (VEB)",
+    group: "Particuliere beveiliging",
+    licenseTypes: ["ND", "BD"],
+    activityKeys: ["private_security", "object_security", "mobile_surveillance", "reception_host"],
+    description: "Voor particuliere beveiligingsorganisaties en reguliere beveiligingsdiensten.",
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "nvb_keurmerk_beveiliging",
+    label: "Nederlandse Veiligheidsbranche Keurmerk Beveiliging",
+    issuer: "Nederlandse Veiligheidsbranche",
+    group: "Particuliere beveiliging",
+    licenseTypes: ["ND", "BD"],
+    activityKeys: ["private_security", "object_security", "mobile_surveillance", "reception_host"],
+    description: "Relevant bij reguliere beveiliging, objectbeveiliging en mobiele surveillance.",
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "vvnl_kwaliteitslabel_regulier",
+    label: "VVNL Kwaliteitslabel Reguliere beveiliging",
+    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+    group: "Particuliere beveiliging",
+    licenseTypes: ["ND", "BD"],
+    activityKeys: ["private_security", "object_security", "mobile_surveillance", "reception_host"],
+    description: "Voor reguliere beveiligingsdiensten binnen het veiligheidsdomein.",
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "nvb_keurmerk_evenementenbeveiliging",
+    label: "Nederlandse Veiligheidsbranche Keurmerk Evenementenbeveiliging",
+    issuer: "Nederlandse Veiligheidsbranche",
+    group: "Evenementen en horeca",
+    licenseTypes: ["ND", "HND", "HBD"],
+    activityKeys: ["event_hospitality_security"],
+    description: "Voor bedrijven die evenementenbeveiliging uitvoeren.",
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "nvb_keurmerk_horecabeveiliging",
+    label: "Nederlandse Veiligheidsbranche Keurmerk Horecabeveiliging",
+    issuer: "Nederlandse Veiligheidsbranche",
+    group: "Evenementen en horeca",
+    licenseTypes: ["HND", "HBD"],
+    activityKeys: ["event_hospitality_security"],
+    description: "Voor horecabeveiliging en portiersdiensten.",
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "vvnl_kwaliteitslabel_ehb",
+    label: "VVNL Kwaliteitslabel Evenementen-/horecabeveiliging",
+    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+    group: "Evenementen en horeca",
+    licenseTypes: ["ND", "HND", "HBD"],
+    activityKeys: ["event_hospitality_security"],
+    description: "Voor evenementen- en horecabeveiliging.",
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "nvb_keurmerk_gwt",
+    label: "Nederlandse Veiligheidsbranche Keurmerk GWT",
+    issuer: "Nederlandse Veiligheidsbranche",
+    group: "Geld- en waardentransport",
+    licenseTypes: ["PGW"],
+    activityKeys: ["cash_value_transport"],
+    description: "Voor geld- en waardentransportbedrijven.",
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "nvb_keurmerk_pob",
+    label: "Nederlandse Veiligheidsbranche Keurmerk POB",
+    issuer: "Nederlandse Veiligheidsbranche",
+    group: "Recherche",
+    licenseTypes: ["POB"],
+    activityKeys: ["private_investigation"],
+    description: "Voor particuliere onderzoeksbureaus.",
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "bpob_keurmerk_particulier_onderzoeksbureau",
+    label: "BPOB Keurmerk Particulier Onderzoeksbureau",
+    issuer: "Branchevereniging Particuliere Onderzoeksbureaus (BPOB)",
+    group: "Recherche",
+    licenseTypes: ["POB"],
+    activityKeys: ["private_investigation"],
+    description: "Voor particuliere recherche en onderzoeksbureaus.",
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "vvnl_kwaliteitslabel_verkeersregelaars",
+    label: "VVNL Kwaliteitslabel Verkeersregelaars",
+    issuer: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+    group: "Aanvullende diensten",
+    licenseTypes: [],
+    activityKeys: ["traffic_controller"],
+    description: "Voor bedrijven met verkeersregelaarsdiensten.",
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "nvb_bhv_opleidingsinstituut",
+    label: "NVB-BHV Opleidingsinstituut / instructeursregistratie",
+    issuer: "Nederlandse Vereniging Bedrijfshulpverlening (NVB-BHV)",
+    group: "Aanvullende diensten",
+    licenseTypes: [],
+    activityKeys: ["bhv"],
+    description: "Voor BHV-opleiders en instructeursregistratie.",
+  },
+  {
+    category: "technical_certification",
+    accreditation_type: "borg_e",
+    label: "BORG-E elektronische inbraakbeveiliging",
+    issuer: "CCV / erkende certificatie-instelling",
+    group: "Technische beveiliging",
+    licenseTypes: [],
+    activityKeys: ["security_installation", "technical_security_other"],
+    description: "Voor elektronische inbraakbeveiligingsinstallaties.",
+  },
+  {
+    category: "technical_certification",
+    accreditation_type: "borg_b",
+    label: "BORG-B bouwkundige inbraakbeveiliging",
+    issuer: "CCV / erkende certificatie-instelling",
+    group: "Technische beveiliging",
+    licenseTypes: [],
+    activityKeys: ["security_installation", "technical_security_other"],
+    description: "Voor bouwkundige inbraakbeveiliging.",
+  },
+  {
+    category: "technical_certification",
+    accreditation_type: "veb_4",
+    label: "VEB 4 kwaliteitsregeling",
+    issuer: "Vereniging Erkende Beveiligingsbedrijven (VEB)",
+    group: "Technische beveiliging",
+    licenseTypes: [],
+    activityKeys: ["security_installation", "technical_security_other"],
+    description: "Voor technische beveiligingsbedrijven en installateurs.",
+  },
+  {
+    category: "technical_certification",
+    accreditation_type: "ccv_bmi_leveren",
+    label: "CCV Leveren brandmeldinstallaties",
+    issuer: "CCV / erkende certificatie-instelling",
+    group: "Brandveiligheidstechniek",
+    licenseTypes: [],
+    activityKeys: ["fire_alarm_installation", "fire_alarm_panel_bmc", "technical_security_other"],
+    description: "Voor leveren van brandmeldinstallaties.",
+  },
+  {
+    category: "technical_certification",
+    accreditation_type: "ccv_bmi_onderhoud",
+    label: "CCV Onderhoud brandmeldinstallaties",
+    issuer: "CCV / erkende certificatie-instelling",
+    group: "Brandveiligheidstechniek",
+    licenseTypes: [],
+    activityKeys: ["fire_alarm_installation", "fire_alarm_panel_bmc", "technical_security_other"],
+    description: "Voor onderhoud aan brandmeldinstallaties.",
+  },
+  {
+    category: "technical_certification",
+    accreditation_type: "ccv_bmi_oai_installeren",
+    label: "CCV Installeren BMI/OAI",
+    issuer: "CCV / erkende certificatie-instelling",
+    group: "Brandveiligheidstechniek",
+    licenseTypes: [],
+    activityKeys: ["fire_alarm_installation", "fire_alarm_panel_bmc", "technical_security_other"],
+    description: "Voor installatie van brandmeld- en ontruimingsalarminstallaties.",
+  },
+  {
+    category: "technical_certification",
+    accreditation_type: "ccv_oai",
+    label: "CCV Ontruimingsalarminstallaties",
+    issuer: "CCV / erkende certificatie-instelling",
+    group: "Brandveiligheidstechniek",
+    licenseTypes: [],
+    activityKeys: ["fire_alarm_installation", "fire_alarm_panel_bmc", "technical_security_other"],
+    description: "Voor ontruimingsalarminstallaties.",
+  },
+];
+
+const MANUAL_ACCREDITATION_PRESET = {
+  category: "other",
+  accreditation_type: "other",
+  label: "Andere erkenning of certificering",
+  issuer: "",
+  group: "Overig",
+  description: "Gebruik dit wanneer de erkenning niet tussen de voorgestelde opties staat.",
+  relevanceReasons: ["Handmatig"],
+};
+
 function optionLabel(category, value) {
   return (OPTIONS_BY_CATEGORY[category] || [])
     .find(o => o.key === value)?.label || value || "Erkenning";
@@ -75,6 +268,95 @@ function optionLabel(category, value) {
 
 function categoryLabel(category) {
   return CATEGORY_OPTIONS.find(o => o.key === category)?.label || category || "Erkenning";
+}
+
+function presetKey(preset) {
+  return `${preset.category}:${preset.accreditation_type}`;
+}
+
+function companyActivityKeys(company) {
+  return [...new Set([
+    company?.primary_activity,
+    ...(company?.activities || []),
+    ...(company?.teamhub_service_types || []),
+  ].filter(Boolean))];
+}
+
+function presetRelevanceReasons(preset, activityKeys, licenseType) {
+  const reasons = [];
+  if (licenseType && preset.licenseTypes?.includes(licenseType)) {
+    reasons.push(`${licenseType} - ${getWpbrLicenseLabel(licenseType)}`);
+  }
+  const matchedActivities = (preset.activityKeys || []).filter(key => activityKeys.includes(key));
+  if (matchedActivities.length > 0) {
+    reasons.push("Past bij activiteiten");
+  }
+  return reasons;
+}
+
+function relevantAccreditationPresets(company, licenseType, activeAccreditations = []) {
+  const activityKeys = companyActivityKeys(company);
+  const existingKeys = new Set(
+    (activeAccreditations || [])
+      .map(item => item.category && item.accreditation_type ? `${item.category}:${item.accreditation_type}` : null)
+      .filter(Boolean)
+  );
+
+  const relevant = ACCREDITATION_PRESETS
+    .map(preset => ({
+      ...preset,
+      relevanceReasons: presetRelevanceReasons(preset, activityKeys, licenseType),
+      alreadyRegistered: existingKeys.has(presetKey(preset)),
+    }))
+    .filter(preset => preset.relevanceReasons.length > 0)
+    .sort((a, b) => {
+      if (a.alreadyRegistered !== b.alreadyRegistered) return a.alreadyRegistered ? 1 : -1;
+      return a.group.localeCompare(b.group, "nl") || a.label.localeCompare(b.label, "nl");
+    });
+
+  if (relevant.length > 0) return relevant;
+
+  return [
+    {
+      category: "quality_mark",
+      accreditation_type: "iso_9001",
+      label: "ISO 9001",
+      issuer: "",
+      group: "Algemeen",
+      description: "Algemeen kwaliteitsmanagementcertificaat.",
+      relevanceReasons: ["Algemeen toepasbaar"],
+      alreadyRegistered: existingKeys.has("quality_mark:iso_9001"),
+    },
+    {
+      category: "quality_mark",
+      accreditation_type: "iso_27001",
+      label: "ISO 27001",
+      issuer: "",
+      group: "Algemeen",
+      description: "Informatiebeveiliging en kwaliteitsborging.",
+      relevanceReasons: ["Algemeen toepasbaar"],
+      alreadyRegistered: existingKeys.has("quality_mark:iso_27001"),
+    },
+    {
+      category: "quality_mark",
+      accreditation_type: "vca",
+      label: "VCA",
+      issuer: "",
+      group: "Algemeen",
+      description: "Veiligheid, gezondheid en milieu op de werkvloer.",
+      relevanceReasons: ["Algemeen toepasbaar"],
+      alreadyRegistered: existingKeys.has("quality_mark:vca"),
+    },
+  ];
+}
+
+function groupPresets(presets) {
+  return Object.entries(
+    (presets || []).reduce((groups, preset) => {
+      const group = preset.group || "Overig";
+      return { ...groups, [group]: [...(groups[group] || []), preset] };
+    }, {})
+  );
 }
 
 function isArchivedStatus(status) {
@@ -140,7 +422,7 @@ function DeleteConfirmBar({ label, onConfirm, onCancel, isPending }) {
 }
 
 function WizardSteps({ step }) {
-  const steps = ["Gegevens", "Document"];
+  const steps = ["Erkenning", "Gegevens", "Document"];
   return (
     <div className="flex items-center gap-1 mb-4">
       {steps.map((s, i) => (
@@ -154,6 +436,98 @@ function WizardSteps({ step }) {
           {i < steps.length - 1 && <div className={`h-px flex-1 ${i + 1 < step ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />}
         </React.Fragment>
       ))}
+    </div>
+  );
+}
+
+function AccreditationPresetCard({ preset, selected, onSelect }) {
+  return (
+    <button
+      type="button"
+      onClick={() => onSelect(preset)}
+      className={`group flex h-full flex-col rounded-md border p-3 text-left transition-colors ${
+        selected
+          ? "border-primary bg-primary/10 shadow-sm"
+          : "border-border bg-card hover:border-primary/50 hover:bg-muted/40"
+      }`}
+    >
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <p className="text-sm font-semibold text-foreground">{preset.label}</p>
+          <p className="mt-1 text-xs text-muted-foreground">{preset.issuer || categoryLabel(preset.category)}</p>
+        </div>
+        {selected && <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
+      </div>
+      <p className="mt-2 text-xs leading-5 text-muted-foreground">{preset.description}</p>
+      <div className="mt-3 flex flex-wrap gap-1.5">
+        {(preset.relevanceReasons || []).map(reason => (
+          <Badge key={reason} variant="secondary" className="text-[11px]">
+            {reason}
+          </Badge>
+        ))}
+        {preset.alreadyRegistered && (
+          <Badge variant="outline" className="text-[11px] text-amber-600 border-amber-300">
+            Staat al actief
+          </Badge>
+        )}
+      </div>
+    </button>
+  );
+}
+
+function AccreditationPresetStep({ presets, manualPreset, selectedKey, onSelect, licenseType }) {
+  const groups = groupPresets(presets);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <p className="text-sm font-semibold text-foreground">Kies een vooraf ingestelde erkenning</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            We tonen alleen suggesties die passen bij de actieve WPBR-vergunning en activiteiten van dit bedrijf.
+          </p>
+        </div>
+        {licenseType && (
+          <Badge variant="outline" className="text-xs">
+            WPBR {licenseType}
+          </Badge>
+        )}
+      </div>
+
+      {groups.map(([group, groupPresetsForGroup]) => (
+        <section key={group} className="space-y-2">
+          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group}</p>
+          <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
+            {groupPresetsForGroup.map(preset => (
+              <AccreditationPresetCard
+                key={presetKey(preset)}
+                preset={preset}
+                selected={selectedKey === presetKey(preset)}
+                onSelect={onSelect}
+              />
+            ))}
+          </div>
+        </section>
+      ))}
+
+      <div className="rounded-md border border-dashed border-border bg-muted/20 p-3">
+        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-foreground">Staat de juiste erkenning er niet tussen?</p>
+            <p className="mt-1 text-xs text-muted-foreground">Voeg dan handmatig een andere erkenning of certificering toe.</p>
+          </div>
+          <Button
+            type="button"
+            variant={selectedKey === presetKey(manualPreset) ? "default" : "outline"}
+            size="sm"
+            className="gap-2 whitespace-nowrap"
+            onClick={() => onSelect(manualPreset)}
+          >
+            <Search className="h-4 w-4" />
+            Handmatig toevoegen
+          </Button>
+        </div>
+      </div>
     </div>
   );
 }
@@ -277,6 +651,12 @@ export default function AccreditationsTab({ companyId, company }) {
   const { data: accreditations = [] } = useQuery({
     queryKey: ["company-accreditations", companyId],
     queryFn: () => base44.entities.CompanyAccreditation.filter({ company_id: companyId }, "-created_date"),
+    enabled: !!companyId,
+  });
+
+  const { data: wpbrLicenses = [] } = useQuery({
+    queryKey: ["wpbr-licenses", companyId],
+    queryFn: () => base44.entities.CompanyWpbrLicense.filter({ company_id: companyId }, "-created_date"),
     enabled: !!companyId,
   });
 
@@ -404,10 +784,31 @@ export default function AccreditationsTab({ companyId, company }) {
     setForm(current => ({ ...current, accreditation_type: type, name: optionLabel(current.category, type) }));
   };
 
+  const selectPreset = (preset) => {
+    setForm(current => ({
+      ...current,
+      category: preset.category,
+      accreditation_type: preset.accreditation_type,
+      name: presetKey(preset) === presetKey(MANUAL_ACCREDITATION_PRESET) ? "" : preset.label,
+      issuer: preset.issuer || "",
+    }));
+    setErrors(current => ({ ...current, accreditation_type: undefined, name: undefined }));
+  };
+
   const openNew = () => {
     setEditingId(null);
     setRenewingId(null);
     setIsArchiveEntry(false);
+    setForm(EMPTY_FORM);
+    setErrors({});
+    setWizardStep(1);
+    setShowWizard(true);
+  };
+
+  const openArchiveEntry = () => {
+    setEditingId(null);
+    setRenewingId(null);
+    setIsArchiveEntry(true);
     setForm(EMPTY_FORM);
     setErrors({});
     setWizardStep(1);
@@ -436,7 +837,7 @@ export default function AccreditationsTab({ companyId, company }) {
       notes: item.notes || "",
     });
     setErrors({});
-    setWizardStep(1);
+    setWizardStep(2);
     setShowWizard(true);
   };
 
@@ -453,7 +854,7 @@ export default function AccreditationsTab({ companyId, company }) {
       status: "active",
     });
     setErrors({});
-    setWizardStep(1);
+    setWizardStep(2);
     setShowWizard(true);
   };
 
@@ -477,6 +878,9 @@ export default function AccreditationsTab({ companyId, company }) {
 
   const validateStep1 = () => {
     const e = {};
+    if (!form.category || !form.accreditation_type) {
+      e.accreditation_type = "Kies eerst een erkenning.";
+    }
     if (!isKnownType(form.category, form.accreditation_type) && !form.name?.trim()) {
       e.name = "Naam is verplicht";
     }
@@ -538,9 +942,18 @@ export default function AccreditationsTab({ companyId, company }) {
 
   const activeAccreditations = accreditations.filter(a => !isArchivedStatus(a.status));
   const archivedAccreditations = accreditations.filter(a => isArchivedStatus(a.status) && a.document_file_url);
+  const effectiveWpbrLicenseType = useMemo(
+    () => getEffectiveWpbrLicenseType(company, wpbrLicenses),
+    [company, wpbrLicenses]
+  );
+  const suggestedPresets = useMemo(
+    () => relevantAccreditationPresets(company, effectiveWpbrLicenseType, activeAccreditations),
+    [company, effectiveWpbrLicenseType, activeAccreditations]
+  );
+  const selectedPresetKey = form.category && form.accreditation_type ? `${form.category}:${form.accreditation_type}` : "";
   const itemToDelete = accreditations.find(item => item.id === deleteId);
   const isRenewing = !!renewingId;
-  const documentRequired = wizardStep === 2 && (isArchiveEntry || !editingId || form.status === "active");
+  const documentRequired = wizardStep === 3 && (isArchiveEntry || !editingId || form.status === "active");
   const missingRequiredDocument = documentRequired && !form.document_file_url;
   const currentFormDocument = withCurrentDocumentDescriptor(form);
   const currentFormDocumentFilename = currentFormDocument.document_download_filename || currentFormDocument.document_filename || "Document toegevoegd";
@@ -580,6 +993,25 @@ export default function AccreditationsTab({ companyId, company }) {
               <motion.div key={wizardStep} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
 
                 {wizardStep === 1 && (
+                  <div className="space-y-4">
+                    <AccreditationPresetStep
+                      presets={suggestedPresets}
+                      manualPreset={MANUAL_ACCREDITATION_PRESET}
+                      selectedKey={selectedPresetKey}
+                      onSelect={selectPreset}
+                      licenseType={effectiveWpbrLicenseType}
+                    />
+                    {errors.accreditation_type && <p className="text-xs text-destructive">{errors.accreditation_type}</p>}
+                    <div className="flex justify-between pt-1">
+                      <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
+                      <Button size="sm" onClick={() => { if (form.category && form.accreditation_type) setWizardStep(2); else setErrors(er => ({ ...er, accreditation_type: "Kies eerst een erkenning." })); }}>
+                        Volgende <ChevronRight className="w-4 h-4 ml-1" />
+                      </Button>
+                    </div>
+                  </div>
+                )}
+
+                {wizardStep === 2 && (
                   <div className="space-y-3">
                     {isRenewing ? (
                       <div className="grid grid-cols-1 gap-3 lg:grid-cols-4">
@@ -681,15 +1113,22 @@ export default function AccreditationsTab({ companyId, company }) {
                       })()
                     )}
                     <div className="flex justify-between pt-1">
-                      <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
-                      <Button size="sm" onClick={() => { if (validateStep1()) setWizardStep(2); }}>
+                      <div className="flex gap-2">
+                        {!editingId && !isRenewing && (
+                          <Button variant="ghost" size="sm" onClick={() => setWizardStep(1)}>
+                            <ChevronLeft className="w-4 h-4 mr-1" /> Terug
+                          </Button>
+                        )}
+                        <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
+                      </div>
+                      <Button size="sm" onClick={() => { if (validateStep1()) setWizardStep(3); }}>
                         Volgende <ChevronRight className="w-4 h-4 ml-1" />
                       </Button>
                     </div>
                   </div>
                 )}
 
-                {wizardStep === 2 && (
+                {wizardStep === 3 && (
                   <div className="space-y-4">
                     <p className="text-sm font-medium text-foreground">Bewijsstuk {editingId ? "bijwerken" : "uploaden"}</p>
                     {documentRequired && (
@@ -723,7 +1162,7 @@ export default function AccreditationsTab({ companyId, company }) {
                     )}
 
                     <div className="flex justify-between pt-1">
-                      <Button variant="ghost" size="sm" onClick={() => setWizardStep(1)}>
+                      <Button variant="ghost" size="sm" onClick={() => setWizardStep(2)}>
                         <ChevronLeft className="w-4 h-4 mr-1" /> Terug
                       </Button>
                       <div className="flex gap-2">
@@ -756,7 +1195,7 @@ export default function AccreditationsTab({ companyId, company }) {
                 <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <ChevronLeft className="w-3 h-3 mr-1" /> Actieve erkenningen
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(true); setWizardStep(1); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
+                <Button size="sm" variant="outline" onClick={openArchiveEntry} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <Plus className="w-3 h-3 mr-1" /> Voeg oude erkenning in archief
                 </Button>
               </>
