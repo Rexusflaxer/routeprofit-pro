@@ -5,13 +5,10 @@ import { useDebouncedCallback } from "@/hooks/useDebouncedCallback";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Plus, Trash2, Edit, Eye, Upload, X, Check, ChevronRight, ChevronLeft, FileText, AlertTriangle } from "lucide-react";
+import { Plus, Trash2, Edit, X, Check, ChevronRight, ChevronLeft, AlertTriangle } from "lucide-react";
 import { motion, AnimatePresence } from "framer-motion";
-import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
-import { buildManagedFileDescriptor, syncManagedFileDescriptor, uploadManagedFile } from "@/lib/managedFiles";
+import { buildManagedFileDescriptor, syncManagedFileDescriptor } from "@/lib/managedFiles";
 
 const ACCOUNT_TYPES = [
   { key: "normal", label: "Normale rekening", desc: "Standaard bedrijfsrekening" },
@@ -35,7 +32,7 @@ const EMPTY_FORM = {
 };
 
 function WizardSteps({ step }) {
-  const steps = ["Type", "Gegevens", "Document"];
+  const steps = ["Type", "Gegevens"];
   const CheckIcon = () => (
     <svg className="w-4 h-4" fill="currentColor" viewBox="0 0 20 20">
       <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
@@ -101,8 +98,6 @@ export default function CompanyBankTab({ companies }) {
   const [showWizard, setShowWizard] = useState(false);
   const [editingId, setEditingId] = useState(null);
   const [step, setStep] = useState(1);
-  const [uploading, setUploading] = useState(false);
-  const [formPreviewOpen, setFormPreviewOpen] = useState(false);
   const [form, setForm] = useState(EMPTY_FORM);
   const [errors, setErrors] = useState({});
   const [deleteId, setDeleteId] = useState(null);
@@ -232,7 +227,6 @@ export default function CompanyBankTab({ companies }) {
 
   const cancelWizard = () => {
     setShowWizard(false);
-    setFormPreviewOpen(false);
     setEditingId(null);
     setStep(1);
     setForm(EMPTY_FORM);
@@ -267,7 +261,7 @@ export default function CompanyBankTab({ companies }) {
   const validateStep2 = () => {
     const e = {};
     const cleanIban = form.iban.replace(/\s/g, "");
-    const ibanPattern = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{18,34}$/;
+    const ibanPattern = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/;
     if (!cleanIban) e.iban = "Verplicht";
     else if (cleanIban.length < 15) e.iban = "IBAN te kort";
     else if (!ibanPattern.test(cleanIban)) e.iban = "Ongeldig IBAN formaat";
@@ -275,41 +269,9 @@ export default function CompanyBankTab({ companies }) {
     return Object.keys(e).length === 0;
   };
 
-  const handleUpload = async (file) => {
-    setUploading(true);
-    try {
-      const ibanDisplay = form.iban_masked || form.iban || "rekening";
-      const result = await uploadManagedFile({
-        file,
-        ownerType: "company",
-        ownerId: companyId,
-        companyId,
-        ownerLabel: company?.display_name || company?.legal_name || "Bedrijf",
-        domain: "compliance",
-        category: "company_bank_account",
-        sourceEntity: "CompanyBankAccount",
-        sourceField: "proof_file_url",
-        documentLabel: `Bankbewijs ${ibanDisplay}`,
-        documentNumber: ibanDisplay,
-        isSensitive: true,
-        folderSegments: ["bank", ibanDisplay],
-      });
-      setForm((f) => ({
-        ...f,
-        proof_file_url: result.file_url,
-        proof_file_id: result.managed_file_id,
-        proof_download_filename: result.download_filename,
-        proof_logical_path: result.logical_path,
-      }));
-    } finally {
-      setUploading(false);
-    }
-  };
-
   const set = (field, val) => setForm((f) => ({ ...f, [field]: val }));
 
   const accountToDelete = accounts.find(a => a.id === deleteId);
-  const currentFormDocumentFilename = form.proof_download_filename || form.proof_file_url?.split("/").pop() || "Document toegevoegd";
 
   return (
     <div className="flex flex-col h-full">
@@ -340,7 +302,7 @@ export default function CompanyBankTab({ companies }) {
             className="rounded-none border-0 border-b border-primary/30 bg-muted/20 p-5 overflow-hidden"
           >
             {editingId && <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">Rekening bewerken</p>}
-            <WizardSteps step={editingId ? step - 1 : step} />
+            <WizardSteps step={step} />
 
             <div className="relative">
               <AnimatePresence mode="wait">
@@ -398,15 +360,16 @@ export default function CompanyBankTab({ companies }) {
                         </div>
                         <div className="space-y-1">
                           <Label>Bank</Label>
-                          <Input value={form.bank_name} onChange={(e) => set("bank_name", e.target.value)} />
+                          <Input value={form.bank_name} onChange={(e) => set("bank_name", e.target.value)} placeholder="Wordt automatisch ingevuld na IBAN" />
                         </div>
                         <div className="col-span-2 space-y-1">
                           <Label>BIC</Label>
-                          <Input value={form.bic} onChange={(e) => set("bic", e.target.value)} placeholder="bijv. ABNANL2A" />
+                          <Input value={form.bic} onChange={(e) => set("bic", e.target.value)} placeholder="Wordt automatisch ingevuld na IBAN" />
                         </div>
                         <div className="col-span-2 space-y-1">
-                          <Label>Opmerkingen</Label>
-                          <Input value={form.notes} onChange={(e) => set("notes", e.target.value)} />
+                          <Label>Referentienaam <span className="font-normal text-muted-foreground">(optioneel)</span></Label>
+                          <Input value={form.notes} onChange={(e) => set("notes", e.target.value)} placeholder="Bijv. Hoofdrekening, G-rekening loonheffingen of incasso" />
+                          <p className="text-xs text-muted-foreground">Gebruik dit om de bankrekening later makkelijk te herkennen.</p>
                         </div>
                       </div>
                       <div className="flex justify-between pt-1">
@@ -415,45 +378,9 @@ export default function CompanyBankTab({ companies }) {
                         ) : (
                           <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
                         )}
-                        <Button size="sm" onClick={() => { if (validateStep2()) setStep(3); }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
-                      </div>
-                    </div>
-                  )}
-
-                  {/* Step 3: Document */}
-                  {step === 3 && (
-                    <div className="space-y-4">
-                      <p className="text-sm font-medium text-foreground">Bankbewijs {editingId ? "bijwerken" : "uploaden"}</p>
-                      {!editingId && <p className="text-xs text-muted-foreground">Upload een kopie van het bankbewijs (PDF of afbeelding).</p>}
-
-                      {form.proof_file_url ? (
-                        <div className="flex items-center gap-2 p-3 rounded-lg border border-border bg-card">
-                          <FileText className="w-4 h-4 text-blue-600 shrink-0" />
-                          <span className="text-sm text-muted-foreground flex-1 truncate">{currentFormDocumentFilename}</span>
-                          <Button type="button" variant="ghost" size="sm" onClick={() => setFormPreviewOpen(true)} className="h-7 px-2 text-xs text-blue-600 hover:text-blue-700">
-                            <Eye className="w-3.5 h-3.5" /> Bekijken
-                          </Button>
-                          <button onClick={() => { setFormPreviewOpen(false); setForm((f) => ({ ...f, proof_file_url: "", proof_file_id: "", proof_download_filename: "", proof_logical_path: "" })); }} className="text-muted-foreground hover:text-destructive">
-                            <X className="w-4 h-4" />
-                          </button>
-                        </div>
-                      ) : (
-                        <label className="flex flex-col items-center justify-center gap-2 p-6 rounded-lg border-2 border-dashed border-border hover:border-primary cursor-pointer transition-colors">
-                          <input type="file" accept=".pdf,image/*" className="hidden" onChange={(e) => e.target.files?.[0] && handleUpload(e.target.files[0])} />
-                          <Upload className="w-6 h-6 text-muted-foreground" />
-                          <span className="text-sm text-muted-foreground">{uploading ? "Uploaden..." : "Klik om document te uploaden"}</span>
-                          <span className="text-xs text-muted-foreground">PDF of afbeelding</span>
-                        </label>
-                      )}
-
-                      <div className="flex justify-between pt-1">
-                        <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                        <div className="flex gap-2">
-                          <Button variant="outline" size="sm" onClick={cancelWizard}>Annuleren</Button>
-                          <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
-                            <Check className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : (editingId ? "Wijzigingen opslaan" : "Rekening opslaan")}
-                          </Button>
-                        </div>
+                        <Button size="sm" onClick={() => { if (validateStep2()) saveMutation.mutate(form); }} disabled={saveMutation.isPending || lookingUpIban}>
+                          <Check className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : (editingId ? "Wijzigingen opslaan" : "Rekening opslaan")}
+                        </Button>
                       </div>
                     </div>
                   )}
@@ -484,6 +411,7 @@ export default function CompanyBankTab({ companies }) {
           <div key={acc.id} className="flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
             <div className="flex-1 min-w-0">
               <span className="text-sm font-medium text-foreground">{acc.iban_masked || acc.iban}</span>
+              {acc.notes && <span className="text-xs text-muted-foreground ml-2">{acc.notes}</span>}
               {acc.account_holder_name && <span className="text-xs text-muted-foreground ml-2">{acc.account_holder_name}</span>}
               {acc.account_type === "g_account" && <span className="ml-2 text-xs text-amber-600 inline-flex items-center gap-1"><AlertTriangle className="w-3 h-3" /> G-rekening</span>}
             </div>
@@ -500,14 +428,6 @@ export default function CompanyBankTab({ companies }) {
         ))}
       </div>
 
-      <ManagedFilePreviewDialog
-        open={formPreviewOpen}
-        onOpenChange={setFormPreviewOpen}
-        managedFileId={form.proof_file_id}
-        fileUrl={form.proof_file_url}
-        filename={currentFormDocumentFilename}
-        title="Bankbewijs bekijken"
-      />
     </div>
   );
 }

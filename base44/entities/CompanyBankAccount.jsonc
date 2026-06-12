@@ -120,7 +120,8 @@
       "type": [
         "string",
         "null"
-      ]
+      ],
+      "description": "Optionele referentienaam om de bankrekening in de interface te herkennen."
     }
   },
   "required": [
