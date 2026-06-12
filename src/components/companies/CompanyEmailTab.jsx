@@ -469,9 +469,7 @@ function ProviderVisual({ providerKey }) {
   if (providerKey === "google_workspace") {
     return (
       <div className="flex h-9 w-12 items-center justify-center rounded-md border border-border bg-background">
-        <div className="flex items-center text-2xl font-semibold leading-none tracking-normal">
-          <span className="text-[#4285f4]">G</span>
-        </div>
+        <img src="/google-g-logo.png" alt="Google" className="h-6 w-6 object-contain" />
       </div>
     );
   }
