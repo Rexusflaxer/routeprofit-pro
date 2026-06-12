@@ -25,6 +25,10 @@ const CATEGORY_OPTIONS = [
 const QUALITY_OPTIONS = [
   { key: "iso_9001", label: "ISO 9001" },
   { key: "iso_27001", label: "ISO/IEC 27001" },
+  { key: "iso_14001", label: "ISO 14001" },
+  { key: "iso_45001", label: "ISO 45001" },
+  { key: "iso_18788", label: "ISO 18788" },
+  { key: "iso_22301", label: "ISO 22301" },
   { key: "vca", label: "VCA" },
   { key: "veb_pbo_kwaliteitsregeling", label: "VEB PBO Kwaliteitsregeling" },
   { key: "nvb_keurmerk_beveiliging", label: "Nederlandse Veiligheidsbranche Keurmerk Beveiliging" },
@@ -83,8 +87,8 @@ const ISSUER_LOGO_RULES = [
     match: ({ issuer, accreditationType }) => /nederlandse veiligheidsbranche/i.test(issuer) || accreditationType?.startsWith("nvb_keurmerk"),
   },
   {
-    shortLabel: "SFV",
-    logoUrl: "https://veiligheidsdomein.nl/wp-content/uploads/2022/07/VVNL_Logo_Blauw_L-300x162.png",
+    shortLabel: "KVL",
+    logoUrl: "https://jouwveiligheidsdomein.nl/wp-content/uploads/2023/10/VVNL_kwaliteitslabel_RGB-1-300x96.png",
     match: ({ issuer, accreditationType, label }) => /veiligheidsdomein|sociaal fonds|sfv|vvnl/i.test(`${issuer} ${label}`) || accreditationType?.startsWith("vvnl_"),
   },
   {
@@ -133,10 +137,15 @@ function issuerForDisplay(issuer = "", accreditationType = "") {
 function IssuerLogo({ issuer, accreditationType, label, className = "" }) {
   const [failed, setFailed] = useState(false);
   const visual = issuerVisual({ issuer, accreditationType, label });
+  const fallbackClass = visual.shortLabel === "ISO"
+    ? "border-blue-800 bg-blue-950 text-white tracking-wide"
+    : visual.shortLabel === "VCA"
+      ? "border-amber-300 bg-amber-100 text-amber-900 dark:border-amber-700 dark:bg-amber-950 dark:text-amber-200"
+      : "border-border bg-muted text-muted-foreground";
 
   if (!visual.logoUrl || failed) {
     return (
-      <div className={`flex items-center justify-center rounded-md border border-border bg-muted text-[10px] font-semibold text-muted-foreground ${className}`}>
+      <div className={`flex items-center justify-center rounded-md border text-[10px] font-semibold ${fallbackClass} ${className}`}>
         {visual.shortLabel}
       </div>
     );
@@ -335,7 +344,7 @@ const GENERAL_ACCREDITATION_PRESETS = [
     label: "ISO 9001",
     issuer: "Erkende certificatie-instelling",
     group: "Algemene ISO-certificeringen",
-    description: "Kwaliteitsmanagementsysteem voor consistente dienstverlening en procesborging.",
+    description: "Kwaliteitsmanagement: legt processen, verantwoordelijkheden, interne audits en continue verbetering vast zodat dienstverlening aantoonbaar beheerst is.",
     defaultReasons: ["Optioneel"],
     alwaysSuggest: true,
   },
@@ -345,7 +354,49 @@ const GENERAL_ACCREDITATION_PRESETS = [
     label: "ISO/IEC 27001",
     issuer: "Erkende certificatie-instelling",
     group: "Algemene ISO-certificeringen",
-    description: "Informatiebeveiligingsmanagement voor organisaties die gevoelige klant- of objectinformatie verwerken.",
+    description: "Informatiebeveiliging: borgt risicoanalyse, toegangsbeheer, incidentafhandeling en bescherming van klant-, object- en personeelsgegevens.",
+    defaultReasons: ["Optioneel"],
+    alwaysSuggest: true,
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "iso_45001",
+    label: "ISO 45001",
+    issuer: "Erkende certificatie-instelling",
+    group: "Algemene ISO-certificeringen",
+    description: "Arbomanagement: helpt aantonen dat veilig en gezond werken structureel is georganiseerd voor beveiligers, supervisors en uitvoerend personeel.",
+    defaultReasons: ["Optioneel"],
+    alwaysSuggest: true,
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "iso_14001",
+    label: "ISO 14001",
+    issuer: "Erkende certificatie-instelling",
+    group: "Algemene ISO-certificeringen",
+    description: "Milieumanagement: relevant bij aanbestedingen en grotere opdrachtgevers wanneer duurzaamheid, vervoer, afval en energie aantoonbaar beheerst moeten zijn.",
+    defaultReasons: ["Optioneel"],
+    alwaysSuggest: true,
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "iso_22301",
+    label: "ISO 22301",
+    issuer: "Erkende certificatie-instelling",
+    group: "Algemene ISO-certificeringen",
+    description: "Business continuity: gericht op continuiteit van kritieke processen, bijvoorbeeld meldkamer-, alarmopvolging- en operationele dienstverlening.",
+    defaultReasons: ["Optioneel"],
+    alwaysSuggest: true,
+  },
+  {
+    category: "quality_mark",
+    accreditation_type: "iso_18788",
+    label: "ISO 18788",
+    issuer: "Erkende certificatie-instelling",
+    group: "Beveiligingsspecifieke ISO-certificeringen",
+    licenseTypes: ["ND", "BD", "HND", "HBD", "PGW", "PAC", "POB"],
+    activityKeys: ["private_security", "object_security", "mobile_surveillance", "reception_host", "event_hospitality_security", "cash_value_transport", "private_investigation"],
+    description: "Managementsysteem voor private security operations: internationaal kader voor risicobeheersing, wettelijke naleving, mensenrechten en operationele beveiligingsdiensten.",
     defaultReasons: ["Optioneel"],
     alwaysSuggest: true,
   },
@@ -370,6 +421,45 @@ const MANUAL_ACCREDITATION_PRESET = {
   relevanceReasons: ["Handmatig"],
 };
 
+const BRANCH_REQUIRED_ACCREDITATION_KEYS = {
+  nederlandse_veiligheidsbranche: {
+    mkb: ["quality_mark:nvb_keurmerk_beveiliging"],
+    ehb: ["quality_mark:nvb_keurmerk_evenementenbeveiliging", "quality_mark:nvb_keurmerk_horecabeveiliging"],
+    gwt: ["quality_mark:nvb_keurmerk_gwt"],
+    pob: ["quality_mark:nvb_keurmerk_pob"],
+  },
+  vereniging_veiligheidsdomein_nederland: {
+    reguliere_beveiliging: ["quality_mark:vvnl_kwaliteitslabel_regulier"],
+    evenementen_horeca: ["quality_mark:vvnl_kwaliteitslabel_ehb"],
+  },
+  veb: {
+    techniek: ["technical_certification:veb_4"],
+    pbo: ["quality_mark:veb_pbo_kwaliteitsregeling"],
+  },
+  nvb_bhv: {
+    opleidingsinstituut_instructeur: ["quality_mark:nvb_bhv_opleidingsinstituut"],
+  },
+};
+
+const BRANCH_MEMBERSHIP_LABELS = {
+  nederlandse_veiligheidsbranche: "Nederlandse Veiligheidsbranche",
+  vereniging_veiligheidsdomein_nederland: "Vereniging Veiligheidsdomein Nederland (VVNL)",
+  veb: "Vereniging Erkende Beveiligingsbedrijven (VEB)",
+  nvb_bhv: "Nederlandse Vereniging Bedrijfshulpverlening (NVB-BHV)",
+};
+
+const BRANCH_MEMBERSHIP_TYPE_LABELS = {
+  mkb: "MKB - particuliere beveiliging",
+  ehb: "EHB - evenementen en horeca",
+  gwt: "GWT - geld- en waardetransport",
+  pob: "POB - particulier onderzoeksbureau",
+  reguliere_beveiliging: "Reguliere beveiliging",
+  evenementen_horeca: "Evenementen-/horecabeveiliging",
+  techniek: "Techniek",
+  pbo: "PBO",
+  opleidingsinstituut_instructeur: "Opleidingsinstituut / instructeur",
+};
+
 function optionLabel(category, value) {
   return (OPTIONS_BY_CATEGORY[category] || [])
     .find(o => o.key === value)?.label || LEGACY_ACCREDITATION_LABELS[`${category}:${value}`] || value || "Erkenning";
@@ -383,6 +473,12 @@ function presetKey(preset) {
   return `${preset.category}:${preset.accreditation_type}`;
 }
 
+function presetFromKey(key) {
+  const [category, accreditationType] = key.split(":");
+  return [...ACCREDITATION_PRESETS, ...GENERAL_ACCREDITATION_PRESETS]
+    .find(preset => preset.category === category && preset.accreditation_type === accreditationType);
+}
+
 function companyActivityKeys(company) {
   return [...new Set([
     company?.primary_activity,
@@ -391,15 +487,22 @@ function companyActivityKeys(company) {
   ].filter(Boolean))];
 }
 
-function presetRelevanceReasons(preset, activityKeys, licenseType) {
-  const reasons = [...(preset.defaultReasons || [])];
+function presetHasContextMatch(preset, activityKeys, licenseType, requiredKeys) {
+  if (requiredKeys?.has(presetKey(preset))) return true;
+  if (preset.alwaysSuggest || preset.defaultReasons?.length > 0) return true;
+  if (licenseType && preset.licenseTypes?.includes(licenseType)) return true;
+  return (preset.activityKeys || []).some(key => activityKeys.includes(key));
+}
+
+function presetRelevanceReasons(preset, licenseType, requiredKeys) {
+  const isRequired = requiredKeys?.has(presetKey(preset));
+  if (isRequired) return ["Verplicht via branche"];
+
+  const reasons = [];
   if (licenseType && preset.licenseTypes?.includes(licenseType)) {
     reasons.push(`${licenseType} - ${getWpbrLicenseLabel(licenseType)}`);
   }
-  const matchedActivities = (preset.activityKeys || []).filter(key => activityKeys.includes(key));
-  if (matchedActivities.length > 0) {
-    reasons.push("Past bij activiteiten");
-  }
+  reasons.push(...(preset.defaultReasons || []));
   return reasons;
 }
 
@@ -408,8 +511,52 @@ function presetForType(category, type) {
     .find(preset => preset.category === category && preset.accreditation_type === type);
 }
 
-function relevantAccreditationPresets(company, licenseType, activeAccreditations = []) {
+function membershipTypeKeysForRequirement(membership, associationRequirements) {
+  if (Array.isArray(membership.membership_types) && membership.membership_types.length > 0) {
+    return membership.membership_types;
+  }
+
+  const legacyTypeText = (membership.membership_type || "").toLowerCase();
+  if (!legacyTypeText) return [];
+
+  return Object.keys(associationRequirements).filter(typeKey => {
+    const label = (BRANCH_MEMBERSHIP_TYPE_LABELS[typeKey] || typeKey).toLowerCase();
+    return legacyTypeText.includes(label) || legacyTypeText.includes(typeKey.replace(/_/g, " "));
+  });
+}
+
+function requiredAccreditationActionsForMemberships(memberships = []) {
+  const byKey = new Map();
+
+  (memberships || [])
+    .filter(membership => !membership.status || membership.status === "active")
+    .forEach(membership => {
+      const associationRequirements = BRANCH_REQUIRED_ACCREDITATION_KEYS[membership.association_type] || {};
+      const selectedTypes = membershipTypeKeysForRequirement(membership, associationRequirements);
+
+      selectedTypes.forEach(typeKey => {
+        const requiredKeys = associationRequirements[typeKey] || [];
+        requiredKeys.forEach(requiredKey => {
+          const preset = presetFromKey(requiredKey);
+          if (!preset) return;
+          byKey.set(requiredKey, {
+            category: preset.category,
+            accreditation_type: preset.accreditation_type,
+            name: preset.label,
+            issuer: issuerForDisplay(preset.issuer, preset.accreditation_type),
+            source_association_label: BRANCH_MEMBERSHIP_LABELS[membership.association_type] || membership.association_name || "Branchevereniging",
+            source_membership_label: BRANCH_MEMBERSHIP_TYPE_LABELS[typeKey] || typeKey,
+          });
+        });
+      });
+    });
+
+  return [...byKey.values()];
+}
+
+function relevantAccreditationPresets(company, licenseType, activeAccreditations = [], branchRequiredActions = []) {
   const activityKeys = companyActivityKeys(company);
+  const requiredKeys = new Set(branchRequiredActions.map(presetKey));
   const existingKeys = new Set(
     (activeAccreditations || [])
       .map(item => item.category && item.accreditation_type ? `${item.category}:${item.accreditation_type}` : null)
@@ -419,10 +566,10 @@ function relevantAccreditationPresets(company, licenseType, activeAccreditations
   const relevant = ACCREDITATION_PRESETS
     .map(preset => ({
       ...preset,
-      relevanceReasons: presetRelevanceReasons(preset, activityKeys, licenseType),
+      relevanceReasons: presetRelevanceReasons(preset, licenseType, requiredKeys),
       alreadyRegistered: existingKeys.has(presetKey(preset)),
     }))
-    .filter(preset => preset.relevanceReasons.length > 0)
+    .filter(preset => presetHasContextMatch(preset, activityKeys, licenseType, requiredKeys))
     .sort((a, b) => {
       if (a.alreadyRegistered !== b.alreadyRegistered) return a.alreadyRegistered ? 1 : -1;
       return a.group.localeCompare(b.group, "nl") || a.label.localeCompare(b.label, "nl");
@@ -431,10 +578,10 @@ function relevantAccreditationPresets(company, licenseType, activeAccreditations
   const general = GENERAL_ACCREDITATION_PRESETS
     .map(preset => ({
       ...preset,
-      relevanceReasons: presetRelevanceReasons(preset, activityKeys, licenseType),
+      relevanceReasons: presetRelevanceReasons(preset, licenseType, requiredKeys),
       alreadyRegistered: existingKeys.has(presetKey(preset)),
     }))
-    .filter(preset => preset.alwaysSuggest || preset.relevanceReasons.length > 0)
+    .filter(preset => presetHasContextMatch(preset, activityKeys, licenseType, requiredKeys))
     .sort((a, b) => {
       if (a.alreadyRegistered !== b.alreadyRegistered) return a.alreadyRegistered ? 1 : -1;
       return a.group.localeCompare(b.group, "nl") || a.label.localeCompare(b.label, "nl");
@@ -567,6 +714,11 @@ function WizardSteps({ step }) {
 
 function AccreditationPresetRow({ preset, selected, onSelect }) {
   const isDisabled = preset.alreadyRegistered;
+  const badgeClass = (reason) => {
+    if (reason === "Verplicht via branche") return "bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200 border-0";
+    if (reason === "Optioneel") return "bg-muted text-muted-foreground border-0";
+    return "";
+  };
 
   return (
     <button
@@ -603,10 +755,15 @@ function AccreditationPresetRow({ preset, selected, onSelect }) {
       <div className="flex-1 min-w-0">
         <p className="text-sm font-medium text-foreground truncate">{preset.label}</p>
         <p className="text-xs text-muted-foreground truncate">{preset.issuer || preset.description}</p>
+        {preset.description && (
+          <p className="mt-1 text-[11px] leading-snug text-muted-foreground/90">
+            {preset.description}
+          </p>
+        )}
       </div>
       <div className="flex flex-wrap gap-1 shrink-0 items-center">
         {!isDisabled && (preset.relevanceReasons || []).map(reason => (
-          <Badge key={reason} variant="secondary" className="text-[11px] whitespace-nowrap">
+          <Badge key={reason} variant="secondary" className={`text-[11px] whitespace-nowrap ${badgeClass(reason)}`}>
             {reason}
           </Badge>
         ))}
@@ -814,6 +971,22 @@ export default function AccreditationsTab({ companyId, company }) {
     enabled: !!companyId,
   });
 
+  const { data: branchMemberships = [] } = useQuery({
+    queryKey: ["company-branch-memberships", companyId],
+    queryFn: () => base44.entities.CompanyBranchMembership.filter({ company_id: companyId }, "-created_date"),
+    enabled: !!companyId,
+  });
+
+  const branchRequiredActions = useMemo(
+    () => requiredAccreditationActionsForMemberships(branchMemberships),
+    [branchMemberships]
+  );
+
+  const branchRequiredActionByKey = useMemo(
+    () => new Map(branchRequiredActions.map(action => [presetKey(action), action])),
+    [branchRequiredActions]
+  );
+
   const getDocumentDescriptor = (data) => buildManagedFileDescriptor({
     filename: data.document_download_filename || data.document_filename || "erkenningsdocument.pdf",
     ownerType: "company",
@@ -919,8 +1092,39 @@ export default function AccreditationsTab({ companyId, company }) {
     },
   });
 
+  const recreateRequiredActionIfNeeded = async (item) => {
+    if (!item || isArchivedStatus(item.status)) return;
+
+    const key = presetKey(item);
+    const requiredAction = branchRequiredActionByKey.get(key);
+    if (!requiredAction) return;
+
+    const hasRemainingActiveRecord = accreditations.some(accreditation =>
+      accreditation.id !== item.id &&
+      !isArchivedStatus(accreditation.status) &&
+      presetKey(accreditation) === key
+    );
+    if (hasRemainingActiveRecord) return;
+
+    await base44.entities.CompanyAccreditation.create({
+      company_id: companyId,
+      category: requiredAction.category,
+      accreditation_type: requiredAction.accreditation_type,
+      name: requiredAction.name,
+      issuer: requiredAction.issuer,
+      certificate_number: null,
+      valid_from: null,
+      valid_until: null,
+      status: "pending_review",
+      notes: `Opnieuw aangemaakt omdat deze erkenning verplicht is vanuit ${requiredAction.source_association_label} (${requiredAction.source_membership_label}). Vul nummer, geldigheid en bewijsstuk aan.`,
+    });
+  };
+
   const deleteMutation = useMutation({
-    mutationFn: (id) => base44.entities.CompanyAccreditation.delete(id),
+    mutationFn: async (item) => {
+      await base44.entities.CompanyAccreditation.delete(item.id);
+      await recreateRequiredActionIfNeeded(item);
+    },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["company-accreditations", companyId] });
       setDeleteId(null);
@@ -931,7 +1135,14 @@ export default function AccreditationsTab({ companyId, company }) {
 
   const setCategory = (category) => {
     const firstOption = (OPTIONS_BY_CATEGORY[category] || OTHER_OPTIONS)[0];
-    setForm(current => ({ ...current, category, accreditation_type: firstOption.key, name: firstOption.label }));
+    const preset = presetForType(category, firstOption.key);
+    setForm(current => ({
+      ...current,
+      category,
+      accreditation_type: firstOption.key,
+      name: preset?.label || firstOption.label,
+      issuer: preset ? issuerForDisplay(preset.issuer, firstOption.key) : "",
+    }));
   };
 
   const setType = (type) => {
@@ -941,7 +1152,7 @@ export default function AccreditationsTab({ companyId, company }) {
         ...current,
         accreditation_type: type,
         name: preset?.label || optionLabel(current.category, type),
-        issuer: preset?.issuer || current.issuer,
+        issuer: preset ? issuerForDisplay(preset.issuer, type) : current.issuer,
       };
     });
   };
@@ -1109,8 +1320,8 @@ export default function AccreditationsTab({ companyId, company }) {
     [company, wpbrLicenses]
   );
   const suggestedPresets = useMemo(
-    () => relevantAccreditationPresets(company, effectiveWpbrLicenseType, activeAccreditations),
-    [company, effectiveWpbrLicenseType, activeAccreditations]
+    () => relevantAccreditationPresets(company, effectiveWpbrLicenseType, activeAccreditations, branchRequiredActions),
+    [company, effectiveWpbrLicenseType, activeAccreditations, branchRequiredActions]
   );
   const selectedPresetKey = form.category && form.accreditation_type ? `${form.category}:${form.accreditation_type}` : "";
   const itemToDelete = accreditations.find(item => item.id === deleteId);
@@ -1129,7 +1340,7 @@ export default function AccreditationsTab({ companyId, company }) {
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} transition={{ duration: 0.15 }}>
             <DeleteConfirmBar
               label={itemToDelete.name || optionLabel(itemToDelete.category, itemToDelete.accreditation_type)}
-              onConfirm={() => deleteMutation.mutate(deleteId)}
+              onConfirm={() => deleteMutation.mutate(itemToDelete)}
               onCancel={() => setDeleteId(null)}
               isPending={deleteMutation.isPending}
             />
