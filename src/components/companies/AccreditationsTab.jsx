@@ -440,34 +440,48 @@ function WizardSteps({ step }) {
   );
 }
 
-function AccreditationPresetCard({ preset, selected, onSelect }) {
+function AccreditationPresetRow({ preset, selected, onSelect }) {
+  const isDisabled = preset.alreadyRegistered;
+
   return (
     <button
       type="button"
-      onClick={() => onSelect(preset)}
-      className={`group flex h-full flex-col rounded-md border p-3 text-left transition-colors ${
-        selected
-          ? "border-primary bg-primary/10 shadow-sm"
-          : "border-border bg-card hover:border-primary/50 hover:bg-muted/40"
+      onClick={() => !isDisabled && onSelect(preset)}
+      disabled={isDisabled}
+      className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md border text-left transition-colors ${
+        isDisabled
+          ? "border-border bg-muted/20 cursor-not-allowed opacity-60"
+          : selected
+            ? "border-primary bg-primary/10"
+            : "border-border bg-card hover:border-primary/50 hover:bg-muted/40"
       }`}
     >
-      <div className="flex items-start justify-between gap-3">
-        <div className="min-w-0">
-          <p className="text-sm font-semibold text-foreground">{preset.label}</p>
-          <p className="mt-1 text-xs text-muted-foreground">{preset.issuer || categoryLabel(preset.category)}</p>
-        </div>
-        {selected && <Check className="mt-0.5 h-4 w-4 shrink-0 text-primary" />}
+      <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+        isDisabled
+          ? "border-green-400 bg-green-100 dark:bg-green-900/40"
+          : selected
+            ? "border-primary bg-primary"
+            : "border-muted-foreground/30"
+      }`}>
+        {isDisabled
+          ? <Check className="h-3 w-3 text-green-700 dark:text-green-400" />
+          : selected
+            ? <Check className="h-3 w-3 text-primary-foreground" />
+            : null}
       </div>
-      <p className="mt-2 text-xs leading-5 text-muted-foreground">{preset.description}</p>
-      <div className="mt-3 flex flex-wrap gap-1.5">
-        {(preset.relevanceReasons || []).map(reason => (
-          <Badge key={reason} variant="secondary" className="text-[11px]">
+      <div className="flex-1 min-w-0">
+        <p className="text-sm font-medium text-foreground truncate">{preset.label}</p>
+        <p className="text-xs text-muted-foreground truncate">{preset.issuer || preset.description}</p>
+      </div>
+      <div className="flex flex-wrap gap-1 shrink-0 items-center">
+        {!isDisabled && (preset.relevanceReasons || []).map(reason => (
+          <Badge key={reason} variant="secondary" className="text-[11px] whitespace-nowrap">
             {reason}
           </Badge>
         ))}
-        {preset.alreadyRegistered && (
-          <Badge variant="outline" className="text-[11px] text-amber-600 border-amber-300">
-            Staat al actief
+        {isDisabled && (
+          <Badge variant="outline" className="text-[11px] text-green-700 dark:text-green-400 border-green-300 dark:border-green-700 whitespace-nowrap">
+            Al actief
           </Badge>
         )}
       </div>
@@ -479,12 +493,12 @@ function AccreditationPresetStep({ presets, manualPreset, selectedKey, onSelect,
   const groups = groupPresets(presets);
 
   return (
-    <div className="space-y-4">
-      <div className="flex flex-wrap items-start justify-between gap-3">
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center justify-between gap-2">
         <div>
-          <p className="text-sm font-semibold text-foreground">Kies een vooraf ingestelde erkenning</p>
-          <p className="mt-1 text-xs text-muted-foreground">
-            We tonen alleen suggesties die passen bij de actieve WPBR-vergunning en activiteiten van dit bedrijf.
+          <p className="text-sm font-semibold text-foreground">Kies een erkenning</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Erkenningen die al actief zijn kunnen niet opnieuw worden toegevoegd.
           </p>
         </div>
         {licenseType && (
@@ -494,39 +508,39 @@ function AccreditationPresetStep({ presets, manualPreset, selectedKey, onSelect,
         )}
       </div>
 
-      {groups.map(([group, groupPresetsForGroup]) => (
-        <section key={group} className="space-y-2">
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group}</p>
-          <div className="grid grid-cols-1 gap-2 lg:grid-cols-3">
-            {groupPresetsForGroup.map(preset => (
-              <AccreditationPresetCard
-                key={presetKey(preset)}
-                preset={preset}
-                selected={selectedKey === presetKey(preset)}
-                onSelect={onSelect}
-              />
-            ))}
-          </div>
-        </section>
-      ))}
+      <div className="space-y-3">
+        {groups.map(([group, groupPresetsForGroup]) => (
+          <section key={group}>
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">{group}</p>
+            <div className="space-y-1">
+              {groupPresetsForGroup.map(preset => (
+                <AccreditationPresetRow
+                  key={presetKey(preset)}
+                  preset={preset}
+                  selected={selectedKey === presetKey(preset)}
+                  onSelect={onSelect}
+                />
+              ))}
+            </div>
+          </section>
+        ))}
+      </div>
 
-      <div className="rounded-md border border-dashed border-border bg-muted/20 p-3">
-        <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-          <div className="min-w-0">
-            <p className="text-sm font-medium text-foreground">Staat de juiste erkenning er niet tussen?</p>
-            <p className="mt-1 text-xs text-muted-foreground">Voeg dan handmatig een andere erkenning of certificering toe.</p>
-          </div>
-          <Button
-            type="button"
-            variant={selectedKey === presetKey(manualPreset) ? "default" : "outline"}
-            size="sm"
-            className="gap-2 whitespace-nowrap"
-            onClick={() => onSelect(manualPreset)}
-          >
-            <Search className="h-4 w-4" />
-            Handmatig toevoegen
-          </Button>
+      <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
+        <div className="min-w-0">
+          <p className="text-sm font-medium text-foreground">Staat de juiste erkenning er niet tussen?</p>
+          <p className="text-xs text-muted-foreground">Voeg dan handmatig een andere erkenning of certificering toe.</p>
         </div>
+        <Button
+          type="button"
+          variant={selectedKey === presetKey(manualPreset) ? "default" : "outline"}
+          size="sm"
+          className="gap-2 whitespace-nowrap shrink-0"
+          onClick={() => onSelect(manualPreset)}
+        >
+          <Search className="h-4 w-4" />
+          Handmatig toevoegen
+        </Button>
       </div>
     </div>
   );
