@@ -33,6 +33,7 @@ const FUNCTION_TYPES = [
   { value: "objectbeveiliger", label: "Objectbeveiliger" },
   { value: "receptie", label: "Receptie" },
   { value: "surveillant", label: "Surveillant" },
+  { value: "alarmopvolging", label: "Alarmopvolging" },
   { value: "binnendienst", label: "Binnendienst" },
   { value: "klantrelatie", label: "Klantrelatie" },
   { value: "planner", label: "Planner" },

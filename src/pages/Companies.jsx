@@ -19,7 +19,7 @@ const ROLE_LABELS = {
 const ACTIVITY_LABELS = {
   private_security: "Particuliere beveiliging", event_hospitality_security: "Evenementen/horeca",
   object_security: "Objectbeveiliging", mobile_surveillance: "Mobiele surveillance",
-  alarm_center: "Alarmcentrale", video_surveillance_center: "Videotoezicht",
+  alarm_response: "Alarmopvolging", alarm_center: "Alarmcentrale", video_surveillance_center: "Videotoezicht",
   security_installation: "Beveiligingsinstallaties", traffic_controller: "Verkeersregelaars",
   fire_watch: "Brandwacht", bhv: "BHV", private_investigation: "Recherche",
   reception_host: "Receptie/host", other: "Overig",

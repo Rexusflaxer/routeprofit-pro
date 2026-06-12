@@ -27,6 +27,7 @@ const ACTIVITIES = [
   { key: "event_hospitality_security", label: "Evenementen- en horecabeveiliging" },
   { key: "object_security", label: "Objectbeveiliging" },
   { key: "mobile_surveillance", label: "Mobiele surveillance" },
+  { key: "alarm_response", label: "Alarmopvolging" },
   { key: "alarm_center", label: "Particuliere alarmcentrale" },
   { key: "video_surveillance_center", label: "Videotoezichtcentrale" },
   { key: "security_installation", label: "Beveiligingsinstallaties / alarminstallateur" },

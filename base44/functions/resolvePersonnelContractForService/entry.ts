@@ -300,7 +300,7 @@ const SECURITY_FUNCTION_GROUPS = [
 ];
 const SECURITY_FUNCTION_TYPES = [
   'objectbeveiliger', 'receptie', 'receptionist',
-  'surveillant', 'centralist', 'verkeersregelaar', 'brandwacht', 'rechercheur'
+  'surveillant', 'alarmopvolging', 'centralist', 'verkeersregelaar', 'brandwacht', 'rechercheur'
 ];
 const SECURITY_ROLE_STATUSES = ['aspirant_beveiliger', 'beveiliger', 'leidinggevende'];
 const NON_SECURITY_FUNCTION_GROUPS = ['non_security_staff'];

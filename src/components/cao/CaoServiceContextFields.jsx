@@ -16,6 +16,7 @@ const FUNCTION_TYPE_OPTIONS = [
   { value: "objectbeveiliger", label: "Objectbeveiliger" },
   { value: "receptie", label: "Receptie" },
   { value: "surveillant", label: "Surveillant" },
+  { value: "alarmopvolging", label: "Alarmopvolging" },
   { value: "centralist", label: "Centralist" },
   { value: "verkeersregelaar", label: "Verkeersregelaar" },
   { value: "brandwacht", label: "Brandwacht" },

@@ -339,6 +339,7 @@
       "enum": [
         "unknown",
         "surveillant",
+        "alarmopvolging",
         "binnendienst",
         "planner",
         "centralist",

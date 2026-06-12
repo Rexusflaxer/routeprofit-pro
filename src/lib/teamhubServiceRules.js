@@ -2,6 +2,7 @@ export const TEAMHUB_SERVICE_OPTIONS = [
   { key: "private_security", label: "Particuliere beveiliging" },
   { key: "object_security", label: "Objectbeveiliging" },
   { key: "mobile_surveillance", label: "Mobiele surveillance" },
+  { key: "alarm_response", label: "Alarmopvolging" },
   { key: "reception_host", label: "Receptie/host" },
   { key: "event_hospitality_security", label: "Evenementen/horeca" },
   { key: "alarm_center", label: "Alarmcentrale" },
@@ -35,7 +36,7 @@ export const WPBR_LICENSE_LABELS = {
 };
 
 const ALLOWED_SERVICES_BY_WPBR_TYPE = {
-  ND: ["private_security", "object_security", "mobile_surveillance", "reception_host", "event_hospitality_security"],
+  ND: ["private_security", "object_security", "mobile_surveillance", "alarm_response", "reception_host", "event_hospitality_security"],
   HND: ["event_hospitality_security"],
   BD: [],
   HBD: [],

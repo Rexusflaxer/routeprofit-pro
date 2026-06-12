@@ -176,7 +176,8 @@ const FUNCTION_TYPE_ALIASES = [
     group: 'mobiel_surveillant',
     aliases: [
       'surveillant', 'mobiel_surveillant', 'mobiele surveillance', 'mobiele surveillant',
-      'mobile surveillance', 'route surveillant', 'ronde surveillant'
+      'mobile surveillance', 'route surveillant', 'ronde surveillant',
+      'alarmopvolging', 'alarm opvolging', 'alarmopvolger', 'alarm response'
     ]
   },
   {

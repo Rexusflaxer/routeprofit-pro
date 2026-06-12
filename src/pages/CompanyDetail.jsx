@@ -5,9 +5,7 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Checkbox } from "@/components/ui/checkbox";
 import { ArrowLeft, Edit, Check, X, Building2, MapPin, FileText, Upload, Handshake } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SidebarPanel from "@/components/companies/CompanySidebarPanel";
@@ -21,7 +19,7 @@ const ROLE_LABELS = {
 const ACTIVITY_LABELS = {
   private_security: "Particuliere beveiliging", event_hospitality_security: "Evenementen/horeca",
   object_security: "Objectbeveiliging", mobile_surveillance: "Mobiele surveillance",
-  alarm_center: "Alarmcentrale", video_surveillance_center: "Videotoezicht",
+  alarm_response: "Alarmopvolging", alarm_center: "Alarmcentrale", video_surveillance_center: "Videotoezicht",
   security_installation: "Beveiligingsinstallaties", traffic_controller: "Verkeersregelaars",
   fire_watch: "Brandwacht", bhv: "BHV", private_investigation: "Recherche",
   reception_host: "Receptie/host", other: "Overig",

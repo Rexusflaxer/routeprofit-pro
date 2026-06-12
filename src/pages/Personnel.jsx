@@ -9,7 +9,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { Plus, Users, Search, Pencil, Trash2, Calculator, AlertTriangle, Clock } from "lucide-react";
+import { Plus, Users, Search, Pencil, Trash2, Calculator, AlertTriangle } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
@@ -114,6 +114,7 @@ export default function Personnel() {
                 <SelectContent>
                   <SelectItem value="all">Alle functies</SelectItem>
                   <SelectItem value="surveillant">Surveillant</SelectItem>
+                  <SelectItem value="alarmopvolging">Alarmopvolging</SelectItem>
                   <SelectItem value="binnendienst">Binnendienst</SelectItem>
                   <SelectItem value="planner">Planner</SelectItem>
                   <SelectItem value="verkeersregelaar">Verkeersregelaar</SelectItem>
