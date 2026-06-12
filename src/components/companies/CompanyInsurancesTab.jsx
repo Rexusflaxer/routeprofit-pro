@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import { Checkbox } from "@/components/ui/checkbox";
 import { Textarea } from "@/components/ui/textarea";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { buildManagedFileDescriptor, updateManagedFileSource, uploadManagedFile } from "@/lib/managedFiles";
 import {
@@ -27,6 +28,8 @@ import { AnimatePresence, motion } from "framer-motion";
 
 const DELETE_PASSWORD = "verwijder";
 const INSURANCE_TABLE_GRID = "grid grid-cols-[minmax(220px,1.2fr)_minmax(180px,0.9fr)_minmax(108px,130px)_minmax(180px,260px)_minmax(230px,300px)] gap-3 xl:gap-4";
+const CUSTOM_PARTY_NEW_VALUE = "__new_party__";
+const CUSTOM_PARTY_NONE_VALUE = "__no_party__";
 
 const INSURANCE_OPTIONS = [
   {
@@ -169,6 +172,24 @@ function validityText(policy) {
   return "Geen einddatum";
 }
 
+function normalizePartyName(value = "") {
+  return value.trim().replace(/\s+/g, " ");
+}
+
+function partyOptionsFromPolicies(policies = [], fieldName) {
+  const byKey = new Map();
+
+  (policies || []).forEach(policy => {
+    const value = normalizePartyName(policy?.[fieldName] || "");
+    if (!value) return;
+
+    const key = value.toLowerCase();
+    if (!byKey.has(key)) byKey.set(key, value);
+  });
+
+  return [...byKey.values()].sort((a, b) => a.localeCompare(b, "nl"));
+}
+
 function WizardSteps({ step }) {
   const steps = ["Verzekering", "Gegevens", "Polisblad"];
   return (
@@ -276,6 +297,59 @@ function InsuranceTypeOption({ option, selected, relevant, onClick }) {
   );
 }
 
+function InsurancePartySelectField({
+  label,
+  value,
+  options,
+  creating,
+  required = false,
+  placeholder,
+  newLabel,
+  emptyLabel,
+  customPlaceholder,
+  help,
+  error,
+  onSelect,
+  onCustomChange,
+}) {
+  const normalizedValue = normalizePartyName(value || "");
+  const selectValue = creating
+    ? CUSTOM_PARTY_NEW_VALUE
+    : normalizedValue && options.some(option => option === normalizedValue)
+      ? normalizedValue
+      : !required && !normalizedValue
+        ? CUSTOM_PARTY_NONE_VALUE
+        : "";
+
+  return (
+    <div className="space-y-1">
+      <Label>{label}{required && <span className="text-destructive"> *</span>}</Label>
+      <Select value={selectValue} onValueChange={onSelect}>
+        <SelectTrigger className={`h-8 ${error ? "border-destructive" : ""}`}>
+          <SelectValue placeholder={placeholder} />
+        </SelectTrigger>
+        <SelectContent>
+          {!required && <SelectItem value={CUSTOM_PARTY_NONE_VALUE}>{emptyLabel || "Geen"}</SelectItem>}
+          {options.map(option => (
+            <SelectItem key={option} value={option}>{option}</SelectItem>
+          ))}
+          <SelectItem value={CUSTOM_PARTY_NEW_VALUE}>{newLabel}</SelectItem>
+        </SelectContent>
+      </Select>
+      {creating && (
+        <Input
+          className={`h-8 ${error ? "border-destructive" : ""}`}
+          value={value}
+          onChange={event => onCustomChange(event.target.value)}
+          placeholder={customPlaceholder}
+        />
+      )}
+      {help && <p className="text-[11px] text-muted-foreground">{help}</p>}
+      {error && <p className="text-xs text-destructive">{error}</p>}
+    </div>
+  );
+}
+
 export default function CompanyInsurancesTab({ companyId, company }) {
   const queryClient = useQueryClient();
   const wizardRef = useRef(null);
@@ -288,6 +362,8 @@ export default function CompanyInsurancesTab({ companyId, company }) {
   const [showArchive, setShowArchive] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [preview, setPreview] = useState(null);
+  const [creatingInsurer, setCreatingInsurer] = useState(false);
+  const [creatingBroker, setCreatingBroker] = useState(false);
 
   useEffect(() => {
     if (!showWizard) return undefined;
@@ -302,6 +378,8 @@ export default function CompanyInsurancesTab({ companyId, company }) {
   });
 
   const companyActivities = useMemo(() => new Set(company?.activities || []), [company]);
+  const insurerOptions = useMemo(() => partyOptionsFromPolicies(policies, "insurer_name"), [policies]);
+  const brokerOptions = useMemo(() => partyOptionsFromPolicies(policies, "broker_name"), [policies]);
   const groupedOptions = useMemo(() => {
     const scored = INSURANCE_OPTIONS.map(option => {
       const relevant = (option.activityKeys || []).some(key => companyActivities.has(key));
@@ -433,6 +511,30 @@ export default function CompanyInsurancesTab({ companyId, company }) {
 
   const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
 
+  const selectInsurer = (value) => {
+    if (value === CUSTOM_PARTY_NEW_VALUE) {
+      setCreatingInsurer(true);
+      set("insurer_name", "");
+      setErrors(current => ({ ...current, insurer_name: undefined }));
+      return;
+    }
+
+    setCreatingInsurer(false);
+    set("insurer_name", value);
+    setErrors(current => ({ ...current, insurer_name: undefined }));
+  };
+
+  const selectBroker = (value) => {
+    if (value === CUSTOM_PARTY_NEW_VALUE) {
+      setCreatingBroker(true);
+      set("broker_name", "");
+      return;
+    }
+
+    setCreatingBroker(false);
+    set("broker_name", value === CUSTOM_PARTY_NONE_VALUE ? "" : value);
+  };
+
   const selectType = (option) => {
     setForm({
       ...EMPTY_FORM,
@@ -440,6 +542,8 @@ export default function CompanyInsurancesTab({ companyId, company }) {
       insurance_name: option.key === "other" ? "" : option.label,
       required_reason: option.requiredReason || "",
     });
+    setCreatingInsurer(false);
+    setCreatingBroker(false);
     setErrors({});
     setStep(2);
   };
@@ -447,6 +551,8 @@ export default function CompanyInsurancesTab({ companyId, company }) {
   const openNew = () => {
     setEditingId(null);
     setForm(EMPTY_FORM);
+    setCreatingInsurer(false);
+    setCreatingBroker(false);
     setErrors({});
     setStep(1);
     setShowWizard(true);
@@ -476,6 +582,8 @@ export default function CompanyInsurancesTab({ companyId, company }) {
       document_metadata: policy.document_metadata || null,
       notes: policy.notes || "",
     });
+    setCreatingInsurer(false);
+    setCreatingBroker(false);
     setErrors({});
     setStep(2);
     setShowWizard(true);
@@ -486,6 +594,8 @@ export default function CompanyInsurancesTab({ companyId, company }) {
     setEditingId(null);
     setStep(1);
     setForm(EMPTY_FORM);
+    setCreatingInsurer(false);
+    setCreatingBroker(false);
     setErrors({});
   };
 
@@ -626,14 +736,23 @@ export default function CompanyInsurancesTab({ companyId, company }) {
                         </div>
                       )}
                       <div className="space-y-1 lg:col-span-2">
-                        <Label>Verzekeraar</Label>
-                        <Input
-                          className={`h-8 ${errors.insurer_name ? "border-destructive" : ""}`}
+                        <InsurancePartySelectField
+                          label="Verzekeraar"
                           value={form.insurer_name}
-                          onChange={event => { set("insurer_name", event.target.value); setErrors(current => ({ ...current, insurer_name: undefined })); }}
-                          placeholder="Naam verzekeraar"
+                          options={insurerOptions}
+                          creating={creatingInsurer}
+                          required
+                          placeholder="Kies verzekeraar"
+                          newLabel="Nieuwe verzekeraar toevoegen"
+                          customPlaceholder="Naam verzekeraar"
+                          help="Gebruik de verzekeraar die op de polis staat."
+                          error={errors.insurer_name}
+                          onSelect={selectInsurer}
+                          onCustomChange={value => {
+                            set("insurer_name", value);
+                            setErrors(current => ({ ...current, insurer_name: undefined }));
+                          }}
                         />
-                        {errors.insurer_name && <p className="text-xs text-destructive">{errors.insurer_name}</p>}
                       </div>
                       <div className="space-y-1">
                         <Label>Polisnummer</Label>
@@ -646,8 +765,19 @@ export default function CompanyInsurancesTab({ companyId, company }) {
                         {errors.policy_number && <p className="text-xs text-destructive">{errors.policy_number}</p>}
                       </div>
                       <div className="space-y-1">
-                        <Label>Tussenpersoon</Label>
-                        <Input className="h-8" value={form.broker_name} onChange={event => set("broker_name", event.target.value)} placeholder="Optioneel" />
+                        <InsurancePartySelectField
+                          label="Tussenpersoon"
+                          value={form.broker_name}
+                          options={brokerOptions}
+                          creating={creatingBroker}
+                          placeholder="Kies tussenpersoon"
+                          emptyLabel="Geen tussenpersoon"
+                          newLabel="Nieuwe tussenpersoon toevoegen"
+                          customPlaceholder="Naam tussenpersoon"
+                          help="Optioneel: adviseur of intermediair die de polis beheert."
+                          onSelect={selectBroker}
+                          onCustomChange={value => set("broker_name", value)}
+                        />
                       </div>
                       <div className="space-y-1">
                         <Label>Geldig vanaf</Label>
