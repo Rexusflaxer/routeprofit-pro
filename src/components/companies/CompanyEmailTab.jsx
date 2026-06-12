@@ -1021,139 +1021,8 @@ export default function CompanyEmailTab({ companyId, company }) {
             />
           )}
 
-          <div className="overflow-x-auto">
-            <table className="w-full min-w-[900px] text-sm">
-              <thead className="bg-muted/50 text-xs uppercase tracking-wider text-muted-foreground">
-                <tr>
-                  <th className="px-4 py-3 text-left font-semibold">E-mail</th>
-                  <th className="px-4 py-3 text-left font-semibold">Authenticatie</th>
-                  <th className="px-4 py-3 text-left font-semibold">Functies</th>
-                  <th className="px-4 py-3 text-left font-semibold">Status</th>
-                  <th className="px-4 py-3 text-left font-semibold">Afzendernaam</th>
-                  <th className="px-4 py-3 text-right font-semibold">Actie</th>
-                </tr>
-              </thead>
-              <tbody>
-                {settings ? (
-                  <>
-                  <tr className={`border-t border-border ${testMailOpen && testMailStatus.type === "success" ? "bg-green-50 dark:bg-green-950/40" : testMailOpen ? "bg-primary/5" : ""}`}>
-                     {testMailOpen ? (
-                       <td colSpan={6} className="px-4 py-3">
-                         {testMailStatus.type === "success" ? (
-                           <div className="flex items-center gap-3">
-                             <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
-                             <p className="text-sm font-medium text-green-800 dark:text-green-200">{testMailStatus.message}</p>
-                           </div>
-                         ) : (
-                           <div className="flex flex-wrap items-center gap-2">
-                             <span className="text-sm font-medium text-foreground shrink-0">Testmail naar:</span>
-                             <Input
-                               type="email"
-                               value={testRecipient}
-                               onChange={(event) => {
-                                 setTestRecipient(event.target.value);
-                                 if (testMailStatus.type === "error") setTestMailStatus({ type: "idle", message: "" });
-                               }}
-                               onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); sendTestMail(); } }}
-                               placeholder="naam@bedrijf.nl"
-                               className="h-8 w-[260px]"
-                               autoFocus
-                             />
-                             <Button size="sm" onClick={sendTestMail} disabled={testMailMutation.isPending}>
-                               {testMailMutation.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}
-                               {testMailMutation.isPending ? "Verzenden..." : "Versturen"}
-                             </Button>
-                             <Button size="sm" variant="ghost" onClick={closeTestMail} disabled={testMailMutation.isPending}>
-                               <X className="h-3.5 w-3.5" />
-                             </Button>
-                             {testMailStatus.type === "error" && testMailStatus.message && (
-                               <span className="flex items-center gap-1 text-xs text-destructive">
-                                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />{testMailStatus.message}
-                               </span>
-                             )}
-                           </div>
-                         )}
-                       </td>
-                     ) : (
-                       <>
-                         <td className="px-4 py-4">
-                           <div className="min-w-0">
-                             <p className="truncate font-medium text-foreground">
-                               {settings.provider === "platform" ? "LOQ standaardmail" : settings.from_email || "Geen e-mailadres"}
-                             </p>
-                             <p className="truncate text-xs text-muted-foreground">{getConnectionSummary(settings)}</p>
-                           </div>
-                         </td>
-                         <td className="px-4 py-4 text-muted-foreground">{savedProvider?.authLabel || "-"}</td>
-                         <td className="px-4 py-4">
-                           <ChannelBadges channels={configuredChannels} muted={!configuredChannels.length} />
-                         </td>
-                         <td className="px-4 py-4">
-                           <Badge className={STATUS_CLASSES[settings.status] || STATUS_CLASSES.draft}>
-                             {STATUS_LABELS[settings.status] || settings.status}
-                           </Badge>
-                         </td>
-                         <td className="px-4 py-4 text-muted-foreground">{settings.from_name || "-"}</td>
-                         <td className="px-4 py-4 text-right">
-                           <div className="flex justify-end gap-2">
-                             {isOauthProvider(settings.provider) && settings.status === "pending_oauth" && (
-                               <Button size="sm" variant="default" onClick={connectExisting}>
-                                 <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
-                                 Account koppelen
-                               </Button>
-                             )}
-                             <Button size="sm" variant="outline" onClick={() => openWizard(1)}>
-                               <Edit className="mr-1.5 h-3.5 w-3.5" />
-                               Wijzigen
-                             </Button>
-                             <Button
-                               size="sm"
-                               variant="outline"
-                               onClick={openTestMail}
-                               disabled={settings.status !== "connected" || testMailMutation.isPending}
-                             >
-                               <Send className="mr-1.5 h-3.5 w-3.5" />
-                               Testmail
-                             </Button>
-                             <Button
-                               size="sm"
-                               variant="outline"
-                               onClick={deleteSettings}
-                               disabled={deleteMutation.isPending}
-                               className="text-destructive hover:text-destructive"
-                               aria-label="E-mailinstelling verwijderen"
-                             >
-                               <Trash2 className="h-3.5 w-3.5" />
-                             </Button>
-                           </div>
-                         </td>
-                       </>
-                     )}
-                   </tr>
-                  </>
-                ) : (
-                  <tr className="border-t border-border">
-                    <td colSpan={6} className="px-4 py-8 text-center">
-                      <Mail className="mx-auto h-6 w-6 text-muted-foreground" />
-                      <p className="mt-2 text-sm font-medium text-foreground">Nog geen e-mailadres gekoppeld.</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        LOQ kan standaardmail gebruiken totdat dit bedrijf een eigen Microsoft-, Google- of overige mailbox koppelt.
-                      </p>
-                      {!showWizard && (
-                        <Button size="sm" className="mt-3" onClick={() => openWizard(1)}>
-                          <Plus className="mr-1.5 h-3.5 w-3.5" />
-                          E-mailadres toevoegen
-                        </Button>
-                      )}
-                    </td>
-                  </tr>
-                )}
-              </tbody>
-            </table>
-          </div>
-
           {showWizard && (
-            <div className="border-t border-primary/30 bg-muted/20">
+            <div className="border-b border-primary/30 bg-muted/20">
               <div className="border-b border-border px-4 py-4 sm:px-6">
                 <p className="text-xs font-semibold uppercase tracking-wider text-primary">
                   {settings ? "E-mailadres wijzigen" : "Nieuw e-mailadres"}
@@ -1454,6 +1323,139 @@ export default function CompanyEmailTab({ companyId, company }) {
               </div>
             </div>
           )}
+
+          <div className="overflow-x-auto">
+            <table className="w-full min-w-[900px] text-sm">
+              <thead className="bg-muted/50 text-xs uppercase tracking-wider text-muted-foreground">
+                <tr>
+                  <th className="px-4 py-3 text-left font-semibold">E-mail</th>
+                  <th className="px-4 py-3 text-left font-semibold">Authenticatie</th>
+                  <th className="px-4 py-3 text-left font-semibold">Functies</th>
+                  <th className="px-4 py-3 text-left font-semibold">Status</th>
+                  <th className="px-4 py-3 text-left font-semibold">Afzendernaam</th>
+                  <th className="px-4 py-3 text-right font-semibold">Actie</th>
+                </tr>
+              </thead>
+              <tbody>
+                {settings ? (
+                  <>
+                  <tr className={`border-t border-border ${testMailOpen && testMailStatus.type === "success" ? "bg-green-50 dark:bg-green-950/40" : testMailOpen ? "bg-primary/5" : ""}`}>
+                     {testMailOpen ? (
+                       <td colSpan={6} className="px-4 py-3">
+                         {testMailStatus.type === "success" ? (
+                           <div className="flex items-center gap-3">
+                             <CheckCircle2 className="h-4 w-4 shrink-0 text-green-600 dark:text-green-400" />
+                             <p className="text-sm font-medium text-green-800 dark:text-green-200">{testMailStatus.message}</p>
+                           </div>
+                         ) : (
+                           <div className="flex flex-wrap items-center gap-2">
+                             <span className="text-sm font-medium text-foreground shrink-0">Testmail naar:</span>
+                             <Input
+                               type="email"
+                               value={testRecipient}
+                               onChange={(event) => {
+                                 setTestRecipient(event.target.value);
+                                 if (testMailStatus.type === "error") setTestMailStatus({ type: "idle", message: "" });
+                               }}
+                               onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); sendTestMail(); } }}
+                               placeholder="naam@bedrijf.nl"
+                               className="h-8 w-[260px]"
+                               autoFocus
+                             />
+                             <Button size="sm" onClick={sendTestMail} disabled={testMailMutation.isPending}>
+                               {testMailMutation.isPending ? <Loader2 className="mr-1.5 h-3.5 w-3.5 animate-spin" /> : <Send className="mr-1.5 h-3.5 w-3.5" />}
+                               {testMailMutation.isPending ? "Verzenden..." : "Versturen"}
+                             </Button>
+                             <Button size="sm" variant="ghost" onClick={closeTestMail} disabled={testMailMutation.isPending}>
+                               <X className="h-3.5 w-3.5" />
+                             </Button>
+                             {testMailStatus.type === "error" && testMailStatus.message && (
+                               <span className="flex items-center gap-1 text-xs text-destructive">
+                                 <AlertCircle className="h-3.5 w-3.5 shrink-0" />{testMailStatus.message}
+                               </span>
+                             )}
+                           </div>
+                         )}
+                       </td>
+                     ) : (
+                       <>
+                         <td className="px-4 py-4">
+                           <div className="min-w-0">
+                             <p className="truncate font-medium text-foreground">
+                               {settings.provider === "platform" ? "LOQ standaardmail" : settings.from_email || "Geen e-mailadres"}
+                             </p>
+                             <p className="truncate text-xs text-muted-foreground">{getConnectionSummary(settings)}</p>
+                           </div>
+                         </td>
+                         <td className="px-4 py-4 text-muted-foreground">{savedProvider?.authLabel || "-"}</td>
+                         <td className="px-4 py-4">
+                           <ChannelBadges channels={configuredChannels} muted={!configuredChannels.length} />
+                         </td>
+                         <td className="px-4 py-4">
+                           <Badge className={STATUS_CLASSES[settings.status] || STATUS_CLASSES.draft}>
+                             {STATUS_LABELS[settings.status] || settings.status}
+                           </Badge>
+                         </td>
+                         <td className="px-4 py-4 text-muted-foreground">{settings.from_name || "-"}</td>
+                         <td className="px-4 py-4 text-right">
+                           <div className="flex justify-end gap-2">
+                             {isOauthProvider(settings.provider) && settings.status === "pending_oauth" && (
+                               <Button size="sm" variant="default" onClick={connectExisting}>
+                                 <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                                 Account koppelen
+                               </Button>
+                             )}
+                             <Button size="sm" variant="outline" onClick={() => openWizard(1)}>
+                               <Edit className="mr-1.5 h-3.5 w-3.5" />
+                               Wijzigen
+                             </Button>
+                             <Button
+                               size="sm"
+                               variant="outline"
+                               onClick={openTestMail}
+                               disabled={settings.status !== "connected" || testMailMutation.isPending}
+                             >
+                               <Send className="mr-1.5 h-3.5 w-3.5" />
+                               Testmail
+                             </Button>
+                             <Button
+                               size="sm"
+                               variant="outline"
+                               onClick={deleteSettings}
+                               disabled={deleteMutation.isPending}
+                               className="text-destructive hover:text-destructive"
+                               aria-label="E-mailinstelling verwijderen"
+                             >
+                               <Trash2 className="h-3.5 w-3.5" />
+                             </Button>
+                           </div>
+                         </td>
+                       </>
+                     )}
+                   </tr>
+                  </>
+                ) : (
+                  <tr className="border-t border-border">
+                    <td colSpan={6} className="px-4 py-8 text-center">
+                      <Mail className="mx-auto h-6 w-6 text-muted-foreground" />
+                      <p className="mt-2 text-sm font-medium text-foreground">Nog geen e-mailadres gekoppeld.</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        LOQ kan standaardmail gebruiken totdat dit bedrijf een eigen Microsoft-, Google- of overige mailbox koppelt.
+                      </p>
+                      {!showWizard && (
+                        <Button size="sm" className="mt-3" onClick={() => openWizard(1)}>
+                          <Plus className="mr-1.5 h-3.5 w-3.5" />
+                          E-mailadres toevoegen
+                        </Button>
+                      )}
+                    </td>
+                  </tr>
+                )}
+              </tbody>
+            </table>
+          </div>
+
+
         </div>
       </div>
     </div>
