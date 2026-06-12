@@ -12,10 +12,12 @@ import {
   ChevronLeft,
   ChevronRight,
   Edit,
+  ExternalLink,
   Mail,
   Plus,
   Server,
   ShieldCheck,
+  Trash2,
 } from "lucide-react";
 
 const PROVIDERS = [
@@ -25,7 +27,7 @@ const PROVIDERS = [
     shortLabel: "Microsoft 365",
     desc: "Koppel veilig met een Microsoft-account",
     authLabel: "OAuth - Microsoft",
-    scopes: ["Mail.Send", "offline_access", "User.Read"],
+    scopes: ["openid", "profile", "offline_access", "User.Read", "Mail.Send"],
   },
   {
     key: "google_workspace",
@@ -33,7 +35,7 @@ const PROVIDERS = [
     shortLabel: "Google Workspace",
     desc: "Koppel veilig met een Google-account",
     authLabel: "OAuth - Google",
-    scopes: ["https://www.googleapis.com/auth/gmail.send"],
+    scopes: ["openid", "email", "profile", "https://www.googleapis.com/auth/gmail.send"],
   },
   {
     key: "smtp",
@@ -187,6 +189,89 @@ function getConnectionSummary(settings) {
     return [settings.smtp_host, settings.smtp_port].filter(Boolean).join(":") || "SMTP niet volledig";
   }
   return settings.oauth_tenant_hint || getEmailDomain(settings.from_email) || "OAuth nog afronden";
+}
+
+const OAUTH_STORAGE_KEY = "loq_pending_email_oauth";
+
+function encodeOAuthState(payload) {
+  if (typeof window === "undefined") return "";
+  const json = encodeURIComponent(JSON.stringify(payload)).replace(
+    /%([0-9A-F]{2})/g,
+    (_, value) => String.fromCharCode(parseInt(value, 16))
+  );
+
+  return window
+    .btoa(json)
+    .replace(/\+/g, "-")
+    .replace(/\//g, "_")
+    .replace(/=+$/, "");
+}
+
+function getOAuthConfig(providerKey) {
+  if (typeof window === "undefined") return null;
+
+  const origin = window.location.origin;
+  const defaultRedirectUri = `${origin}/email-oauth/callback`;
+  const sharedRedirectUri = import.meta.env.VITE_EMAIL_OAUTH_REDIRECT_URI || defaultRedirectUri;
+
+  if (providerKey === "microsoft_365") {
+    return {
+      clientId:
+        import.meta.env.VITE_MICROSOFT_EMAIL_CLIENT_ID ||
+        import.meta.env.VITE_MICROSOFT_CLIENT_ID ||
+        "",
+      authorizeUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
+      redirectUri: import.meta.env.VITE_MICROSOFT_EMAIL_REDIRECT_URI || sharedRedirectUri,
+    };
+  }
+
+  if (providerKey === "google_workspace") {
+    return {
+      clientId:
+        import.meta.env.VITE_GOOGLE_EMAIL_CLIENT_ID ||
+        import.meta.env.VITE_GOOGLE_CLIENT_ID ||
+        "",
+      authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
+      redirectUri: import.meta.env.VITE_GOOGLE_EMAIL_REDIRECT_URI || sharedRedirectUri,
+    };
+  }
+
+  return null;
+}
+
+function buildOAuthUrl({ settings, providerKey, companyId }) {
+  const provider = getProvider(providerKey);
+  const config = getOAuthConfig(providerKey);
+
+  if (!provider || !isOauthProvider(providerKey) || !config?.clientId) return null;
+
+  const state = encodeOAuthState({
+    company_id: companyId,
+    settings_id: settings?.id || null,
+    provider: providerKey,
+    from_email: settings?.from_email || "",
+    ts: Date.now(),
+  });
+
+  const params = new URLSearchParams({
+    client_id: config.clientId,
+    response_type: "code",
+    redirect_uri: config.redirectUri,
+    scope: provider.scopes.join(" "),
+    state,
+    prompt: "consent",
+  });
+
+  if (settings?.from_email) {
+    params.set("login_hint", settings.from_email);
+  }
+
+  if (providerKey === "google_workspace") {
+    params.set("access_type", "offline");
+    params.set("include_granted_scopes", "true");
+  }
+
+  return `${config.authorizeUrl}?${params.toString()}`;
 }
 
 function WizardSteps({ step }) {
@@ -355,12 +440,14 @@ export default function CompanyEmailTab({ companyId, company }) {
   };
 
   const saveMutation = useMutation({
-    mutationFn: async (data) => {
+    mutationFn: async ({ data, connectAfterSave = false }) => {
       const payload = normalizePayload(data, companyId);
-      if (settings?.id) return base44.entities.CompanyEmailSettings.update(settings.id, payload);
-      return base44.entities.CompanyEmailSettings.create(payload);
+      const saved = settings?.id
+        ? await base44.entities.CompanyEmailSettings.update(settings.id, payload)
+        : await base44.entities.CompanyEmailSettings.create(payload);
+      return { saved, connectAfterSave, providerKey: payload.provider };
     },
-    onSuccess: (saved) => {
+    onSuccess: ({ saved, connectAfterSave, providerKey }) => {
       if (saved) {
         queryClient.setQueryData(["company-email-settings", companyId], (old = []) => {
           const list = Array.isArray(old) ? old : [];
@@ -368,11 +455,70 @@ export default function CompanyEmailTab({ companyId, company }) {
         });
       }
       queryClient.invalidateQueries({ queryKey: ["company-email-settings", companyId] });
+
+      if (connectAfterSave && saved) {
+        const redirected = startOAuthRedirect(saved, providerKey);
+        if (!redirected) return;
+      }
+
       setShowWizard(false);
       setStep(1);
       setErrors({});
     },
   });
+
+  const deleteMutation = useMutation({
+    mutationFn: (id) => base44.entities.CompanyEmailSettings.delete(id),
+    onSuccess: (_, id) => {
+      queryClient.setQueryData(["company-email-settings", companyId], (old = []) => {
+        const list = Array.isArray(old) ? old : [];
+        return list.filter(item => item.id !== id);
+      });
+      queryClient.invalidateQueries({ queryKey: ["company-email-settings", companyId] });
+      setShowWizard(false);
+      setStep(1);
+      setErrors({});
+      setForm(getInitialForm(company));
+    },
+  });
+
+  function startOAuthRedirect(nextSettings, providerOverride) {
+    const providerKey = providerOverride || nextSettings?.provider || form.provider;
+    const redirectUrl = buildOAuthUrl({
+      settings: nextSettings,
+      providerKey,
+      companyId,
+    });
+
+    if (!redirectUrl) {
+      const providerName = providerKey === "google_workspace" ? "Google" : "Microsoft";
+      setStep(3);
+      setShowWizard(true);
+      setErrors(current => ({
+        ...current,
+        oauth: `De ${providerName}-koppeling kan nog niet starten omdat de OAuth client-id in de app-configuratie ontbreekt.`,
+      }));
+      return false;
+    }
+
+    try {
+      window.sessionStorage.setItem(
+        OAUTH_STORAGE_KEY,
+        JSON.stringify({
+          company_id: companyId,
+          settings_id: nextSettings?.id || null,
+          provider: providerKey,
+          from_email: nextSettings?.from_email || "",
+          started_at: new Date().toISOString(),
+        })
+      );
+    } catch {
+      // De redirect mag doorgaan, ook als sessionStorage niet beschikbaar is.
+    }
+
+    window.location.assign(redirectUrl);
+    return true;
+  }
 
   const openWizard = (targetStep = 1) => {
     const nextForm = {
@@ -431,7 +577,7 @@ export default function CompanyEmailTab({ companyId, company }) {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const save = () => {
+  const save = ({ connectAfterSave = false } = {}) => {
     const email = form.from_email?.trim() || "";
     const payload = {
       ...form,
@@ -448,7 +594,31 @@ export default function CompanyEmailTab({ companyId, company }) {
       oauth_account_id: isOauthProvider(form.provider) ? form.oauth_account_id || email : null,
     };
     setForm(payload);
-    saveMutation.mutate(payload);
+    saveMutation.mutate({ data: payload, connectAfterSave });
+  };
+
+  const connectExisting = () => {
+    if (!settings) return;
+    const nextForm = {
+      ...getInitialForm(company),
+      ...settings,
+      company_id: companyId,
+      oauth_scopes: settings.oauth_scopes?.length
+        ? settings.oauth_scopes
+        : getProvider(settings.provider || "microsoft_365").scopes,
+    };
+    setForm(nextForm);
+    setErrors({});
+    startOAuthRedirect(settings, settings.provider);
+  };
+
+  const deleteSettings = () => {
+    if (!settings?.id || deleteMutation.isPending) return;
+    const confirmed = typeof window === "undefined"
+      ? true
+      : window.confirm("Weet je zeker dat je deze e-mailinstelling wilt verwijderen?");
+    if (!confirmed) return;
+    deleteMutation.mutate(settings.id);
   };
 
   if (isLoading) {
@@ -536,10 +706,28 @@ export default function CompanyEmailTab({ companyId, company }) {
                     </td>
                     <td className="px-4 py-4 text-muted-foreground">{settings.from_name || "-"}</td>
                     <td className="px-4 py-4 text-right">
-                      <Button size="sm" variant="outline" onClick={() => openWizard(1)}>
-                        <Edit className="mr-1.5 h-3.5 w-3.5" />
-                        Wijzigen
-                      </Button>
+                      <div className="flex justify-end gap-2">
+                        {isOauthProvider(settings.provider) && settings.status === "pending_oauth" && (
+                          <Button size="sm" variant="default" onClick={connectExisting}>
+                            <ExternalLink className="mr-1.5 h-3.5 w-3.5" />
+                            Account koppelen
+                          </Button>
+                        )}
+                        <Button size="sm" variant="outline" onClick={() => openWizard(1)}>
+                          <Edit className="mr-1.5 h-3.5 w-3.5" />
+                          Wijzigen
+                        </Button>
+                        <Button
+                          size="sm"
+                          variant="outline"
+                          onClick={deleteSettings}
+                          disabled={deleteMutation.isPending}
+                          className="text-destructive hover:text-destructive"
+                          aria-label="E-mailinstelling verwijderen"
+                        >
+                          <Trash2 className="h-3.5 w-3.5" />
+                        </Button>
+                      </div>
                     </td>
                   </tr>
                 ) : (
@@ -775,8 +963,14 @@ export default function CompanyEmailTab({ companyId, company }) {
                   <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
                     <p>
-                      De instelling wordt opgeslagen als klaar voor koppeling. De echte Microsoft- of Google-machtiging moet daarna via de beveiligde provider-login worden afgerond.
+                      Na opslaan opent LOQ de beveiligde Microsoft- of Google-login om de machtiging af te ronden.
                     </p>
+                  </div>
+                )}
+                {errors.oauth && (
+                  <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-3 text-xs text-destructive">
+                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
+                    <p>{errors.oauth}</p>
                   </div>
                 )}
               </div>
@@ -811,9 +1005,20 @@ export default function CompanyEmailTab({ companyId, company }) {
                   <ChevronLeft className="mr-1.5 h-4 w-4" />
                   Terug
                 </Button>
-                <Button onClick={save} disabled={saveMutation.isPending}>
-                  <Check className="mr-1.5 h-4 w-4" />
-                  {saveMutation.isPending ? "Opslaan..." : "Opslaan"}
+                <Button
+                  onClick={() => save({ connectAfterSave: isOauthProvider(form.provider) })}
+                  disabled={saveMutation.isPending}
+                >
+                  {isOauthProvider(form.provider) ? (
+                    <ExternalLink className="mr-1.5 h-4 w-4" />
+                  ) : (
+                    <Check className="mr-1.5 h-4 w-4" />
+                  )}
+                  {saveMutation.isPending
+                    ? "Opslaan..."
+                    : isOauthProvider(form.provider)
+                      ? "Opslaan en account koppelen"
+                      : "Opslaan"}
                 </Button>
               </>
             )}
