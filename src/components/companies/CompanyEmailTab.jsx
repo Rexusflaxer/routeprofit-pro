@@ -24,6 +24,14 @@ import {
 
 const PROVIDERS = [
   {
+    key: "platform",
+    label: "LOQ standaardmail",
+    shortLabel: "LOQ",
+    desc: "Gebruik LOQ-verzending wanneer er geen eigen mailbox is gekoppeld",
+    authLabel: "LOQ Mail Service",
+    scopes: [],
+  },
+  {
     key: "microsoft_365",
     label: "Office 365 (Microsoft)",
     shortLabel: "Microsoft 365",
@@ -43,21 +51,13 @@ const PROVIDERS = [
     key: "smtp",
     label: "Overige",
     shortLabel: "Overige",
-    desc: "Gebruik SMTP-gegevens van de mailprovider",
+    desc: "Gebruik een SMTP-relay of mailprovider buiten Microsoft/Google",
     authLabel: "SMTP",
-    scopes: [],
-  },
-  {
-    key: "platform",
-    label: "Later instellen",
-    shortLabel: "Later instellen",
-    desc: "Nog geen mailbox koppelen",
-    authLabel: "Niet gekoppeld",
     scopes: [],
   },
 ];
 
-const PROVIDER_CARDS = PROVIDERS.filter(provider => provider.key !== "platform");
+const PROVIDER_CARDS = PROVIDERS;
 
 const LEGACY_OTHER_PROVIDER = {
   key: "other",
@@ -149,6 +149,7 @@ function getInitialForm(company) {
 }
 
 function getStatusForProvider(provider) {
+  if (provider === "platform") return "connected";
   if (provider === "microsoft_365" || provider === "google_workspace") return "pending_oauth";
   if (provider === "smtp" || provider === "other") return "action_required";
   return "draft";
@@ -276,7 +277,8 @@ function normalizePayload(form, companyId) {
   const provider = getProvider(providerKey);
   const isOauth = isOauthProvider(providerKey);
   const isSmtp = isSmtpProvider(providerKey);
-  const email = form.from_email?.trim() || null;
+  const formEmail = form.from_email?.trim() || null;
+  const email = providerKey === "platform" ? null : formEmail;
   const domain = getEmailDomain(email);
   const status = form.status || getStatusForProvider(providerKey);
   const channelDeliveryStatus = buildChannelDeliveryStatus({ ...form, provider: providerKey }, status);
@@ -288,7 +290,9 @@ function normalizePayload(form, companyId) {
     status,
     from_name: form.from_name?.trim() || null,
     from_email: email,
-    reply_to_email: email,
+    reply_to_email: providerKey === "platform"
+      ? form.reply_to_email?.trim() || formEmail
+      : email,
     bcc_email: null,
     use_for_invoices: Boolean(form.use_for_invoices),
     use_for_operational_mail: Boolean(form.use_for_operational_mail),
@@ -325,98 +329,17 @@ function isValidEmail(value) {
 
 function getConnectionSummary(settings) {
   if (!settings) return "Nog niet ingesteld";
-  if (settings.provider === "platform") return "Nog niet gekoppeld";
+  if (settings.provider === "platform") return "LOQ Mail Service";
   if (isSmtpProvider(settings.provider)) {
     return [settings.smtp_host, settings.smtp_port].filter(Boolean).join(":") || "SMTP niet volledig";
   }
   return settings.oauth_tenant_hint || getEmailDomain(settings.from_email) || "OAuth nog afronden";
 }
 
-const OAUTH_STORAGE_KEY = "loq_pending_email_oauth";
-
-function encodeOAuthState(payload) {
-  if (typeof window === "undefined") return "";
-  const json = encodeURIComponent(JSON.stringify(payload)).replace(
-    /%([0-9A-F]{2})/g,
-    (_, value) => String.fromCharCode(parseInt(value, 16))
-  );
-
-  return window
-    .btoa(json)
-    .replace(/\+/g, "-")
-    .replace(/\//g, "_")
-    .replace(/=+$/, "");
-}
-
-function getOAuthConfig(providerKey) {
-  if (typeof window === "undefined") return null;
-
-  const origin = window.location.origin;
-  const defaultRedirectUri = `${origin}/email-oauth/callback`;
-  const sharedRedirectUri = import.meta.env.VITE_EMAIL_OAUTH_REDIRECT_URI || defaultRedirectUri;
-
-  if (providerKey === "microsoft_365") {
-    return {
-      clientId:
-        import.meta.env.VITE_MICROSOFT_EMAIL_CLIENT_ID ||
-        import.meta.env.VITE_MICROSOFT_CLIENT_ID ||
-        "",
-      authorizeUrl: "https://login.microsoftonline.com/common/oauth2/v2.0/authorize",
-      redirectUri: import.meta.env.VITE_MICROSOFT_EMAIL_REDIRECT_URI || sharedRedirectUri,
-    };
-  }
-
-  if (providerKey === "google_workspace") {
-    return {
-      clientId:
-        import.meta.env.VITE_GOOGLE_EMAIL_CLIENT_ID ||
-        import.meta.env.VITE_GOOGLE_CLIENT_ID ||
-        "",
-      authorizeUrl: "https://accounts.google.com/o/oauth2/v2/auth",
-      redirectUri: import.meta.env.VITE_GOOGLE_EMAIL_REDIRECT_URI || sharedRedirectUri,
-    };
-  }
-
-  return null;
-}
-
-function buildOAuthUrl({ settings, providerKey, companyId }) {
-  const provider = getProvider(providerKey);
-  const config = getOAuthConfig(providerKey);
-
-  if (!provider || !isOauthProvider(providerKey) || !config?.clientId) return null;
-
-  const state = encodeOAuthState({
-    company_id: companyId,
-    settings_id: settings?.id || null,
-    provider: providerKey,
-    from_email: settings?.from_email || "",
-    ts: Date.now(),
-  });
-
-  const params = new URLSearchParams({
-    client_id: config.clientId,
-    response_type: "code",
-    redirect_uri: config.redirectUri,
-    scope: provider.scopes.join(" "),
-    state,
-    prompt: "consent",
-  });
-
-  if (settings?.from_email) {
-    params.set("login_hint", settings.from_email);
-  }
-
-  if (providerKey === "google_workspace") {
-    params.set("access_type", "offline");
-    params.set("include_granted_scopes", "true");
-  }
-
-  return `${config.authorizeUrl}?${params.toString()}`;
-}
+const OAUTH_COMPLETED_STORAGE_KEY = "loq_email_oauth_completed";
 
 function WizardSteps({ step }) {
-  const steps = ["Provider", "Gegevens", "Bevestigen"];
+  const steps = ["Provider", "Koppeling", "Afzender"];
 
   return (
     <div className="flex items-center gap-2">
@@ -672,14 +595,14 @@ export default function CompanyEmailTab({ companyId, company }) {
   };
 
   const saveMutation = useMutation({
-    mutationFn: async ({ data, connectAfterSave = false }) => {
+    mutationFn: async ({ data }) => {
       const payload = normalizePayload(data, companyId);
       const saved = settings?.id
         ? await base44.entities.CompanyEmailSettings.update(settings.id, payload)
         : await base44.entities.CompanyEmailSettings.create(payload);
-      return { saved, connectAfterSave, providerKey: payload.provider };
+      return { saved };
     },
-    onSuccess: ({ saved, connectAfterSave, providerKey }) => {
+    onSuccess: ({ saved }) => {
       if (saved) {
         queryClient.setQueryData(["company-email-settings", companyId], (old = []) => {
           const list = Array.isArray(old) ? old : [];
@@ -687,11 +610,6 @@ export default function CompanyEmailTab({ companyId, company }) {
         });
       }
       queryClient.invalidateQueries({ queryKey: ["company-email-settings", companyId] });
-
-      if (connectAfterSave && saved) {
-        const redirected = startOAuthRedirect(saved, providerKey);
-        if (!redirected) return;
-      }
 
       setShowWizard(false);
       setStep(1);
@@ -731,42 +649,28 @@ export default function CompanyEmailTab({ companyId, company }) {
     },
   });
 
-  function startOAuthRedirect(nextSettings, providerOverride) {
-    const providerKey = providerOverride || nextSettings?.provider || form.provider;
-    const redirectUrl = buildOAuthUrl({
-      settings: nextSettings,
-      providerKey,
-      companyId,
-    });
-
-    if (!redirectUrl) {
-      const providerName = providerKey === "google_workspace" ? "Google" : "Microsoft";
-      setStep(3);
-      setShowWizard(true);
+  async function startOAuthRedirect(providerOverride) {
+    const providerKey = providerOverride || form.provider;
+    try {
+      setErrors(current => ({ ...current, oauth: undefined }));
+      const redirectUri = `${window.location.origin}/email-oauth/callback`;
+      const { data } = await base44.functions.invoke("startCompanyEmailOAuth", {
+        company_id: companyId,
+        provider: providerKey,
+        redirect_uri: redirectUri,
+      });
+      if (!data?.authorize_url) {
+        throw new Error("De provider gaf geen koppel-url terug.");
+      }
+      window.location.assign(data.authorize_url);
+      return true;
+    } catch (error) {
       setErrors(current => ({
         ...current,
-        oauth: `De ${providerName}-koppeling kan nog niet starten omdat de OAuth client-id in de app-configuratie ontbreekt.`,
+        oauth: error?.response?.data?.error || error?.message || "De koppeling kan niet worden gestart.",
       }));
       return false;
     }
-
-    try {
-      window.sessionStorage.setItem(
-        OAUTH_STORAGE_KEY,
-        JSON.stringify({
-          company_id: companyId,
-          settings_id: nextSettings?.id || null,
-          provider: providerKey,
-          from_email: nextSettings?.from_email || "",
-          started_at: new Date().toISOString(),
-        })
-      );
-    } catch {
-      // De redirect mag doorgaan, ook als sessionStorage niet beschikbaar is.
-    }
-
-    window.location.assign(redirectUrl);
-    return true;
   }
 
   const openWizard = (targetStep = 1) => {
@@ -803,6 +707,27 @@ export default function CompanyEmailTab({ companyId, company }) {
     });
   };
 
+  useEffect(() => {
+    if (!settings || settings.status !== "connected" || typeof window === "undefined") return;
+    const params = new URLSearchParams(window.location.search);
+    if (params.get("emailSetup") !== "sender") return;
+
+    let shouldOpen = true;
+    try {
+      const completed = JSON.parse(window.sessionStorage.getItem(OAUTH_COMPLETED_STORAGE_KEY) || "{}");
+      shouldOpen = !completed.company_id || completed.company_id === companyId;
+      window.sessionStorage.removeItem(OAUTH_COMPLETED_STORAGE_KEY);
+    } catch {
+      shouldOpen = true;
+    }
+
+    if (!shouldOpen) return;
+    openWizard(3);
+    params.delete("emailSetup");
+    const nextUrl = `${window.location.pathname}${params.toString() ? `?${params.toString()}` : ""}${window.location.hash}`;
+    window.history.replaceState({}, document.title, nextUrl);
+  }, [companyId, settings]);
+
   const validateProviderStep = () => {
     if (form.provider) return true;
     setErrors({ provider: "Kies eerst een e-mailservice" });
@@ -812,11 +737,8 @@ export default function CompanyEmailTab({ companyId, company }) {
   const validateDetailsStep = () => {
     const nextErrors = {};
     if (!form.provider) nextErrors.provider = "Kies eerst een e-mailservice";
-    if (form.provider !== "platform") {
-      if (!form.from_name?.trim()) nextErrors.from_name = "Vul een afzendernaam in";
-      if (!isValidEmail(form.from_email)) nextErrors.from_email = "Vul een geldig e-mailadres in";
-    }
     if (isSmtpProvider(form.provider)) {
+      if (!isValidEmail(form.from_email)) nextErrors.from_email = "Vul een geldig e-mailadres in";
       if (!form.smtp_host?.trim()) nextErrors.smtp_host = "Vul de SMTP-server in";
       const port = Number(form.smtp_port);
       if (!port || port < 1 || port > 65535) nextErrors.smtp_port = "Vul een geldige poort in";
@@ -827,7 +749,17 @@ export default function CompanyEmailTab({ companyId, company }) {
     return Object.keys(nextErrors).length === 0;
   };
 
-  const save = ({ connectAfterSave = false } = {}) => {
+  const validateSenderStep = () => {
+    const nextErrors = {};
+    if (form.provider !== "platform" && !form.from_email?.trim()) {
+      nextErrors.from_email = "Rond eerst de koppeling af";
+    }
+    if (!form.from_name?.trim()) nextErrors.from_name = "Vul een afzendernaam in";
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const save = () => {
     const email = form.from_email?.trim() || "";
     const nextStatus = settings?.status === "connected" && settings.provider === form.provider
       ? "connected"
@@ -848,7 +780,7 @@ export default function CompanyEmailTab({ companyId, company }) {
       oauth_account_id: isOauthProvider(form.provider) ? form.oauth_account_id || email : null,
     };
     setForm(payload);
-    saveMutation.mutate({ data: payload, connectAfterSave });
+    saveMutation.mutate({ data: payload });
   };
 
   const connectExisting = () => {
@@ -863,7 +795,7 @@ export default function CompanyEmailTab({ companyId, company }) {
     };
     setForm(nextForm);
     setErrors({});
-    startOAuthRedirect(settings, settings.provider);
+    startOAuthRedirect(settings.provider);
   };
 
   const deleteSettings = () => {
@@ -883,15 +815,6 @@ export default function CompanyEmailTab({ companyId, company }) {
   if (isLoading) {
     return <div className="p-6 text-sm text-muted-foreground">E-mailinstellingen laden...</div>;
   }
-
-  const providerActionLabel = form.provider
-    ? isOauthProvider(form.provider)
-      ? "Account koppelen"
-      : "SMTP instellen"
-    : "Account koppelen";
-  const shouldConnectAfterSave = isOauthProvider(form.provider) && !(
-    settings?.status === "connected" && settings.provider === form.provider
-  );
 
   return (
     <div className="flex h-full flex-col">
@@ -985,7 +908,9 @@ export default function CompanyEmailTab({ companyId, company }) {
                           <Mail className="h-4 w-4 text-muted-foreground" />
                         </span>
                         <div className="min-w-0">
-                          <p className="truncate font-medium text-foreground">{settings.from_email || "Geen e-mailadres"}</p>
+                          <p className="truncate font-medium text-foreground">
+                            {settings.provider === "platform" ? "LOQ standaardmail" : settings.from_email || "Geen e-mailadres"}
+                          </p>
                           <p className="truncate text-xs text-muted-foreground">{getConnectionSummary(settings)}</p>
                         </div>
                       </div>
@@ -1031,7 +956,7 @@ export default function CompanyEmailTab({ companyId, company }) {
                       <Mail className="mx-auto h-6 w-6 text-muted-foreground" />
                       <p className="mt-2 text-sm font-medium text-foreground">Nog geen e-mailadres gekoppeld.</p>
                       <p className="mt-1 text-xs text-muted-foreground">
-                        Voeg een zakelijk mailadres toe om later rapportages, facturen en meldingen vanuit het eigen domein te verzenden.
+                        LOQ kan standaardmail gebruiken totdat dit bedrijf een eigen Microsoft-, Google- of overige mailbox koppelt.
                       </p>
                       {!showWizard && (
                         <Button size="sm" className="mt-3" onClick={() => openWizard(1)}>
@@ -1068,7 +993,7 @@ export default function CompanyEmailTab({ companyId, company }) {
                     Kies de provider. Voor Microsoft en Google loopt de koppeling via een veilige inlogmachtiging.
                   </p>
                 </div>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-3">
+                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
                   {PROVIDER_CARDS.map(provider => (
                     <ProviderCard
                       key={provider.key}
@@ -1088,38 +1013,35 @@ export default function CompanyEmailTab({ companyId, company }) {
               <div className="space-y-4">
                 <div>
                   <p className="text-sm font-semibold text-foreground">
-                    {isOauthProvider(form.provider) ? "Account koppelen" : "SMTP-gegevens instellen"}
+                    {form.provider === "platform"
+                      ? "LOQ standaardmail gebruiken"
+                      : isOauthProvider(form.provider)
+                        ? "Account koppelen"
+                        : "SMTP-gegevens instellen"}
                   </p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    {isOauthProvider(form.provider)
-                      ? "Vul het afzendadres in. Na opslaan staat de koppeling klaar om via de provider te worden gemachtigd."
-                      : "Vul de afzender en de verzendserver van de mailprovider in."}
+                    {form.provider === "platform"
+                      ? "LOQ gebruikt de standaard mailprovider wanneer er geen eigen mailbox is gekoppeld."
+                      : isOauthProvider(form.provider)
+                        ? "Je wordt doorgestuurd naar de provider. Het e-mailadres komt daarna automatisch terug uit de koppeling."
+                        : "Vul de verzendserver van de mailprovider in. Voor overige providers is een SMTP-relay nodig."}
                   </p>
                 </div>
 
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                  <div className="space-y-1">
-                    <Label>Afzendernaam</Label>
-                    <Input
-                      value={form.from_name || ""}
-                      onChange={(event) => { set("from_name", event.target.value); setErrors(current => ({ ...current, from_name: undefined })); }}
-                      placeholder={company?.display_name || "Bedrijfsnaam"}
-                      className={errors.from_name ? "border-destructive" : ""}
-                    />
-                    {errors.from_name && <p className="text-xs text-destructive">{errors.from_name}</p>}
+                {form.provider === "platform" && (
+                  <div className="rounded-lg border border-border bg-card p-4">
+                    <div className="flex items-start gap-3">
+                      <Mail className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+                      <div className="min-w-0">
+                        <p className="text-sm font-semibold text-foreground">Fallback vanuit LOQ</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Facturen, rapportages en meldingen kunnen via de LOQ mailprovider worden verzonden.
+                          Antwoorden gaan naar het e-mailadres van het bedrijf zodra dat bekend is.
+                        </p>
+                      </div>
+                    </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label>Zakelijk e-mailadres</Label>
-                    <Input
-                      type="email"
-                      value={form.from_email || ""}
-                      onChange={(event) => { set("from_email", event.target.value); setErrors(current => ({ ...current, from_email: undefined })); }}
-                      placeholder="no-reply@bedrijf.nl"
-                      className={errors.from_email ? "border-destructive" : ""}
-                    />
-                    {errors.from_email && <p className="text-xs text-destructive">{errors.from_email}</p>}
-                  </div>
-                </div>
+                )}
 
                 {isOauthProvider(form.provider) && (
                   <div className="rounded-lg border border-border bg-card p-4">
@@ -1129,7 +1051,8 @@ export default function CompanyEmailTab({ companyId, company }) {
                         <div>
                           <p className="text-sm font-semibold text-foreground">{selectedProvider.label}</p>
                           <p className="mt-1 text-xs text-muted-foreground">
-                            LOQ vraagt alleen toestemming om namens dit e-mailadres uitgaande mail te verzenden. Het wachtwoord wordt niet opgeslagen.
+                            LOQ vraagt alleen toestemming om namens de gekoppelde mailbox uitgaande mail te verzenden.
+                            Het wachtwoord wordt niet opgeslagen.
                           </p>
                         </div>
                         <div className="grid grid-cols-1 gap-2 text-xs text-muted-foreground sm:grid-cols-3">
@@ -1146,9 +1069,12 @@ export default function CompanyEmailTab({ companyId, company }) {
                             E-mail verzenden
                           </div>
                         </div>
-                        <div className="rounded-md border border-border bg-muted/20 px-3 py-2 text-xs text-muted-foreground">
-                          Domein: <span className="font-medium text-foreground">{getEmailDomain(form.from_email) || "wordt afgeleid uit het e-mailadres"}</span>
-                        </div>
+                        {errors.oauth && (
+                          <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                            <AlertCircle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            <p>{errors.oauth}</p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </div>
@@ -1166,6 +1092,17 @@ export default function CompanyEmailTab({ companyId, company }) {
                       </div>
                     </div>
                     <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                      <div className="space-y-1 sm:col-span-2">
+                        <Label>Zakelijk e-mailadres</Label>
+                        <Input
+                          type="email"
+                          value={form.from_email || ""}
+                          onChange={(event) => { set("from_email", event.target.value); setErrors(current => ({ ...current, from_email: undefined })); }}
+                          placeholder="mailbox@bedrijf.nl"
+                          className={errors.from_email ? "border-destructive" : ""}
+                        />
+                        {errors.from_email && <p className="text-xs text-destructive">{errors.from_email}</p>}
+                      </div>
                       <div className="space-y-1">
                         <Label>SMTP-server</Label>
                         <Input
@@ -1229,17 +1166,38 @@ export default function CompanyEmailTab({ companyId, company }) {
             {step === 3 && selectedProvider && (
               <div className="space-y-4">
                 <div>
-                  <p className="text-sm font-semibold text-foreground">Controleer de instelling</p>
+                  <p className="text-sm font-semibold text-foreground">Afzendernaam</p>
                   <p className="mt-1 text-xs text-muted-foreground">
-                    Sla deze instelling op. Daarna staat het e-mailadres als uitgaande mailbox in het bedrijfsprofiel.
+                    Kies de naam die ontvangers bij uitgaande e-mails zien.
                   </p>
+                </div>
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+                  <div className="space-y-1">
+                    <Label>Afzendernaam</Label>
+                    <Input
+                      value={form.from_name || ""}
+                      onChange={(event) => { set("from_name", event.target.value); setErrors(current => ({ ...current, from_name: undefined })); }}
+                      placeholder={company?.display_name || company?.legal_name || "Bedrijfsnaam"}
+                      className={errors.from_name ? "border-destructive" : ""}
+                    />
+                    {errors.from_name && <p className="text-xs text-destructive">{errors.from_name}</p>}
+                  </div>
+                  <div className="space-y-1">
+                    <Label>Verzendadres</Label>
+                    <div className="flex h-10 items-center rounded-md border border-border bg-muted/30 px-3 text-sm text-muted-foreground">
+                      {form.provider === "platform"
+                        ? "LOQ standaardmail"
+                        : form.from_email || "Wordt ingesteld door de provider"}
+                    </div>
+                    {errors.from_email && <p className="text-xs text-destructive">{errors.from_email}</p>}
+                  </div>
                 </div>
                 <div className="rounded-lg border border-border bg-card divide-y divide-border">
                   <SummaryRow label="E-mailservice" value={selectedProvider.label} />
                   <SummaryRow label="Authenticatie" value={selectedProvider.authLabel} />
                   <SummaryRow label="Status na opslaan" value={STATUS_LABELS[getStatusForProvider(form.provider)] || getStatusForProvider(form.provider)} />
                   <SummaryRow label="Afzendernaam" value={form.from_name} />
-                  <SummaryRow label="E-mailadres" value={form.from_email} />
+                  <SummaryRow label="E-mailadres" value={form.provider === "platform" ? "LOQ standaardmail" : form.from_email} />
                   {isOauthProvider(form.provider) && (
                     <>
                       <SummaryRow label="Domein" value={form.oauth_tenant_hint || getEmailDomain(form.from_email)} />
@@ -1254,14 +1212,6 @@ export default function CompanyEmailTab({ companyId, company }) {
                     </>
                   )}
                 </div>
-                {isOauthProvider(form.provider) && shouldConnectAfterSave && (
-                  <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-3 text-xs text-amber-900 dark:border-amber-900 dark:bg-amber-950 dark:text-amber-200">
-                    <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
-                    <p>
-                      Na opslaan opent LOQ de beveiligde Microsoft- of Google-login om de machtiging af te ronden.
-                    </p>
-                  </div>
-                )}
                 {errors.oauth && (
                   <div className="flex items-start gap-2 rounded-lg border border-destructive/30 bg-destructive/10 px-3 py-3 text-xs text-destructive">
                     <AlertCircle className="mt-0.5 h-4 w-4 shrink-0" />
@@ -1277,7 +1227,7 @@ export default function CompanyEmailTab({ companyId, company }) {
               <>
                 <Button variant="outline" onClick={closeWizard}>Annuleren</Button>
                 <Button onClick={() => { if (validateProviderStep()) setStep(2); }} disabled={!form.provider}>
-                  {providerActionLabel}
+                  Volgende
                   <ChevronRight className="ml-1.5 h-4 w-4" />
                 </Button>
               </>
@@ -1288,9 +1238,20 @@ export default function CompanyEmailTab({ companyId, company }) {
                   <ChevronLeft className="mr-1.5 h-4 w-4" />
                   Terug
                 </Button>
-                <Button onClick={() => { if (validateDetailsStep()) setStep(3); }}>
-                  Volgende
-                  <ChevronRight className="ml-1.5 h-4 w-4" />
+                <Button
+                  onClick={() => {
+                    if (isOauthProvider(form.provider)) {
+                      startOAuthRedirect(form.provider);
+                      return;
+                    }
+                    if (validateDetailsStep()) setStep(3);
+                  }}
+                >
+                  {isOauthProvider(form.provider) ? (
+                    <ExternalLink className="mr-1.5 h-4 w-4" />
+                  ) : null}
+                  {isOauthProvider(form.provider) ? "Account koppelen" : "Volgende"}
+                  {!isOauthProvider(form.provider) && <ChevronRight className="ml-1.5 h-4 w-4" />}
                 </Button>
               </>
             )}
@@ -1301,19 +1262,11 @@ export default function CompanyEmailTab({ companyId, company }) {
                   Terug
                 </Button>
                 <Button
-                  onClick={() => save({ connectAfterSave: shouldConnectAfterSave })}
+                  onClick={() => { if (validateSenderStep()) save(); }}
                   disabled={saveMutation.isPending}
                 >
-                  {shouldConnectAfterSave ? (
-                    <ExternalLink className="mr-1.5 h-4 w-4" />
-                  ) : (
-                    <Check className="mr-1.5 h-4 w-4" />
-                  )}
-                  {saveMutation.isPending
-                    ? "Opslaan..."
-                    : shouldConnectAfterSave
-                      ? "Opslaan en account koppelen"
-                      : "Opslaan"}
+                  <Check className="mr-1.5 h-4 w-4" />
+                  {saveMutation.isPending ? "Opslaan..." : "Opslaan"}
                 </Button>
               </>
             )}

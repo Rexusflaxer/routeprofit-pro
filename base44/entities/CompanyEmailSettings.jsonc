@@ -145,6 +145,35 @@
       ],
       "description": "Referentie naar server-side tokenopslag; bevat nooit tokens zelf"
     },
+    "oauth_access_token_encrypted": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Versleutelde access token voor Microsoft/Google-verzending"
+    },
+    "oauth_refresh_token_encrypted": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Versleutelde refresh token voor Microsoft/Google-verzending"
+    },
+    "oauth_token_expires_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "Moment waarop de access token verloopt"
+    },
+    "oauth_token_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Token type van de gekoppelde provider"
+    },
     "smtp_host": {
       "type": [
         "string",

@@ -48,7 +48,13 @@ function hasEmailSettingsAction(settings) {
 }
 
 export default function CompanySidebarPanel({ companyId, companies, company }) {
-  const [active, setActive] = useState("wpbr");
+  const getInitialActiveTab = () => {
+    if (typeof window === "undefined") return "wpbr";
+    const tab = new URLSearchParams(window.location.search).get("tab");
+    return MENU_ITEMS.some(item => item.key === tab) ? tab : "wpbr";
+  };
+
+  const [active, setActive] = useState(getInitialActiveTab);
 
   const { data: accreditations = [] } = useQuery({
     queryKey: ["company-accreditations", companyId],
