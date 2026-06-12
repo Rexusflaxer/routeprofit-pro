@@ -61,7 +61,7 @@ const PROVIDERS = [
   },
 ];
 
-const PROVIDER_CARDS = PROVIDERS;
+const PROVIDER_CARDS = PROVIDERS.filter(p => p.key !== "platform");
 
 const LEGACY_OTHER_PROVIDER = {
   key: "other",
