@@ -814,22 +814,29 @@ function AccreditationPresetStep({ presets, manualPreset, selectedKey, onSelect,
         ))}
       </div>
 
-      <div className="rounded-md border border-dashed border-border bg-muted/20 px-3 py-2.5 flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-        <div className="min-w-0">
-          <p className="text-sm font-medium text-foreground">Staat de juiste erkenning er niet tussen?</p>
-          <p className="text-xs text-muted-foreground">Voeg dan handmatig een andere erkenning of certificering toe.</p>
-        </div>
-        <Button
+      <section>
+        <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground mb-1.5 px-1">Overig</p>
+        <button
           type="button"
-          variant={selectedKey === presetKey(manualPreset) ? "default" : "outline"}
-          size="sm"
-          className="gap-2 whitespace-nowrap shrink-0"
           onClick={() => onSelect(manualPreset)}
+          className={`w-full flex items-center gap-3 px-3 py-2.5 rounded-md border text-left transition-colors ${
+            selectedKey === presetKey(manualPreset)
+              ? "border-primary bg-primary/10"
+              : "border-border bg-card hover:border-primary/50 hover:bg-muted/40"
+          }`}
         >
-          <Search className="h-4 w-4" />
-          Handmatig toevoegen
-        </Button>
-      </div>
+          <div className={`flex h-5 w-5 shrink-0 items-center justify-center rounded-full border-2 transition-colors ${
+            selectedKey === presetKey(manualPreset) ? "border-primary bg-primary" : "border-muted-foreground/30"
+          }`}>
+            {selectedKey === presetKey(manualPreset) && <Check className="h-3 w-3 text-primary-foreground" />}
+          </div>
+          <div className="flex-1 min-w-0">
+            <p className="text-sm font-medium text-foreground">Staat de juiste erkenning er niet tussen?</p>
+            <p className="text-xs text-muted-foreground">Voeg handmatig een andere erkenning of certificering toe.</p>
+          </div>
+          <Badge variant="secondary" className="text-[11px] whitespace-nowrap shrink-0">Handmatig</Badge>
+        </button>
+      </section>
     </div>
   );
 }
