@@ -1036,26 +1036,36 @@ export default function CompanyEmailTab({ companyId, company }) {
                 <WizardSteps step={step} />
 
             {step === 1 && (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm font-semibold text-foreground">Van welke e-mailservice maak je gebruik?</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Kies de provider. Voor Microsoft en Google loopt de koppeling via een veilige inlogmachtiging.
-                  </p>
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-foreground">Kies de e-mailservice</p>
+                <div className="grid grid-cols-1 gap-2">
+                  {PROVIDER_CARDS.map(provider => {
+                    const isSelected = form.provider === provider.key || (form.provider === "other" && provider.key === "smtp");
+                    return (
+                      <button
+                        key={provider.key}
+                        type="button"
+                        onClick={() => { set("provider", provider.key); setErrors(current => ({ ...current, provider: undefined })); setStep(2); }}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${
+                          isSelected ? "border-primary bg-accent" : "border-border bg-card"
+                        }`}
+                      >
+                        <div className="mr-3 flex h-10 w-16 shrink-0 items-center justify-center">
+                          <ProviderVisual providerKey={provider.key} />
+                        </div>
+                        <div className="min-w-0 flex-1">
+                          <span className="text-sm font-semibold text-foreground">{provider.label}</span>
+                          <span className="mt-0.5 block text-xs text-muted-foreground">{provider.desc}</span>
+                        </div>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                      </button>
+                    );
+                  })}
                 </div>
-                <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4">
-                  {PROVIDER_CARDS.map(provider => (
-                    <ProviderCard
-                      key={provider.key}
-                      provider={provider}
-                      selected={form.provider === provider.key || (form.provider === "other" && provider.key === "smtp")}
-                      onSelect={(providerKey) => { set("provider", providerKey); setErrors(current => ({ ...current, provider: undefined })); }}
-                    />
-                  ))}
+                {errors.provider && <p className="text-xs text-destructive">{errors.provider}</p>}
+                <div className="flex justify-end pt-1">
+                  <Button variant="outline" size="sm" onClick={closeWizard}>Annuleren</Button>
                 </div>
-                {errors.provider && (
-                  <p className="text-xs text-destructive">{errors.provider}</p>
-                )}
               </div>
             )}
 
@@ -1273,15 +1283,7 @@ export default function CompanyEmailTab({ companyId, company }) {
           </div>
 
               <div className="flex items-center justify-between border-t border-border px-4 py-4 sm:px-6">
-            {step === 1 && (
-              <>
-                <Button variant="outline" onClick={closeWizard}>Annuleren</Button>
-                <Button onClick={() => { if (validateProviderStep()) setStep(2); }} disabled={!form.provider}>
-                  Volgende
-                  <ChevronRight className="ml-1.5 h-4 w-4" />
-                </Button>
-              </>
-            )}
+            {step === 1 && null}
             {step === 2 && (
               <>
                 <Button variant="ghost" onClick={() => setStep(1)}>
