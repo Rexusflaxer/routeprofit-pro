@@ -7,9 +7,9 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ToggleGroup, ToggleGroupItem } from "@/components/ui/toggle-group";
 import { Building2, List, Map as MapIcon, Search } from "lucide-react";
+import { getCompanyLocationAddressLabel } from "@/lib/companyLocationScope";
 import { TEAMHUB_SERVICE_LABELS, getActiveWpbrLicenseType } from "@/lib/teamhubServiceRules";
 import TeamhubMap from "@/components/teamhub/TeamhubMap";
-import TeamhubCompanyPreview from "@/components/teamhub/TeamhubCompanyPreview";
 
 function normalizeSearch(value) {
   return String(value || "").trim().toLowerCase();
@@ -21,6 +21,20 @@ function serviceLabel(key) {
 
 function getCompanyName(company) {
   return company?.display_name || company?.trade_name || company?.legal_name || "Bedrijf";
+}
+
+function getRegionLabels(company) {
+  return (company?.teamhub_regions || [])
+    .map(region => region.label || region.city)
+    .filter(Boolean);
+}
+
+function formatLimitedList(labels, limit = 3) {
+  const cleanLabels = (labels || []).filter(Boolean);
+  if (cleanLabels.length === 0) return "—";
+  const visible = cleanLabels.slice(0, limit).join(", ");
+  const remaining = cleanLabels.length - limit;
+  return remaining > 0 ? `${visible} +${remaining}` : visible;
 }
 
 function CompanyLogo({ company }) {
@@ -52,25 +66,70 @@ function TeamhubListView({ companies, locationById, onOpenCompany }) {
   }
 
   return (
-    <div className="grid grid-cols-1 gap-3 xl:grid-cols-2">
-      {companies.map(company => {
-        const location = locationById.get(company.teamhub_public_location_id);
-        return (
-          <article key={company.id} className="overflow-hidden rounded-md border border-border bg-card">
-            <TeamhubCompanyPreview
-              company={company}
-              location={location}
-              className="rounded-none border-0 shadow-none"
-            />
-            <div className="flex justify-end border-t border-border bg-muted/20 px-4 py-3">
-              <Button type="button" variant="outline" size="sm" className="gap-2" onClick={() => onOpenCompany(company)}>
-                <MapIcon className="h-4 w-4" />
-                Toon op kaart
-              </Button>
-            </div>
-          </article>
-        );
-      })}
+    <div className="overflow-x-auto rounded-md border border-border bg-card">
+      <div className="min-w-[1180px]">
+        <div className="grid grid-cols-[minmax(260px,1.25fr)_minmax(240px,1.15fr)_minmax(210px,0.95fr)_minmax(260px,1fr)_minmax(220px,0.9fr)_120px] gap-4 border-b border-border bg-muted/30 px-4 py-2 text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">
+          <span>Bedrijf</span>
+          <span>Diensten</span>
+          <span>Werkgebied</span>
+          <span>Vestiging</span>
+          <span>Contact</span>
+          <span className="text-right">Actie</span>
+        </div>
+        <div className="divide-y divide-border">
+          {companies.map(company => {
+            const location = locationById.get(company.teamhub_public_location_id);
+            const services = Array.isArray(company.teamhub_service_types) ? company.teamhub_service_types : [];
+            const serviceLabels = services.map(serviceLabel);
+            const regions = getRegionLabels(company);
+            const address = location ? getCompanyLocationAddressLabel(location) : [
+              company.street_name,
+              company.house_number,
+              company.postal_code,
+              company.city,
+            ].filter(Boolean).join(" ");
+            const email = company.teamhub_contact_email || company.email;
+            const phone = company.teamhub_contact_phone || company.phone;
+
+            return (
+              <div key={company.id} className="grid grid-cols-[minmax(260px,1.25fr)_minmax(240px,1.15fr)_minmax(210px,0.95fr)_minmax(260px,1fr)_minmax(220px,0.9fr)_120px] items-center gap-4 px-4 py-3 transition-colors hover:bg-accent/40">
+                <div className="flex min-w-0 items-center gap-3">
+                  <CompanyLogo company={company} />
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{getCompanyName(company)}</p>
+                    {company.trade_name && company.trade_name !== getCompanyName(company) && (
+                      <p className="truncate text-xs text-muted-foreground">Handelsnaam: {company.trade_name}</p>
+                    )}
+                  </div>
+                </div>
+                <p className="truncate text-sm text-muted-foreground" title={serviceLabels.join(", ")}>
+                  {formatLimitedList(serviceLabels, 3)}
+                </p>
+                <p className="truncate text-sm text-muted-foreground" title={regions.join(", ")}>
+                  {formatLimitedList(regions, 3)}
+                </p>
+                <p className="truncate text-sm text-muted-foreground" title={address || ""}>
+                  {address || "—"}
+                </p>
+                <div className="min-w-0 text-sm text-muted-foreground">
+                  {email ? (
+                    <a className="block truncate hover:text-foreground" href={`mailto:${email}`} title={email}>{email}</a>
+                  ) : (
+                    <span className="block">—</span>
+                  )}
+                  {phone && <a className="block truncate text-xs hover:text-foreground" href={`tel:${phone}`} title={phone}>{phone}</a>}
+                </div>
+                <div className="flex justify-end">
+                  <Button type="button" variant="outline" size="sm" className="h-8 gap-2" onClick={() => onOpenCompany(company)}>
+                    <MapIcon className="h-3.5 w-3.5" />
+                    Kaart
+                  </Button>
+                </div>
+              </div>
+            );
+          })}
+        </div>
+      </div>
     </div>
   );
 }
