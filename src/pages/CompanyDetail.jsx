@@ -5,10 +5,8 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Edit, Check, X, Building2, MapPin, FileText, Upload, Handshake } from "lucide-react";
+import { ArrowLeft, Edit, Check, X, Building2, MapPin, Upload, Handshake } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import SidebarPanel from "@/components/companies/CompanySidebarPanel";
 import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
@@ -18,16 +16,6 @@ const ROLE_LABELS = {
   sole_proprietor: "Eenmanszaak", other: "Overig",
 };
 
-const ACTIVITY_LABELS = {
-  private_security: "Particuliere beveiliging", event_hospitality_security: "Evenementen/horeca",
-  object_security: "Objectbeveiliging", mobile_surveillance: "Mobiele surveillance",
-  alarm_response: "Alarmopvolging", alarm_center: "Alarmcentrale", video_surveillance_center: "Videotoezicht",
-  security_installation: "Beveiligingsinstallaties", traffic_controller: "Verkeersregelaars",
-  fire_watch: "Brandwacht", bhv: "BHV", private_investigation: "Recherche",
-  reception_host: "Receptie/host", other: "Overig",
-};
-
-const ACTIVITIES = Object.entries(ACTIVITY_LABELS).map(([key, label]) => ({ key, label }));
 const LEGAL_FORMS = ["BV", "NV", "VOF", "CV", "Eenmanszaak", "Maatschap", "Stichting", "Coöperatie", "Anders"];
 const NEW_COMPANY_PLACEHOLDER = "Nieuw bedrijf";
 const STATUS_COLORS = {
@@ -56,7 +44,7 @@ function editableCompanyForm(company, blankPlaceholder = false) {
     display_name: shouldBlank ? "" : company.display_name || "",
     legal_name: shouldBlank ? "" : company.legal_name || "",
     trade_name: company.trade_name || "",
-    status: company.status || "inactive",
+    status: company.status || "active",
     company_role: company.company_role || "operating_company",
     country: company.country || "Nederland",
     activities: company.activities || [],
@@ -118,7 +106,7 @@ function isEmptyDraftCompany(data = {}) {
 
   return textFields.every(field => !String(data[field] || "").trim())
     && (data.country || "Nederland") === "Nederland"
-    && (data.status || "inactive") === "inactive"
+    && (data.status || "active") === "active"
     && (data.company_role || "operating_company") === "operating_company"
     && !(data.activities || []).length;
 }
@@ -258,11 +246,6 @@ export default function CompanyDetail() {
     }
   };
 
-  const toggleActivity = (key) => {
-    const current = form.activities || [];
-    set("activities", current.includes(key) ? current.filter(a => a !== key) : [...current, key]);
-  };
-
   if (!company && companies.length > 0) {
     return (
       <div className="py-16 text-center text-muted-foreground">
@@ -398,18 +381,6 @@ export default function CompanyDetail() {
                   </Select>
                 : <ViewText value={ROLE_LABELS[data.company_role] || data.company_role} />}
             </InfoRow>
-            <InfoRow label="Status">
-              {editing
-                ? <Select value={data.status || "inactive"} onValueChange={v => set("status", v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="active">Actief</SelectItem>
-                      <SelectItem value="inactive">Inactief</SelectItem>
-                      <SelectItem value="archived">Gearchiveerd</SelectItem>
-                    </SelectContent>
-                  </Select>
-                : <ViewText value={data.status === "active" ? "Actief" : data.status === "inactive" ? "Inactief" : "Gearchiveerd"} />}
-            </InfoRow>
             {(holdingOptions.length > 0 || holdingCompany) && (
               <InfoRow label="Onder holding">
                 {editing
@@ -476,76 +447,6 @@ export default function CompanyDetail() {
             </InfoRow>
           </div>
 
-          {/* Activiteiten */}
-          <div className="space-y-3 md:col-span-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Activiteiten</h3>
-            {editing ? (
-              <>
-                <InfoRow label="Primaire activiteit">
-                  <Select value={data.primary_activity || "none"} onValueChange={v => set("primary_activity", v === "none" ? null : v)}>
-                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Kies primaire activiteit" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Geen primaire activiteit</SelectItem>
-                      {ACTIVITIES.map(activity => (
-                        <SelectItem key={activity.key} value={activity.key}>{activity.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </InfoRow>
-                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-                  {ACTIVITIES.map(activity => (
-                    <label key={activity.key} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-sm hover:bg-muted/50">
-                      <Checkbox
-                        checked={(data.activities || []).includes(activity.key)}
-                        onCheckedChange={() => toggleActivity(activity.key)}
-                      />
-                      <span>{activity.label}</span>
-                    </label>
-                  ))}
-                </div>
-              </>
-            ) : (
-              <div className="flex flex-wrap gap-1.5">
-                {(data.activities || []).length > 0 ? (
-                  (data.activities || []).map(activity => (
-                    <span key={activity} className="rounded bg-muted px-2 py-1 text-xs text-foreground">
-                      {ACTIVITY_LABELS[activity] || activity}
-                    </span>
-                  ))
-                ) : (
-                  <ViewText value={null} />
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* Notities */}
-          <div className="space-y-2 md:col-span-2">
-            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notities</h3>
-            {editing ? (
-              <Textarea
-                value={data.notes || ""}
-                onChange={e => set("notes", e.target.value)}
-                rows={3}
-                placeholder="Interne notities over dit bedrijf"
-              />
-            ) : (
-              <ViewText value={data.notes} />
-            )}
-          </div>
-
-
-          {/* Briefpapier */}
-          {(data.letterhead_file_url || editing) && (
-            <div className="space-y-2">
-              <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Briefpapier</h3>
-              {data.letterhead_file_url && (
-                <a href={data.letterhead_file_url} download={data.letterhead_download_filename || undefined} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 text-sm text-blue-600 hover:underline">
-                  <FileText className="w-4 h-4" /> {data.letterhead_download_filename || "Briefpapier bekijken"}
-                </a>
-              )}
-            </div>
-          )}
         </div>
 
         {/* Save bar at bottom when editing */}

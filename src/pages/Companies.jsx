@@ -65,7 +65,7 @@ export default function Companies() {
       rsin: null,
       btw_number: null,
       legal_form: null,
-      status: "inactive",
+      status: "active",
       company_role: "operating_company",
       holding_company_id: null,
       primary_activity: null,
