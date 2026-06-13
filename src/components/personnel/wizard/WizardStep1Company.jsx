@@ -7,15 +7,14 @@ import { Switch } from "@/components/ui/switch";
 const PROFILE_POLICY_LABELS = {
   local_only: "Alleen lokaal",
   profile_wins_after_acceptance: "Profiel wint na acceptatie",
-  organization_wins: "Organisatiekopie leidend",
-  manual_review: "Handmatige review"
+  organization_override: "Organisatiekopie leidend"
 };
 
 const CONFLICT_STATUS_LABELS = {
   none: "Geen conflict",
-  pending_review: "Review nodig",
+  review_required: "Review nodig",
+  profile_accepted: "Profiel geaccepteerd",
   local_copy_retained: "Lokale kopie bewaard",
-  resolved: "Opgelost"
 };
 
 const RELATION_OPTIONS = [

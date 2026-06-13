@@ -24,11 +24,11 @@ import {
   BriefcaseBusiness,
   Building2,
   CalendarDays,
+  Check,
   ClipboardCheck,
   FileBadge,
   FileText,
   Handshake,
-  Mail,
   MessageSquareText,
   Package,
   Pencil,
@@ -36,8 +36,10 @@ import {
   Search,
   ShieldCheck,
   Trash2,
+  Upload,
   UserCheck,
   Users,
+  X,
 } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import PageHeader from "../components/ui-custom/PageHeader";
@@ -46,6 +48,7 @@ import PersonnelWizard from "../components/personnel/PersonnelWizard";
 import CostCalculator from "../components/personnel/CostCalculator";
 import PersonnelAccessTab from "../components/personnel/PersonnelAccessTab";
 import PersonnelContractsTab from "../components/personnel/PersonnelContractsTab";
+import { uploadManagedFile } from "@/lib/managedFiles";
 
 const STATUS_COLORS = {
   draft: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
@@ -169,6 +172,11 @@ function getDisplayName(personnel) {
   return personnel.name || [personnel.call_name || personnel.first_name, personnel.name_prefix, personnel.last_name].filter(Boolean).join(" ") || "Naam onbekend";
 }
 
+function buildPersonnelDisplayName(personnel) {
+  const first = personnel.call_name || personnel.first_name || personnel.legal_first_names || "";
+  return [first, personnel.name_prefix, personnel.last_name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim() || personnel.name || "";
+}
+
 function getStatus(personnel) {
   return personnel.status || (personnel.is_active === false ? "inactive" : "active");
 }
@@ -246,6 +254,259 @@ function MiniTable({ columns, rows, emptyText }) {
           ))}
         </TableBody>
       </Table>
+    </div>
+  );
+}
+
+function ProfileInfoRow({ label, editing, children, value }) {
+  return (
+    <div className="grid grid-cols-1 gap-2 py-2 md:grid-cols-[190px_1fr] md:items-center">
+      <Label className="text-sm text-muted-foreground">{label}</Label>
+      {editing ? children : <span className="text-sm font-medium text-foreground">{value || "-"}</span>}
+    </div>
+  );
+}
+
+function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
+  const queryClient = useQueryClient();
+  const [form, setForm] = useState(person);
+  const [uploadingPhoto, setUploadingPhoto] = useState(false);
+
+  useEffect(() => {
+    setForm(person);
+  }, [person]);
+
+  const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
+
+  const updateNamePart = (field, value) => {
+    setForm(current => {
+      const next = { ...current, [field]: value };
+      return { ...next, name: buildPersonnelDisplayName(next) };
+    });
+  };
+
+  const saveMutation = useMutation({
+    mutationFn: async () => {
+      const displayName = buildPersonnelDisplayName(form);
+      return base44.entities.Personnel.update(person.id, {
+        ...form,
+        name: displayName,
+        is_active: !["inactive", "archived"].includes(form.status || "active"),
+      });
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["personnel"] });
+      onSaved?.();
+    },
+  });
+
+  const uploadPhoto = async (file) => {
+    setUploadingPhoto(true);
+    try {
+      const result = await uploadManagedFile({
+        file,
+        ownerType: "personnel",
+        ownerId: person.id,
+        companyId: form.primary_company_id || null,
+        ownerLabel: buildPersonnelDisplayName(form) || "Medewerker",
+        domain: "identity",
+        category: "personnel_photo",
+        sourceEntity: "Personnel",
+        sourceEntityId: person.id,
+        sourceField: "photo_file_url",
+        documentLabel: "Pasfoto",
+        isSensitive: true,
+        folderSegments: ["identity", "photo"]
+      });
+      setForm(current => ({
+        ...current,
+        photo_file_url: result.file_url,
+        photo_file_id: result.managed_file_id,
+        photo_download_filename: result.download_filename,
+        photo_logical_path: result.logical_path,
+      }));
+    } finally {
+      setUploadingPhoto(false);
+    }
+  };
+
+  const data = editing ? form : person;
+  const relationship = getRelationshipType(data);
+  const address = [
+    data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(),
+    [data.postal_code, data.city].filter(Boolean).join(" "),
+    data.country && data.country !== "Nederland" ? data.country : null,
+  ].filter(Boolean).join(", ");
+
+  return (
+    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="flex flex-col gap-5 border-b border-border bg-muted/30 px-6 py-5 lg:flex-row lg:items-center">
+        <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-background">
+          {data.photo_file_url ? (
+            <img src={data.photo_file_url} alt="" className="h-full w-full object-cover" />
+          ) : (
+            <span className="text-2xl font-semibold text-muted-foreground">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
+          )}
+          {editing && (
+            <label className="absolute inset-0 flex cursor-pointer items-center justify-center bg-black/45 text-white">
+              <input type="file" accept="image/*" className="hidden" onChange={event => event.target.files?.[0] && uploadPhoto(event.target.files[0])} />
+              <Upload className="h-5 w-5" />
+              <span className="sr-only">Pasfoto uploaden</span>
+            </label>
+          )}
+        </div>
+
+        <div className="min-w-0 flex-1">
+          {editing ? (
+            <div className="grid max-w-4xl grid-cols-1 gap-3 md:grid-cols-4">
+              <div className="space-y-1">
+                <Label>Initialen</Label>
+                <Input value={data.initials || ""} onChange={event => set("initials", event.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Voornamen</Label>
+                <Input value={data.legal_first_names || ""} onChange={event => updateNamePart("legal_first_names", event.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Roepnaam</Label>
+                <Input value={data.first_name || data.call_name || ""} onChange={event => {
+                  updateNamePart("first_name", event.target.value);
+                  set("call_name", event.target.value);
+                }} />
+              </div>
+              <div className="space-y-1">
+                <Label>Tussenvoegsel</Label>
+                <Input value={data.name_prefix || ""} onChange={event => updateNamePart("name_prefix", event.target.value)} />
+              </div>
+              <div className="space-y-1 md:col-span-2">
+                <Label>Achternaam</Label>
+                <Input value={data.last_name || ""} onChange={event => updateNamePart("last_name", event.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Status</Label>
+                <Select value={data.status || "draft"} onValueChange={value => set("status", value)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {Object.entries(STATUS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Relatie</Label>
+                <Select value={data.employee_type || "loondienst"} onValueChange={value => {
+                  set("employee_type", value);
+                  set("relationship_type", value === "zzp" ? "self_employed" : "employee");
+                  set("profile_data_policy", value === "zzp" ? "profile_wins_after_acceptance" : "local_only");
+                }}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="loondienst">Loondienst</SelectItem>
+                    <SelectItem value="zzp">ZZP'er</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </div>
+          ) : (
+            <div>
+              <div className="flex flex-wrap items-center gap-2">
+                <h2 className="text-xl font-semibold text-foreground">{getDisplayName(data)}</h2>
+                <BadgePill className={STATUS_COLORS[getStatus(data)] || STATUS_COLORS.draft}>
+                  {STATUS_LABELS[getStatus(data)] || getStatus(data)}
+                </BadgePill>
+                <BadgePill className={relationship === "self_employed" ? "bg-fuchsia-100 text-fuchsia-700" : "bg-blue-100 text-blue-700"}>
+                  {RELATIONSHIP_LABELS[relationship]}
+                </BadgePill>
+              </div>
+              <p className="mt-1 text-sm text-muted-foreground">{data.email || data.phone || address || "Geen NAW-gegevens ingevuld"}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex flex-wrap justify-end gap-2">
+          {editing ? (
+            <>
+              <Button variant="outline" onClick={onCancel} disabled={saveMutation.isPending || uploadingPhoto}>
+                <X className="mr-1 h-4 w-4" /> Annuleren
+              </Button>
+              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || uploadingPhoto}>
+                <Check className="mr-1 h-4 w-4" /> {saveMutation.isPending ? "Opslaan..." : "Opslaan"}
+              </Button>
+            </>
+          ) : (
+            <Button variant="outline" onClick={onEdit}>
+              <Pencil className="mr-1 h-4 w-4" /> Wijzigen
+            </Button>
+          )}
+        </div>
+      </div>
+
+      <div className="grid grid-cols-1 gap-x-12 gap-y-6 p-6 lg:grid-cols-2">
+        <div>
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Persoonlijke gegevens</h3>
+          <ProfileInfoRow label="Geslacht" editing={editing} value={data.gender === "male" ? "Man" : data.gender === "female" ? "Vrouw" : data.gender === "other" ? "Anders" : "Onbekend"}>
+            <Select value={data.gender || "unknown"} onValueChange={value => set("gender", value)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="male">Man</SelectItem>
+                <SelectItem value="female">Vrouw</SelectItem>
+                <SelectItem value="other">Anders</SelectItem>
+                <SelectItem value="unknown">Onbekend</SelectItem>
+              </SelectContent>
+            </Select>
+          </ProfileInfoRow>
+          <ProfileInfoRow label="Geboortedatum" editing={editing} value={formatDate(data.date_of_birth)}>
+            <Input type="date" value={data.date_of_birth || ""} onChange={event => set("date_of_birth", event.target.value)} />
+          </ProfileInfoRow>
+          <ProfileInfoRow label="Geboorteplaats" editing={editing} value={data.place_of_birth}>
+            <Input value={data.place_of_birth || ""} onChange={event => set("place_of_birth", event.target.value)} />
+          </ProfileInfoRow>
+          <ProfileInfoRow label="Geboorteland" editing={editing} value={data.country_of_birth}>
+            <Input value={data.country_of_birth || ""} onChange={event => set("country_of_birth", event.target.value)} />
+          </ProfileInfoRow>
+          <ProfileInfoRow label="Nationaliteit" editing={editing} value={data.nationality}>
+            <Input value={data.nationality || ""} onChange={event => set("nationality", event.target.value)} />
+          </ProfileInfoRow>
+        </div>
+
+        <div>
+          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contact & adres</h3>
+          <ProfileInfoRow label="E-mail" editing={editing} value={data.email}>
+            <Input type="email" value={data.email || ""} onChange={event => set("email", event.target.value)} />
+          </ProfileInfoRow>
+          <ProfileInfoRow label="Telefoon" editing={editing} value={data.phone}>
+            <Input value={data.phone || ""} onChange={event => set("phone", event.target.value)} />
+          </ProfileInfoRow>
+          <ProfileInfoRow label="Straatnaam" editing={editing} value={data.street_name}>
+            <Input value={data.street_name || ""} onChange={event => set("street_name", event.target.value)} />
+          </ProfileInfoRow>
+          <ProfileInfoRow label="Huisnummer" editing={editing} value={[data.house_number, data.house_number_addition].filter(Boolean).join(" ")}>
+            <div className="grid grid-cols-[1fr_120px] gap-2">
+              <Input value={data.house_number || ""} onChange={event => set("house_number", event.target.value)} placeholder="Nr." />
+              <Input value={data.house_number_addition || ""} onChange={event => set("house_number_addition", event.target.value)} placeholder="Toev." />
+            </div>
+          </ProfileInfoRow>
+          <ProfileInfoRow label="Postcode" editing={editing} value={data.postal_code}>
+            <Input value={data.postal_code || ""} onChange={event => set("postal_code", event.target.value)} />
+          </ProfileInfoRow>
+          <ProfileInfoRow label="Plaats" editing={editing} value={data.city}>
+            <Input value={data.city || ""} onChange={event => set("city", event.target.value)} />
+          </ProfileInfoRow>
+          <ProfileInfoRow label="Land" editing={editing} value={data.country || "Nederland"}>
+            <Input value={data.country || "Nederland"} onChange={event => set("country", event.target.value)} />
+          </ProfileInfoRow>
+        </div>
+      </div>
+
+      {editing && (
+        <div className="flex justify-end gap-2 border-t border-border bg-muted/20 px-6 py-3">
+          <Button variant="outline" onClick={onCancel} disabled={saveMutation.isPending || uploadingPhoto}>
+            <X className="mr-1 h-4 w-4" /> Annuleren
+          </Button>
+          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || uploadingPhoto}>
+            <Check className="mr-1 h-4 w-4" /> {saveMutation.isPending ? "Wijzigingen opslaan..." : "Wijzigingen opslaan"}
+          </Button>
+        </div>
+      )}
     </div>
   );
 }
@@ -375,6 +636,22 @@ function getRecordConfig(type, personnel) {
         { name: "notes", label: "Notities zonder medische details", type: "textarea" },
       ],
       buildPayload: values => ({ ...values, days: values.days ? Number(values.days) : null, personnel_id: id }),
+    },
+    emergencyContact: {
+      title: "ICE-contact toevoegen",
+      entityName: "PersonnelEmergencyContact",
+      queryKeys: ["personnel-emergency-contacts"],
+      initialValues: { priority: 1 },
+      fields: [
+        { name: "name", label: "Naam" },
+        { name: "relationship", label: "Relatie" },
+        { name: "phone_1", label: "Telefoon 1" },
+        { name: "phone_2", label: "Telefoon 2" },
+        { name: "email", label: "E-mail" },
+        { name: "priority", label: "Prioriteit", type: "number" },
+        { name: "notes", label: "Notities", type: "textarea" },
+      ],
+      buildPayload: values => ({ ...values, priority: Number(values.priority || 1), personnel_id: id }),
     },
   };
   return configs[type];
@@ -635,33 +912,187 @@ function PersonnelOverviewTab({ person, companies, documents, qualifications, ba
   );
 }
 
-function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
-  const address = [
-    person.street_name && `${person.street_name} ${person.house_number || ""}${person.house_number_addition || ""}`.trim(),
-    [person.postal_code, person.city].filter(Boolean).join(" "),
-    person.country && person.country !== "Nederland" ? person.country : null,
-  ].filter(Boolean).join(", ");
+function PersonnelPayrollTab({ person, documents }) {
   const relationship = getRelationshipType(person);
-  const routeExecutions = dossier.routeExecutions.filter(item => item.employee_id === person.id).slice(0, 8);
+  const payrollDocs = documents.filter(item => item.category === "payroll_tax_statement");
+
+  if (relationship === "self_employed") {
+    return (
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+        <SectionPanel title="ZZP-bedrijfsgegevens" icon={BriefcaseBusiness}>
+          <FieldRow label="Bedrijfsnaam">{person.self_employed_company_name}</FieldRow>
+          <FieldRow label="KvK-nummer">{person.self_employed_kvk_number}</FieldRow>
+          <FieldRow label="Btw-nummer">{person.self_employed_vat_number}</FieldRow>
+          <FieldRow label="Aansprakelijkheid">{person.self_employed_liability_insurance}</FieldRow>
+          <FieldRow label="Standaard uurtarief">{formatCurrency(person.zzp_hourly_rate_excl_vat)}</FieldRow>
+        </SectionPanel>
+        <SectionPanel title="Administratieve status" icon={ClipboardCheck}>
+          <FieldRow label="Teamhub beleid">{person.profile_data_policy || "local_only"}</FieldRow>
+          <FieldRow label="Conflictstatus">{person.profile_conflict_status || "none"}</FieldRow>
+          <FieldRow label="Lokale kopie behouden">{person.local_organization_copy_retained === false ? "Nee" : "Ja"}</FieldRow>
+        </SectionPanel>
+      </div>
+    );
+  }
 
   return (
-    <Tabs defaultValue="overview" className="mt-4">
-      <div className="overflow-x-auto">
-        <TabsList className="h-auto min-w-max flex-wrap justify-start">
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <SectionPanel title="Loonheffing" icon={Banknote}>
+        <FieldRow label="Loonheffingskorting">
+          {person.payroll_tax_credit_applies === true ? "Ja" : person.payroll_tax_credit_applies === false ? "Nee" : "Onbekend"}
+        </FieldRow>
+        <FieldRow label="Verklaring getekend op">{formatDate(person.payroll_tax_statement_signed_at)}</FieldRow>
+        <FieldRow label="Verklaring bestand">{person.payroll_tax_statement_download_filename || (person.payroll_tax_statement_file_url ? "Aanwezig" : "-")}</FieldRow>
+      </SectionPanel>
+      <SectionPanel title="Loonheffingsdocumenten" icon={FileText}>
+        <MiniTable
+          emptyText="Nog geen loonheffingsdocumenten vastgelegd."
+          rows={payrollDocs}
+          columns={[
+            { key: "document_type", label: "Type" },
+            { key: "document_number", label: "Nummer" },
+            { key: "valid_from", label: "Datum", render: row => formatDate(row.valid_from) },
+            { key: "verification_status", label: "Status", render: row => VERIFICATION_LABELS[row.verification_status] || row.verification_status },
+          ]}
+        />
+      </SectionPanel>
+    </div>
+  );
+}
+
+function PersonnelIdentityTab({ person, documents }) {
+  const identityDocs = documents.filter(item => item.category === "identity_document");
+  return (
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <SectionPanel title="Identiteit" icon={Users}>
+        <FieldRow label="Geboortedatum">{formatDate(person.date_of_birth)}</FieldRow>
+        <FieldRow label="Geboorteplaats">{person.place_of_birth}</FieldRow>
+        <FieldRow label="Geboorteland">{person.country_of_birth}</FieldRow>
+        <FieldRow label="Nationaliteit">{person.nationality}</FieldRow>
+      </SectionPanel>
+      <SectionPanel title="Legitimatiebewijzen" icon={FileBadge}>
+        <MiniTable
+          emptyText="Nog geen legitimatiebewijs vastgelegd."
+          rows={identityDocs}
+          columns={[
+            { key: "document_type", label: "Type" },
+            { key: "document_number", label: "Nummer" },
+            { key: "valid_until", label: "Geldig tot", render: row => formatDate(row.valid_until) },
+            { key: "verification_status", label: "Status", render: row => VERIFICATION_LABELS[row.verification_status] || row.verification_status },
+          ]}
+        />
+      </SectionPanel>
+    </div>
+  );
+}
+
+function PersonnelBankMobilityTab({ documents, bankAccounts }) {
+  const licenseDocs = documents.filter(item => item.category === "drivers_license");
+  return (
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <SectionPanel title="Bankrekeningen" icon={Banknote}>
+        <MiniTable
+          emptyText="Nog geen bankrekening geregistreerd."
+          rows={bankAccounts}
+          columns={[
+            { key: "iban", label: "IBAN", render: row => row.iban_masked || row.iban },
+            { key: "account_holder_name", label: "Rekeninghouder" },
+            { key: "bank_name", label: "Bank" },
+            { key: "valid_from", label: "Startdatum", render: row => formatDate(row.valid_from) },
+            { key: "verification_status", label: "Status", render: row => VERIFICATION_LABELS[row.verification_status] || row.verification_status },
+          ]}
+        />
+      </SectionPanel>
+      <SectionPanel title="Rijbewijzen" icon={FileBadge}>
+        <MiniTable
+          emptyText="Nog geen rijbewijs geregistreerd."
+          rows={licenseDocs}
+          columns={[
+            { key: "document_number", label: "Nummer" },
+            { key: "document_type", label: "Type" },
+            { key: "valid_until", label: "Geldig tot", render: row => formatDate(row.valid_until) },
+            { key: "verification_status", label: "Status", render: row => VERIFICATION_LABELS[row.verification_status] || row.verification_status },
+          ]}
+        />
+      </SectionPanel>
+    </div>
+  );
+}
+
+function PersonnelIceTab({ documents, emergencyContacts, onAddRecord }) {
+  const cvDocs = documents.filter(item => item.category === "cv");
+  return (
+    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+      <SectionPanel
+        title="ICE-contactpersonen"
+        icon={Users}
+        action={<Button size="sm" variant="outline" onClick={() => onAddRecord("emergencyContact")}><Plus className="mr-1 h-4 w-4" />Contact</Button>}
+      >
+        <MiniTable
+          emptyText="Nog geen noodcontacten toegevoegd."
+          rows={emergencyContacts}
+          columns={[
+            { key: "name", label: "Naam" },
+            { key: "relationship", label: "Relatie" },
+            { key: "phone_1", label: "Telefoon 1" },
+            { key: "phone_2", label: "Telefoon 2" },
+            { key: "email", label: "E-mail" },
+          ]}
+        />
+      </SectionPanel>
+      <SectionPanel
+        title="CV"
+        icon={FileText}
+        action={<Button size="sm" variant="outline" onClick={() => onAddRecord("document")}><Plus className="mr-1 h-4 w-4" />Document</Button>}
+      >
+        <MiniTable
+          emptyText="Nog geen CV toegevoegd."
+          rows={cvDocs}
+          columns={[
+            { key: "document_type", label: "Omschrijving" },
+            { key: "valid_from", label: "Datum", render: row => formatDate(row.valid_from) },
+            { key: "verification_status", label: "Status", render: row => VERIFICATION_LABELS[row.verification_status] || row.verification_status },
+          ]}
+        />
+      </SectionPanel>
+    </div>
+  );
+}
+
+function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
+  const routeExecutions = dossier.routeExecutions.filter(item => item.employee_id === person.id).slice(0, 8);
+  const generalDocuments = dossier.documents.filter(item => ![
+    "identity_document",
+    "drivers_license",
+    "vog",
+    "cv",
+    "bank_account_proof",
+    "payroll_tax_statement",
+  ].includes(item.category));
+
+  return (
+    <Tabs defaultValue="overview" className="mt-4 overflow-hidden rounded-xl border border-border bg-card">
+      <div className="grid grid-cols-1 md:grid-cols-[260px_1fr]">
+        <div className="border-b border-border bg-muted/30 md:border-b-0 md:border-r">
+          <TabsList className="flex h-auto w-full min-w-max justify-start overflow-x-auto rounded-none bg-transparent p-0 md:min-w-0 md:flex-col md:items-stretch md:overflow-visible">
           <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="naw">NAW</TabsTrigger>
+          <TabsTrigger value="payroll">Loonheffing</TabsTrigger>
+          <TabsTrigger value="identity">Identiteit</TabsTrigger>
           <TabsTrigger value="documents">Documenten</TabsTrigger>
           <TabsTrigger value="compliance">Compliance</TabsTrigger>
-          <TabsTrigger value="bank">Bank</TabsTrigger>
+          <TabsTrigger value="bank-mobility">Bank & mobiliteit</TabsTrigger>
+          <TabsTrigger value="ice">ICE</TabsTrigger>
           <TabsTrigger value="contracts">Contracten/kosten</TabsTrigger>
           <TabsTrigger value="planning">Planning/restricties</TabsTrigger>
           <TabsTrigger value="materials">Materiaal</TabsTrigger>
           <TabsTrigger value="notes">Notities/gesprekken</TabsTrigger>
           <TabsTrigger value="teamhub">App & Teamhub</TabsTrigger>
         </TabsList>
-      </div>
+        </div>
 
-      <TabsContent value="overview" className="pt-4">
+        <div className="min-w-0 p-4">
+
+      <TabsContent value="overview" className="m-0">
         <PersonnelOverviewTab
           person={person}
           companies={companies}
@@ -673,29 +1104,15 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
         />
       </TabsContent>
 
-      <TabsContent value="naw" className="grid grid-cols-1 gap-4 pt-4 lg:grid-cols-2">
-        <SectionPanel title="Persoonlijke gegevens" icon={Users}>
-          <FieldRow label="Naam">{getDisplayName(person)}</FieldRow>
-          <FieldRow label="Initialen">{person.initials}</FieldRow>
-          <FieldRow label="Voornamen">{person.legal_first_names}</FieldRow>
-          <FieldRow label="Roepnaam">{person.call_name || person.first_name}</FieldRow>
-          <FieldRow label="Achternaam">{[person.name_prefix, person.last_name].filter(Boolean).join(" ")}</FieldRow>
-          <FieldRow label="Geboortedatum">{formatDate(person.date_of_birth)}</FieldRow>
-          <FieldRow label="Geboorteplaats">{person.place_of_birth}</FieldRow>
-          <FieldRow label="Nationaliteit">{person.nationality}</FieldRow>
-        </SectionPanel>
-        <SectionPanel title="Contact en adres" icon={Mail}>
-          <FieldRow label="E-mail">{person.email}</FieldRow>
-          <FieldRow label="Telefoon">{person.phone}</FieldRow>
-          <FieldRow label="Adres">{address}</FieldRow>
-          <FieldRow label="Reisadres afwijkend">{person.travel_expense_address_differs ? "Ja" : "Nee"}</FieldRow>
-          <FieldRow label="ZZP-bedrijf">{relationship === "self_employed" ? person.self_employed_company_name || "-" : "Niet van toepassing"}</FieldRow>
-          <FieldRow label="KvK">{relationship === "self_employed" ? person.self_employed_kvk_number || "-" : "Niet van toepassing"}</FieldRow>
-          <FieldRow label="Btw">{relationship === "self_employed" ? person.self_employed_vat_number || "-" : "Niet van toepassing"}</FieldRow>
-        </SectionPanel>
+      <TabsContent value="payroll" className="m-0">
+        <PersonnelPayrollTab person={person} documents={dossier.documents} />
       </TabsContent>
 
-      <TabsContent value="documents" className="pt-4">
+      <TabsContent value="identity" className="m-0">
+        <PersonnelIdentityTab person={person} documents={dossier.documents} />
+      </TabsContent>
+
+      <TabsContent value="documents" className="m-0">
         <SectionPanel
           title="Documenten"
           icon={FileText}
@@ -703,7 +1120,7 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
         >
           <MiniTable
             emptyText="Nog geen documenten vastgelegd."
-            rows={dossier.documents}
+            rows={generalDocuments}
             columns={[
               { key: "category", label: "Categorie", render: row => DOCUMENT_CATEGORIES.find(item => item.value === row.category)?.label || row.category },
               { key: "document_type", label: "Type" },
@@ -756,20 +1173,12 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
         </SectionPanel>
       </TabsContent>
 
-      <TabsContent value="bank" className="pt-4">
-        <SectionPanel title="Bankrekeningen" icon={Banknote}>
-          <MiniTable
-            emptyText="Nog geen bankrekening geregistreerd."
-            rows={dossier.bankAccounts}
-            columns={[
-              { key: "iban", label: "IBAN", render: row => row.iban_masked || row.iban },
-              { key: "account_holder_name", label: "Rekeninghouder" },
-              { key: "bank_name", label: "Bank" },
-              { key: "valid_from", label: "Startdatum", render: row => formatDate(row.valid_from) },
-              { key: "verification_status", label: "Status", render: row => VERIFICATION_LABELS[row.verification_status] || row.verification_status },
-            ]}
-          />
-        </SectionPanel>
+      <TabsContent value="bank-mobility" className="m-0">
+        <PersonnelBankMobilityTab documents={dossier.documents} bankAccounts={dossier.bankAccounts} />
+      </TabsContent>
+
+      <TabsContent value="ice" className="m-0">
+        <PersonnelIceTab documents={dossier.documents} emergencyContacts={dossier.emergencyContacts} onAddRecord={onAddRecord} />
       </TabsContent>
 
       <TabsContent value="contracts" className="grid grid-cols-1 gap-4 pt-4 xl:grid-cols-[1fr_420px]">
@@ -896,6 +1305,8 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
           </div>
         </SectionPanel>
       </TabsContent>
+        </div>
+      </div>
     </Tabs>
   );
 }
@@ -1068,9 +1479,9 @@ function SubcontractorsPanel({ subcontractors, onCreate, onEdit, onDelete }) {
 export default function Personnel() {
   const queryClient = useQueryClient();
   const [showWizard, setShowWizard] = useState(false);
-  const [editing, setEditing] = useState(null);
   const [newPreset, setNewPreset] = useState({});
   const [selectedPersonnelId, setSelectedPersonnelId] = useState(null);
+  const [editingProfileId, setEditingProfileId] = useState(null);
   const [activeTopTab, setActiveTopTab] = useState("employees");
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -1176,7 +1587,6 @@ export default function Personnel() {
 
   const openNew = (type = "employee") => {
     const isZzp = type === "self_employed";
-    setEditing(null);
     setNewPreset({
       employee_type: isZzp ? "zzp" : "loondienst",
       relationship_type: isZzp ? "self_employed" : "employee",
@@ -1187,7 +1597,6 @@ export default function Personnel() {
 
   const closeWizard = () => {
     setShowWizard(false);
-    setEditing(null);
     setNewPreset({});
   };
 
@@ -1240,7 +1649,16 @@ export default function Personnel() {
       <AnimatePresence>
         {showWizard && (
           <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="mb-5">
-            <PersonnelWizard person={editing} initialValues={newPreset} onClose={closeWizard} />
+            <PersonnelWizard
+              initialValues={newPreset}
+              onClose={closeWizard}
+              onSaved={id => {
+                if (id) {
+                  setSelectedPersonnelId(id);
+                  setEditingProfileId(id);
+                }
+              }}
+            />
           </motion.div>
         )}
       </AnimatePresence>
@@ -1294,7 +1712,7 @@ export default function Personnel() {
                 companies={companies}
                 selectedId={selectedPersonnel?.id}
                 onSelect={person => setSelectedPersonnelId(person.id)}
-                onEdit={person => { setEditing(person); setShowWizard(true); }}
+                onEdit={person => { setSelectedPersonnelId(person.id); setEditingProfileId(person.id); }}
                 onDelete={deletePersonnel}
                 onCalculate={person => { setSelectedPersonnelId(person.id); }}
               />
@@ -1305,7 +1723,7 @@ export default function Personnel() {
                 companies={companies}
                 selectedId={selectedPersonnel?.id}
                 onSelect={person => setSelectedPersonnelId(person.id)}
-                onEdit={person => { setEditing(person); setShowWizard(true); }}
+                onEdit={person => { setSelectedPersonnelId(person.id); setEditingProfileId(person.id); }}
                 onDelete={deletePersonnel}
                 onCalculate={person => { setSelectedPersonnelId(person.id); }}
               />
@@ -1323,36 +1741,14 @@ export default function Personnel() {
           </Tabs>
 
           {activeTopTab !== "subcontractors" && selectedPersonnel && selectedDossier && (
-            <div className="rounded-xl border border-border bg-background p-4 shadow-sm">
-              <div className="flex flex-col gap-3 border-b border-border pb-4 lg:flex-row lg:items-center lg:justify-between">
-                <div className="flex items-center gap-3">
-                  {selectedPersonnel.photo_file_url ? (
-                    <img src={selectedPersonnel.photo_file_url} alt="" className="h-14 w-14 rounded-lg border border-border object-cover" />
-                  ) : (
-                    <div className="flex h-14 w-14 items-center justify-center rounded-lg border border-border bg-muted text-xl font-semibold text-muted-foreground">
-                      {getDisplayName(selectedPersonnel).slice(0, 1).toUpperCase()}
-                    </div>
-                  )}
-                  <div>
-                    <div className="flex flex-wrap items-center gap-2">
-                      <h2 className="text-lg font-semibold text-foreground">{getDisplayName(selectedPersonnel)}</h2>
-                      <BadgePill className={STATUS_COLORS[getStatus(selectedPersonnel)] || STATUS_COLORS.draft}>
-                        {STATUS_LABELS[getStatus(selectedPersonnel)] || getStatus(selectedPersonnel)}
-                      </BadgePill>
-                      <BadgePill className={getRelationshipType(selectedPersonnel) === "self_employed" ? "bg-fuchsia-100 text-fuchsia-700" : "bg-blue-100 text-blue-700"}>
-                        {RELATIONSHIP_LABELS[getRelationshipType(selectedPersonnel)]}
-                      </BadgePill>
-                    </div>
-                    <p className="text-sm text-muted-foreground">
-                      {FUNCTION_LABELS[selectedPersonnel.function_type] || selectedPersonnel.function_type || "Functie onbekend"}
-                      {selectedPersonnel.email ? ` · ${selectedPersonnel.email}` : ""}
-                    </p>
-                  </div>
-                </div>
-                <Button variant="outline" onClick={() => { setEditing(selectedPersonnel); setShowWizard(true); }}>
-                  <Pencil className="mr-1 h-4 w-4" /> Dossier bewerken
-                </Button>
-              </div>
+            <div className="space-y-4">
+              <PersonnelProfileCard
+                person={selectedPersonnel}
+                editing={editingProfileId === selectedPersonnel.id}
+                onEdit={() => setEditingProfileId(selectedPersonnel.id)}
+                onCancel={() => setEditingProfileId(null)}
+                onSaved={() => setEditingProfileId(null)}
+              />
               <PersonnelDetailTabs
                 person={selectedPersonnel}
                 companies={companies}
