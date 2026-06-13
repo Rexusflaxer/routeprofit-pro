@@ -4,7 +4,6 @@ import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
-import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { Plus, Building2, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import PageTransition from "@/components/ui-custom/PageTransition";
@@ -177,67 +176,64 @@ export default function Companies() {
 
       {isLoading && <p className="text-sm text-muted-foreground py-8 text-center">Laden...</p>}
       {!isLoading && (
-        <div className="overflow-x-auto rounded-xl border border-border shadow-sm">
-          <Table>
-            <TableHeader>
-              <TableRow className="bg-muted/40">
-                <TableHead>Bedrijf</TableHead>
-                <TableHead>KvK</TableHead>
-                <TableHead>Rol</TableHead>
-                <TableHead>Activiteiten</TableHead>
-                <TableHead>CAO</TableHead>
-                <TableHead>LOQ Teamhub</TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {getGroupedCompanies().map(({ company, isChild }) => (
-                <TableRow
-                  key={company.id}
-                  className={`cursor-pointer transition-colors ${isChild ? "bg-muted/10 hover:bg-accent" : "hover:bg-accent"}`}
-                  onClick={() => navigate(`/CompanyDetail?id=${company.id}`)}
-                >
-                  <TableCell>
-                    <div className={`flex items-center gap-2 ${isChild ? "pl-6 border-l-2 border-muted ml-1" : ""}`}>
-                      {company.logo_file_url
-                        ? <img src={company.logo_file_url} alt="logo" className="w-7 h-7 rounded object-contain bg-white border border-border p-0.5 shrink-0" />
-                        : <div className="w-7 h-7 rounded bg-muted flex items-center justify-center shrink-0"><Building2 className="w-3.5 h-3.5 text-muted-foreground" /></div>
-                      }
-                      <div>
-                        <p className="font-medium text-sm text-foreground">{company.display_name}</p>
-                        {company.trade_name && company.trade_name !== company.display_name && (
-                          <p className="text-xs text-muted-foreground">{company.trade_name}</p>
-                        )}
-                      </div>
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-sm text-muted-foreground">{company.kvk_number || "—"}</TableCell>
-                  <TableCell>
-                    <span className="text-xs bg-muted text-foreground px-2 py-1 rounded font-medium">{ROLE_LABELS[company.company_role] || company.company_role}</span>
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex flex-wrap gap-1">
-                      {(company.activities || []).slice(0, 2).map(a => (
-                        <span key={a} className="text-xs bg-muted text-foreground px-1.5 py-0.5 rounded">{ACTIVITY_LABELS[a] || a}</span>
-                      ))}
-                      {(company.activities || []).length > 2 && (
-                        <span className="text-xs text-muted-foreground">+{(company.activities || []).length - 2}</span>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-xs text-muted-foreground">
-                    {company.default_cao_configuration_id ? getCaoName(company.default_cao_configuration_id) : "—"}
-                  </TableCell>
-                  <TableCell>
-                    <Badge className={company.teamhub_enabled ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"}>
-                      {company.teamhub_enabled ? "Zichtbaar" : "Niet zichtbaar"}
-                    </Badge>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+        <div className="rounded-xl border border-border shadow-sm overflow-hidden">
+          {/* Table header */}
+          <div className="flex items-center px-4 py-2 bg-muted/30 border-b border-border text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <span className="flex-[2] min-w-0">Bedrijf</span>
+            <span className="w-32 shrink-0">KvK</span>
+            <span className="w-36 shrink-0">Rol</span>
+            <span className="flex-[2] min-w-0">Activiteiten</span>
+            <span className="w-32 shrink-0">CAO</span>
+            <span className="w-28 shrink-0">LOQ Teamhub</span>
           </div>
-          )}
+          {/* Rows */}
+          <div className="divide-y divide-border">
+            {getGroupedCompanies().length === 0 && (
+              <p className="px-4 py-4 text-sm text-muted-foreground">Nog geen bedrijven aangemaakt.</p>
+            )}
+            {getGroupedCompanies().map(({ company, isChild }) => (
+              <div
+                key={company.id}
+                className="flex items-center px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors group"
+                onClick={() => navigate(`/CompanyDetail?id=${company.id}`)}
+              >
+                <div className={`flex-[2] min-w-0 flex items-center gap-2 ${isChild ? "pl-6 border-l-2 border-muted ml-1" : ""}`}>
+                  {company.logo_file_url
+                    ? <img src={company.logo_file_url} alt="logo" className="w-7 h-7 rounded object-contain bg-white border border-border p-0.5 shrink-0" />
+                    : <div className="w-7 h-7 rounded bg-muted flex items-center justify-center shrink-0"><Building2 className="w-3.5 h-3.5 text-muted-foreground" /></div>
+                  }
+                  <div className="min-w-0">
+                    <p className="font-medium text-sm text-foreground truncate">{company.display_name}</p>
+                    {company.trade_name && company.trade_name !== company.display_name && (
+                      <p className="text-xs text-muted-foreground truncate">{company.trade_name}</p>
+                    )}
+                  </div>
+                </div>
+                <span className="w-32 shrink-0 text-sm text-muted-foreground">{company.kvk_number || "—"}</span>
+                <span className="w-36 shrink-0">
+                  <span className="text-xs bg-muted text-foreground px-2 py-1 rounded font-medium">{ROLE_LABELS[company.company_role] || company.company_role}</span>
+                </span>
+                <div className="flex-[2] min-w-0 flex flex-wrap gap-1">
+                  {(company.activities || []).slice(0, 2).map(a => (
+                    <span key={a} className="text-xs bg-muted text-foreground px-1.5 py-0.5 rounded">{ACTIVITY_LABELS[a] || a}</span>
+                  ))}
+                  {(company.activities || []).length > 2 && (
+                    <span className="text-xs text-muted-foreground">+{(company.activities || []).length - 2}</span>
+                  )}
+                </div>
+                <span className="w-32 shrink-0 text-xs text-muted-foreground">
+                  {company.default_cao_configuration_id ? getCaoName(company.default_cao_configuration_id) : "—"}
+                </span>
+                <span className="w-28 shrink-0">
+                  <Badge className={company.teamhub_enabled ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"}>
+                    {company.teamhub_enabled ? "Zichtbaar" : "Niet zichtbaar"}
+                  </Badge>
+                </span>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
 
       {/* Company form dialog */}
       <Dialog open={dialogOpen} onOpenChange={v => { setDialogOpen(v); if (!v) setEditingCompany(null); }}>
