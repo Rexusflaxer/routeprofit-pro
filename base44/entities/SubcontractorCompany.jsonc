@@ -1,0 +1,136 @@
+{
+  "name": "SubcontractorCompany",
+  "type": "object",
+  "properties": {
+    "display_name": {
+      "type": "string"
+    },
+    "legal_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "prospect",
+        "active",
+        "paused",
+        "inactive",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "kvk_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "vat_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "nd_number": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ND-/WPBR-nummer van het beveiligingsbedrijf."
+    },
+    "permit_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "permit_valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "contact_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contact_email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contact_phone": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "street_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "postal_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "city": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "country": {
+      "type": "string",
+      "default": "Nederland"
+    },
+    "default_hourly_rate": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "contract_notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "teamhub_link_status": {
+      "type": "string",
+      "enum": [
+        "local_only",
+        "invited",
+        "linked",
+        "conflict_review"
+      ],
+      "default": "local_only"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "display_name",
+    "status"
+  ]
+}

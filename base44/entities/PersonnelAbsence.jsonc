@@ -1,0 +1,61 @@
+{
+  "name": "PersonnelAbsence",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string"
+    },
+    "absence_type": {
+      "type": "string",
+      "enum": [
+        "leave",
+        "sick",
+        "special_leave",
+        "unavailable",
+        "other"
+      ],
+      "default": "leave"
+    },
+    "start_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "end_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "requested",
+        "approved",
+        "rejected",
+        "active",
+        "closed"
+      ],
+      "default": "requested"
+    },
+    "days": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Geen medische details opslaan."
+    }
+  },
+  "required": [
+    "personnel_id",
+    "absence_type",
+    "start_date",
+    "status"
+  ]
+}

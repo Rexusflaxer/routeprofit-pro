@@ -1,0 +1,56 @@
+{
+  "name": "PersonnelPerformanceReview",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string"
+    },
+    "review_type": {
+      "type": "string",
+      "enum": [
+        "performance_review",
+        "evaluation",
+        "incident_followup",
+        "coaching",
+        "other"
+      ],
+      "default": "performance_review"
+    },
+    "review_date": {
+      "type": "string",
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "planned",
+        "completed",
+        "cancelled"
+      ],
+      "default": "planned"
+    },
+    "subject": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "personnel_id",
+    "review_date",
+    "status"
+  ]
+}

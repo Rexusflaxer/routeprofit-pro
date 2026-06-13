@@ -1,0 +1,87 @@
+{
+  "name": "PersonnelSecurityPass",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pass_type": {
+      "type": "string",
+      "enum": [
+        "grey",
+        "green",
+        "temporary",
+        "other"
+      ],
+      "default": "green"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "requested",
+        "approved",
+        "active",
+        "rejected",
+        "expired",
+        "revoked"
+      ],
+      "default": "requested"
+    },
+    "pass_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "requested_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "authority": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "personnel_id",
+    "pass_type",
+    "status"
+  ]
+}

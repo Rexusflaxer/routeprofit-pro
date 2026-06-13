@@ -12,6 +12,67 @@
         "null"
       ]
     },
+    "relationship_type": {
+      "type": "string",
+      "enum": [
+        "employee",
+        "self_employed"
+      ],
+      "default": "employee",
+      "description": "Strategische relatievorm voor Personeel v1. Backwards compatible afgeleid van employee_type."
+    },
+    "teamhub_link_status": {
+      "type": "string",
+      "enum": [
+        "not_invited",
+        "invited",
+        "pending_acceptance",
+        "linked",
+        "conflict_review",
+        "revoked"
+      ],
+      "default": "not_invited"
+    },
+    "profile_data_policy": {
+      "type": "string",
+      "enum": [
+        "local_only",
+        "profile_wins_after_acceptance",
+        "organization_override"
+      ],
+      "default": "local_only",
+      "description": "Toekomstig Teamhub-conflictbeleid. Voor persoonlijke/gevoelige data wint na acceptatie het eigen profiel, terwijl lokale organisatiehistorie behouden blijft."
+    },
+    "profile_conflict_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "none",
+        "review_required",
+        "profile_accepted",
+        "local_copy_retained",
+        null
+      ],
+      "default": "none"
+    },
+    "profile_conflict_summary": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "canonical_profile_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "local_organization_copy_retained": {
+      "type": "boolean",
+      "default": true
+    },
     "status": {
       "type": "string",
       "enum": [
@@ -338,9 +399,12 @@
       "type": "string",
       "enum": [
         "unknown",
+        "objectbeveiliger",
+        "receptie",
         "surveillant",
         "alarmopvolging",
         "binnendienst",
+        "klantrelatie",
         "planner",
         "centralist",
         "verkeersregelaar",
@@ -366,6 +430,30 @@
         "loondienst"
       ],
       "default": "loondienst"
+    },
+    "self_employed_company_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "self_employed_kvk_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "self_employed_vat_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "self_employed_liability_insurance": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "contract_type": {
       "type": "string",

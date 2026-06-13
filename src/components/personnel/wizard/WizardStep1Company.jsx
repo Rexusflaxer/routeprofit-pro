@@ -23,6 +23,12 @@ const FUNCTION_TYPES = [
 ];
 
 export default function WizardStep1Company({ form, onChange, companies, assignments, onAddAssignment, onRemoveAssignment }) {
+  const setEmploymentType = (value) => {
+    onChange("employee_type", value);
+    onChange("relationship_type", value === "zzp" ? "self_employed" : "employee");
+    onChange("profile_data_policy", value === "zzp" ? "profile_wins_after_acceptance" : "local_only");
+  };
+
   return (
     <div className="space-y-6">
       <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -48,7 +54,7 @@ export default function WizardStep1Company({ form, onChange, companies, assignme
         </div>
         <div className="space-y-1">
           <Label>Loondienst / ZZP</Label>
-          <Select value={form.employee_type || "loondienst"} onValueChange={v => onChange("employee_type", v)}>
+          <Select value={form.employee_type || "loondienst"} onValueChange={setEmploymentType}>
             <SelectTrigger><SelectValue /></SelectTrigger>
             <SelectContent>
               <SelectItem value="loondienst">Loondienst</SelectItem>

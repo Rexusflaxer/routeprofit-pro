@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useEffect, useState } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -27,6 +27,99 @@ const BASE_STEPS = [
   { label: "ICE & documenten" },
   { label: "Controle" },
 ];
+
+function buildDisplayName(personnel) {
+  const first = personnel.call_name || personnel.first_name || personnel.legal_first_names || "";
+  const prefix = personnel.name_prefix || "";
+  const last = personnel.last_name || "";
+  const composed = [first, prefix, last].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+  return composed || personnel.name || "";
+}
+
+function deriveRelationshipType(personnel) {
+  return personnel.relationship_type || (personnel.employee_type === "zzp" ? "self_employed" : "employee");
+}
+
+function computeHrCompletenessStatus({ personnel, sensitiveData, idDoc, bankAccount, vogDoc }) {
+  const required = [
+    buildDisplayName(personnel),
+    personnel.email,
+    personnel.date_of_birth,
+    personnel.primary_company_id,
+    personnel.street_name,
+    personnel.postal_code,
+    personnel.city
+  ];
+
+  if ((personnel.employee_type || "loondienst") === "loondienst") {
+    required.push(
+      String(sensitiveData.bsn || "").trim(),
+      personnel.payroll_tax_statement_file_url || personnel.payroll_tax_statement_file_id || personnel.payroll_tax_statement_signed_at,
+      idDoc.front_file_url || idDoc.front_file_id || idDoc.document_number,
+      bankAccount.iban
+    );
+  } else {
+    required.push(personnel.self_employed_company_name || buildDisplayName(personnel));
+  }
+
+  if (required.some(value => !value)) return "incomplete";
+
+  const reviewStatuses = [
+    idDoc.verification_status,
+    vogDoc.verification_status,
+    bankAccount.verification_status
+  ].filter(Boolean);
+  if (reviewStatuses.some(status => ["uploaded", "pending_review"].includes(status))) return "needs_review";
+
+  return "complete";
+}
+
+function normalizePersonnelPayload(form, context) {
+  const relationshipType = deriveRelationshipType(form);
+  const name = buildDisplayName(form);
+  return {
+    ...form,
+    name,
+    function_type: form.function_type || "unknown",
+    employee_type: form.employee_type || (relationshipType === "self_employed" ? "zzp" : "loondienst"),
+    relationship_type: relationshipType,
+    profile_data_policy: form.profile_data_policy || (relationshipType === "self_employed" ? "profile_wins_after_acceptance" : "local_only"),
+    profile_conflict_status: form.profile_conflict_status || "none",
+    local_organization_copy_retained: form.local_organization_copy_retained !== false,
+    status: form.status || "draft",
+    hr_completeness_status: computeHrCompletenessStatus({ personnel: form, ...context })
+  };
+}
+
+function normalizeAssignmentPayload(assignment, personnel) {
+  const rest = { ...(assignment || {}) };
+  delete rest.id;
+  delete rest.created_date;
+  delete rest.updated_date;
+  delete rest.created_by;
+  delete rest.updated_by;
+  return {
+    ...rest,
+    company_id: rest.company_id || personnel.primary_company_id,
+    relation_type: rest.relation_type || (personnel.employee_type === "zzp" ? "contractor" : "employee"),
+    assignment_status: rest.assignment_status || "active",
+    is_primary: rest.is_primary === true,
+    available_for_planning: rest.available_for_planning !== false
+  };
+}
+
+function normalizeAssignments(assignments, personnel) {
+  const source = assignments.length > 0
+    ? assignments
+    : personnel.primary_company_id
+      ? [{ company_id: personnel.primary_company_id, is_primary: true }]
+      : [];
+  const normalized = source
+    .map(assignment => normalizeAssignmentPayload(assignment, personnel))
+    .filter(assignment => assignment.company_id);
+  if (!normalized.some(assignment => assignment.is_primary) && normalized[0]) normalized[0].is_primary = true;
+  return normalized;
+}
 
 const NON_PROOF_SECURITY_ROLE_STATUSES = new Set(["unknown", "not_applicable"]);
 const ID_DOC_LABELS = {
@@ -262,7 +355,7 @@ function applyCurrentDocumentDescriptor(doc, context) {
   return { doc: next, targets };
 }
 
-export default function PersonnelWizard({ person, onClose }) {
+export default function PersonnelWizard({ person, initialValues = {}, onClose }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(0);
   const [uploadSessionId] = useState(() => createManagedUploadSession("personnel"));
@@ -273,7 +366,8 @@ export default function PersonnelWizard({ person, onClose }) {
   const [form, setForm] = useState(person || {
     name: "", status: "draft", function_type: null, employee_type: "loondienst",
     cao: null, cao_scale: null, cao_period: null, payroll_final_allowed: false, is_active: true,
-    country: "Nederland", wpbr_required: false,
+    country: "Nederland", wpbr_required: false, relationship_type: "employee", profile_data_policy: "local_only",
+    ...initialValues,
   });
   const [sensitiveData, setSensitiveData] = useState({ bsn: "", identity_verified_at_hire: false, payroll_notes: "" });
   const [assignments, setAssignments] = useState([]);
@@ -287,6 +381,22 @@ export default function PersonnelWizard({ person, onClose }) {
 
   const onChange = (field, value) => setForm(f => ({ ...f, [field]: value }));
   const onSensitiveChange = (field, value) => setSensitiveData(f => ({ ...f, [field]: value }));
+
+  useEffect(() => {
+    let cancelled = false;
+    async function loadExistingDossier() {
+      if (!person?.id) return;
+      const [existingSensitive, existingAssignments] = await Promise.all([
+        base44.entities.PersonnelSensitiveData.filter({ personnel_id: person.id }).catch(() => []),
+        base44.entities.PersonnelCompanyAssignment.filter({ personnel_id: person.id }).catch(() => []),
+      ]);
+      if (cancelled) return;
+      if (existingSensitive[0]) setSensitiveData(existingSensitive[0]);
+      setAssignments(existingAssignments);
+    }
+    loadExistingDossier();
+    return () => { cancelled = true; };
+  }, [person?.id]);
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
@@ -364,7 +474,9 @@ export default function PersonnelWizard({ person, onClose }) {
         await base44.entities.PersonnelSensitiveData.create({ ...sensitiveToSave, personnel_id: personnelId });
       }
 
-      // Save company assignments
+      // Save company assignments as the current local assignment set.
+      const existingAssignments = await base44.entities.PersonnelCompanyAssignment.filter({ personnel_id: personnelId }).catch(() => []);
+      await Promise.all(existingAssignments.map(assignment => base44.entities.PersonnelCompanyAssignment.delete(assignment.id)));
       for (const a of data.assignments) {
         await base44.entities.PersonnelCompanyAssignment.create({ ...a, personnel_id: personnelId });
       }
@@ -554,12 +666,15 @@ export default function PersonnelWizard({ person, onClose }) {
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["personnel"] });
+      queryClient.invalidateQueries({ queryKey: ["personnel-assignments"] });
       onClose();
     },
   });
 
   const handleSave = () => {
-    saveMutation.mutate({ personnel: form, sensitive: sensitiveData, assignments, idDoc, vogDoc, driversLicense, bankAccount, iceContacts, cvDoc, qualifications, uploadSessionId });
+    const personnel = normalizePersonnelPayload(form, { sensitiveData, idDoc, bankAccount, vogDoc });
+    const normalizedAssignments = normalizeAssignments(assignments, personnel);
+    saveMutation.mutate({ personnel, sensitive: sensitiveData, assignments: normalizedAssignments, idDoc, vogDoc, driversLicense, bankAccount, iceContacts, cvDoc, qualifications, uploadSessionId });
   };
 
   const stepContent = [

@@ -1,0 +1,56 @@
+{
+  "name": "PersonnelMaterial",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string"
+    },
+    "material": {
+      "type": "string"
+    },
+    "quantity": {
+      "type": "number",
+      "default": 1
+    },
+    "issued_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "returned_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "issued",
+        "returned",
+        "lost",
+        "damaged"
+      ],
+      "default": "issued"
+    },
+    "serial_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "personnel_id",
+    "material"
+  ]
+}

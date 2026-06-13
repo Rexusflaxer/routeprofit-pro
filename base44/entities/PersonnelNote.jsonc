@@ -1,0 +1,48 @@
+{
+  "name": "PersonnelNote",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string"
+    },
+    "note_type": {
+      "type": "string",
+      "enum": [
+        "general",
+        "planning",
+        "compliance",
+        "hr",
+        "teamhub",
+        "other"
+      ],
+      "default": "general"
+    },
+    "title": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "body": {
+      "type": "string"
+    },
+    "is_private": {
+      "type": "boolean",
+      "default": true
+    },
+    "created_by_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "personnel_id",
+    "body",
+    "created_at"
+  ]
+}

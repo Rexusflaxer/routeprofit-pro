@@ -1,0 +1,59 @@
+{
+  "name": "PersonnelRestriction",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string"
+    },
+    "scope_type": {
+      "type": "string",
+      "enum": [
+        "customer",
+        "object",
+        "route",
+        "function_group",
+        "other"
+      ],
+      "default": "object"
+    },
+    "scope_label": {
+      "type": "string"
+    },
+    "may_work": {
+      "type": "boolean",
+      "default": true
+    },
+    "reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive"
+      ],
+      "default": "active"
+    }
+  },
+  "required": [
+    "personnel_id",
+    "scope_label"
+  ]
+}
