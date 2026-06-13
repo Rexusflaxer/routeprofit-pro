@@ -6,7 +6,29 @@ import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { ArrowLeft, Edit, Check, X, Building2, MapPin, Upload, Handshake } from "lucide-react";
+import {
+  AlertTriangle,
+  ArrowLeft,
+  Building2,
+  Check,
+  Edit,
+  Handshake,
+  MapPin,
+  RotateCcw,
+  Trash2,
+  Upload,
+  X,
+} from "lucide-react";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { useNavigate } from "react-router-dom";
 import SidebarPanel from "@/components/companies/CompanySidebarPanel";
 import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
@@ -121,6 +143,7 @@ export default function CompanyDetail() {
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
+  const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const addressTimeout = useRef(null);
   const initializedRequestedEdit = useRef(false);
   const [addressSuggestions, setAddressSuggestions] = useState([]);
@@ -164,6 +187,24 @@ export default function CompanyDetail() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
       navigate("/Companies", { replace: true });
+    },
+  });
+
+  const archiveCompanyMutation = useMutation({
+    mutationFn: () => base44.entities.Company.update(companyId, {
+      status: "archived",
+      teamhub_enabled: false,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      setArchiveDialogOpen(false);
+    },
+  });
+
+  const restoreCompanyMutation = useMutation({
+    mutationFn: () => base44.entities.Company.update(companyId, { status: "active" }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
     },
   });
 
@@ -262,6 +303,7 @@ export default function CompanyDetail() {
   }
 
   const data = editing ? form : company;
+  const isArchived = company.status === "archived";
 
   const address = [
     company.street_name && `${company.street_name} ${company.house_number || ""}${company.house_number_addition || ""}`.trim(),
@@ -329,7 +371,7 @@ export default function CompanyDetail() {
               </div>
             )}
           </div>
-          <div className="flex gap-2">
+          <div className="flex flex-wrap justify-end gap-2">
             {editing ? (
               <>
                 <Button variant="outline" size="sm" onClick={cancelEdit} disabled={deleteDraftCompanyMutation.isPending}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
@@ -338,9 +380,31 @@ export default function CompanyDetail() {
                 </Button>
               </>
             ) : (
-              <Button onClick={startEdit} variant="outline">
-                <Edit className="w-4 h-4 mr-1" /> Wijzigen
-              </Button>
+              <>
+                <Button onClick={startEdit} variant="outline">
+                  <Edit className="w-4 h-4 mr-1" /> Wijzigen
+                </Button>
+                {isArchived ? (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    onClick={() => restoreCompanyMutation.mutate()}
+                    disabled={restoreCompanyMutation.isPending}
+                  >
+                    <RotateCcw className="w-4 h-4 mr-1" />
+                    {restoreCompanyMutation.isPending ? "Herstellen..." : "Herstellen"}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button"
+                    variant="outline"
+                    className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={() => setArchiveDialogOpen(true)}
+                  >
+                    <Trash2 className="w-4 h-4 mr-1" /> Verwijderen
+                  </Button>
+                )}
+              </>
             )}
           </div>
         </div>
@@ -466,6 +530,36 @@ export default function CompanyDetail() {
         companies={companies}
         company={company}
       />
+
+      <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <div className="mb-1 flex items-center gap-2">
+              <AlertTriangle className="h-5 w-5 text-amber-500" />
+              <AlertDialogTitle>Bedrijf naar archief verplaatsen?</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription>
+              Dit bedrijf wordt niet definitief verwijderd. Het profiel gaat naar het archief en blijft gekoppeld aan bestaande medewerkers, klanten, contracten, documenten en historie. LOQ Teamhub wordt direct uitgeschakeld zodat het bedrijf niet meer zichtbaar is voor nieuwe aanvragen.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-xs text-amber-900 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
+            Gebruik dit alleen wanneer het bedrijf niet meer actief gebruikt mag worden. Je kunt het bedrijf later openen vanuit de bedrijvenlijst en weer herstellen.
+          </div>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={archiveCompanyMutation.isPending}>Annuleren</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={archiveCompanyMutation.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+                archiveCompanyMutation.mutate();
+              }}
+            >
+              {archiveCompanyMutation.isPending ? "Archiveren..." : "Naar archief"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
     </PageTransition>
   );
 }

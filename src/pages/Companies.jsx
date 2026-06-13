@@ -184,46 +184,55 @@ export default function Companies() {
             {getGroupedCompanies().length === 0 && (
               <p className="px-4 py-4 text-sm text-muted-foreground">Nog geen bedrijven aangemaakt.</p>
             )}
-            {getGroupedCompanies().map(({ company, isChild }) => (
-              <div
-                key={company.id}
-                className="flex items-center px-4 py-3 cursor-pointer hover:bg-accent/50 transition-colors group"
-                onClick={() => navigate(`/CompanyDetail?id=${company.id}`)}
-              >
-                <div className={`flex-[2] min-w-0 flex items-center gap-2 ${isChild ? "pl-6 border-l-2 border-muted ml-1" : ""}`}>
-                  {company.logo_file_url
-                    ? <img src={company.logo_file_url} alt="logo" className="w-7 h-7 rounded object-contain bg-white border border-border p-0.5 shrink-0" />
-                    : <div className="w-7 h-7 rounded bg-muted flex items-center justify-center shrink-0"><Building2 className="w-3.5 h-3.5 text-muted-foreground" /></div>
-                  }
-                  <div className="min-w-0">
-                    <p className="font-medium text-sm text-foreground truncate">{company.display_name}</p>
-                    {company.trade_name && company.trade_name !== company.display_name && (
-                      <p className="text-xs text-muted-foreground truncate">{company.trade_name}</p>
+            {getGroupedCompanies().map(({ company, isChild }) => {
+              const teamhubVisible = company.status === "active" && company.teamhub_enabled;
+
+              return (
+                <div
+                  key={company.id}
+                  className={`flex items-center px-4 py-3 cursor-pointer transition-colors group hover:bg-accent/50 ${company.status === "archived" ? "bg-muted/20 opacity-75" : ""}`}
+                  onClick={() => navigate(`/CompanyDetail?id=${company.id}`)}
+                >
+                  <div className={`flex-[2] min-w-0 flex items-center gap-2 ${isChild ? "pl-6 border-l-2 border-muted ml-1" : ""}`}>
+                    {company.logo_file_url
+                      ? <img src={company.logo_file_url} alt="logo" className="w-7 h-7 rounded object-contain bg-white border border-border p-0.5 shrink-0" />
+                      : <div className="w-7 h-7 rounded bg-muted flex items-center justify-center shrink-0"><Building2 className="w-3.5 h-3.5 text-muted-foreground" /></div>
+                    }
+                    <div className="min-w-0">
+                      <div className="flex min-w-0 items-center gap-2">
+                        <p className="truncate text-sm font-medium text-foreground">{company.display_name}</p>
+                        {company.status === "archived" && (
+                          <Badge className={`shrink-0 text-xs ${STATUS_COLORS.archived}`}>Gearchiveerd</Badge>
+                        )}
+                      </div>
+                      {company.trade_name && company.trade_name !== company.display_name && (
+                        <p className="text-xs text-muted-foreground truncate">{company.trade_name}</p>
+                      )}
+                    </div>
+                  </div>
+                  <span className="w-32 shrink-0 text-sm text-muted-foreground">{company.kvk_number || "—"}</span>
+                  <span className="w-36 shrink-0">
+                    <span className="text-xs bg-muted text-foreground px-2 py-1 rounded font-medium">{ROLE_LABELS[company.company_role] || company.company_role}</span>
+                  </span>
+                  <div className="flex-[2] min-w-0 flex flex-wrap gap-1">
+                    {(company.activities || []).slice(0, 2).map(a => (
+                      <span key={a} className="text-xs bg-muted text-foreground px-1.5 py-0.5 rounded">{ACTIVITY_LABELS[a] || a}</span>
+                    ))}
+                    {(company.activities || []).length > 2 && (
+                      <span className="text-xs text-muted-foreground">+{(company.activities || []).length - 2}</span>
                     )}
                   </div>
+                  <span className="w-32 shrink-0 text-xs text-muted-foreground">
+                    {company.default_cao_configuration_id ? getCaoName(company.default_cao_configuration_id) : "—"}
+                  </span>
+                  <span className="w-28 shrink-0">
+                    <Badge className={teamhubVisible ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"}>
+                      {teamhubVisible ? "Zichtbaar" : "Niet zichtbaar"}
+                    </Badge>
+                  </span>
                 </div>
-                <span className="w-32 shrink-0 text-sm text-muted-foreground">{company.kvk_number || "—"}</span>
-                <span className="w-36 shrink-0">
-                  <span className="text-xs bg-muted text-foreground px-2 py-1 rounded font-medium">{ROLE_LABELS[company.company_role] || company.company_role}</span>
-                </span>
-                <div className="flex-[2] min-w-0 flex flex-wrap gap-1">
-                  {(company.activities || []).slice(0, 2).map(a => (
-                    <span key={a} className="text-xs bg-muted text-foreground px-1.5 py-0.5 rounded">{ACTIVITY_LABELS[a] || a}</span>
-                  ))}
-                  {(company.activities || []).length > 2 && (
-                    <span className="text-xs text-muted-foreground">+{(company.activities || []).length - 2}</span>
-                  )}
-                </div>
-                <span className="w-32 shrink-0 text-xs text-muted-foreground">
-                  {company.default_cao_configuration_id ? getCaoName(company.default_cao_configuration_id) : "—"}
-                </span>
-                <span className="w-28 shrink-0">
-                  <Badge className={company.teamhub_enabled ? "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200" : "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300"}>
-                    {company.teamhub_enabled ? "Zichtbaar" : "Niet zichtbaar"}
-                  </Badge>
-                </span>
-              </div>
-            ))}
+              );
+            })}
           </div>
         </div>
       )}
