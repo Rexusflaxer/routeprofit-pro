@@ -4,16 +4,7 @@ import { Input } from "@/components/ui/input";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Button } from "@/components/ui/button";
 import { Upload, Eye, EyeOff, Lock } from "lucide-react";
-import ContractRulesPanel from "@/components/personnel/ContractRulesPanel";
-import CaoApplicabilityPanel from "@/components/personnel/CaoApplicabilityPanel";
 import { downloadManagedFile, uploadManagedFile } from "@/lib/managedFiles";
-
-const CAO_OPTIONS = [
-  { value: "cao_particuliere_beveiliging", label: "CAO Particuliere Beveiliging" },
-  { value: "cao_evenementen_horecabeveiliging", label: "CAO Evenementen- en Horecabeveiliging" },
-  { value: "cao_verkeersregelaars", label: "CAO Verkeersregelaars" },
-  { value: "cao_veiligheidsdomein", label: "CAO Veiligheidsdomein" }
-];
 
 export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSensitiveChange, personnelId, uploadSessionId }) {
   const [showBsn, setShowBsn] = useState(false);
@@ -50,7 +41,7 @@ export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSe
 
   return (
     <div className="space-y-6">
-      {form.employee_type === "zzp" ? (
+      {form.employee_type === "zzp" && (
         <div className="rounded-xl border border-border p-4 space-y-3">
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">ZZP-bedrijfsgegevens</p>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -76,34 +67,6 @@ export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSe
             </div>
           </div>
         </div>
-      ) : (
-        <>
-          <div className="rounded-xl border border-border p-4 space-y-3">
-            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contract-CAO</p>
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <Label>Toepasselijke CAO</Label>
-                <Select value={form.cao || "unknown"} onValueChange={v => onChange("cao", v === "unknown" ? null : v)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="unknown">Kies expliciet een CAO</SelectItem>
-                    {CAO_OPTIONS.map(option => (
-                      <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-          </div>
-
-          {/* CAO PB toepassingsprofiel */}
-          <div className="rounded-xl border border-border p-4">
-            <CaoApplicabilityPanel form={form} onChange={onChange} personnelId={personnelId} />
-          </div>
-
-          {/* Contract & CAO-regels */}
-          <ContractRulesPanel form={form} onChange={onChange} personnelId={personnelId} />
-        </>
       )}
 
       {/* Geboortegegevens */}
@@ -192,13 +155,15 @@ export default function WizardStep3Payroll({ form, onChange, sensitiveData, onSe
 
       {/* Payroll notities */}
       <div className="rounded-xl border border-amber-200 bg-amber-50 p-4 space-y-2">
-        <Label className="text-amber-800">Loonadministratie notities (beveiligd)</Label>
+        <Label className="text-amber-800">
+          {form.employee_type === "zzp" ? "Administratieve notities (beveiligd)" : "Loonadministratie notities (beveiligd)"}
+        </Label>
         <textarea
           className="w-full text-sm rounded-lg border border-amber-200 bg-white p-2 resize-none"
           rows={3}
           value={sensitiveData.payroll_notes || ""}
           onChange={e => onSensitiveChange("payroll_notes", e.target.value)}
-          placeholder="Intern gebruik – niet zichtbaar in personeelslijst"
+          placeholder="Intern gebruik"
         />
       </div>
     </div>

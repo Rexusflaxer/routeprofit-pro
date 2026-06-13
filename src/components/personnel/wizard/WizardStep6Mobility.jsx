@@ -103,9 +103,8 @@ export default function WizardStep6Mobility({ driversLicense, onLicenseChange, b
         )}
       </div>
 
-      {/* Bankrekening */}
       <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Bankrekening (salarisbetaling)</p>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Bankrekening</p>
         <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
           <div className="space-y-1">
             <Label>IBAN</Label>

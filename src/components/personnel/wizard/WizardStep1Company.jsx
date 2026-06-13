@@ -2,27 +2,36 @@ import React from "react";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { Button } from "@/components/ui/button";
-import { Plus, X } from "lucide-react";
+import { Switch } from "@/components/ui/switch";
 
-const FUNCTION_TYPES = [
-  { value: "objectbeveiliger", label: "Objectbeveiliger" },
-  { value: "receptie", label: "Receptie" },
-  { value: "surveillant", label: "Surveillant" },
-  { value: "alarmopvolging", label: "Alarmopvolging" },
-  { value: "binnendienst", label: "Binnendienst" },
-  { value: "klantrelatie", label: "Klantrelatie" },
-  { value: "planner", label: "Planner" },
-  { value: "centralist", label: "Centralist" },
-  { value: "verkeersregelaar", label: "Verkeersregelaar" },
-  { value: "brandwacht", label: "Brandwacht" },
-  { value: "installateur", label: "Installateur" },
-  { value: "rechercheur", label: "Rechercheur" },
-  { value: "host", label: "Host / Hostess" },
-  { value: "other", label: "Overig" },
+const PROFILE_POLICY_LABELS = {
+  local_only: "Alleen lokaal",
+  profile_wins_after_acceptance: "Profiel wint na acceptatie",
+  organization_wins: "Organisatiekopie leidend",
+  manual_review: "Handmatige review"
+};
+
+const CONFLICT_STATUS_LABELS = {
+  none: "Geen conflict",
+  pending_review: "Review nodig",
+  local_copy_retained: "Lokale kopie bewaard",
+  resolved: "Opgelost"
+};
+
+const RELATION_OPTIONS = [
+  {
+    value: "loondienst",
+    label: "Loondienst",
+    description: "Medewerker in dienst van de organisatie."
+  },
+  {
+    value: "zzp",
+    label: "ZZP'er",
+    description: "Zelfstandige ondernemer met een eigen profiel of lokaal dossier."
+  }
 ];
 
-export default function WizardStep1Company({ form, onChange, companies, assignments, onAddAssignment, onRemoveAssignment }) {
+export default function WizardStep1Company({ form, onChange }) {
   const setEmploymentType = (value) => {
     onChange("employee_type", value);
     onChange("relationship_type", value === "zzp" ? "self_employed" : "employee");
@@ -31,36 +40,30 @@ export default function WizardStep1Company({ form, onChange, companies, assignme
 
   return (
     <div className="space-y-6">
-      <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-        <div className="space-y-1">
-          <Label>Primair bedrijf</Label>
-          <Select value={form.primary_company_id || "none"} onValueChange={v => onChange("primary_company_id", v === "none" ? null : v)}>
-            <SelectTrigger><SelectValue placeholder="Kies bedrijf" /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="none">— Geen —</SelectItem>
-              {companies.map(c => <SelectItem key={c.id} value={c.id}>{c.display_name}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="space-y-1">
-          <Label>Functietype</Label>
-          <Select value={form.function_type || "unknown"} onValueChange={v => onChange("function_type", v === "unknown" ? null : v)}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="unknown">Kies functietype</SelectItem>
-              {FUNCTION_TYPES.map(f => <SelectItem key={f.value} value={f.value}>{f.label}</SelectItem>)}
-            </SelectContent>
-          </Select>
-        </div>
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-[1fr_320px]">
         <div className="space-y-1">
           <Label>Loondienst / ZZP</Label>
-          <Select value={form.employee_type || "loondienst"} onValueChange={setEmploymentType}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="loondienst">Loondienst</SelectItem>
-              <SelectItem value="zzp">ZZP</SelectItem>
-            </SelectContent>
-          </Select>
+          <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
+            {RELATION_OPTIONS.map(option => {
+              const active = (form.employee_type || "loondienst") === option.value;
+              return (
+                <button
+                  key={option.value}
+                  type="button"
+                  onClick={() => setEmploymentType(option.value)}
+                  className={`rounded-lg border p-4 text-left transition-colors ${
+                    active ? "border-primary bg-primary/5" : "border-border bg-background hover:border-primary/40"
+                  }`}
+                >
+                  <div className="flex items-center justify-between gap-2">
+                    <span className="font-medium text-foreground">{option.label}</span>
+                    {active && <Badge variant="secondary" className="text-xs">Gekozen</Badge>}
+                  </div>
+                  <p className="mt-1 text-sm text-muted-foreground">{option.description}</p>
+                </button>
+              );
+            })}
+          </div>
         </div>
         <div className="space-y-1">
           <Label>Status medewerker</Label>
@@ -77,26 +80,34 @@ export default function WizardStep1Company({ form, onChange, companies, assignme
         </div>
       </div>
 
-      <div className="space-y-2">
-        <Label className="text-sm font-medium">Extra bedrijfskoppelingen</Label>
-        <div className="space-y-2">
-          {assignments.map((a, i) => {
-            const co = companies.find(c => c.id === a.company_id);
-            return (
-              <div key={i} className="flex items-center gap-2 p-2 rounded-lg bg-muted/50 border border-border">
-                <span className="text-sm flex-1">{co?.display_name || a.company_id}</span>
-                <Badge variant="outline" className="text-xs">{a.relation_type}</Badge>
-                <Button type="button" size="icon" variant="ghost" className="h-7 w-7" onClick={() => onRemoveAssignment(i)}>
-                  <X className="w-3 h-3" />
-                </Button>
-              </div>
-            );
-          })}
-          {companies.length > 0 && (
-            <Button type="button" size="sm" variant="outline" onClick={() => onAddAssignment(companies[0].id)}>
-              <Plus className="w-3 h-3 mr-1" /> Bedrijf koppelen
-            </Button>
-          )}
+      <div className="rounded-lg border border-border bg-muted/30 p-4">
+        <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+          <div className="space-y-1">
+            <Label>Teamhub-koppelbeleid</Label>
+            <Select value={form.profile_data_policy || "local_only"} onValueChange={v => onChange("profile_data_policy", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(PROFILE_POLICY_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label>Conflictstatus</Label>
+            <Select value={form.profile_conflict_status || "none"} onValueChange={v => onChange("profile_conflict_status", v)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                {Object.entries(CONFLICT_STATUS_LABELS).map(([value, label]) => (
+                  <SelectItem key={value} value={value}>{label}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex items-center gap-2 md:col-span-2">
+            <Switch checked={form.local_organization_copy_retained !== false} onCheckedChange={v => onChange("local_organization_copy_retained", v)} />
+            <Label>Lokale organisatiekopie bewaren</Label>
+          </div>
         </div>
       </div>
     </div>
