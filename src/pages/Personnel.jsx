@@ -1207,10 +1207,9 @@ export default function Personnel() {
   });
 
   const topTabs = [
-    { value: "all", label: "Alle", count: counts.all, icon: Users },
-    { value: "employees", label: "Loondienst", count: counts.employees, icon: UserCheck },
-    { value: "self_employed", label: "ZZP'ers", count: counts.zzp, icon: IdCard },
-    { value: "subcontractors", label: "Onderaannemers", count: counts.subcontractors, icon: Building2 },
+    { value: "employees", label: "Loondienst", count: counts.employees },
+    { value: "self_employed", label: "ZZP'ers", count: counts.zzp },
+    { value: "subcontractors", label: "Onderaannemers", count: counts.subcontractors },
   ];
 
   return (
@@ -1248,20 +1247,16 @@ export default function Personnel() {
 
       {!showWizard && (
         <div className="space-y-4">
-          <Tabs value={activeTopTab} onValueChange={setActiveTopTab}>
+          <Tabs value={activeTopTab || "employees"} onValueChange={setActiveTopTab}>
             <div className="overflow-x-auto">
               <TabsList className="h-auto min-w-max justify-start">
-                {topTabs.map(tab => {
-                  const Icon = tab.icon;
-                  return (
-                    <TabsTrigger key={tab.value} value={tab.value} className="gap-2">
-                      <Icon className="h-4 w-4" />
-                      {tab.label}
-                      <span className="rounded-full bg-background/80 px-1.5 py-0.5 text-[11px] text-muted-foreground">{tab.count}</span>
-                    </TabsTrigger>
-                  );
-                })}
-              </TabsList>
+                {topTabs.map(tab => (
+                     <TabsTrigger key={tab.value} value={tab.value}>
+                       {tab.label}
+                       <span className="rounded-full bg-background/80 px-1.5 py-0.5 text-[11px] text-muted-foreground">{tab.count}</span>
+                     </TabsTrigger>
+                   ))}
+               </TabsList>
             </div>
 
             <div className="mt-4 flex flex-wrap gap-3">
@@ -1293,17 +1288,6 @@ export default function Personnel() {
               )}
             </div>
 
-            <TabsContent value="all" className="mt-4 space-y-4">
-              <PersonnelList
-                personnel={visiblePersonnel}
-                companies={companies}
-                selectedId={selectedPersonnel?.id}
-                onSelect={person => setSelectedPersonnelId(person.id)}
-                onEdit={person => { setEditing(person); setShowWizard(true); }}
-                onDelete={deletePersonnel}
-                onCalculate={person => { setSelectedPersonnelId(person.id); }}
-              />
-            </TabsContent>
             <TabsContent value="employees" className="mt-4 space-y-4">
               <PersonnelList
                 personnel={visiblePersonnel}
