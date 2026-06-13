@@ -139,10 +139,37 @@ const PERMANENT_DELETE_RETENTION_YEARS = 10;
 const PERMANENT_DELETE_RETENTION_LABEL = `${PERMANENT_DELETE_RETENTION_YEARS} jaar`;
 const ACTIVE_PERSONNEL_STATUSES = new Set(["draft", "onboarding", "active"]);
 const ACTIVE_ASSIGNMENT_STATUSES = new Set(["pending", "active"]);
+const ACTIVE_INVITATION_STATUSES = new Set(["pending"]);
 const ACTIVE_EMAIL_STATUSES = new Set(["pending_oauth", "connected", "action_required"]);
 const ACTIVE_BANK_STATUSES = new Set(["active", "pending"]);
 const ACTIVE_INSURANCE_STATUSES = new Set(["active", "action_required"]);
 const ACTIVE_DOCUMENT_STATUSES = new Set(["pending_review", "active", "suspended"]);
+const ACTIVE_SECURITY_PASS_STATUSES = new Set(["requested", "approved", "active"]);
+
+const COMPANY_DELETE_DEPENDENCY_ENTITIES = [
+  ["managedFileAccessLogs", "ManagedFileAccessLog"],
+  ["employeeAccessAuditLogs", "EmployeeAccessAuditLog"],
+  ["employeeInvitations", "EmployeeInvitation"],
+  ["payrollCalculationRuns", "PayrollCalculationRun"],
+  ["personnelCaoEmploymentEvents", "PersonnelCaoEmploymentEvent"],
+  ["personnelSecurityPasses", "PersonnelSecurityPass"],
+  ["personnelQualifications", "PersonnelQualification"],
+  ["personnelDocuments", "PersonnelDocument"],
+  ["personnelAssignments", "PersonnelCompanyAssignment"],
+  ["personnelContracts", "PersonnelContract"],
+  ["personnel", "Personnel"],
+  ["routes", "Route"],
+  ["tasks", "Task"],
+  ["caoAssignments", "CompanyCaoAssignment"],
+  ["locationAssignments", "CompanyLocationAssignment"],
+  ["wpbrLicenses", "CompanyWpbrLicense"],
+  ["branchMemberships", "CompanyBranchMembership"],
+  ["accreditations", "CompanyAccreditation"],
+  ["bankAccounts", "CompanyBankAccount"],
+  ["emailSettings", "CompanyEmailSettings"],
+  ["insurancePolicies", "CompanyInsurancePolicy"],
+  ["managedFiles", "ManagedFile"],
+];
 
 function getTodayDateString() {
   return new Date().toISOString().slice(0, 10);
@@ -154,22 +181,11 @@ function yearsAgo(years) {
   return date;
 }
 
-function addYears(date, years) {
-  const result = new Date(date);
-  result.setFullYear(result.getFullYear() + years);
-  return result;
-}
-
 function parseRecordDate(value) {
   if (!value || typeof value !== "string") return null;
   const normalized = value.length <= 10 ? `${value}T00:00:00` : value;
   const parsed = new Date(normalized);
   return Number.isNaN(parsed.getTime()) ? null : parsed;
-}
-
-function formatDateNl(date) {
-  if (!date) return "onbekend";
-  return date.toLocaleDateString("nl-NL", { year: "numeric", month: "long", day: "numeric" });
 }
 
 function hasOpenDateRange(item, endField = "valid_until") {
@@ -181,11 +197,20 @@ function latestRecordDate(record = {}) {
   const dateFields = [
     "updated_date",
     "created_date",
+    "created_at",
     "valid_until",
     "contract_end_date",
     "service_date",
     "valid_from",
     "contract_start_date",
+    "pay_period_end",
+    "pay_period_start",
+    "requested_at",
+    "awarded_at",
+    "provided_to_employer_date",
+    "expires_at",
+    "accepted_at",
+    "declined_at",
     "connected_at",
     "revoked_at",
     "archived_at",
@@ -221,32 +246,24 @@ function buildPermanentDeleteGuard(company, dependencies = {}) {
     emailSettings: dependencies.emailSettings || [],
     insurancePolicies: dependencies.insurancePolicies || [],
     managedFiles: dependencies.managedFiles || [],
+    employeeAccessAuditLogs: dependencies.employeeAccessAuditLogs || [],
+    employeeInvitations: dependencies.employeeInvitations || [],
+    managedFileAccessLogs: dependencies.managedFileAccessLogs || [],
+    payrollCalculationRuns: dependencies.payrollCalculationRuns || [],
+    personnelCaoEmploymentEvents: dependencies.personnelCaoEmploymentEvents || [],
+    personnelDocuments: dependencies.personnelDocuments || [],
+    personnelQualifications: dependencies.personnelQualifications || [],
+    personnelSecurityPasses: dependencies.personnelSecurityPasses || [],
   };
   const blockers = [];
   const retentionThreshold = yearsAgo(PERMANENT_DELETE_RETENTION_YEARS);
   const today = getTodayDateString();
-  const archivedAt = parseRecordDate(company?.archived_at);
 
   if (company?.status !== "archived") {
     blockers.push({
       title: "Bedrijf staat niet in het archief",
       detail: "Verplaats het bedrijf eerst naar het archief voordat definitief verwijderen beoordeeld kan worden.",
     });
-  }
-
-  if (!archivedAt) {
-    blockers.push({
-      title: "Archiefdatum ontbreekt",
-      detail: "De bewaartermijn kan pas starten zodra het bedrijf met datum naar het archief is verplaatst.",
-    });
-  } else {
-    const eligibleDeleteDate = addYears(archivedAt, PERMANENT_DELETE_RETENTION_YEARS);
-    if (eligibleDeleteDate > new Date()) {
-      blockers.push({
-        title: `Bewaartermijn van ${PERMANENT_DELETE_RETENTION_LABEL} loopt nog`,
-        detail: `Definitief verwijderen kan op zijn vroegst vanaf ${formatDateNl(eligibleDeleteDate)} worden beoordeeld.`,
-      });
-    }
   }
 
   const groups = [
@@ -268,12 +285,12 @@ function buildPermanentDeleteGuard(company, dependencies = {}) {
     {
       label: "Routes",
       items: deps.routes,
-      activeCount: deps.routes.length,
+      activeCount: deps.routes.filter(item => item.status && item.status !== "vergrendeld").length,
     },
     {
       label: "Diensten",
       items: deps.tasks,
-      activeCount: deps.tasks.length,
+      activeCount: 0,
     },
     {
       label: "CAO-koppelingen",
@@ -320,6 +337,46 @@ function buildPermanentDeleteGuard(company, dependencies = {}) {
       items: deps.managedFiles,
       activeCount: 0,
     },
+    {
+      label: "Medewerkeruitnodigingen",
+      items: deps.employeeInvitations,
+      activeCount: deps.employeeInvitations.filter(item => ACTIVE_INVITATION_STATUSES.has(item.status)).length,
+    },
+    {
+      label: "Toegangsauditlogs",
+      items: deps.employeeAccessAuditLogs,
+      activeCount: 0,
+    },
+    {
+      label: "Bestandsauditlogs",
+      items: deps.managedFileAccessLogs,
+      activeCount: 0,
+    },
+    {
+      label: "Payroll-runs",
+      items: deps.payrollCalculationRuns,
+      activeCount: 0,
+    },
+    {
+      label: "CAO-dienstverbandhistorie",
+      items: deps.personnelCaoEmploymentEvents,
+      activeCount: 0,
+    },
+    {
+      label: "Personeelsdocumenten",
+      items: deps.personnelDocuments,
+      activeCount: 0,
+    },
+    {
+      label: "Personeelskwalificaties",
+      items: deps.personnelQualifications,
+      activeCount: 0,
+    },
+    {
+      label: "Beveiligingspassen",
+      items: deps.personnelSecurityPasses,
+      activeCount: deps.personnelSecurityPasses.filter(item => ACTIVE_SECURITY_PASS_STATUSES.has(item.status) && hasOpenDateRange(item)).length,
+    },
   ];
 
   groups.forEach(group => {
@@ -341,19 +398,22 @@ function buildPermanentDeleteGuard(company, dependencies = {}) {
     }
   });
 
-  const linkedCount = groups.reduce((count, group) => count + group.items.length, 0);
-  if (linkedCount > 0) {
-    blockers.push({
-      title: "Gekoppelde historie aanwezig",
-      detail: `${linkedCount} gekoppelde record(s) blijven nodig voor historie, audit of referenties. Verwijderen blijft geblokkeerd om conflicten in de applicatie te voorkomen.`,
-    });
-  }
-
   return {
     allowed: blockers.length === 0,
     blockers,
-    linkedCount,
+    linkedCount: groups.reduce((count, group) => count + group.items.length, 0),
   };
+}
+
+async function deleteCompanyDependencyRecords(dependencies = {}) {
+  for (const [key, entityName] of COMPANY_DELETE_DEPENDENCY_ENTITIES) {
+    const records = dependencies[key] || [];
+    await Promise.all(
+      records
+        .filter(record => record?.id)
+        .map(record => base44.entities[entityName].delete(record.id))
+    );
+  }
 }
 
 export default function CompanyDetail() {
@@ -416,6 +476,14 @@ export default function CompanyDetail() {
         emailSettings,
         insurancePolicies,
         managedFiles,
+        employeeAccessAuditLogs,
+        employeeInvitations,
+        managedFileAccessLogs,
+        payrollCalculationRuns,
+        personnelCaoEmploymentEvents,
+        personnelDocuments,
+        personnelQualifications,
+        personnelSecurityPasses,
       ] = await Promise.all([
         base44.entities.Personnel.filter({ primary_company_id: companyId }),
         base44.entities.PersonnelContract.filter({ company_id: companyId }),
@@ -431,6 +499,14 @@ export default function CompanyDetail() {
         base44.entities.CompanyEmailSettings.filter({ company_id: companyId }),
         base44.entities.CompanyInsurancePolicy.filter({ company_id: companyId }),
         base44.entities.ManagedFile.filter({ company_id: companyId }),
+        base44.entities.EmployeeAccessAuditLog.filter({ company_id: companyId }),
+        base44.entities.EmployeeInvitation.filter({ company_id: companyId }),
+        base44.entities.ManagedFileAccessLog.filter({ company_id: companyId }),
+        base44.entities.PayrollCalculationRun.filter({ company_id: companyId }),
+        base44.entities.PersonnelCaoEmploymentEvent.filter({ company_id: companyId }),
+        base44.entities.PersonnelDocument.filter({ company_id: companyId }),
+        base44.entities.PersonnelQualification.filter({ company_id: companyId }),
+        base44.entities.PersonnelSecurityPass.filter({ company_id: companyId }),
       ]);
 
       return {
@@ -448,6 +524,14 @@ export default function CompanyDetail() {
         emailSettings,
         insurancePolicies,
         managedFiles,
+        employeeAccessAuditLogs,
+        employeeInvitations,
+        managedFileAccessLogs,
+        payrollCalculationRuns,
+        personnelCaoEmploymentEvents,
+        personnelDocuments,
+        personnelQualifications,
+        personnelSecurityPasses,
       };
     },
     enabled: !!companyId && company?.status === "archived",
@@ -505,6 +589,7 @@ export default function CompanyDetail() {
       if (!guard.allowed) {
         throw new Error("Dit bedrijf mag nog niet definitief verwijderd worden.");
       }
+      await deleteCompanyDependencyRecords(deletionDependencies);
       return base44.entities.Company.delete(companyId);
     },
     onSuccess: () => {
@@ -886,7 +971,7 @@ export default function CompanyDetail() {
               <AlertDialogTitle>Bedrijf definitief verwijderen?</AlertDialogTitle>
             </div>
             <AlertDialogDescription>
-              Definitief verwijderen kan alleen vanuit het archief, na de bewaartermijn van {PERMANENT_DELETE_RETENTION_LABEL}, en alleen wanneer er geen actieve of gekoppelde records meer bestaan die administratie, contracten, diensten, documenten of historie kunnen raken.
+              Definitief verwijderen kan alleen vanuit het archief. De app controleert eerst of er actieve koppelingen zijn en of gekoppelde administratie, planning, documenten of logs jonger zijn dan {PERMANENT_DELETE_RETENTION_LABEL}. Een leeg archiefbedrijf kan direct worden verwijderd.
             </AlertDialogDescription>
           </AlertDialogHeader>
 
@@ -900,7 +985,7 @@ export default function CompanyDetail() {
             </div>
           ) : permanentDeleteGuard.allowed ? (
             <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900 dark:border-green-900/70 dark:bg-green-950/30 dark:text-green-100">
-              Er zijn geen blokkades gevonden. Dit bedrijf heeft geen gekoppelde historie meer en valt buiten de bewaartermijn.
+              Er zijn geen actieve of bewaarplichtige koppelingen gevonden. Definitief verwijderen kan worden uitgevoerd.
             </div>
           ) : (
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
