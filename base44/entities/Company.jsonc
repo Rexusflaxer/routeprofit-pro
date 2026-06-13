@@ -54,6 +54,14 @@
       ],
       "default": "active"
     },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "Moment waarop het bedrijf naar het archief is verplaatst. Dit is het startpunt voor definitieve verwijdercontrole."
+    },
     "company_role": {
       "type": "string",
       "enum": [

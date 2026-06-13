@@ -9,6 +9,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   AlertTriangle,
   ArrowLeft,
+  Archive,
   Building2,
   Check,
   Edit,
@@ -133,6 +134,228 @@ function isEmptyDraftCompany(data = {}) {
     && !(data.activities || []).length;
 }
 
+// Conservative guard: Dutch administration is generally 7 years, but some records require 10 years.
+const PERMANENT_DELETE_RETENTION_YEARS = 10;
+const PERMANENT_DELETE_RETENTION_LABEL = `${PERMANENT_DELETE_RETENTION_YEARS} jaar`;
+const ACTIVE_PERSONNEL_STATUSES = new Set(["draft", "onboarding", "active"]);
+const ACTIVE_ASSIGNMENT_STATUSES = new Set(["pending", "active"]);
+const ACTIVE_EMAIL_STATUSES = new Set(["pending_oauth", "connected", "action_required"]);
+const ACTIVE_BANK_STATUSES = new Set(["active", "pending"]);
+const ACTIVE_INSURANCE_STATUSES = new Set(["active", "action_required"]);
+const ACTIVE_DOCUMENT_STATUSES = new Set(["pending_review", "active", "suspended"]);
+
+function getTodayDateString() {
+  return new Date().toISOString().slice(0, 10);
+}
+
+function yearsAgo(years) {
+  const date = new Date();
+  date.setFullYear(date.getFullYear() - years);
+  return date;
+}
+
+function addYears(date, years) {
+  const result = new Date(date);
+  result.setFullYear(result.getFullYear() + years);
+  return result;
+}
+
+function parseRecordDate(value) {
+  if (!value || typeof value !== "string") return null;
+  const normalized = value.length <= 10 ? `${value}T00:00:00` : value;
+  const parsed = new Date(normalized);
+  return Number.isNaN(parsed.getTime()) ? null : parsed;
+}
+
+function formatDateNl(date) {
+  if (!date) return "onbekend";
+  return date.toLocaleDateString("nl-NL", { year: "numeric", month: "long", day: "numeric" });
+}
+
+function hasOpenDateRange(item, endField = "valid_until") {
+  const endDate = item?.[endField];
+  return !endDate || endDate >= getTodayDateString();
+}
+
+function latestRecordDate(record = {}) {
+  const dateFields = [
+    "updated_date",
+    "created_date",
+    "valid_until",
+    "contract_end_date",
+    "service_date",
+    "valid_from",
+    "contract_start_date",
+    "connected_at",
+    "revoked_at",
+    "archived_at",
+  ];
+
+  return dateFields.reduce((latest, field) => {
+    const parsed = parseRecordDate(record[field]);
+    if (!parsed) return latest;
+    return !latest || parsed > latest ? parsed : latest;
+  }, null);
+}
+
+function countRecentOrUnknownRecords(items = [], thresholdDate) {
+  return items.filter(item => {
+    const recordDate = latestRecordDate(item);
+    return !recordDate || recordDate >= thresholdDate;
+  }).length;
+}
+
+function buildPermanentDeleteGuard(company, dependencies = {}) {
+  const deps = {
+    personnel: dependencies.personnel || [],
+    personnelContracts: dependencies.personnelContracts || [],
+    personnelAssignments: dependencies.personnelAssignments || [],
+    routes: dependencies.routes || [],
+    tasks: dependencies.tasks || [],
+    caoAssignments: dependencies.caoAssignments || [],
+    locationAssignments: dependencies.locationAssignments || [],
+    wpbrLicenses: dependencies.wpbrLicenses || [],
+    branchMemberships: dependencies.branchMemberships || [],
+    accreditations: dependencies.accreditations || [],
+    bankAccounts: dependencies.bankAccounts || [],
+    emailSettings: dependencies.emailSettings || [],
+    insurancePolicies: dependencies.insurancePolicies || [],
+    managedFiles: dependencies.managedFiles || [],
+  };
+  const blockers = [];
+  const retentionThreshold = yearsAgo(PERMANENT_DELETE_RETENTION_YEARS);
+  const today = getTodayDateString();
+  const archivedAt = parseRecordDate(company?.archived_at);
+
+  if (company?.status !== "archived") {
+    blockers.push({
+      title: "Bedrijf staat niet in het archief",
+      detail: "Verplaats het bedrijf eerst naar het archief voordat definitief verwijderen beoordeeld kan worden.",
+    });
+  }
+
+  if (!archivedAt) {
+    blockers.push({
+      title: "Archiefdatum ontbreekt",
+      detail: "De bewaartermijn kan pas starten zodra het bedrijf met datum naar het archief is verplaatst.",
+    });
+  } else {
+    const eligibleDeleteDate = addYears(archivedAt, PERMANENT_DELETE_RETENTION_YEARS);
+    if (eligibleDeleteDate > new Date()) {
+      blockers.push({
+        title: `Bewaartermijn van ${PERMANENT_DELETE_RETENTION_LABEL} loopt nog`,
+        detail: `Definitief verwijderen kan op zijn vroegst vanaf ${formatDateNl(eligibleDeleteDate)} worden beoordeeld.`,
+      });
+    }
+  }
+
+  const groups = [
+    {
+      label: "Medewerkers",
+      items: deps.personnel,
+      activeCount: deps.personnel.filter(item => ACTIVE_PERSONNEL_STATUSES.has(item.status)).length,
+    },
+    {
+      label: "Arbeidscontracten",
+      items: deps.personnelContracts,
+      activeCount: deps.personnelContracts.filter(item => hasOpenDateRange(item, "contract_end_date")).length,
+    },
+    {
+      label: "Bedrijfstoewijzingen",
+      items: deps.personnelAssignments,
+      activeCount: deps.personnelAssignments.filter(item => ACTIVE_ASSIGNMENT_STATUSES.has(item.assignment_status) && hasOpenDateRange(item)).length,
+    },
+    {
+      label: "Routes",
+      items: deps.routes,
+      activeCount: deps.routes.length,
+    },
+    {
+      label: "Diensten",
+      items: deps.tasks,
+      activeCount: deps.tasks.length,
+    },
+    {
+      label: "CAO-koppelingen",
+      items: deps.caoAssignments,
+      activeCount: deps.caoAssignments.filter(item => hasOpenDateRange(item)).length,
+    },
+    {
+      label: "Vestigingen",
+      items: deps.locationAssignments,
+      activeCount: deps.locationAssignments.filter(item => hasOpenDateRange(item)).length,
+    },
+    {
+      label: "WPBR-vergunningen",
+      items: deps.wpbrLicenses,
+      activeCount: deps.wpbrLicenses.filter(item => item.status === "active" && (!item.valid_until || item.valid_until >= today)).length,
+    },
+    {
+      label: "Brancheverenigingen",
+      items: deps.branchMemberships,
+      activeCount: deps.branchMemberships.filter(item => ACTIVE_DOCUMENT_STATUSES.has(item.status) && hasOpenDateRange(item)).length,
+    },
+    {
+      label: "Erkenningen",
+      items: deps.accreditations,
+      activeCount: deps.accreditations.filter(item => ACTIVE_DOCUMENT_STATUSES.has(item.status) && hasOpenDateRange(item)).length,
+    },
+    {
+      label: "Bankrekeningen",
+      items: deps.bankAccounts,
+      activeCount: deps.bankAccounts.filter(item => ACTIVE_BANK_STATUSES.has(item.status) && hasOpenDateRange(item)).length,
+    },
+    {
+      label: "E-mailkoppelingen",
+      items: deps.emailSettings,
+      activeCount: deps.emailSettings.filter(item => ACTIVE_EMAIL_STATUSES.has(item.status)).length,
+    },
+    {
+      label: "Verzekeringen",
+      items: deps.insurancePolicies,
+      activeCount: deps.insurancePolicies.filter(item => ACTIVE_INSURANCE_STATUSES.has(item.status) && hasOpenDateRange(item)).length,
+    },
+    {
+      label: "Documenten",
+      items: deps.managedFiles,
+      activeCount: 0,
+    },
+  ];
+
+  groups.forEach(group => {
+    if (group.activeCount > 0) {
+      blockers.push({
+        title: `${group.label} nog actief`,
+        detail: `${group.activeCount} gekoppelde record(s) zijn nog actief of openstaand.`,
+      });
+    }
+  });
+
+  groups.forEach(group => {
+    const recentCount = countRecentOrUnknownRecords(group.items, retentionThreshold);
+    if (recentCount > 0) {
+      blockers.push({
+        title: `${group.label} binnen bewaartermijn`,
+        detail: `${recentCount} record(s) vallen binnen ${PERMANENT_DELETE_RETENTION_LABEL} of hebben geen betrouwbare datum.`,
+      });
+    }
+  });
+
+  const linkedCount = groups.reduce((count, group) => count + group.items.length, 0);
+  if (linkedCount > 0) {
+    blockers.push({
+      title: "Gekoppelde historie aanwezig",
+      detail: `${linkedCount} gekoppelde record(s) blijven nodig voor historie, audit of referenties. Verwijderen blijft geblokkeerd om conflicten in de applicatie te voorkomen.`,
+    });
+  }
+
+  return {
+    allowed: blockers.length === 0,
+    blockers,
+    linkedCount,
+  };
+}
+
 export default function CompanyDetail() {
   const urlParams = new URLSearchParams(window.location.search);
   const companyId = urlParams.get("id");
@@ -144,6 +367,7 @@ export default function CompanyDetail() {
   const [form, setForm] = useState(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
+  const [permanentDeleteDialogOpen, setPermanentDeleteDialogOpen] = useState(false);
   const addressTimeout = useRef(null);
   const initializedRequestedEdit = useRef(false);
   const [addressSuggestions, setAddressSuggestions] = useState([]);
@@ -170,6 +394,65 @@ export default function CompanyDetail() {
     enabled: !!company,
   });
 
+  const {
+    data: deletionDependencies,
+    isLoading: deletionGuardLoading,
+    isError: deletionGuardHasError,
+  } = useQuery({
+    queryKey: ["company-permanent-delete-guard", companyId],
+    queryFn: async () => {
+      const [
+        personnel,
+        personnelContracts,
+        personnelAssignments,
+        routes,
+        tasks,
+        caoAssignments,
+        locationAssignments,
+        wpbrLicenses,
+        branchMemberships,
+        accreditations,
+        bankAccounts,
+        emailSettings,
+        insurancePolicies,
+        managedFiles,
+      ] = await Promise.all([
+        base44.entities.Personnel.filter({ primary_company_id: companyId }),
+        base44.entities.PersonnelContract.filter({ company_id: companyId }),
+        base44.entities.PersonnelCompanyAssignment.filter({ company_id: companyId }),
+        base44.entities.Route.filter({ operating_company_id: companyId }),
+        base44.entities.Task.filter({ operating_company_id: companyId }),
+        base44.entities.CompanyCaoAssignment.filter({ company_id: companyId }),
+        base44.entities.CompanyLocationAssignment.filter({ company_id: companyId }),
+        base44.entities.CompanyWpbrLicense.filter({ company_id: companyId }),
+        base44.entities.CompanyBranchMembership.filter({ company_id: companyId }),
+        base44.entities.CompanyAccreditation.filter({ company_id: companyId }),
+        base44.entities.CompanyBankAccount.filter({ company_id: companyId }),
+        base44.entities.CompanyEmailSettings.filter({ company_id: companyId }),
+        base44.entities.CompanyInsurancePolicy.filter({ company_id: companyId }),
+        base44.entities.ManagedFile.filter({ company_id: companyId }),
+      ]);
+
+      return {
+        personnel,
+        personnelContracts,
+        personnelAssignments,
+        routes,
+        tasks,
+        caoAssignments,
+        locationAssignments,
+        wpbrLicenses,
+        branchMemberships,
+        accreditations,
+        bankAccounts,
+        emailSettings,
+        insurancePolicies,
+        managedFiles,
+      };
+    },
+    enabled: !!companyId && company?.status === "archived",
+  });
+
   const saveMutation = useMutation({
     mutationFn: (data) => base44.entities.Company.update(companyId, normalizeCompanyPayload(data)),
     onSuccess: () => {
@@ -194,17 +477,41 @@ export default function CompanyDetail() {
     mutationFn: () => base44.entities.Company.update(companyId, {
       status: "archived",
       teamhub_enabled: false,
+      archived_at: new Date().toISOString(),
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
+      queryClient.invalidateQueries({ queryKey: ["company-permanent-delete-guard", companyId] });
       setArchiveDialogOpen(false);
     },
   });
 
   const restoreCompanyMutation = useMutation({
-    mutationFn: () => base44.entities.Company.update(companyId, { status: "active" }),
+    mutationFn: () => base44.entities.Company.update(companyId, { status: "active", archived_at: null }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
+      queryClient.invalidateQueries({ queryKey: ["company-permanent-delete-guard", companyId] });
+    },
+  });
+
+  const permanentDeleteGuard = buildPermanentDeleteGuard(company, deletionDependencies);
+
+  const permanentDeleteCompanyMutation = useMutation({
+    mutationFn: async () => {
+      if (deletionGuardHasError) {
+        throw new Error("De verwijdercontrole kon niet volledig worden uitgevoerd.");
+      }
+      const guard = buildPermanentDeleteGuard(company, deletionDependencies);
+      if (!guard.allowed) {
+        throw new Error("Dit bedrijf mag nog niet definitief verwijderd worden.");
+      }
+      return base44.entities.Company.delete(companyId);
+    },
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      queryClient.invalidateQueries({ queryKey: ["company-permanent-delete-guard", companyId] });
+      setPermanentDeleteDialogOpen(false);
+      navigate("/Companies", { replace: true });
     },
   });
 
@@ -385,15 +692,25 @@ export default function CompanyDetail() {
                   <Edit className="w-4 h-4 mr-1" /> Wijzigen
                 </Button>
                 {isArchived ? (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    onClick={() => restoreCompanyMutation.mutate()}
-                    disabled={restoreCompanyMutation.isPending}
-                  >
-                    <RotateCcw className="w-4 h-4 mr-1" />
-                    {restoreCompanyMutation.isPending ? "Herstellen..." : "Herstellen"}
-                  </Button>
+                  <>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={() => restoreCompanyMutation.mutate()}
+                      disabled={restoreCompanyMutation.isPending}
+                    >
+                      <RotateCcw className="w-4 h-4 mr-1" />
+                      {restoreCompanyMutation.isPending ? "Herstellen..." : "Herstellen"}
+                    </Button>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      onClick={() => setPermanentDeleteDialogOpen(true)}
+                    >
+                      <Trash2 className="w-4 h-4 mr-1" /> Definitief verwijderen
+                    </Button>
+                  </>
                 ) : (
                   <Button
                     type="button"
@@ -401,7 +718,7 @@ export default function CompanyDetail() {
                     className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
                     onClick={() => setArchiveDialogOpen(true)}
                   >
-                    <Trash2 className="w-4 h-4 mr-1" /> Verwijderen
+                    <Archive className="w-4 h-4 mr-1" /> Verplaatsen naar archief
                   </Button>
                 )}
               </>
@@ -556,6 +873,70 @@ export default function CompanyDetail() {
               }}
             >
               {archiveCompanyMutation.isPending ? "Archiveren..." : "Naar archief"}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={permanentDeleteDialogOpen} onOpenChange={setPermanentDeleteDialogOpen}>
+        <AlertDialogContent className="max-w-2xl">
+          <AlertDialogHeader>
+            <div className="mb-1 flex items-center gap-2">
+              <Trash2 className="h-5 w-5 text-destructive" />
+              <AlertDialogTitle>Bedrijf definitief verwijderen?</AlertDialogTitle>
+            </div>
+            <AlertDialogDescription>
+              Definitief verwijderen kan alleen vanuit het archief, na de bewaartermijn van {PERMANENT_DELETE_RETENTION_LABEL}, en alleen wanneer er geen actieve of gekoppelde records meer bestaan die administratie, contracten, diensten, documenten of historie kunnen raken.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+
+          {deletionGuardHasError ? (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              De controle op gekoppelde records kon niet worden uitgevoerd. Definitief verwijderen blijft daarom geblokkeerd.
+            </div>
+          ) : deletionGuardLoading ? (
+            <div className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
+              Controle op contracten, diensten, documenten en bewaartermijnen wordt uitgevoerd...
+            </div>
+          ) : permanentDeleteGuard.allowed ? (
+            <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900 dark:border-green-900/70 dark:bg-green-950/30 dark:text-green-100">
+              Er zijn geen blokkades gevonden. Dit bedrijf heeft geen gekoppelde historie meer en valt buiten de bewaartermijn.
+            </div>
+          ) : (
+            <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
+              <p className="font-medium">Definitief verwijderen is geblokkeerd.</p>
+              <ul className="mt-2 space-y-1">
+                {permanentDeleteGuard.blockers.slice(0, 8).map((blocker, index) => (
+                  <li key={`${blocker.title}-${index}`}>
+                    <span className="font-medium">{blocker.title}:</span> {blocker.detail}
+                  </li>
+                ))}
+              </ul>
+              {permanentDeleteGuard.blockers.length > 8 && (
+                <p className="mt-2 text-xs">
+                  Nog {permanentDeleteGuard.blockers.length - 8} extra blokkade(s) gevonden.
+                </p>
+              )}
+            </div>
+          )}
+
+          {permanentDeleteCompanyMutation.isError && (
+            <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+              {permanentDeleteCompanyMutation.error?.message || "Definitief verwijderen is niet gelukt."}
+            </div>
+          )}
+
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={permanentDeleteCompanyMutation.isPending}>Sluiten</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:cursor-not-allowed disabled:opacity-50"
+              disabled={deletionGuardHasError || deletionGuardLoading || !permanentDeleteGuard.allowed || permanentDeleteCompanyMutation.isPending}
+              onClick={(event) => {
+                event.preventDefault();
+                permanentDeleteCompanyMutation.mutate();
+              }}
+            >
+              {permanentDeleteCompanyMutation.isPending ? "Verwijderen..." : "Definitief verwijderen"}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
