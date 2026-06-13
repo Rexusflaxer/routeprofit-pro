@@ -176,14 +176,7 @@ export default function Companies() {
       )}
 
       {isLoading && <p className="text-sm text-muted-foreground py-8 text-center">Laden...</p>}
-      {!isLoading && companies.length === 0 && (
-        <div className="py-12 text-center text-muted-foreground">
-          <Building2 className="w-12 h-12 mx-auto mb-3 text-muted-foreground/50" />
-          <p className="text-sm">Geen bedrijven aangemaakt.</p>
-          <Button className="mt-4" size="sm" onClick={openNew}><Plus className="w-4 h-4 mr-1" />Eerste bedrijf toevoegen</Button>
-        </div>
-      )}
-      {companies.length > 0 && (
+      {!isLoading && (
         <div className="overflow-x-auto rounded-xl border border-border shadow-sm">
           <Table>
             <TableHeader>
@@ -243,8 +236,8 @@ export default function Companies() {
               ))}
             </TableBody>
           </Table>
-        </div>
-      )}
+          </div>
+          )}
 
       {/* Company form dialog */}
       <Dialog open={dialogOpen} onOpenChange={v => { setDialogOpen(v); if (!v) setEditingCompany(null); }}>
