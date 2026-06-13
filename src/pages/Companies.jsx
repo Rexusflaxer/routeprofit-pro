@@ -3,12 +3,9 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { Plus, Building2, AlertCircle } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import PageTransition from "@/components/ui-custom/PageTransition";
-import CompanyForm from "@/components/companies/CompanyForm";
-import { attachManagedFilesToOwner, updateManagedFileSource } from "@/lib/managedFiles";
 
 const ROLE_LABELS = {
   holding: "Holding", operating_company: "Werkmaatschappij",
@@ -31,8 +28,6 @@ const STATUS_COLORS = {
 };
 
 export default function Companies() {
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [editingCompany, setEditingCompany] = useState(null);
   const [migrateLoading, setMigrateLoading] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
@@ -61,41 +56,37 @@ export default function Companies() {
     queryFn: () => base44.entities.CompanySettings.list(),
   });
 
-  const saveMutation = useMutation({
-    mutationFn: async (data) => {
-      const { _managed_file_upload_session_id, ...companyData } = data;
-      const created = await base44.entities.Company.create(companyData);
-      let attachedFiles = [];
-      if (_managed_file_upload_session_id) {
-        attachedFiles = await attachManagedFilesToOwner({
-          uploadSessionId: _managed_file_upload_session_id,
-          ownerType: "company",
-          ownerId: created.id,
-          companyId: created.id,
-          ownerLabel: created.display_name || created.legal_name || "Bedrijf"
-        });
-      }
-      const attachedById = Object.fromEntries(attachedFiles.map((file) => [file.id, file]));
-      const filePatch = {};
-      if (created.logo_file_id && attachedById[created.logo_file_id]) {
-        filePatch.logo_download_filename = attachedById[created.logo_file_id].download_filename;
-        filePatch.logo_logical_path = attachedById[created.logo_file_id].logical_path;
-      }
-      if (created.letterhead_file_id && attachedById[created.letterhead_file_id]) {
-        filePatch.letterhead_download_filename = attachedById[created.letterhead_file_id].download_filename;
-        filePatch.letterhead_logical_path = attachedById[created.letterhead_file_id].logical_path;
-      }
-      await Promise.all([
-        created.logo_file_id ? updateManagedFileSource(created.logo_file_id, { owner_id: created.id, company_id: created.id, source_entity_id: created.id }) : null,
-        created.letterhead_file_id ? updateManagedFileSource(created.letterhead_file_id, { owner_id: created.id, company_id: created.id, source_entity_id: created.id }) : null,
-        Object.keys(filePatch).length ? base44.entities.Company.update(created.id, filePatch) : null
-      ].filter(Boolean));
-      return created;
-    },
-    onSuccess: () => {
+  const createBlankCompanyMutation = useMutation({
+    mutationFn: () => base44.entities.Company.create({
+      display_name: "Nieuw bedrijf",
+      legal_name: "Nieuw bedrijf",
+      trade_name: null,
+      kvk_number: null,
+      rsin: null,
+      btw_number: null,
+      legal_form: null,
+      status: "inactive",
+      company_role: "operating_company",
+      holding_company_id: null,
+      primary_activity: null,
+      activities: [],
+      street_name: null,
+      house_number: null,
+      house_number_addition: null,
+      postal_code: null,
+      city: null,
+      country: "Nederland",
+      phone: null,
+      email: null,
+      website: null,
+      teamhub_enabled: false,
+      teamhub_service_types: [],
+      teamhub_regions: [],
+      notes: null,
+    }),
+    onSuccess: (created) => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
-      setDialogOpen(false);
-      setEditingCompany(null);
+      navigate(`/CompanyDetail?id=${created.id}&new=1&edit=1`);
     },
   });
 
@@ -121,7 +112,9 @@ export default function Companies() {
     setMigrateLoading(false);
   };
 
-  const openNew = () => { setEditingCompany(null); setDialogOpen(true); };
+  const openNew = () => {
+    if (!createBlankCompanyMutation.isPending) createBlankCompanyMutation.mutate();
+  };
 
   const getCaoName = (id) => {
     const cao = caoConfigurations.find(c => c.id === id);
@@ -153,8 +146,8 @@ export default function Companies() {
           <h1 className="text-2xl font-bold text-foreground">Bedrijven</h1>
           <p className="text-sm text-muted-foreground mt-0.5">Beheer juridische entiteiten, holdings en vestigingen</p>
         </div>
-        <Button onClick={openNew}>
-          <Plus className="w-4 h-4 mr-1" /> Bedrijf toevoegen
+        <Button onClick={openNew} disabled={createBlankCompanyMutation.isPending}>
+          <Plus className="w-4 h-4 mr-1" /> {createBlankCompanyMutation.isPending ? "Aanmaken..." : "Bedrijf toevoegen"}
         </Button>
       </div>
 
@@ -235,21 +228,6 @@ export default function Companies() {
         </div>
       )}
 
-      {/* Company form dialog */}
-      <Dialog open={dialogOpen} onOpenChange={v => { setDialogOpen(v); if (!v) setEditingCompany(null); }}>
-        <DialogContent className="max-w-2xl max-h-[92vh] overflow-y-auto">
-          <DialogHeader>
-            <DialogTitle>Nieuw bedrijf</DialogTitle>
-          </DialogHeader>
-          <CompanyForm
-            company={editingCompany}
-            companies={companies}
-            caoConfigurations={caoConfigurations}
-            onSave={(data) => saveMutation.mutate(data)}
-            onCancel={() => { setDialogOpen(false); setEditingCompany(null); }}
-          />
-        </DialogContent>
-      </Dialog>
     </PageTransition>
   );
 }

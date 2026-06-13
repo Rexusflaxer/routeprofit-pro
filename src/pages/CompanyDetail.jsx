@@ -1,10 +1,12 @@
-import React, { useState, useRef } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import PageTransition from "@/components/ui-custom/PageTransition";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
+import { Checkbox } from "@/components/ui/checkbox";
+import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { ArrowLeft, Edit, Check, X, Building2, MapPin, FileText, Upload, Handshake } from "lucide-react";
 import { useNavigate } from "react-router-dom";
@@ -27,6 +29,7 @@ const ACTIVITY_LABELS = {
 
 const ACTIVITIES = Object.entries(ACTIVITY_LABELS).map(([key, label]) => ({ key, label }));
 const LEGAL_FORMS = ["BV", "NV", "VOF", "CV", "Eenmanszaak", "Maatschap", "Stichting", "Coöperatie", "Anders"];
+const NEW_COMPANY_PLACEHOLDER = "Nieuw bedrijf";
 const STATUS_COLORS = {
   active: "bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-300",
   inactive: "bg-slate-100 text-slate-600 dark:bg-slate-700 dark:text-slate-300",
@@ -46,15 +49,92 @@ function ViewText({ value, fallback = "—" }) {
   return <span className="text-sm text-foreground font-medium">{value || fallback}</span>;
 }
 
+function editableCompanyForm(company, blankPlaceholder = false) {
+  const shouldBlank = blankPlaceholder && company.display_name === NEW_COMPANY_PLACEHOLDER && company.legal_name === NEW_COMPANY_PLACEHOLDER;
+  return {
+    ...company,
+    display_name: shouldBlank ? "" : company.display_name || "",
+    legal_name: shouldBlank ? "" : company.legal_name || "",
+    trade_name: company.trade_name || "",
+    status: company.status || "inactive",
+    company_role: company.company_role || "operating_company",
+    country: company.country || "Nederland",
+    activities: company.activities || [],
+  };
+}
+
+function normalizeCompanyPayload(data) {
+  const displayName = data.display_name?.trim() || NEW_COMPANY_PLACEHOLDER;
+  const legalName = data.legal_name?.trim() || displayName;
+
+  return {
+    ...data,
+    display_name: displayName,
+    legal_name: legalName,
+    trade_name: data.trade_name?.trim() || null,
+    kvk_number: data.kvk_number?.trim() || null,
+    rsin: data.rsin?.trim() || null,
+    btw_number: data.btw_number?.trim() || null,
+    legal_form: data.legal_form || null,
+    holding_company_id: data.holding_company_id || null,
+    primary_activity: data.primary_activity || null,
+    activities: data.activities || [],
+    street_name: data.street_name?.trim() || null,
+    house_number: data.house_number?.trim() || null,
+    house_number_addition: data.house_number_addition?.trim() || null,
+    postal_code: data.postal_code?.trim() || null,
+    city: data.city?.trim() || null,
+    country: data.country?.trim() || "Nederland",
+    phone: data.phone?.trim() || null,
+    email: data.email?.trim() || null,
+    website: data.website?.trim() || null,
+    notes: data.notes?.trim() || null,
+  };
+}
+
+function isEmptyDraftCompany(data = {}) {
+  const textFields = [
+    "display_name",
+    "legal_name",
+    "trade_name",
+    "kvk_number",
+    "rsin",
+    "btw_number",
+    "legal_form",
+    "holding_company_id",
+    "primary_activity",
+    "street_name",
+    "house_number",
+    "house_number_addition",
+    "postal_code",
+    "city",
+    "phone",
+    "email",
+    "website",
+    "notes",
+    "logo_file_url",
+    "letterhead_file_url",
+  ];
+
+  return textFields.every(field => !String(data[field] || "").trim())
+    && (data.country || "Nederland") === "Nederland"
+    && (data.status || "inactive") === "inactive"
+    && (data.company_role || "operating_company") === "operating_company"
+    && !(data.activities || []).length;
+}
+
 export default function CompanyDetail() {
   const urlParams = new URLSearchParams(window.location.search);
   const companyId = urlParams.get("id");
+  const isNewProfileFlow = urlParams.get("new") === "1";
+  const shouldOpenInEditMode = isNewProfileFlow || urlParams.get("edit") === "1";
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [form, setForm] = useState(null);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const addressTimeout = useRef(null);
+  const initializedRequestedEdit = useRef(false);
   const [addressSuggestions, setAddressSuggestions] = useState([]);
   const [showAddressSugg, setShowAddressSugg] = useState(false);
 
@@ -80,24 +160,52 @@ export default function CompanyDetail() {
   });
 
   const saveMutation = useMutation({
-    mutationFn: (data) => base44.entities.Company.update(companyId, data),
+    mutationFn: (data) => base44.entities.Company.update(companyId, normalizeCompanyPayload(data)),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["companies"] });
       setEditing(false);
+      setForm(null);
+      if (shouldOpenInEditMode) {
+        navigate(`/CompanyDetail?id=${companyId}`, { replace: true });
+      }
+    },
+  });
+
+  const deleteDraftCompanyMutation = useMutation({
+    mutationFn: () => base44.entities.Company.delete(companyId),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["companies"] });
+      navigate("/Companies", { replace: true });
     },
   });
 
   const startEdit = () => {
-    setForm({ ...company });
+    setForm(editableCompanyForm(company));
     setEditing(true);
   };
 
   const cancelEdit = () => {
+    if (isNewProfileFlow && isEmptyDraftCompany(form)) {
+      deleteDraftCompanyMutation.mutate();
+      return;
+    }
+
     setEditing(false);
     setForm(null);
+    if (shouldOpenInEditMode) {
+      navigate(`/CompanyDetail?id=${companyId}`, { replace: true });
+    }
   };
 
   const set = (field, value) => setForm(f => ({ ...f, [field]: value }));
+
+  useEffect(() => {
+    if (!company || !shouldOpenInEditMode || initializedRequestedEdit.current) return;
+
+    setForm(editableCompanyForm(company, isNewProfileFlow));
+    setEditing(true);
+    initializedRequestedEdit.current = true;
+  }, [company, isNewProfileFlow, shouldOpenInEditMode]);
 
   const handleAddressQuery = (val) => {
     set("street_name", val);
@@ -241,7 +349,7 @@ export default function CompanyDetail() {
           <div className="flex gap-2">
             {editing ? (
               <>
-                <Button variant="outline" size="sm" onClick={cancelEdit}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
+                <Button variant="outline" size="sm" onClick={cancelEdit} disabled={deleteDraftCompanyMutation.isPending}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
                 <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
                   <Check className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : "Opslaan"}
                 </Button>
@@ -277,8 +385,31 @@ export default function CompanyDetail() {
                   </Select>
                 : <ViewText value={data.legal_form} />}
             </InfoRow>
-
-
+            <InfoRow label="Rol">
+              {editing
+                ? <Select value={data.company_role || "operating_company"} onValueChange={v => set("company_role", v)}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="holding">Holding</SelectItem>
+                      <SelectItem value="operating_company">Werkmaatschappij</SelectItem>
+                      <SelectItem value="sole_proprietor">Eenmanszaak</SelectItem>
+                      <SelectItem value="other">Overig</SelectItem>
+                    </SelectContent>
+                  </Select>
+                : <ViewText value={ROLE_LABELS[data.company_role] || data.company_role} />}
+            </InfoRow>
+            <InfoRow label="Status">
+              {editing
+                ? <Select value={data.status || "inactive"} onValueChange={v => set("status", v)}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="active">Actief</SelectItem>
+                      <SelectItem value="inactive">Inactief</SelectItem>
+                      <SelectItem value="archived">Gearchiveerd</SelectItem>
+                    </SelectContent>
+                  </Select>
+                : <ViewText value={data.status === "active" ? "Actief" : data.status === "inactive" ? "Inactief" : "Gearchiveerd"} />}
+            </InfoRow>
             {(holdingOptions.length > 0 || holdingCompany) && (
               <InfoRow label="Onder holding">
                 {editing
@@ -345,6 +476,64 @@ export default function CompanyDetail() {
             </InfoRow>
           </div>
 
+          {/* Activiteiten */}
+          <div className="space-y-3 md:col-span-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Activiteiten</h3>
+            {editing ? (
+              <>
+                <InfoRow label="Primaire activiteit">
+                  <Select value={data.primary_activity || "none"} onValueChange={v => set("primary_activity", v === "none" ? null : v)}>
+                    <SelectTrigger className="h-8 text-sm"><SelectValue placeholder="Kies primaire activiteit" /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Geen primaire activiteit</SelectItem>
+                      {ACTIVITIES.map(activity => (
+                        <SelectItem key={activity.key} value={activity.key}>{activity.label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                </InfoRow>
+                <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+                  {ACTIVITIES.map(activity => (
+                    <label key={activity.key} className="flex min-h-9 cursor-pointer items-center gap-2 rounded-md border border-border bg-muted/20 px-3 py-2 text-sm hover:bg-muted/50">
+                      <Checkbox
+                        checked={(data.activities || []).includes(activity.key)}
+                        onCheckedChange={() => toggleActivity(activity.key)}
+                      />
+                      <span>{activity.label}</span>
+                    </label>
+                  ))}
+                </div>
+              </>
+            ) : (
+              <div className="flex flex-wrap gap-1.5">
+                {(data.activities || []).length > 0 ? (
+                  (data.activities || []).map(activity => (
+                    <span key={activity} className="rounded bg-muted px-2 py-1 text-xs text-foreground">
+                      {ACTIVITY_LABELS[activity] || activity}
+                    </span>
+                  ))
+                ) : (
+                  <ViewText value={null} />
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Notities */}
+          <div className="space-y-2 md:col-span-2">
+            <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Notities</h3>
+            {editing ? (
+              <Textarea
+                value={data.notes || ""}
+                onChange={e => set("notes", e.target.value)}
+                rows={3}
+                placeholder="Interne notities over dit bedrijf"
+              />
+            ) : (
+              <ViewText value={data.notes} />
+            )}
+          </div>
+
 
           {/* Briefpapier */}
           {(data.letterhead_file_url || editing) && (
@@ -362,7 +551,7 @@ export default function CompanyDetail() {
         {/* Save bar at bottom when editing */}
         {editing && (
           <div className="border-t border-border bg-muted/30 px-6 py-3 flex justify-end gap-2">
-            <Button variant="outline" size="sm" onClick={cancelEdit}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
+            <Button variant="outline" size="sm" onClick={cancelEdit} disabled={deleteDraftCompanyMutation.isPending}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
             <Button size="sm" onClick={() => saveMutation.mutate(form)} disabled={saveMutation.isPending}>
               <Check className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : "Wijzigingen opslaan"}
             </Button>
