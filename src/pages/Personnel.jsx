@@ -28,7 +28,6 @@ import {
   FileBadge,
   FileText,
   Handshake,
-  IdCard,
   Mail,
   MessageSquareText,
   Package,
@@ -1072,7 +1071,7 @@ export default function Personnel() {
   const [editing, setEditing] = useState(null);
   const [newPreset, setNewPreset] = useState({});
   const [selectedPersonnelId, setSelectedPersonnelId] = useState(null);
-  const [activeTopTab, setActiveTopTab] = useState("all");
+  const [activeTopTab, setActiveTopTab] = useState("employees");
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterFunction, setFilterFunction] = useState("all");
@@ -1219,19 +1218,20 @@ export default function Personnel() {
         subtitle="Loondienst, ZZP'ers, onderaannemers en lokale HR-dossiers"
         actions={
           <div className="flex flex-wrap justify-end gap-2">
-            {activeTopTab === "subcontractors" ? (
+            {activeTopTab === "subcontractors" && (
               <Button onClick={() => { setEditingSubcontractor(null); setSubcontractorDialogOpen(true); }}>
                 <Plus className="mr-1 h-4 w-4" /> Onderaannemer
               </Button>
-            ) : (
-              <>
-                <Button variant="outline" onClick={() => openNew("self_employed")}>
-                  <Plus className="mr-1 h-4 w-4" /> ZZP'er
-                </Button>
-                <Button onClick={() => openNew("employee")}>
-                  <Plus className="mr-1 h-4 w-4" /> Loondienst
-                </Button>
-              </>
+            )}
+            {activeTopTab === "employees" && (
+              <Button onClick={() => openNew("employee")}>
+                <Plus className="mr-1 h-4 w-4" /> Loondienst
+              </Button>
+            )}
+            {activeTopTab === "self_employed" && (
+              <Button onClick={() => openNew("self_employed")}>
+                <Plus className="mr-1 h-4 w-4" /> ZZP'er
+              </Button>
             )}
           </div>
         }
