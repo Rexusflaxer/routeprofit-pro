@@ -645,7 +645,54 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
         <div>
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contact & adres</h3>
           <ProfileInfoRow label="E-mail" editing={editing} value={data.email}><Input type="email" value={data.email || ""} onChange={e => set("email", e.target.value)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Telefoon" editing={editing} value={data.phone}><Input value={data.phone || ""} onChange={e => set("phone", e.target.value)} /></ProfileInfoRow>
+          <ProfileInfoRow label="Telefoon" editing={editing} value={data.phone}>
+            <div className="flex gap-2">
+              <Select
+                value={(data.phone || "").startsWith("+") ? (data.phone.match(/^(\+\d+)\s/)?.[1] || "+31") : "+31"}
+                onValueChange={code => {
+                  const local = (data.phone || "").replace(/^\+\d+\s?/, "");
+                  set("phone", `${code} ${local}`);
+                }}
+              >
+                <SelectTrigger className="w-24 shrink-0"><SelectValue /></SelectTrigger>
+                <SelectContent className="max-h-60">
+                  {[
+                    { code: "+31", label: "🇳🇱 +31" },
+                    { code: "+32", label: "🇧🇪 +32" },
+                    { code: "+49", label: "🇩🇪 +49" },
+                    { code: "+33", label: "🇫🇷 +33" },
+                    { code: "+44", label: "🇬🇧 +44" },
+                    { code: "+1",  label: "🇺🇸 +1" },
+                    { code: "+90", label: "🇹🇷 +90" },
+                    { code: "+212", label: "🇲🇦 +212" },
+                    { code: "+213", label: "🇩🇿 +213" },
+                    { code: "+216", label: "🇹🇳 +216" },
+                    { code: "+34", label: "🇪🇸 +34" },
+                    { code: "+39", label: "🇮🇹 +39" },
+                    { code: "+48", label: "🇵🇱 +48" },
+                    { code: "+40", label: "🇷🇴 +40" },
+                    { code: "+380", label: "🇺🇦 +380" },
+                    { code: "+359", label: "🇧🇬 +359" },
+                    { code: "+20", label: "🇪🇬 +20" },
+                    { code: "+234", label: "🇳🇬 +234" },
+                    { code: "+27", label: "🇿🇦 +27" },
+                    { code: "+55", label: "🇧🇷 +55" },
+                  ].map(({ code, label }) => (
+                    <SelectItem key={code} value={code}>{label}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <Input
+                value={(data.phone || "").replace(/^\+\d+\s?/, "")}
+                onChange={e => {
+                  const code = (data.phone || "").startsWith("+") ? (data.phone.match(/^(\+\d+)\s/)?.[1] || "+31") : "+31";
+                  set("phone", `${code} ${e.target.value}`);
+                }}
+                placeholder="612345678"
+                className="flex-1"
+              />
+            </div>
+          </ProfileInfoRow>
           <ProfileInfoRow label="Straatnaam" editing={editing} value={data.street_name}><Input value={data.street_name || ""} onChange={e => set("street_name", e.target.value)} /></ProfileInfoRow>
           <ProfileInfoRow label="Huisnummer" editing={editing} value={[data.house_number, data.house_number_addition].filter(Boolean).join(" ")}>
             <div className="grid grid-cols-[1fr_120px] gap-2"><Input value={data.house_number || ""} onChange={e => set("house_number", e.target.value)} placeholder="Nr." /><Input value={data.house_number_addition || ""} onChange={e => set("house_number_addition", e.target.value)} placeholder="Toev." /></div>
