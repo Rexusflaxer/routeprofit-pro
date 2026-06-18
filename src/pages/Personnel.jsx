@@ -1421,9 +1421,9 @@ function PersonnelList({ personnel, companies, selectedId, onSelect, onEdit, onD
                 >
                   <div className="flex-[2] min-w-0 flex items-center gap-3">
                     {person.photo_file_url ? (
-                      <img src={person.photo_file_url} alt="" className="h-14 w-10 shrink-0 rounded border border-border object-cover object-top" />
+                      <img src={person.photo_file_url} alt="" className="shrink-0 rounded border border-border object-cover object-top" style={{ width: 40, height: Math.round(40 * 9 / 7) }} />
                     ) : (
-                      <div className="flex h-14 w-10 shrink-0 items-center justify-center rounded bg-muted text-sm font-semibold text-muted-foreground">
+                      <div className="flex shrink-0 items-center justify-center rounded bg-muted text-sm font-semibold text-muted-foreground" style={{ width: 40, height: Math.round(40 * 9 / 7) }}>
                         {getDisplayName(person).slice(0, 1).toUpperCase()}
                       </div>
                     )}
