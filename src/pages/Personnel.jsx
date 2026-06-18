@@ -1427,10 +1427,9 @@ function PersonnelList({ personnel, companies, selectedId, onSelect, onEdit, onD
                         {getDisplayName(person).slice(0, 1).toUpperCase()}
                       </div>
                     )}
-                    <div className="min-w-0">
+                    <div className="min-w-0 flex flex-col justify-center">
                       <p className="truncate text-sm font-medium text-foreground">{buildCallName(person) || getDisplayName(person)}</p>
                       {(() => { const full = buildFullLegalName(person); const call = buildCallName(person); return full && full !== call ? <p className="truncate text-xs text-muted-foreground/70">{full}</p> : null; })()}
-                      <p className="truncate text-xs text-muted-foreground">{person.email || person.phone || "Geen contactgegevens"}</p>
                     </div>
                   </div>
                   <span className="flex-[1.5] min-w-0 truncate text-sm text-muted-foreground">{company?.display_name || "—"}</span>
