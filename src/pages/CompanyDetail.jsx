@@ -145,6 +145,9 @@ const ACTIVE_BANK_STATUSES = new Set(["active", "pending"]);
 const ACTIVE_INSURANCE_STATUSES = new Set(["active", "action_required"]);
 const ACTIVE_DOCUMENT_STATUSES = new Set(["pending_review", "active", "suspended"]);
 const ACTIVE_SECURITY_PASS_STATUSES = new Set(["requested", "approved", "active"]);
+const COMPANY_DELETE_CHECK_PAUSE_MS = 140;
+const COMPANY_DELETE_RECORD_DELETE_PAUSE_MS = 80;
+const COMPANY_DELETE_RATE_LIMIT_RETRY_DELAYS_MS = [600, 1400, 3000, 6000];
 
 const COMPANY_DELETE_DEPENDENCY_CHECKS = [
   { key: "personnel", label: "Medewerkers", entityName: "Personnel", filter: companyId => ({ primary_company_id: companyId }) },
@@ -262,6 +265,44 @@ function errorMessage(error) {
     "Onbekende fout bij het ophalen van deze controle.";
 }
 
+function isRateLimitError(error) {
+  const message = errorMessage(error).toLowerCase();
+  return error?.response?.status === 429 ||
+    error?.status === 429 ||
+    message.includes("rate limit") ||
+    message.includes("too many requests");
+}
+
+function deleteGuardErrorMessage(error) {
+  if (isRateLimitError(error)) {
+    return "De Base44 API-limiet is tijdelijk bereikt tijdens de controle. Dit betekent niet dat er gekoppelde data is gevonden; de controle kon alleen tijdelijk niet worden afgerond. Wacht enkele seconden en open de verwijdercontrole opnieuw.";
+  }
+  return errorMessage(error);
+}
+
+function wait(ms) {
+  return new Promise(resolve => setTimeout(resolve, ms));
+}
+
+async function runWithRateLimitRetry(operation) {
+  let lastError = null;
+
+  for (let attempt = 0; attempt <= COMPANY_DELETE_RATE_LIMIT_RETRY_DELAYS_MS.length; attempt += 1) {
+    try {
+      return await operation();
+    } catch (error) {
+      lastError = error;
+      const retryDelay = COMPANY_DELETE_RATE_LIMIT_RETRY_DELAYS_MS[attempt];
+      if (!isRateLimitError(error) || !retryDelay) {
+        throw error;
+      }
+      await wait(retryDelay);
+    }
+  }
+
+  throw lastError;
+}
+
 async function fetchCompanyDependency(check, companyId) {
   const entity = base44.entities[check.entityName];
   const baseFailure = {
@@ -283,9 +324,12 @@ async function fetchCompanyDependency(check, companyId) {
 
   if (entity?.filter) {
     try {
-      const items = await entity.filter(check.filter(companyId));
+      const items = await runWithRateLimitRetry(() => entity.filter(check.filter(companyId)));
       return { key: check.key, items: Array.isArray(items) ? items : [] };
     } catch (filterError) {
+      if (isRateLimitError(filterError)) {
+        throw filterError;
+      }
       if (!entity?.list) {
         return {
           key: check.key,
@@ -300,12 +344,15 @@ async function fetchCompanyDependency(check, companyId) {
   }
 
   try {
-    const items = await entity.list();
+    const items = await runWithRateLimitRetry(() => entity.list());
     return {
       key: check.key,
       items: (Array.isArray(items) ? items : []).filter(record => recordMatchesCompany(record, companyId)),
     };
   } catch (listError) {
+    if (isRateLimitError(listError)) {
+      throw listError;
+    }
     return {
       key: check.key,
       items: [],
@@ -550,11 +597,10 @@ async function deleteCompanyDependencyRecords(dependencies = {}) {
       throw new Error(`${entityName} kan niet automatisch worden opgeschoond. Definitief verwijderen is daarom gestopt.`);
     }
 
-    await Promise.all(
-      records
-        .filter(record => record?.id)
-        .map(record => entity.delete(record.id))
-    );
+    for (const record of records.filter(item => item?.id)) {
+      await runWithRateLimitRetry(() => entity.delete(record.id));
+      await wait(COMPANY_DELETE_RECORD_DELETE_PAUSE_MS);
+    }
   }
 }
 
@@ -605,9 +651,12 @@ export default function CompanyDetail() {
   } = useQuery({
     queryKey: ["company-permanent-delete-guard", companyId],
     queryFn: async () => {
-      const results = await Promise.all(
-        COMPANY_DELETE_DEPENDENCY_CHECKS.map(check => fetchCompanyDependency(check, companyId))
-      );
+      const results = [];
+
+      for (const check of COMPANY_DELETE_DEPENDENCY_CHECKS) {
+        results.push(await fetchCompanyDependency(check, companyId));
+        await wait(COMPANY_DELETE_CHECK_PAUSE_MS);
+      }
 
       return results.reduce((acc, result) => {
         acc[result.key] = result.items;
@@ -615,7 +664,11 @@ export default function CompanyDetail() {
         return acc;
       }, { __checkFailures: [] });
     },
-    enabled: !!companyId && company?.status === "archived",
+    enabled: !!companyId && company?.status === "archived" && permanentDeleteDialogOpen,
+    retry: (failureCount, error) => isRateLimitError(error) && failureCount < 3,
+    retryDelay: attemptIndex => Math.min(2000 * (attemptIndex + 1), 6000),
+    refetchOnWindowFocus: false,
+    staleTime: 15000,
   });
 
   const saveMutation = useMutation({
@@ -1063,7 +1116,7 @@ export default function CompanyDetail() {
 
           {deletionGuardHasError ? (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-              De controle op gekoppelde records kon niet worden uitgevoerd. Definitief verwijderen blijft daarom geblokkeerd. Reden: {errorMessage(deletionGuardError)}
+              De controle op gekoppelde records kon niet worden uitgevoerd. Definitief verwijderen blijft daarom geblokkeerd. Reden: {deleteGuardErrorMessage(deletionGuardError)}
             </div>
           ) : deletionGuardChecking ? (
             <div className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
