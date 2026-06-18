@@ -699,15 +699,15 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       {/* Hero banner */}
       <div className="flex flex-col sm:flex-row">
-        {/* Left: passport photo panel */}
-        <div className="relative shrink-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-b from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-900 px-6 py-6 sm:w-[180px]">
-          <div className="group relative flex items-center justify-center overflow-hidden rounded-xl border-2 border-white shadow-lg dark:border-slate-700"
+        {/* Left: passport photo */}
+        <div className="relative shrink-0 flex items-center justify-center px-6 py-6 sm:w-[180px]">
+          <div className="group relative flex items-center justify-center overflow-hidden rounded-xl shadow-md"
                style={{ width: 112, height: 144 }}>
             {data.photo_file_url
               ? <img src={data.photo_file_url} alt="" className="h-full w-full object-cover" />
               : (
-                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/20 to-primary/10">
-                  <span className="text-5xl font-bold text-primary/60">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
+                <div className="flex h-full w-full items-center justify-center bg-muted rounded-xl border border-border">
+                  <span className="text-5xl font-bold text-muted-foreground/40">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
                 </div>
               )
             }
@@ -719,11 +719,6 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
               />
             )}
           </div>
-          {!editing && (
-            <p className="text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
-              {data.personnel_number ? `#${data.personnel_number}` : "Medewerker"}
-            </p>
-          )}
         </div>
 
         {/* Right: info banner */}
