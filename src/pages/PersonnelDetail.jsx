@@ -694,137 +694,154 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      {/* Banner */}
-      <div className="flex flex-col gap-5 border-b border-border bg-muted/40 px-6 py-5 sm:flex-row sm:items-center">
-        <div className="group relative flex h-[72px] w-[56px] shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-white">
-          {data.photo_file_url
-            ? <img src={data.photo_file_url} alt="" className="h-full w-full object-cover" />
-            : <span className="text-xl font-semibold text-muted-foreground">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
-          }
-          {editing && (
-            <PhotoCropUpload
-              onUploaded={handlePhotoUploaded}
-              uploading={uploadingPhoto}
-              setUploading={setUploadingPhoto}
-            />
-          )}
-        </div>
-        <div className="min-w-0 flex-1">
-          {editing ? (
-            <div className="grid max-w-4xl grid-cols-1 gap-3 md:grid-cols-4">
-              <div className="space-y-1"><span className="text-xs text-muted-foreground">Initialen</span><Input value={data.initials || ""} onChange={e => set("initials", e.target.value)} className="h-8 text-sm" /></div>
-              <div className="space-y-1"><span className="text-xs text-muted-foreground">Voornamen</span><Input value={data.legal_first_names || ""} onChange={e => updateNamePart("legal_first_names", e.target.value)} className="h-8 text-sm" /></div>
-              <div className="space-y-1"><span className="text-xs text-muted-foreground">Roepnaam</span><Input value={data.first_name || data.call_name || ""} onChange={e => { updateNamePart("first_name", e.target.value); set("call_name", e.target.value); }} className="h-8 text-sm" /></div>
-              <div className="space-y-1"><span className="text-xs text-muted-foreground">Tussenvoegsel</span><Input value={data.name_prefix || ""} onChange={e => updateNamePart("name_prefix", e.target.value)} className="h-8 text-sm" /></div>
-              <div className="space-y-1 md:col-span-2"><span className="text-xs text-muted-foreground">Achternaam</span><Input value={data.last_name || ""} onChange={e => updateNamePart("last_name", e.target.value)} className="h-8 text-sm" /></div>
-            </div>
-          ) : (
-            <div>
-              <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-semibold text-foreground">{buildFullName(data) || "Naam onbekend"}</h2>
-                <BadgePill className={STATUS_COLORS[getStatus(data)] || STATUS_COLORS.draft}>{STATUS_LABELS[getStatus(data)] || getStatus(data)}</BadgePill>
-                <BadgePill className={relationship === "self_employed" ? "bg-fuchsia-100 text-fuchsia-700" : "bg-blue-100 text-blue-700"}>{RELATIONSHIP_LABELS[relationship]}</BadgePill>
-              </div>
-              <p className="mt-1 text-sm text-muted-foreground">{data.email || data.phone || address || "Geen NAW-gegevens ingevuld"}</p>
-            </div>
-          )}
-        </div>
-        <div className="flex flex-wrap justify-end gap-2">
-          {editing ? (
-            <>
-              <Button variant="outline" size="sm" onClick={onCancel} disabled={saveMutation.isPending || uploadingPhoto}><X className="mr-1 h-4 w-4" /> Annuleren</Button>
-              <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || uploadingPhoto}><Check className="mr-1 h-4 w-4" /> {saveMutation.isPending ? "Opslaan..." : "Opslaan"}</Button>
-            </>
-          ) : (
-            <Button variant="outline" onClick={onEdit}><Pencil className="mr-1 h-4 w-4" /> Wijzigen</Button>
-          )}
-        </div>
-      </div>
-
-      {/* Details */}
-      <div className="grid grid-cols-1 gap-x-12 gap-y-6 p-6 lg:grid-cols-2">
-        <div>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Persoonlijke gegevens</h3>
-          <ProfileInfoRow label="Geslacht" editing={editing} value={data.gender === "male" ? "Man" : data.gender === "female" ? "Vrouw" : data.gender === "other" ? "Anders" : "Onbekend"}>
-            <Select value={data.gender || "unknown"} onValueChange={v => set("gender", v)}>
-              <SelectTrigger><SelectValue /></SelectTrigger>
-              <SelectContent><SelectItem value="male">Man</SelectItem><SelectItem value="female">Vrouw</SelectItem><SelectItem value="other">Anders</SelectItem><SelectItem value="unknown">Onbekend</SelectItem></SelectContent>
-            </Select>
-          </ProfileInfoRow>
-          <ProfileInfoRow label="Geboortedatum" editing={editing} value={formatDate(data.date_of_birth)}><Input type="date" value={data.date_of_birth || ""} onChange={e => set("date_of_birth", e.target.value)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Geboorteplaats" editing={editing} value={data.place_of_birth}><PlaceSearchInput value={data.place_of_birth || ""} onChange={v => set("place_of_birth", v)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Geboorteland" editing={editing} value={data.country_of_birth}><CountrySelect value={data.country_of_birth || ""} onChange={v => set("country_of_birth", v)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Nationaliteit" editing={editing} value={data.nationality}><NationalitySelect value={data.nationality || ""} onChange={v => set("nationality", v)} /></ProfileInfoRow>
-        </div>
-        <div>
-          <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contact & adres</h3>
-          <ProfileInfoRow label="E-mail" editing={editing} value={data.email}><Input type="email" value={data.email || ""} onChange={e => set("email", e.target.value)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Telefoon" editing={editing} value={data.phone}>
-            <div className="flex gap-2">
-              <Select
-                value={(data.phone || "").startsWith("+") ? (data.phone.match(/^(\+\d+)\s/)?.[1] || "+31") : "+31"}
-                onValueChange={code => {
-                  const local = (data.phone || "").replace(/^\+\d+\s?/, "");
-                  set("phone", `${code} ${local}`);
-                }}
-              >
-                <SelectTrigger className="w-24 shrink-0"><SelectValue /></SelectTrigger>
-                <SelectContent className="max-h-60">
-                  {[
-                    { code: "+31", label: "🇳🇱 +31" },
-                    { code: "+32", label: "🇧🇪 +32" },
-                    { code: "+49", label: "🇩🇪 +49" },
-                    { code: "+33", label: "🇫🇷 +33" },
-                    { code: "+44", label: "🇬🇧 +44" },
-                    { code: "+1",  label: "🇺🇸 +1" },
-                    { code: "+90", label: "🇹🇷 +90" },
-                    { code: "+212", label: "🇲🇦 +212" },
-                    { code: "+213", label: "🇩🇿 +213" },
-                    { code: "+216", label: "🇹🇳 +216" },
-                    { code: "+34", label: "🇪🇸 +34" },
-                    { code: "+39", label: "🇮🇹 +39" },
-                    { code: "+48", label: "🇵🇱 +48" },
-                    { code: "+40", label: "🇷🇴 +40" },
-                    { code: "+380", label: "🇺🇦 +380" },
-                    { code: "+359", label: "🇧🇬 +359" },
-                    { code: "+20", label: "🇪🇬 +20" },
-                    { code: "+234", label: "🇳🇬 +234" },
-                    { code: "+27", label: "🇿🇦 +27" },
-                    { code: "+55", label: "🇧🇷 +55" },
-                  ].map(({ code, label }) => (
-                    <SelectItem key={code} value={code}>{label}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-              <Input
-                value={(data.phone || "").replace(/^\+\d+\s?/, "")}
-                onChange={e => {
-                  const code = (data.phone || "").startsWith("+") ? (data.phone.match(/^(\+\d+)\s/)?.[1] || "+31") : "+31";
-                  set("phone", `${code} ${e.target.value}`);
-                }}
-                placeholder="612345678"
-                className="flex-1"
+      {/* Hero banner: photo left, info right */}
+      <div className="flex flex-col sm:flex-row">
+        {/* Left: large passport photo */}
+        <div className="relative shrink-0 bg-muted/30 flex items-center justify-center sm:w-[168px]">
+          <div className="group relative m-5 flex items-center justify-center overflow-hidden rounded-lg border-2 border-border bg-white shadow-md"
+               style={{ width: 112, height: 144 }}>
+            {data.photo_file_url
+              ? <img src={data.photo_file_url} alt="" className="h-full w-full object-cover" />
+              : <span className="text-4xl font-semibold text-muted-foreground">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
+            }
+            {editing && (
+              <PhotoCropUpload
+                onUploaded={handlePhotoUploaded}
+                uploading={uploadingPhoto}
+                setUploading={setUploadingPhoto}
               />
+            )}
+          </div>
+        </div>
+
+        {/* Right: info banner */}
+        <div className="flex min-w-0 flex-1 flex-col justify-between border-t border-border bg-muted/40 px-6 py-5 sm:border-l sm:border-t-0">
+          <div className="flex flex-wrap items-start justify-between gap-3">
+            <div className="min-w-0">
+              {editing ? (
+                <div className="grid max-w-4xl grid-cols-1 gap-3 md:grid-cols-4">
+                  <div className="space-y-1"><span className="text-xs text-muted-foreground">Initialen</span><Input value={data.initials || ""} onChange={e => set("initials", e.target.value)} className="h-8 text-sm" /></div>
+                  <div className="space-y-1"><span className="text-xs text-muted-foreground">Voornamen</span><Input value={data.legal_first_names || ""} onChange={e => updateNamePart("legal_first_names", e.target.value)} className="h-8 text-sm" /></div>
+                  <div className="space-y-1"><span className="text-xs text-muted-foreground">Roepnaam</span><Input value={data.first_name || data.call_name || ""} onChange={e => { updateNamePart("first_name", e.target.value); set("call_name", e.target.value); }} className="h-8 text-sm" /></div>
+                  <div className="space-y-1"><span className="text-xs text-muted-foreground">Tussenvoegsel</span><Input value={data.name_prefix || ""} onChange={e => updateNamePart("name_prefix", e.target.value)} className="h-8 text-sm" /></div>
+                  <div className="space-y-1 md:col-span-2"><span className="text-xs text-muted-foreground">Achternaam</span><Input value={data.last_name || ""} onChange={e => updateNamePart("last_name", e.target.value)} className="h-8 text-sm" /></div>
+                </div>
+              ) : (
+                <>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <h2 className="text-2xl font-bold text-foreground">{buildFullName(data) || "Naam onbekend"}</h2>
+                    <BadgePill className={STATUS_COLORS[getStatus(data)] || STATUS_COLORS.draft}>{STATUS_LABELS[getStatus(data)] || getStatus(data)}</BadgePill>
+                    <BadgePill className={relationship === "self_employed" ? "bg-fuchsia-100 text-fuchsia-700" : "bg-blue-100 text-blue-700"}>{RELATIONSHIP_LABELS[relationship]}</BadgePill>
+                  </div>
+                  <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
+                    {data.email && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">E-mail: </span>{data.email}</p>}
+                    {data.phone && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">Tel: </span>{data.phone}</p>}
+                    {data.date_of_birth && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">Geboortedatum: </span>{formatDate(data.date_of_birth)}</p>}
+                    {address && <p className="text-sm text-muted-foreground sm:col-span-2"><span className="font-medium text-foreground">Adres: </span>{address}</p>}
+                    {data.nationality && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">Nationaliteit: </span>{data.nationality}</p>}
+                  </div>
+                </>
+              )}
             </div>
-          </ProfileInfoRow>
-          <ProfileInfoRow label="Adres" editing={editing} value={[
-              data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(),
-              [data.postal_code, data.city].filter(Boolean).join(" "),
-              data.country && data.country !== "Nederland" ? data.country : null,
-            ].filter(Boolean).join(", ")}>
-            <AddressAutocomplete
-              data={data}
-              onAddressSelect={addr => { Object.entries(addr).forEach(([k, v]) => set(k, v)); }}
-            />
-          </ProfileInfoRow>
+            <div className="flex shrink-0 flex-wrap gap-2">
+              {editing ? (
+                <>
+                  <Button variant="outline" size="sm" onClick={onCancel} disabled={saveMutation.isPending || uploadingPhoto}><X className="mr-1 h-4 w-4" /> Annuleren</Button>
+                  <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || uploadingPhoto}><Check className="mr-1 h-4 w-4" /> {saveMutation.isPending ? "Opslaan..." : "Opslaan"}</Button>
+                </>
+              ) : (
+                <Button variant="outline" onClick={onEdit}><Pencil className="mr-1 h-4 w-4" /> Wijzigen</Button>
+              )}
+            </div>
+          </div>
         </div>
       </div>
 
+      {/* Details (only shown in edit mode) */}
       {editing && (
-        <div className="flex justify-end gap-2 border-t border-border bg-muted/20 px-6 py-3">
-          <Button variant="outline" onClick={onCancel} disabled={saveMutation.isPending || uploadingPhoto}><X className="mr-1 h-4 w-4" /> Annuleren</Button>
-          <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || uploadingPhoto}><Check className="mr-1 h-4 w-4" /> {saveMutation.isPending ? "Wijzigingen opslaan..." : "Wijzigingen opslaan"}</Button>
-        </div>
+        <>
+          <div className="grid grid-cols-1 gap-x-12 gap-y-6 border-t border-border p-6 lg:grid-cols-2">
+            <div>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Persoonlijke gegevens</h3>
+              <ProfileInfoRow label="Geslacht" editing={editing} value={data.gender === "male" ? "Man" : data.gender === "female" ? "Vrouw" : data.gender === "other" ? "Anders" : "Onbekend"}>
+                <Select value={data.gender || "unknown"} onValueChange={v => set("gender", v)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent><SelectItem value="male">Man</SelectItem><SelectItem value="female">Vrouw</SelectItem><SelectItem value="other">Anders</SelectItem><SelectItem value="unknown">Onbekend</SelectItem></SelectContent>
+                </Select>
+              </ProfileInfoRow>
+              <ProfileInfoRow label="Geboortedatum" editing={editing} value={formatDate(data.date_of_birth)}><Input type="date" value={data.date_of_birth || ""} onChange={e => set("date_of_birth", e.target.value)} /></ProfileInfoRow>
+              <ProfileInfoRow label="Geboorteplaats" editing={editing} value={data.place_of_birth}><PlaceSearchInput value={data.place_of_birth || ""} onChange={v => set("place_of_birth", v)} /></ProfileInfoRow>
+              <ProfileInfoRow label="Geboorteland" editing={editing} value={data.country_of_birth}><CountrySelect value={data.country_of_birth || ""} onChange={v => set("country_of_birth", v)} /></ProfileInfoRow>
+              <ProfileInfoRow label="Nationaliteit" editing={editing} value={data.nationality}><NationalitySelect value={data.nationality || ""} onChange={v => set("nationality", v)} /></ProfileInfoRow>
+            </div>
+            <div>
+              <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contact & adres</h3>
+              <ProfileInfoRow label="E-mail" editing={editing} value={data.email}><Input type="email" value={data.email || ""} onChange={e => set("email", e.target.value)} /></ProfileInfoRow>
+              <ProfileInfoRow label="Telefoon" editing={editing} value={data.phone}>
+                <div className="flex gap-2">
+                  <Select
+                    value={(data.phone || "").startsWith("+") ? (data.phone.match(/^(\+\d+)\s/)?.[1] || "+31") : "+31"}
+                    onValueChange={code => {
+                      const local = (data.phone || "").replace(/^\+\d+\s?/, "");
+                      set("phone", `${code} ${local}`);
+                    }}
+                  >
+                    <SelectTrigger className="w-24 shrink-0"><SelectValue /></SelectTrigger>
+                    <SelectContent className="max-h-60">
+                      {[
+                        { code: "+31", label: "🇳🇱 +31" },
+                        { code: "+32", label: "🇧🇪 +32" },
+                        { code: "+49", label: "🇩🇪 +49" },
+                        { code: "+33", label: "🇫🇷 +33" },
+                        { code: "+44", label: "🇬🇧 +44" },
+                        { code: "+1",  label: "🇺🇸 +1" },
+                        { code: "+90", label: "🇹🇷 +90" },
+                        { code: "+212", label: "🇲🇦 +212" },
+                        { code: "+213", label: "🇩🇿 +213" },
+                        { code: "+216", label: "🇹🇳 +216" },
+                        { code: "+34", label: "🇪🇸 +34" },
+                        { code: "+39", label: "🇮🇹 +39" },
+                        { code: "+48", label: "🇵🇱 +48" },
+                        { code: "+40", label: "🇷🇴 +40" },
+                        { code: "+380", label: "🇺🇦 +380" },
+                        { code: "+359", label: "🇧🇬 +359" },
+                        { code: "+20", label: "🇪🇬 +20" },
+                        { code: "+234", label: "🇳🇬 +234" },
+                        { code: "+27", label: "🇿🇦 +27" },
+                        { code: "+55", label: "🇧🇷 +55" },
+                      ].map(({ code, label }) => (
+                        <SelectItem key={code} value={code}>{label}</SelectItem>
+                      ))}
+                    </SelectContent>
+                  </Select>
+                  <Input
+                    value={(data.phone || "").replace(/^\+\d+\s?/, "")}
+                    onChange={e => {
+                      const code = (data.phone || "").startsWith("+") ? (data.phone.match(/^(\+\d+)\s/)?.[1] || "+31") : "+31";
+                      set("phone", `${code} ${e.target.value}`);
+                    }}
+                    placeholder="612345678"
+                    className="flex-1"
+                  />
+                </div>
+              </ProfileInfoRow>
+              <ProfileInfoRow label="Adres" editing={editing} value={[
+                  data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(),
+                  [data.postal_code, data.city].filter(Boolean).join(" "),
+                  data.country && data.country !== "Nederland" ? data.country : null,
+                ].filter(Boolean).join(", ")}>
+                <AddressAutocomplete
+                  data={data}
+                  onAddressSelect={addr => { Object.entries(addr).forEach(([k, v]) => set(k, v)); }}
+                />
+              </ProfileInfoRow>
+            </div>
+          </div>
+          <div className="flex justify-end gap-2 border-t border-border bg-muted/20 px-6 py-3">
+            <Button variant="outline" onClick={onCancel} disabled={saveMutation.isPending || uploadingPhoto}><X className="mr-1 h-4 w-4" /> Annuleren</Button>
+            <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || uploadingPhoto}><Check className="mr-1 h-4 w-4" /> {saveMutation.isPending ? "Wijzigingen opslaan..." : "Wijzigingen opslaan"}</Button>
+          </div>
+        </>
       )}
     </div>
   );
