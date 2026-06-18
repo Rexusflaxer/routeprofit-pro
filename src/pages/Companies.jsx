@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Building2, AlertCircle, Archive, ChevronLeft, Loader2 } from "lucide-react";
+import { Plus, Building2, AlertCircle, Archive, ChevronLeft } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import PageTransition from "@/components/ui-custom/PageTransition";
 
@@ -31,15 +31,8 @@ function CompaniesLoadingState() {
   return (
     <div className="rounded-xl border border-border bg-card/70 p-8 shadow-sm">
       <div className="mx-auto flex max-w-sm flex-col items-center text-center">
-        <div className="relative mb-3 flex h-12 w-12 items-center justify-center">
-          <div className="absolute inset-0 rounded-md border border-primary/20 bg-background/80 shadow-sm" />
-          <div className="absolute inset-0 rounded-md border-2 border-primary/15 border-t-primary animate-spin" />
-          <Building2 className="relative h-5 w-5 text-primary" />
-        </div>
-        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
-          <span>Bedrijven laden</span>
-          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-        </div>
+        <div className="mb-3 h-9 w-9 rounded-full border-2 border-primary/20 border-t-primary animate-spin" />
+        <p className="text-sm font-medium text-foreground">Bedrijven laden</p>
         <p className="mt-1 text-xs text-muted-foreground">LOQ haalt actieve bedrijven en archiefstatussen op.</p>
       </div>
     </div>
