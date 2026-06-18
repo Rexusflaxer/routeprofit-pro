@@ -96,14 +96,14 @@ const QUALIFICATION_TYPES = [
 ];
 
 const PERSONNEL_TABS = [
-  { key: "payroll", label: "Loonheffing", icon: Banknote },
   { key: "identity", label: "Identiteit", icon: BadgeCheck },
-  { key: "documents", label: "Documenten", icon: FileText },
-  { key: "compliance", label: "Compliance", icon: ShieldCheck },
+  { key: "payroll", label: "Loonheffing", icon: Banknote },
   { key: "bank-mobility", label: "Bank & mobiliteit", icon: CreditCard },
-  { key: "ice", label: "ICE", icon: Users },
   { key: "contracts", label: "Contracten/kosten", icon: BriefcaseBusiness },
+  { key: "compliance", label: "Compliance", icon: ShieldCheck },
+  { key: "documents", label: "Documenten", icon: FileText },
   { key: "planning", label: "Planning/restricties", icon: CalendarDays },
+  { key: "ice", label: "ICE", icon: Users },
   { key: "materials", label: "Materiaal", icon: Package },
   { key: "notes", label: "Notities/gesprekken", icon: MessageSquareText },
   { key: "teamhub", label: "App & Teamhub", icon: Handshake },
@@ -619,7 +619,7 @@ function PayrollTab({ person, documents }) {
 // ─── Sidebar tabs panel ───────────────────────────────────────────────────────
 
 function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
-  const [active, setActive] = useState("payroll");
+  const [active, setActive] = useState("identity");
   const generalDocuments = dossier.documents.filter(d => !["identity_document","drivers_license","vog","cv","bank_account_proof","payroll_tax_statement"].includes(d.category));
   const identityDocs = dossier.documents.filter(d => d.category === "identity_document");
   const licenseDocs = dossier.documents.filter(d => d.category === "drivers_license");
