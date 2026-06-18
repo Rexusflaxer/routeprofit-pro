@@ -14,6 +14,7 @@ import {
   Check,
   Edit,
   Handshake,
+  Loader2,
   MapPin,
   RotateCcw,
   Trash2,
@@ -58,6 +59,40 @@ function InfoRow({ label, children }) {
 
 function ViewText({ value, fallback = "—" }) {
   return <span className="text-sm text-foreground font-medium">{value || fallback}</span>;
+}
+
+function DeleteGuardLoadingState() {
+  return (
+    <div className="rounded-md border border-primary/25 bg-primary/5 p-4 text-sm">
+      <div className="flex items-start gap-3">
+        <div className="relative flex h-11 w-11 shrink-0 items-center justify-center">
+          <div className="absolute inset-0 rounded-md border border-primary/20 bg-background/80 shadow-sm" />
+          <div className="absolute inset-0 rounded-md border-2 border-primary/15 border-t-primary animate-spin" />
+          <Building2 className="relative h-5 w-5 text-primary" />
+        </div>
+        <div className="min-w-0 flex-1">
+          <div className="flex items-center gap-2">
+            <p className="font-medium text-foreground">Verwijdercontrole wordt uitgevoerd</p>
+            <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+          </div>
+          <p className="mt-1 text-xs leading-relaxed text-muted-foreground">
+            LOQ controleert gekoppelde administratie, documenten, planning en bewaartermijnen voordat definitief verwijderen mogelijk wordt.
+          </p>
+          <div className="mt-3 grid gap-2 sm:grid-cols-3">
+            {["Koppelingen", "Documenten", "Bewaartermijn"].map((label, index) => (
+              <div
+                key={label}
+                className="h-8 rounded-md border border-border/70 bg-background/70 px-3 py-2 text-xs font-medium text-muted-foreground animate-pulse"
+                style={{ animationDelay: `${index * 120}ms` }}
+              >
+                {label}
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function editableCompanyForm(company, blankPlaceholder = false) {
@@ -1119,9 +1154,7 @@ export default function CompanyDetail() {
               De controle op gekoppelde records kon niet worden uitgevoerd. Definitief verwijderen blijft daarom geblokkeerd. Reden: {deleteGuardErrorMessage(deletionGuardError)}
             </div>
           ) : deletionGuardChecking ? (
-            <div className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
-              Controle op contracten, diensten, documenten en bewaartermijnen wordt uitgevoerd...
-            </div>
+            <DeleteGuardLoadingState />
           ) : permanentDeleteGuard.allowed ? (
             <>
               <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900 dark:border-green-900/70 dark:bg-green-950/30 dark:text-green-100">

@@ -3,7 +3,7 @@ import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
-import { Plus, Building2, AlertCircle } from "lucide-react";
+import { Plus, Building2, AlertCircle, Archive, ChevronLeft, Loader2 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import PageTransition from "@/components/ui-custom/PageTransition";
 
@@ -27,8 +27,28 @@ const STATUS_COLORS = {
   archived: "bg-red-50 text-red-600 dark:bg-red-900 dark:text-red-300",
 };
 
+function CompaniesLoadingState() {
+  return (
+    <div className="rounded-xl border border-border bg-card/70 p-8 shadow-sm">
+      <div className="mx-auto flex max-w-sm flex-col items-center text-center">
+        <div className="relative mb-3 flex h-12 w-12 items-center justify-center">
+          <div className="absolute inset-0 rounded-md border border-primary/20 bg-background/80 shadow-sm" />
+          <div className="absolute inset-0 rounded-md border-2 border-primary/15 border-t-primary animate-spin" />
+          <Building2 className="relative h-5 w-5 text-primary" />
+        </div>
+        <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+          <span>Bedrijven laden</span>
+          <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+        </div>
+        <p className="mt-1 text-xs text-muted-foreground">LOQ haalt actieve bedrijven en archiefstatussen op.</p>
+      </div>
+    </div>
+  );
+}
+
 export default function Companies() {
   const [migrateLoading, setMigrateLoading] = useState(false);
+  const [showArchive, setShowArchive] = useState(false);
   const navigate = useNavigate();
   const queryClient = useQueryClient();
 
@@ -121,11 +141,15 @@ export default function Companies() {
     return cao ? (cao.label || cao.display_name || cao.name) : null;
   };
 
+  const activeCompanies = companies.filter(company => company.status !== "archived");
+  const archivedCompanies = companies.filter(company => company.status === "archived");
+  const visibleCompanies = showArchive ? archivedCompanies : activeCompanies;
+
   // Groepeer bedrijven: holdings bovenaan, dan hun werkmaatschappijen, dan zelfstandige bedrijven
   const getGroupedCompanies = () => {
-    const holdings = companies.filter(c => c.company_role === "holding");
-    const subsidiaries = companies.filter(c => c.holding_company_id);
-    const independents = companies.filter(c => c.company_role !== "holding" && !c.holding_company_id);
+    const holdings = visibleCompanies.filter(c => c.company_role === "holding");
+    const subsidiaries = visibleCompanies.filter(c => c.holding_company_id);
+    const independents = visibleCompanies.filter(c => c.company_role !== "holding" && !c.holding_company_id);
     const result = [];
     for (const holding of holdings) {
       result.push({ company: holding, isChild: false });
@@ -138,6 +162,7 @@ export default function Companies() {
     for (const c of independents) result.push({ company: c, isChild: false });
     return result;
   };
+  const groupedCompanies = getGroupedCompanies();
 
   return (
     <PageTransition>
@@ -167,7 +192,7 @@ export default function Companies() {
         </div>
       )}
 
-      {isLoading && <p className="text-sm text-muted-foreground py-8 text-center">Laden...</p>}
+      {isLoading && <CompaniesLoadingState />}
       {!isLoading && (
         <div className="rounded-xl border border-border shadow-sm overflow-hidden">
           {/* Table header */}
@@ -178,19 +203,35 @@ export default function Companies() {
             <span className="flex-[2] min-w-0">Activiteiten</span>
             <span className="w-32 shrink-0">CAO</span>
             <span className="w-28 shrink-0">LOQ Teamhub</span>
+            {showArchive && <Badge className="mr-2 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
+            <div className="shrink-0 flex items-center gap-2">
+              {showArchive ? (
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
+                  <ChevronLeft className="w-3 h-3 mr-1" /> Actieve bedrijven
+                </Button>
+              ) : (
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
+                  <Archive className="w-3 h-3 mr-1" /> Archief {archivedCompanies.length > 0 ? `(${archivedCompanies.length})` : ""}
+                </Button>
+              )}
+            </div>
           </div>
           {/* Rows */}
           <div className="divide-y divide-border">
-            {getGroupedCompanies().length === 0 && (
-              <p className="px-4 py-4 text-sm text-muted-foreground">Nog geen bedrijven aangemaakt.</p>
+            {groupedCompanies.length === 0 && (
+              <p className="px-4 py-6 text-sm text-muted-foreground text-center">
+                {showArchive ? "Geen bedrijven in het archief." : "Nog geen bedrijven aangemaakt."}
+              </p>
             )}
-            {getGroupedCompanies().map(({ company, isChild }) => {
+            {groupedCompanies.map(({ company, isChild }) => {
               const teamhubVisible = company.status === "active" && company.teamhub_enabled;
 
               return (
                 <div
                   key={company.id}
-                  className={`flex items-center px-4 py-3 cursor-pointer transition-colors group hover:bg-accent/50 ${company.status === "archived" ? "bg-muted/20 opacity-75" : ""}`}
+                  className={`flex items-center px-4 py-3 cursor-pointer transition-colors group hover:bg-accent/50 ${
+                    company.status === "archived" ? (showArchive ? "bg-muted/10" : "bg-muted/20 opacity-75") : ""
+                  }`}
                   onClick={() => navigate(`/CompanyDetail?id=${company.id}`)}
                 >
                   <div className={`flex-[2] min-w-0 flex items-center gap-2 ${isChild ? "pl-6 border-l-2 border-muted ml-1" : ""}`}>
