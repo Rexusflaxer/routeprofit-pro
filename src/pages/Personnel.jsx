@@ -187,6 +187,16 @@ function buildPersonnelDisplayName(personnel) {
   return [first, personnel.name_prefix, personnel.last_name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim() || personnel.name || "";
 }
 
+function buildCallName(personnel) {
+  const first = personnel.call_name || personnel.first_name || "";
+  return [first, personnel.name_prefix, personnel.last_name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
+}
+
+function buildFullLegalName(personnel) {
+  const first = personnel.legal_first_names || personnel.first_name || personnel.call_name || "";
+  return [first, personnel.name_prefix, personnel.last_name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim() || personnel.name || "";
+}
+
 function isEmptyDraftPersonnel(personnel = {}) {
   if ((personnel.status || "draft") !== "draft") return false;
   const textFields = [
@@ -1418,7 +1428,8 @@ function PersonnelList({ personnel, companies, selectedId, onSelect, onEdit, onD
                       </div>
                     )}
                     <div className="min-w-0">
-                      <p className="truncate text-sm font-medium text-foreground">{getDisplayName(person)}</p>
+                      <p className="truncate text-sm font-medium text-foreground">{buildCallName(person) || getDisplayName(person)}</p>
+                      {(() => { const full = buildFullLegalName(person); const call = buildCallName(person); return full && full !== call ? <p className="truncate text-xs text-muted-foreground/70">{full}</p> : null; })()}
                       <p className="truncate text-xs text-muted-foreground">{person.email || person.phone || "Geen contactgegevens"}</p>
                     </div>
                   </div>
