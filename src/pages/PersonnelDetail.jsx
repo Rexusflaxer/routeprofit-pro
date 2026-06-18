@@ -699,25 +699,23 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       {/* Hero banner */}
       <div className="flex flex-col sm:flex-row">
-        {/* Left: passport photo */}
-        <div className="relative shrink-0 flex items-center justify-center px-6 py-6 sm:w-[180px]">
-          <div className="group relative" style={{ width: 112, height: 144 }}>
-            {data.photo_file_url
-              ? <img src={data.photo_file_url} alt="" className="h-full w-full object-cover rounded-xl" />
-              : (
-                <div className="flex h-full w-full items-center justify-center">
-                  <span className="text-5xl font-bold text-muted-foreground/40">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
-                </div>
-              )
-            }
-            {editing && (
-              <PhotoCropUpload
-                onUploaded={handlePhotoUploaded}
-                uploading={uploadingPhoto}
-                setUploading={setUploadingPhoto}
-              />
-            )}
-          </div>
+        {/* Left: passport photo fills entire column */}
+        <div className="group relative shrink-0 overflow-hidden sm:w-[180px] min-h-[160px]">
+          {data.photo_file_url
+            ? <img src={data.photo_file_url} alt="" className="h-full w-full object-cover" />
+            : (
+              <div className="flex h-full w-full min-h-[160px] items-center justify-center bg-muted">
+                <span className="text-5xl font-bold text-muted-foreground/40">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
+              </div>
+            )
+          }
+          {editing && (
+            <PhotoCropUpload
+              onUploaded={handlePhotoUploaded}
+              uploading={uploadingPhoto}
+              setUploading={setUploadingPhoto}
+            />
+          )}
         </div>
 
         {/* Right: info banner */}
