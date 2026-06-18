@@ -274,25 +274,29 @@ function PlaceSearchInput({ value, onChange }) {
   const [query, setQuery] = useState(value || "");
   const [suggestions, setSuggestions] = useState([]);
   const [open, setOpen] = useState(false);
-  const timer = React.useRef(null);
+  const abortRef = React.useRef(null);
 
   React.useEffect(() => { setQuery(value || ""); }, [value]);
 
   const search = async (q) => {
     if (q.length < 2) { setSuggestions([]); return; }
+    // Cancel any in-flight request
+    if (abortRef.current) abortRef.current = false;
+    const token = {};
+    abortRef.current = token;
     try {
       const res = await base44.functions.invoke("searchAddress", { query: q });
+      if (abortRef.current !== token) return; // stale response, discard
       const raw = res.data?.suggestions || res.data?.results || [];
       const cities = [...new Set(raw
         .map(r => {
           const addr = r.city || r.municipality || r.address || r.label || "";
-          const first = addr.split(",")[0].trim();
-          // Strip leading "Gemeente " prefix
-          return first.replace(/^Gemeente\s+/i, "");
+          return addr.split(",")[0].trim().replace(/^Gemeente\s+/i, "");
         })
         .filter(Boolean)
       )];
       setSuggestions(cities.slice(0, 8));
+      setOpen(true);
     } catch { setSuggestions([]); }
   };
 
@@ -300,8 +304,7 @@ function PlaceSearchInput({ value, onChange }) {
     const v = e.target.value;
     setQuery(v);
     onChange(v);
-    clearTimeout(timer.current);
-    timer.current = setTimeout(() => { search(v); setOpen(true); }, 150);
+    search(v);
   };
 
   return (
