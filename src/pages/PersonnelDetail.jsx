@@ -84,6 +84,23 @@ const DOCUMENT_CATEGORIES = [
   { value: "wpbr_badge", label: "Beveiligingspas document" },
   { value: "other", label: "Overig" },
 ];
+const COUNTRIES = [
+  "Afghanistan","Albanië","Algerije","Andorra","Angola","Argentinië","Armenië","Australië","Oostenrijk",
+  "Azerbeidzjan","Bangladesh","België","Bolivia","Bosnië-Herzegovina","Botswana","Brazilië","Bulgarije",
+  "Burkina Faso","Burundi","Cambodja","Kameroen","Canada","Chili","China","Colombia","Congo","Costa Rica",
+  "Kroatië","Cuba","Cyprus","Tsjechië","Denemarken","Dominicaanse Republiek","Ecuador","Egypte","Estland",
+  "Ethiopië","Finland","Frankrijk","Georgië","Duitsland","Ghana","Griekenland","Guatemala","Haïti",
+  "Honduras","Hongarije","IJsland","India","Indonesië","Iran","Irak","Ierland","Israël","Italië",
+  "Ivoorkust","Jamaica","Japan","Jordanië","Kazachstan","Kenia","Kosovo","Koeweit","Letland","Libanon",
+  "Libië","Litouwen","Luxemburg","Maleisië","Mali","Malta","Marokko","Mexico","Moldavië","Montenegro",
+  "Mozambique","Myanmar","Namibië","Nepal","Nederland","Nicaragua","Nigeria","Noord-Korea","Noord-Macedonië",
+  "Noorwegen","Oman","Pakistan","Panama","Paraguay","Peru","Filipijnen","Polen","Portugal","Qatar",
+  "Roemenië","Rusland","Rwanda","Saoedi-Arabië","Senegal","Servië","Singapore","Slowakije","Slovenië",
+  "Somalië","Zuid-Afrika","Zuid-Korea","Spanje","Sri Lanka","Soedan","Suriname","Zweden","Zwitserland",
+  "Syrië","Tanzania","Thailand","Tunesië","Turkije","Oeganda","Oekraïne","Verenigd Koninkrijk",
+  "Verenigde Arabische Emiraten","Verenigde Staten","Uruguay","Venezuela","Vietnam","Zambia","Zimbabwe",
+].sort((a, b) => a.localeCompare(b, "nl"));
+
 const QUALIFICATION_TYPES = [
   { value: "beveiliger_2", label: "Beveiliger niveau 2" },
   { value: "beveiliger_3", label: "Beveiliger niveau 3" },
@@ -220,6 +237,60 @@ function MiniTable({ columns, rows, emptyText }) {
     </div>
   );
 }
+function CountrySelect({ value, onChange }) {
+  return (
+    <Select value={value || ""} onValueChange={onChange}>
+      <SelectTrigger><SelectValue placeholder="Selecteer land" /></SelectTrigger>
+      <SelectContent className="max-h-60">
+        {COUNTRIES.map(c => <SelectItem key={c} value={c}>{c}</SelectItem>)}
+      </SelectContent>
+    </Select>
+  );
+}
+
+function PlaceSearchInput({ value, onChange }) {
+  const [query, setQuery] = useState(value || "");
+  const [suggestions, setSuggestions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const timer = React.useRef(null);
+
+  React.useEffect(() => { setQuery(value || ""); }, [value]);
+
+  const search = async (q) => {
+    if (q.length < 2) { setSuggestions([]); return; }
+    try {
+      const res = await base44.functions.invoke("searchAddress", { query: q });
+      const raw = res.data?.results || res.data?.suggestions || [];
+      const cities = [...new Set(raw.map(r => r.city || r.municipality || r.label || "").filter(Boolean))];
+      setSuggestions(cities.slice(0, 8));
+    } catch { setSuggestions([]); }
+  };
+
+  const handleChange = (e) => {
+    const v = e.target.value;
+    setQuery(v);
+    onChange(v);
+    clearTimeout(timer.current);
+    timer.current = setTimeout(() => { search(v); setOpen(true); }, 300);
+  };
+
+  return (
+    <div className="relative">
+      <Input value={query} onChange={handleChange} onBlur={() => setTimeout(() => setOpen(false), 150)} placeholder="Typ een plaatsnaam..." />
+      {open && suggestions.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 rounded-md border border-border bg-popover shadow-lg max-h-48 overflow-auto">
+          {suggestions.map((s, i) => (
+            <button key={i} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors"
+              onMouseDown={() => { setQuery(s); onChange(s); setOpen(false); setSuggestions([]); }}>
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function ProfileInfoRow({ label, editing, children, value }) {
   return (
     <div className="flex flex-col py-1 sm:flex-row sm:gap-4">
@@ -512,9 +583,9 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
             </Select>
           </ProfileInfoRow>
           <ProfileInfoRow label="Geboortedatum" editing={editing} value={formatDate(data.date_of_birth)}><Input type="date" value={data.date_of_birth || ""} onChange={e => set("date_of_birth", e.target.value)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Geboorteplaats" editing={editing} value={data.place_of_birth}><Input value={data.place_of_birth || ""} onChange={e => set("place_of_birth", e.target.value)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Geboorteland" editing={editing} value={data.country_of_birth}><Input value={data.country_of_birth || ""} onChange={e => set("country_of_birth", e.target.value)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Nationaliteit" editing={editing} value={data.nationality}><Input value={data.nationality || ""} onChange={e => set("nationality", e.target.value)} /></ProfileInfoRow>
+          <ProfileInfoRow label="Geboorteplaats" editing={editing} value={data.place_of_birth}><PlaceSearchInput value={data.place_of_birth || ""} onChange={v => set("place_of_birth", v)} /></ProfileInfoRow>
+          <ProfileInfoRow label="Geboorteland" editing={editing} value={data.country_of_birth}><CountrySelect value={data.country_of_birth || ""} onChange={v => set("country_of_birth", v)} /></ProfileInfoRow>
+          <ProfileInfoRow label="Nationaliteit" editing={editing} value={data.nationality}><CountrySelect value={data.nationality || ""} onChange={v => set("nationality", v)} /></ProfileInfoRow>
         </div>
         <div>
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contact & adres</h3>
