@@ -84,6 +84,49 @@ const DOCUMENT_CATEGORIES = [
   { value: "wpbr_badge", label: "Beveiligingspas document" },
   { value: "other", label: "Overig" },
 ];
+const NL_PLACES = [
+  "Aalsmeer","Aalten","Achtkarspelen","Alblasserdam","Albrandswaard","Alkmaar","Almelo","Almere","Alphen aan den Rijn",
+  "Alphen-Chaam","Altena","Ameland","Amersfoort","Amstelveen","Amsterdam","Apeldoorn","Appingedam","Arnhem",
+  "Assen","Asten","Baarle-Nassau","Baarn","Barendrecht","Barneveld","Beekdaelen","Beemster","Berg en Dal",
+  "Bergeijk","Bergen (L)","Bergen (NH)","Bergen op Zoom","Berkelland","Bernheze","Best","Beuningen","Beverwijk",
+  "Binnenmaas","Bloemendaal","Bodegraven-Reeuwijk","Boekel","Borger-Odoorn","Borne","Borsele","Boxmeer","Boxtel",
+  "Breda","Brielle","Bronckhorst","Brummen","Brunssum","Bunnik","Bunschoten","Buren","Capelle aan den IJssel",
+  "Castricum","Coevorden","Cranendonck","Cuijk","Culemborg","Dalfsen","Dantumadiel","De Bilt","De Friese Meren",
+  "De Ronde Venen","De Wolden","Delft","Delfzijl","Den Helder","Deurne","Deventer","Diemen","Dinkelland",
+  "Doesburg","Doetinchem","Dongen","Dordrecht","Drechterland","Drimmelen","Dronten","Druten","Duiven",
+  "Echt-Susteren","Edam-Volendam","Ede","Eemnes","Eemsdelta","Eersel","Eindhoven","Elburg","Emmen",
+  "Enkhuizen","Enschede","Epe","Ermelo","Etten-Leur","Geertruidenberg","Geldrop-Mierlo","Gemert-Bakel",
+  "Gennep","Gilze en Rijen","Goeree-Overflakkee","Goes","Gorinchem","Gouda","Groningen","Gulpen-Wittem",
+  "Haaksbergen","Haaren","Haarlem","Haarlemmermeer","Halderberge","Hardenberg","Harderwijk","Hardinxveld-Giessendam",
+  "Harlingen","Hattem","Heemskerk","Heemstede","Heerde","Heerenveen","Heerhugowaard","Heerlen","Heeze-Leende",
+  "Heiloo","Hellendoorn","Hellevoetsluis","Helmond","Hendrik-Ido-Ambacht","Hengelo","Het Hogeland","Heumen",
+  "Hillegom","Hilvarenbeek","Hilversum","Hoeksche Waard","Hof van Twente","Hollands Kroon","Hoogeveen",
+  "Hoorn","Horst aan de Maas","Houten","Huizen","Hulst","IJsselstein","Kaag en Braassem","Kampen",
+  "Kapelle","Katwijk","Kerkrade","Koggenland","Krimpen aan den IJssel","Krimpenerwaard","Laarbeek",
+  "Land van Cuijk","Landerd","Landgraaf","Landsmeer","Langedijk","Lansingerland","Laren","Leeuwarden",
+  "Leiden","Leiderdorp","Leidschendam-Voorburg","Lelystad","Lingewaard","Lisse","Lochem","Loon op Zand",
+  "Lopik","Loppersum","Losser","Maasdriel","Maasgouw","Maassluis","Maastricht","Medemblik","Meerssen",
+  "Meierijstad","Meppel","Middelburg","Midden-Delfland","Midden-Groningen","Mill en Sint Hubert","Moerdijk",
+  "Molenlanden","Montferland","Moordrecht","Morssinkhof","Muiden","Neder-Betuwe","Nederweert","Nieuwegein",
+  "Nieuwkoop","Nijkerk","Nijmegen","Noord-Beveland","Noordenveld","Noordoostpolder","Noardeast-Fryslân",
+  "Nuenen","Nunspeet","Oegstgeest","Oirschot","Oisterwijk","Oldambt","Oldebroek","Oldenzaal","Olst-Wijhe",
+  "Ommen","Oost Gelre","Oosterhout","Ooststellingwerf","Oostzaan","Opmeer","Opsterland","Oss","Ouder-Amstel",
+  "Oudewater","Overbetuwe","Papendrecht","Peel en Maas","Pekela","Pijnacker-Nootdorp","Purmerend","Putten",
+  "Raalte","Reimerswaal","Renkum","Reusel-De Mierden","Rheden","Rhenen","Ridderkerk","Rijssen-Holten",
+  "Rijswijk","Roerdalen","Roermond","Roosendaal","Rotterdam","Rozendaal","Rucphen","Schagen","Schinnen",
+  "Schiedam","Schijndel","Simpelveld","Sint Anthonis","Sint-Michielsgestel","Sittard-Geleen","Sliedrecht",
+  "Sluis","Smallingerland","Soest","Someren","Son en Breugel","Stadskanaal","Staphorst","Stede Broec",
+  "Steenbergen","Steenwijkerland","Stein","Súdwest-Fryslân","Terneuzen","Teylingen","Tholen","Tiel",
+  "Tilburg","Tubbergen","Twenterand","Tynaarlo","Tytsjerksteradiel","Uitgeest","Uithoorn","Urk","Utrecht",
+  "Utrechtse Heuvelrug","Vaals","Valkenburg aan de Geul","Valkenswaard","Veendam","Veenendaal","Veere",
+  "Veldhoven","Velsen","Venlo","Venray","Vijfheerenlanden","Vlaardingen","Vlieland","Vlissingen","Voerendaal",
+  "Voorschoten","Voorst","Vught","Waadhoeke","Waalre","Waalwijk","Waddinxveen","Wageningen","Wassenaar",
+  "Waterland","Weert","Weesp","West Betuwe","West Maas en Waal","Westerveld","Westervoort","Westerwolde",
+  "Westland","Weststellingwerf","Westvoorne","Wierden","Wijchen","Wijdemeren","Wijk bij Duurstede",
+  "Winterswijk","Woensdrecht","Woerden","Wormerland","Woudenberg","Zaanstad","Zaltbommel","Zandvoort",
+  "Zeewolde","Zeist","Zevenaar","Zoetermeer","Zoeterwoude","Zuidplas","Zundert","Zutphen","Zwartewaterland","Zwolle",
+].sort((a, b) => a.localeCompare(b, "nl"));
+
 const COUNTRIES = [
   "Afghanistan","Albanië","Algerije","Andorra","Angola","Argentinië","Armenië","Australië","Oostenrijk",
   "Azerbeidzjan","Bangladesh","België","Bolivia","Bosnië-Herzegovina","Botswana","Brazilië","Bulgarije",
@@ -272,50 +315,29 @@ function CountrySelect({ value, onChange }) {
 
 function PlaceSearchInput({ value, onChange }) {
   const [query, setQuery] = useState(value || "");
-  const [suggestions, setSuggestions] = useState([]);
   const [open, setOpen] = useState(false);
-  const abortRef = React.useRef(null);
 
   React.useEffect(() => { setQuery(value || ""); }, [value]);
 
-  const search = async (q) => {
-    if (q.length < 2) { setSuggestions([]); return; }
-    // Cancel any in-flight request
-    if (abortRef.current) abortRef.current = false;
-    const token = {};
-    abortRef.current = token;
-    try {
-      const res = await base44.functions.invoke("searchAddress", { query: q });
-      if (abortRef.current !== token) return; // stale response, discard
-      const raw = res.data?.suggestions || res.data?.results || [];
-      const cities = [...new Set(raw
-        .map(r => {
-          const addr = r.city || r.municipality || r.address || r.label || "";
-          return addr.split(",")[0].trim().replace(/^Gemeente\s+/i, "");
-        })
-        .filter(Boolean)
-      )];
-      setSuggestions(cities.slice(0, 8));
-      setOpen(true);
-    } catch { setSuggestions([]); }
-  };
-
-  const handleChange = (e) => {
-    const v = e.target.value;
-    setQuery(v);
-    onChange(v);
-    search(v);
-  };
+  const filtered = query.length > 0
+    ? NL_PLACES.filter(p => p.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
+    : NL_PLACES.slice(0, 8);
 
   return (
     <div className="relative">
-      <Input value={query} onChange={handleChange} onBlur={() => setTimeout(() => setOpen(false), 150)} placeholder="Typ een plaatsnaam..." />
-      {open && suggestions.length > 0 && (
+      <Input
+        value={query}
+        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Typ een plaatsnaam..."
+      />
+      {open && filtered.length > 0 && (
         <div className="absolute z-50 w-full mt-1 rounded-md border border-border bg-popover shadow-lg max-h-48 overflow-auto">
-          {suggestions.map((s, i) => (
-            <button key={i} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors"
-              onMouseDown={() => { setQuery(s); onChange(s); setOpen(false); setSuggestions([]); }}>
-              {s}
+          {filtered.map(p => (
+            <button key={p} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors"
+              onMouseDown={() => { setQuery(p); onChange(p); setOpen(false); }}>
+              {p}
             </button>
           ))}
         </div>
