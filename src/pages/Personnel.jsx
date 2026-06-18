@@ -1625,7 +1625,6 @@ export default function Personnel() {
   });
 
   const topTabs = [
-    { value: "all", label: "Alle", count: counts.all },
     { value: "employees", label: "Loondienst", count: counts.employees },
     { value: "self_employed", label: "ZZP'ers", count: counts.zzp },
     { value: "subcontractors", label: "Onderaannemers", count: counts.subcontractors },
