@@ -1419,11 +1419,11 @@ function PersonnelList({ personnel, companies, selectedId, onSelect, onEdit, onD
                   onClick={() => onSelect(person)}
                   className={`group flex cursor-pointer items-center px-4 py-3 transition-colors hover:bg-accent/50 ${isSelected ? "bg-muted/40" : ""}`}
                 >
-                  <div className="flex-[2] min-w-0 flex items-center gap-2">
+                  <div className="flex-[2] min-w-0 flex items-center gap-3">
                     {person.photo_file_url ? (
-                      <img src={person.photo_file_url} alt="" className="h-7 w-7 shrink-0 rounded border border-border object-cover" />
+                      <img src={person.photo_file_url} alt="" className="h-14 w-10 shrink-0 rounded border border-border object-cover object-top" />
                     ) : (
-                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-muted text-xs font-semibold text-muted-foreground">
+                      <div className="flex h-14 w-10 shrink-0 items-center justify-center rounded bg-muted text-sm font-semibold text-muted-foreground">
                         {getDisplayName(person).slice(0, 1).toUpperCase()}
                       </div>
                     )}
