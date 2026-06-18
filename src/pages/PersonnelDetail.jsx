@@ -747,6 +747,8 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
                   )}
                   <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-1 text-xs">
                     {[
+                      { label: "Roepnaam", value: data.call_name || data.first_name },
+                      { label: "Initialen", value: data.initials },
                       { label: "E-mail", value: data.email },
                       { label: "Telefoon", value: data.phone },
                       { label: "Geslacht", value: data.gender === "male" ? "Man" : data.gender === "female" ? "Vrouw" : data.gender === "other" ? "Anders" : null },
