@@ -146,6 +146,31 @@ const ACTIVE_INSURANCE_STATUSES = new Set(["active", "action_required"]);
 const ACTIVE_DOCUMENT_STATUSES = new Set(["pending_review", "active", "suspended"]);
 const ACTIVE_SECURITY_PASS_STATUSES = new Set(["requested", "approved", "active"]);
 
+const COMPANY_DELETE_DEPENDENCY_CHECKS = [
+  { key: "personnel", label: "Medewerkers", entityName: "Personnel", filter: companyId => ({ primary_company_id: companyId }) },
+  { key: "personnelContracts", label: "Arbeidscontracten", entityName: "PersonnelContract", filter: companyId => ({ company_id: companyId }) },
+  { key: "personnelAssignments", label: "Bedrijfstoewijzingen", entityName: "PersonnelCompanyAssignment", filter: companyId => ({ company_id: companyId }) },
+  { key: "routes", label: "Routes", entityName: "Route", filter: companyId => ({ operating_company_id: companyId }) },
+  { key: "tasks", label: "Diensten", entityName: "Task", filter: companyId => ({ operating_company_id: companyId }) },
+  { key: "caoAssignments", label: "CAO-koppelingen", entityName: "CompanyCaoAssignment", filter: companyId => ({ company_id: companyId }) },
+  { key: "locationAssignments", label: "Vestigingen", entityName: "CompanyLocationAssignment", filter: companyId => ({ company_id: companyId }) },
+  { key: "wpbrLicenses", label: "WPBR-vergunningen", entityName: "CompanyWpbrLicense", filter: companyId => ({ company_id: companyId }) },
+  { key: "branchMemberships", label: "Brancheverenigingen", entityName: "CompanyBranchMembership", filter: companyId => ({ company_id: companyId }) },
+  { key: "accreditations", label: "Erkenningen", entityName: "CompanyAccreditation", filter: companyId => ({ company_id: companyId }) },
+  { key: "bankAccounts", label: "Bankrekeningen", entityName: "CompanyBankAccount", filter: companyId => ({ company_id: companyId }) },
+  { key: "emailSettings", label: "E-mailkoppelingen", entityName: "CompanyEmailSettings", filter: companyId => ({ company_id: companyId }) },
+  { key: "insurancePolicies", label: "Verzekeringen", entityName: "CompanyInsurancePolicy", filter: companyId => ({ company_id: companyId }) },
+  { key: "managedFiles", label: "Documenten", entityName: "ManagedFile", filter: companyId => ({ company_id: companyId }) },
+  { key: "employeeInvitations", label: "Medewerkeruitnodigingen", entityName: "EmployeeInvitation", filter: companyId => ({ company_id: companyId }) },
+  { key: "payrollCalculationRuns", label: "Payroll-runs", entityName: "PayrollCalculationRun", filter: companyId => ({ company_id: companyId }) },
+  { key: "personnelCaoEmploymentEvents", label: "CAO-dienstverbandhistorie", entityName: "PersonnelCaoEmploymentEvent", filter: companyId => ({ company_id: companyId }) },
+  { key: "personnelDocuments", label: "Personeelsdocumenten", entityName: "PersonnelDocument", filter: companyId => ({ company_id: companyId }) },
+  { key: "personnelQualifications", label: "Personeelskwalificaties", entityName: "PersonnelQualification", filter: companyId => ({ company_id: companyId }) },
+  { key: "personnelSecurityPasses", label: "Beveiligingspassen", entityName: "PersonnelSecurityPass", filter: companyId => ({ company_id: companyId }) },
+  { key: "employeeAccessAuditLogs", label: "Toegangsauditlogs", entityName: "EmployeeAccessAuditLog", filter: companyId => ({ company_id: companyId }), blocksOnFailure: false },
+  { key: "managedFileAccessLogs", label: "Bestandsauditlogs", entityName: "ManagedFileAccessLog", filter: companyId => ({ company_id: companyId }), blocksOnFailure: false },
+];
+
 const COMPANY_DELETE_DEPENDENCY_ENTITIES = [
   ["managedFileAccessLogs", "ManagedFileAccessLog"],
   ["employeeAccessAuditLogs", "EmployeeAccessAuditLog"],
@@ -223,11 +248,104 @@ function latestRecordDate(record = {}) {
   }, null);
 }
 
-function countRecentOrUnknownRecords(items = [], thresholdDate) {
-  return items.filter(item => {
-    const recordDate = latestRecordDate(item);
-    return !recordDate || recordDate >= thresholdDate;
-  }).length;
+function recordMatchesCompany(record = {}, companyId) {
+  return record.company_id === companyId ||
+    record.operating_company_id === companyId ||
+    record.primary_company_id === companyId ||
+    record.tenant_container_key === `company:${companyId}` ||
+    (Array.isArray(record.company_ids) && record.company_ids.includes(companyId));
+}
+
+function errorMessage(error) {
+  return error?.response?.data?.message ||
+    error?.message ||
+    "Onbekende fout bij het ophalen van deze controle.";
+}
+
+async function fetchCompanyDependency(check, companyId) {
+  const entity = base44.entities[check.entityName];
+  const baseFailure = {
+    label: check.label,
+    entityName: check.entityName,
+    blocking: check.blocksOnFailure !== false,
+  };
+
+  if (!entity?.filter && !entity?.list) {
+    return {
+      key: check.key,
+      items: [],
+      failure: {
+        ...baseFailure,
+        detail: `${check.entityName} is niet beschikbaar in de app-client.`,
+      },
+    };
+  }
+
+  if (entity?.filter) {
+    try {
+      const items = await entity.filter(check.filter(companyId));
+      return { key: check.key, items: Array.isArray(items) ? items : [] };
+    } catch (filterError) {
+      if (!entity?.list) {
+        return {
+          key: check.key,
+          items: [],
+          failure: {
+            ...baseFailure,
+            detail: errorMessage(filterError),
+          },
+        };
+      }
+    }
+  }
+
+  try {
+    const items = await entity.list();
+    return {
+      key: check.key,
+      items: (Array.isArray(items) ? items : []).filter(record => recordMatchesCompany(record, companyId)),
+    };
+  } catch (listError) {
+    return {
+      key: check.key,
+      items: [],
+      failure: {
+        ...baseFailure,
+        detail: errorMessage(listError),
+      },
+    };
+  }
+}
+
+function recordLabel(record = {}) {
+  return record.display_name ||
+    record.legal_name ||
+    record.name ||
+    record.title ||
+    record.email ||
+    record.normalized_email ||
+    record.document_label ||
+    record.file_download_filename ||
+    record.download_filename ||
+    record.logical_path ||
+    record.license_number ||
+    record.wpbr_license_number ||
+    record.certificate_number ||
+    record.policy_number ||
+    record.iban_masked ||
+    record.iban ||
+    record.status ||
+    (record.id ? `ID ${String(record.id).slice(-6)}` : "record");
+}
+
+function summarizeRecords(items = [], max = 3) {
+  const examples = items.slice(0, max).map(item => {
+    const date = latestRecordDate(item);
+    const dateLabel = date ? date.toLocaleDateString("nl-NL") : "datum onbekend";
+    return `${recordLabel(item)} (${dateLabel})`;
+  });
+  const remaining = Math.max(0, items.length - max);
+  return remaining ? `${examples.join(", ")} en nog ${remaining}` : examples.join(", ");
 }
 
 function buildPermanentDeleteGuard(company, dependencies = {}) {
@@ -256,8 +374,21 @@ function buildPermanentDeleteGuard(company, dependencies = {}) {
     personnelSecurityPasses: dependencies.personnelSecurityPasses || [],
   };
   const blockers = [];
+  const warnings = [];
   const retentionThreshold = yearsAgo(PERMANENT_DELETE_RETENTION_YEARS);
   const today = getTodayDateString();
+
+  (dependencies.__checkFailures || []).forEach(failure => {
+    const item = {
+      title: `${failure.label} niet gecontroleerd`,
+      detail: failure.detail,
+    };
+    if (failure.blocking === false) {
+      warnings.push(item);
+    } else {
+      blockers.push(item);
+    }
+  });
 
   if (company?.status !== "archived") {
     blockers.push({
@@ -270,130 +401,133 @@ function buildPermanentDeleteGuard(company, dependencies = {}) {
     {
       label: "Medewerkers",
       items: deps.personnel,
-      activeCount: deps.personnel.filter(item => ACTIVE_PERSONNEL_STATUSES.has(item.status)).length,
+      activeItems: deps.personnel.filter(item => ACTIVE_PERSONNEL_STATUSES.has(item.status)),
     },
     {
       label: "Arbeidscontracten",
       items: deps.personnelContracts,
-      activeCount: deps.personnelContracts.filter(item => hasOpenDateRange(item, "contract_end_date")).length,
+      activeItems: deps.personnelContracts.filter(item => hasOpenDateRange(item, "contract_end_date")),
     },
     {
       label: "Bedrijfstoewijzingen",
       items: deps.personnelAssignments,
-      activeCount: deps.personnelAssignments.filter(item => ACTIVE_ASSIGNMENT_STATUSES.has(item.assignment_status) && hasOpenDateRange(item)).length,
+      activeItems: deps.personnelAssignments.filter(item => ACTIVE_ASSIGNMENT_STATUSES.has(item.assignment_status) && hasOpenDateRange(item)),
     },
     {
       label: "Routes",
       items: deps.routes,
-      activeCount: deps.routes.filter(item => item.status && item.status !== "vergrendeld").length,
+      activeItems: deps.routes.filter(item => item.status && item.status !== "vergrendeld"),
     },
     {
       label: "Diensten",
       items: deps.tasks,
-      activeCount: 0,
+      activeItems: [],
     },
     {
       label: "CAO-koppelingen",
       items: deps.caoAssignments,
-      activeCount: deps.caoAssignments.filter(item => hasOpenDateRange(item)).length,
+      activeItems: deps.caoAssignments.filter(item => hasOpenDateRange(item)),
     },
     {
       label: "Vestigingen",
       items: deps.locationAssignments,
-      activeCount: deps.locationAssignments.filter(item => hasOpenDateRange(item)).length,
+      activeItems: deps.locationAssignments.filter(item => hasOpenDateRange(item)),
     },
     {
       label: "WPBR-vergunningen",
       items: deps.wpbrLicenses,
-      activeCount: deps.wpbrLicenses.filter(item => item.status === "active" && (!item.valid_until || item.valid_until >= today)).length,
+      activeItems: deps.wpbrLicenses.filter(item => item.status === "active" && (!item.valid_until || item.valid_until >= today)),
     },
     {
       label: "Brancheverenigingen",
       items: deps.branchMemberships,
-      activeCount: deps.branchMemberships.filter(item => ACTIVE_DOCUMENT_STATUSES.has(item.status) && hasOpenDateRange(item)).length,
+      activeItems: deps.branchMemberships.filter(item => ACTIVE_DOCUMENT_STATUSES.has(item.status) && hasOpenDateRange(item)),
     },
     {
       label: "Erkenningen",
       items: deps.accreditations,
-      activeCount: deps.accreditations.filter(item => ACTIVE_DOCUMENT_STATUSES.has(item.status) && hasOpenDateRange(item)).length,
+      activeItems: deps.accreditations.filter(item => ACTIVE_DOCUMENT_STATUSES.has(item.status) && hasOpenDateRange(item)),
     },
     {
       label: "Bankrekeningen",
       items: deps.bankAccounts,
-      activeCount: deps.bankAccounts.filter(item => ACTIVE_BANK_STATUSES.has(item.status) && hasOpenDateRange(item)).length,
+      activeItems: deps.bankAccounts.filter(item => ACTIVE_BANK_STATUSES.has(item.status) && hasOpenDateRange(item)),
     },
     {
       label: "E-mailkoppelingen",
       items: deps.emailSettings,
-      activeCount: deps.emailSettings.filter(item => ACTIVE_EMAIL_STATUSES.has(item.status)).length,
+      activeItems: deps.emailSettings.filter(item => ACTIVE_EMAIL_STATUSES.has(item.status)),
     },
     {
       label: "Verzekeringen",
       items: deps.insurancePolicies,
-      activeCount: deps.insurancePolicies.filter(item => ACTIVE_INSURANCE_STATUSES.has(item.status) && hasOpenDateRange(item)).length,
+      activeItems: deps.insurancePolicies.filter(item => ACTIVE_INSURANCE_STATUSES.has(item.status) && hasOpenDateRange(item)),
     },
     {
       label: "Documenten",
       items: deps.managedFiles,
-      activeCount: 0,
+      activeItems: [],
     },
     {
       label: "Medewerkeruitnodigingen",
       items: deps.employeeInvitations,
-      activeCount: deps.employeeInvitations.filter(item => ACTIVE_INVITATION_STATUSES.has(item.status)).length,
+      activeItems: deps.employeeInvitations.filter(item => ACTIVE_INVITATION_STATUSES.has(item.status)),
     },
     {
       label: "Toegangsauditlogs",
       items: deps.employeeAccessAuditLogs,
-      activeCount: 0,
+      activeItems: [],
     },
     {
       label: "Bestandsauditlogs",
       items: deps.managedFileAccessLogs,
-      activeCount: 0,
+      activeItems: [],
     },
     {
       label: "Payroll-runs",
       items: deps.payrollCalculationRuns,
-      activeCount: 0,
+      activeItems: [],
     },
     {
       label: "CAO-dienstverbandhistorie",
       items: deps.personnelCaoEmploymentEvents,
-      activeCount: 0,
+      activeItems: [],
     },
     {
       label: "Personeelsdocumenten",
       items: deps.personnelDocuments,
-      activeCount: 0,
+      activeItems: [],
     },
     {
       label: "Personeelskwalificaties",
       items: deps.personnelQualifications,
-      activeCount: 0,
+      activeItems: [],
     },
     {
       label: "Beveiligingspassen",
       items: deps.personnelSecurityPasses,
-      activeCount: deps.personnelSecurityPasses.filter(item => ACTIVE_SECURITY_PASS_STATUSES.has(item.status) && hasOpenDateRange(item)).length,
+      activeItems: deps.personnelSecurityPasses.filter(item => ACTIVE_SECURITY_PASS_STATUSES.has(item.status) && hasOpenDateRange(item)),
     },
   ];
 
   groups.forEach(group => {
-    if (group.activeCount > 0) {
+    if (group.activeItems.length > 0) {
       blockers.push({
         title: `${group.label} nog actief`,
-        detail: `${group.activeCount} gekoppelde record(s) zijn nog actief of openstaand.`,
+        detail: `${group.activeItems.length} gekoppelde record(s) zijn nog actief of openstaand. Bijvoorbeeld: ${summarizeRecords(group.activeItems)}.`,
       });
     }
   });
 
   groups.forEach(group => {
-    const recentCount = countRecentOrUnknownRecords(group.items, retentionThreshold);
-    if (recentCount > 0) {
+    const recentItems = group.items.filter(item => {
+      const recordDate = latestRecordDate(item);
+      return !recordDate || recordDate >= retentionThreshold;
+    });
+    if (recentItems.length > 0) {
       blockers.push({
         title: `${group.label} binnen bewaartermijn`,
-        detail: `${recentCount} record(s) vallen binnen ${PERMANENT_DELETE_RETENTION_LABEL} of hebben geen betrouwbare datum.`,
+        detail: `${recentItems.length} record(s) vallen binnen ${PERMANENT_DELETE_RETENTION_LABEL} of hebben geen betrouwbare datum. Bijvoorbeeld: ${summarizeRecords(recentItems)}.`,
       });
     }
   });
@@ -401,6 +535,7 @@ function buildPermanentDeleteGuard(company, dependencies = {}) {
   return {
     allowed: blockers.length === 0,
     blockers,
+    warnings,
     linkedCount: groups.reduce((count, group) => count + group.items.length, 0),
   };
 }
@@ -408,10 +543,17 @@ function buildPermanentDeleteGuard(company, dependencies = {}) {
 async function deleteCompanyDependencyRecords(dependencies = {}) {
   for (const [key, entityName] of COMPANY_DELETE_DEPENDENCY_ENTITIES) {
     const records = dependencies[key] || [];
+    if (!records.length) continue;
+
+    const entity = base44.entities[entityName];
+    if (!entity?.delete) {
+      throw new Error(`${entityName} kan niet automatisch worden opgeschoond. Definitief verwijderen is daarom gestopt.`);
+    }
+
     await Promise.all(
       records
         .filter(record => record?.id)
-        .map(record => base44.entities[entityName].delete(record.id))
+        .map(record => entity.delete(record.id))
     );
   }
 }
@@ -457,82 +599,21 @@ export default function CompanyDetail() {
   const {
     data: deletionDependencies,
     isLoading: deletionGuardLoading,
+    isFetching: deletionGuardFetching,
     isError: deletionGuardHasError,
+    error: deletionGuardError,
   } = useQuery({
     queryKey: ["company-permanent-delete-guard", companyId],
     queryFn: async () => {
-      const [
-        personnel,
-        personnelContracts,
-        personnelAssignments,
-        routes,
-        tasks,
-        caoAssignments,
-        locationAssignments,
-        wpbrLicenses,
-        branchMemberships,
-        accreditations,
-        bankAccounts,
-        emailSettings,
-        insurancePolicies,
-        managedFiles,
-        employeeAccessAuditLogs,
-        employeeInvitations,
-        managedFileAccessLogs,
-        payrollCalculationRuns,
-        personnelCaoEmploymentEvents,
-        personnelDocuments,
-        personnelQualifications,
-        personnelSecurityPasses,
-      ] = await Promise.all([
-        base44.entities.Personnel.filter({ primary_company_id: companyId }),
-        base44.entities.PersonnelContract.filter({ company_id: companyId }),
-        base44.entities.PersonnelCompanyAssignment.filter({ company_id: companyId }),
-        base44.entities.Route.filter({ operating_company_id: companyId }),
-        base44.entities.Task.filter({ operating_company_id: companyId }),
-        base44.entities.CompanyCaoAssignment.filter({ company_id: companyId }),
-        base44.entities.CompanyLocationAssignment.filter({ company_id: companyId }),
-        base44.entities.CompanyWpbrLicense.filter({ company_id: companyId }),
-        base44.entities.CompanyBranchMembership.filter({ company_id: companyId }),
-        base44.entities.CompanyAccreditation.filter({ company_id: companyId }),
-        base44.entities.CompanyBankAccount.filter({ company_id: companyId }),
-        base44.entities.CompanyEmailSettings.filter({ company_id: companyId }),
-        base44.entities.CompanyInsurancePolicy.filter({ company_id: companyId }),
-        base44.entities.ManagedFile.filter({ company_id: companyId }),
-        base44.entities.EmployeeAccessAuditLog.filter({ company_id: companyId }),
-        base44.entities.EmployeeInvitation.filter({ company_id: companyId }),
-        base44.entities.ManagedFileAccessLog.filter({ company_id: companyId }),
-        base44.entities.PayrollCalculationRun.filter({ company_id: companyId }),
-        base44.entities.PersonnelCaoEmploymentEvent.filter({ company_id: companyId }),
-        base44.entities.PersonnelDocument.filter({ company_id: companyId }),
-        base44.entities.PersonnelQualification.filter({ company_id: companyId }),
-        base44.entities.PersonnelSecurityPass.filter({ company_id: companyId }),
-      ]);
+      const results = await Promise.all(
+        COMPANY_DELETE_DEPENDENCY_CHECKS.map(check => fetchCompanyDependency(check, companyId))
+      );
 
-      return {
-        personnel,
-        personnelContracts,
-        personnelAssignments,
-        routes,
-        tasks,
-        caoAssignments,
-        locationAssignments,
-        wpbrLicenses,
-        branchMemberships,
-        accreditations,
-        bankAccounts,
-        emailSettings,
-        insurancePolicies,
-        managedFiles,
-        employeeAccessAuditLogs,
-        employeeInvitations,
-        managedFileAccessLogs,
-        payrollCalculationRuns,
-        personnelCaoEmploymentEvents,
-        personnelDocuments,
-        personnelQualifications,
-        personnelSecurityPasses,
-      };
+      return results.reduce((acc, result) => {
+        acc[result.key] = result.items;
+        if (result.failure) acc.__checkFailures.push(result.failure);
+        return acc;
+      }, { __checkFailures: [] });
     },
     enabled: !!companyId && company?.status === "archived",
   });
@@ -579,9 +660,14 @@ export default function CompanyDetail() {
   });
 
   const permanentDeleteGuard = buildPermanentDeleteGuard(company, deletionDependencies);
+  const deletionGuardChecking = company?.status === "archived" &&
+    (deletionGuardLoading || deletionGuardFetching || !deletionDependencies);
 
   const permanentDeleteCompanyMutation = useMutation({
     mutationFn: async () => {
+      if (deletionGuardChecking) {
+        throw new Error("Wacht tot de verwijdercontrole klaar is.");
+      }
       if (deletionGuardHasError) {
         throw new Error("De verwijdercontrole kon niet volledig worden uitgevoerd.");
       }
@@ -977,16 +1063,30 @@ export default function CompanyDetail() {
 
           {deletionGuardHasError ? (
             <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-              De controle op gekoppelde records kon niet worden uitgevoerd. Definitief verwijderen blijft daarom geblokkeerd.
+              De controle op gekoppelde records kon niet worden uitgevoerd. Definitief verwijderen blijft daarom geblokkeerd. Reden: {errorMessage(deletionGuardError)}
             </div>
-          ) : deletionGuardLoading ? (
+          ) : deletionGuardChecking ? (
             <div className="rounded-md border border-border bg-muted/40 p-3 text-sm text-muted-foreground">
               Controle op contracten, diensten, documenten en bewaartermijnen wordt uitgevoerd...
             </div>
           ) : permanentDeleteGuard.allowed ? (
-            <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900 dark:border-green-900/70 dark:bg-green-950/30 dark:text-green-100">
-              Er zijn geen actieve of bewaarplichtige koppelingen gevonden. Definitief verwijderen kan worden uitgevoerd.
-            </div>
+            <>
+              <div className="rounded-md border border-green-200 bg-green-50 p-3 text-sm text-green-900 dark:border-green-900/70 dark:bg-green-950/30 dark:text-green-100">
+                Er zijn geen actieve of bewaarplichtige koppelingen gevonden. Definitief verwijderen kan worden uitgevoerd.
+              </div>
+              {permanentDeleteGuard.warnings.length > 0 && (
+                <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
+                  <p className="font-medium">Niet-blokkerende waarschuwingen</p>
+                  <ul className="mt-2 space-y-1">
+                    {permanentDeleteGuard.warnings.map((warning, index) => (
+                      <li key={`${warning.title}-${index}`}>
+                        <span className="font-medium">{warning.title}:</span> {warning.detail}
+                      </li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </>
           ) : (
             <div className="rounded-md border border-amber-200 bg-amber-50 p-3 text-sm text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
               <p className="font-medium">Definitief verwijderen is geblokkeerd.</p>
@@ -1015,7 +1115,7 @@ export default function CompanyDetail() {
             <AlertDialogCancel disabled={permanentDeleteCompanyMutation.isPending}>Sluiten</AlertDialogCancel>
             <AlertDialogAction
               className="bg-destructive text-destructive-foreground hover:bg-destructive/90 disabled:cursor-not-allowed disabled:opacity-50"
-              disabled={deletionGuardHasError || deletionGuardLoading || !permanentDeleteGuard.allowed || permanentDeleteCompanyMutation.isPending}
+              disabled={deletionGuardHasError || deletionGuardChecking || !permanentDeleteGuard.allowed || permanentDeleteCompanyMutation.isPending}
               onClick={(event) => {
                 event.preventDefault();
                 permanentDeleteCompanyMutation.mutate();
