@@ -96,7 +96,6 @@ const QUALIFICATION_TYPES = [
 ];
 
 const PERSONNEL_TABS = [
-  { key: "overview", label: "Overzicht", icon: ClipboardCheck },
   { key: "payroll", label: "Loonheffing", icon: Banknote },
   { key: "identity", label: "Identiteit", icon: BadgeCheck },
   { key: "documents", label: "Documenten", icon: FileText },
@@ -620,7 +619,7 @@ function PayrollTab({ person, documents }) {
 // ─── Sidebar tabs panel ───────────────────────────────────────────────────────
 
 function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
-  const [active, setActive] = useState("overview");
+  const [active, setActive] = useState("payroll");
   const generalDocuments = dossier.documents.filter(d => !["identity_document","drivers_license","vog","cv","bank_account_proof","payroll_tax_statement"].includes(d.category));
   const identityDocs = dossier.documents.filter(d => d.category === "identity_document");
   const licenseDocs = dossier.documents.filter(d => d.category === "drivers_license");
