@@ -118,6 +118,10 @@ function buildDisplayName(p) {
   const first = p.call_name || p.first_name || p.legal_first_names || "";
   return [first, p.name_prefix, p.last_name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim() || p.name || "";
 }
+function buildFullName(p) {
+  const first = p.legal_first_names || p.first_name || p.call_name || "";
+  return [first, p.name_prefix, p.last_name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim() || p.name || "";
+}
 function getDisplayName(p) {
   return p.name || buildDisplayName(p) || "Naam onbekend";
 }
@@ -477,7 +481,7 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
           ) : (
             <div>
               <div className="flex flex-wrap items-center gap-2">
-                <h2 className="text-xl font-semibold text-foreground">{getDisplayName(data)}</h2>
+                <h2 className="text-xl font-semibold text-foreground">{buildFullName(data) || "Naam onbekend"}</h2>
                 <BadgePill className={STATUS_COLORS[getStatus(data)] || STATUS_COLORS.draft}>{STATUS_LABELS[getStatus(data)] || getStatus(data)}</BadgePill>
                 <BadgePill className={relationship === "self_employed" ? "bg-fuchsia-100 text-fuchsia-700" : "bg-blue-100 text-blue-700"}>{RELATIONSHIP_LABELS[relationship]}</BadgePill>
               </div>
