@@ -474,12 +474,6 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
               <div className="space-y-1"><span className="text-xs text-muted-foreground">Roepnaam</span><Input value={data.first_name || data.call_name || ""} onChange={e => { updateNamePart("first_name", e.target.value); set("call_name", e.target.value); }} className="h-8 text-sm" /></div>
               <div className="space-y-1"><span className="text-xs text-muted-foreground">Tussenvoegsel</span><Input value={data.name_prefix || ""} onChange={e => updateNamePart("name_prefix", e.target.value)} className="h-8 text-sm" /></div>
               <div className="space-y-1 md:col-span-2"><span className="text-xs text-muted-foreground">Achternaam</span><Input value={data.last_name || ""} onChange={e => updateNamePart("last_name", e.target.value)} className="h-8 text-sm" /></div>
-              <div className="space-y-1"><span className="text-xs text-muted-foreground">Relatie</span>
-                <Select value={data.employee_type || "loondienst"} onValueChange={v => { set("employee_type", v); set("relationship_type", v === "zzp" ? "self_employed" : "employee"); }}>
-                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
-                  <SelectContent><SelectItem value="loondienst">Loondienst</SelectItem><SelectItem value="zzp">ZZP'er</SelectItem></SelectContent>
-                </Select>
-              </div>
             </div>
           ) : (
             <div>
