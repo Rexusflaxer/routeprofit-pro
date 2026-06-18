@@ -144,6 +144,25 @@ const COUNTRIES = [
   "Verenigde Arabische Emiraten","Verenigde Staten","Uruguay","Venezuela","Vietnam","Zambia","Zimbabwe",
 ].sort((a, b) => a.localeCompare(b, "nl"));
 
+const NATIONALITIES = [
+  "Nederlandse","Belgische","Duitse","Franse","Britse","Amerikaanse","Turkse","Marokkaanse","Algerijnse",
+  "Tunesische","Spaanse","Italiaanse","Poolse","Roemeense","Oekraïense","Bulgaarse","Surinaamse",
+  "Antilliaanse","Indonesische","Chinese","Indiaase","Pakistaanse","Syrische","Iraakse","Iraanse",
+  "Afghaanse","Somalische","Eritrese","Ethiopische","Nigeriaanse","Ghanese","Zuid-Afrikaanse",
+  "Braziliaanse","Mexicaanse","Colombiaanse","Peruaanse","Venezolaanse","Argentijnse","Chileense",
+  "Russische","Kazachse","Azerbeidzjaanse","Armeense","Georgische","Moldavische","Wit-Russische",
+  "Litouwse","Letse","Estse","Finse","Zweedse","Noorse","Deense","IJslandse","Ierse","Portugese",
+  "Griekse","Hongaarse","Tsjechische","Slowaakse","Sloveense","Kroatische","Servische","Bosnische",
+  "Montenegrijnse","Albanese","Macedonische","Kosovaarse","Luxemburgse","Zwitserse","Oostenrijkse",
+  "Japanse","Koreaanse","Filipijnse","Vietnamese","Thaise","Maleisische","Singaporese","Cambodjaanse",
+  "Myanmarese","Bengalese","Nepalese","Sri Lankaanse","Israëlische","Jordaanse","Libanese","Syrische",
+  "Koeweitische","Saoedi-Arabische","Emiratische","Egyptische","Libische","Tunesische","Senegalese",
+  "Rwandese","Burundische","Tanzaniaanse","Keniaanse","Ugandese","Mozambikaanse","Zambiaanse","Zimbabwaanse",
+  "Namibische","Botswaanse","Congolese","Angolese","Camerounse","Ivoorkustse","Malische","Burkinese",
+  "Guatemalteekse","Costa Ricaanse","Cubaanse","Jamaicaanse","Haïtiaanse","Dominicaanse","Uruguayaanse",
+  "Paraguayaanse","Boliviaanse","Ecuadoriaanse","Panamaanse","Nicaraguaanse",
+].sort((a, b) => a.localeCompare(b, "nl"));
+
 const QUALIFICATION_TYPES = [
   { value: "beveiliger_2", label: "Beveiliger niveau 2" },
   { value: "beveiliger_3", label: "Beveiliger niveau 3" },
@@ -305,6 +324,39 @@ function CountrySelect({ value, onChange }) {
             <button key={c} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors"
               onMouseDown={() => { setQuery(c); onChange(c); setOpen(false); }}>
               {c}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
+function NationalitySelect({ value, onChange }) {
+  const [query, setQuery] = useState(value || "");
+  const [open, setOpen] = useState(false);
+
+  React.useEffect(() => { setQuery(value || ""); }, [value]);
+
+  const filtered = query.length > 0
+    ? NATIONALITIES.filter(n => n.toLowerCase().includes(query.toLowerCase())).slice(0, 8)
+    : NATIONALITIES.slice(0, 8);
+
+  return (
+    <div className="relative">
+      <Input
+        value={query}
+        onChange={e => { setQuery(e.target.value); onChange(e.target.value); setOpen(true); }}
+        onFocus={() => setOpen(true)}
+        onBlur={() => setTimeout(() => setOpen(false), 150)}
+        placeholder="Typ een nationaliteit..."
+      />
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 w-full mt-1 rounded-md border border-border bg-popover shadow-lg max-h-48 overflow-auto">
+          {filtered.map(n => (
+            <button key={n} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors"
+              onMouseDown={() => { setQuery(n); onChange(n); setOpen(false); }}>
+              {n}
             </button>
           ))}
         </div>
@@ -640,7 +692,7 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
           <ProfileInfoRow label="Geboortedatum" editing={editing} value={formatDate(data.date_of_birth)}><Input type="date" value={data.date_of_birth || ""} onChange={e => set("date_of_birth", e.target.value)} /></ProfileInfoRow>
           <ProfileInfoRow label="Geboorteplaats" editing={editing} value={data.place_of_birth}><PlaceSearchInput value={data.place_of_birth || ""} onChange={v => set("place_of_birth", v)} /></ProfileInfoRow>
           <ProfileInfoRow label="Geboorteland" editing={editing} value={data.country_of_birth}><CountrySelect value={data.country_of_birth || ""} onChange={v => set("country_of_birth", v)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Nationaliteit" editing={editing} value={data.nationality}><CountrySelect value={data.nationality || ""} onChange={v => set("nationality", v)} /></ProfileInfoRow>
+          <ProfileInfoRow label="Nationaliteit" editing={editing} value={data.nationality}><NationalitySelect value={data.nationality || ""} onChange={v => set("nationality", v)} /></ProfileInfoRow>
         </div>
         <div>
           <h3 className="mb-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contact & adres</h3>
