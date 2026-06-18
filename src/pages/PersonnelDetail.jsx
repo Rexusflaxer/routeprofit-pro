@@ -301,7 +301,7 @@ function PlaceSearchInput({ value, onChange }) {
     setQuery(v);
     onChange(v);
     clearTimeout(timer.current);
-    timer.current = setTimeout(() => { search(v); setOpen(true); }, 300);
+    timer.current = setTimeout(() => { search(v); setOpen(true); }, 150);
   };
 
   return (
