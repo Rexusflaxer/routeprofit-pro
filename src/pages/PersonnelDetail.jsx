@@ -28,7 +28,6 @@ import {
   Pencil,
   Plus,
   ShieldCheck,
-  Upload,
   UserCheck,
   Users,
   X,
@@ -38,6 +37,7 @@ import { uploadManagedFile } from "@/lib/managedFiles";
 import PersonnelAccessTab from "@/components/personnel/PersonnelAccessTab";
 import PersonnelContractsTab from "@/components/personnel/PersonnelContractsTab";
 import CostCalculator from "@/components/personnel/CostCalculator";
+import PhotoCropUpload from "@/components/personnel/PhotoCropUpload";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -681,19 +681,8 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["personnel"] }); onSaved?.(); },
   });
-  const uploadPhoto = async (file) => {
-    setUploadingPhoto(true);
-    try {
-      const result = await uploadManagedFile({
-        file, ownerType: "personnel", ownerId: person.id,
-        companyId: form.primary_company_id || null,
-        ownerLabel: buildDisplayName(form) || "Medewerker",
-        domain: "identity", category: "personnel_photo",
-        sourceEntity: "Personnel", sourceEntityId: person.id, sourceField: "photo_file_url",
-        documentLabel: "Pasfoto", isSensitive: true, folderSegments: ["identity", "photo"]
-      });
-      setForm(cur => ({ ...cur, photo_file_url: result.file_url, photo_file_id: result.managed_file_id, photo_download_filename: result.download_filename, photo_logical_path: result.logical_path }));
-    } finally { setUploadingPhoto(false); }
+  const handlePhotoUploaded = (file_url) => {
+    setForm(cur => ({ ...cur, photo_file_url: file_url }));
   };
   const data = editing ? form : person;
   const relationship = getRelationshipType(data);
@@ -713,10 +702,11 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
             : <span className="text-xl font-semibold text-muted-foreground">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
           }
           {editing && (
-            <label className="absolute inset-0 flex cursor-pointer items-center justify-center bg-black/40 text-white">
-              <input type="file" accept="image/*" className="hidden" onChange={e => e.target.files?.[0] && uploadPhoto(e.target.files[0])} />
-              <Upload className="h-5 w-5" />
-            </label>
+            <PhotoCropUpload
+              onUploaded={handlePhotoUploaded}
+              uploading={uploadingPhoto}
+              setUploading={setUploadingPhoto}
+            />
           )}
         </div>
         <div className="min-w-0 flex-1">
