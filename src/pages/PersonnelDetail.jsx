@@ -821,31 +821,16 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
               />
             </div>
           </ProfileInfoRow>
-          {editing ? (
-            <div className="flex flex-col py-1 gap-2">
-              <Label className="text-xs text-muted-foreground">Adres</Label>
-              <AddressAutocomplete
-                data={data}
-                onAddressSelect={addr => {
-                  Object.entries(addr).forEach(([k, v]) => set(k, v));
-                }}
-              />
-              <div className="grid grid-cols-2 gap-2 mt-1">
-                <div className="space-y-1"><Label className="text-xs text-muted-foreground">Straat</Label><Input value={data.street_name || ""} onChange={e => set("street_name", e.target.value)} placeholder="Straatnaam" /></div>
-                <div className="space-y-1"><Label className="text-xs text-muted-foreground">Huisnr.</Label>
-                  <div className="flex gap-1"><Input value={data.house_number || ""} onChange={e => set("house_number", e.target.value)} placeholder="Nr." /><Input value={data.house_number_addition || ""} onChange={e => set("house_number_addition", e.target.value)} placeholder="Toev." className="w-20" /></div>
-                </div>
-                <div className="space-y-1"><Label className="text-xs text-muted-foreground">Postcode</Label><Input value={data.postal_code || ""} onChange={e => set("postal_code", e.target.value)} /></div>
-                <div className="space-y-1"><Label className="text-xs text-muted-foreground">Stad</Label><Input value={data.city || ""} onChange={e => set("city", e.target.value)} /></div>
-              </div>
-            </div>
-          ) : (
-            <ProfileInfoRow label="Adres" editing={false} value={[
+          <ProfileInfoRow label="Adres" editing={editing} value={[
               data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(),
               [data.postal_code, data.city].filter(Boolean).join(" "),
               data.country && data.country !== "Nederland" ? data.country : null,
-            ].filter(Boolean).join(", ")} />
-          )}
+            ].filter(Boolean).join(", ")}>
+            <AddressAutocomplete
+              data={data}
+              onAddressSelect={addr => { Object.entries(addr).forEach(([k, v]) => set(k, v)); }}
+            />
+          </ProfileInfoRow>
         </div>
       </div>
 
