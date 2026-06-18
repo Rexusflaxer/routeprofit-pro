@@ -696,7 +696,7 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       {/* Banner */}
       <div className="flex flex-col gap-5 border-b border-border bg-muted/40 px-6 py-5 sm:flex-row sm:items-center">
-        <div className="group relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-white">
+        <div className="group relative flex h-20 w-[56px] shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-white">
           {data.photo_file_url
             ? <img src={data.photo_file_url} alt="" className="h-full w-full object-cover" />
             : <span className="text-xl font-semibold text-muted-foreground">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
