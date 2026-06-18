@@ -260,8 +260,13 @@ function PlaceSearchInput({ value, onChange }) {
     if (q.length < 2) { setSuggestions([]); return; }
     try {
       const res = await base44.functions.invoke("searchAddress", { query: q });
-      const raw = res.data?.results || res.data?.suggestions || [];
-      const cities = [...new Set(raw.map(r => r.city || r.municipality || r.label || "").filter(Boolean))];
+      const raw = res.data?.suggestions || res.data?.results || [];
+      // Extract the first part of "City, Municipality, Province" or use full address
+      const cities = [...new Set(raw.map(r => {
+        const addr = r.city || r.municipality || r.address || r.label || "";
+        // Take the first segment before the comma
+        return addr.split(",")[0].trim();
+      }).filter(Boolean))];
       setSuggestions(cities.slice(0, 8));
     } catch { setSuggestions([]); }
   };
