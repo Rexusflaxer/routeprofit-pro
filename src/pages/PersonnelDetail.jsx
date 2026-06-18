@@ -745,42 +745,24 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
                   {data.job_title_raw && (
                     <p className="mt-0.5 text-sm text-muted-foreground">{data.job_title_raw}</p>
                   )}
-                  <div className="mt-4 flex flex-wrap gap-2">
-                    {data.email && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
-                        <Mail className="h-3 w-3 text-primary" />{data.email}
-                      </span>
-                    )}
-                    {data.phone && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
-                        <Phone className="h-3 w-3 text-primary" />{data.phone}
-                      </span>
-                    )}
-                    {(data.city || address) && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
-                        <MapPin className="h-3 w-3 text-primary" />{data.city || address}
-                      </span>
-                    )}
-                    {data.date_of_birth && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
-                        <CalendarDays className="h-3 w-3 text-primary" />{formatDate(data.date_of_birth)}
-                      </span>
-                    )}
-                    {data.place_of_birth && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
-                        <MapPin className="h-3 w-3 text-muted-foreground" />Geb. {data.place_of_birth}{data.country_of_birth && data.country_of_birth !== "Nederland" ? `, ${data.country_of_birth}` : ""}
-                      </span>
-                    )}
-                    {data.nationality && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
-                        <UserCheck className="h-3 w-3 text-muted-foreground" />{data.nationality}
-                      </span>
-                    )}
-                    {data.personnel_number && (
-                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
-                        <BadgeCheck className="h-3 w-3 text-muted-foreground" />#{data.personnel_number}
-                      </span>
-                    )}
+                  <div className="mt-4 grid grid-cols-2 gap-x-8 gap-y-1 text-xs">
+                    {[
+                      { label: "E-mail", value: data.email },
+                      { label: "Telefoon", value: data.phone },
+                      { label: "Geslacht", value: data.gender === "male" ? "Man" : data.gender === "female" ? "Vrouw" : data.gender === "other" ? "Anders" : null },
+                      { label: "Geboortedatum", value: formatDate(data.date_of_birth, null) },
+                      { label: "Geboorteplaats", value: data.place_of_birth },
+                      { label: "Geboorteland", value: data.country_of_birth },
+                      { label: "Nationaliteit", value: data.nationality },
+                      { label: "Adres", value: [data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(), [data.postal_code, data.city].filter(Boolean).join(" ")].filter(Boolean).join(", ") || null },
+                      { label: "Land", value: data.country && data.country !== "Nederland" ? data.country : null },
+                      { label: "Personeelsnr.", value: data.personnel_number ? `#${data.personnel_number}` : null },
+                    ].filter(f => f.value).map(f => (
+                      <div key={f.label} className="flex gap-2 py-0.5">
+                        <span className="w-28 shrink-0 text-muted-foreground">{f.label}</span>
+                        <span className="font-medium text-foreground">{f.value}</span>
+                      </div>
+                    ))}
                   </div>
                 </>
               )}
