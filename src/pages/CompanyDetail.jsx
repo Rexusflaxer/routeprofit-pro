@@ -9,14 +9,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import {
   AlertTriangle,
   ArrowLeft,
-  Archive,
   Building2,
   Check,
   Edit,
   Handshake,
   Loader2,
   MapPin,
-  RotateCcw,
   Trash2,
   Upload,
   X,
@@ -950,36 +948,6 @@ export default function CompanyDetail() {
                 <Button onClick={startEdit} variant="outline">
                   <Edit className="w-4 h-4 mr-1" /> Wijzigen
                 </Button>
-                {isArchived ? (
-                  <>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      onClick={() => restoreCompanyMutation.mutate()}
-                      disabled={restoreCompanyMutation.isPending}
-                    >
-                      <RotateCcw className="w-4 h-4 mr-1" />
-                      {restoreCompanyMutation.isPending ? "Herstellen..." : "Herstellen"}
-                    </Button>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                      onClick={() => setPermanentDeleteDialogOpen(true)}
-                    >
-                      <Trash2 className="w-4 h-4 mr-1" /> Definitief verwijderen
-                    </Button>
-                  </>
-                ) : (
-                  <Button
-                    type="button"
-                    variant="outline"
-                    className="border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
-                    onClick={() => setArchiveDialogOpen(true)}
-                  >
-                    <Archive className="w-4 h-4 mr-1" /> Verplaatsen naar archief
-                  </Button>
-                )}
               </>
             )}
           </div>
@@ -1105,6 +1073,13 @@ export default function CompanyDetail() {
         companyId={companyId}
         companies={companies}
         company={company}
+        isArchived={isArchived}
+        onArchive={() => setArchiveDialogOpen(true)}
+        onRestore={() => restoreCompanyMutation.mutate()}
+        onPermanentDelete={() => setPermanentDeleteDialogOpen(true)}
+        archivePending={archiveCompanyMutation.isPending}
+        restorePending={restoreCompanyMutation.isPending}
+        permanentDeletePending={permanentDeleteCompanyMutation.isPending}
       />
 
       <AlertDialog open={archiveDialogOpen} onOpenChange={setArchiveDialogOpen}>

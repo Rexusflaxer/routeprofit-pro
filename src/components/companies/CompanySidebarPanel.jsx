@@ -1,7 +1,9 @@
 import React, { useState } from "react";
-import { Award, BookOpen, CreditCard, Handshake, Mail, MapPin, Shield, ShieldCheck } from "lucide-react";
+import { AlertTriangle, Archive, Award, BookOpen, CreditCard, Handshake, Lock, Mail, MapPin, RotateCcw, Shield, ShieldCheck, Trash2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { getCompanyProfileLocations } from "@/lib/companyLocationScope";
 import { getActiveWpbrLicenseType } from "@/lib/teamhubServiceRules";
 import WpbrTab from "./WpbrTab";
@@ -24,7 +26,10 @@ const MENU_ITEMS = [
   { key: "teamhub", label: "LOQ Teamhub", icon: Handshake },
   { key: "bank", label: "Bank", icon: CreditCard },
   { key: "email", label: "E-mail", icon: Mail },
+  { key: "management", label: "Beheer", icon: Lock },
 ];
+
+const MANAGEMENT_CONFIRMATION = "BEHEER";
 
 function hasTeamhubConfiguration(company) {
   return Boolean(
@@ -55,7 +60,187 @@ function hasInsuranceAction(policy, today) {
   return Boolean(policy.valid_until && policy.valid_until < today);
 }
 
-export default function CompanySidebarPanel({ companyId, companies, company }) {
+function ProtectedManagementTab({
+  company,
+  isArchived,
+  onArchive,
+  onRestore,
+  onPermanentDelete,
+  archivePending,
+  restorePending,
+  permanentDeletePending,
+}) {
+  const [unlocked, setUnlocked] = useState(false);
+  const [confirmation, setConfirmation] = useState("");
+  const [error, setError] = useState("");
+  const companyName = company?.display_name || "dit bedrijf";
+
+  const unlock = () => {
+    if (confirmation.trim().toUpperCase() !== MANAGEMENT_CONFIRMATION) {
+      setError(`Typ "${MANAGEMENT_CONFIRMATION}" om beheer te openen.`);
+      return;
+    }
+    setUnlocked(true);
+    setError("");
+  };
+
+  if (!unlocked) {
+    return (
+      <div className="p-6 space-y-5">
+        <div>
+          <p className="text-xs font-semibold text-primary uppercase tracking-wider">Beveiligd beheer</p>
+          <h3 className="text-lg font-semibold text-foreground mt-1">Risico-acties zijn afgeschermd</h3>
+          <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+            Hier staan acties die gevolgen hebben voor koppelingen, historie en zichtbaarheid. Open dit alleen wanneer je bewust een beheeractie voor dit bedrijfsprofiel wilt uitvoeren.
+          </p>
+        </div>
+
+        <div className="rounded-lg border border-border bg-muted/20 p-4 max-w-2xl">
+          <div className="flex items-start gap-3">
+            <Lock className="mt-0.5 h-5 w-5 shrink-0 text-primary" />
+            <div className="min-w-0 flex-1">
+              <p className="text-sm font-semibold text-foreground">Extra bevestiging</p>
+              <p className="text-xs text-muted-foreground mt-1">
+                Bij Google-, Microsoft- of andere externe login kan LOQ het accountwachtwoord niet opnieuw controleren in deze browser. Daarom vragen we hier een bewuste bevestiging voordat deze beheerknoppen zichtbaar worden.
+              </p>
+              <label className="mt-4 block text-xs font-medium text-muted-foreground">
+                Typ <span className="font-mono font-semibold text-foreground">{MANAGEMENT_CONFIRMATION}</span> om beheer te openen
+              </label>
+              <div className="mt-2 flex flex-wrap gap-2">
+                <Input
+                  value={confirmation}
+                  onChange={(event) => {
+                    setConfirmation(event.target.value);
+                    setError("");
+                  }}
+                  className={`h-8 max-w-[220px] font-mono text-sm ${error ? "border-destructive" : ""}`}
+                  placeholder={MANAGEMENT_CONFIRMATION}
+                  onKeyDown={(event) => event.key === "Enter" && unlock()}
+                />
+                <Button type="button" size="sm" onClick={unlock}>
+                  Beheer openen
+                </Button>
+              </div>
+              {error && <p className="mt-2 text-xs text-destructive">{error}</p>}
+            </div>
+          </div>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className="p-6 space-y-5">
+      <div>
+        <p className="text-xs font-semibold text-primary uppercase tracking-wider">Beveiligd beheer</p>
+        <h3 className="text-lg font-semibold text-foreground mt-1">Beheeracties voor {companyName}</h3>
+        <p className="text-sm text-muted-foreground mt-1 max-w-2xl">
+          Deze acties zijn bewust uit de profielheader gehaald. Gebruik ze alleen wanneer het bedrijf echt gearchiveerd, hersteld of juridisch definitief verwijderd mag worden.
+        </p>
+      </div>
+
+      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-950 dark:border-amber-900/70 dark:bg-amber-950/30 dark:text-amber-100">
+        <div className="flex items-start gap-3">
+          <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-amber-600 dark:text-amber-300" />
+          <div>
+            <p className="font-semibold">Controleer eerst of dit gevolgen heeft voor contracten, diensten, documenten of planning.</p>
+            <p className="mt-1 text-xs opacity-90">
+              Archiveren bewaart alle historie en schakelt zichtbaarheid uit. Definitief verwijderen kan alleen vanuit het archief en wordt nogmaals gecontroleerd op bewaarplichtige of actieve koppelingen.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="grid gap-3 lg:grid-cols-2">
+        {!isArchived ? (
+          <div className="rounded-lg border border-border bg-card p-4">
+            <div className="flex items-start gap-3">
+              <Archive className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+              <div className="min-w-0 flex-1">
+                <p className="text-sm font-semibold text-foreground">Verplaatsen naar archief</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  Het bedrijf blijft bewaard, maar wordt uit actief gebruik gehaald. Teamhub-zichtbaarheid wordt uitgeschakeld.
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="mt-4 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                  onClick={onArchive}
+                  disabled={archivePending}
+                >
+                  <Archive className="mr-1 h-3.5 w-3.5" />
+                  {archivePending ? "Archiveren..." : "Verplaatsen naar archief"}
+                </Button>
+              </div>
+            </div>
+          </div>
+        ) : (
+          <>
+            <div className="rounded-lg border border-border bg-card p-4">
+              <div className="flex items-start gap-3">
+                <RotateCcw className="mt-0.5 h-5 w-5 shrink-0 text-muted-foreground" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground">Bedrijf herstellen</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Zet dit bedrijf terug naar actief gebruik. Controleer daarna opnieuw de tabs met vergunningen, diensten en Teamhub.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={onRestore}
+                    disabled={restorePending}
+                  >
+                    <RotateCcw className="mr-1 h-3.5 w-3.5" />
+                    {restorePending ? "Herstellen..." : "Herstellen"}
+                  </Button>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+              <div className="flex items-start gap-3">
+                <Trash2 className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+                <div className="min-w-0 flex-1">
+                  <p className="text-sm font-semibold text-foreground">Definitief verwijderen</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Alleen mogelijk wanneer LOQ geen actieve of bewaarplichtige koppelingen vindt. Deze controle volgt in de bevestiging.
+                  </p>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-4 border-destructive/40 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                    onClick={onPermanentDelete}
+                    disabled={permanentDeletePending}
+                  >
+                    <Trash2 className="mr-1 h-3.5 w-3.5" />
+                    Definitief verwijderen
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
+export default function CompanySidebarPanel({
+  companyId,
+  companies,
+  company,
+  isArchived = false,
+  onArchive,
+  onRestore,
+  onPermanentDelete,
+  archivePending = false,
+  restorePending = false,
+  permanentDeletePending = false,
+}) {
   const getInitialActiveTab = () => {
     if (typeof window === "undefined") return "wpbr";
     const tab = new URLSearchParams(window.location.search).get("tab");
@@ -200,6 +385,19 @@ export default function CompanySidebarPanel({ companyId, companies, company }) {
 
         {active === "teamhub" && (
           <TeamhubTab companyId={companyId} company={company} />
+        )}
+
+        {active === "management" && (
+          <ProtectedManagementTab
+            company={company}
+            isArchived={isArchived}
+            onArchive={onArchive}
+            onRestore={onRestore}
+            onPermanentDelete={onPermanentDelete}
+            archivePending={archivePending}
+            restorePending={restorePending}
+            permanentDeletePending={permanentDeletePending}
+          />
         )}
       </div>
     </div>
