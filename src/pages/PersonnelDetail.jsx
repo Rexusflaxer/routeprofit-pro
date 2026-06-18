@@ -365,6 +365,82 @@ function NationalitySelect({ value, onChange }) {
   );
 }
 
+function AddressAutocomplete({ data, onAddressSelect }) {
+  const [query, setQuery] = useState("");
+  const [suggestions, setSuggestions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const abortRef = React.useRef(null);
+
+  // Build current address string for display
+  const currentAddress = [
+    data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(),
+    [data.postal_code, data.city].filter(Boolean).join(" "),
+  ].filter(Boolean).join(", ");
+
+  const search = async (q) => {
+    if (q.length < 3) { setSuggestions([]); return; }
+    const token = {};
+    abortRef.current = token;
+    setLoading(true);
+    try {
+      const res = await base44.functions.invoke("searchAddress", { query: q });
+      if (abortRef.current !== token) return;
+      const raw = res.data?.suggestions || res.data?.results || [];
+      setSuggestions(raw.slice(0, 8));
+      setOpen(true);
+    } catch { setSuggestions([]); }
+    finally { setLoading(false); }
+  };
+
+  const handleSelect = (s) => {
+    // Parse suggestion into address parts
+    const label = s.label || s.address || "";
+    // Try to extract postcode + city from label
+    const postcodeMatch = label.match(/\b(\d{4}\s?[A-Z]{2})\b/);
+    const parts = label.split(",").map(p => p.trim());
+    onAddressSelect({
+      street_name: s.street || s.streetName || parts[0]?.replace(/\s+\d+.*$/, "").trim() || "",
+      house_number: s.houseNumber || (parts[0]?.match(/\d+[a-zA-Z]?/))?.[0] || "",
+      house_number_addition: s.houseNumberAddition || "",
+      postal_code: postcodeMatch?.[1] || s.postalCode || s.postcode || "",
+      city: s.city || s.municipality || parts[1] || "",
+      country: s.country || "Nederland",
+    });
+    setQuery(label);
+    setOpen(false);
+    setSuggestions([]);
+  };
+
+  return (
+    <div className="space-y-2">
+      <div className="relative">
+        <Input
+          value={query}
+          onChange={e => { setQuery(e.target.value); search(e.target.value); }}
+          onFocus={() => { if (suggestions.length > 0) setOpen(true); }}
+          onBlur={() => setTimeout(() => setOpen(false), 150)}
+          placeholder="Zoek adres, bijv. Dorpsstraat 12 Amsterdam..."
+        />
+        {loading && <div className="absolute right-3 top-2.5 h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" />}
+        {open && suggestions.length > 0 && (
+          <div className="absolute z-50 w-full mt-1 rounded-md border border-border bg-popover shadow-lg max-h-56 overflow-auto">
+            {suggestions.map((s, i) => (
+              <button key={i} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors"
+                onMouseDown={() => handleSelect(s)}>
+                {s.label || s.address || JSON.stringify(s)}
+              </button>
+            ))}
+          </div>
+        )}
+      </div>
+      {currentAddress && (
+        <p className="text-xs text-muted-foreground">Huidig: {currentAddress}</p>
+      )}
+    </div>
+  );
+}
+
 function PlaceSearchInput({ value, onChange }) {
   const [query, setQuery] = useState(value || "");
   const [open, setOpen] = useState(false);
@@ -745,13 +821,31 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
               />
             </div>
           </ProfileInfoRow>
-          <ProfileInfoRow label="Straatnaam" editing={editing} value={data.street_name}><Input value={data.street_name || ""} onChange={e => set("street_name", e.target.value)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Huisnummer" editing={editing} value={[data.house_number, data.house_number_addition].filter(Boolean).join(" ")}>
-            <div className="grid grid-cols-[1fr_120px] gap-2"><Input value={data.house_number || ""} onChange={e => set("house_number", e.target.value)} placeholder="Nr." /><Input value={data.house_number_addition || ""} onChange={e => set("house_number_addition", e.target.value)} placeholder="Toev." /></div>
-          </ProfileInfoRow>
-          <ProfileInfoRow label="Postcode" editing={editing} value={data.postal_code}><Input value={data.postal_code || ""} onChange={e => set("postal_code", e.target.value)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Plaats" editing={editing} value={data.city}><Input value={data.city || ""} onChange={e => set("city", e.target.value)} /></ProfileInfoRow>
-          <ProfileInfoRow label="Land" editing={editing} value={data.country || "Nederland"}><Input value={data.country || "Nederland"} onChange={e => set("country", e.target.value)} /></ProfileInfoRow>
+          {editing ? (
+            <div className="flex flex-col py-1 gap-2">
+              <Label className="text-xs text-muted-foreground">Adres</Label>
+              <AddressAutocomplete
+                data={data}
+                onAddressSelect={addr => {
+                  Object.entries(addr).forEach(([k, v]) => set(k, v));
+                }}
+              />
+              <div className="grid grid-cols-2 gap-2 mt-1">
+                <div className="space-y-1"><Label className="text-xs text-muted-foreground">Straat</Label><Input value={data.street_name || ""} onChange={e => set("street_name", e.target.value)} placeholder="Straatnaam" /></div>
+                <div className="space-y-1"><Label className="text-xs text-muted-foreground">Huisnr.</Label>
+                  <div className="flex gap-1"><Input value={data.house_number || ""} onChange={e => set("house_number", e.target.value)} placeholder="Nr." /><Input value={data.house_number_addition || ""} onChange={e => set("house_number_addition", e.target.value)} placeholder="Toev." className="w-20" /></div>
+                </div>
+                <div className="space-y-1"><Label className="text-xs text-muted-foreground">Postcode</Label><Input value={data.postal_code || ""} onChange={e => set("postal_code", e.target.value)} /></div>
+                <div className="space-y-1"><Label className="text-xs text-muted-foreground">Stad</Label><Input value={data.city || ""} onChange={e => set("city", e.target.value)} /></div>
+              </div>
+            </div>
+          ) : (
+            <ProfileInfoRow label="Adres" editing={false} value={[
+              data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(),
+              [data.postal_code, data.city].filter(Boolean).join(" "),
+              data.country && data.country !== "Nederland" ? data.country : null,
+            ].filter(Boolean).join(", ")} />
+          )}
         </div>
       </div>
 
