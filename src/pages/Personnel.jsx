@@ -1396,7 +1396,6 @@ function PersonnelList({ personnel, companies, selectedId, onSelect, onEdit, onD
             <span className="w-28 shrink-0">Relatie</span>
             <span className="w-28 shrink-0">HR</span>
             <span className="w-28 shrink-0">Status</span>
-            <span className="w-28 shrink-0">App</span>
             <span className="w-28 shrink-0 text-right">Acties</span>
           </div>
           <div className="divide-y divide-border">
@@ -1438,13 +1437,6 @@ function PersonnelList({ personnel, companies, selectedId, onSelect, onEdit, onD
                   </span>
                   <span className="w-28 shrink-0">
                     <BadgePill className={STATUS_COLORS[status] || STATUS_COLORS.draft}>{STATUS_LABELS[status] || status}</BadgePill>
-                  </span>
-                  <span className="w-28 shrink-0">
-                    {person.linked_user_id ? (
-                      <BadgePill className="bg-emerald-100 text-emerald-700" icon={UserCheck}>Gekoppeld</BadgePill>
-                    ) : (
-                      <BadgePill className="bg-slate-100 text-slate-600">Lokaal</BadgePill>
-                    )}
                   </span>
                   <div className="w-28 shrink-0" onClick={event => event.stopPropagation()}>
                     <div className="flex justify-end gap-1">
