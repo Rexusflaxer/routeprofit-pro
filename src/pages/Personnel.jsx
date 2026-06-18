@@ -1448,9 +1448,6 @@ function PersonnelList({ personnel, companies, selectedId, onSelect, onEdit, onD
                   </span>
                   <div className="w-28 shrink-0" onClick={event => event.stopPropagation()}>
                     <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onCalculate(person)} title="Kosten">
-                        <BriefcaseBusiness className="h-4 w-4" />
-                      </Button>
                       <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(person)} title="Bewerken">
                         <Pencil className="h-4 w-4" />
                       </Button>
