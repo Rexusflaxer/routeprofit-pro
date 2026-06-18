@@ -13,6 +13,7 @@ import RouteExecutions from './pages/RouteExecutions';
 import RouteExecutionDetails from './pages/RouteExecutionDetails';
 import ReportTemplates from './pages/ReportTemplates';
 import Companies from './pages/Companies';
+import PersonnelDetail from './pages/PersonnelDetail';
 import EmployeePortal from './pages/EmployeePortal';
 import CompanyDetail from './pages/CompanyDetail';
 import EmailOAuthCallback from './pages/EmailOAuthCallback';
@@ -66,6 +67,7 @@ const AuthenticatedApp = () => {
       <Route path="/EmployeePortal" element={<LayoutWrapper currentPageName="EmployeePortal"><EmployeePortal /></LayoutWrapper>} />
       <Route path="/CompanyDetail" element={<LayoutWrapper currentPageName="Companies"><CompanyDetail /></LayoutWrapper>} />
       <Route path="/email-oauth/callback" element={<LayoutWrapper currentPageName="Companies"><EmailOAuthCallback /></LayoutWrapper>} />
+      <Route path="/PersonnelDetail" element={<LayoutWrapper currentPageName="Personnel"><PersonnelDetail /></LayoutWrapper>} />
       {/* CAOBeheer: geen route — CAO governance is owner-only via Codex/Cloudflare.
            Klanten kunnen CAO-regels/configuraties niet zien, goedkeuren of aanpassen. */}
       {Object.entries(Pages).map(([path, Page]) => (

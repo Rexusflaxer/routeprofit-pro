@@ -2,6 +2,7 @@ import React, { useEffect, useMemo, useState } from "react";
 import PageTransition from "@/components/ui-custom/PageTransition";
 import { base44 } from "@/api/base44Client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { useNavigate } from "react-router-dom";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -1549,50 +1550,23 @@ function SubcontractorsPanel({ subcontractors, onCreate, onEdit, onDelete }) {
 
 export default function Personnel() {
   const queryClient = useQueryClient();
-  const [selectedPersonnelId, setSelectedPersonnelId] = useState(null);
-  const [editingProfileId, setEditingProfileId] = useState(null);
-  const [newDraftPersonnelId, setNewDraftPersonnelId] = useState(null);
+  const navigate = useNavigate();
   const [activeTopTab, setActiveTopTab] = useState("employees");
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
   const [filterFunction, setFilterFunction] = useState("all");
-  const [recordDialogType, setRecordDialogType] = useState(null);
   const [subcontractorDialogOpen, setSubcontractorDialogOpen] = useState(false);
   const [editingSubcontractor, setEditingSubcontractor] = useState(null);
 
   const { data: personnel = [] } = useQuery({ queryKey: ["personnel"], queryFn: () => base44.entities.Personnel.list() });
   const { data: companies = [] } = useQuery({ queryKey: ["companies"], queryFn: () => base44.entities.Company.list() });
   const { data: subcontractors = [] } = useQuery({ queryKey: ["subcontractors"], queryFn: () => safeList("SubcontractorCompany", "-created_date") });
-  const { data: documents = [] } = useQuery({ queryKey: ["personnel-documents"], queryFn: () => safeList("PersonnelDocument", "-created_date") });
-  const { data: qualifications = [] } = useQuery({ queryKey: ["personnel-qualifications"], queryFn: () => safeList("PersonnelQualification", "-created_date") });
-  const { data: bankAccounts = [] } = useQuery({ queryKey: ["personnel-bank-accounts"], queryFn: () => safeList("PersonnelBankAccount", "-created_date") });
-  const { data: emergencyContacts = [] } = useQuery({ queryKey: ["personnel-emergency-contacts"], queryFn: () => safeList("PersonnelEmergencyContact", "-created_date") });
-  const { data: securityPasses = [] } = useQuery({ queryKey: ["personnel-security-passes"], queryFn: () => safeList("PersonnelSecurityPass", "-created_date") });
-  const { data: restrictions = [] } = useQuery({ queryKey: ["personnel-restrictions"], queryFn: () => safeList("PersonnelRestriction", "-created_date") });
-  const { data: materials = [] } = useQuery({ queryKey: ["personnel-materials"], queryFn: () => safeList("PersonnelMaterial", "-created_date") });
-  const { data: notes = [] } = useQuery({ queryKey: ["personnel-notes"], queryFn: () => safeList("PersonnelNote", "-created_date") });
-  const { data: reviews = [] } = useQuery({ queryKey: ["personnel-reviews"], queryFn: () => safeList("PersonnelPerformanceReview", "-created_date") });
-  const { data: absences = [] } = useQuery({ queryKey: ["personnel-absences"], queryFn: () => safeList("PersonnelAbsence", "-created_date") });
-  const { data: routeExecutions = [] } = useQuery({ queryKey: ["route-executions"], queryFn: () => safeList("RouteExecution", "-service_date") });
-
-  const grouped = useMemo(() => ({
-    documents: groupByPersonnel(documents),
-    qualifications: groupByPersonnel(qualifications),
-    bankAccounts: groupByPersonnel(bankAccounts),
-    emergencyContacts: groupByPersonnel(emergencyContacts),
-    securityPasses: groupByPersonnel(securityPasses),
-    restrictions: groupByPersonnel(restrictions),
-    materials: groupByPersonnel(materials),
-    notes: groupByPersonnel(notes),
-    reviews: groupByPersonnel(reviews),
-    absences: groupByPersonnel(absences),
-  }), [absences, bankAccounts, documents, emergencyContacts, materials, notes, qualifications, restrictions, reviews, securityPasses]);
 
   const counts = useMemo(() => {
     const employees = personnel.filter(item => getRelationshipType(item) === "employee").length;
     const zzp = personnel.filter(item => getRelationshipType(item) === "self_employed").length;
     return { all: personnel.length, employees, zzp, subcontractors: subcontractors.length };
-  }, [personnel, subcontractors.length]);
+  }, [personnel, subcontractors]);
 
   const visiblePersonnel = useMemo(() => {
     const needle = search.trim().toLowerCase();
@@ -1612,26 +1586,10 @@ export default function Personnel() {
     });
   }, [activeTopTab, filterFunction, filterStatus, personnel, search]);
 
-  const selectedPersonnel = visiblePersonnel.find(item => item.id === selectedPersonnelId) || visiblePersonnel[0] || null;
-  const selectedDossier = selectedPersonnel ? {
-    documents: grouped.documents[selectedPersonnel.id] || [],
-    qualifications: grouped.qualifications[selectedPersonnel.id] || [],
-    bankAccounts: grouped.bankAccounts[selectedPersonnel.id] || [],
-    emergencyContacts: grouped.emergencyContacts[selectedPersonnel.id] || [],
-    securityPasses: grouped.securityPasses[selectedPersonnel.id] || [],
-    restrictions: grouped.restrictions[selectedPersonnel.id] || [],
-    materials: grouped.materials[selectedPersonnel.id] || [],
-    notes: grouped.notes[selectedPersonnel.id] || [],
-    reviews: grouped.reviews[selectedPersonnel.id] || [],
-    absences: grouped.absences[selectedPersonnel.id] || [],
-    routeExecutions,
-  } : null;
-
   const deletePersonnelMutation = useMutation({
     mutationFn: (id) => base44.entities.Personnel.delete(id),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["personnel"] });
-      setSelectedPersonnelId(null);
     },
   });
 
@@ -1652,30 +1610,10 @@ export default function Personnel() {
       });
     },
     onSuccess: (created) => {
-      if (created?.id) {
-        queryClient.setQueryData(["personnel"], current => {
-          const list = Array.isArray(current) ? current : [];
-          if (list.some(item => item.id === created.id)) return list;
-          return [created, ...list];
-        });
-      }
       queryClient.invalidateQueries({ queryKey: ["personnel"] });
       if (created?.id) {
-        setSelectedPersonnelId(created.id);
-        setEditingProfileId(created.id);
-        setNewDraftPersonnelId(created.id);
+        navigate(`/PersonnelDetail?id=${created.id}&new=1`);
       }
-    },
-  });
-
-  const deleteEmptyDraftMutation = useMutation({
-    mutationFn: (id) => base44.entities.Personnel.delete(id),
-    onSuccess: (_, id) => {
-      queryClient.setQueryData(["personnel"], current => (Array.isArray(current) ? current.filter(item => item.id !== id) : current));
-      queryClient.invalidateQueries({ queryKey: ["personnel"] });
-      setSelectedPersonnelId(null);
-      setEditingProfileId(null);
-      setNewDraftPersonnelId(null);
     },
   });
 
@@ -1692,23 +1630,7 @@ export default function Personnel() {
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ["subcontractors"] }),
   });
 
-  const recordConfig = selectedPersonnel ? getRecordConfig(recordDialogType, selectedPersonnel) : null;
-
-  const createRecord = async (config, payload) => {
-    await base44.entities[config.entityName].create(payload);
-    config.queryKeys.forEach(queryKey => queryClient.invalidateQueries({ queryKey: [queryKey] }));
-  };
-
   const openNew = (type = "employee") => createPersonnelMutation.mutate(type);
-
-  const cancelProfileEdit = (person) => {
-    if (newDraftPersonnelId === person?.id && isEmptyDraftPersonnel(person)) {
-      deleteEmptyDraftMutation.mutate(person.id);
-      return;
-    }
-    setEditingProfileId(null);
-    if (newDraftPersonnelId === person?.id) setNewDraftPersonnelId(null);
-  };
 
   const deletePersonnel = (person) => {
     if (confirm(`${getDisplayName(person)} verwijderen? Dossierdata blijft alleen behouden als deze elders gekoppeld is.`)) {
@@ -1813,44 +1735,18 @@ export default function Personnel() {
                 <PersonnelList
                   personnel={visiblePersonnel}
                   companies={companies}
-                  selectedId={selectedPersonnel?.id}
-                  onSelect={person => setSelectedPersonnelId(person.id)}
-                  onEdit={person => { setSelectedPersonnelId(person.id); setEditingProfileId(person.id); }}
+                  selectedId={null}
+                  onSelect={person => navigate(`/PersonnelDetail?id=${person.id}`)}
+                  onEdit={person => navigate(`/PersonnelDetail?id=${person.id}&edit=1`)}
                   onDelete={deletePersonnel}
-                  onCalculate={person => { setSelectedPersonnelId(person.id); }}
+                  onCalculate={person => navigate(`/PersonnelDetail?id=${person.id}`)}
                 />
               )}
             </div>
           </Tabs>
 
-          {activeTopTab !== "subcontractors" && selectedPersonnel && selectedDossier && (
-            <div className="space-y-4">
-              <PersonnelProfileCard
-                person={selectedPersonnel}
-                editing={editingProfileId === selectedPersonnel.id}
-                onEdit={() => setEditingProfileId(selectedPersonnel.id)}
-                onCancel={() => cancelProfileEdit(selectedPersonnel)}
-                onSaved={() => {
-                  setEditingProfileId(null);
-                  if (newDraftPersonnelId === selectedPersonnel.id) setNewDraftPersonnelId(null);
-                }}
-              />
-              <PersonnelDetailTabs
-                person={selectedPersonnel}
-                companies={companies}
-                dossier={selectedDossier}
-                onAddRecord={type => setRecordDialogType(type)}
-              />
-            </div>
-          )}
-        </div>
 
-      <RecordDialog
-        config={recordConfig}
-        open={!!recordDialogType}
-        onOpenChange={open => !open && setRecordDialogType(null)}
-        onSave={createRecord}
-      />
+        </div>
 
       <SubcontractorDialog
         open={subcontractorDialogOpen}
