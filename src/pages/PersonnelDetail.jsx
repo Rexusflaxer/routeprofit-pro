@@ -23,9 +23,12 @@ import {
   FileBadge,
   FileText,
   Handshake,
+  Mail,
+  MapPin,
   MessageSquareText,
   Package,
   Pencil,
+  Phone,
   Plus,
   ShieldCheck,
   UserCheck,
@@ -694,15 +697,19 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      {/* Hero banner: photo left, info right */}
+      {/* Hero banner */}
       <div className="flex flex-col sm:flex-row">
-        {/* Left: large passport photo */}
-        <div className="relative shrink-0 bg-muted/30 flex items-center justify-center sm:w-[168px]">
-          <div className="group relative m-5 flex items-center justify-center overflow-hidden rounded-lg border-2 border-border bg-white shadow-md"
+        {/* Left: passport photo panel */}
+        <div className="relative shrink-0 flex flex-col items-center justify-center gap-3 bg-gradient-to-b from-slate-100 to-slate-50 dark:from-slate-800 dark:to-slate-900 px-6 py-6 sm:w-[180px]">
+          <div className="group relative flex items-center justify-center overflow-hidden rounded-xl border-2 border-white shadow-lg dark:border-slate-700"
                style={{ width: 112, height: 144 }}>
             {data.photo_file_url
               ? <img src={data.photo_file_url} alt="" className="h-full w-full object-cover" />
-              : <span className="text-4xl font-semibold text-muted-foreground">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
+              : (
+                <div className="flex h-full w-full items-center justify-center bg-gradient-to-br from-primary/20 to-primary/10">
+                  <span className="text-5xl font-bold text-primary/60">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
+                </div>
+              )
             }
             {editing && (
               <PhotoCropUpload
@@ -712,12 +719,17 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
               />
             )}
           </div>
+          {!editing && (
+            <p className="text-center text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+              {data.personnel_number ? `#${data.personnel_number}` : "Medewerker"}
+            </p>
+          )}
         </div>
 
         {/* Right: info banner */}
-        <div className="flex min-w-0 flex-1 flex-col justify-between border-t border-border bg-muted/40 px-6 py-5 sm:border-l sm:border-t-0">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
+        <div className="flex min-w-0 flex-1 flex-col justify-between border-t border-border bg-gradient-to-br from-background to-muted/20 px-6 py-5 sm:border-l sm:border-t-0">
+          <div className="flex flex-wrap items-start justify-between gap-4">
+            <div className="min-w-0 flex-1">
               {editing ? (
                 <div className="grid max-w-4xl grid-cols-1 gap-3 md:grid-cols-4">
                   <div className="space-y-1"><span className="text-xs text-muted-foreground">Initialen</span><Input value={data.initials || ""} onChange={e => set("initials", e.target.value)} className="h-8 text-sm" /></div>
@@ -728,17 +740,40 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
                 </div>
               ) : (
                 <>
-                  <div className="flex flex-wrap items-center gap-2">
-                    <h2 className="text-2xl font-bold text-foreground">{buildFullName(data) || "Naam onbekend"}</h2>
+                  <div className="flex flex-wrap items-center gap-2 mb-1">
                     <BadgePill className={STATUS_COLORS[getStatus(data)] || STATUS_COLORS.draft}>{STATUS_LABELS[getStatus(data)] || getStatus(data)}</BadgePill>
-                    <BadgePill className={relationship === "self_employed" ? "bg-fuchsia-100 text-fuchsia-700" : "bg-blue-100 text-blue-700"}>{RELATIONSHIP_LABELS[relationship]}</BadgePill>
+                    <BadgePill className={relationship === "self_employed" ? "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-950 dark:text-fuchsia-300" : "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"}>{RELATIONSHIP_LABELS[relationship]}</BadgePill>
+                    {data.function_type && data.function_type !== "unknown" && (
+                      <BadgePill className="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{FUNCTION_LABELS[data.function_type] || data.function_type}</BadgePill>
+                    )}
                   </div>
-                  <div className="mt-3 grid grid-cols-1 gap-x-8 gap-y-1 sm:grid-cols-2 lg:grid-cols-3">
-                    {data.email && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">E-mail: </span>{data.email}</p>}
-                    {data.phone && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">Tel: </span>{data.phone}</p>}
-                    {data.date_of_birth && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">Geboortedatum: </span>{formatDate(data.date_of_birth)}</p>}
-                    {address && <p className="text-sm text-muted-foreground sm:col-span-2"><span className="font-medium text-foreground">Adres: </span>{address}</p>}
-                    {data.nationality && <p className="text-sm text-muted-foreground"><span className="font-medium text-foreground">Nationaliteit: </span>{data.nationality}</p>}
+                  <h2 className="text-[1.6rem] font-bold tracking-tight text-foreground leading-tight">
+                    {buildFullName(data) || "Naam onbekend"}
+                  </h2>
+                  {data.job_title_raw && (
+                    <p className="mt-0.5 text-sm text-muted-foreground">{data.job_title_raw}</p>
+                  )}
+                  <div className="mt-4 flex flex-wrap gap-3">
+                    {data.email && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
+                        <Mail className="h-3 w-3 text-primary" />{data.email}
+                      </span>
+                    )}
+                    {data.phone && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
+                        <Phone className="h-3 w-3 text-primary" />{data.phone}
+                      </span>
+                    )}
+                    {(data.city || address) && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
+                        <MapPin className="h-3 w-3 text-primary" />{data.city || address}
+                      </span>
+                    )}
+                    {data.date_of_birth && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
+                        <CalendarDays className="h-3 w-3 text-primary" />{formatDate(data.date_of_birth)}
+                      </span>
+                    )}
                   </div>
                 </>
               )}
@@ -750,7 +785,7 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
                   <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || uploadingPhoto}><Check className="mr-1 h-4 w-4" /> {saveMutation.isPending ? "Opslaan..." : "Opslaan"}</Button>
                 </>
               ) : (
-                <Button variant="outline" onClick={onEdit}><Pencil className="mr-1 h-4 w-4" /> Wijzigen</Button>
+                <Button variant="outline" size="sm" onClick={onEdit}><Pencil className="mr-1 h-4 w-4" /> Wijzigen</Button>
               )}
             </div>
           </div>
@@ -1090,24 +1125,25 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
 
   return (
     <div className="mt-4 flex min-h-[200px] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      <div className="w-48 shrink-0 border-r border-border bg-muted/30 py-3">
+      <div className="w-52 shrink-0 border-r border-border bg-muted/20 py-2">
+        <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Dossier</p>
         {PERSONNEL_TABS.map(item => (
           <button
             key={item.key}
             type="button"
             onClick={() => setActive(item.key)}
-            className={`flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm font-medium transition-colors ${
+            className={`flex w-full items-center gap-2.5 px-4 py-2 text-left text-[13px] font-medium transition-all ${
               active === item.key
-                ? "border-r-2 border-primary bg-background text-foreground"
-                : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
+                ? "border-r-2 border-primary bg-primary/5 text-primary"
+                : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
             }`}
           >
-            <item.icon className="h-4 w-4 shrink-0" />
+            <item.icon className={`h-3.5 w-3.5 shrink-0 ${active === item.key ? "text-primary" : ""}`} />
             <span className="flex-1">{item.label}</span>
           </button>
         ))}
       </div>
-      <div className="min-w-0 flex-1 p-4">{renderTab()}</div>
+      <div className="min-w-0 flex-1 p-5">{renderTab()}</div>
     </div>
   );
 }
@@ -1198,10 +1234,12 @@ export default function PersonnelDetail() {
 
   return (
     <PageTransition>
-      <div className="flex items-center gap-3">
-        <Button variant="ghost" size="sm" onClick={() => navigate("/Personnel")}>
+      <div className="mb-4 flex items-center gap-2">
+        <Button variant="ghost" size="sm" className="text-muted-foreground hover:text-foreground" onClick={() => navigate("/Personnel")}>
           <ArrowLeft className="w-4 h-4 mr-1" /> Personeel
         </Button>
+        <span className="text-muted-foreground/40">/</span>
+        <span className="text-sm font-medium text-foreground">{buildDisplayName(person) || "Nieuw profiel"}</span>
       </div>
 
       <PersonnelProfileCard
