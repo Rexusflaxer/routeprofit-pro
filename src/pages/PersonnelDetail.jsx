@@ -745,7 +745,7 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
                   {data.job_title_raw && (
                     <p className="mt-0.5 text-sm text-muted-foreground">{data.job_title_raw}</p>
                   )}
-                  <div className="mt-4 flex flex-wrap gap-3">
+                  <div className="mt-4 flex flex-wrap gap-2">
                     {data.email && (
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
                         <Mail className="h-3 w-3 text-primary" />{data.email}
@@ -764,6 +764,21 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
                     {data.date_of_birth && (
                       <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
                         <CalendarDays className="h-3 w-3 text-primary" />{formatDate(data.date_of_birth)}
+                      </span>
+                    )}
+                    {data.place_of_birth && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
+                        <MapPin className="h-3 w-3 text-muted-foreground" />Geb. {data.place_of_birth}{data.country_of_birth && data.country_of_birth !== "Nederland" ? `, ${data.country_of_birth}` : ""}
+                      </span>
+                    )}
+                    {data.nationality && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
+                        <UserCheck className="h-3 w-3 text-muted-foreground" />{data.nationality}
+                      </span>
+                    )}
+                    {data.personnel_number && (
+                      <span className="inline-flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1 text-xs text-foreground shadow-sm">
+                        <BadgeCheck className="h-3 w-3 text-muted-foreground" />#{data.personnel_number}
                       </span>
                     )}
                   </div>
