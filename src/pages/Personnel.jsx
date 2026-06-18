@@ -83,6 +83,16 @@ const RELATIONSHIP_LABELS = {
   self_employed: "ZZP'er",
 };
 
+const TEAMHUB_LINK_LABELS = {
+  not_invited: "Lokaal profiel",
+  invited: "Uitgenodigd",
+  pending_acceptance: "Wacht op acceptatie",
+  linked: "Gekoppeld",
+  conflict_review: "Review nodig",
+  revoked: "Koppeling ingetrokken",
+  local_only: "Lokaal profiel",
+};
+
 const FUNCTION_LABELS = {
   unknown: "Onbekend",
   objectbeveiliger: "Objectbeveiliger",
@@ -396,7 +406,7 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
                 <Select value={data.employee_type || "loondienst"} onValueChange={value => {
                   set("employee_type", value);
                   set("relationship_type", value === "zzp" ? "self_employed" : "employee");
-                  set("profile_data_policy", value === "zzp" ? "profile_wins_after_acceptance" : "local_only");
+                  set("profile_data_policy", "profile_wins_after_acceptance");
                 }}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
                   <SelectContent>
@@ -926,10 +936,10 @@ function PersonnelPayrollTab({ person, documents }) {
           <FieldRow label="Aansprakelijkheid">{person.self_employed_liability_insurance}</FieldRow>
           <FieldRow label="Standaard uurtarief">{formatCurrency(person.zzp_hourly_rate_excl_vat)}</FieldRow>
         </SectionPanel>
-        <SectionPanel title="Administratieve status" icon={ClipboardCheck}>
-          <FieldRow label="Teamhub beleid">{person.profile_data_policy || "local_only"}</FieldRow>
-          <FieldRow label="Conflictstatus">{person.profile_conflict_status || "none"}</FieldRow>
-          <FieldRow label="Lokale kopie behouden">{person.local_organization_copy_retained === false ? "Nee" : "Ja"}</FieldRow>
+        <SectionPanel title="Profieleigenaarschap" icon={ClipboardCheck}>
+          <FieldRow label="Eigen account">Heeft voorrang na bevestigde koppeling</FieldRow>
+          <FieldRow label="Lokale dossierdata">Blijft behouden voor review en historie</FieldRow>
+          <FieldRow label="Koppelstatus">{TEAMHUB_LINK_LABELS[person.teamhub_link_status] || "Lokaal profiel"}</FieldRow>
         </SectionPanel>
       </div>
     );
@@ -1292,15 +1302,15 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
 
       <TabsContent value="teamhub" className="grid grid-cols-1 gap-4 pt-4 xl:grid-cols-[1fr_420px]">
         <PersonnelAccessTab personnel={person} />
-        <SectionPanel title="Conflictbeleid profielkoppeling" icon={Handshake}>
+        <SectionPanel title="Koppelregels profiel" icon={Handshake}>
           <div className="space-y-3 text-sm text-muted-foreground">
-            <p className="font-medium text-foreground">Profiel wint na acceptatie voor persoonlijke en gevoelige gegevens.</p>
-            <p>Lokale werkgeverdata blijft behouden: scans, notities, roosterhistorie, gesprekken, contracten, restricties en materiaal worden niet verwijderd.</p>
-            <p>Bij een conflict komt het dossier op review. De profieldata wordt canoniek, terwijl de lokale scan of waarde als organisatiekopie/auditbron zichtbaar blijft.</p>
+            <p className="font-medium text-foreground">Het eigen account van de medewerker of ZZP'er heeft voorrang na bevestigde koppeling.</p>
+            <p>Voor conflicten volgt eerst een review. Na bevestiging vervangen persoonlijke gegevens en conflicterende bestanden de lokale waarden.</p>
+            <p>Lokale werkgeverdata blijft behouden. Bestanden zonder conflict, zoals oude verlopen legitimatiekopieen, worden toegevoegd aan het profiel.</p>
             <div className="rounded-md border border-border px-3 py-2">
-              <FieldRow label="Koppelstatus">{person.teamhub_link_status || (person.linked_user_id ? "linked" : "not_invited")}</FieldRow>
-              <FieldRow label="Conflictstatus">{person.profile_conflict_status || "none"}</FieldRow>
-              <FieldRow label="Lokale kopie behouden">{person.local_organization_copy_retained === false ? "Nee" : "Ja"}</FieldRow>
+              <FieldRow label="Koppelstatus">{TEAMHUB_LINK_LABELS[person.teamhub_link_status] || (person.linked_user_id ? "Gekoppeld" : "Lokaal profiel")}</FieldRow>
+              <FieldRow label="Review bij conflicten">Vereist voor overschrijven</FieldRow>
+              <FieldRow label="Niet-conflicterende documenten">Toevoegen aan profiel</FieldRow>
             </div>
           </div>
         </SectionPanel>
@@ -1590,7 +1600,9 @@ export default function Personnel() {
     setNewPreset({
       employee_type: isZzp ? "zzp" : "loondienst",
       relationship_type: isZzp ? "self_employed" : "employee",
-      profile_data_policy: isZzp ? "profile_wins_after_acceptance" : "local_only",
+      profile_data_policy: "profile_wins_after_acceptance",
+      profile_conflict_status: "none",
+      local_organization_copy_retained: true,
     });
     setShowWizard(true);
   };

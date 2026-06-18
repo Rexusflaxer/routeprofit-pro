@@ -40,8 +40,8 @@
         "profile_wins_after_acceptance",
         "organization_override"
       ],
-      "default": "local_only",
-      "description": "Toekomstig Teamhub-conflictbeleid. Voor persoonlijke/gevoelige data wint na acceptatie het eigen profiel, terwijl lokale organisatiehistorie behouden blijft."
+      "default": "profile_wins_after_acceptance",
+      "description": "Toekomstig Teamhub-koppelbeleid. De medewerker/ZZP'er is eigenaar van het eigen profiel. Na duidelijke waarschuwing, review en acceptatie winnen persoonlijke/gevoelige profielgegevens en conflicterende profielbestanden. Lokale organisatiehistorie blijft behouden en niet-conflicterende documenten worden toegevoegd."
     },
     "profile_conflict_status": {
       "type": [
