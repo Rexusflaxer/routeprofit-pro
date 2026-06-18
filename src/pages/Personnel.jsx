@@ -1396,7 +1396,6 @@ function PersonnelList({ personnel, companies, selectedId, onSelect, onEdit, onD
             <span className="w-28 shrink-0">Relatie</span>
             <span className="w-28 shrink-0">HR</span>
             <span className="w-28 shrink-0">Status</span>
-            <span className="w-28 shrink-0 text-right">Acties</span>
           </div>
           <div className="divide-y divide-border">
             {personnel.map(person => {
@@ -1438,16 +1437,6 @@ function PersonnelList({ personnel, companies, selectedId, onSelect, onEdit, onD
                   <span className="w-28 shrink-0">
                     <BadgePill className={STATUS_COLORS[status] || STATUS_COLORS.draft}>{STATUS_LABELS[status] || status}</BadgePill>
                   </span>
-                  <div className="w-28 shrink-0" onClick={event => event.stopPropagation()}>
-                    <div className="flex justify-end gap-1">
-                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(person)} title="Bewerken">
-                        <Pencil className="h-4 w-4" />
-                      </Button>
-                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(person)} title="Verwijderen">
-                        <Trash2 className="h-4 w-4" />
-                      </Button>
-                    </div>
-                  </div>
                 </div>
               );
             })}
