@@ -733,8 +733,6 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
               ) : (
                 <>
                   <div className="flex flex-wrap items-center gap-2 mb-1">
-                    <BadgePill className={STATUS_COLORS[getStatus(data)] || STATUS_COLORS.draft}>{STATUS_LABELS[getStatus(data)] || getStatus(data)}</BadgePill>
-                    <BadgePill className={relationship === "self_employed" ? "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-950 dark:text-fuchsia-300" : "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-300"}>{RELATIONSHIP_LABELS[relationship]}</BadgePill>
                     {data.function_type && data.function_type !== "unknown" && (
                       <BadgePill className="bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300">{FUNCTION_LABELS[data.function_type] || data.function_type}</BadgePill>
                     )}
