@@ -8,7 +8,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import {
   Dialog,
@@ -26,6 +26,7 @@ import {
   CalendarDays,
   Check,
   ClipboardCheck,
+  CreditCard,
   FileBadge,
   FileText,
   Handshake,
@@ -41,10 +42,8 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { AnimatePresence, motion } from "framer-motion";
 import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
-import PersonnelWizard from "../components/personnel/PersonnelWizard";
 import CostCalculator from "../components/personnel/CostCalculator";
 import PersonnelAccessTab from "../components/personnel/PersonnelAccessTab";
 import PersonnelContractsTab from "../components/personnel/PersonnelContractsTab";
@@ -187,6 +186,32 @@ function buildPersonnelDisplayName(personnel) {
   return [first, personnel.name_prefix, personnel.last_name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim() || personnel.name || "";
 }
 
+function isEmptyDraftPersonnel(personnel = {}) {
+  if ((personnel.status || "draft") !== "draft") return false;
+  const textFields = [
+    "name",
+    "initials",
+    "legal_first_names",
+    "first_name",
+    "call_name",
+    "name_prefix",
+    "last_name",
+    "email",
+    "phone",
+    "street_name",
+    "house_number",
+    "house_number_addition",
+    "postal_code",
+    "city",
+    "date_of_birth",
+    "place_of_birth",
+    "country_of_birth",
+    "nationality",
+    "photo_file_url",
+  ];
+  return !textFields.some(field => String(personnel[field] || "").trim());
+}
+
 function getStatus(personnel) {
   return personnel.status || (personnel.is_active === false ? "inactive" : "active");
 }
@@ -270,9 +295,11 @@ function MiniTable({ columns, rows, emptyText }) {
 
 function ProfileInfoRow({ label, editing, children, value }) {
   return (
-    <div className="grid grid-cols-1 gap-2 py-2 md:grid-cols-[190px_1fr] md:items-center">
-      <Label className="text-sm text-muted-foreground">{label}</Label>
-      {editing ? children : <span className="text-sm font-medium text-foreground">{value || "-"}</span>}
+    <div className="flex flex-col py-1 sm:flex-row sm:gap-4">
+      <Label className="w-40 shrink-0 pt-1 text-xs text-muted-foreground">{label}</Label>
+      <div className="flex-1">
+        {editing ? children : <span className="text-sm font-medium text-foreground">{value || "—"}</span>}
+      </div>
     </div>
   );
 }
@@ -350,15 +377,15 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
-      <div className="flex flex-col gap-5 border-b border-border bg-muted/30 px-6 py-5 lg:flex-row lg:items-center">
-        <div className="relative flex h-20 w-20 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-background">
+      <div className="flex flex-col gap-5 border-b border-border bg-muted/40 px-6 py-5 sm:flex-row sm:items-center">
+        <div className="group relative flex h-16 w-16 shrink-0 items-center justify-center overflow-hidden rounded-xl border border-border bg-white">
           {data.photo_file_url ? (
             <img src={data.photo_file_url} alt="" className="h-full w-full object-cover" />
           ) : (
-            <span className="text-2xl font-semibold text-muted-foreground">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
+            <span className="text-xl font-semibold text-muted-foreground">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
           )}
           {editing && (
-            <label className="absolute inset-0 flex cursor-pointer items-center justify-center bg-black/45 text-white">
+            <label className="absolute inset-0 flex cursor-pointer items-center justify-center bg-black/40 text-white">
               <input type="file" accept="image/*" className="hidden" onChange={event => event.target.files?.[0] && uploadPhoto(event.target.files[0])} />
               <Upload className="h-5 w-5" />
               <span className="sr-only">Pasfoto uploaden</span>
@@ -370,45 +397,36 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
           {editing ? (
             <div className="grid max-w-4xl grid-cols-1 gap-3 md:grid-cols-4">
               <div className="space-y-1">
-                <Label>Initialen</Label>
-                <Input value={data.initials || ""} onChange={event => set("initials", event.target.value)} />
+                <span className="text-xs text-muted-foreground">Initialen</span>
+                <Input value={data.initials || ""} onChange={event => set("initials", event.target.value)} className="h-8 text-sm" />
               </div>
               <div className="space-y-1">
-                <Label>Voornamen</Label>
-                <Input value={data.legal_first_names || ""} onChange={event => updateNamePart("legal_first_names", event.target.value)} />
+                <span className="text-xs text-muted-foreground">Voornamen</span>
+                <Input value={data.legal_first_names || ""} onChange={event => updateNamePart("legal_first_names", event.target.value)} className="h-8 text-sm" />
               </div>
               <div className="space-y-1">
-                <Label>Roepnaam</Label>
+                <span className="text-xs text-muted-foreground">Roepnaam</span>
                 <Input value={data.first_name || data.call_name || ""} onChange={event => {
                   updateNamePart("first_name", event.target.value);
                   set("call_name", event.target.value);
-                }} />
+                }} className="h-8 text-sm" />
               </div>
               <div className="space-y-1">
-                <Label>Tussenvoegsel</Label>
-                <Input value={data.name_prefix || ""} onChange={event => updateNamePart("name_prefix", event.target.value)} />
+                <span className="text-xs text-muted-foreground">Tussenvoegsel</span>
+                <Input value={data.name_prefix || ""} onChange={event => updateNamePart("name_prefix", event.target.value)} className="h-8 text-sm" />
               </div>
               <div className="space-y-1 md:col-span-2">
-                <Label>Achternaam</Label>
-                <Input value={data.last_name || ""} onChange={event => updateNamePart("last_name", event.target.value)} />
+                <span className="text-xs text-muted-foreground">Achternaam</span>
+                <Input value={data.last_name || ""} onChange={event => updateNamePart("last_name", event.target.value)} className="h-8 text-sm" />
               </div>
               <div className="space-y-1">
-                <Label>Status</Label>
-                <Select value={data.status || "draft"} onValueChange={value => set("status", value)}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {Object.entries(STATUS_LABELS).map(([value, label]) => <SelectItem key={value} value={value}>{label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Relatie</Label>
+                <span className="text-xs text-muted-foreground">Relatie</span>
                 <Select value={data.employee_type || "loondienst"} onValueChange={value => {
                   set("employee_type", value);
                   set("relationship_type", value === "zzp" ? "self_employed" : "employee");
                   set("profile_data_policy", "profile_wins_after_acceptance");
                 }}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectTrigger className="h-8 text-sm"><SelectValue /></SelectTrigger>
                   <SelectContent>
                     <SelectItem value="loondienst">Loondienst</SelectItem>
                     <SelectItem value="zzp">ZZP'er</SelectItem>
@@ -435,10 +453,10 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
         <div className="flex flex-wrap justify-end gap-2">
           {editing ? (
             <>
-              <Button variant="outline" onClick={onCancel} disabled={saveMutation.isPending || uploadingPhoto}>
+              <Button variant="outline" size="sm" onClick={onCancel} disabled={saveMutation.isPending || uploadingPhoto}>
                 <X className="mr-1 h-4 w-4" /> Annuleren
               </Button>
-              <Button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || uploadingPhoto}>
+              <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || uploadingPhoto}>
                 <Check className="mr-1 h-4 w-4" /> {saveMutation.isPending ? "Opslaan..." : "Opslaan"}
               </Button>
             </>
@@ -1069,7 +1087,23 @@ function PersonnelIceTab({ documents, emergencyContacts, onAddRecord }) {
   );
 }
 
+const PERSONNEL_DETAIL_MENU_ITEMS = [
+  { key: "overview", label: "Overzicht", icon: ClipboardCheck },
+  { key: "payroll", label: "Loonheffing", icon: Banknote },
+  { key: "identity", label: "Identiteit", icon: BadgeCheck },
+  { key: "documents", label: "Documenten", icon: FileText },
+  { key: "compliance", label: "Compliance", icon: ShieldCheck },
+  { key: "bank-mobility", label: "Bank & mobiliteit", icon: CreditCard },
+  { key: "ice", label: "ICE", icon: Users },
+  { key: "contracts", label: "Contracten/kosten", icon: BriefcaseBusiness },
+  { key: "planning", label: "Planning/restricties", icon: CalendarDays },
+  { key: "materials", label: "Materiaal", icon: Package },
+  { key: "notes", label: "Notities/gesprekken", icon: MessageSquareText },
+  { key: "teamhub", label: "App & Teamhub", icon: Handshake },
+];
+
 function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
+  const [active, setActive] = useState("overview");
   const routeExecutions = dossier.routeExecutions.filter(item => item.employee_id === person.id).slice(0, 8);
   const generalDocuments = dossier.documents.filter(item => ![
     "identity_document",
@@ -1080,29 +1114,9 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
     "payroll_tax_statement",
   ].includes(item.category));
 
-  return (
-    <Tabs defaultValue="overview" className="mt-4 overflow-hidden rounded-xl border border-border bg-card">
-      <div className="grid grid-cols-1 md:grid-cols-[260px_1fr]">
-        <div className="border-b border-border bg-muted/30 md:border-b-0 md:border-r">
-          <TabsList className="flex h-auto w-full min-w-max justify-start overflow-x-auto rounded-none bg-transparent p-0 md:min-w-0 md:flex-col md:items-stretch md:overflow-visible">
-          <TabsTrigger value="overview">Overzicht</TabsTrigger>
-          <TabsTrigger value="payroll">Loonheffing</TabsTrigger>
-          <TabsTrigger value="identity">Identiteit</TabsTrigger>
-          <TabsTrigger value="documents">Documenten</TabsTrigger>
-          <TabsTrigger value="compliance">Compliance</TabsTrigger>
-          <TabsTrigger value="bank-mobility">Bank & mobiliteit</TabsTrigger>
-          <TabsTrigger value="ice">ICE</TabsTrigger>
-          <TabsTrigger value="contracts">Contracten/kosten</TabsTrigger>
-          <TabsTrigger value="planning">Planning/restricties</TabsTrigger>
-          <TabsTrigger value="materials">Materiaal</TabsTrigger>
-          <TabsTrigger value="notes">Notities/gesprekken</TabsTrigger>
-          <TabsTrigger value="teamhub">App & Teamhub</TabsTrigger>
-        </TabsList>
-        </div>
-
-        <div className="min-w-0 p-4">
-
-      <TabsContent value="overview" className="m-0">
+  const renderActiveTab = () => {
+    if (active === "overview") {
+      return (
         <PersonnelOverviewTab
           person={person}
           companies={companies}
@@ -1112,17 +1126,19 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
           emergencyContacts={dossier.emergencyContacts}
           securityPasses={dossier.securityPasses}
         />
-      </TabsContent>
+      );
+    }
 
-      <TabsContent value="payroll" className="m-0">
-        <PersonnelPayrollTab person={person} documents={dossier.documents} />
-      </TabsContent>
+    if (active === "payroll") {
+      return <PersonnelPayrollTab person={person} documents={dossier.documents} />;
+    }
 
-      <TabsContent value="identity" className="m-0">
-        <PersonnelIdentityTab person={person} documents={dossier.documents} />
-      </TabsContent>
+    if (active === "identity") {
+      return <PersonnelIdentityTab person={person} documents={dossier.documents} />;
+    }
 
-      <TabsContent value="documents" className="m-0">
+    if (active === "documents") {
+      return (
         <SectionPanel
           title="Documenten"
           icon={FileText}
@@ -1140,112 +1156,126 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
             ]}
           />
         </SectionPanel>
-      </TabsContent>
+      );
+    }
 
-      <TabsContent value="compliance" className="grid grid-cols-1 gap-4 pt-4 xl:grid-cols-2">
-        <SectionPanel
-          title="WPBR en beveiligingspassen"
-          icon={ShieldCheck}
-          action={<Button size="sm" variant="outline" onClick={() => onAddRecord("securityPass")}><Plus className="mr-1 h-4 w-4" />Pas</Button>}
-        >
-          <FieldRow label="WPBR vereist">{person.wpbr_required ? "Ja" : "Nee"}</FieldRow>
-          <FieldRow label="WPBR status">{person.wpbr_status || "-"}</FieldRow>
-          <FieldRow label="Autoriteit">{person.wpbr_authority || "-"}</FieldRow>
-          <FieldRow label="Toestemmingsnummer">{person.wpbr_permission_number || "-"}</FieldRow>
-          <div className="mt-4">
+    if (active === "compliance") {
+      return (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <SectionPanel
+            title="WPBR en beveiligingspassen"
+            icon={ShieldCheck}
+            action={<Button size="sm" variant="outline" onClick={() => onAddRecord("securityPass")}><Plus className="mr-1 h-4 w-4" />Pas</Button>}
+          >
+            <FieldRow label="WPBR vereist">{person.wpbr_required ? "Ja" : "Nee"}</FieldRow>
+            <FieldRow label="WPBR status">{person.wpbr_status || "-"}</FieldRow>
+            <FieldRow label="Autoriteit">{person.wpbr_authority || "-"}</FieldRow>
+            <FieldRow label="Toestemmingsnummer">{person.wpbr_permission_number || "-"}</FieldRow>
+            <div className="mt-4">
+              <MiniTable
+                emptyText="Nog geen beveiligingspassen geregistreerd."
+                rows={dossier.securityPasses}
+                columns={[
+                  { key: "pass_type", label: "Pas" },
+                  { key: "pass_number", label: "Nummer" },
+                  { key: "status", label: "Status" },
+                  { key: "valid_until", label: "Geldig tot", render: row => formatDate(row.valid_until) },
+                ]}
+              />
+            </div>
+          </SectionPanel>
+          <SectionPanel
+            title="Diploma's en VOG"
+            icon={FileBadge}
+            action={<Button size="sm" variant="outline" onClick={() => onAddRecord("qualification")}><Plus className="mr-1 h-4 w-4" />Diploma</Button>}
+          >
             <MiniTable
-              emptyText="Nog geen beveiligingspassen geregistreerd."
-              rows={dossier.securityPasses}
+              emptyText="Nog geen diploma's of certificaten vastgelegd."
+              rows={dossier.qualifications}
               columns={[
-                { key: "pass_type", label: "Pas" },
-                { key: "pass_number", label: "Nummer" },
-                { key: "status", label: "Status" },
+                { key: "name", label: "Opleiding" },
+                { key: "issuer", label: "Uitgever" },
                 { key: "valid_until", label: "Geldig tot", render: row => formatDate(row.valid_until) },
+                { key: "verification_status", label: "Status", render: row => VERIFICATION_LABELS[row.verification_status] || row.verification_status },
               ]}
             />
-          </div>
-        </SectionPanel>
-        <SectionPanel
-          title="Diploma's en VOG"
-          icon={FileBadge}
-          action={<Button size="sm" variant="outline" onClick={() => onAddRecord("qualification")}><Plus className="mr-1 h-4 w-4" />Diploma</Button>}
-        >
-          <MiniTable
-            emptyText="Nog geen diploma's of certificaten vastgelegd."
-            rows={dossier.qualifications}
-            columns={[
-              { key: "name", label: "Opleiding" },
-              { key: "issuer", label: "Uitgever" },
-              { key: "valid_until", label: "Geldig tot", render: row => formatDate(row.valid_until) },
-              { key: "verification_status", label: "Status", render: row => VERIFICATION_LABELS[row.verification_status] || row.verification_status },
-            ]}
-          />
-        </SectionPanel>
-      </TabsContent>
+          </SectionPanel>
+        </div>
+      );
+    }
 
-      <TabsContent value="bank-mobility" className="m-0">
-        <PersonnelBankMobilityTab documents={dossier.documents} bankAccounts={dossier.bankAccounts} />
-      </TabsContent>
+    if (active === "bank-mobility") {
+      return <PersonnelBankMobilityTab documents={dossier.documents} bankAccounts={dossier.bankAccounts} />;
+    }
 
-      <TabsContent value="ice" className="m-0">
-        <PersonnelIceTab documents={dossier.documents} emergencyContacts={dossier.emergencyContacts} onAddRecord={onAddRecord} />
-      </TabsContent>
+    if (active === "ice") {
+      return <PersonnelIceTab documents={dossier.documents} emergencyContacts={dossier.emergencyContacts} onAddRecord={onAddRecord} />;
+    }
 
-      <TabsContent value="contracts" className="grid grid-cols-1 gap-4 pt-4 xl:grid-cols-[1fr_420px]">
-        <PersonnelContractsTab personnel={person} companies={companies} />
-        <SectionPanel title="Kostenberekening" icon={BriefcaseBusiness}>
-          <CostCalculator personnel={person} />
-        </SectionPanel>
-      </TabsContent>
+    if (active === "contracts") {
+      return (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_420px]">
+          <PersonnelContractsTab personnel={person} companies={companies} />
+          <SectionPanel title="Kostenberekening" icon={BriefcaseBusiness}>
+            <CostCalculator personnel={person} />
+          </SectionPanel>
+        </div>
+      );
+    }
 
-      <TabsContent value="planning" className="grid grid-cols-1 gap-4 pt-4 xl:grid-cols-2">
-        <SectionPanel
-          title="Klant/object restricties"
-          icon={ClipboardCheck}
-          action={<Button size="sm" variant="outline" onClick={() => onAddRecord("restriction")}><Plus className="mr-1 h-4 w-4" />Restrictie</Button>}
-        >
-          <MiniTable
-            emptyText="Geen restricties ingesteld."
-            rows={dossier.restrictions}
-            columns={[
-              { key: "scope_label", label: "Klant/object" },
-              { key: "may_work", label: "Mag werken", render: row => row.may_work ? "Ja" : "Nee" },
-              { key: "reason", label: "Reden" },
-              { key: "valid_until", label: "Tot", render: row => formatDate(row.valid_until) },
-            ]}
-          />
-        </SectionPanel>
-        <SectionPanel
-          title="Rooster, verlof en ziekte"
-          icon={CalendarDays}
-          action={<Button size="sm" variant="outline" onClick={() => onAddRecord("absence")}><Plus className="mr-1 h-4 w-4" />Afwezigheid</Button>}
-        >
-          <div className="mb-4">
+    if (active === "planning") {
+      return (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <SectionPanel
+            title="Klant/object restricties"
+            icon={ClipboardCheck}
+            action={<Button size="sm" variant="outline" onClick={() => onAddRecord("restriction")}><Plus className="mr-1 h-4 w-4" />Restrictie</Button>}
+          >
             <MiniTable
-              emptyText="Geen verlof- of ziekteregistraties."
-              rows={dossier.absences}
+              emptyText="Geen restricties ingesteld."
+              rows={dossier.restrictions}
               columns={[
-                { key: "absence_type", label: "Type" },
-                { key: "start_date", label: "Start", render: row => formatDate(row.start_date) },
-                { key: "end_date", label: "Einde", render: row => formatDate(row.end_date) },
+                { key: "scope_label", label: "Klant/object" },
+                { key: "may_work", label: "Mag werken", render: row => row.may_work ? "Ja" : "Nee" },
+                { key: "reason", label: "Reden" },
+                { key: "valid_until", label: "Tot", render: row => formatDate(row.valid_until) },
+              ]}
+            />
+          </SectionPanel>
+          <SectionPanel
+            title="Rooster, verlof en ziekte"
+            icon={CalendarDays}
+            action={<Button size="sm" variant="outline" onClick={() => onAddRecord("absence")}><Plus className="mr-1 h-4 w-4" />Afwezigheid</Button>}
+          >
+            <div className="mb-4">
+              <MiniTable
+                emptyText="Geen verlof- of ziekteregistraties."
+                rows={dossier.absences}
+                columns={[
+                  { key: "absence_type", label: "Type" },
+                  { key: "start_date", label: "Start", render: row => formatDate(row.start_date) },
+                  { key: "end_date", label: "Einde", render: row => formatDate(row.end_date) },
+                  { key: "status", label: "Status" },
+                ]}
+              />
+            </div>
+            <MiniTable
+              emptyText="Nog geen recente route-uitvoeringen voor deze persoon."
+              rows={routeExecutions}
+              columns={[
+                { key: "route_name", label: "Route" },
+                { key: "service_date", label: "Datum", render: row => formatDate(row.service_date) },
+                { key: "shift_start_time", label: "Start" },
                 { key: "status", label: "Status" },
               ]}
             />
-          </div>
-          <MiniTable
-            emptyText="Nog geen recente route-uitvoeringen voor deze persoon."
-            rows={routeExecutions}
-            columns={[
-              { key: "route_name", label: "Route" },
-              { key: "service_date", label: "Datum", render: row => formatDate(row.service_date) },
-              { key: "shift_start_time", label: "Start" },
-              { key: "status", label: "Status" },
-            ]}
-          />
-        </SectionPanel>
-      </TabsContent>
+          </SectionPanel>
+        </div>
+      );
+    }
 
-      <TabsContent value="materials" className="pt-4">
+    if (active === "materials") {
+      return (
         <SectionPanel
           title="Materiaal"
           icon={Package}
@@ -1263,44 +1293,50 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
             ]}
           />
         </SectionPanel>
-      </TabsContent>
+      );
+    }
 
-      <TabsContent value="notes" className="grid grid-cols-1 gap-4 pt-4 xl:grid-cols-2">
-        <SectionPanel
-          title="Notities"
-          icon={MessageSquareText}
-          action={<Button size="sm" variant="outline" onClick={() => onAddRecord("note")}><Plus className="mr-1 h-4 w-4" />Notitie</Button>}
-        >
-          <MiniTable
-            emptyText="Nog geen notities."
-            rows={dossier.notes}
-            columns={[
-              { key: "title", label: "Titel" },
-              { key: "note_type", label: "Type" },
-              { key: "body", label: "Notitie" },
-              { key: "created_at", label: "Datum", render: row => formatDate(row.created_at) },
-            ]}
-          />
-        </SectionPanel>
-        <SectionPanel
-          title="Functioneringsgesprekken"
-          icon={ClipboardCheck}
-          action={<Button size="sm" variant="outline" onClick={() => onAddRecord("review")}><Plus className="mr-1 h-4 w-4" />Gesprek</Button>}
-        >
-          <MiniTable
-            emptyText="Nog geen gesprekken geregistreerd."
-            rows={dossier.reviews}
-            columns={[
-              { key: "review_type", label: "Type" },
-              { key: "review_date", label: "Datum", render: row => formatDate(row.review_date) },
-              { key: "subject", label: "Onderwerp" },
-              { key: "status", label: "Status" },
-            ]}
-          />
-        </SectionPanel>
-      </TabsContent>
+    if (active === "notes") {
+      return (
+        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
+          <SectionPanel
+            title="Notities"
+            icon={MessageSquareText}
+            action={<Button size="sm" variant="outline" onClick={() => onAddRecord("note")}><Plus className="mr-1 h-4 w-4" />Notitie</Button>}
+          >
+            <MiniTable
+              emptyText="Nog geen notities."
+              rows={dossier.notes}
+              columns={[
+                { key: "title", label: "Titel" },
+                { key: "note_type", label: "Type" },
+                { key: "body", label: "Notitie" },
+                { key: "created_at", label: "Datum", render: row => formatDate(row.created_at) },
+              ]}
+            />
+          </SectionPanel>
+          <SectionPanel
+            title="Functioneringsgesprekken"
+            icon={ClipboardCheck}
+            action={<Button size="sm" variant="outline" onClick={() => onAddRecord("review")}><Plus className="mr-1 h-4 w-4" />Gesprek</Button>}
+          >
+            <MiniTable
+              emptyText="Nog geen gesprekken geregistreerd."
+              rows={dossier.reviews}
+              columns={[
+                { key: "review_type", label: "Type" },
+                { key: "review_date", label: "Datum", render: row => formatDate(row.review_date) },
+                { key: "subject", label: "Onderwerp" },
+                { key: "status", label: "Status" },
+              ]}
+            />
+          </SectionPanel>
+        </div>
+      );
+    }
 
-      <TabsContent value="teamhub" className="grid grid-cols-1 gap-4 pt-4 xl:grid-cols-[1fr_420px]">
+    return (
+      <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_420px]">
         <PersonnelAccessTab personnel={person} />
         <SectionPanel title="Koppelregels profiel" icon={Handshake}>
           <div className="space-y-3 text-sm text-muted-foreground">
@@ -1314,10 +1350,33 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
             </div>
           </div>
         </SectionPanel>
-      </TabsContent>
-        </div>
       </div>
-    </Tabs>
+    );
+  };
+
+  return (
+    <div className="mt-4 flex min-h-[200px] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="w-48 shrink-0 border-r border-border bg-muted/30 py-3">
+        {PERSONNEL_DETAIL_MENU_ITEMS.map(item => (
+          <button
+            key={item.key}
+            type="button"
+            onClick={() => setActive(item.key)}
+            className={`flex w-full items-center gap-2.5 px-4 py-2.5 text-left text-sm font-medium transition-colors ${
+              active === item.key
+                ? "border-r-2 border-primary bg-background text-foreground"
+                : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
+            }`}
+          >
+            <item.icon className="h-4 w-4 shrink-0" />
+            <span className="flex-1">{item.label}</span>
+          </button>
+        ))}
+      </div>
+      <div className="min-w-0 flex-1 p-4">
+        {renderActiveTab()}
+      </div>
+    </div>
   );
 }
 
@@ -1326,83 +1385,85 @@ function PersonnelList({ personnel, companies, selectedId, onSelect, onEdit, onD
     return <EmptyState icon={Users} title="Geen personen gevonden" description="Pas de filters aan of voeg een nieuwe persoon toe." />;
   }
   return (
-    <div className="overflow-x-auto rounded-lg border border-border bg-card">
-      <Table>
-        <TableHeader>
-          <TableRow className="bg-muted/50">
-            <TableHead>Naam</TableHead>
-            <TableHead>Bedrijf</TableHead>
-            <TableHead>Functie</TableHead>
-            <TableHead>Relatie</TableHead>
-            <TableHead>HR</TableHead>
-            <TableHead>Status</TableHead>
-            <TableHead>App</TableHead>
-            <TableHead className="text-right">Acties</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {personnel.map(person => {
-            const relationship = getRelationshipType(person);
-            const company = companies.find(item => item.id === person.primary_company_id);
-            const status = getStatus(person);
-            const isSelected = selectedId === person.id;
-            return (
-              <TableRow key={person.id} onClick={() => onSelect(person)} className={`cursor-pointer hover:bg-muted/40 ${isSelected ? "bg-muted/50" : ""}`}>
-                <TableCell>
-                  <div className="flex min-w-[220px] items-center gap-3">
+    <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+      <div className="overflow-x-auto">
+        <div className="min-w-[980px]">
+          <div className="flex items-center border-b border-border bg-muted/30 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <span className="flex-[2] min-w-0">Naam</span>
+            <span className="flex-[1.5] min-w-0">Bedrijf</span>
+            <span className="w-36 shrink-0">Functie</span>
+            <span className="w-28 shrink-0">Relatie</span>
+            <span className="w-28 shrink-0">HR</span>
+            <span className="w-28 shrink-0">Status</span>
+            <span className="w-28 shrink-0">App</span>
+            <span className="w-28 shrink-0 text-right">Acties</span>
+          </div>
+          <div className="divide-y divide-border">
+            {personnel.map(person => {
+              const relationship = getRelationshipType(person);
+              const company = companies.find(item => item.id === person.primary_company_id);
+              const status = getStatus(person);
+              const isSelected = selectedId === person.id;
+              return (
+                <div
+                  key={person.id}
+                  onClick={() => onSelect(person)}
+                  className={`group flex cursor-pointer items-center px-4 py-3 transition-colors hover:bg-accent/50 ${isSelected ? "bg-muted/40" : ""}`}
+                >
+                  <div className="flex-[2] min-w-0 flex items-center gap-2">
                     {person.photo_file_url ? (
-                      <img src={person.photo_file_url} alt="" className="h-9 w-9 rounded-md border border-border object-cover" />
+                      <img src={person.photo_file_url} alt="" className="h-7 w-7 shrink-0 rounded border border-border object-cover" />
                     ) : (
-                      <div className="flex h-9 w-9 items-center justify-center rounded-md border border-border bg-muted text-sm font-semibold text-muted-foreground">
+                      <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded bg-muted text-xs font-semibold text-muted-foreground">
                         {getDisplayName(person).slice(0, 1).toUpperCase()}
                       </div>
                     )}
-                    <div>
-                      <p className="font-medium text-foreground">{getDisplayName(person)}</p>
-                      <p className="text-xs text-muted-foreground">{person.email || person.phone || "Geen contactgegevens"}</p>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-medium text-foreground">{getDisplayName(person)}</p>
+                      <p className="truncate text-xs text-muted-foreground">{person.email || person.phone || "Geen contactgegevens"}</p>
                     </div>
                   </div>
-                </TableCell>
-                <TableCell className="text-sm text-muted-foreground">{company?.display_name || "-"}</TableCell>
-                <TableCell className="text-sm">{FUNCTION_LABELS[person.function_type] || person.function_type || "-"}</TableCell>
-                <TableCell>
-                  <BadgePill className={relationship === "self_employed" ? "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-950 dark:text-fuchsia-200" : "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-200"}>
-                    {RELATIONSHIP_LABELS[relationship]}
-                  </BadgePill>
-                </TableCell>
-                <TableCell>
-                  <BadgePill className={HR_COLORS[person.hr_completeness_status || "incomplete"] || HR_COLORS.incomplete}>
-                    {HR_LABELS[person.hr_completeness_status || "incomplete"]}
-                  </BadgePill>
-                </TableCell>
-                <TableCell>
-                  <BadgePill className={STATUS_COLORS[status] || STATUS_COLORS.draft}>{STATUS_LABELS[status] || status}</BadgePill>
-                </TableCell>
-                <TableCell>
-                  {person.linked_user_id ? (
-                    <BadgePill className="bg-emerald-100 text-emerald-700" icon={UserCheck}>Gekoppeld</BadgePill>
-                  ) : (
-                    <BadgePill className="bg-slate-100 text-slate-600">Lokaal</BadgePill>
-                  )}
-                </TableCell>
-                <TableCell className="text-right" onClick={event => event.stopPropagation()}>
-                  <div className="flex justify-end gap-1">
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onCalculate(person)} title="Kosten">
-                      <BriefcaseBusiness className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(person)} title="Bewerken">
-                      <Pencil className="h-4 w-4" />
-                    </Button>
-                    <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(person)} title="Verwijderen">
-                      <Trash2 className="h-4 w-4" />
-                    </Button>
+                  <span className="flex-[1.5] min-w-0 truncate text-sm text-muted-foreground">{company?.display_name || "—"}</span>
+                  <span className="w-36 shrink-0 truncate text-sm">{FUNCTION_LABELS[person.function_type] || person.function_type || "—"}</span>
+                  <span className="w-28 shrink-0">
+                    <BadgePill className={relationship === "self_employed" ? "bg-fuchsia-100 text-fuchsia-700 dark:bg-fuchsia-950 dark:text-fuchsia-200" : "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-200"}>
+                      {RELATIONSHIP_LABELS[relationship]}
+                    </BadgePill>
+                  </span>
+                  <span className="w-28 shrink-0">
+                    <BadgePill className={HR_COLORS[person.hr_completeness_status || "incomplete"] || HR_COLORS.incomplete}>
+                      {HR_LABELS[person.hr_completeness_status || "incomplete"]}
+                    </BadgePill>
+                  </span>
+                  <span className="w-28 shrink-0">
+                    <BadgePill className={STATUS_COLORS[status] || STATUS_COLORS.draft}>{STATUS_LABELS[status] || status}</BadgePill>
+                  </span>
+                  <span className="w-28 shrink-0">
+                    {person.linked_user_id ? (
+                      <BadgePill className="bg-emerald-100 text-emerald-700" icon={UserCheck}>Gekoppeld</BadgePill>
+                    ) : (
+                      <BadgePill className="bg-slate-100 text-slate-600">Lokaal</BadgePill>
+                    )}
+                  </span>
+                  <div className="w-28 shrink-0" onClick={event => event.stopPropagation()}>
+                    <div className="flex justify-end gap-1">
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onCalculate(person)} title="Kosten">
+                        <BriefcaseBusiness className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8" onClick={() => onEdit(person)} title="Bewerken">
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button variant="ghost" size="icon" className="h-8 w-8 text-destructive" onClick={() => onDelete(person)} title="Verwijderen">
+                        <Trash2 className="h-4 w-4" />
+                      </Button>
+                    </div>
                   </div>
-                </TableCell>
-              </TableRow>
-            );
-          })}
-        </TableBody>
-      </Table>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      </div>
     </div>
   );
 }
@@ -1488,10 +1549,9 @@ function SubcontractorsPanel({ subcontractors, onCreate, onEdit, onDelete }) {
 
 export default function Personnel() {
   const queryClient = useQueryClient();
-  const [showWizard, setShowWizard] = useState(false);
-  const [newPreset, setNewPreset] = useState({});
   const [selectedPersonnelId, setSelectedPersonnelId] = useState(null);
   const [editingProfileId, setEditingProfileId] = useState(null);
+  const [newDraftPersonnelId, setNewDraftPersonnelId] = useState(null);
   const [activeTopTab, setActiveTopTab] = useState("employees");
   const [search, setSearch] = useState("");
   const [filterStatus, setFilterStatus] = useState("all");
@@ -1552,7 +1612,7 @@ export default function Personnel() {
     });
   }, [activeTopTab, filterFunction, filterStatus, personnel, search]);
 
-  const selectedPersonnel = personnel.find(item => item.id === selectedPersonnelId) || visiblePersonnel[0] || null;
+  const selectedPersonnel = visiblePersonnel.find(item => item.id === selectedPersonnelId) || visiblePersonnel[0] || null;
   const selectedDossier = selectedPersonnel ? {
     documents: grouped.documents[selectedPersonnel.id] || [],
     qualifications: grouped.qualifications[selectedPersonnel.id] || [],
@@ -1572,6 +1632,50 @@ export default function Personnel() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["personnel"] });
       setSelectedPersonnelId(null);
+    },
+  });
+
+  const createPersonnelMutation = useMutation({
+    mutationFn: (type = "employee") => {
+      const isZzp = type === "self_employed";
+      return base44.entities.Personnel.create({
+        name: "",
+        employee_type: isZzp ? "zzp" : "loondienst",
+        relationship_type: isZzp ? "self_employed" : "employee",
+        profile_data_policy: "profile_wins_after_acceptance",
+        profile_conflict_status: "none",
+        local_organization_copy_retained: true,
+        status: "draft",
+        hr_completeness_status: "incomplete",
+        country: "Nederland",
+        is_active: true,
+      });
+    },
+    onSuccess: (created) => {
+      if (created?.id) {
+        queryClient.setQueryData(["personnel"], current => {
+          const list = Array.isArray(current) ? current : [];
+          if (list.some(item => item.id === created.id)) return list;
+          return [created, ...list];
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["personnel"] });
+      if (created?.id) {
+        setSelectedPersonnelId(created.id);
+        setEditingProfileId(created.id);
+        setNewDraftPersonnelId(created.id);
+      }
+    },
+  });
+
+  const deleteEmptyDraftMutation = useMutation({
+    mutationFn: (id) => base44.entities.Personnel.delete(id),
+    onSuccess: (_, id) => {
+      queryClient.setQueryData(["personnel"], current => (Array.isArray(current) ? current.filter(item => item.id !== id) : current));
+      queryClient.invalidateQueries({ queryKey: ["personnel"] });
+      setSelectedPersonnelId(null);
+      setEditingProfileId(null);
+      setNewDraftPersonnelId(null);
     },
   });
 
@@ -1595,21 +1699,15 @@ export default function Personnel() {
     config.queryKeys.forEach(queryKey => queryClient.invalidateQueries({ queryKey: [queryKey] }));
   };
 
-  const openNew = (type = "employee") => {
-    const isZzp = type === "self_employed";
-    setNewPreset({
-      employee_type: isZzp ? "zzp" : "loondienst",
-      relationship_type: isZzp ? "self_employed" : "employee",
-      profile_data_policy: "profile_wins_after_acceptance",
-      profile_conflict_status: "none",
-      local_organization_copy_retained: true,
-    });
-    setShowWizard(true);
-  };
+  const openNew = (type = "employee") => createPersonnelMutation.mutate(type);
 
-  const closeWizard = () => {
-    setShowWizard(false);
-    setNewPreset({});
+  const cancelProfileEdit = (person) => {
+    if (newDraftPersonnelId === person?.id && isEmptyDraftPersonnel(person)) {
+      deleteEmptyDraftMutation.mutate(person.id);
+      return;
+    }
+    setEditingProfileId(null);
+    if (newDraftPersonnelId === person?.id) setNewDraftPersonnelId(null);
   };
 
   const deletePersonnel = (person) => {
@@ -1627,6 +1725,7 @@ export default function Personnel() {
   });
 
   const topTabs = [
+    { value: "all", label: "Alle", count: counts.all },
     { value: "employees", label: "Loondienst", count: counts.employees },
     { value: "self_employed", label: "ZZP'ers", count: counts.zzp },
     { value: "subcontractors", label: "Onderaannemers", count: counts.subcontractors },
@@ -1645,38 +1744,20 @@ export default function Personnel() {
               </Button>
             )}
             {activeTopTab === "employees" && (
-              <Button onClick={() => openNew("employee")}>
-                <Plus className="mr-1 h-4 w-4" /> Loondienst
+              <Button onClick={() => openNew("employee")} disabled={createPersonnelMutation.isPending}>
+                <Plus className="mr-1 h-4 w-4" /> {createPersonnelMutation.isPending ? "Aanmaken..." : "Loondienst"}
               </Button>
             )}
             {activeTopTab === "self_employed" && (
-              <Button onClick={() => openNew("self_employed")}>
-                <Plus className="mr-1 h-4 w-4" /> ZZP'er
+              <Button onClick={() => openNew("self_employed")} disabled={createPersonnelMutation.isPending}>
+                <Plus className="mr-1 h-4 w-4" /> {createPersonnelMutation.isPending ? "Aanmaken..." : "ZZP'er"}
               </Button>
             )}
           </div>
         }
       />
 
-      <AnimatePresence>
-        {showWizard && (
-          <motion.div initial={{ opacity: 0, y: -8 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -8 }} className="mb-5">
-            <PersonnelWizard
-              initialValues={newPreset}
-              onClose={closeWizard}
-              onSaved={id => {
-                if (id) {
-                  setSelectedPersonnelId(id);
-                  setEditingProfileId(id);
-                }
-              }}
-            />
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {!showWizard && (
-        <div className="space-y-4">
+      <div className="space-y-4">
           <Tabs value={activeTopTab || "employees"} onValueChange={setActiveTopTab}>
             <div className="overflow-x-auto">
               <TabsList className="h-auto min-w-max justify-start">
@@ -1718,29 +1799,8 @@ export default function Personnel() {
               )}
             </div>
 
-            <TabsContent value="employees" className="mt-4 space-y-4">
-              <PersonnelList
-                personnel={visiblePersonnel}
-                companies={companies}
-                selectedId={selectedPersonnel?.id}
-                onSelect={person => setSelectedPersonnelId(person.id)}
-                onEdit={person => { setSelectedPersonnelId(person.id); setEditingProfileId(person.id); }}
-                onDelete={deletePersonnel}
-                onCalculate={person => { setSelectedPersonnelId(person.id); }}
-              />
-            </TabsContent>
-            <TabsContent value="self_employed" className="mt-4 space-y-4">
-              <PersonnelList
-                personnel={visiblePersonnel}
-                companies={companies}
-                selectedId={selectedPersonnel?.id}
-                onSelect={person => setSelectedPersonnelId(person.id)}
-                onEdit={person => { setSelectedPersonnelId(person.id); setEditingProfileId(person.id); }}
-                onDelete={deletePersonnel}
-                onCalculate={person => { setSelectedPersonnelId(person.id); }}
-              />
-            </TabsContent>
-            <TabsContent value="subcontractors" className="mt-4">
+            <div className="mt-4">
+              {activeTopTab === "subcontractors" ? (
               <SubcontractorsPanel
                 subcontractors={filteredSubcontractors}
                 onCreate={() => { setEditingSubcontractor(null); setSubcontractorDialogOpen(true); }}
@@ -1749,7 +1809,18 @@ export default function Personnel() {
                   if (confirm(`${item.display_name} verwijderen?`)) deleteSubcontractorMutation.mutate(item.id);
                 }}
               />
-            </TabsContent>
+              ) : (
+                <PersonnelList
+                  personnel={visiblePersonnel}
+                  companies={companies}
+                  selectedId={selectedPersonnel?.id}
+                  onSelect={person => setSelectedPersonnelId(person.id)}
+                  onEdit={person => { setSelectedPersonnelId(person.id); setEditingProfileId(person.id); }}
+                  onDelete={deletePersonnel}
+                  onCalculate={person => { setSelectedPersonnelId(person.id); }}
+                />
+              )}
+            </div>
           </Tabs>
 
           {activeTopTab !== "subcontractors" && selectedPersonnel && selectedDossier && (
@@ -1758,8 +1829,11 @@ export default function Personnel() {
                 person={selectedPersonnel}
                 editing={editingProfileId === selectedPersonnel.id}
                 onEdit={() => setEditingProfileId(selectedPersonnel.id)}
-                onCancel={() => setEditingProfileId(null)}
-                onSaved={() => setEditingProfileId(null)}
+                onCancel={() => cancelProfileEdit(selectedPersonnel)}
+                onSaved={() => {
+                  setEditingProfileId(null);
+                  if (newDraftPersonnelId === selectedPersonnel.id) setNewDraftPersonnelId(null);
+                }}
               />
               <PersonnelDetailTabs
                 person={selectedPersonnel}
@@ -1770,7 +1844,6 @@ export default function Personnel() {
             </div>
           )}
         </div>
-      )}
 
       <RecordDialog
         config={recordConfig}
