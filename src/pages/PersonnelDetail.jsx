@@ -366,17 +366,16 @@ function NationalitySelect({ value, onChange }) {
 }
 
 function AddressAutocomplete({ data, onAddressSelect }) {
-  const [query, setQuery] = useState("");
-  const [suggestions, setSuggestions] = useState([]);
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const abortRef = React.useRef(null);
-
-  // Build current address string for display
   const currentAddress = [
     data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(),
     [data.postal_code, data.city].filter(Boolean).join(" "),
   ].filter(Boolean).join(", ");
+
+  const [query, setQuery] = useState(currentAddress);
+  const [suggestions, setSuggestions] = useState([]);
+  const [open, setOpen] = useState(false);
+  const [loading, setLoading] = useState(false);
+  const abortRef = React.useRef(null);
 
   const search = async (q) => {
     if (q.length < 3) { setSuggestions([]); return; }
@@ -434,9 +433,6 @@ function AddressAutocomplete({ data, onAddressSelect }) {
           </div>
         )}
       </div>
-      {currentAddress && (
-        <p className="text-xs text-muted-foreground">Huidig: {currentAddress}</p>
-      )}
     </div>
   );
 }
