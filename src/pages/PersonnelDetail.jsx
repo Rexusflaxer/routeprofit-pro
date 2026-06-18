@@ -699,12 +699,12 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       {/* Hero banner */}
       <div className="flex flex-col sm:flex-row">
-        {/* Left: passport photo fills entire column */}
-        <div className="group relative shrink-0 overflow-hidden sm:w-[180px] min-h-[160px]">
+        {/* Left: passport photo — 3.5 × 4.5 cm ratio (7:9) */}
+        <div className="group relative shrink-0 overflow-hidden sm:w-[175px]" style={{ aspectRatio: "7/9" }}>
           {data.photo_file_url
-            ? <img src={data.photo_file_url} alt="" className="h-full w-full object-cover" />
+            ? <img src={data.photo_file_url} alt="" className="h-full w-full object-cover object-top" />
             : (
-              <div className="flex h-full w-full min-h-[160px] items-center justify-center bg-muted">
+              <div className="flex h-full w-full items-center justify-center bg-muted">
                 <span className="text-5xl font-bold text-muted-foreground/40">{getDisplayName(data).slice(0, 1).toUpperCase()}</span>
               </div>
             )
