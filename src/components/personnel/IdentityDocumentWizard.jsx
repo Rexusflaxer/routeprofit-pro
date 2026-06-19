@@ -1,10 +1,11 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, ChevronRight, Check, X, Globe, AlertTriangle } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, X, Globe, AlertTriangle, Upload, ImageIcon, Crop } from "lucide-react";
 
 // EU/EEA nationalities that can carry an identity card
 const EU_EEA_NATIONALITIES = new Set([
@@ -42,70 +43,243 @@ const ALL_COUNTRIES = Object.values(NATIONALITY_TO_COUNTRY)
   .filter((v, i, a) => a.indexOf(v) === i)
   .sort((a, b) => a.localeCompare(b, "nl"));
 
+// ─── Image Crop Dialog ─────────────────────────────────────────────────────────
+
+function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
+  const canvasRef = useRef(null);
+  const [drag, setDrag] = useState(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0, w: 0, h: 0 });
+  const [imgEl, setImgEl] = useState(null);
+  const [drawing, setDrawing] = useState(false);
+  const [startPos, setStartPos] = useState(null);
+  const containerRef = useRef(null);
+
+  useEffect(() => {
+    if (!imageSrc || !open) return;
+    const img = new Image();
+    img.onload = () => {
+      setImgEl(img);
+      // Default crop = full image
+      setCrop({ x: 0, y: 0, w: img.width, h: img.height });
+    };
+    img.src = imageSrc;
+  }, [imageSrc, open]);
+
+  useEffect(() => {
+    if (!canvasRef.current || !imgEl) return;
+    const canvas = canvasRef.current;
+    const ctx = canvas.getContext("2d");
+    const maxW = Math.min(imgEl.width, 700);
+    const scale = maxW / imgEl.width;
+    canvas.width = imgEl.width * scale;
+    canvas.height = imgEl.height * scale;
+    canvas.dataset.scale = scale;
+    ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
+    // Draw crop overlay
+    const sx = crop.x * scale;
+    const sy = crop.y * scale;
+    const sw = crop.w * scale;
+    const sh = crop.h * scale;
+    ctx.fillStyle = "rgba(0,0,0,0.45)";
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    ctx.clearRect(sx, sy, sw, sh);
+    ctx.strokeStyle = "#3b82f6";
+    ctx.lineWidth = 2;
+    ctx.strokeRect(sx, sy, sw, sh);
+  }, [imgEl, crop]);
+
+  const getPos = (e) => {
+    const canvas = canvasRef.current;
+    const rect = canvas.getBoundingClientRect();
+    const scale = parseFloat(canvas.dataset.scale || 1);
+    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
+    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
+    return {
+      x: Math.max(0, Math.min(imgEl.width, (clientX - rect.left) / scale)),
+      y: Math.max(0, Math.min(imgEl.height, (clientY - rect.top) / scale)),
+    };
+  };
+
+  const onMouseDown = (e) => {
+    const pos = getPos(e);
+    setStartPos(pos);
+    setDrawing(true);
+    setCrop({ x: pos.x, y: pos.y, w: 0, h: 0 });
+  };
+
+  const onMouseMove = (e) => {
+    if (!drawing || !startPos) return;
+    const pos = getPos(e);
+    setCrop({
+      x: Math.min(startPos.x, pos.x),
+      y: Math.min(startPos.y, pos.y),
+      w: Math.abs(pos.x - startPos.x),
+      h: Math.abs(pos.y - startPos.y),
+    });
+  };
+
+  const onMouseUp = () => setDrawing(false);
+
+  const applyCrop = () => {
+    const offscreen = document.createElement("canvas");
+    const finalCrop = crop.w < 10 || crop.h < 10
+      ? { x: 0, y: 0, w: imgEl.width, h: imgEl.height }
+      : crop;
+    offscreen.width = finalCrop.w;
+    offscreen.height = finalCrop.h;
+    const ctx = offscreen.getContext("2d");
+    ctx.drawImage(imgEl, finalCrop.x, finalCrop.y, finalCrop.w, finalCrop.h, 0, 0, finalCrop.w, finalCrop.h);
+    offscreen.toBlob(blob => {
+      const url = URL.createObjectURL(blob);
+      onCropped(url, blob);
+      onClose();
+    }, "image/jpeg", 0.92);
+  };
+
+  const resetCrop = () => {
+    if (imgEl) setCrop({ x: 0, y: 0, w: imgEl.width, h: imgEl.height });
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={open => !open && onClose()}>
+      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Crop className="w-4 h-4" /> Bijsnijden — {label}
+          </DialogTitle>
+        </DialogHeader>
+        <p className="text-xs text-muted-foreground mb-3">
+          Teken een selectie op de afbeelding om het gewenste gebied bij te snijden. Klik op <strong>Toepassen</strong> om op te slaan.
+        </p>
+        <div ref={containerRef} className="overflow-auto rounded-md border border-border bg-muted/30 flex items-center justify-center p-2">
+          <canvas
+            ref={canvasRef}
+            className="max-w-full cursor-crosshair select-none"
+            style={{ userSelect: "none" }}
+            onMouseDown={onMouseDown}
+            onMouseMove={onMouseMove}
+            onMouseUp={onMouseUp}
+            onMouseLeave={onMouseUp}
+          />
+        </div>
+        <div className="flex justify-between items-center mt-3">
+          <Button variant="outline" size="sm" onClick={resetCrop}>
+            Selectie resetten
+          </Button>
+          <div className="flex gap-2">
+            <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
+            <Button size="sm" onClick={applyCrop}>
+              <Check className="w-3.5 h-3.5 mr-1" /> Toepassen
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Document Side Upload ──────────────────────────────────────────────────────
+
+function DocumentSideUpload({ label, previewUrl, onFileSelected, uploading }) {
+  const [cropOpen, setCropOpen] = useState(false);
+  const [rawImageSrc, setRawImageSrc] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const handleFile = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      setRawImageSrc(e.target.result);
+      setCropOpen(true);
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const handleCropped = async (objectUrl, blob) => {
+    const file = new File([blob], "document.jpg", { type: "image/jpeg" });
+    onFileSelected(file, objectUrl);
+  };
+
+  return (
+    <div className="space-y-2">
+      <label className="text-xs font-medium text-muted-foreground block">{label}</label>
+      <div
+        onClick={() => fileInputRef.current?.click()}
+        className="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border hover:border-primary bg-muted/20 hover:bg-accent/30 cursor-pointer transition-colors min-h-[120px] overflow-hidden"
+      >
+        {previewUrl ? (
+          <>
+            <img src={previewUrl} alt={label} className="w-full h-40 object-contain" />
+            <div className="absolute inset-0 bg-black/0 hover:bg-black/10 transition-colors flex items-center justify-center opacity-0 hover:opacity-100">
+              <span className="text-xs font-medium text-white bg-black/50 rounded px-2 py-1">Vervangen</span>
+            </div>
+          </>
+        ) : (
+          <>
+            <ImageIcon className="w-8 h-8 text-muted-foreground/50" />
+            <span className="text-xs text-muted-foreground">Klik om te uploaden</span>
+            <span className="text-[10px] text-muted-foreground/60">JPG, PNG, PDF</span>
+          </>
+        )}
+        {uploading && (
+          <div className="absolute inset-0 bg-background/80 flex items-center justify-center">
+            <div className="w-5 h-5 rounded-full border-2 border-primary border-t-transparent animate-spin" />
+          </div>
+        )}
+      </div>
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*,application/pdf"
+        className="hidden"
+        onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
+      />
+      <ImageCropDialog
+        open={cropOpen}
+        onClose={() => setCropOpen(false)}
+        imageSrc={rawImageSrc}
+        onCropped={handleCropped}
+        label={label}
+      />
+    </div>
+  );
+}
+
+// ─── Helpers ───────────────────────────────────────────────────────────────────
+
 function IssuingCountryField({ value, onChange, error, defaultCountry }) {
   const [editing, setEditing] = useState(false);
   const [query, setQuery] = useState("");
   const inputRef = React.useRef(null);
-
-  const filtered = query.trim()
-    ? ALL_COUNTRIES.filter(c => c.toLowerCase().includes(query.toLowerCase()))
-    : ALL_COUNTRIES;
-
+  const filtered = query.trim() ? ALL_COUNTRIES.filter(c => c.toLowerCase().includes(query.toLowerCase())) : ALL_COUNTRIES;
   const isDefault = value === defaultCountry;
-
-  const handleSelect = (country) => {
-    onChange(country);
-    setEditing(false);
-    setQuery("");
-  };
-
-  React.useEffect(() => {
-    if (editing) inputRef.current?.focus();
-  }, [editing]);
+  const handleSelect = (country) => { onChange(country); setEditing(false); setQuery(""); };
+  React.useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
 
   return (
     <div>
-      <label className="text-xs text-muted-foreground mb-1 block">
-        Uitgevend land <span className="text-destructive">*</span>
-      </label>
-
+      <label className="text-xs text-muted-foreground mb-1 block">Uitgevend land <span className="text-destructive">*</span></label>
       {!editing ? (
-        <button
-          type="button"
-          onClick={() => { setEditing(true); setQuery(""); }}
-          className={`flex items-center gap-2 h-8 px-3 w-full rounded-md border text-sm text-left transition-colors hover:bg-accent ${error ? "border-destructive" : "border-input bg-background"}`}
-        >
+        <button type="button" onClick={() => { setEditing(true); setQuery(""); }}
+          className={`flex items-center gap-2 h-8 px-3 w-full rounded-md border text-sm text-left transition-colors hover:bg-accent ${error ? "border-destructive" : "border-input bg-background"}`}>
           <span className="flex-1 truncate">{value || <span className="text-muted-foreground">Selecteer land...</span>}</span>
-          {isDefault && value && (
-            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">automatisch</span>
-          )}
+          {isDefault && value && <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">automatisch</span>}
           <svg className="w-3.5 h-3.5 text-muted-foreground shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
             <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
           </svg>
         </button>
       ) : (
         <div className="relative">
-          <Input
-            ref={inputRef}
-            value={query}
-            onChange={e => setQuery(e.target.value)}
+          <Input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
             onBlur={() => setTimeout(() => { setEditing(false); setQuery(""); }, 150)}
-            className="h-8 text-sm"
-            placeholder={value || "Typ een land..."}
-          />
+            className="h-8 text-sm" placeholder={value || "Typ een land..."} />
           {filtered.length > 0 && (
             <div className="absolute z-50 top-full mt-1 left-0 right-0 max-h-48 overflow-y-auto rounded-md border border-border bg-popover shadow-lg text-sm">
               {filtered.slice(0, 20).map(country => (
-                <button
-                  key={country}
-                  type="button"
-                  onMouseDown={() => handleSelect(country)}
-                  className={`flex items-center w-full px-3 py-1.5 text-left hover:bg-accent transition-colors ${country === value ? "bg-accent/60 font-medium" : ""}`}
-                >
+                <button key={country} type="button" onMouseDown={() => handleSelect(country)}
+                  className={`flex items-center w-full px-3 py-1.5 text-left hover:bg-accent transition-colors ${country === value ? "bg-accent/60 font-medium" : ""}`}>
                   {country}
-                  {country === defaultCountry && (
-                    <span className="ml-2 text-[10px] text-muted-foreground">(standaard)</span>
-                  )}
+                  {country === defaultCountry && <span className="ml-2 text-[10px] text-muted-foreground">(standaard)</span>}
                 </button>
               ))}
             </div>
@@ -147,10 +321,12 @@ function WizardSteps({ step, labels }) {
   );
 }
 
+// ─── Main Wizard ───────────────────────────────────────────────────────────────
+
 export default function IdentityDocumentWizard({ personnelId, nationality, onClose, onSaved }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
-  const [docType, setDocType] = useState(null); // "passport" | "id_card"
+  const [docType, setDocType] = useState(null);
   const [form, setForm] = useState({
     document_number: "",
     bsn: "",
@@ -158,9 +334,14 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     valid_until: "",
     issuing_country: NATIONALITY_TO_COUNTRY[nationality] || "",
     issuing_authority: "",
-    notes: "",
   });
   const [errors, setErrors] = useState({});
+  const [frontFile, setFrontFile] = useState(null);
+  const [frontPreview, setFrontPreview] = useState(null);
+  const [backFile, setBackFile] = useState(null);
+  const [backPreview, setBackPreview] = useState(null);
+  const [uploadingFront, setUploadingFront] = useState(false);
+  const [uploadingBack, setUploadingBack] = useState(false);
 
   const isEuEea = EU_EEA_NATIONALITIES.has(nationality);
   const isDutch = nationality === "Nederlandse";
@@ -185,10 +366,10 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     if (!form.valid_from) e.valid_from = "Verplicht";
     if (!form.valid_until) {
       e.valid_until = "Verplicht";
+    } else if (form.valid_until <= today) {
+      e.valid_until = "Document is verlopen — alleen geldige documenten mogen worden toegevoegd. Voeg verlopen documenten toe via het archief.";
     } else if (form.valid_from && form.valid_until <= form.valid_from) {
       e.valid_until = "Geldig tot moet later zijn dan geldig vanaf";
-    } else if (form.valid_until < today) {
-      e.valid_until = "Geldig tot ligt in het verleden";
     }
     if (!form.issuing_country.trim()) e.issuing_country = "Verplicht";
     setErrors(e);
@@ -200,11 +381,27 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       const typeLabel = docType === "passport" ? "Paspoort" : "Identiteitskaart";
       const country = form.issuing_country || countryLabel;
 
-      // Archiveer bestaande documenten van hetzelfde type (paspoort of ID-kaart)
+      // Upload foto's
+      let frontUrl = null;
+      let backUrl = null;
+
+      if (frontFile) {
+        setUploadingFront(true);
+        const res = await base44.integrations.Core.UploadFile({ file: frontFile });
+        frontUrl = res.file_url;
+        setUploadingFront(false);
+      }
+      if (backFile) {
+        setUploadingBack(true);
+        const res = await base44.integrations.Core.UploadFile({ file: backFile });
+        backUrl = res.file_url;
+        setUploadingBack(false);
+      }
+
+      // Archiveer bestaande documenten van hetzelfde type
       const existing = await base44.entities.PersonnelDocument.filter({ personnel_id: personnelId, category: "identity_document" });
       for (const doc of existing) {
-        const existingDocType = doc.metadata?.doc_type;
-        if (existingDocType === docType && doc.metadata?.archived !== true) {
+        if (doc.metadata?.doc_type === docType && doc.metadata?.archived !== true) {
           await base44.entities.PersonnelDocument.update(doc.id, {
             metadata: { ...doc.metadata, archived: true },
           });
@@ -227,14 +424,15 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
           nationality,
           is_eu_eea: isEuEea,
           archived: false,
+          front_file_url: frontUrl,
+          back_file_url: backUrl,
         },
       });
 
-      // Save BSN to PersonnelSensitiveData if provided
       if (form.bsn.trim()) {
-        const existing = sensitiveData[0];
-        if (existing) {
-          await base44.entities.PersonnelSensitiveData.update(existing.id, { bsn: form.bsn.trim() });
+        const existingSensitive = sensitiveData[0];
+        if (existingSensitive) {
+          await base44.entities.PersonnelSensitiveData.update(existingSensitive.id, { bsn: form.bsn.trim() });
         } else {
           await base44.entities.PersonnelSensitiveData.create({ personnel_id: personnelId, bsn: form.bsn.trim() });
         }
@@ -247,6 +445,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       onClose();
     },
   });
+
+  const STEP_LABELS = ["Type", "Gegevens", "Document scan", "Controleren"];
 
   return (
     <motion.div
@@ -265,17 +465,12 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
         )}
       </p>
 
-      <WizardSteps step={step} labels={["Type", "Gegevens", "Controleren"]} />
+      <WizardSteps step={step} labels={STEP_LABELS} />
 
       <AnimatePresence mode="wait">
-        <motion.div
-          key={step}
-          initial={{ opacity: 0, y: 6 }}
-          animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: -6 }}
-          transition={{ duration: 0.18, ease: "easeOut" }}
-        >
-          {/* Step 1: Kies type */}
+        <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
+
+          {/* Step 1: Type */}
           {step === 1 && (
             <div className="space-y-3">
               <p className="text-sm font-medium text-foreground">Kies het type legitimatiebewijs</p>
@@ -283,30 +478,27 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
               {isNonEu && nationality && (
                 <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
                   <Globe className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  <span>
-                    Op basis van de nationaliteit <strong>{nationality}</strong> is alleen een paspoort toegestaan.
-                    Een EU/EEA-identiteitskaart is niet van toepassing.
-                  </span>
+                  <span>Op basis van de nationaliteit <strong>{nationality}</strong> is alleen een paspoort toegestaan. Een EU/EEA-identiteitskaart is niet van toepassing.</span>
                 </div>
               )}
 
+              <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-900 dark:text-blue-200 flex items-start gap-2">
+                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                <span>Alleen <strong>geldige</strong> documenten kunnen hier worden toegevoegd. Verlopen documenten voeg je toe via het archief.</span>
+              </div>
+
               <div className="grid grid-cols-1 gap-2">
-                <button
-                  onClick={() => { setDocType("passport"); setStep(2); }}
-                  className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]"
-                >
+                <button onClick={() => { setDocType("passport"); setStep(2); }}
+                  className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
                   <div>
                     <span className="text-sm font-semibold text-foreground">Paspoort</span>
                     <span className="text-xs text-muted-foreground ml-2">{countryLabel} paspoort</span>
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>
-
                 {isEuEea && (
-                  <button
-                    onClick={() => { setDocType("id_card"); setStep(2); }}
-                    className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]"
-                  >
+                  <button onClick={() => { setDocType("id_card"); setStep(2); }}
+                    className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
                     <div>
                       <span className="text-sm font-semibold text-foreground">Identiteitskaart</span>
                       <span className="text-xs text-muted-foreground ml-2">{countryLabel} ID-kaart</span>
@@ -317,34 +509,24 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
               </div>
 
               <div className="flex justify-end pt-1">
-                <Button variant="ghost" size="sm" onClick={onClose}>
-                  <X className="w-4 h-4 mr-1" /> Annuleren
-                </Button>
+                <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
               </div>
             </div>
           )}
 
-          {/* Step 2: Documentgegevens */}
+          {/* Step 2: Gegevens */}
           {step === 2 && (
             <div className="space-y-3">
               <p className="text-sm font-medium text-foreground">
-                Documentgegevens —{" "}
-                <span className="text-muted-foreground font-normal">
-                  {docType === "passport" ? "Paspoort" : "Identiteitskaart"}
-                </span>
+                Documentgegevens — <span className="text-muted-foreground font-normal">{docType === "passport" ? "Paspoort" : "Identiteitskaart"}</span>
               </p>
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">
-                    Documentnummer <span className="text-destructive">*</span>
-                  </label>
-                  <Input
-                    value={form.document_number}
-                    onChange={e => set("document_number", e.target.value)}
+                  <label className="text-xs text-muted-foreground mb-1 block">Documentnummer <span className="text-destructive">*</span></label>
+                  <Input value={form.document_number} onChange={e => set("document_number", e.target.value)}
                     className={`h-8 text-sm font-mono ${errors.document_number ? "border-destructive" : ""}`}
-                    placeholder={docType === "passport" ? "Bijv. NL1234567" : "Bijv. ID1234567NL"}
-                  />
+                    placeholder={docType === "passport" ? "Bijv. NL1234567" : "Bijv. ID1234567NL"} />
                   {errors.document_number && <p className="text-xs text-destructive mt-1">{errors.document_number}</p>}
                 </div>
 
@@ -354,92 +536,97 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                     {isDutch && <span className="text-destructive ml-1">*</span>}
                     {!isDutch && <span className="text-muted-foreground ml-1">(indien beschikbaar)</span>}
                   </label>
-                  <Input
-                    value={form.bsn}
-                    onChange={e => set("bsn", e.target.value.replace(/\D/g, ""))}
+                  <Input value={form.bsn} onChange={e => set("bsn", e.target.value.replace(/\D/g, ""))}
                     className={`h-8 text-sm font-mono ${errors.bsn ? "border-destructive" : ""}`}
-                    placeholder="000000000"
-                    maxLength={9}
-                  />
-                  {!isDutch && (
-                    <p className="text-xs text-muted-foreground mt-1">
-                      Buitenlandse medewerkers ontvangen een BSN na inschrijving in de BRP.
-                    </p>
-                  )}
+                    placeholder="000000000" maxLength={9} />
+                  {!isDutch && <p className="text-xs text-muted-foreground mt-1">Buitenlandse medewerkers ontvangen een BSN na inschrijving in de BRP.</p>}
                   {errors.bsn && <p className="text-xs text-destructive mt-1">{errors.bsn}</p>}
                 </div>
 
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">
-                    Geldig vanaf <span className="text-destructive">*</span>
-                  </label>
-                  <Input
-                    type="date"
-                    value={form.valid_from}
-                    onChange={e => set("valid_from", e.target.value)}
-                    className={`h-8 text-sm ${errors.valid_from ? "border-destructive" : ""}`}
-                  />
+                  <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf <span className="text-destructive">*</span></label>
+                  <Input type="date" value={form.valid_from} onChange={e => set("valid_from", e.target.value)}
+                    className={`h-8 text-sm ${errors.valid_from ? "border-destructive" : ""}`} />
                   {errors.valid_from && <p className="text-xs text-destructive mt-1">{errors.valid_from}</p>}
                 </div>
 
                 <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">
-                    Geldig tot <span className="text-destructive">*</span>
-                  </label>
-                  <Input
-                    type="date"
-                    value={form.valid_until}
-                    onChange={e => set("valid_until", e.target.value)}
+                  <label className="text-xs text-muted-foreground mb-1 block">Geldig tot <span className="text-destructive">*</span></label>
+                  <Input type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)}
                     className={`h-8 text-sm ${errors.valid_until ? "border-destructive" : ""}`}
-                  />
+                    min={new Date(Date.now() + 86400000).toISOString().split("T")[0]} />
                   {errors.valid_until && <p className="text-xs text-destructive mt-1">{errors.valid_until}</p>}
                 </div>
 
-                <IssuingCountryField
-                  value={form.issuing_country}
-                  onChange={val => set("issuing_country", val)}
-                  error={errors.issuing_country}
-                  defaultCountry={NATIONALITY_TO_COUNTRY[nationality] || ""}
-                />
+                <IssuingCountryField value={form.issuing_country} onChange={val => set("issuing_country", val)}
+                  error={errors.issuing_country} defaultCountry={NATIONALITY_TO_COUNTRY[nationality] || ""} />
 
                 {isNonEu && (
                   <div>
                     <label className="text-xs text-muted-foreground mb-1 block">Uitgevende instantie</label>
-                    <Input
-                      value={form.issuing_authority}
-                      onChange={e => set("issuing_authority", e.target.value)}
-                      className="h-8 text-sm"
-                      placeholder="Bijv. Ministry of Interior"
-                    />
+                    <Input value={form.issuing_authority} onChange={e => set("issuing_authority", e.target.value)}
+                      className="h-8 text-sm" placeholder="Bijv. Ministry of Interior" />
                   </div>
                 )}
-
-
               </div>
 
               {isNonEu && (
                 <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-900 dark:text-blue-200">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  <span>
-                    Voor niet-EU medewerkers is naast het paspoort een verblijfs- en/of werkvergunning vereist.
-                    Registreer deze apart onder het tabblad <strong>Compliance</strong>.
-                  </span>
+                  <span>Voor niet-EU medewerkers is naast het paspoort een verblijfs- en/of werkvergunning vereist. Registreer deze apart onder het tabblad <strong>Compliance</strong>.</span>
                 </div>
               )}
 
               <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}>
-                  <ChevronLeft className="w-4 h-4 mr-1" /> Terug
-                </Button>
-                <Button size="sm" onClick={() => { if (validateStep2()) setStep(3); }}>
-                  Volgende <ChevronRight className="w-4 h-4 ml-1" />
-                </Button>
+                <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <Button size="sm" onClick={() => { if (validateStep2()) setStep(3); }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
               </div>
             </div>
           )}
 
-          {/* Step 3: Controleer & opslaan */}
+          {/* Step 3: Document scan */}
           {step === 3 && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium text-foreground mb-1">
+                  Document scannen — <span className="text-muted-foreground font-normal">{docType === "passport" ? "Paspoort" : "Identiteitskaart"}</span>
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  Upload een foto of scan van de voor- en achterkant. Na het uploaden kun je de afbeelding bijsnijden.
+                </p>
+              </div>
+
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <DocumentSideUpload
+                  label="Voorkant"
+                  previewUrl={frontPreview}
+                  onFileSelected={(file, preview) => { setFrontFile(file); setFrontPreview(preview); }}
+                  uploading={uploadingFront}
+                />
+                <DocumentSideUpload
+                  label={docType === "passport" ? "Pagina met pasfoto" : "Achterkant"}
+                  previewUrl={backPreview}
+                  onFileSelected={(file, preview) => { setBackFile(file); setBackPreview(preview); }}
+                  uploading={uploadingBack}
+                />
+              </div>
+
+              {!frontFile && !backFile && (
+                <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
+                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                  <span>Het uploaden van scans is sterk aanbevolen voor een compleet dossier. Je kunt ook doorgaan zonder upload.</span>
+                </div>
+              )}
+
+              <div className="flex justify-between pt-1">
+                <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <Button size="sm" onClick={() => setStep(4)}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+              </div>
+            </div>
+          )}
+
+          {/* Step 4: Controleren & opslaan */}
+          {step === 4 && (
             <div className="space-y-4">
               <p className="text-sm font-medium text-foreground">Controleer de gegevens en sla op</p>
 
@@ -451,7 +638,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   { label: "Geldig van", value: form.valid_from },
                   { label: "Geldig tot", value: form.valid_until },
                   form.issuing_authority ? { label: "Instantie", value: form.issuing_authority } : null,
-                  form.notes ? { label: "Opmerking", value: form.notes } : null,
+                  { label: "Voorkant", value: frontFile ? "✓ Geüpload" : "Niet geüpload" },
+                  { label: docType === "passport" ? "Pasfoto pagina" : "Achterkant", value: backFile ? "✓ Geüpload" : "Niet geüpload" },
                 ].filter(Boolean).map(row => (
                   <div key={row.label} className="flex gap-4">
                     <span className="w-36 shrink-0 text-xs text-muted-foreground">{row.label}</span>
@@ -460,10 +648,25 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 ))}
               </div>
 
+              {(frontPreview || backPreview) && (
+                <div className="grid grid-cols-2 gap-3">
+                  {frontPreview && (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">Voorkant</p>
+                      <img src={frontPreview} alt="Voorkant" className="rounded-md border border-border w-full h-28 object-contain bg-muted/20" />
+                    </div>
+                  )}
+                  {backPreview && (
+                    <div>
+                      <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Pasfoto pagina" : "Achterkant"}</p>
+                      <img src={backPreview} alt="Achterkant" className="rounded-md border border-border w-full h-28 object-contain bg-muted/20" />
+                    </div>
+                  )}
+                </div>
+              )}
+
               <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={() => setStep(2)}>
-                  <ChevronLeft className="w-4 h-4 mr-1" /> Terug
-                </Button>
+                <Button variant="ghost" size="sm" onClick={() => setStep(3)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
                   <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
