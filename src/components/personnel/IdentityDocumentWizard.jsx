@@ -286,11 +286,7 @@ function IssuingCountryField({ value, onChange, error, defaultCountry }) {
           placeholder="Typ een land..."
           className={`h-8 text-sm pr-8 ${error ? "border-destructive" : ""}`}
         />
-        {value && value === defaultCountry && (
-          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded pointer-events-none">
-            automatisch
-          </span>
-        )}
+
       </div>
       {open && filtered.length > 0 && (
         <div className="absolute z-50 top-full mt-1 left-0 right-0 max-h-48 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg text-sm">
