@@ -180,7 +180,7 @@ function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
 
 // ─── Document Side Upload ──────────────────────────────────────────────────────
 
-function DocumentSideUpload({ label, previewUrl, onFileSelected, uploading }) {
+function DocumentSideUpload({ label, previewUrl, onFileSelected, uploading, required }) {
   const [cropOpen, setCropOpen] = useState(false);
   const [rawImageSrc, setRawImageSrc] = useState(null);
   const fileInputRef = useRef(null);
@@ -202,7 +202,7 @@ function DocumentSideUpload({ label, previewUrl, onFileSelected, uploading }) {
 
   return (
     <div className="space-y-2">
-      <label className="text-xs font-medium text-muted-foreground block">{label}</label>
+      <label className="text-xs font-medium text-muted-foreground block">{label}{required && <span className="text-destructive ml-1">*</span>}</label>
       <div
         onClick={() => fileInputRef.current?.click()}
         className="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border hover:border-primary bg-muted/20 hover:bg-accent/30 cursor-pointer transition-colors min-h-[120px] overflow-hidden"
@@ -624,6 +624,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   previewUrl={frontPreview}
                   onFileSelected={(file, preview) => { setFrontFile(file); setFrontPreview(preview); }}
                   uploading={uploadingFront}
+                  required
                 />
                 <DocumentSideUpload
                   label={docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant"}
@@ -633,16 +634,9 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 />
               </div>
 
-              {(!frontFile || !backFile) && (
-                <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  <span>Upload zowel de voor- als achterkant van het document om verder te gaan.</span>
-                </div>
-              )}
-
               <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                <Button size="sm" onClick={() => setStep(4)} disabled={!frontFile || !backFile}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                <Button size="sm" onClick={() => setStep(4)} disabled={!frontFile}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
               </div>
             </div>
           )}
