@@ -37,10 +37,12 @@ import {
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
 import { uploadManagedFile } from "@/lib/managedFiles";
+import { AnimatePresence } from "framer-motion";
 import PersonnelAccessTab from "@/components/personnel/PersonnelAccessTab";
 import PersonnelContractsTab from "@/components/personnel/PersonnelContractsTab";
 import CostCalculator from "@/components/personnel/CostCalculator";
 import PhotoCropUpload from "@/components/personnel/PhotoCropUpload";
+import IdentityDocumentWizard from "@/components/personnel/IdentityDocumentWizard";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -955,6 +957,7 @@ function PayrollTab({ person, documents }) {
 
 function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
   const [active, setActive] = useState("identity");
+  const [showIdentityWizard, setShowIdentityWizard] = useState(false);
   const generalDocuments = dossier.documents.filter(d => !["identity_document","drivers_license","vog","cv","bank_account_proof","payroll_tax_statement"].includes(d.category));
   const identityDocs = dossier.documents.filter(d => d.category === "identity_document");
   const licenseDocs = dossier.documents.filter(d => d.category === "drivers_license");
@@ -967,21 +970,35 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
       case "payroll": return <PayrollTab person={person} documents={dossier.documents} />;
       case "identity": return (
         <div className="flex flex-col h-full">
+          {/* Wizard inline */}
+          <AnimatePresence>
+            {showIdentityWizard && (
+              <IdentityDocumentWizard
+                personnelId={person.id}
+                nationality={person.nationality}
+                onClose={() => setShowIdentityWizard(false)}
+                onSaved={() => setShowIdentityWizard(false)}
+              />
+            )}
+          </AnimatePresence>
+
           {/* Table header */}
           <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
             <span className="flex-1 min-w-0">Type / omschrijving</span>
             <span className="w-36 shrink-0">Documentnummer</span>
             <span className="w-28 shrink-0">Geldig tot</span>
             <span className="w-28 shrink-0">Status</span>
-            <div className="shrink-0">
-              <Button size="sm" variant="outline" onClick={() => onAddRecord("document")} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-                <Plus className="w-3 h-3 mr-1" /> Toevoegen
-              </Button>
-            </div>
+            {!showIdentityWizard && (
+              <div className="shrink-0">
+                <Button size="sm" variant="outline" onClick={() => setShowIdentityWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                  <Plus className="w-3 h-3 mr-1" /> Nieuw document
+                </Button>
+              </div>
+            )}
           </div>
 
           {/* Rows */}
-          {identityDocs.length === 0 ? (
+          {identityDocs.length === 0 && !showIdentityWizard ? (
             <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen legitimatiebewijs geregistreerd.</p>
           ) : (
             <div className="divide-y divide-border">
