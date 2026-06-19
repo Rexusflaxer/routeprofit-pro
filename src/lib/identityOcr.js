@@ -269,7 +269,7 @@ function mergeResults(text) {
 }
 
 export async function recognizeIdentityDocument({ frontFile, backFile, onProgress }) {
-  const { createWorker } = await import("tesseract.js");
+  const { createWorker } = await import("https://esm.sh/tesseract.js@6.0.1");
   const worker = await createWorker("eng", 1, {
     logger: message => {
       if (message.status && typeof message.progress === "number") {
