@@ -242,9 +242,9 @@ export default function CompanySidebarPanel({
   permanentDeletePending = false,
 }) {
   const getInitialActiveTab = () => {
-    if (typeof window === "undefined") return null;
+    if (typeof window === "undefined") return MENU_ITEMS[0].key;
     const tab = new URLSearchParams(window.location.search).get("tab");
-    return MENU_ITEMS.some(item => item.key === tab) ? tab : null;
+    return MENU_ITEMS.some(item => item.key === tab) ? tab : MENU_ITEMS[0].key;
   };
 
   const [active, setActive] = useState(getInitialActiveTab);

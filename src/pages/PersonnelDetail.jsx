@@ -957,7 +957,7 @@ function PayrollTab({ person, documents }) {
 
 function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
   const queryClient = useQueryClient();
-  const [active, setActive] = useState(null);
+  const [active, setActive] = useState(PERSONNEL_TABS[0].key);
   const [showIdentityWizard, setShowIdentityWizard] = useState(false);
   const [identityArchiveMode, setIdentityArchiveMode] = useState(false);
   const [showIdentityArchive, setShowIdentityArchive] = useState(false);
