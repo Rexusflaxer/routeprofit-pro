@@ -633,16 +633,16 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 />
               </div>
 
-              {!frontFile && !backFile && (
+              {(!frontFile || !backFile) && (
                 <div className="flex items-start gap-2 rounded-md border border-amber-200 bg-amber-50 dark:border-amber-900/50 dark:bg-amber-950/30 px-3 py-2 text-xs text-amber-900 dark:text-amber-200">
                   <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  <span>Het uploaden van scans is sterk aanbevolen voor een compleet dossier. Je kunt ook doorgaan zonder upload.</span>
+                  <span>Upload zowel de voor- als achterkant van het document om verder te gaan.</span>
                 </div>
               )}
 
               <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                <Button size="sm" onClick={() => setStep(4)}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                <Button size="sm" onClick={() => setStep(4)} disabled={!frontFile || !backFile}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
               </div>
             </div>
           )}
