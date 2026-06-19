@@ -242,9 +242,9 @@ export default function CompanySidebarPanel({
   permanentDeletePending = false,
 }) {
   const getInitialActiveTab = () => {
-    if (typeof window === "undefined") return "wpbr";
+    if (typeof window === "undefined") return null;
     const tab = new URLSearchParams(window.location.search).get("tab");
-    return MENU_ITEMS.some(item => item.key === tab) ? tab : "wpbr";
+    return MENU_ITEMS.some(item => item.key === tab) ? tab : null;
   };
 
   const [active, setActive] = useState(getInitialActiveTab);
@@ -351,6 +351,7 @@ export default function CompanySidebarPanel({
 
       {/* Right content */}
       <div className="flex-1 min-w-0">
+        {!active && null}
         {active === "wpbr" && (
           <WpbrTab companyId={companyId} company={company} />
         )}

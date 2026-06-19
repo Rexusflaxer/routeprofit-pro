@@ -957,7 +957,7 @@ function PayrollTab({ person, documents }) {
 
 function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
   const queryClient = useQueryClient();
-  const [active, setActive] = useState("identity");
+  const [active, setActive] = useState(null);
   const [showIdentityWizard, setShowIdentityWizard] = useState(false);
   const generalDocuments = dossier.documents.filter(d => !["identity_document","drivers_license","vog","cv","bank_account_proof","payroll_tax_statement"].includes(d.category));
   const identityDocs = dossier.documents.filter(d => d.category === "identity_document" && !d.metadata?.archived);
@@ -969,6 +969,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
 
   const renderTab = () => {
     switch (active) {
+      case null: return null;
       case "overview": return <OverviewTab person={person} companies={companies} dossier={dossier} />;
       case "payroll": return <PayrollTab person={person} documents={dossier.documents} />;
       case "identity": return (
