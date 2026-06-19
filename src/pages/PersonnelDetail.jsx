@@ -12,6 +12,7 @@ import { Dialog, DialogContent, DialogFooter, DialogHeader, DialogTitle } from "
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import {
   AlertTriangle,
+  Archive,
   ArrowLeft,
   BadgeCheck,
   Banknote,
@@ -1002,7 +1003,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
             <span className="w-28 shrink-0">Geldig tot</span>
             <span className="w-28 shrink-0">Status</span>
             {!showIdentityWizard && (
-              <div className="shrink-0 flex gap-1.5">
+              <div className="shrink-0 flex items-center gap-2">
                 {showIdentityArchive ? (
                   <>
                     <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
@@ -1015,7 +1016,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
                 ) : (
                   <>
                     <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-                      Archief {identityArchived.length > 0 ? `(${identityArchived.length})` : ""}
+                      <Archive className="w-3 h-3 mr-1" /> Archief {identityArchived.length > 0 ? `(${identityArchived.length})` : ""}
                     </Button>
                     <Button size="sm" variant="outline" onClick={() => { setIdentityArchiveMode(false); setShowIdentityWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
                       <Plus className="w-3 h-3 mr-1" /> Nieuw document
