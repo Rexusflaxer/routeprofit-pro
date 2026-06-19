@@ -959,6 +959,8 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
   const queryClient = useQueryClient();
   const [active, setActive] = useState(null);
   const [showIdentityWizard, setShowIdentityWizard] = useState(false);
+  const [identityArchiveMode, setIdentityArchiveMode] = useState(false);
+  const [showIdentityArchive, setShowIdentityArchive] = useState(false);
   const generalDocuments = dossier.documents.filter(d => !["identity_document","drivers_license","vog","cv","bank_account_proof","payroll_tax_statement"].includes(d.category));
   const identityDocs = dossier.documents.filter(d => d.category === "identity_document" && !d.metadata?.archived);
   const identityArchived = dossier.documents.filter(d => d.category === "identity_document" && d.metadata?.archived);
@@ -986,8 +988,9 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
               <IdentityDocumentWizard
                 personnelId={person.id}
                 nationality={person.nationality}
-                onClose={() => setShowIdentityWizard(false)}
-                onSaved={() => setShowIdentityWizard(false)}
+                isArchiveEntry={identityArchiveMode}
+                onClose={() => { setShowIdentityWizard(false); setIdentityArchiveMode(false); }}
+                onSaved={() => { setShowIdentityWizard(false); setIdentityArchiveMode(false); }}
               />
             )}
           </AnimatePresence>
@@ -999,16 +1002,66 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
             <span className="w-28 shrink-0">Geldig tot</span>
             <span className="w-28 shrink-0">Status</span>
             {!showIdentityWizard && (
-              <div className="shrink-0">
-                <Button size="sm" variant="outline" onClick={() => setShowIdentityWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-                  <Plus className="w-3 h-3 mr-1" /> Nieuw document
-                </Button>
+              <div className="shrink-0 flex gap-1.5">
+                {showIdentityArchive ? (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                      <ArrowLeft className="w-3 h-3 mr-1" /> Actieve documenten
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => { setIdentityArchiveMode(true); setShowIdentityWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                      <Plus className="w-3 h-3 mr-1" /> Verlopen doc. toevoegen
+                    </Button>
+                  </>
+                ) : (
+                  <>
+                    <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                      Archief {identityArchived.length > 0 ? `(${identityArchived.length})` : ""}
+                    </Button>
+                    <Button size="sm" variant="outline" onClick={() => { setIdentityArchiveMode(false); setShowIdentityWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                      <Plus className="w-3 h-3 mr-1" /> Nieuw document
+                    </Button>
+                  </>
+                )}
               </div>
             )}
           </div>
 
+          {/* Rows — archief view */}
+          {showIdentityArchive && (
+            <div>
+              {identityArchived.length === 0 ? (
+                <p className="px-4 py-6 text-sm text-muted-foreground text-center">Geen verlopen documenten in het archief.</p>
+              ) : (
+                <div className="divide-y divide-border opacity-70">
+                  {identityArchived.map(doc => {
+                    const expiry = getExpiryState(doc.valid_until);
+                    return (
+                      <div key={doc.id} className="relative flex items-center px-4 py-2.5 group hover:opacity-80 transition-opacity">
+                        <div className="flex-1 min-w-0">
+                          <span className="text-sm text-muted-foreground line-through">{doc.document_type || "—"}</span>
+                        </div>
+                        <span className="w-36 shrink-0 text-xs text-muted-foreground">{doc.document_number ? `#${doc.document_number}` : "—"}</span>
+                        <div className="w-28 shrink-0 flex items-center gap-1.5">
+                          <span className="text-xs text-muted-foreground">{doc.valid_until ? formatDate(doc.valid_until) : "—"}</span>
+                          {expiry && <BadgePill className={expiry.className}>{expiry.label}</BadgePill>}
+                        </div>
+                        <div className="w-28 shrink-0"><BadgePill className="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">Gearchiveerd</BadgePill></div>
+                        <div className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                            onClick={async () => { await base44.entities.PersonnelDocument.delete(doc.id); queryClient.invalidateQueries({ queryKey: ["personnel-documents"] }); }} title="Verwijderen">
+                            <X className="w-3.5 h-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+          )}
+
           {/* Rows — actief */}
-          {identityDocs.length > 0 && (
+          {!showIdentityArchive && identityDocs.length > 0 && (
             <div className="divide-y divide-border">
               {identityDocs.map(doc => {
                 const expiry = getExpiryState(doc.valid_until);
@@ -1039,31 +1092,8 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
             </div>
           )}
 
-          {/* Archief */}
 
-          {identityArchived.length > 0 && (
-            <div className="border-t border-border mt-2">
-              <p className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 bg-muted/30">Archief</p>
-              <div className="divide-y divide-border opacity-60">
-                {identityArchived.map(doc => (
-                  <div key={doc.id} className="relative flex items-center px-4 py-2.5 group hover:opacity-80 transition-opacity">
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm text-muted-foreground line-through">{doc.document_type || "—"}</span>
-                    </div>
-                    <span className="w-36 shrink-0 text-xs text-muted-foreground">{doc.document_number ? `#${doc.document_number}` : "—"}</span>
-                    <span className="w-28 shrink-0 text-xs text-muted-foreground">{doc.valid_until ? formatDate(doc.valid_until) : "—"}</span>
-                    <div className="w-28 shrink-0"><BadgePill className="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">Gearchiveerd</BadgePill></div>
-                    <div className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={async () => { await base44.entities.PersonnelDocument.delete(doc.id); queryClient.invalidateQueries({ queryKey: ["personnel-documents"] }); }} title="Verwijderen">
-                        <X className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
+
         </div>
       );
       case "documents": return (

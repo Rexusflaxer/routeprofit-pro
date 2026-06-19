@@ -323,7 +323,7 @@ function WizardSteps({ step, labels }) {
 
 // ─── Main Wizard ───────────────────────────────────────────────────────────────
 
-export default function IdentityDocumentWizard({ personnelId, nationality, onClose, onSaved }) {
+export default function IdentityDocumentWizard({ personnelId, nationality, onClose, onSaved, isArchiveEntry = false }) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
   const [docType, setDocType] = useState(null);
@@ -366,8 +366,10 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     if (!form.valid_from) e.valid_from = "Verplicht";
     if (!form.valid_until) {
       e.valid_until = "Verplicht";
-    } else if (form.valid_until <= today) {
-      e.valid_until = "Document is verlopen — alleen geldige documenten mogen worden toegevoegd. Voeg verlopen documenten toe via het archief.";
+    } else if (!isArchiveEntry && form.valid_until <= today) {
+      e.valid_until = "Document is verlopen — voeg verlopen documenten toe via het archief.";
+    } else if (isArchiveEntry && form.valid_until >= today) {
+      e.valid_until = "Archief is voor verlopen documenten (einddatum moet in het verleden liggen).";
     } else if (form.valid_from && form.valid_until <= form.valid_from) {
       e.valid_until = "Geldig tot moet later zijn dan geldig vanaf";
     }
@@ -416,14 +418,14 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
         valid_from: form.valid_from || null,
         valid_until: form.valid_until || null,
         is_sensitive: true,
-        verification_status: "pending_review",
+        verification_status: isArchiveEntry ? "verified" : "pending_review",
         metadata: {
           doc_type: docType,
           issuing_country: form.issuing_country,
           issuing_authority: form.issuing_authority || null,
           nationality,
           is_eu_eea: isEuEea,
-          archived: false,
+          archived: isArchiveEntry,
           front_file_url: frontUrl,
           back_file_url: backUrl,
         },
@@ -457,7 +459,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       className="border-b border-primary/30 bg-muted/20 p-5"
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
-        Legitimatiebewijs toevoegen
+        {isArchiveEntry ? "Verlopen legitimatiebewijs archiveren" : "Legitimatiebewijs toevoegen"}
         {nationality && (
           <span className="ml-2 text-muted-foreground font-normal normal-case tracking-normal">
             — {countryLabel} ({nationality})
@@ -481,11 +483,6 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   <span>Op basis van de nationaliteit <strong>{nationality}</strong> is alleen een paspoort toegestaan. Een EU/EEA-identiteitskaart is niet van toepassing.</span>
                 </div>
               )}
-
-              <div className="rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-900 dark:text-blue-200 flex items-start gap-2">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                <span>Alleen <strong>geldige</strong> documenten kunnen hier worden toegevoegd. Verlopen documenten voeg je toe via het archief.</span>
-              </div>
 
               <div className="grid grid-cols-1 gap-2">
                 <button onClick={() => { setDocType("passport"); setStep(2); }}
@@ -554,7 +551,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   <label className="text-xs text-muted-foreground mb-1 block">Geldig tot <span className="text-destructive">*</span></label>
                   <Input type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)}
                     className={`h-8 text-sm ${errors.valid_until ? "border-destructive" : ""}`}
-                    min={new Date(Date.now() + 86400000).toISOString().split("T")[0]} />
+                    max={isArchiveEntry ? new Date().toISOString().split("T")[0] : undefined}
+                    min={isArchiveEntry ? undefined : new Date(Date.now() + 86400000).toISOString().split("T")[0]} />
                   {errors.valid_until && <p className="text-xs text-destructive mt-1">{errors.valid_until}</p>}
                 </div>
 
