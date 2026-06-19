@@ -351,7 +351,11 @@ export default function CompanySidebarPanel({
 
       {/* Right content */}
       <div className="flex-1 min-w-0">
-        {!active && null}
+        {!active && (
+          <div className="flex h-full items-center justify-center py-16 text-center">
+            <p className="text-sm text-muted-foreground">Selecteer een tabblad om de gegevens te bekijken.</p>
+          </div>
+        )}
         {active === "wpbr" && (
           <WpbrTab companyId={companyId} company={company} />
         )}

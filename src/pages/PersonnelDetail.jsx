@@ -969,7 +969,13 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
 
   const renderTab = () => {
     switch (active) {
-      case null: return null;
+      case null: return (
+        <div className="flex h-full items-center justify-center text-center py-16">
+          <div>
+            <p className="text-sm text-muted-foreground">Selecteer een tabblad om het dossier te bekijken.</p>
+          </div>
+        </div>
+      );
       case "overview": return <OverviewTab person={person} companies={companies} dossier={dossier} />;
       case "payroll": return <PayrollTab person={person} documents={dossier.documents} />;
       case "identity": return (
