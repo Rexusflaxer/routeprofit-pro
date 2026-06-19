@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -381,9 +381,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const [uploadingFront, setUploadingFront] = useState(false);
   const [uploadingBack, setUploadingBack] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
-  const [recognitionMessage, setRecognitionMessage] = useState("");
-  const [recognitionResult, setRecognitionResult] = useState(null);
   const [recognizedUploadKey, setRecognizedUploadKey] = useState("");
+  const latestUploadKeyRef = useRef("");
 
   const isEuEea = EU_EEA_NATIONALITIES.has(nationality);
   const isDutch = nationality === "Nederlandse";
@@ -408,12 +407,14 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   ].join("|");
 
   useEffect(() => {
-    setRecognitionMessage("");
-    setRecognitionResult(null);
+    latestUploadKeyRef.current = uploadKey;
+  }, [uploadKey]);
+
+  useEffect(() => {
     setRecognizedUploadKey("");
   }, [docType, frontFile, backFile]);
 
-  const applyRecognizedFields = (result) => {
+  const applyRecognizedFields = useCallback((result) => {
     setForm(current => {
       const next = { ...current };
       for (const field of ["document_number", "bsn", "valid_from", "valid_until"]) {
@@ -421,44 +422,37 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       }
       return next;
     });
-  };
+  }, []);
 
-  const runRecognition = async () => {
+  const runRecognition = useCallback(async () => {
     if (!frontFile || recognizing) return;
     if (recognizedUploadKey === uploadKey) return;
 
+    const currentUploadKey = uploadKey;
     setRecognizing(true);
-    setRecognitionMessage("Automatische herkenning starten...");
     try {
       const { recognizeIdentityDocument } = await import("@/lib/identityOcr");
       const result = await recognizeIdentityDocument({
         frontFile,
         backFile,
-        onProgress: message => setRecognitionMessage(`Herkenning: ${message}`),
       });
-      setRecognitionResult(result);
+      if (latestUploadKeyRef.current !== currentUploadKey) return;
       applyRecognizedFields(result);
-      setRecognizedUploadKey(uploadKey);
-
-      const labels = {
-        document_number: "documentnummer",
-        bsn: "BSN",
-        valid_from: "geldig vanaf",
-        valid_until: "geldig tot",
-      };
-      const detected = (result.detected_fields || []).map(field => labels[field] || field);
-      setRecognitionMessage(
-        detected.length > 0
-          ? `Herkend: ${detected.join(", ")}. Controleer de waarden met de upload.`
-          : "Er zijn geen betrouwbare velden herkend. Vul de gegevens handmatig in."
-      );
+      setRecognizedUploadKey(currentUploadKey);
     } catch (error) {
       console.error("Identity OCR failed", error);
-      setRecognitionMessage("Automatische herkenning is niet gelukt. Vul de gegevens handmatig in.");
+      if (latestUploadKeyRef.current === currentUploadKey) {
+        setRecognizedUploadKey(currentUploadKey);
+      }
     } finally {
       setRecognizing(false);
     }
-  };
+  }, [applyRecognizedFields, backFile, frontFile, recognizedUploadKey, recognizing, uploadKey]);
+
+  useEffect(() => {
+    if (step !== 2 || !frontFile || recognizing || recognizedUploadKey === uploadKey) return;
+    runRecognition();
+  }, [frontFile, recognizedUploadKey, recognizing, runRecognition, step, uploadKey]);
 
   const validateDetails = () => {
     const e = {};
@@ -550,6 +544,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   });
 
   const STEP_LABELS = ["Type", "Upload", "Controleren"];
+  const canContinueToReview = Boolean(frontFile) && recognizedUploadKey === uploadKey && !recognizing;
 
   return (
     <motion.div
@@ -620,7 +615,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   Document uploaden — <span className="text-muted-foreground font-normal">{docType === "passport" ? "Paspoort" : "Identiteitskaart"}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Upload een duidelijke foto of scan van het document. Na het uploaden kun je de afbeelding bijsnijden en probeert de app documentnummer, BSN en geldigheid automatisch te herkennen.
+                  Upload een duidelijke foto of scan van het document. Na het uploaden kun je de afbeelding bijsnijden. De controle opent zodra de scan klaar is.
                 </p>
               </div>
 
@@ -642,8 +637,9 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
               <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                <Button size="sm" onClick={() => { setStep(3); runRecognition(); }} disabled={!frontFile || recognizing}>
-                  {recognizing ? "Herkennen..." : "Volgende"} <ChevronRight className="w-4 h-4 ml-1" />
+                <Button size="sm" onClick={() => setStep(3)} disabled={!canContinueToReview}>
+                  {frontFile && !canContinueToReview && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
+                  {frontFile && !canContinueToReview ? "Verwerken..." : "Volgende"} <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               </div>
             </div>
@@ -653,33 +649,14 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
           {step === 3 && (
             <div className="space-y-4">
               <div>
-                <p className="text-sm font-medium text-foreground mb-1">Controleer de herkenning en vul aan</p>
+                <p className="text-sm font-medium text-foreground mb-1">Controleer en vul aan</p>
                 <p className="text-xs text-muted-foreground">
-                  Vergelijk de automatisch ingevulde velden met de upload. Als herkenning een fout maakt, kun je hier direct overtypen voordat je opslaat.
+                  Vergelijk de velden met de upload. Je kunt waarden direct aanpassen voordat je opslaat.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
                 <div className="rounded-lg border border-border bg-card p-4">
-                  {(recognizing || recognitionMessage) && (
-                    <div className={`mb-4 flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
-                      recognizing
-                        ? "border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200"
-                        : recognitionResult?.detected_fields?.length
-                          ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200"
-                          : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
-                    }`}>
-                      {recognizing ? (
-                        <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
-                      ) : recognitionResult?.detected_fields?.length ? (
-                        <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      ) : (
-                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      )}
-                      <span>{recognitionMessage}</span>
-                    </div>
-                  )}
-
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Documentnummer <span className="text-destructive">*</span></label>
