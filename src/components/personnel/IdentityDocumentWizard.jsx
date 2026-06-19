@@ -248,42 +248,59 @@ function DocumentSideUpload({ label, previewUrl, onFileSelected, uploading }) {
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function IssuingCountryField({ value, onChange, error, defaultCountry }) {
-  const [editing, setEditing] = useState(false);
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(value || "");
+  const [open, setOpen] = useState(false);
   const inputRef = React.useRef(null);
-  const filtered = query.trim() ? ALL_COUNTRIES.filter(c => c.toLowerCase().includes(query.toLowerCase())) : ALL_COUNTRIES;
-  const isDefault = value === defaultCountry;
-  const handleSelect = (country) => { onChange(country); setEditing(false); setQuery(""); };
-  React.useEffect(() => { if (editing) inputRef.current?.focus(); }, [editing]);
+  const filtered = query.trim()
+    ? ALL_COUNTRIES.filter(c => c.toLowerCase().includes(query.toLowerCase()))
+    : ALL_COUNTRIES;
+
+  const handleSelect = (country) => {
+    onChange(country);
+    setQuery(country);
+    setOpen(false);
+  };
+
+  const handleBlur = () => {
+    setTimeout(() => {
+      setOpen(false);
+      // Snap back to selected value if user typed something invalid
+      setQuery(value || "");
+    }, 150);
+  };
+
+  React.useEffect(() => {
+    setQuery(value || "");
+  }, [value]);
 
   return (
-    <div>
+    <div className="relative">
       <label className="text-xs text-muted-foreground mb-1 block">Uitgevend land <span className="text-destructive">*</span></label>
-      {!editing ? (
-        <button type="button" onClick={() => { setEditing(true); setQuery(""); }}
-          className={`flex items-center gap-2 h-8 px-3 w-full rounded-md border text-sm text-left transition-colors hover:bg-accent ${error ? "border-destructive" : "border-input bg-background"}`}>
-          <span className="flex-1 truncate">{value || <span className="text-muted-foreground">Selecteer land...</span>}</span>
-          {isDefault && value && <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">automatisch</span>}
-          <svg className="w-3.5 h-3.5 text-muted-foreground shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
-          </svg>
-        </button>
-      ) : (
-        <div className="relative">
-          <Input ref={inputRef} value={query} onChange={e => setQuery(e.target.value)}
-            onBlur={() => setTimeout(() => { setEditing(false); setQuery(""); }, 150)}
-            className="h-8 text-sm" placeholder={value || "Typ een land..."} />
-          {filtered.length > 0 && (
-            <div className="absolute z-50 top-full mt-1 left-0 right-0 max-h-48 overflow-y-auto rounded-md border border-border bg-popover shadow-lg text-sm">
-              {filtered.slice(0, 20).map(country => (
-                <button key={country} type="button" onMouseDown={() => handleSelect(country)}
-                  className={`flex items-center w-full px-3 py-1.5 text-left hover:bg-accent transition-colors ${country === value ? "bg-accent/60 font-medium" : ""}`}>
-                  {country}
-                  {country === defaultCountry && <span className="ml-2 text-[10px] text-muted-foreground">(standaard)</span>}
-                </button>
-              ))}
-            </div>
-          )}
+      <div className="relative">
+        <Input
+          ref={inputRef}
+          value={query}
+          onChange={e => { setQuery(e.target.value); setOpen(true); }}
+          onFocus={() => setOpen(true)}
+          onBlur={handleBlur}
+          placeholder="Typ een land..."
+          className={`h-8 text-sm pr-8 ${error ? "border-destructive" : ""}`}
+        />
+        {value && value === defaultCountry && (
+          <span className="absolute right-2 top-1/2 -translate-y-1/2 text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded pointer-events-none">
+            automatisch
+          </span>
+        )}
+      </div>
+      {open && filtered.length > 0 && (
+        <div className="absolute z-50 top-full mt-1 left-0 right-0 max-h-48 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg text-sm">
+          {filtered.slice(0, 30).map(country => (
+            <button key={country} type="button" onMouseDown={() => handleSelect(country)}
+              className={`flex items-center w-full px-3 py-1.5 text-left hover:bg-accent hover:text-accent-foreground transition-colors ${country === value ? "bg-accent/60 font-medium" : ""}`}>
+              {country}
+              {country === defaultCountry && <span className="ml-2 text-[10px] text-muted-foreground">(standaard)</span>}
+            </button>
+          ))}
         </div>
       )}
       {error && <p className="text-xs text-destructive mt-1">{error}</p>}
