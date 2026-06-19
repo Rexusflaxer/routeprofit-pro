@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, ChevronRight, Check, X, Globe, AlertTriangle, ImageIcon, Crop } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, X, Globe, AlertTriangle, ImageIcon, Crop, Loader2 } from "lucide-react";
 
 // EU/EEA nationalities that can carry an identity card
 const EU_EEA_NATIONALITIES = new Set([
@@ -47,21 +47,24 @@ const ALL_COUNTRIES = Object.values(NATIONALITY_TO_COUNTRY)
 
 function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
   const canvasRef = useRef(null);
-  const [drag, setDrag] = useState(null);
   const [crop, setCrop] = useState({ x: 0, y: 0, w: 0, h: 0 });
   const [imgEl, setImgEl] = useState(null);
+  const [imageError, setImageError] = useState("");
   const [drawing, setDrawing] = useState(false);
   const [startPos, setStartPos] = useState(null);
   const containerRef = useRef(null);
 
   useEffect(() => {
     if (!imageSrc || !open) return;
+    setImgEl(null);
+    setImageError("");
     const img = new Image();
     img.onload = () => {
       setImgEl(img);
       // Default crop = full image
       setCrop({ x: 0, y: 0, w: img.width, h: img.height });
     };
+    img.onerror = () => setImageError("De afbeelding kon niet worden geopend. Gebruik een JPG of PNG.");
     img.src = imageSrc;
   }, [imageSrc, open]);
 
@@ -81,8 +84,10 @@ function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
     const sw = crop.w * scale;
     const sh = crop.h * scale;
     ctx.fillStyle = "rgba(0,0,0,0.45)";
-    ctx.fillRect(0, 0, canvas.width, canvas.height);
-    ctx.clearRect(sx, sy, sw, sh);
+    ctx.fillRect(0, 0, canvas.width, sy);
+    ctx.fillRect(0, sy + sh, canvas.width, canvas.height - (sy + sh));
+    ctx.fillRect(0, sy, sx, sh);
+    ctx.fillRect(sx + sw, sy, canvas.width - (sx + sw), sh);
     ctx.strokeStyle = "#3b82f6";
     ctx.lineWidth = 2;
     ctx.strokeRect(sx, sy, sw, sh);
@@ -151,16 +156,25 @@ function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
         <p className="text-xs text-muted-foreground mb-3">
           Teken een selectie op de afbeelding om het gewenste gebied bij te snijden. Klik op <strong>Toepassen</strong> om op te slaan.
         </p>
-        <div ref={containerRef} className="overflow-auto rounded-md border border-border bg-muted/30 flex items-center justify-center p-2">
-          <canvas
-            ref={canvasRef}
-            className="max-w-full cursor-crosshair select-none"
-            style={{ userSelect: "none" }}
-            onMouseDown={onMouseDown}
-            onMouseMove={onMouseMove}
-            onMouseUp={onMouseUp}
-            onMouseLeave={onMouseUp}
-          />
+        <div ref={containerRef} className="min-h-64 overflow-auto rounded-md border border-border bg-muted/30 flex items-center justify-center p-2">
+          {imageError ? (
+            <p className="text-sm text-destructive">{imageError}</p>
+          ) : !imgEl ? (
+            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+              <Loader2 className="h-4 w-4 animate-spin" />
+              Afbeelding laden...
+            </div>
+          ) : (
+            <canvas
+              ref={canvasRef}
+              className="max-w-full cursor-crosshair select-none"
+              style={{ userSelect: "none" }}
+              onMouseDown={onMouseDown}
+              onMouseMove={onMouseMove}
+              onMouseUp={onMouseUp}
+              onMouseLeave={onMouseUp}
+            />
+          )}
         </div>
         <div className="flex justify-between items-center mt-3">
           <Button variant="outline" size="sm" onClick={resetCrop}>
@@ -168,7 +182,7 @@ function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
           </Button>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
-            <Button size="sm" onClick={applyCrop}>
+            <Button size="sm" onClick={applyCrop} disabled={!imgEl || !!imageError}>
               <Check className="w-3.5 h-3.5 mr-1" /> Toepassen
             </Button>
           </div>
@@ -366,6 +380,10 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const [backPreview, setBackPreview] = useState(null);
   const [uploadingFront, setUploadingFront] = useState(false);
   const [uploadingBack, setUploadingBack] = useState(false);
+  const [recognizing, setRecognizing] = useState(false);
+  const [recognitionMessage, setRecognitionMessage] = useState("");
+  const [recognitionResult, setRecognitionResult] = useState(null);
+  const [recognizedUploadKey, setRecognizedUploadKey] = useState("");
 
   const isEuEea = EU_EEA_NATIONALITIES.has(nationality);
   const isDutch = nationality === "Nederlandse";
@@ -381,6 +399,65 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const set = (field, val) => {
     setForm(f => ({ ...f, [field]: val }));
     setErrors(e => ({ ...e, [field]: undefined }));
+  };
+
+  const uploadKey = [
+    docType || "",
+    frontFile ? `${frontFile.name}-${frontFile.size}-${frontFile.lastModified}` : "",
+    backFile ? `${backFile.name}-${backFile.size}-${backFile.lastModified}` : "",
+  ].join("|");
+
+  useEffect(() => {
+    setRecognitionMessage("");
+    setRecognitionResult(null);
+    setRecognizedUploadKey("");
+  }, [docType, frontFile, backFile]);
+
+  const applyRecognizedFields = (result) => {
+    setForm(current => {
+      const next = { ...current };
+      for (const field of ["document_number", "bsn", "valid_from", "valid_until"]) {
+        if (!next[field] && result?.[field]) next[field] = result[field];
+      }
+      return next;
+    });
+  };
+
+  const runRecognition = async () => {
+    if (!frontFile || recognizing) return;
+    if (recognizedUploadKey === uploadKey) return;
+
+    setRecognizing(true);
+    setRecognitionMessage("Automatische herkenning starten...");
+    try {
+      const { recognizeIdentityDocument } = await import("@/lib/identityOcr");
+      const result = await recognizeIdentityDocument({
+        frontFile,
+        backFile,
+        onProgress: message => setRecognitionMessage(`Herkenning: ${message}`),
+      });
+      setRecognitionResult(result);
+      applyRecognizedFields(result);
+      setRecognizedUploadKey(uploadKey);
+
+      const labels = {
+        document_number: "documentnummer",
+        bsn: "BSN",
+        valid_from: "geldig vanaf",
+        valid_until: "geldig tot",
+      };
+      const detected = (result.detected_fields || []).map(field => labels[field] || field);
+      setRecognitionMessage(
+        detected.length > 0
+          ? `Herkend: ${detected.join(", ")}. Controleer de waarden met de upload.`
+          : "Er zijn geen betrouwbare velden herkend. Vul de gegevens handmatig in."
+      );
+    } catch (error) {
+      console.error("Identity OCR failed", error);
+      setRecognitionMessage("Automatische herkenning is niet gelukt. Vul de gegevens handmatig in.");
+    } finally {
+      setRecognizing(false);
+    }
   };
 
   const validateDetails = () => {
@@ -543,7 +620,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   Document uploaden — <span className="text-muted-foreground font-normal">{docType === "passport" ? "Paspoort" : "Identiteitskaart"}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Upload een duidelijke foto of scan van het document. Na het uploaden kun je de afbeelding bijsnijden.
+                  Upload een duidelijke foto of scan van het document. Na het uploaden kun je de afbeelding bijsnijden en probeert de app documentnummer, BSN en geldigheid automatisch te herkennen.
                 </p>
               </div>
 
@@ -565,7 +642,9 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
               <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                <Button size="sm" onClick={() => setStep(3)} disabled={!frontFile}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                <Button size="sm" onClick={() => { setStep(3); runRecognition(); }} disabled={!frontFile || recognizing}>
+                  {recognizing ? "Herkennen..." : "Volgende"} <ChevronRight className="w-4 h-4 ml-1" />
+                </Button>
               </div>
             </div>
           )}
@@ -576,12 +655,31 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
               <div>
                 <p className="text-sm font-medium text-foreground mb-1">Controleer de herkenning en vul aan</p>
                 <p className="text-xs text-muted-foreground">
-                  Vergelijk de velden met de upload. Als herkenning later een fout maakt, kun je hier direct overtypen voordat je opslaat.
+                  Vergelijk de automatisch ingevulde velden met de upload. Als herkenning een fout maakt, kun je hier direct overtypen voordat je opslaat.
                 </p>
               </div>
 
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
                 <div className="rounded-lg border border-border bg-card p-4">
+                  {(recognizing || recognitionMessage) && (
+                    <div className={`mb-4 flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
+                      recognizing
+                        ? "border-blue-200 bg-blue-50 text-blue-900 dark:border-blue-900/50 dark:bg-blue-950/30 dark:text-blue-200"
+                        : recognitionResult?.detected_fields?.length
+                          ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/50 dark:bg-emerald-950/30 dark:text-emerald-200"
+                          : "border-amber-200 bg-amber-50 text-amber-900 dark:border-amber-900/50 dark:bg-amber-950/30 dark:text-amber-200"
+                    }`}>
+                      {recognizing ? (
+                        <Loader2 className="mt-0.5 h-3.5 w-3.5 shrink-0 animate-spin" />
+                      ) : recognitionResult?.detected_fields?.length ? (
+                        <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      ) : (
+                        <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      )}
+                      <span>{recognitionMessage}</span>
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Documentnummer <span className="text-destructive">*</span></label>
@@ -668,7 +766,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 <Button variant="ghost" size="sm" onClick={() => { setStep(2); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
-                  <Button size="sm" onClick={() => { if (validateDetails()) saveMutation.mutate(); }} disabled={saveMutation.isPending}>
+                  <Button size="sm" onClick={() => { if (validateDetails()) saveMutation.mutate(); }} disabled={saveMutation.isPending || recognizing}>
                     <Check className="w-4 h-4 mr-1" />
                     {saveMutation.isPending ? "Opslaan..." : "Document opslaan"}
                   </Button>
