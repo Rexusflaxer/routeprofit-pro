@@ -1252,7 +1252,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
           );
         })}
       </div>
-      <div className="min-w-0 flex-1 p-5">{renderTab()}</div>
+      <div className={`min-w-0 flex-1 overflow-hidden ${active === "identity" ? "" : "p-5"}`}>{renderTab()}</div>
     </div>
   );
 }
