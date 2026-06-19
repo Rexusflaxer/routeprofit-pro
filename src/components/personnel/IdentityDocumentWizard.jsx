@@ -620,13 +620,13 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                 <DocumentSideUpload
-                  label="Voorkant"
+                  label={docType === "passport" ? "Pagina met pasfoto / persoonsgegevens" : "Voorkant"}
                   previewUrl={frontPreview}
                   onFileSelected={(file, preview) => { setFrontFile(file); setFrontPreview(preview); }}
                   uploading={uploadingFront}
                 />
                 <DocumentSideUpload
-                  label={docType === "passport" ? "Pagina met pasfoto" : "Achterkant"}
+                  label={docType === "passport" ? "Binnenkant (visumpagina's / tekst)" : "Achterkant"}
                   previewUrl={backPreview}
                   onFileSelected={(file, preview) => { setBackFile(file); setBackPreview(preview); }}
                   uploading={uploadingBack}
@@ -660,8 +660,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   { label: "Geldig van", value: form.valid_from },
                   { label: "Geldig tot", value: form.valid_until },
                   form.issuing_authority ? { label: "Instantie", value: form.issuing_authority } : null,
-                  { label: "Voorkant", value: frontFile ? "✓ Geüpload" : "Niet geüpload" },
-                  { label: docType === "passport" ? "Pasfoto pagina" : "Achterkant", value: backFile ? "✓ Geüpload" : "Niet geüpload" },
+                  { label: docType === "passport" ? "Pasfoto / persoonsgegevens" : "Voorkant", value: frontFile ? "✓ Geüpload" : "Niet geüpload" },
+                  { label: docType === "passport" ? "Binnenkant (tekst)" : "Achterkant", value: backFile ? "✓ Geüpload" : "Niet geüpload" },
                 ].filter(Boolean).map(row => (
                   <div key={row.label} className="flex gap-4">
                     <span className="w-36 shrink-0 text-xs text-muted-foreground">{row.label}</span>
@@ -674,13 +674,13 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 <div className="grid grid-cols-2 gap-3">
                   {frontPreview && (
                     <div>
-                      <p className="text-xs text-muted-foreground mb-1">Voorkant</p>
+                      <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Pasfoto / persoonsgegevens" : "Voorkant"}</p>
                       <img src={frontPreview} alt="Voorkant" className="rounded-md border border-border w-full h-28 object-contain bg-muted/20" />
                     </div>
                   )}
                   {backPreview && (
                     <div>
-                      <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Pasfoto pagina" : "Achterkant"}</p>
+                      <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Binnenkant (tekst)" : "Achterkant"}</p>
                       <img src={backPreview} alt="Achterkant" className="rounded-md border border-border w-full h-28 object-contain bg-muted/20" />
                     </div>
                   )}
