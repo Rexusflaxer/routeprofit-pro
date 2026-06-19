@@ -6,6 +6,7 @@ const MONTHS = {
   FEB: 2,
   FEBRUARI: 2,
   MRT: 3,
+  MAA: 3,
   MAART: 3,
   MAR: 3,
   MARCH: 3,
@@ -65,9 +66,14 @@ function parseVisibleDate(value) {
     return year ? toIsoDate(year, Number(numeric[2]), Number(numeric[1])) : null;
   }
 
-  const named = text.match(/\b([0-3]?\d)\s+([A-ZÀ-ÿ]{3,10})\s+((?:19|20)?\d{2})\b/);
+  const named = text.match(/\b([0-3]?\d)\s+([A-ZÀ-ÿ]{3,10}(?:\/[A-ZÀ-ÿ]{3,10})?)\s+((?:19|20)?\d{2})\b/);
   if (named) {
-    const month = MONTHS[named[2].normalize("NFD").replace(/[\u0300-\u036f]/g, "")];
+    const monthToken = named[2]
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .split("/")
+      .find(Boolean);
+    const month = MONTHS[monthToken];
     const year = parseYear(named[3]);
     return month && year ? toIsoDate(year, month, Number(named[1])) : null;
   }
@@ -111,8 +117,44 @@ function mrzDateToIso(value, mode = "expiry") {
   return toIsoDate(year, mm, dd);
 }
 
+function mrzCheckDigit(value) {
+  const weights = [7, 3, 1];
+  const total = String(value || "").toUpperCase().split("").reduce((sum, char, index) => {
+    let number = 0;
+    if (/\d/.test(char)) number = Number(char);
+    else if (/[A-Z]/.test(char)) number = char.charCodeAt(0) - 55;
+    return sum + number * weights[index % weights.length];
+  }, 0);
+  return total % 10;
+}
+
+function hasValidMrzCheckDigit(value, checkDigit) {
+  return /^\d$/.test(String(checkDigit || "")) && mrzCheckDigit(value) === Number(checkDigit);
+}
+
 function cleanMrzField(value) {
   return String(value || "").replace(/</g, "").trim();
+}
+
+function isLikelyDocumentNumber(value) {
+  const normalized = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (normalized.length < 7 || normalized.length > 12) return false;
+  if (!/[A-Z]/.test(normalized) || !/\d/.test(normalized)) return false;
+  if (/^(TYPE|CODE|TYPECODE|DOCUMENT|DOCUMENTNO|DOCUMENTNUMMER|PASSPORT|PASPOORT|PASSEPORT|NATIONALITY|NEDERLANDSE)$/.test(normalized)) {
+    return false;
+  }
+  return true;
+}
+
+function documentNumberVariants(value) {
+  const normalized = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  const variants = [normalized];
+  if (normalized.length > 9) {
+    for (let index = 0; index <= normalized.length - 9; index += 1) {
+      variants.push(normalized.slice(index, index + 9));
+    }
+  }
+  return [...new Set(variants)].filter(isLikelyDocumentNumber);
 }
 
 function findBsnInText(text) {
@@ -143,14 +185,35 @@ function isLikelyBsn(value) {
 
 function findDocumentNumberInText(text) {
   const normalized = text.toUpperCase();
-  const labeled = normalized.match(/(?:DOCUMENT(?:\s+|\s*-\s*)NUMMER|DOCUMENT\s+NUMBER|PASPOORTNUMMER|PASSPORT\s+NO|IDENTITEITSKAARTNUMMER)\D{0,35}([A-Z0-9][A-Z0-9<\s-]{6,14})/);
-  if (labeled) {
-    const value = cleanMrzField(labeled[1]).replace(/[^A-Z0-9]/g, "");
-    if (value.length >= 7 && value.length <= 12) return value;
+
+  const labelPattern = /DOCUMENT(?:\s+|\s*-\s*)NUMMER|DOCUMENT\s+NO\.?|DOCUMENT\s+NUMBER|N[°O]\s*DU\s*DOCUMENT|PASPOORTNUMMER|PASSPORT\s+NO\.?|IDENTITEITSKAARTNUMMER/g;
+  const labeledCandidates = [];
+  for (const match of normalized.matchAll(labelPattern)) {
+    const after = normalized.slice(match.index + match[0].length, match.index + match[0].length + 220);
+    const candidates = after.match(/\b[A-Z0-9][A-Z0-9<\s-]{6,18}[A-Z0-9]\b/g) || [];
+    for (const candidate of candidates) {
+      const value = cleanMrzField(candidate).replace(/[^A-Z0-9]/g, "");
+      labeledCandidates.push(...documentNumberVariants(value));
+    }
+  }
+  if (labeledCandidates.length > 0) {
+    return labeledCandidates.sort((a, b) => scoreDocumentNumber(b) - scoreDocumentNumber(a))[0];
   }
 
   const candidates = normalized.match(/\b[A-Z]{1,3}[A-Z0-9]{6,9}\b/g) || [];
-  return candidates.find(candidate => !/^(NLD|NEDERLAND|PASPOORT)$/.test(candidate)) || "";
+  return candidates
+    .flatMap(documentNumberVariants)
+    .sort((a, b) => scoreDocumentNumber(b) - scoreDocumentNumber(a))[0] || "";
+}
+
+function scoreDocumentNumber(value) {
+  const normalized = String(value || "");
+  let score = 0;
+  if (normalized.length === 9) score += 20;
+  if (/^[A-Z]{3}\d/.test(normalized)) score += 10;
+  score += (normalized.match(/\d/g) || []).length;
+  score += (normalized.match(/[A-Z]/g) || []).length * 0.4;
+  return score;
 }
 
 function extractMrz(text) {
@@ -171,13 +234,18 @@ function extractMrz(text) {
     }
   }
 
+  const passportSecondLine = findPassportMrzSecondLine(lines);
+  if (passportSecondLine) return passportSecondLine;
+
   for (let i = 0; i < lines.length - 1; i += 1) {
     const first = lines[i];
     const second = lines[i + 1];
     if (/^P[A-Z<]/.test(first) && second.length >= 35) {
+      const documentNumber = cleanMrzField(second.slice(0, 9)).replace(/[^A-Z0-9]/g, "");
+      const documentNumberIsValid = isLikelyDocumentNumber(documentNumber) && hasValidMrzCheckDigit(second.slice(0, 9), second[9]);
       return {
         format: "TD3",
-        document_number: cleanMrzField(second.slice(0, 9)),
+        document_number: documentNumberIsValid ? documentNumber : "",
         valid_until: mrzDateToIso(second.slice(21, 27), "expiry"),
         bsn: findBsnInText(second.slice(28, 43)),
       };
@@ -187,15 +255,41 @@ function extractMrz(text) {
   for (let i = 0; i < lines.length - 2; i += 1) {
     const first = lines[i];
     const second = lines[i + 1];
-    if (/^[IA][A-Z<]/.test(first) && first.length >= 25 && second.length >= 25) {
+    if (/^[IA][A-Z<][A-Z]{3}/.test(first) && first[1] === "<" && first.length >= 25 && second.length >= 25) {
+      const documentNumber = cleanMrzField(first.slice(5, 14)).replace(/[^A-Z0-9]/g, "");
+      const documentNumberIsValid = isLikelyDocumentNumber(documentNumber) && hasValidMrzCheckDigit(first.slice(5, 14), first[14]);
       const optional = `${first.slice(15)} ${second.slice(18, 29)}`;
       return {
         format: "TD1",
-        document_number: cleanMrzField(first.slice(5, 14)),
+        document_number: documentNumberIsValid ? documentNumber : "",
         valid_until: mrzDateToIso(second.slice(8, 14), "expiry"),
         bsn: findBsnInText(optional),
       };
     }
+  }
+
+  return null;
+}
+
+function findPassportMrzSecondLine(lines) {
+  const candidates = [];
+  for (const line of lines) {
+    const withoutFillers = line.replace(/<+$/g, "");
+    const compacted = withoutFillers.replace(/</g, "");
+    candidates.push(line, withoutFillers, compacted);
+  }
+
+  for (const candidate of candidates) {
+    const match = candidate.match(/([A-Z0-9<]{9})(\d)[A-Z<]{0,2}NLD(\d{6})(\d)([MF<])(\d{6})(\d)/);
+    if (!match) continue;
+    const documentNumber = cleanMrzField(match[1]).replace(/[^A-Z0-9]/g, "");
+    const documentNumberIsValid = isLikelyDocumentNumber(documentNumber) && hasValidMrzCheckDigit(match[1], match[2]);
+    return {
+      format: "TD3",
+      document_number: documentNumberIsValid ? documentNumber : "",
+      valid_until: mrzDateToIso(match[6], "expiry"),
+      bsn: "",
+    };
   }
 
   return null;
@@ -215,17 +309,16 @@ async function imageToDataUrl(file, { crop = "full" } = {}) {
   try {
     const sourceWidth = image.naturalWidth || image.width;
     const sourceHeight = image.naturalHeight || image.height;
-    const sourceY = crop === "mrz" ? Math.floor(sourceHeight * 0.52) : 0;
-    const cropHeight = crop === "mrz" ? Math.ceil(sourceHeight * 0.48) : sourceHeight;
-    const maxWidth = crop === "mrz" ? 2600 : 2200;
-    const scale = Math.min(1.8, maxWidth / sourceWidth);
-    const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
-    const targetHeight = Math.max(1, Math.round(cropHeight * scale));
+    const cropBox = resolveCropBox(crop, sourceWidth, sourceHeight);
+    const maxWidth = crop === "mrz" ? 3200 : 2200;
+    const scale = Math.min(crop === "mrz" ? 2.4 : 1.8, maxWidth / cropBox.width);
+    const targetWidth = Math.max(1, Math.round(cropBox.width * scale));
+    const targetHeight = Math.max(1, Math.round(cropBox.height * scale));
     const canvas = document.createElement("canvas");
     canvas.width = targetWidth;
     canvas.height = targetHeight;
     const ctx = canvas.getContext("2d");
-    ctx.drawImage(image, 0, sourceY, sourceWidth, cropHeight, 0, 0, targetWidth, targetHeight);
+    ctx.drawImage(image, cropBox.x, cropBox.y, cropBox.width, cropBox.height, 0, 0, targetWidth, targetHeight);
 
     const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
     const data = imageData.data;
@@ -243,7 +336,38 @@ async function imageToDataUrl(file, { crop = "full" } = {}) {
   }
 }
 
-function mergeResults(text) {
+function resolveCropBox(crop, width, height) {
+  if (crop === "mrz") {
+    return {
+      x: 0,
+      y: Math.floor(height * 0.78),
+      width,
+      height: Math.ceil(height * 0.22),
+    };
+  }
+
+  if (crop === "passport_details") {
+    return {
+      x: Math.floor(width * 0.18),
+      y: Math.floor(height * 0.42),
+      width: Math.ceil(width * 0.82),
+      height: Math.ceil(height * 0.42),
+    };
+  }
+
+  if (crop === "back_details") {
+    return {
+      x: Math.floor(width * 0.52),
+      y: 0,
+      width: Math.ceil(width * 0.48),
+      height: Math.ceil(height * 0.34),
+    };
+  }
+
+  return { x: 0, y: 0, width, height };
+}
+
+export function parseIdentityOcrText(text) {
   const mrz = extractMrz(text) || {};
   const visibleUntil = findDateNearLabel(text, [
     "GELDIG TOT",
@@ -293,6 +417,17 @@ export async function recognizeIdentityDocument({ frontFile, backFile, onProgres
       textParts.push(data.text || "");
     }
 
+    if (frontFile) {
+      const image = await imageToDataUrl(frontFile, { crop: "passport_details" });
+      const { data } = await worker.recognize(image);
+      textParts.push(data.text || "");
+    }
+    if (backFile) {
+      const image = await imageToDataUrl(backFile, { crop: "back_details" });
+      const { data } = await worker.recognize(image);
+      textParts.push(data.text || "");
+    }
+
     await worker.setParameters({
       tessedit_char_whitelist: MRZ_CHARS,
       tessedit_pageseg_mode: "6",
@@ -307,7 +442,7 @@ export async function recognizeIdentityDocument({ frontFile, backFile, onProgres
     }
 
     const rawText = textParts.join("\n");
-    const fields = mergeResults(rawText);
+    const fields = parseIdentityOcrText(rawText);
     return {
       ...fields,
       detected_fields: Object.entries(fields)
