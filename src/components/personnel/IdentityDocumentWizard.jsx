@@ -403,15 +403,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   </div>
                 )}
 
-                <div className="sm:col-span-2">
-                  <label className="text-xs text-muted-foreground mb-1 block">Opmerkingen</label>
-                  <Input
-                    value={form.notes}
-                    onChange={e => set("notes", e.target.value)}
-                    className="h-8 text-sm"
-                    placeholder="Optionele toelichting..."
-                  />
-                </div>
+
               </div>
 
               {isNonEu && (
