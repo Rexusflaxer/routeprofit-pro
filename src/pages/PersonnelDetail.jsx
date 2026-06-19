@@ -966,12 +966,39 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
       case "overview": return <OverviewTab person={person} companies={companies} dossier={dossier} />;
       case "payroll": return <PayrollTab person={person} documents={dossier.documents} />;
       case "identity": return (
-        <SectionPanel title="Legitimatiebewijzen" icon={FileBadge}>
-          <MiniTable emptyText="Nog geen legitimatiebewijs." rows={identityDocs} columns={[
-            { key: "document_type", label: "Type" }, { key: "document_number", label: "Nummer" },
-            { key: "valid_until", label: "Geldig tot", render: r => formatDate(r.valid_until) },
-            { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
-          ]} />
+        <SectionPanel 
+          title="Legitimatiebewijzen" 
+          icon={FileBadge}
+          action={<Button size="sm" variant="outline" onClick={() => onAddRecord("document")}><Plus className="mr-1 h-4 w-4" />Toevoegen</Button>}
+        >
+          {identityDocs.length === 0 ? (
+            <SmallEmpty text="Nog geen legitimatiebewijs." />
+          ) : (
+            <div className="space-y-2">
+              {identityDocs.map(doc => (
+                <div key={doc.id} className="flex items-center justify-between gap-3 rounded-md border border-border px-4 py-3 hover:bg-muted/30 transition-colors">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium">{doc.document_type || "Document"}</p>
+                    <div className="grid grid-cols-3 gap-4 mt-1 text-xs text-muted-foreground">
+                      <span>Nummer: {doc.document_number || "-"}</span>
+                      <span>Geldig tot: {formatDate(doc.valid_until, "-")}</span>
+                      <span>Status: <BadgePill className={doc.verification_status === "verified" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}>{VERIFICATION_LABELS[doc.verification_status] || doc.verification_status}</BadgePill></span>
+                    </div>
+                  </div>
+                  <Button 
+                    variant="ghost" 
+                    size="sm" 
+                    onClick={async () => {
+                      await base44.entities.PersonnelDocument.delete(doc.id);
+                      queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
+                    }}
+                  >
+                    <X className="h-4 w-4" />
+                  </Button>
+                </div>
+              ))}
+            </div>
+          )}
         </SectionPanel>
       );
       case "documents": return (
