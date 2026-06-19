@@ -1002,12 +1002,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
           </div>
 
           {/* Rows — actief */}
-          {identityDocs.length === 0 && !showIdentityWizard ? (
-            <div className="flex items-center gap-2 px-4 py-3 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30">
-              <AlertTriangle className="w-4 h-4 shrink-0" />
-              Nog geen legitimatiebewijs geregistreerd.
-            </div>
-          ) : (
+          {identityDocs.length > 0 && (
             <div className="divide-y divide-border">
               {identityDocs.map(doc => {
                 const expiry = getExpiryState(doc.valid_until);
@@ -1039,6 +1034,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
           )}
 
           {/* Archief */}
+
           {identityArchived.length > 0 && (
             <div className="border-t border-border mt-2">
               <p className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 bg-muted/30">Archief</p>
