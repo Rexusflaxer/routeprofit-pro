@@ -250,6 +250,7 @@ function DocumentSideUpload({ label, previewUrl, onFileSelected, uploading }) {
 function IssuingCountryField({ value, onChange, error, defaultCountry }) {
   const [query, setQuery] = useState(value || "");
   const [open, setOpen] = useState(false);
+  const [dropdownStyle, setDropdownStyle] = useState({});
   const inputRef = React.useRef(null);
   const filtered = query.trim()
     ? ALL_COUNTRIES.filter(c => c.toLowerCase().includes(query.toLowerCase()))
@@ -264,9 +265,22 @@ function IssuingCountryField({ value, onChange, error, defaultCountry }) {
   const handleBlur = () => {
     setTimeout(() => {
       setOpen(false);
-      // Snap back to selected value if user typed something invalid
       setQuery(value || "");
     }, 150);
+  };
+
+  const handleFocus = () => {
+    if (inputRef.current) {
+      const rect = inputRef.current.getBoundingClientRect();
+      setDropdownStyle({
+        position: "fixed",
+        top: rect.bottom + 4,
+        left: rect.left,
+        width: rect.width,
+        zIndex: 9999,
+      });
+    }
+    setOpen(true);
   };
 
   React.useEffect(() => {
@@ -276,20 +290,17 @@ function IssuingCountryField({ value, onChange, error, defaultCountry }) {
   return (
     <div className="relative">
       <label className="text-xs text-muted-foreground mb-1 block">Uitgevend land <span className="text-destructive">*</span></label>
-      <div className="relative">
-        <Input
-          ref={inputRef}
-          value={query}
-          onChange={e => { setQuery(e.target.value); setOpen(true); }}
-          onFocus={() => setOpen(true)}
-          onBlur={handleBlur}
-          placeholder="Typ een land..."
-          className={`h-8 text-sm pr-8 ${error ? "border-destructive" : ""}`}
-        />
-
-      </div>
+      <Input
+        ref={inputRef}
+        value={query}
+        onChange={e => { setQuery(e.target.value); setOpen(true); }}
+        onFocus={handleFocus}
+        onBlur={handleBlur}
+        placeholder="Typ een land..."
+        className={`h-8 text-sm ${error ? "border-destructive" : ""}`}
+      />
       {open && filtered.length > 0 && (
-        <div className="absolute z-50 top-full mt-1 left-0 right-0 max-h-48 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg text-sm">
+        <div style={dropdownStyle} className="max-h-48 overflow-y-auto rounded-md border border-border bg-popover text-popover-foreground shadow-lg text-sm">
           {filtered.slice(0, 30).map(country => (
             <button key={country} type="button" onMouseDown={() => handleSelect(country)}
               className={`flex items-center w-full px-3 py-1.5 text-left hover:bg-accent hover:text-accent-foreground transition-colors ${country === value ? "bg-accent/60 font-medium" : ""}`}>
