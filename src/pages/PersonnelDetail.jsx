@@ -966,56 +966,59 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
       case "overview": return <OverviewTab person={person} companies={companies} dossier={dossier} />;
       case "payroll": return <PayrollTab person={person} documents={dossier.documents} />;
       case "identity": return (
-        <>
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div className="flex items-center gap-2">
-              <FileBadge className="h-4 w-4 text-muted-foreground" />
-              <h3 className="text-sm font-semibold text-foreground">Legitimatiebewijzen</h3>
-              <span className="text-xs text-muted-foreground">({identityDocs.length})</span>
+        <div className="flex flex-col h-full">
+          {/* Table header */}
+          <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <span className="flex-1 min-w-0">Type / omschrijving</span>
+            <span className="w-36 shrink-0">Documentnummer</span>
+            <span className="w-28 shrink-0">Geldig tot</span>
+            <span className="w-28 shrink-0">Status</span>
+            <div className="shrink-0">
+              <Button size="sm" variant="outline" onClick={() => onAddRecord("document")} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                <Plus className="w-3 h-3 mr-1" /> Toevoegen
+              </Button>
             </div>
-            <Button size="sm" variant="outline" onClick={() => onAddRecord("document")}><Plus className="mr-1 h-4 w-4" />Toevoegen</Button>
           </div>
+
+          {/* Rows */}
           {identityDocs.length === 0 ? (
-            <SmallEmpty text="Nog geen legitimatiebewijs." />
+            <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen legitimatiebewijs geregistreerd.</p>
           ) : (
-            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-              <div className="overflow-x-auto">
-                <Table>
-                  <TableHeader>
-                    <TableRow className="bg-muted/50">
-                      <TableHead className="text-xs">Type</TableHead>
-                      <TableHead className="text-xs">Nummer</TableHead>
-                      <TableHead className="text-xs">Geldig tot</TableHead>
-                      <TableHead className="text-xs">Status</TableHead>
-                      <TableHead className="text-xs w-12">Acties</TableHead>
-                    </TableRow>
-                  </TableHeader>
-                  <TableBody>
-                    {identityDocs.map(doc => (
-                      <TableRow key={doc.id}>
-                        <TableCell className="text-sm font-medium">{doc.document_type || "-"}</TableCell>
-                        <TableCell className="text-sm">{doc.document_number || "-"}</TableCell>
-                        <TableCell className="text-sm">{formatDate(doc.valid_until, "-")}</TableCell>
-                        <TableCell className="text-sm"><BadgePill className={doc.verification_status === "verified" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}>{VERIFICATION_LABELS[doc.verification_status] || doc.verification_status}</BadgePill></TableCell>
-                        <TableCell className="text-sm">
-                          <Button 
-                            variant="ghost" 
-                            size="sm" 
-                            onClick={async () => {
-                              await base44.entities.PersonnelDocument.delete(doc.id);
-                            }}
-                          >
-                            <X className="h-4 w-4" />
-                          </Button>
-                        </TableCell>
-                      </TableRow>
-                    ))}
-                  </TableBody>
-                </Table>
-              </div>
+            <div className="divide-y divide-border">
+              {identityDocs.map(doc => {
+                const expiry = getExpiryState(doc.valid_until);
+                return (
+                  <div key={doc.id} className="relative flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm font-semibold text-foreground">{doc.document_type || "—"}</span>
+                    </div>
+                    <span className="w-36 shrink-0 text-sm text-muted-foreground">{doc.document_number ? `#${doc.document_number}` : "—"}</span>
+                    <div className="w-28 shrink-0 flex items-center gap-1.5">
+                      <span className="text-xs text-foreground">{doc.valid_until ? formatDate(doc.valid_until) : "—"}</span>
+                      {expiry && <BadgePill className={expiry.className}>{expiry.label}</BadgePill>}
+                    </div>
+                    <div className="w-28 shrink-0">
+                      <BadgePill className={doc.verification_status === "verified" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-200" : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"}>
+                        {VERIFICATION_LABELS[doc.verification_status] || doc.verification_status}
+                      </BadgePill>
+                    </div>
+                    <div className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={async () => { await base44.entities.PersonnelDocument.delete(doc.id); }}
+                        title="Verwijderen"
+                      >
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
-        </>
+        </div>
       );
       case "documents": return (
         <SectionPanel title="Documenten" icon={FileText} action={<Button size="sm" variant="outline" onClick={() => onAddRecord("document")}><Plus className="mr-1 h-4 w-4" />Toevoegen</Button>}>
