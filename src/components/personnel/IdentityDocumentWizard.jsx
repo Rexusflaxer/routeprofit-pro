@@ -1,11 +1,11 @@
-import React, { useState, useEffect, useRef, useCallback } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, ChevronRight, Check, X, Globe, AlertTriangle, Upload, ImageIcon, Crop } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, X, Globe, AlertTriangle, ImageIcon, Crop } from "lucide-react";
 
 // EU/EEA nationalities that can carry an identity card
 const EU_EEA_NATIONALITIES = new Set([
@@ -218,7 +218,7 @@ function DocumentSideUpload({ label, previewUrl, onFileSelected, uploading, requ
           <>
             <ImageIcon className="w-8 h-8 text-muted-foreground/50" />
             <span className="text-xs text-muted-foreground">Klik om te uploaden</span>
-            <span className="text-[10px] text-muted-foreground/60">JPG, PNG, PDF</span>
+            <span className="text-[10px] text-muted-foreground/60">JPG of PNG</span>
           </>
         )}
         {uploading && (
@@ -230,7 +230,7 @@ function DocumentSideUpload({ label, previewUrl, onFileSelected, uploading, requ
       <input
         ref={fileInputRef}
         type="file"
-        accept="image/*,application/pdf"
+        accept="image/*"
         className="hidden"
         onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
       />
@@ -383,7 +383,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     setErrors(e => ({ ...e, [field]: undefined }));
   };
 
-  const validateStep2 = () => {
+  const validateDetails = () => {
     const e = {};
     const today = new Date().toISOString().split("T")[0];
     if (!form.document_number.trim()) e.document_number = "Verplicht";
@@ -472,7 +472,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     },
   });
 
-  const STEP_LABELS = ["Type", "Gegevens", "Document scan", "Controleren"];
+  const STEP_LABELS = ["Type", "Upload", "Controleren"];
 
   return (
     <motion.div
@@ -535,86 +535,15 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
             </div>
           )}
 
-          {/* Step 2: Gegevens */}
+          {/* Step 2: Upload */}
           {step === 2 && (
-            <div className="space-y-3">
-              <p className="text-sm font-medium text-foreground">
-                Documentgegevens — <span className="text-muted-foreground font-normal">{docType === "passport" ? "Paspoort" : "Identiteitskaart"}</span>
-              </p>
-
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Documentnummer <span className="text-destructive">*</span></label>
-                  <Input value={form.document_number} onChange={e => set("document_number", e.target.value)}
-                    className={`h-8 text-sm font-mono ${errors.document_number ? "border-destructive" : ""}`}
-                    placeholder={docType === "passport" ? "Bijv. NL1234567" : "Bijv. ID1234567NL"} />
-                  {errors.document_number && <p className="text-xs text-destructive mt-1">{errors.document_number}</p>}
-                </div>
-
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">
-                    BSN-nummer
-                    {isDutch && <span className="text-destructive ml-1">*</span>}
-                    {!isDutch && <span className="text-muted-foreground ml-1">(indien beschikbaar)</span>}
-                  </label>
-                  <Input value={form.bsn} onChange={e => set("bsn", e.target.value.replace(/\D/g, ""))}
-                    className={`h-8 text-sm font-mono ${errors.bsn ? "border-destructive" : ""}`}
-                    placeholder="000000000" maxLength={9} />
-                  {!isDutch && <p className="text-xs text-muted-foreground mt-1">Buitenlandse medewerkers ontvangen een BSN na inschrijving in de BRP.</p>}
-                  {errors.bsn && <p className="text-xs text-destructive mt-1">{errors.bsn}</p>}
-                </div>
-
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf <span className="text-destructive">*</span></label>
-                  <Input type="date" value={form.valid_from} onChange={e => set("valid_from", e.target.value)}
-                    className={`h-8 text-sm ${errors.valid_from ? "border-destructive" : ""}`} />
-                  {errors.valid_from && <p className="text-xs text-destructive mt-1">{errors.valid_from}</p>}
-                </div>
-
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">Geldig tot <span className="text-destructive">*</span></label>
-                  <Input type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)}
-                    className={`h-8 text-sm ${errors.valid_until ? "border-destructive" : ""}`}
-                    max={isArchiveEntry ? new Date().toISOString().split("T")[0] : undefined}
-                    min={isArchiveEntry ? undefined : new Date(Date.now() + 86400000).toISOString().split("T")[0]} />
-                  {errors.valid_until && <p className="text-xs text-destructive mt-1">{errors.valid_until}</p>}
-                </div>
-
-                <IssuingCountryField value={form.issuing_country} onChange={val => set("issuing_country", val)}
-                  error={errors.issuing_country} defaultCountry={NATIONALITY_TO_COUNTRY[nationality] || ""} />
-
-                {isNonEu && (
-                  <div>
-                    <label className="text-xs text-muted-foreground mb-1 block">Uitgevende instantie</label>
-                    <Input value={form.issuing_authority} onChange={e => set("issuing_authority", e.target.value)}
-                      className="h-8 text-sm" placeholder="Bijv. Ministry of Interior" />
-                  </div>
-                )}
-              </div>
-
-              {isNonEu && (
-                <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-900 dark:text-blue-200">
-                  <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
-                  <span>Voor niet-EU medewerkers is naast het paspoort een verblijfs- en/of werkvergunning vereist. Registreer deze apart onder het tabblad <strong>Compliance</strong>.</span>
-                </div>
-              )}
-
-              <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                <Button size="sm" onClick={() => { if (validateStep2()) setStep(3); }}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
-              </div>
-            </div>
-          )}
-
-          {/* Step 3: Document scan */}
-          {step === 3 && (
             <div className="space-y-4">
               <div>
                 <p className="text-sm font-medium text-foreground mb-1">
-                  Document scannen — <span className="text-muted-foreground font-normal">{docType === "passport" ? "Paspoort" : "Identiteitskaart"}</span>
+                  Document uploaden — <span className="text-muted-foreground font-normal">{docType === "passport" ? "Paspoort" : "Identiteitskaart"}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Upload een foto of scan van de voor- en achterkant. Na het uploaden kun je de afbeelding bijsnijden.
+                  Upload een duidelijke foto of scan van het document. Na het uploaden kun je de afbeelding bijsnijden.
                 </p>
               </div>
 
@@ -635,57 +564,111 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
               </div>
 
               <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                <Button size="sm" onClick={() => setStep(4)} disabled={!frontFile}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
+                <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <Button size="sm" onClick={() => setStep(3)} disabled={!frontFile}>Volgende <ChevronRight className="w-4 h-4 ml-1" /></Button>
               </div>
             </div>
           )}
 
-          {/* Step 4: Controleren & opslaan */}
-          {step === 4 && (
+          {/* Step 3: Controleren & opslaan */}
+          {step === 3 && (
             <div className="space-y-4">
-              <p className="text-sm font-medium text-foreground">Controleer de gegevens en sla op</p>
-
-              <div className="rounded-lg border border-border bg-card p-4 space-y-2 text-sm">
-                {[
-                  { label: "Type", value: `${docType === "passport" ? "Paspoort" : "Identiteitskaart"} (${form.issuing_country || countryLabel})` },
-                  { label: "Documentnummer", value: form.document_number, mono: true },
-                  form.bsn ? { label: "BSN", value: "•".repeat(Math.max(0, form.bsn.length - 3)) + form.bsn.slice(-3), mono: true } : null,
-                  { label: "Geldig van", value: form.valid_from },
-                  { label: "Geldig tot", value: form.valid_until },
-                  form.issuing_authority ? { label: "Instantie", value: form.issuing_authority } : null,
-                  { label: docType === "passport" ? "Voorkant (pasfoto)" : "Voorkant", value: frontFile ? "✓ Geüpload" : "Niet geüpload" },
-                  { label: docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant", value: backFile ? "✓ Geüpload" : "Niet geüpload" },
-                ].filter(Boolean).map(row => (
-                  <div key={row.label} className="flex gap-4">
-                    <span className="w-36 shrink-0 text-xs text-muted-foreground">{row.label}</span>
-                    <span className={`font-medium ${row.mono ? "font-mono" : ""}`}>{row.value || "—"}</span>
-                  </div>
-                ))}
+              <div>
+                <p className="text-sm font-medium text-foreground mb-1">Controleer de herkenning en vul aan</p>
+                <p className="text-xs text-muted-foreground">
+                  Vergelijk de velden met de upload. Als herkenning later een fout maakt, kun je hier direct overtypen voordat je opslaat.
+                </p>
               </div>
 
-              {(frontPreview || backPreview) && (
-                <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+                <div className="rounded-lg border border-border bg-card p-4">
+                  <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Documentnummer <span className="text-destructive">*</span></label>
+                      <Input value={form.document_number} onChange={e => set("document_number", e.target.value)}
+                        className={`h-8 text-sm font-mono ${errors.document_number ? "border-destructive" : ""}`}
+                        placeholder={docType === "passport" ? "Bijv. NL1234567" : "Bijv. ID1234567NL"} />
+                      {errors.document_number && <p className="text-xs text-destructive mt-1">{errors.document_number}</p>}
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">
+                        BSN-nummer
+                        {isDutch && <span className="text-destructive ml-1">*</span>}
+                        {!isDutch && <span className="text-muted-foreground ml-1">(indien beschikbaar)</span>}
+                      </label>
+                      <Input value={form.bsn} onChange={e => set("bsn", e.target.value.replace(/\D/g, ""))}
+                        className={`h-8 text-sm font-mono ${errors.bsn ? "border-destructive" : ""}`}
+                        placeholder="000000000" maxLength={9} />
+                      {!isDutch && <p className="text-xs text-muted-foreground mt-1">Buitenlandse medewerkers ontvangen een BSN na inschrijving in de BRP.</p>}
+                      {errors.bsn && <p className="text-xs text-destructive mt-1">{errors.bsn}</p>}
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Geldig vanaf <span className="text-destructive">*</span></label>
+                      <Input type="date" value={form.valid_from} onChange={e => set("valid_from", e.target.value)}
+                        className={`h-8 text-sm ${errors.valid_from ? "border-destructive" : ""}`} />
+                      {errors.valid_from && <p className="text-xs text-destructive mt-1">{errors.valid_from}</p>}
+                    </div>
+
+                    <div>
+                      <label className="text-xs text-muted-foreground mb-1 block">Geldig tot <span className="text-destructive">*</span></label>
+                      <Input type="date" value={form.valid_until} onChange={e => set("valid_until", e.target.value)}
+                        className={`h-8 text-sm ${errors.valid_until ? "border-destructive" : ""}`}
+                        max={isArchiveEntry ? new Date().toISOString().split("T")[0] : undefined}
+                        min={isArchiveEntry ? undefined : new Date(Date.now() + 86400000).toISOString().split("T")[0]} />
+                      {errors.valid_until && <p className="text-xs text-destructive mt-1">{errors.valid_until}</p>}
+                    </div>
+
+                    <IssuingCountryField value={form.issuing_country} onChange={val => set("issuing_country", val)}
+                      error={errors.issuing_country} defaultCountry={NATIONALITY_TO_COUNTRY[nationality] || ""} />
+
+                    {isNonEu && (
+                      <div>
+                        <label className="text-xs text-muted-foreground mb-1 block">Uitgevende instantie</label>
+                        <Input value={form.issuing_authority} onChange={e => set("issuing_authority", e.target.value)}
+                          className="h-8 text-sm" placeholder="Bijv. Ministry of Interior" />
+                      </div>
+                    )}
+                  </div>
+
+                  {isNonEu && (
+                    <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-900 dark:text-blue-200 mt-4">
+                      <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
+                      <span>Voor niet-EU medewerkers is naast het paspoort een verblijfs- en/of werkvergunning vereist. Registreer deze apart onder het tabblad <strong>Compliance</strong>.</span>
+                    </div>
+                  )}
+                </div>
+
+                <div className="rounded-lg border border-border bg-card p-3">
+                  <div className="flex items-center justify-between gap-2 mb-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Upload controleren</p>
+                    <Button variant="ghost" size="sm" onClick={() => setStep(2)} className="h-7 px-2 text-xs">
+                      Wijzig upload
+                    </Button>
+                  </div>
+                  <div className="space-y-3">
                   {frontPreview && (
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant"}</p>
-                      <img src={frontPreview} alt="Voorkant" className="rounded-md border border-border w-full h-28 object-contain bg-muted/20" />
+                      <img src={frontPreview} alt="Voorkant" className="rounded-md border border-border w-full max-h-56 object-contain bg-muted/20" />
                     </div>
                   )}
                   {backPreview && (
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant"}</p>
-                      <img src={backPreview} alt="Achterkant" className="rounded-md border border-border w-full h-28 object-contain bg-muted/20" />
+                      <img src={backPreview} alt="Achterkant" className="rounded-md border border-border w-full max-h-56 object-contain bg-muted/20" />
                     </div>
                   )}
+                  </div>
                 </div>
-              )}
+              </div>
 
               <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={() => setStep(3)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setStep(2); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
-                  <Button size="sm" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}>
+                  <Button size="sm" onClick={() => { if (validateDetails()) saveMutation.mutate(); }} disabled={saveMutation.isPending}>
                     <Check className="w-4 h-4 mr-1" />
                     {saveMutation.isPending ? "Opslaan..." : "Document opslaan"}
                   </Button>
