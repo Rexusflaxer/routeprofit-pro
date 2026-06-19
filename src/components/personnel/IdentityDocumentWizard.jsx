@@ -1,4 +1,4 @@
-import React, { useState } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -37,6 +37,85 @@ const NATIONALITY_TO_COUNTRY = {
   "Libische": "Libië", "Jordaanse": "Jordanië", "Libanese": "Libanon",
   "Braziliaanse": "Brazilië", "Mexicaanse": "Mexico", "Colombiaanse": "Colombia",
 };
+
+const ALL_COUNTRIES = Object.values(NATIONALITY_TO_COUNTRY)
+  .filter((v, i, a) => a.indexOf(v) === i)
+  .sort((a, b) => a.localeCompare(b, "nl"));
+
+function IssuingCountryField({ value, onChange, error, defaultCountry }) {
+  const [editing, setEditing] = useState(false);
+  const [query, setQuery] = useState("");
+  const inputRef = React.useRef(null);
+
+  const filtered = query.trim()
+    ? ALL_COUNTRIES.filter(c => c.toLowerCase().includes(query.toLowerCase()))
+    : ALL_COUNTRIES;
+
+  const isDefault = value === defaultCountry;
+
+  const handleSelect = (country) => {
+    onChange(country);
+    setEditing(false);
+    setQuery("");
+  };
+
+  React.useEffect(() => {
+    if (editing) inputRef.current?.focus();
+  }, [editing]);
+
+  return (
+    <div>
+      <label className="text-xs text-muted-foreground mb-1 block">
+        Uitgevend land <span className="text-destructive">*</span>
+      </label>
+
+      {!editing ? (
+        <button
+          type="button"
+          onClick={() => { setEditing(true); setQuery(""); }}
+          className={`flex items-center gap-2 h-8 px-3 w-full rounded-md border text-sm text-left transition-colors hover:bg-accent ${error ? "border-destructive" : "border-input bg-background"}`}
+        >
+          <span className="flex-1 truncate">{value || <span className="text-muted-foreground">Selecteer land...</span>}</span>
+          {isDefault && value && (
+            <span className="text-[10px] text-muted-foreground bg-muted px-1.5 py-0.5 rounded shrink-0">automatisch</span>
+          )}
+          <svg className="w-3.5 h-3.5 text-muted-foreground shrink-0" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M15.232 5.232l3.536 3.536m-2.036-5.036a2.5 2.5 0 113.536 3.536L6.5 21.036H3v-3.572L16.732 3.732z" />
+          </svg>
+        </button>
+      ) : (
+        <div className="relative">
+          <Input
+            ref={inputRef}
+            value={query}
+            onChange={e => setQuery(e.target.value)}
+            onBlur={() => setTimeout(() => { setEditing(false); setQuery(""); }, 150)}
+            className="h-8 text-sm"
+            placeholder={value || "Typ een land..."}
+          />
+          {filtered.length > 0 && (
+            <div className="absolute z-50 top-full mt-1 left-0 right-0 max-h-48 overflow-y-auto rounded-md border border-border bg-popover shadow-lg text-sm">
+              {filtered.slice(0, 20).map(country => (
+                <button
+                  key={country}
+                  type="button"
+                  onMouseDown={() => handleSelect(country)}
+                  className={`flex items-center w-full px-3 py-1.5 text-left hover:bg-accent transition-colors ${country === value ? "bg-accent/60 font-medium" : ""}`}
+                >
+                  {country}
+                  {country === defaultCountry && (
+                    <span className="ml-2 text-[10px] text-muted-foreground">(standaard)</span>
+                  )}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+      {error && <p className="text-xs text-destructive mt-1">{error}</p>}
+    </div>
+  );
+}
 
 function WizardSteps({ step, labels }) {
   return (
@@ -305,18 +384,12 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   {errors.valid_until && <p className="text-xs text-destructive mt-1">{errors.valid_until}</p>}
                 </div>
 
-                <div>
-                  <label className="text-xs text-muted-foreground mb-1 block">
-                    Uitgevend land <span className="text-destructive">*</span>
-                  </label>
-                  <Input
-                    value={form.issuing_country}
-                    onChange={e => set("issuing_country", e.target.value)}
-                    className={`h-8 text-sm ${errors.issuing_country ? "border-destructive" : ""}`}
-                    placeholder="Bijv. Nederland"
-                  />
-                  {errors.issuing_country && <p className="text-xs text-destructive mt-1">{errors.issuing_country}</p>}
-                </div>
+                <IssuingCountryField
+                  value={form.issuing_country}
+                  onChange={val => set("issuing_country", val)}
+                  error={errors.issuing_country}
+                  defaultCountry={NATIONALITY_TO_COUNTRY[nationality] || ""}
+                />
 
                 {isNonEu && (
                   <div>
