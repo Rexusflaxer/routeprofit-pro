@@ -200,6 +200,17 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       const typeLabel = docType === "passport" ? "Paspoort" : "Identiteitskaart";
       const country = form.issuing_country || countryLabel;
 
+      // Archiveer bestaande documenten van hetzelfde type (paspoort of ID-kaart)
+      const existing = await base44.entities.PersonnelDocument.filter({ personnel_id: personnelId, category: "identity_document" });
+      for (const doc of existing) {
+        const existingDocType = doc.metadata?.doc_type;
+        if (existingDocType === docType && doc.metadata?.archived !== true) {
+          await base44.entities.PersonnelDocument.update(doc.id, {
+            metadata: { ...doc.metadata, archived: true },
+          });
+        }
+      }
+
       await base44.entities.PersonnelDocument.create({
         personnel_id: personnelId,
         category: "identity_document",
@@ -209,13 +220,13 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
         valid_until: form.valid_until || null,
         is_sensitive: true,
         verification_status: "pending_review",
-        notes: form.notes || null,
         metadata: {
           doc_type: docType,
           issuing_country: form.issuing_country,
           issuing_authority: form.issuing_authority || null,
           nationality,
           is_eu_eea: isEuEea,
+          archived: false,
         },
       });
 

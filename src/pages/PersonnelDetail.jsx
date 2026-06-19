@@ -956,10 +956,13 @@ function PayrollTab({ person, documents }) {
 // ─── Sidebar tabs panel ───────────────────────────────────────────────────────
 
 function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
+  const queryClient = useQueryClient();
   const [active, setActive] = useState("identity");
   const [showIdentityWizard, setShowIdentityWizard] = useState(false);
   const generalDocuments = dossier.documents.filter(d => !["identity_document","drivers_license","vog","cv","bank_account_proof","payroll_tax_statement"].includes(d.category));
-  const identityDocs = dossier.documents.filter(d => d.category === "identity_document");
+  const identityDocs = dossier.documents.filter(d => d.category === "identity_document" && !d.metadata?.archived);
+  const identityArchived = dossier.documents.filter(d => d.category === "identity_document" && d.metadata?.archived);
+  const hasActiveIdentity = identityDocs.length > 0;
   const licenseDocs = dossier.documents.filter(d => d.category === "drivers_license");
   const cvDocs = dossier.documents.filter(d => d.category === "cv");
   const routeExecutions = dossier.routeExecutions?.filter(r => r.employee_id === person.id).slice(0, 8) || [];
@@ -997,9 +1000,12 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
             )}
           </div>
 
-          {/* Rows */}
+          {/* Rows — actief */}
           {identityDocs.length === 0 && !showIdentityWizard ? (
-            <p className="px-4 py-3 text-sm text-muted-foreground">Nog geen legitimatiebewijs geregistreerd.</p>
+            <div className="flex items-center gap-2 px-4 py-3 text-sm text-amber-700 dark:text-amber-300 bg-amber-50 dark:bg-amber-950/30">
+              <AlertTriangle className="w-4 h-4 shrink-0" />
+              Nog geen legitimatiebewijs geregistreerd.
+            </div>
           ) : (
             <div className="divide-y divide-border">
               {identityDocs.map(doc => {
@@ -1020,19 +1026,39 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
                       </BadgePill>
                     </div>
                     <div className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={async () => { await base44.entities.PersonnelDocument.delete(doc.id); }}
-                        title="Verwijderen"
-                      >
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={async () => { await base44.entities.PersonnelDocument.delete(doc.id); queryClient.invalidateQueries({ queryKey: ["personnel-documents"] }); }} title="Verwijderen">
                         <X className="w-3.5 h-3.5" />
                       </Button>
                     </div>
                   </div>
                 );
               })}
+            </div>
+          )}
+
+          {/* Archief */}
+          {identityArchived.length > 0 && (
+            <div className="border-t border-border mt-2">
+              <p className="px-4 py-1.5 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60 bg-muted/30">Archief</p>
+              <div className="divide-y divide-border opacity-60">
+                {identityArchived.map(doc => (
+                  <div key={doc.id} className="relative flex items-center px-4 py-2.5 group hover:opacity-80 transition-opacity">
+                    <div className="flex-1 min-w-0">
+                      <span className="text-sm text-muted-foreground line-through">{doc.document_type || "—"}</span>
+                    </div>
+                    <span className="w-36 shrink-0 text-xs text-muted-foreground">{doc.document_number ? `#${doc.document_number}` : "—"}</span>
+                    <span className="w-28 shrink-0 text-xs text-muted-foreground">{doc.valid_until ? formatDate(doc.valid_until) : "—"}</span>
+                    <div className="w-28 shrink-0"><BadgePill className="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">Gearchiveerd</BadgePill></div>
+                    <div className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
+                        onClick={async () => { await base44.entities.PersonnelDocument.delete(doc.id); queryClient.invalidateQueries({ queryKey: ["personnel-documents"] }); }} title="Verwijderen">
+                        <X className="w-3.5 h-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>
@@ -1171,21 +1197,27 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
     <div className="mt-4 flex min-h-[200px] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
       <div className="w-52 shrink-0 border-r border-border bg-muted/20 py-2">
         <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Dossier</p>
-        {PERSONNEL_TABS.map(item => (
-          <button
-            key={item.key}
-            type="button"
-            onClick={() => setActive(item.key)}
-            className={`flex w-full items-center gap-2.5 px-4 py-2 text-left text-[13px] font-medium transition-all ${
-              active === item.key
-                ? "border-r-2 border-primary bg-primary/5 text-primary"
-                : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
-            }`}
-          >
-            <item.icon className={`h-3.5 w-3.5 shrink-0 ${active === item.key ? "text-primary" : ""}`} />
-            <span className="flex-1">{item.label}</span>
-          </button>
-        ))}
+        {PERSONNEL_TABS.map(item => {
+          const needsAttention = item.key === "identity" && !hasActiveIdentity;
+          return (
+            <button
+              key={item.key}
+              type="button"
+              onClick={() => setActive(item.key)}
+              className={`flex w-full items-center gap-2.5 px-4 py-2 text-left text-[13px] font-medium transition-all ${
+                active === item.key
+                  ? "border-r-2 border-primary bg-primary/5 text-primary"
+                  : "text-muted-foreground hover:bg-muted/40 hover:text-foreground"
+              }`}
+            >
+              <item.icon className={`h-3.5 w-3.5 shrink-0 ${active === item.key ? "text-primary" : ""}`} />
+              <span className="flex-1">{item.label}</span>
+              {needsAttention && (
+                <span className="h-2 w-2 rounded-full bg-amber-400 shrink-0" title="Geen legitimatiebewijs" />
+              )}
+            </button>
+          );
+        })}
       </div>
       <div className="min-w-0 flex-1 p-5">{renderTab()}</div>
     </div>
