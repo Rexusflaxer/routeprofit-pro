@@ -966,8 +966,8 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
       case "overview": return <OverviewTab person={person} companies={companies} dossier={dossier} />;
       case "payroll": return <PayrollTab person={person} documents={dossier.documents} />;
       case "identity": return (
-        <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
-          <div className="flex items-center justify-between gap-3 border-b border-border px-6 py-4 bg-muted/20">
+        <>
+          <div className="flex items-center justify-between gap-3 mb-4">
             <div className="flex items-center gap-2">
               <FileBadge className="h-4 w-4 text-muted-foreground" />
               <h3 className="text-sm font-semibold text-foreground">Legitimatiebewijzen</h3>
@@ -976,44 +976,46 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
             <Button size="sm" variant="outline" onClick={() => onAddRecord("document")}><Plus className="mr-1 h-4 w-4" />Toevoegen</Button>
           </div>
           {identityDocs.length === 0 ? (
-            <div className="p-6"><SmallEmpty text="Nog geen legitimatiebewijs." /></div>
+            <SmallEmpty text="Nog geen legitimatiebewijs." />
           ) : (
-            <div className="overflow-x-auto">
-              <Table>
-                <TableHeader>
-                  <TableRow className="bg-muted/50">
-                    <TableHead className="text-xs">Type</TableHead>
-                    <TableHead className="text-xs">Nummer</TableHead>
-                    <TableHead className="text-xs">Geldig tot</TableHead>
-                    <TableHead className="text-xs">Status</TableHead>
-                    <TableHead className="text-xs w-12">Acties</TableHead>
-                  </TableRow>
-                </TableHeader>
-                <TableBody>
-                  {identityDocs.map(doc => (
-                    <TableRow key={doc.id}>
-                      <TableCell className="text-sm font-medium">{doc.document_type || "-"}</TableCell>
-                      <TableCell className="text-sm">{doc.document_number || "-"}</TableCell>
-                      <TableCell className="text-sm">{formatDate(doc.valid_until, "-")}</TableCell>
-                      <TableCell className="text-sm"><BadgePill className={doc.verification_status === "verified" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}>{VERIFICATION_LABELS[doc.verification_status] || doc.verification_status}</BadgePill></TableCell>
-                      <TableCell className="text-sm">
-                        <Button 
-                          variant="ghost" 
-                          size="sm" 
-                          onClick={async () => {
-                            await base44.entities.PersonnelDocument.delete(doc.id);
-                          }}
-                        >
-                          <X className="h-4 w-4" />
-                        </Button>
-                      </TableCell>
+            <div className="rounded-xl border border-border bg-card shadow-sm overflow-hidden">
+              <div className="overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow className="bg-muted/50">
+                      <TableHead className="text-xs">Type</TableHead>
+                      <TableHead className="text-xs">Nummer</TableHead>
+                      <TableHead className="text-xs">Geldig tot</TableHead>
+                      <TableHead className="text-xs">Status</TableHead>
+                      <TableHead className="text-xs w-12">Acties</TableHead>
                     </TableRow>
-                  ))}
-                </TableBody>
-              </Table>
+                  </TableHeader>
+                  <TableBody>
+                    {identityDocs.map(doc => (
+                      <TableRow key={doc.id}>
+                        <TableCell className="text-sm font-medium">{doc.document_type || "-"}</TableCell>
+                        <TableCell className="text-sm">{doc.document_number || "-"}</TableCell>
+                        <TableCell className="text-sm">{formatDate(doc.valid_until, "-")}</TableCell>
+                        <TableCell className="text-sm"><BadgePill className={doc.verification_status === "verified" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}>{VERIFICATION_LABELS[doc.verification_status] || doc.verification_status}</BadgePill></TableCell>
+                        <TableCell className="text-sm">
+                          <Button 
+                            variant="ghost" 
+                            size="sm" 
+                            onClick={async () => {
+                              await base44.entities.PersonnelDocument.delete(doc.id);
+                            }}
+                          >
+                            <X className="h-4 w-4" />
+                          </Button>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
             </div>
           )}
-        </div>
+        </>
       );
       case "documents": return (
         <SectionPanel title="Documenten" icon={FileText} action={<Button size="sm" variant="outline" onClick={() => onAddRecord("document")}><Plus className="mr-1 h-4 w-4" />Toevoegen</Button>}>
