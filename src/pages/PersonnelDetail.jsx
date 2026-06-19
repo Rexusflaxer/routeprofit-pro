@@ -966,21 +966,13 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
       case "overview": return <OverviewTab person={person} companies={companies} dossier={dossier} />;
       case "payroll": return <PayrollTab person={person} documents={dossier.documents} />;
       case "identity": return (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <SectionPanel title="Identiteit" icon={Users}>
-            <FieldRow label="Geboortedatum">{formatDate(person.date_of_birth)}</FieldRow>
-            <FieldRow label="Geboorteplaats">{person.place_of_birth}</FieldRow>
-            <FieldRow label="Geboorteland">{person.country_of_birth}</FieldRow>
-            <FieldRow label="Nationaliteit">{person.nationality}</FieldRow>
-          </SectionPanel>
-          <SectionPanel title="Legitimatiebewijzen" icon={FileBadge}>
-            <MiniTable emptyText="Nog geen legitimatiebewijs." rows={identityDocs} columns={[
-              { key: "document_type", label: "Type" }, { key: "document_number", label: "Nummer" },
-              { key: "valid_until", label: "Geldig tot", render: r => formatDate(r.valid_until) },
-              { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
-            ]} />
-          </SectionPanel>
-        </div>
+        <SectionPanel title="Legitimatiebewijzen" icon={FileBadge}>
+          <MiniTable emptyText="Nog geen legitimatiebewijs." rows={identityDocs} columns={[
+            { key: "document_type", label: "Type" }, { key: "document_number", label: "Nummer" },
+            { key: "valid_until", label: "Geldig tot", render: r => formatDate(r.valid_until) },
+            { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
+          ]} />
+        </SectionPanel>
       );
       case "documents": return (
         <SectionPanel title="Documenten" icon={FileText} action={<Button size="sm" variant="outline" onClick={() => onAddRecord("document")}><Plus className="mr-1 h-4 w-4" />Toevoegen</Button>}>
