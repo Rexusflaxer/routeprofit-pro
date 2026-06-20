@@ -43,46 +43,6 @@ const ALL_COUNTRIES = Object.values(NATIONALITY_TO_COUNTRY)
   .filter((v, i, a) => a.indexOf(v) === i)
   .sort((a, b) => a.localeCompare(b, "nl"));
 
-function getScrollParent(element) {
-  if (typeof window === "undefined" || !element) return null;
-
-  let parent = element.parentElement;
-  while (parent && parent !== document.body) {
-    const style = window.getComputedStyle(parent);
-    const overflowY = `${style.overflowY} ${style.overflow}`;
-    if (/(auto|scroll|overlay)/.test(overflowY) && parent.scrollHeight > parent.clientHeight + 8) {
-      return parent;
-    }
-    parent = parent.parentElement;
-  }
-
-  return document.scrollingElement || document.documentElement;
-}
-
-function scrollElementIntoComfortView(element, behavior = "smooth") {
-  if (typeof window === "undefined" || !element) return;
-
-  const margin = 16;
-  const parent = getScrollParent(element);
-  const rect = element.getBoundingClientRect();
-
-  if (!parent || parent === document.documentElement || parent === document.body) {
-    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
-    const elementTop = rect.top + window.scrollY;
-    const availableOffset = Math.max(margin, Math.min(72, (viewportHeight - Math.min(rect.height, viewportHeight)) / 2));
-    window.scrollTo({ top: Math.max(0, elementTop - availableOffset), behavior });
-    return;
-  }
-
-  const parentRect = parent.getBoundingClientRect();
-  const targetTop = parent.scrollTop + rect.top - parentRect.top - margin;
-  parent.scrollTo({ top: Math.max(0, targetTop), behavior });
-
-  if (parent.getBoundingClientRect().bottom > window.innerHeight || parent.getBoundingClientRect().top < 0) {
-    parent.scrollIntoView({ behavior, block: "nearest" });
-  }
-}
-
 // ─── Image Crop Dialog ─────────────────────────────────────────────────────────
 
 function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
@@ -634,14 +594,6 @@ function WizardSteps({ step, labels }) {
   );
 }
 
-function WizardActionBar({ children }) {
-  return (
-    <div className="sticky bottom-0 z-20 -mx-5 mt-4 flex items-center justify-between gap-3 border-t border-border bg-background/95 px-5 py-3 shadow-[0_-14px_28px_rgba(0,0,0,0.18)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
-      {children}
-    </div>
-  );
-}
-
 // ─── Main Wizard ───────────────────────────────────────────────────────────────
 
 export default function IdentityDocumentWizard({ personnelId, nationality, onClose, onSaved, isArchiveEntry = false }) {
@@ -668,22 +620,6 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const [scanQuality, setScanQuality] = useState(null);
   const latestUploadKeyRef = useRef("");
   const wizardRef = useRef(null);
-  const [wizardViewportHeight, setWizardViewportHeight] = useState(null);
-  const constrainWizardHeight = [2, 3].includes(step);
-  const updateWizardViewportHeight = useCallback(() => {
-    if (typeof window === "undefined" || !wizardRef.current) return;
-    const rect = wizardRef.current.getBoundingClientRect();
-    const availableHeight = window.innerHeight - Math.max(0, rect.top) - 14;
-    const nextHeight = Math.max(320, Math.min(760, availableHeight));
-    setWizardViewportHeight(`${nextHeight}px`);
-  }, []);
-  const scrollWizardIntoView = useCallback((behavior = "smooth") => {
-    if (typeof window === "undefined") return;
-    window.requestAnimationFrame(() => {
-      scrollElementIntoComfortView(wizardRef.current, behavior);
-      window.setTimeout(() => scrollElementIntoComfortView(wizardRef.current, behavior), 180);
-    });
-  }, []);
 
   const isEuEea = EU_EEA_NATIONALITIES.has(nationality);
   const isDutch = nationality === "Nederlandse";
@@ -718,32 +654,14 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
   useEffect(() => {
     if (![2, 3].includes(step)) return;
-    scrollWizardIntoView();
-  }, [scrollWizardIntoView, step]);
-
-  useEffect(() => {
-    if (typeof window === "undefined") return undefined;
-    if (!constrainWizardHeight) {
-      setWizardViewportHeight(null);
-      return undefined;
-    }
-
-    const update = () => {
-      updateWizardViewportHeight();
-      if (wizardRef.current) wizardRef.current.scrollTo({ top: 0, behavior: "auto" });
-    };
-
-    window.requestAnimationFrame(update);
-    const firstTimer = window.setTimeout(update, 80);
-    const secondTimer = window.setTimeout(updateWizardViewportHeight, 260);
-    window.addEventListener("resize", updateWizardViewportHeight);
+    const timer = window.setTimeout(() => {
+      wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 200);
 
     return () => {
-      window.clearTimeout(firstTimer);
-      window.clearTimeout(secondTimer);
-      window.removeEventListener("resize", updateWizardViewportHeight);
+      window.clearTimeout(timer);
     };
-  }, [constrainWizardHeight, step, updateWizardViewportHeight]);
+  }, [step]);
 
   const applyRecognizedFields = useCallback((result) => {
     setForm(current => {
@@ -897,8 +815,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.2 }}
       ref={wizardRef}
-      style={wizardViewportHeight ? { maxHeight: wizardViewportHeight } : undefined}
-      className={`scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5 ${wizardViewportHeight ? "overflow-y-auto overscroll-contain" : ""}`}
+      className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
         {isArchiveEntry ? "Verlopen legitimatiebewijs archiveren" : "Legitimatiebewijs toevoegen"}
@@ -990,12 +907,12 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 <UploadGuideCard docType={docType} />
               </div>
 
-              <WizardActionBar>
+              <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <Button size="sm" onClick={() => setStep(3)} disabled={!frontFile}>
                   Volgende <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
-              </WizardActionBar>
+              </div>
             </div>
           )}
 
@@ -1010,10 +927,10 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 </p>
               </div>
 
-              <WizardActionBar>
+              <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
-              </WizardActionBar>
+              </div>
             </div>
           )}
 
@@ -1112,7 +1029,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 </div>
               </div>
 
-              <WizardActionBar>
+              <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => { setStep(2); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
@@ -1121,7 +1038,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                     {saveMutation.isPending ? "Opslaan..." : "Document opslaan"}
                   </Button>
                 </div>
-              </WizardActionBar>
+              </div>
             </div>
           )}
         </motion.div>
