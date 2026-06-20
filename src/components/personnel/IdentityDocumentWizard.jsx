@@ -351,23 +351,6 @@ function DocumentSideUpload({ label, hint, previewUrl, onFileSelected, uploading
 
 // ─── Upload Guidance ──────────────────────────────────────────────────────────
 
-function Marker({ x, y, children }) {
-  return (
-    <g transform={`translate(${x} ${y})`}>
-      <circle r="9" fill="#2563eb" />
-      <text x="0" y="3.5" textAnchor="middle" fontSize="9" fontWeight="700" fill="white">{children}</text>
-    </g>
-  );
-}
-
-function GuidePin({ className = "", children }) {
-  return (
-    <span className={`absolute flex h-5 w-5 items-center justify-center rounded-full bg-primary text-[10px] font-semibold text-primary-foreground shadow-sm ring-2 ring-background ${className}`}>
-      {children}
-    </span>
-  );
-}
-
 function GuideExampleCard({ title, target, description, children }) {
   return (
     <div className="w-full rounded-md border border-border bg-background/70 p-2 shadow-sm sm:w-[230px]">
@@ -402,10 +385,6 @@ function PassportGuideIllustration() {
             className="max-h-36 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
             draggable="false"
           />
-          <GuidePin className="left-[16%] top-[18%]">1</GuidePin>
-          <GuidePin className="left-[12%] top-[46%]">2</GuidePin>
-          <GuidePin className="right-[31%] top-[64%]">3</GuidePin>
-          <GuidePin className="right-[18%] top-[72%]">4</GuidePin>
         </div>
       </GuideExampleCard>
       <GuideExampleCard
@@ -420,7 +399,6 @@ function PassportGuideIllustration() {
             className="max-h-36 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
             draggable="false"
           />
-          <GuidePin className="left-[32%] top-[14%]">5</GuidePin>
         </div>
       </GuideExampleCard>
     </div>
@@ -472,32 +450,12 @@ function IdCardGuideIllustration() {
         <path d="M372 114h16M372 120h16" stroke="#facc15" strokeWidth="2" strokeLinecap="round" />
         <path d="M154 132h252" stroke="#0f172a" strokeWidth="4" strokeDasharray="12 7" opacity="0.86" />
       </g>
-
-      <Marker x="118" y="58">1</Marker>
-      <Marker x="46" y="92">2</Marker>
-      <Marker x="344" y="90">3</Marker>
-      <Marker x="432" y="89">4</Marker>
-      <Marker x="236" y="42">5</Marker>
     </svg>
   );
 }
 
 function UploadGuideCard({ docType, frontUpload, backUpload }) {
   const isPassport = docType === "passport";
-  const points = isPassport
-    ? [
-      "Volledig document met alle randen zichtbaar.",
-      "Pasfoto en tweede portret scherp in beeld.",
-      "Persoonsgegevens, documentnummer en geldigheid leesbaar.",
-      "MRZ-regels onderaan vrij van schaduw.",
-      "Upload ook de BSN-pagina of achterkant.",
-    ]
-    : [
-      "Upload de voorzijde volledig en zonder afgesneden hoeken.",
-      "Zorg dat pasfoto, kaartnummer en datums scherp zijn.",
-      "Upload ook de achterzijde voor BSN en controlegegevens.",
-      "Vermijd reflectie op de kaart.",
-    ];
 
   return (
     <div className="rounded-lg border border-border bg-card p-3 space-y-3">
@@ -524,10 +482,6 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
                     className="max-h-32 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
                     draggable="false"
                   />
-                  <GuidePin className="left-[16%] top-[18%]">1</GuidePin>
-                  <GuidePin className="left-[12%] top-[46%]">2</GuidePin>
-                  <GuidePin className="right-[31%] top-[64%]">3</GuidePin>
-                  <GuidePin className="right-[18%] top-[72%]">4</GuidePin>
                 </div>
               </GuideExampleCard>
             </div>
@@ -548,7 +502,6 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
                     className="max-h-32 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
                     draggable="false"
                   />
-                  <GuidePin className="left-[32%] top-[14%]">5</GuidePin>
                 </div>
               </GuideExampleCard>
             </div>
@@ -569,17 +522,6 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
           </div>
         </div>
       )}
-
-      <div className="grid gap-1.5 sm:grid-cols-2">
-        {points.map((point, index) => (
-          <div key={point} className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
-            <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[9px] font-semibold text-primary">
-              {index + 1}
-            </span>
-            <span>{point}</span>
-          </div>
-        ))}
-      </div>
     </div>
   );
 }
