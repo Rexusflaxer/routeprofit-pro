@@ -482,7 +482,7 @@ function IdCardGuideIllustration() {
   );
 }
 
-function UploadGuideCard({ docType }) {
+function UploadGuideCard({ docType, frontUpload, backUpload }) {
   const isPassport = docType === "passport";
   const points = isPassport
     ? [
@@ -500,27 +500,85 @@ function UploadGuideCard({ docType }) {
     ];
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3">
-      <div className="mb-2 flex flex-col gap-1 sm:flex-row sm:items-end sm:justify-between">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Scanvoorbeeld</p>
-          <p className="mt-1 text-sm font-medium text-foreground">{isPassport ? "Nederlands paspoort" : "ID-kaart"} correct uploaden</p>
-        </div>
+    <div className="rounded-lg border border-border bg-card p-3 space-y-3">
+      <div>
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Scanvoorbeeld</p>
+        <p className="mt-0.5 text-sm font-medium text-foreground">{isPassport ? "Nederlands paspoort" : "ID-kaart"} correct uploaden</p>
       </div>
-      <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
-        <div className="w-full rounded-md bg-muted/20 p-2 xl:w-auto xl:shrink-0">
-          {isPassport ? <PassportGuideIllustration /> : <IdCardGuideIllustration />}
-        </div>
-        <div className="grid flex-1 gap-1.5 sm:grid-cols-2 xl:max-w-xl xl:grid-cols-1">
-          {points.map((point, index) => (
-            <div key={point} className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
-              <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[9px] font-semibold text-primary">
-                {index + 1}
-              </span>
-              <span>{point}</span>
+
+      {isPassport ? (
+        <div className="flex flex-col gap-4 sm:flex-row">
+          {/* Voorkant */}
+          <div className="flex-1 space-y-2">
+            {frontUpload}
+            <div className="w-full rounded-md bg-muted/20 p-2">
+              <GuideExampleCard
+                title="Voorzijde"
+                target="Uploadvak links"
+                description="Houderpagina met pasfoto, persoonsgegevens, documentnummer, geldigheid en MRZ."
+              >
+                <div className="relative flex h-36 items-center justify-center rounded-md bg-sky-50/80 p-2 dark:bg-slate-950/40">
+                  <img
+                    src="/identity-guides/passport-holder-page-model-2024.jpg"
+                    alt=""
+                    className="max-h-32 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
+                    draggable="false"
+                  />
+                  <GuidePin className="left-[16%] top-[18%]">1</GuidePin>
+                  <GuidePin className="left-[12%] top-[46%]">2</GuidePin>
+                  <GuidePin className="right-[31%] top-[64%]">3</GuidePin>
+                  <GuidePin className="right-[18%] top-[72%]">4</GuidePin>
+                </div>
+              </GuideExampleCard>
             </div>
-          ))}
+          </div>
+          {/* Achterkant */}
+          <div className="flex-1 space-y-2">
+            {backUpload}
+            <div className="w-full rounded-md bg-muted/20 p-2">
+              <GuideExampleCard
+                title="Achterzijde"
+                target="Uploadvak rechts"
+                description="BSN-/titelpagina met persoonsnummer en documentnummer. Upload deze ook wanneer aanwezig."
+              >
+                <div className="relative flex h-36 items-center justify-center rounded-md bg-sky-50/80 p-2 dark:bg-slate-950/40">
+                  <img
+                    src="/identity-guides/passport-back-page-2021.jpg"
+                    alt=""
+                    className="max-h-32 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
+                    draggable="false"
+                  />
+                  <GuidePin className="left-[32%] top-[14%]">5</GuidePin>
+                </div>
+              </GuideExampleCard>
+            </div>
+          </div>
         </div>
+      ) : (
+        <div className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div className="space-y-2">
+              {frontUpload}
+            </div>
+            <div className="space-y-2">
+              {backUpload}
+            </div>
+          </div>
+          <div className="w-full rounded-md bg-muted/20 p-2">
+            <IdCardGuideIllustration />
+          </div>
+        </div>
+      )}
+
+      <div className="grid gap-1.5 sm:grid-cols-2">
+        {points.map((point, index) => (
+          <div key={point} className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+            <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[9px] font-semibold text-primary">
+              {index + 1}
+            </span>
+            <span>{point}</span>
+          </div>
+        ))}
       </div>
     </div>
   );
@@ -1026,8 +1084,9 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 </p>
               </div>
 
-              <div className="space-y-4">
-                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <UploadGuideCard
+                docType={docType}
+                frontUpload={
                   <DocumentSideUpload
                     label={docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant"}
                     hint={docType === "passport"
@@ -1038,6 +1097,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                     uploading={uploadingFront}
                     required
                   />
+                }
+                backUpload={
                   <DocumentSideUpload
                     label={docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant"}
                     hint={docType === "passport"
@@ -1047,10 +1108,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                     onFileSelected={(file, preview) => { setBackFile(file); setBackPreview(preview); }}
                     uploading={uploadingBack}
                   />
-                </div>
-              </div>
-
-              <UploadGuideCard docType={docType} />
+                }
+              />
 
               <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
