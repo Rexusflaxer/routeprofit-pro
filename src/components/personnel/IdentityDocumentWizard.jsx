@@ -619,6 +619,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const [recognizedUploadKey, setRecognizedUploadKey] = useState("");
   const [scanQuality, setScanQuality] = useState(null);
   const latestUploadKeyRef = useRef("");
+  const wizardRef = useRef(null);
 
   const isEuEea = EU_EEA_NATIONALITIES.has(nationality);
   const isDutch = nationality === "Nederlandse";
@@ -650,6 +651,12 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     setRecognizedUploadKey("");
     setScanQuality(null);
   }, [docType, frontFile, backFile]);
+
+  useEffect(() => {
+    if (step >= 2 && wizardRef.current) {
+      wizardRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+    }
+  }, [step]);
 
   const applyRecognizedFields = useCallback((result) => {
     setForm(current => {
@@ -802,6 +809,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.2 }}
+      ref={wizardRef}
       className="border-b border-primary/30 bg-muted/20 p-5"
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
