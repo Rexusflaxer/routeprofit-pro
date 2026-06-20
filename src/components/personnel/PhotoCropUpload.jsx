@@ -132,6 +132,13 @@ function PhotoCropDialog({ open, onOpenChange, imageSrc, onConfirm, uploading })
     };
   };
 
+  const getImageAspect = () => {
+    if (!imgRef.current?.naturalWidth || !imgRef.current?.naturalHeight) {
+      return PHOTO_ASPECT;
+    }
+    return imgRef.current.naturalWidth / imgRef.current.naturalHeight;
+  };
+
   const startCropDrag = (mode, event) => {
     const pointer = getPointerRatio(event);
     if (!pointer) return;
@@ -147,6 +154,7 @@ function PhotoCropDialog({ open, onOpenChange, imageSrc, onConfirm, uploading })
   };
 
   const resizeWithAspect = (mode, origin, pointer) => {
+    const imageAspect = getImageAspect();
     let anchorX;
     let anchorY;
     let draggedX = pointer.x;
@@ -161,18 +169,18 @@ function PhotoCropDialog({ open, onOpenChange, imageSrc, onConfirm, uploading })
     const directionX = mode.includes("w") ? -1 : 1;
     const directionY = mode.includes("n") ? -1 : 1;
     let width = Math.abs(draggedX - anchorX);
-    let height = width / PHOTO_ASPECT;
+    let height = width * imageAspect / PHOTO_ASPECT;
 
     if (Math.abs(draggedY - anchorY) > height) {
       height = Math.abs(draggedY - anchorY);
-      width = height * PHOTO_ASPECT;
+      width = height * PHOTO_ASPECT / imageAspect;
     }
 
     const maxWidth = directionX > 0 ? 1 - anchorX : anchorX;
     const maxHeight = directionY > 0 ? 1 - anchorY : anchorY;
-    const maxWidthByHeight = maxHeight * PHOTO_ASPECT;
+    const maxWidthByHeight = maxHeight * PHOTO_ASPECT / imageAspect;
     width = clamp(width, 0.08, Math.min(maxWidth, maxWidthByHeight));
-    height = width / PHOTO_ASPECT;
+    height = width * imageAspect / PHOTO_ASPECT;
 
     const x = directionX > 0 ? anchorX : anchorX - width;
     const y = directionY > 0 ? anchorY : anchorY - height;
@@ -300,8 +308,9 @@ function PhotoCropDialog({ open, onOpenChange, imageSrc, onConfirm, uploading })
                   <button
                     key={handle.mode}
                     type="button"
+                    tabIndex={-1}
                     aria-label={`Pasfotohoek ${handle.mode} verplaatsen`}
-                    className={`absolute h-8 w-8 appearance-none border-0 bg-transparent p-0 shadow-none outline-none hover:bg-transparent focus:bg-transparent focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background ${handle.className}`}
+                    className={`absolute h-8 w-8 appearance-none rounded-none border-0 bg-transparent p-0 shadow-none outline-none ring-0 hover:bg-transparent focus:bg-transparent focus:outline-none focus:ring-0 active:bg-transparent ${handle.className}`}
                     onPointerDown={event => startCropDrag(handle.mode, event)}
                   >
                     <span className={`pointer-events-none absolute block h-5 w-5 border-primary bg-transparent drop-shadow-[0_1px_1px_rgba(0,0,0,0.65)] ${handle.cornerClass}`} />

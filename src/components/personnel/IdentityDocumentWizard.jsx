@@ -249,8 +249,9 @@ function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
                       <button
                         key={handle.mode}
                         type="button"
+                        tabIndex={-1}
                         aria-label={`Uitsnedehoek ${handle.mode} verplaatsen`}
-                        className={`absolute h-8 w-8 appearance-none border-0 bg-transparent p-0 shadow-none outline-none hover:bg-transparent focus:bg-transparent focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background ${handle.className}`}
+                        className={`absolute h-8 w-8 appearance-none rounded-none border-0 bg-transparent p-0 shadow-none outline-none ring-0 hover:bg-transparent focus:bg-transparent focus:outline-none focus:ring-0 active:bg-transparent ${handle.className}`}
                         onPointerDown={event => startCropDrag(handle.mode, event)}
                       >
                         <span className={`pointer-events-none absolute block h-5 w-5 border-primary bg-transparent drop-shadow-[0_1px_1px_rgba(0,0,0,0.65)] ${handle.cornerClass}`} />
