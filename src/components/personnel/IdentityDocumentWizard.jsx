@@ -272,38 +272,66 @@ function Marker({ x, y, children }) {
 
 function PassportGuideIllustration() {
   return (
-    <svg viewBox="0 0 420 210" role="img" aria-label="Schematisch voorbeeld van paspoort upload" className="h-auto w-full">
-      <rect width="420" height="210" rx="14" fill="hsl(var(--muted))" opacity="0.45" />
-      <rect x="22" y="24" width="176" height="154" rx="10" fill="#eef8ff" stroke="#38bdf8" strokeWidth="2" />
-      <rect x="32" y="34" width="156" height="134" rx="8" fill="#f8fafc" stroke="#94a3b8" />
-      <rect x="42" y="126" width="136" height="24" rx="3" fill="#e2e8f0" />
-      <path d="M48 154h118M48 164h126" stroke="#0f172a" strokeWidth="3" strokeDasharray="10 4" />
-      <circle cx="72" cy="78" r="20" fill="#cbd5e1" />
-      <rect x="112" y="58" width="54" height="6" rx="3" fill="#64748b" />
-      <rect x="112" y="72" width="66" height="5" rx="2.5" fill="#94a3b8" />
-      <rect x="112" y="84" width="42" height="5" rx="2.5" fill="#94a3b8" />
-      <rect x="112" y="98" width="60" height="8" rx="3" fill="#bfdbfe" />
-      <text x="42" y="46" fontSize="10" fontWeight="700" fill="#0f172a">PASPOORT</text>
-      <text x="42" y="116" fontSize="8" fill="#475569">Documentnummer / geldigheid</text>
-      <rect x="222" y="34" width="154" height="134" rx="8" fill="#f8fafc" stroke="#94a3b8" />
-      <rect x="238" y="50" width="72" height="8" rx="4" fill="#64748b" />
-      <rect x="238" y="66" width="92" height="6" rx="3" fill="#94a3b8" />
-      <rect x="238" y="84" width="64" height="20" rx="4" fill="#dbeafe" />
-      <rect x="332" y="50" width="22" height="22" rx="3" fill="#0f172a" opacity="0.75" />
-      <rect x="238" y="130" width="48" height="7" rx="3.5" fill="#64748b" />
-      <text x="238" y="122" fontSize="9" fill="#475569">BSN / persoonsgegevens</text>
-      <Marker x="32" y="26">1</Marker>
-      <Marker x="196" y="54">2</Marker>
-      <Marker x="172" y="118">3</Marker>
-      <Marker x="178" y="164">4</Marker>
-      <Marker x="352" y="42">5</Marker>
+    <svg viewBox="0 0 420 210" role="img" aria-label="Schematisch voorbeeld van Nederlands paspoort upload" className="h-40 w-full">
+      <defs>
+        <linearGradient id="passportDataPage" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#e7fbf4" />
+          <stop offset="0.44" stopColor="#d8f6ff" />
+          <stop offset="0.74" stopColor="#f6f3cf" />
+          <stop offset="1" stopColor="#f7dfe7" />
+        </linearGradient>
+        <linearGradient id="passportInfoPage" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0" stopColor="#f5faf4" />
+          <stop offset="1" stopColor="#e5f4ff" />
+        </linearGradient>
+        <pattern id="passportPattern" width="22" height="18" patternUnits="userSpaceOnUse">
+          <text x="1" y="10" fontSize="7" fill="#0f766e" opacity="0.18">NLD</text>
+          <path d="M0 16c6-6 14-6 22 0" fill="none" stroke="#be123c" strokeWidth="1" opacity="0.12" />
+        </pattern>
+      </defs>
+      <rect width="420" height="210" rx="14" fill="hsl(var(--muted))" opacity="0.42" />
+
+      <g transform="translate(20 22)">
+        <rect x="0" y="0" width="380" height="166" rx="12" fill="#eef2f7" stroke="#94a3b8" />
+        <rect x="10" y="10" width="176" height="146" rx="8" fill="#eef8ec" />
+        <rect x="194" y="10" width="176" height="146" rx="8" fill="url(#passportDataPage)" />
+        <path d="M190 11v144" stroke="#cbd5e1" strokeWidth="3" />
+
+        <rect x="16" y="16" width="164" height="132" rx="7" fill="url(#passportInfoPage)" stroke="#cbd5e1" />
+        <text x="96" y="34" textAnchor="middle" fontSize="7" letterSpacing="1.3" fill="#64748b">IN NAAM VAN ZIJNE MAJESTEIT DE KONING</text>
+        <path d="M38 52h118M48 66h98M42 80h110M54 94h86M36 112h124" stroke="#94a3b8" strokeWidth="2.2" strokeLinecap="round" opacity="0.58" />
+        <rect x="82" y="128" width="28" height="14" rx="2" fill="#1d4ed8" opacity="0.9" />
+        <circle cx="96" cy="135" r="5" fill="#e0f2fe" />
+
+        <rect x="200" y="16" width="164" height="132" rx="7" fill="url(#passportPattern)" stroke="#cbd5e1" />
+        <text x="210" y="33" fontSize="7.5" fontWeight="700" fill="#0f172a">KONINKRIJK DER</text>
+        <text x="279" y="33" fontSize="7.5" fontWeight="700" fill="#be123c">NEDERLANDEN</text>
+        <text x="210" y="45" fontSize="7" fill="#475569">KINGDOM OF THE NETHERLANDS</text>
+        <rect x="211" y="58" width="46" height="58" rx="4" fill="#e0f2fe" stroke="#94a3b8" />
+        <circle cx="234" cy="77" r="13" fill="#64748b" opacity="0.5" />
+        <rect x="222" y="93" width="24" height="18" rx="9" fill="#64748b" opacity="0.45" />
+        <rect x="268" y="58" width="28" height="8" rx="2" fill="#dbeafe" />
+        <text x="268" y="56" fontSize="5.5" fill="#1e40af">Type Code</text>
+        <text x="301" y="56" fontSize="5.5" fill="#1e40af">Document no.</text>
+        <rect x="301" y="58" width="48" height="8" rx="2" fill="#c7d2fe" />
+        <rect x="268" y="77" width="80" height="7" rx="2" fill="#475569" opacity="0.75" />
+        <rect x="268" y="91" width="66" height="7" rx="2" fill="#64748b" opacity="0.6" />
+        <rect x="268" y="105" width="70" height="7" rx="2" fill="#64748b" opacity="0.6" />
+        <rect x="268" y="119" width="44" height="9" rx="2" fill="#dbeafe" />
+        <path d="M210 134h146M210 143h146" stroke="#0f172a" strokeWidth="3" strokeDasharray="9 4" />
+      </g>
+
+      <Marker x="212" y="42">1</Marker>
+      <Marker x="352" y="84">2</Marker>
+      <Marker x="304" y="139">3</Marker>
+      <Marker x="296" y="174">4</Marker>
     </svg>
   );
 }
 
 function IdCardGuideIllustration() {
   return (
-    <svg viewBox="0 0 420 210" role="img" aria-label="Schematisch voorbeeld van ID-kaart upload" className="h-auto w-full">
+    <svg viewBox="0 0 420 210" role="img" aria-label="Schematisch voorbeeld van ID-kaart upload" className="h-40 w-full">
       <rect width="420" height="210" rx="14" fill="hsl(var(--muted))" opacity="0.45" />
       <rect x="26" y="40" width="170" height="112" rx="12" fill="#eef8ff" stroke="#38bdf8" strokeWidth="2" />
       <rect x="42" y="56" width="48" height="58" rx="7" fill="#cbd5e1" />
@@ -345,16 +373,16 @@ function UploadGuideCard({ docType }) {
     ];
 
   return (
-    <div className="rounded-lg border border-border bg-card p-4">
-      <div className="mb-3">
+    <div className="rounded-lg border border-border bg-card p-3">
+      <div className="mb-2">
         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Scanvoorbeeld</p>
         <p className="mt-1 text-sm font-medium text-foreground">{isPassport ? "Paspoort" : "ID-kaart"} correct uploaden</p>
       </div>
       {isPassport ? <PassportGuideIllustration /> : <IdCardGuideIllustration />}
-      <div className="mt-3 grid gap-2">
+      <div className="mt-2 grid gap-1.5">
         {points.map((point, index) => (
-          <div key={point} className="flex items-start gap-2 text-xs text-muted-foreground">
-            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+          <div key={point} className="flex items-start gap-1.5 text-[11px] text-muted-foreground">
+            <span className="mt-0.5 flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[9px] font-semibold text-primary">
               {index + 1}
             </span>
             <span>{point}</span>
@@ -795,7 +823,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_300px]">
                 <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
                   <DocumentSideUpload
                     label={docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant"}
