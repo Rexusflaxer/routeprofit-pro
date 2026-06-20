@@ -227,10 +227,26 @@ function PhotoCropDialog({ open, onOpenChange, imageSrc, onConfirm, uploading })
     right: { left: `${(crop.x + crop.width) * 100}%`, top: `${crop.y * 100}%`, width: `${(1 - crop.x - crop.width) * 100}%`, height: `${crop.height * 100}%` },
   };
   const handles = [
-    { mode: "nw", className: "left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize" },
-    { mode: "ne", className: "right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize" },
-    { mode: "sw", className: "bottom-0 left-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize" },
-    { mode: "se", className: "bottom-0 right-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize" },
+    {
+      mode: "nw",
+      className: "left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize",
+      cornerClass: "left-1/2 top-1/2 border-l-[5px] border-t-[5px] rounded-tl-sm",
+    },
+    {
+      mode: "ne",
+      className: "right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize",
+      cornerClass: "right-1/2 top-1/2 border-r-[5px] border-t-[5px] rounded-tr-sm",
+    },
+    {
+      mode: "sw",
+      className: "bottom-0 left-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize",
+      cornerClass: "bottom-1/2 left-1/2 border-b-[5px] border-l-[5px] rounded-bl-sm",
+    },
+    {
+      mode: "se",
+      className: "bottom-0 right-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize",
+      cornerClass: "bottom-1/2 right-1/2 border-b-[5px] border-r-[5px] rounded-br-sm",
+    },
   ];
 
   return (
@@ -281,9 +297,11 @@ function PhotoCropDialog({ open, onOpenChange, imageSrc, onConfirm, uploading })
                     key={handle.mode}
                     type="button"
                     aria-label={`Pasfotohoek ${handle.mode} verplaatsen`}
-                    className={`absolute h-5 w-5 rounded-sm border-2 border-white bg-primary shadow-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background ${handle.className}`}
+                    className={`absolute h-8 w-8 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background ${handle.className}`}
                     onPointerDown={event => startCropDrag(handle.mode, event)}
-                  />
+                  >
+                    <span className={`pointer-events-none absolute h-5 w-5 border-primary drop-shadow-[0_1px_1px_rgba(0,0,0,0.65)] ${handle.cornerClass}`} />
+                  </button>
                 ))}
               </div>
             </div>
