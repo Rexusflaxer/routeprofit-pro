@@ -962,17 +962,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
   const [showIdentityWizard, setShowIdentityWizard] = useState(false);
   const [identityArchiveMode, setIdentityArchiveMode] = useState(false);
   const [showIdentityArchive, setShowIdentityArchive] = useState(false);
-  const wizardAnchorRef = useRef(null);
 
-  useEffect(() => {
-    if (showIdentityWizard && wizardAnchorRef.current) {
-      setTimeout(() => {
-        const rect = wizardAnchorRef.current.getBoundingClientRect();
-        const scrollTop = window.scrollY + rect.top - 16;
-        window.scrollTo({ top: scrollTop, behavior: "smooth" });
-      }, 50);
-    }
-  }, [showIdentityWizard]);
   const generalDocuments = dossier.documents.filter(d => !["identity_document","drivers_license","vog","cv","bank_account_proof","payroll_tax_statement"].includes(d.category));
   const identityDocs = dossier.documents.filter(d => d.category === "identity_document" && !d.metadata?.archived);
   const identityArchived = dossier.documents.filter(d => d.category === "identity_document" && d.metadata?.archived);
@@ -995,7 +985,6 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
       case "identity": return (
         <div className="flex flex-col h-full">
           {/* Wizard inline */}
-          <div ref={wizardAnchorRef} />
           <AnimatePresence>
             {showIdentityWizard && (
               <IdentityDocumentWizard

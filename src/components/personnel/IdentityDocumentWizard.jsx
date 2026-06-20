@@ -654,7 +654,9 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
   useEffect(() => {
     if (step >= 2 && wizardRef.current) {
-      wizardRef.current.scrollIntoView({ behavior: "smooth", block: "start" });
+      const rect = wizardRef.current.getBoundingClientRect();
+      const scrollTop = window.scrollY + rect.top - 16;
+      window.scrollTo({ top: scrollTop, behavior: "smooth" });
     }
   }, [step]);
 
