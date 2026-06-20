@@ -217,7 +217,7 @@ function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
             <div className="flex min-h-64 items-center justify-center rounded-md bg-slate-950 p-2">
               <div
                 ref={imageFrameRef}
-                className="relative max-h-[58vh] max-w-full touch-none select-none"
+                className="relative inline-block w-fit max-h-[58vh] max-w-full touch-none select-none leading-none"
               >
                 <img
                   src={imageSrc}
@@ -250,10 +250,10 @@ function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
                         key={handle.mode}
                         type="button"
                         aria-label={`Uitsnedehoek ${handle.mode} verplaatsen`}
-                        className={`absolute h-8 w-8 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background ${handle.className}`}
+                        className={`absolute h-8 w-8 appearance-none border-0 bg-transparent p-0 shadow-none outline-none hover:bg-transparent focus:bg-transparent focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background ${handle.className}`}
                         onPointerDown={event => startCropDrag(handle.mode, event)}
                       >
-                        <span className={`pointer-events-none absolute h-5 w-5 border-primary drop-shadow-[0_1px_1px_rgba(0,0,0,0.65)] ${handle.cornerClass}`} />
+                        <span className={`pointer-events-none absolute block h-5 w-5 border-primary bg-transparent drop-shadow-[0_1px_1px_rgba(0,0,0,0.65)] ${handle.cornerClass}`} />
                       </button>
                     ))}
                   </div>

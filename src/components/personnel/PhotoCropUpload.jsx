@@ -8,6 +8,7 @@ import { base44 } from "@/api/base44Client";
 const PHOTO_ASPECT = 7 / 9;
 const OUTPUT_W = 350;
 const OUTPUT_H = 450;
+const PHOTO_ASPECT_TOLERANCE = 0.015;
 
 function clamp(value, min, max) {
   return Math.min(max, Math.max(min, value));
@@ -15,6 +16,9 @@ function clamp(value, min, max) {
 
 function getInitialPhotoCrop(image) {
   const aspect = image.naturalWidth / image.naturalHeight;
+  if (Math.abs(aspect - PHOTO_ASPECT) / PHOTO_ASPECT <= PHOTO_ASPECT_TOLERANCE) {
+    return { x: 0, y: 0, width: 1, height: 1 };
+  }
   if (aspect > PHOTO_ASPECT) {
     const width = PHOTO_ASPECT / aspect;
     return { x: (1 - width) / 2, y: 0, width, height: 1 };
@@ -260,7 +264,7 @@ function PhotoCropDialog({ open, onOpenChange, imageSrc, onConfirm, uploading })
         </p>
 
         <div className="flex min-h-72 items-center justify-center rounded-lg border border-border bg-slate-950 p-2">
-          <div ref={imageFrameRef} className="relative max-h-[58vh] max-w-full touch-none select-none">
+          <div ref={imageFrameRef} className="relative inline-block w-fit max-h-[58vh] max-w-full touch-none select-none leading-none">
             {imageSrc && (
               <img
                 ref={imgRef}
@@ -297,10 +301,10 @@ function PhotoCropDialog({ open, onOpenChange, imageSrc, onConfirm, uploading })
                     key={handle.mode}
                     type="button"
                     aria-label={`Pasfotohoek ${handle.mode} verplaatsen`}
-                    className={`absolute h-8 w-8 bg-transparent focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background ${handle.className}`}
+                    className={`absolute h-8 w-8 appearance-none border-0 bg-transparent p-0 shadow-none outline-none hover:bg-transparent focus:bg-transparent focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background ${handle.className}`}
                     onPointerDown={event => startCropDrag(handle.mode, event)}
                   >
-                    <span className={`pointer-events-none absolute h-5 w-5 border-primary drop-shadow-[0_1px_1px_rgba(0,0,0,0.65)] ${handle.cornerClass}`} />
+                    <span className={`pointer-events-none absolute block h-5 w-5 border-primary bg-transparent drop-shadow-[0_1px_1px_rgba(0,0,0,0.65)] ${handle.cornerClass}`} />
                   </button>
                 ))}
               </div>
