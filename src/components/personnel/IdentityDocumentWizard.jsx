@@ -450,7 +450,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   }, [applyRecognizedFields, backFile, frontFile, recognizedUploadKey, recognizing, uploadKey]);
 
   useEffect(() => {
-    if (step !== 2 || !frontFile || recognizing || recognizedUploadKey === uploadKey) return;
+    if (![2, 3].includes(step) || !frontFile || recognizing || recognizedUploadKey === uploadKey) return;
     runRecognition();
   }, [frontFile, recognizedUploadKey, recognizing, runRecognition, step, uploadKey]);
 
@@ -544,7 +544,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   });
 
   const STEP_LABELS = ["Type", "Upload", "Controleren"];
-  const canContinueToReview = Boolean(frontFile) && recognizedUploadKey === uploadKey && !recognizing;
+  const scanPending = Boolean(frontFile) && recognizedUploadKey !== uploadKey;
 
   return (
     <motion.div
@@ -637,16 +637,32 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
               <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                <Button size="sm" onClick={() => setStep(3)} disabled={!canContinueToReview}>
-                  {frontFile && !canContinueToReview && <Loader2 className="w-4 h-4 mr-1 animate-spin" />}
-                  {frontFile && !canContinueToReview ? "Verwerken..." : "Volgende"} <ChevronRight className="w-4 h-4 ml-1" />
+                <Button size="sm" onClick={() => setStep(3)} disabled={!frontFile}>
+                  Volgende <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               </div>
             </div>
           )}
 
           {/* Step 3: Controleren & opslaan */}
-          {step === 3 && (
+          {step === 3 && scanPending && (
+            <div className="space-y-4">
+              <div className="flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-border bg-card px-6 py-12 text-center">
+                <Loader2 className="mb-4 h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm font-medium text-foreground">Scan verwerken</p>
+                <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                  De upload wordt gelezen. Zodra dit klaar is, opent de controle automatisch.
+                </p>
+              </div>
+
+              <div className="flex justify-between pt-1">
+                <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
+              </div>
+            </div>
+          )}
+
+          {step === 3 && !scanPending && (
             <div className="space-y-4">
               <div>
                 <p className="text-sm font-medium text-foreground mb-1">Controleer en vul aan</p>
