@@ -467,44 +467,41 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
       {isPassport ? (
         <div className="flex flex-col gap-4 sm:flex-row">
           {/* Voorkant */}
-          <div className="flex-1 space-y-2">
+          <div className="w-full sm:w-[230px] shrink-0 space-y-2">
             {frontUpload}
-            <div className="w-full rounded-md bg-muted/20 p-2">
-              <GuideExampleCard
-                title="Voorzijde"
-                target="Uploadvak links"
-                description="Houderpagina met pasfoto, persoonsgegevens, documentnummer, geldigheid en MRZ."
-              >
-                <div className="relative flex h-36 items-center justify-center rounded-md bg-sky-50/80 p-2 dark:bg-slate-950/40">
-                  <img
-                    src="/identity-guides/passport-holder-page-model-2024.jpg"
-                    alt=""
-                    className="max-h-32 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
-                    draggable="false"
-                  />
-                </div>
-              </GuideExampleCard>
-            </div>
+            <GuideExampleCard
+              title="Voorzijde"
+              target="Uploadvak links"
+              description="Houderpagina met pasfoto, persoonsgegevens, documentnummer, geldigheid en MRZ."
+            >
+              <div className="relative flex h-36 items-center justify-center rounded-md bg-sky-50/80 p-2 dark:bg-slate-950/40">
+                <img
+                  src="/identity-guides/passport-holder-page-model-2024.jpg"
+                  alt=""
+                  className="max-h-32 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
+                  draggable="false"
+                />
+              </div>
+            </GuideExampleCard>
           </div>
           {/* Achterkant */}
-          <div className="flex-1 space-y-2">
+          <div className="w-full sm:w-[230px] shrink-0 space-y-2">
             {backUpload}
-            <div className="w-full rounded-md bg-muted/20 p-2">
-              <GuideExampleCard
-                title="Achterzijde"
-                target="Uploadvak rechts"
-                description="BSN-/titelpagina met persoonsnummer en documentnummer. Upload deze ook wanneer aanwezig."
-              >
-                <div className="relative flex h-36 items-center justify-center rounded-md bg-sky-50/80 p-2 dark:bg-slate-950/40">
-                  <img
-                    src="/identity-guides/passport-back-page-2021.jpg"
-                    alt=""
-                    className="max-h-32 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
-                    draggable="false"
-                  />
-                </div>
-              </GuideExampleCard>
-            </div>
+            <GuideExampleCard
+              title="Achterzijde"
+              target="Uploadvak rechts"
+              description="BSN-/titelpagina met persoonsnummer en documentnummer. Upload deze ook wanneer aanwezig."
+            >
+              <div className="relative flex h-36 items-center justify-center rounded-md bg-sky-50/80 p-2 dark:bg-slate-950/40">
+                <img
+                  src="/identity-guides/passport-back-page-2021.jpg"
+                  alt=""
+                  className="max-h-32 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
+                  draggable="false"
+                />
+                <GuidePin className="left-[32%] top-[14%]">5</GuidePin>
+              </div>
+            </GuideExampleCard>
           </div>
         </div>
       ) : (
