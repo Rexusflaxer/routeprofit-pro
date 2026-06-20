@@ -967,7 +967,9 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
   useEffect(() => {
     if (showIdentityWizard && wizardAnchorRef.current) {
       setTimeout(() => {
-        wizardAnchorRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+        const rect = wizardAnchorRef.current.getBoundingClientRect();
+        const scrollTop = window.scrollY + rect.top - 16;
+        window.scrollTo({ top: scrollTop, behavior: "smooth" });
       }, 50);
     }
   }, [showIdentityWizard]);
