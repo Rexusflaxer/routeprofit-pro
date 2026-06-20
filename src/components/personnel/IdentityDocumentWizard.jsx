@@ -653,11 +653,26 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   }, [docType, frontFile, backFile]);
 
   useEffect(() => {
-    if (step >= 2 && wizardRef.current) {
-      const rect = wizardRef.current.getBoundingClientRect();
-      const scrollTop = window.scrollY + rect.top - 16;
-      window.scrollTo({ top: scrollTop, behavior: "smooth" });
-    }
+    if (step < 2 || !wizardRef.current) return;
+    setTimeout(() => {
+      const el = wizardRef.current;
+      if (!el) return;
+      // Find the nearest scrollable ancestor
+      let scrollParent = el.parentElement;
+      while (scrollParent && scrollParent !== document.body) {
+        const style = window.getComputedStyle(scrollParent);
+        const overflow = style.overflow + style.overflowY;
+        if (/auto|scroll/.test(overflow) && scrollParent.scrollHeight > scrollParent.clientHeight) break;
+        scrollParent = scrollParent.parentElement;
+      }
+      const target = scrollParent && scrollParent !== document.body ? scrollParent : window;
+      const rect = el.getBoundingClientRect();
+      if (target === window) {
+        window.scrollTo({ top: window.scrollY + rect.top - 16, behavior: "smooth" });
+      } else {
+        target.scrollTo({ top: target.scrollTop + rect.top - target.getBoundingClientRect().top - 16, behavior: "smooth" });
+      }
+    }, 60);
   }, [step]);
 
   const applyRecognizedFields = useCallback((result) => {
