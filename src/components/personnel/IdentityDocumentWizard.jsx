@@ -419,7 +419,6 @@ function UploadGuideCard({ docType }) {
           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Scanvoorbeeld</p>
           <p className="mt-1 text-sm font-medium text-foreground">{isPassport ? "Nederlands paspoort" : "ID-kaart"} correct uploaden</p>
         </div>
-        <p className="text-[11px] text-muted-foreground">Controleert scanbaarheid, geen echtheid.</p>
       </div>
       <div className="flex flex-col gap-3 xl:flex-row xl:items-start">
         <div className="w-full rounded-md bg-muted/20 p-2 xl:w-auto xl:shrink-0">
