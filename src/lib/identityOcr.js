@@ -304,6 +304,208 @@ function loadImage(source) {
   });
 }
 
+function qualityCheck(key, label, status, detail = "") {
+  return { key, label, status, detail };
+}
+
+function thresholdStatus(value, passMinimum, warnMinimum) {
+  if (value >= passMinimum) return "pass";
+  if (value >= warnMinimum) return "warn";
+  return "fail";
+}
+
+function rangeStatus(value, passMin, passMax, warnMin, warnMax) {
+  if (value >= passMin && value <= passMax) return "pass";
+  if (value >= warnMin && value <= warnMax) return "warn";
+  return "fail";
+}
+
+async function analyzeImageFile(file, sideLabel, keyPrefix) {
+  const image = await loadImage(file);
+  try {
+    const width = image.naturalWidth || image.width;
+    const height = image.naturalHeight || image.height;
+    const pixelCount = width * height;
+    const sampleWidth = Math.min(420, width);
+    const sampleHeight = Math.max(1, Math.round(height * (sampleWidth / width)));
+    const canvas = document.createElement("canvas");
+    canvas.width = sampleWidth;
+    canvas.height = sampleHeight;
+    const ctx = canvas.getContext("2d", { willReadFrequently: true });
+    ctx.drawImage(image, 0, 0, sampleWidth, sampleHeight);
+
+    const imageData = ctx.getImageData(0, 0, sampleWidth, sampleHeight);
+    const data = imageData.data;
+    const grays = new Float32Array(sampleWidth * sampleHeight);
+    let sum = 0;
+    let sumSquares = 0;
+    let edgeSum = 0;
+    let edgeCount = 0;
+
+    for (let y = 0; y < sampleHeight; y += 1) {
+      for (let x = 0; x < sampleWidth; x += 1) {
+        const pixelIndex = y * sampleWidth + x;
+        const dataIndex = pixelIndex * 4;
+        const gray = data[dataIndex] * 0.299 + data[dataIndex + 1] * 0.587 + data[dataIndex + 2] * 0.114;
+        grays[pixelIndex] = gray;
+        sum += gray;
+        sumSquares += gray * gray;
+        if (x > 0) {
+          edgeSum += Math.abs(gray - grays[pixelIndex - 1]);
+          edgeCount += 1;
+        }
+        if (y > 0) {
+          edgeSum += Math.abs(gray - grays[pixelIndex - sampleWidth]);
+          edgeCount += 1;
+        }
+      }
+    }
+
+    const samplePixels = sampleWidth * sampleHeight;
+    const brightness = sum / samplePixels;
+    const variance = Math.max(0, (sumSquares / samplePixels) - brightness * brightness);
+    const contrast = Math.sqrt(variance);
+    const sharpness = edgeCount ? edgeSum / edgeCount : 0;
+    const resolutionStatus = pixelCount >= 800000 && Math.min(width, height) >= 550
+      ? "pass"
+      : pixelCount >= 420000 && Math.min(width, height) >= 360
+        ? "warn"
+        : "fail";
+
+    return {
+      side: keyPrefix,
+      width,
+      height,
+      checks: [
+        qualityCheck(
+          `${keyPrefix}_resolution`,
+          `${sideLabel} heeft voldoende resolutie`,
+          resolutionStatus,
+          `${width} x ${height}px`
+        ),
+        qualityCheck(
+          `${keyPrefix}_exposure`,
+          `${sideLabel} is goed belicht`,
+          rangeStatus(brightness, 55, 215, 35, 235)
+        ),
+        qualityCheck(
+          `${keyPrefix}_contrast`,
+          `${sideLabel} heeft voldoende contrast`,
+          thresholdStatus(contrast, 32, 22)
+        ),
+        qualityCheck(
+          `${keyPrefix}_sharpness`,
+          `${sideLabel} lijkt scherp genoeg`,
+          thresholdStatus(sharpness, 7, 4.5)
+        ),
+      ],
+    };
+  } finally {
+    URL.revokeObjectURL(image.src);
+  }
+}
+
+async function analyzeUploadedImages({ frontFile, backFile }) {
+  const checks = [];
+  const metrics = {};
+  const jobs = [];
+
+  if (frontFile) {
+    jobs.push(
+      analyzeImageFile(frontFile, "Voorkant", "front")
+        .then(result => {
+          metrics.front = { width: result.width, height: result.height };
+          checks.push(...result.checks);
+        })
+        .catch(() => {
+          checks.push(qualityCheck("front_readable", "Voorkant kon technisch worden beoordeeld", "warn"));
+        })
+    );
+  }
+
+  if (backFile) {
+    jobs.push(
+      analyzeImageFile(backFile, "Achterkant", "back")
+        .then(result => {
+          metrics.back = { width: result.width, height: result.height };
+          checks.push(...result.checks);
+        })
+        .catch(() => {
+          checks.push(qualityCheck("back_readable", "Achterkant kon technisch worden beoordeeld", "warn"));
+        })
+    );
+  }
+
+  await Promise.all(jobs);
+  return { checks, metrics };
+}
+
+function buildUploadQuality({ imageQuality, fields, docType, requiresBsn, hasBackFile }) {
+  const checks = [...(imageQuality?.checks || [])];
+  const isPassport = docType === "passport";
+  const hasDates = Boolean(fields.valid_from && fields.valid_until);
+
+  checks.unshift(
+    qualityCheck(
+      "back_uploaded",
+      isPassport ? "BSN-pagina of achterkant toegevoegd" : "Achterkant toegevoegd",
+      hasBackFile ? "pass" : "warn",
+      hasBackFile ? "" : "Aanbevolen voor BSN en volledige dossiercontrole"
+    )
+  );
+
+  checks.push(
+    qualityCheck(
+      "document_number_found",
+      "Documentnummer gevonden",
+      fields.document_number ? "pass" : "warn"
+    ),
+    qualityCheck(
+      "bsn_found",
+      "BSN gevonden",
+      fields.bsn ? "pass" : requiresBsn ? "warn" : "pass",
+      fields.bsn ? "" : requiresBsn ? "Controleer of de BSN-zijde goed zichtbaar is" : "Niet altijd beschikbaar"
+    ),
+    qualityCheck(
+      "validity_found",
+      "Geldigheid gevonden",
+      fields.valid_until ? "pass" : "warn"
+    ),
+    qualityCheck(
+      "validity_logic",
+      "Geldigheidsdatums zijn logisch",
+      hasDates ? fields.valid_from < fields.valid_until ? "pass" : "fail" : "warn"
+    ),
+    qualityCheck(
+      "machine_readable",
+      isPassport ? "Machineleesbare paspoortregel gelezen" : "Machineleesbare gegevens gelezen",
+      fields.mrz_format ? "pass" : "warn",
+      fields.mrz_format ? "" : "Controleer documentnummer en datums handmatig"
+    )
+  );
+
+  const failCount = checks.filter(check => check.status === "fail").length;
+  const warnCount = checks.filter(check => check.status === "warn").length;
+  const score = Math.round((checks.filter(check => check.status === "pass").length / checks.length) * 100);
+  const status = failCount >= 2 ? "poor" : failCount > 0 || warnCount > 0 ? "review" : "good";
+
+  return {
+    status,
+    score,
+    title: status === "good"
+      ? "Uploadkwaliteit goed"
+      : status === "poor"
+        ? "Nieuwe upload aanbevolen"
+        : "Controle aanbevolen",
+    summary: status === "good"
+      ? "Deze upload lijkt bruikbaar voor dossiercontrole."
+      : status === "poor"
+        ? "De upload bevat meerdere technische aandachtspunten. Maak bij voorkeur een nieuwe scan of foto."
+        : "De upload is bruikbaar, maar controleer de aandachtspunten voordat je opslaat.",
+    checks,
+  };
+}
+
 async function imageToDataUrl(file, { crop = "full" } = {}) {
   const image = await loadImage(file);
   try {
@@ -392,8 +594,9 @@ export function parseIdentityOcrText(text) {
   };
 }
 
-export async function recognizeIdentityDocument({ frontFile, backFile, onProgress }) {
+export async function recognizeIdentityDocument({ frontFile, backFile, docType = "passport", requiresBsn = false, onProgress }) {
   const { createWorker } = await import("tesseract.js");
+  const imageQualityPromise = analyzeUploadedImages({ frontFile, backFile });
   const worker = await createWorker("eng", 1, {
     logger: message => {
       if (message.status && typeof message.progress === "number") {
@@ -443,11 +646,19 @@ export async function recognizeIdentityDocument({ frontFile, backFile, onProgres
 
     const rawText = textParts.join("\n");
     const fields = parseIdentityOcrText(rawText);
+    const imageQuality = await imageQualityPromise;
     return {
       ...fields,
       detected_fields: Object.entries(fields)
         .filter(([key, value]) => key !== "mrz_format" && Boolean(value))
         .map(([key]) => key),
+      upload_quality: buildUploadQuality({
+        imageQuality,
+        fields,
+        docType,
+        requiresBsn,
+        hasBackFile: Boolean(backFile),
+      }),
     };
   } finally {
     await worker.terminate();

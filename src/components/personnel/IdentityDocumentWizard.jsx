@@ -259,6 +259,167 @@ function DocumentSideUpload({ label, previewUrl, onFileSelected, uploading, requ
   );
 }
 
+// ─── Upload Guidance ──────────────────────────────────────────────────────────
+
+function Marker({ x, y, children }) {
+  return (
+    <g transform={`translate(${x} ${y})`}>
+      <circle r="9" fill="#2563eb" />
+      <text x="0" y="3.5" textAnchor="middle" fontSize="9" fontWeight="700" fill="white">{children}</text>
+    </g>
+  );
+}
+
+function PassportGuideIllustration() {
+  return (
+    <svg viewBox="0 0 420 210" role="img" aria-label="Schematisch voorbeeld van paspoort upload" className="h-auto w-full">
+      <rect width="420" height="210" rx="14" fill="hsl(var(--muted))" opacity="0.45" />
+      <rect x="22" y="24" width="176" height="154" rx="10" fill="#eef8ff" stroke="#38bdf8" strokeWidth="2" />
+      <rect x="32" y="34" width="156" height="134" rx="8" fill="#f8fafc" stroke="#94a3b8" />
+      <rect x="42" y="126" width="136" height="24" rx="3" fill="#e2e8f0" />
+      <path d="M48 154h118M48 164h126" stroke="#0f172a" strokeWidth="3" strokeDasharray="10 4" />
+      <circle cx="72" cy="78" r="20" fill="#cbd5e1" />
+      <rect x="112" y="58" width="54" height="6" rx="3" fill="#64748b" />
+      <rect x="112" y="72" width="66" height="5" rx="2.5" fill="#94a3b8" />
+      <rect x="112" y="84" width="42" height="5" rx="2.5" fill="#94a3b8" />
+      <rect x="112" y="98" width="60" height="8" rx="3" fill="#bfdbfe" />
+      <text x="42" y="46" fontSize="10" fontWeight="700" fill="#0f172a">PASPOORT</text>
+      <text x="42" y="116" fontSize="8" fill="#475569">Documentnummer / geldigheid</text>
+      <rect x="222" y="34" width="154" height="134" rx="8" fill="#f8fafc" stroke="#94a3b8" />
+      <rect x="238" y="50" width="72" height="8" rx="4" fill="#64748b" />
+      <rect x="238" y="66" width="92" height="6" rx="3" fill="#94a3b8" />
+      <rect x="238" y="84" width="64" height="20" rx="4" fill="#dbeafe" />
+      <rect x="332" y="50" width="22" height="22" rx="3" fill="#0f172a" opacity="0.75" />
+      <rect x="238" y="130" width="48" height="7" rx="3.5" fill="#64748b" />
+      <text x="238" y="122" fontSize="9" fill="#475569">BSN / persoonsgegevens</text>
+      <Marker x="32" y="26">1</Marker>
+      <Marker x="196" y="54">2</Marker>
+      <Marker x="172" y="118">3</Marker>
+      <Marker x="178" y="164">4</Marker>
+      <Marker x="352" y="42">5</Marker>
+    </svg>
+  );
+}
+
+function IdCardGuideIllustration() {
+  return (
+    <svg viewBox="0 0 420 210" role="img" aria-label="Schematisch voorbeeld van ID-kaart upload" className="h-auto w-full">
+      <rect width="420" height="210" rx="14" fill="hsl(var(--muted))" opacity="0.45" />
+      <rect x="26" y="40" width="170" height="112" rx="12" fill="#eef8ff" stroke="#38bdf8" strokeWidth="2" />
+      <rect x="42" y="56" width="48" height="58" rx="7" fill="#cbd5e1" />
+      <circle cx="66" cy="80" r="14" fill="#94a3b8" />
+      <rect x="104" y="60" width="62" height="6" rx="3" fill="#64748b" />
+      <rect x="104" y="75" width="72" height="5" rx="2.5" fill="#94a3b8" />
+      <rect x="104" y="88" width="48" height="5" rx="2.5" fill="#94a3b8" />
+      <rect x="104" y="106" width="66" height="8" rx="3" fill="#bfdbfe" />
+      <path d="M42 132h126" stroke="#0f172a" strokeWidth="3" strokeDasharray="10 4" />
+      <text x="42" y="143" fontSize="8" fill="#475569">MRZ / documentgegevens</text>
+      <rect x="226" y="40" width="170" height="112" rx="12" fill="#f8fafc" stroke="#94a3b8" />
+      <rect x="244" y="58" width="78" height="8" rx="4" fill="#64748b" />
+      <rect x="244" y="78" width="58" height="20" rx="4" fill="#dbeafe" />
+      <rect x="344" y="58" width="24" height="24" rx="3" fill="#0f172a" opacity="0.75" />
+      <rect x="244" y="120" width="52" height="7" rx="3.5" fill="#64748b" />
+      <text x="244" y="112" fontSize="8" fill="#475569">BSN / kaartnummer</text>
+      <Marker x="30" y="44">1</Marker>
+      <Marker x="195" y="72">2</Marker>
+      <Marker x="172" y="132">3</Marker>
+      <Marker x="364" y="48">4</Marker>
+    </svg>
+  );
+}
+
+function UploadGuideCard({ docType }) {
+  const isPassport = docType === "passport";
+  const points = isPassport
+    ? [
+      "Leg het paspoort recht en volledig in beeld.",
+      "Zorg dat de persoonsgegevens scherp leesbaar zijn.",
+      "Upload ook de BSN-pagina of achterkant.",
+      "Houd de machineleesbare regels vrij van schaduw.",
+    ]
+    : [
+      "Upload de voorzijde volledig en zonder afgesneden hoeken.",
+      "Zorg dat pasfoto, kaartnummer en datums scherp zijn.",
+      "Upload ook de achterzijde voor BSN en controlegegevens.",
+      "Vermijd reflectie op de kaart.",
+    ];
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-4">
+      <div className="mb-3">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Scanvoorbeeld</p>
+        <p className="mt-1 text-sm font-medium text-foreground">{isPassport ? "Paspoort" : "ID-kaart"} correct uploaden</p>
+      </div>
+      {isPassport ? <PassportGuideIllustration /> : <IdCardGuideIllustration />}
+      <div className="mt-3 grid gap-2">
+        {points.map((point, index) => (
+          <div key={point} className="flex items-start gap-2 text-xs text-muted-foreground">
+            <span className="mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full bg-primary/10 text-[10px] font-semibold text-primary">
+              {index + 1}
+            </span>
+            <span>{point}</span>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function UploadQualityCard({ quality }) {
+  if (!quality) return null;
+
+  const tone = quality.status === "good"
+    ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100"
+    : quality.status === "poor"
+      ? "border-red-200 bg-red-50 text-red-950 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-100"
+      : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100";
+
+  const statusClasses = {
+    pass: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
+    warn: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
+    fail: "bg-red-500/10 text-red-700 dark:text-red-300",
+  };
+
+  const statusIcons = {
+    pass: Check,
+    warn: AlertTriangle,
+    fail: X,
+  };
+
+  return (
+    <div className={`rounded-lg border p-4 ${tone}`}>
+      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+        <div>
+          <p className="text-xs font-semibold uppercase tracking-wider opacity-75">Uploadcontrole</p>
+          <p className="mt-1 text-sm font-semibold">{quality.title}</p>
+          <p className="mt-1 text-xs opacity-80">{quality.summary}</p>
+        </div>
+        <div className="rounded-full border border-current/15 px-3 py-1 text-xs font-semibold">
+          Score {quality.score}%
+        </div>
+      </div>
+      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
+        {quality.checks.map(check => {
+          const Icon = statusIcons[check.status] || AlertTriangle;
+          return (
+            <div key={check.key} className="rounded-md border border-current/10 bg-background/55 px-3 py-2">
+              <div className="flex items-start gap-2">
+                <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${statusClasses[check.status] || statusClasses.warn}`}>
+                  <Icon className="h-3 w-3" />
+                </span>
+                <div className="min-w-0">
+                  <p className="text-xs font-medium text-foreground">{check.label}</p>
+                  {check.detail && <p className="mt-0.5 text-[11px] text-muted-foreground">{check.detail}</p>}
+                </div>
+              </div>
+            </div>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function IssuingCountryField({ value, onChange, error, defaultCountry }) {
@@ -382,6 +543,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const [uploadingBack, setUploadingBack] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
   const [recognizedUploadKey, setRecognizedUploadKey] = useState("");
+  const [scanQuality, setScanQuality] = useState(null);
   const latestUploadKeyRef = useRef("");
 
   const isEuEea = EU_EEA_NATIONALITIES.has(nationality);
@@ -412,6 +574,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
   useEffect(() => {
     setRecognizedUploadKey("");
+    setScanQuality(null);
   }, [docType, frontFile, backFile]);
 
   const applyRecognizedFields = useCallback((result) => {
@@ -435,19 +598,32 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       const result = await recognizeIdentityDocument({
         frontFile,
         backFile,
+        docType,
+        requiresBsn: isDutch,
       });
       if (latestUploadKeyRef.current !== currentUploadKey) return;
       applyRecognizedFields(result);
+      setScanQuality(result.upload_quality || null);
       setRecognizedUploadKey(currentUploadKey);
     } catch (error) {
       console.error("Identity OCR failed", error);
       if (latestUploadKeyRef.current === currentUploadKey) {
+        setScanQuality({
+          status: "review",
+          score: 0,
+          title: "Handmatige controle nodig",
+          summary: "De upload is ontvangen, maar de automatische scan kon niet volledig worden afgerond. Controleer de velden handmatig.",
+          checks: [
+            { key: "upload_available", label: "Upload aanwezig", status: "pass" },
+            { key: "automatic_scan", label: "Automatische scan afgerond", status: "warn", detail: "Controleer documentnummer, BSN en geldigheid handmatig" },
+          ],
+        });
         setRecognizedUploadKey(currentUploadKey);
       }
     } finally {
       setRecognizing(false);
     }
-  }, [applyRecognizedFields, backFile, frontFile, recognizedUploadKey, recognizing, uploadKey]);
+  }, [applyRecognizedFields, backFile, docType, frontFile, isDutch, recognizedUploadKey, recognizing, uploadKey]);
 
   useEffect(() => {
     if (![2, 3].includes(step) || !frontFile || recognizing || recognizedUploadKey === uploadKey) return;
@@ -619,20 +795,23 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <DocumentSideUpload
-                  label={docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant"}
-                  previewUrl={frontPreview}
-                  onFileSelected={(file, preview) => { setFrontFile(file); setFrontPreview(preview); }}
-                  uploading={uploadingFront}
-                  required
-                />
-                <DocumentSideUpload
-                  label={docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant"}
-                  previewUrl={backPreview}
-                  onFileSelected={(file, preview) => { setBackFile(file); setBackPreview(preview); }}
-                  uploading={uploadingBack}
-                />
+              <div className="grid grid-cols-1 gap-4 xl:grid-cols-[minmax(0,1fr)_340px]">
+                <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                  <DocumentSideUpload
+                    label={docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant"}
+                    previewUrl={frontPreview}
+                    onFileSelected={(file, preview) => { setFrontFile(file); setFrontPreview(preview); }}
+                    uploading={uploadingFront}
+                    required
+                  />
+                  <DocumentSideUpload
+                    label={docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant"}
+                    previewUrl={backPreview}
+                    onFileSelected={(file, preview) => { setBackFile(file); setBackPreview(preview); }}
+                    uploading={uploadingBack}
+                  />
+                </div>
+                <UploadGuideCard docType={docType} />
               </div>
 
               <div className="flex justify-between pt-1">
@@ -670,6 +849,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   Vergelijk de velden met de upload. Je kunt waarden direct aanpassen voordat je opslaat.
                 </p>
               </div>
+
+              <UploadQualityCard quality={scanQuality} />
 
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
                 <div className="rounded-lg border border-border bg-card p-4">
