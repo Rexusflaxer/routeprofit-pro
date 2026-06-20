@@ -594,67 +594,6 @@ function WizardSteps({ step, labels }) {
   );
 }
 
-function scrollPageToElement(element, align = "end") {
-  if (!element || typeof window === "undefined") return;
-
-  const behavior = window.matchMedia?.("(prefers-reduced-motion: reduce)")?.matches ? "auto" : "smooth";
-  const margin = 24;
-
-  element.scrollIntoView({ behavior, block: align, inline: "nearest" });
-
-  const adjustWindow = () => {
-    const scrollingElement = document.scrollingElement || document.documentElement;
-    if (!scrollingElement) return;
-
-    const rect = element.getBoundingClientRect();
-    let delta = 0;
-
-    if (align === "start") {
-      delta = rect.top - margin;
-    } else if (rect.bottom > window.innerHeight - margin) {
-      delta = rect.bottom - window.innerHeight + margin;
-    } else if (rect.top < margin) {
-      delta = rect.top - margin;
-    }
-
-    if (Math.abs(delta) > 1) {
-      window.scrollTo({
-        top: Math.max(0, scrollingElement.scrollTop + delta),
-        behavior,
-      });
-    }
-  };
-
-  adjustWindow();
-
-  let parent = element.parentElement;
-  while (parent && parent !== document.body) {
-    const style = window.getComputedStyle(parent);
-    const scrollsY = /(auto|scroll|overlay)/.test(style.overflowY);
-    if (scrollsY && parent.scrollHeight > parent.clientHeight + 1) {
-      const parentRect = parent.getBoundingClientRect();
-      const rect = element.getBoundingClientRect();
-      let delta = 0;
-
-      if (align === "start") {
-        delta = rect.top - parentRect.top - margin;
-      } else if (rect.bottom > parentRect.bottom - margin) {
-        delta = rect.bottom - parentRect.bottom + margin;
-      } else if (rect.top < parentRect.top + margin) {
-        delta = rect.top - parentRect.top - margin;
-      }
-
-      if (Math.abs(delta) > 1) {
-        parent.scrollTo({
-          top: Math.max(0, parent.scrollTop + delta),
-          behavior,
-        });
-      }
-    }
-    parent = parent.parentElement;
-  }
-}
-
 // ─── Main Wizard ───────────────────────────────────────────────────────────────
 
 export default function IdentityDocumentWizard({ personnelId, nationality, onClose, onSaved, isArchiveEntry = false }) {
@@ -680,8 +619,6 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const [recognizedUploadKey, setRecognizedUploadKey] = useState("");
   const [scanQuality, setScanQuality] = useState(null);
   const latestUploadKeyRef = useRef("");
-  const wizardRef = useRef(null);
-  const stepActionRef = useRef(null);
 
   const isEuEea = EU_EEA_NATIONALITIES.has(nationality);
   const isDutch = nationality === "Nederlandse";
@@ -713,37 +650,6 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     setRecognizedUploadKey("");
     setScanQuality(null);
   }, [docType, frontFile, backFile]);
-
-  useEffect(() => {
-    if (![2, 3].includes(step)) return;
-    const getTarget = () => (step === 2 ? stepActionRef.current : wizardRef.current) || wizardRef.current;
-    const delays = step === 2 ? [120, 320, 650] : [160, 360];
-    const timers = delays.map(delay => window.setTimeout(() => {
-      scrollPageToElement(getTarget(), step === 2 ? "end" : "start");
-    }, delay));
-
-    return () => {
-      timers.forEach(timer => window.clearTimeout(timer));
-    };
-  }, [step]);
-
-  useEffect(() => {
-    if (step !== 2 || !wizardRef.current || typeof ResizeObserver === "undefined") return;
-
-    let timer = null;
-    const observer = new ResizeObserver(() => {
-      if (timer) window.clearTimeout(timer);
-      timer = window.setTimeout(() => {
-        scrollPageToElement(stepActionRef.current || wizardRef.current, "end");
-      }, 80);
-    });
-
-    observer.observe(wizardRef.current);
-    return () => {
-      if (timer) window.clearTimeout(timer);
-      observer.disconnect();
-    };
-  }, [step]);
 
   const applyRecognizedFields = useCallback((result) => {
     setForm(current => {
@@ -896,7 +802,6 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       animate={{ opacity: 1, y: 0 }}
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.2 }}
-      ref={wizardRef}
       className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
@@ -986,10 +891,11 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                     uploading={uploadingBack}
                   />
                 </div>
-                <UploadGuideCard docType={docType} />
               </div>
 
-              <div ref={stepActionRef} className="flex justify-between pt-1 scroll-mb-6">
+              <UploadGuideCard docType={docType} />
+
+              <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <Button size="sm" onClick={() => setStep(3)} disabled={!frontFile}>
                   Volgende <ChevronRight className="w-4 h-4 ml-1" />
@@ -1009,7 +915,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 </p>
               </div>
 
-              <div ref={stepActionRef} className="flex justify-between pt-1 scroll-mb-6">
+              <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
               </div>
@@ -1111,7 +1017,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 </div>
               </div>
 
-              <div ref={stepActionRef} className="flex justify-between pt-1 scroll-mb-6">
+              <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => { setStep(2); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
