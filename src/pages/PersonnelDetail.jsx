@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useState } from "react";
 import PageTransition from "@/components/ui-custom/PageTransition";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
@@ -24,20 +24,15 @@ import {
   FileBadge,
   FileText,
   Handshake,
-  Mail,
-  MapPin,
   MessageSquareText,
   Package,
   Pencil,
-  Phone,
   Plus,
   ShieldCheck,
-  UserCheck,
   Users,
   X,
 } from "lucide-react";
 import { useNavigate } from "react-router-dom";
-import { uploadManagedFile } from "@/lib/managedFiles";
 import { AnimatePresence } from "framer-motion";
 import PersonnelAccessTab from "@/components/personnel/PersonnelAccessTab";
 import PersonnelContractsTab from "@/components/personnel/PersonnelContractsTab";
@@ -1229,7 +1224,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
   };
 
   return (
-    <div className="mt-4 flex min-h-[200px] overflow-hidden rounded-xl border border-border bg-card shadow-sm">
+    <div className="mt-4 flex min-h-[200px] overflow-visible rounded-xl border border-border bg-card shadow-sm">
       <div className="w-52 shrink-0 border-r border-border bg-muted/20 py-2">
         <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Dossier</p>
         {PERSONNEL_TABS.map(item => {

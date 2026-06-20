@@ -43,6 +43,46 @@ const ALL_COUNTRIES = Object.values(NATIONALITY_TO_COUNTRY)
   .filter((v, i, a) => a.indexOf(v) === i)
   .sort((a, b) => a.localeCompare(b, "nl"));
 
+function getScrollParent(element) {
+  if (typeof window === "undefined" || !element) return null;
+
+  let parent = element.parentElement;
+  while (parent && parent !== document.body) {
+    const style = window.getComputedStyle(parent);
+    const overflowY = `${style.overflowY} ${style.overflow}`;
+    if (/(auto|scroll|overlay)/.test(overflowY) && parent.scrollHeight > parent.clientHeight + 8) {
+      return parent;
+    }
+    parent = parent.parentElement;
+  }
+
+  return document.scrollingElement || document.documentElement;
+}
+
+function scrollElementIntoComfortView(element, behavior = "smooth") {
+  if (typeof window === "undefined" || !element) return;
+
+  const margin = 16;
+  const parent = getScrollParent(element);
+  const rect = element.getBoundingClientRect();
+
+  if (!parent || parent === document.documentElement || parent === document.body) {
+    const viewportHeight = window.innerHeight || document.documentElement.clientHeight;
+    const elementTop = rect.top + window.scrollY;
+    const availableOffset = Math.max(margin, Math.min(72, (viewportHeight - Math.min(rect.height, viewportHeight)) / 2));
+    window.scrollTo({ top: Math.max(0, elementTop - availableOffset), behavior });
+    return;
+  }
+
+  const parentRect = parent.getBoundingClientRect();
+  const targetTop = parent.scrollTop + rect.top - parentRect.top - margin;
+  parent.scrollTo({ top: Math.max(0, targetTop), behavior });
+
+  if (parent.getBoundingClientRect().bottom > window.innerHeight || parent.getBoundingClientRect().top < 0) {
+    parent.scrollIntoView({ behavior, block: "nearest" });
+  }
+}
+
 // ─── Image Crop Dialog ─────────────────────────────────────────────────────────
 
 function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
@@ -620,6 +660,13 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const [scanQuality, setScanQuality] = useState(null);
   const latestUploadKeyRef = useRef("");
   const wizardRef = useRef(null);
+  const scrollWizardIntoView = useCallback((behavior = "smooth") => {
+    if (typeof window === "undefined") return;
+    window.requestAnimationFrame(() => {
+      scrollElementIntoComfortView(wizardRef.current, behavior);
+      window.setTimeout(() => scrollElementIntoComfortView(wizardRef.current, behavior), 180);
+    });
+  }, []);
 
   const isEuEea = EU_EEA_NATIONALITIES.has(nationality);
   const isDutch = nationality === "Nederlandse";
@@ -652,7 +699,10 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     setScanQuality(null);
   }, [docType, frontFile, backFile]);
 
-
+  useEffect(() => {
+    if (![2, 3].includes(step)) return;
+    scrollWizardIntoView();
+  }, [scrollWizardIntoView, step]);
 
   const applyRecognizedFields = useCallback((result) => {
     setForm(current => {
@@ -806,7 +856,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.2 }}
       ref={wizardRef}
-      className="border-b border-primary/30 bg-muted/20 p-5"
+      className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
         {isArchiveEntry ? "Verlopen legitimatiebewijs archiveren" : "Legitimatiebewijs toevoegen"}
@@ -835,7 +885,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
               )}
 
               <div className="grid grid-cols-1 gap-2">
-                <button onClick={() => { setDocType("passport"); setStep(2); setTimeout(() => { if (wizardRef.current) { const top = wizardRef.current.getBoundingClientRect().top + window.pageYOffset - 16; window.scrollTo({ top, behavior: "smooth" }); } }, 50); }}
+                <button onClick={() => { setDocType("passport"); setStep(2); }}
                   className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
                   <div>
                     <span className="text-sm font-semibold text-foreground">Paspoort</span>
@@ -844,7 +894,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>
                 {isEuEea && (
-                  <button onClick={() => { setDocType("id_card"); setStep(2); setTimeout(() => { if (wizardRef.current) { const top = wizardRef.current.getBoundingClientRect().top + window.pageYOffset - 16; window.scrollTo({ top, behavior: "smooth" }); } }, 50); }}
+                  <button onClick={() => { setDocType("id_card"); setStep(2); }}
                     className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
                     <div>
                       <span className="text-sm font-semibold text-foreground">Identiteitskaart</span>
@@ -900,15 +950,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
               <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                <Button size="sm" onClick={() => {
-                  setStep(3);
-                  setTimeout(() => {
-                    if (wizardRef.current) {
-                      const top = wizardRef.current.getBoundingClientRect().top + window.pageYOffset - 16;
-                      window.scrollTo({ top, behavior: "smooth" });
-                    }
-                  }, 50);
-                }} disabled={!frontFile}>
+                <Button size="sm" onClick={() => setStep(3)} disabled={!frontFile}>
                   Volgende <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               </div>
