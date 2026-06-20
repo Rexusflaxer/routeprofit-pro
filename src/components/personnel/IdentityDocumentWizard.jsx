@@ -990,7 +990,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 </p>
               </div>
 
-              <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
+              <div className="space-y-3">
                 <div className="rounded-lg border border-border bg-card p-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
@@ -1052,28 +1052,30 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   )}
                 </div>
 
-                <div className="rounded-lg border border-border bg-card p-3">
-                  <div className="flex items-center justify-between gap-2 mb-3">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Upload controleren</p>
-                    <Button variant="ghost" size="sm" onClick={() => setStep(2)} className="h-7 px-2 text-xs">
-                      Wijzig upload
-                    </Button>
-                  </div>
-                  <div className="grid grid-cols-2 gap-2">
-                  {frontPreview && (
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant"}</p>
-                      <img src={frontPreview} alt="Voorkant" className="rounded-md border border-border w-full object-contain bg-muted/20" />
+                {(frontPreview || backPreview) && (
+                  <div className="rounded-lg border border-border bg-card p-3">
+                    <div className="flex items-center justify-between gap-2 mb-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Upload controleren</p>
+                      <Button variant="ghost" size="sm" onClick={() => setStep(2)} className="h-7 px-2 text-xs">
+                        Wijzig upload
+                      </Button>
                     </div>
-                  )}
-                  {backPreview && (
-                    <div>
-                      <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant"}</p>
-                      <img src={backPreview} alt="Achterkant" className="rounded-md border border-border w-full object-contain bg-muted/20" />
+                    <div className="grid grid-cols-2 gap-3">
+                      {frontPreview && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant"}</p>
+                          <img src={frontPreview} alt="Voorkant" className="rounded-md border border-border w-full max-h-48 object-contain bg-muted/20" />
+                        </div>
+                      )}
+                      {backPreview && (
+                        <div>
+                          <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant"}</p>
+                          <img src={backPreview} alt="Achterkant" className="rounded-md border border-border w-full max-h-48 object-contain bg-muted/20" />
+                        </div>
+                      )}
                     </div>
-                  )}
                   </div>
-                </div>
+                )}
               </div>
 
               <div className="flex justify-between pt-1">
