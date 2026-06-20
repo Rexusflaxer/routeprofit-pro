@@ -458,72 +458,70 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
   const isPassport = docType === "passport";
 
   return (
-    <div className="inline-flex flex-col rounded-lg border border-border bg-card p-4 gap-4 max-w-full">
-      {isPassport ? (
-        <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
-          {/* Voorkant */}
-          <div className="flex flex-col gap-2 w-full sm:w-[220px] shrink-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Voorkant</p>
-            {frontUpload}
-            <div className="rounded-md overflow-hidden border border-border">
-              <div className="flex h-32 items-center justify-center bg-sky-50/50 dark:bg-slate-950/40 p-2">
-                <img
-                  src="/identity-guides/passport-holder-page-model-2024.jpg"
-                  alt="Voorbeeld voorkant paspoort"
-                  className="max-h-28 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
-                  draggable="false"
-                />
-              </div>
-              <div className="bg-muted/30 px-2 py-1.5">
-                <p className="text-[11px] leading-snug text-muted-foreground">Houderpagina met pasfoto, persoonsgegevens, documentnummer, geldigheid en MRZ.</p>
-              </div>
-            </div>
+    <div className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3 w-fit max-w-full">
+      {/* Rij 1: uploadvak links + voorbeeldafbeelding rechts */}
+      <div className="flex items-stretch gap-4">
+        <div className="w-[220px] shrink-0 flex flex-col gap-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Voorkant</p>
+          {frontUpload}
+        </div>
+        <div className="w-px bg-border self-stretch" />
+        <div className="w-[200px] shrink-0 rounded-md overflow-hidden border border-border flex flex-col">
+          <div className="flex flex-1 items-center justify-center bg-sky-50/50 dark:bg-slate-950/40 p-2 min-h-[120px]">
+            {isPassport ? (
+              <img
+                src="/identity-guides/passport-holder-page-model-2024.jpg"
+                alt="Voorbeeld voorkant paspoort"
+                className="max-h-36 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
+                draggable="false"
+              />
+            ) : (
+              <IdCardGuideIllustration />
+            )}
           </div>
-
-          {/* Divider */}
-          <div className="hidden sm:flex items-stretch">
-            <div className="w-px bg-border self-stretch" />
-          </div>
-
-          {/* Achterkant */}
-          <div className="flex flex-col gap-2 w-full sm:w-[220px] shrink-0">
-            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Achterkant</p>
-            {backUpload}
-            <div className="rounded-md overflow-hidden border border-border">
-              <div className="flex h-32 items-center justify-center bg-sky-50/50 dark:bg-slate-950/40 p-2">
-                <img
-                  src="/identity-guides/passport-back-page-2021.jpg"
-                  alt="Voorbeeld achterkant paspoort"
-                  className="max-h-28 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
-                  draggable="false"
-                />
-              </div>
-              <div className="bg-muted/30 px-2 py-1.5">
-                <p className="text-[11px] leading-snug text-muted-foreground">BSN-/titelpagina met persoonsnummer en documentnummer. Upload ook wanneer aanwezig.</p>
-              </div>
-            </div>
+          <div className="bg-muted/30 px-2 py-1.5">
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              {isPassport
+                ? "Houderpagina met pasfoto, persoonsgegevens, documentnummer en MRZ."
+                : "Voorzijde met pasfoto en kaartgegevens."}
+            </p>
           </div>
         </div>
-      ) : (
-        <div className="space-y-3">
-          <div className="flex flex-col gap-6 sm:flex-row">
-            <div className="flex flex-col gap-2 w-full sm:w-[220px] shrink-0">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Voorkant</p>
-              {frontUpload}
-            </div>
-            <div className="hidden sm:flex items-stretch">
-              <div className="w-px bg-border self-stretch" />
-            </div>
-            <div className="flex flex-col gap-2 w-full sm:w-[220px] shrink-0">
-              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Achterkant</p>
-              {backUpload}
-            </div>
+      </div>
+
+      <div className="h-px bg-border" />
+
+      {/* Rij 2: uploadvak links + voorbeeldafbeelding rechts */}
+      <div className="flex items-stretch gap-4">
+        <div className="w-[220px] shrink-0 flex flex-col gap-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Achterkant</p>
+          {backUpload}
+        </div>
+        <div className="w-px bg-border self-stretch" />
+        <div className="w-[200px] shrink-0 rounded-md overflow-hidden border border-border flex flex-col">
+          <div className="flex flex-1 items-center justify-center bg-sky-50/50 dark:bg-slate-950/40 p-2 min-h-[120px]">
+            {isPassport ? (
+              <img
+                src="/identity-guides/passport-back-page-2021.jpg"
+                alt="Voorbeeld achterkant paspoort"
+                className="max-h-36 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
+                draggable="false"
+              />
+            ) : (
+              <div className="flex items-center justify-center h-full">
+                <p className="text-[11px] text-muted-foreground text-center px-2">Upload de achterzijde met BSN en controlegegevens.</p>
+              </div>
+            )}
           </div>
-          <div className="rounded-md bg-muted/20 p-2">
-            <IdCardGuideIllustration />
+          <div className="bg-muted/30 px-2 py-1.5">
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              {isPassport
+                ? "BSN-/titelpagina met persoonsnummer en documentnummer."
+                : "Achterzijde met BSN en controlegegevens."}
+            </p>
           </div>
         </div>
-      )}
+      </div>
     </div>
   );
 }
