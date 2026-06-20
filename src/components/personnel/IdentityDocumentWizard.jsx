@@ -634,6 +634,14 @@ function WizardSteps({ step, labels }) {
   );
 }
 
+function WizardActionBar({ children }) {
+  return (
+    <div className="sticky bottom-0 z-20 -mx-5 mt-4 flex items-center justify-between gap-3 border-t border-border bg-background/95 px-5 py-3 shadow-[0_-14px_28px_rgba(0,0,0,0.18)] backdrop-blur supports-[backdrop-filter]:bg-background/85">
+      {children}
+    </div>
+  );
+}
+
 // ─── Main Wizard ───────────────────────────────────────────────────────────────
 
 export default function IdentityDocumentWizard({ personnelId, nationality, onClose, onSaved, isArchiveEntry = false }) {
@@ -660,6 +668,15 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const [scanQuality, setScanQuality] = useState(null);
   const latestUploadKeyRef = useRef("");
   const wizardRef = useRef(null);
+  const [wizardViewportHeight, setWizardViewportHeight] = useState(null);
+  const constrainWizardHeight = [2, 3].includes(step);
+  const updateWizardViewportHeight = useCallback(() => {
+    if (typeof window === "undefined" || !wizardRef.current) return;
+    const rect = wizardRef.current.getBoundingClientRect();
+    const availableHeight = window.innerHeight - Math.max(0, rect.top) - 14;
+    const nextHeight = Math.max(320, Math.min(760, availableHeight));
+    setWizardViewportHeight(`${nextHeight}px`);
+  }, []);
   const scrollWizardIntoView = useCallback((behavior = "smooth") => {
     if (typeof window === "undefined") return;
     window.requestAnimationFrame(() => {
@@ -703,6 +720,30 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     if (![2, 3].includes(step)) return;
     scrollWizardIntoView();
   }, [scrollWizardIntoView, step]);
+
+  useEffect(() => {
+    if (typeof window === "undefined") return undefined;
+    if (!constrainWizardHeight) {
+      setWizardViewportHeight(null);
+      return undefined;
+    }
+
+    const update = () => {
+      updateWizardViewportHeight();
+      if (wizardRef.current) wizardRef.current.scrollTo({ top: 0, behavior: "auto" });
+    };
+
+    window.requestAnimationFrame(update);
+    const firstTimer = window.setTimeout(update, 80);
+    const secondTimer = window.setTimeout(updateWizardViewportHeight, 260);
+    window.addEventListener("resize", updateWizardViewportHeight);
+
+    return () => {
+      window.clearTimeout(firstTimer);
+      window.clearTimeout(secondTimer);
+      window.removeEventListener("resize", updateWizardViewportHeight);
+    };
+  }, [constrainWizardHeight, step, updateWizardViewportHeight]);
 
   const applyRecognizedFields = useCallback((result) => {
     setForm(current => {
@@ -856,7 +897,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       exit={{ opacity: 0, y: -8 }}
       transition={{ duration: 0.2 }}
       ref={wizardRef}
-      className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
+      style={wizardViewportHeight ? { maxHeight: wizardViewportHeight } : undefined}
+      className={`scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5 ${wizardViewportHeight ? "overflow-y-auto overscroll-contain" : ""}`}
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
         {isArchiveEntry ? "Verlopen legitimatiebewijs archiveren" : "Legitimatiebewijs toevoegen"}
@@ -948,12 +990,12 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 <UploadGuideCard docType={docType} />
               </div>
 
-              <div className="flex justify-between pt-1">
+              <WizardActionBar>
                 <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <Button size="sm" onClick={() => setStep(3)} disabled={!frontFile}>
                   Volgende <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
-              </div>
+              </WizardActionBar>
             </div>
           )}
 
@@ -968,10 +1010,10 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 </p>
               </div>
 
-              <div className="flex justify-between pt-1">
+              <WizardActionBar>
                 <Button variant="ghost" size="sm" onClick={() => setStep(2)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
-              </div>
+              </WizardActionBar>
             </div>
           )}
 
@@ -1070,7 +1112,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 </div>
               </div>
 
-              <div className="flex justify-between pt-1">
+              <WizardActionBar>
                 <Button variant="ghost" size="sm" onClick={() => { setStep(2); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
@@ -1079,7 +1121,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                     {saveMutation.isPending ? "Opslaan..." : "Document opslaan"}
                   </Button>
                 </div>
-              </div>
+              </WizardActionBar>
             </div>
           )}
         </motion.div>
