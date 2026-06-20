@@ -461,12 +461,12 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
     <div className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3 w-full">
       {/* Rij 1: uploadvak links + voorbeeldafbeelding rechts */}
       <div className="flex items-stretch gap-4">
-        <div className="w-[220px] shrink-0 flex flex-col gap-1.5">
+        <div className="flex-1 min-w-0 flex flex-col gap-1.5">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Voorkant</p>
           {frontUpload}
         </div>
         <div className="w-px bg-border self-stretch" />
-        <div className="flex-1 min-w-0 rounded-md overflow-hidden border border-border flex flex-col">
+        <div className="w-[180px] shrink-0 rounded-md overflow-hidden border border-border flex flex-col">
           <div className="flex flex-1 items-center justify-center bg-sky-50/50 dark:bg-slate-950/40 p-2 min-h-[120px]">
             {isPassport ? (
               <img
@@ -493,12 +493,12 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
 
       {/* Rij 2: uploadvak links + voorbeeldafbeelding rechts */}
       <div className="flex items-stretch gap-4">
-        <div className="w-[220px] shrink-0 flex flex-col gap-1.5">
+        <div className="flex-1 min-w-0 flex flex-col gap-1.5">
           <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Achterkant</p>
           {backUpload}
         </div>
         <div className="w-px bg-border self-stretch" />
-        <div className="flex-1 min-w-0 rounded-md overflow-hidden border border-border flex flex-col">
+        <div className="w-[180px] shrink-0 rounded-md overflow-hidden border border-border flex flex-col">
           <div className="flex flex-1 items-center justify-center bg-sky-50/50 dark:bg-slate-950/40 p-2 min-h-[120px]">
             {isPassport ? (
               <img
