@@ -466,8 +466,8 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
           {frontUpload}
         </div>
         <div className="w-px bg-border self-stretch" />
-        <div className="w-1/2 rounded-md overflow-hidden border border-border flex flex-col">
-          <div className="flex flex-1 items-center justify-center bg-sky-50/50 dark:bg-slate-950/40 p-2 min-h-[120px]">
+        <div className="w-1/2 flex flex-col">
+          <div className="flex flex-1 items-center justify-center p-2 min-h-[120px]">
             {isPassport ? (
               <img
                 src="/identity-guides/passport-holder-page-model-2024.jpg"
@@ -479,7 +479,7 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
               <IdCardGuideIllustration />
             )}
           </div>
-          <div className="bg-muted/30 px-2 py-1.5">
+          <div className="px-2 py-1.5">
             <p className="text-[11px] leading-snug text-muted-foreground">
               {isPassport
                 ? "Houderpagina met pasfoto, persoonsgegevens, documentnummer en MRZ."
@@ -498,8 +498,8 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
           {backUpload}
         </div>
         <div className="w-px bg-border self-stretch" />
-        <div className="w-1/2 rounded-md overflow-hidden border border-border flex flex-col">
-          <div className="flex flex-1 items-center justify-center bg-sky-50/50 dark:bg-slate-950/40 p-2 min-h-[120px]">
+        <div className="w-1/2 flex flex-col">
+          <div className="flex flex-1 items-center justify-center p-2 min-h-[120px]">
             {isPassport ? (
               <img
                 src="/identity-guides/passport-back-page-2021.jpg"
@@ -513,7 +513,7 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
               </div>
             )}
           </div>
-          <div className="bg-muted/30 px-2 py-1.5">
+          <div className="px-2 py-1.5">
             <p className="text-[11px] leading-snug text-muted-foreground">
               {isPassport
                 ? "BSN-/titelpagina met persoonsnummer en documentnummer."
