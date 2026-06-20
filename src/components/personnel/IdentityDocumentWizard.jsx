@@ -458,62 +458,68 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
   const isPassport = docType === "passport";
 
   return (
-    <div className="rounded-lg border border-border bg-card p-3 space-y-3">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Scanvoorbeeld</p>
-        <p className="mt-0.5 text-sm font-medium text-foreground">{isPassport ? "Nederlands paspoort" : "ID-kaart"} correct uploaden</p>
-      </div>
-
+    <div className="inline-flex flex-col rounded-lg border border-border bg-card p-4 gap-4 max-w-full">
       {isPassport ? (
-        <div className="flex flex-col gap-4 sm:flex-row">
+        <div className="flex flex-col gap-6 sm:flex-row sm:items-start">
           {/* Voorkant */}
-          <div className="w-full sm:w-[230px] shrink-0 space-y-2">
+          <div className="flex flex-col gap-2 w-full sm:w-[220px] shrink-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Voorkant</p>
             {frontUpload}
-            <GuideExampleCard
-              title="Voorzijde"
-              target="Uploadvak links"
-              description="Houderpagina met pasfoto, persoonsgegevens, documentnummer, geldigheid en MRZ."
-            >
-              <div className="relative flex h-36 items-center justify-center rounded-md bg-sky-50/80 p-2 dark:bg-slate-950/40">
+            <div className="rounded-md overflow-hidden border border-border">
+              <div className="flex h-32 items-center justify-center bg-sky-50/50 dark:bg-slate-950/40 p-2">
                 <img
                   src="/identity-guides/passport-holder-page-model-2024.jpg"
-                  alt=""
-                  className="max-h-32 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
+                  alt="Voorbeeld voorkant paspoort"
+                  className="max-h-28 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
                   draggable="false"
                 />
               </div>
-            </GuideExampleCard>
+              <div className="bg-muted/30 px-2 py-1.5">
+                <p className="text-[11px] leading-snug text-muted-foreground">Houderpagina met pasfoto, persoonsgegevens, documentnummer, geldigheid en MRZ.</p>
+              </div>
+            </div>
           </div>
+
+          {/* Divider */}
+          <div className="hidden sm:flex items-stretch">
+            <div className="w-px bg-border self-stretch" />
+          </div>
+
           {/* Achterkant */}
-          <div className="w-full sm:w-[230px] shrink-0 space-y-2">
+          <div className="flex flex-col gap-2 w-full sm:w-[220px] shrink-0">
+            <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Achterkant</p>
             {backUpload}
-            <GuideExampleCard
-              title="Achterzijde"
-              target="Uploadvak rechts"
-              description="BSN-/titelpagina met persoonsnummer en documentnummer. Upload deze ook wanneer aanwezig."
-            >
-              <div className="relative flex h-36 items-center justify-center rounded-md bg-sky-50/80 p-2 dark:bg-slate-950/40">
+            <div className="rounded-md overflow-hidden border border-border">
+              <div className="flex h-32 items-center justify-center bg-sky-50/50 dark:bg-slate-950/40 p-2">
                 <img
                   src="/identity-guides/passport-back-page-2021.jpg"
-                  alt=""
-                  className="max-h-32 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
+                  alt="Voorbeeld achterkant paspoort"
+                  className="max-h-28 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
                   draggable="false"
                 />
               </div>
-            </GuideExampleCard>
+              <div className="bg-muted/30 px-2 py-1.5">
+                <p className="text-[11px] leading-snug text-muted-foreground">BSN-/titelpagina met persoonsnummer en documentnummer. Upload ook wanneer aanwezig.</p>
+              </div>
+            </div>
           </div>
         </div>
       ) : (
         <div className="space-y-3">
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div className="space-y-2">
+          <div className="flex flex-col gap-6 sm:flex-row">
+            <div className="flex flex-col gap-2 w-full sm:w-[220px] shrink-0">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Voorkant</p>
               {frontUpload}
             </div>
-            <div className="space-y-2">
+            <div className="hidden sm:flex items-stretch">
+              <div className="w-px bg-border self-stretch" />
+            </div>
+            <div className="flex flex-col gap-2 w-full sm:w-[220px] shrink-0">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Achterkant</p>
               {backUpload}
             </div>
           </div>
-          <div className="w-full rounded-md bg-muted/20 p-2">
+          <div className="rounded-md bg-muted/20 p-2">
             <IdCardGuideIllustration />
           </div>
         </div>
@@ -1014,11 +1020,11 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
           {step === 2 && (
             <div className="space-y-4">
               <div>
-                <p className="text-sm font-medium text-foreground mb-1">
+                <p className="text-sm font-medium text-foreground mb-0.5">
                   Document uploaden — <span className="text-muted-foreground font-normal">{docType === "passport" ? "Paspoort" : "Identiteitskaart"}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
-                  Upload een duidelijke foto of scan van het document. Na het uploaden kun je de afbeelding bijsnijden. De controle opent zodra de scan klaar is.
+                  Upload een duidelijke foto of scan. Na het uploaden kun je bijsnijden. De controle opent zodra de scan klaar is.
                 </p>
               </div>
 
