@@ -1,16 +1,29 @@
-import React, { useState, useRef, useCallback, useEffect } from "react";
+import React, { useState, useRef, useEffect } from "react";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { Button } from "@/components/ui/button";
-import { Upload, ZoomIn, ZoomOut, RotateCw, Camera } from "lucide-react";
+import { Upload, Camera } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 
 // Official Dutch passport photo: 35mm × 45mm → ratio 7:9
-const CROP_W = 280;
-const CROP_H = 360; // 280 * 9/7
+const PHOTO_ASPECT = 7 / 9;
+const OUTPUT_W = 350;
+const OUTPUT_H = 450;
 
-function getCroppedBlob(image, offsetX, offsetY, zoom, rotation) {
-  const OUTPUT_W = 350;
-  const OUTPUT_H = 450;
+function clamp(value, min, max) {
+  return Math.min(max, Math.max(min, value));
+}
+
+function getInitialPhotoCrop(image) {
+  const aspect = image.naturalWidth / image.naturalHeight;
+  if (aspect > PHOTO_ASPECT) {
+    const width = PHOTO_ASPECT / aspect;
+    return { x: (1 - width) / 2, y: 0, width, height: 1 };
+  }
+  const height = aspect / PHOTO_ASPECT;
+  return { x: 0, y: (1 - height) / 2, width: 1, height };
+}
+
+function getCroppedBlob(image, crop) {
   const canvas = document.createElement("canvas");
   canvas.width = OUTPUT_W;
   canvas.height = OUTPUT_H;
@@ -19,24 +32,17 @@ function getCroppedBlob(image, offsetX, offsetY, zoom, rotation) {
   ctx.fillStyle = "#fff";
   ctx.fillRect(0, 0, OUTPUT_W, OUTPUT_H);
 
-  const scaleX = image.naturalWidth / CROP_W;
-  const scaleY = image.naturalHeight / CROP_H;
-
-  // We render the image into the canvas scaled to output size,
-  // with the same pan/zoom/rotation the user set.
-  const rad = (rotation * Math.PI) / 180;
-  ctx.save();
-  ctx.translate(OUTPUT_W / 2, OUTPUT_H / 2);
-  ctx.rotate(rad);
-  ctx.scale(zoom, zoom);
   ctx.drawImage(
     image,
-    -(OUTPUT_W / 2) - offsetX * (OUTPUT_W / CROP_W),
-    -(OUTPUT_H / 2) - offsetY * (OUTPUT_H / CROP_H),
-    image.naturalWidth * (OUTPUT_W / (CROP_W)),
-    image.naturalHeight * (OUTPUT_H / (CROP_H))
+    crop.x * image.naturalWidth,
+    crop.y * image.naturalHeight,
+    crop.width * image.naturalWidth,
+    crop.height * image.naturalHeight,
+    0,
+    0,
+    OUTPUT_W,
+    OUTPUT_H
   );
-  ctx.restore();
 
   return new Promise((resolve) => canvas.toBlob(resolve, "image/jpeg", 0.92));
 }
@@ -99,126 +105,193 @@ function PhotoInfoDialog({ open, onOpenChange, onFileSelected }) {
 
 // ── Crop dialog (step 2) ──────────────────────────────────────────────────────
 function PhotoCropDialog({ open, onOpenChange, imageSrc, onConfirm, uploading }) {
-  const [zoom, setZoom] = useState(1);
-  const [rotation, setRotation] = useState(0);
-  const [offset, setOffset] = useState({ x: 0, y: 0 });
-  const [dragging, setDragging] = useState(false);
-  const [dragStart, setDragStart] = useState(null);
   const imgRef = useRef(null);
+  const imageFrameRef = useRef(null);
+  const interactionLayerRef = useRef(null);
+  const dragRef = useRef(null);
+  const [crop, setCrop] = useState({ x: 0, y: 0, width: 1, height: 1 });
 
-  // Reset state when a new image opens
   useEffect(() => {
-    if (open) { setZoom(1); setRotation(0); setOffset({ x: 0, y: 0 }); }
+    if (open) setCrop({ x: 0, y: 0, width: 1, height: 1 });
   }, [open, imageSrc]);
 
-  const onMouseDown = (e) => {
-    e.preventDefault();
-    setDragging(true);
-    setDragStart({ x: e.clientX - offset.x, y: e.clientY - offset.y });
+  const handleImageLoad = () => {
+    if (imgRef.current) setCrop(getInitialPhotoCrop(imgRef.current));
   };
-  const onMouseMove = useCallback((e) => {
-    if (!dragging || !dragStart) return;
-    setOffset({ x: e.clientX - dragStart.x, y: e.clientY - dragStart.y });
-  }, [dragging, dragStart]);
-  const onMouseUp = useCallback(() => setDragging(false), []);
 
-  // Touch support
-  const onTouchStart = (e) => {
-    const t = e.touches[0];
-    setDragging(true);
-    setDragStart({ x: t.clientX - offset.x, y: t.clientY - offset.y });
-  };
-  const onTouchMove = useCallback((e) => {
-    if (!dragging || !dragStart) return;
-    const t = e.touches[0];
-    setOffset({ x: t.clientX - dragStart.x, y: t.clientY - dragStart.y });
-  }, [dragging, dragStart]);
-  const onTouchEnd = useCallback(() => setDragging(false), []);
-
-  useEffect(() => {
-    if (dragging) {
-      window.addEventListener("mousemove", onMouseMove);
-      window.addEventListener("mouseup", onMouseUp);
-      window.addEventListener("touchmove", onTouchMove, { passive: true });
-      window.addEventListener("touchend", onTouchEnd);
-    }
-    return () => {
-      window.removeEventListener("mousemove", onMouseMove);
-      window.removeEventListener("mouseup", onMouseUp);
-      window.removeEventListener("touchmove", onTouchMove);
-      window.removeEventListener("touchend", onTouchEnd);
+  const getPointerRatio = (event) => {
+    const rect = imageFrameRef.current?.getBoundingClientRect();
+    if (!rect || rect.width <= 0 || rect.height <= 0) return null;
+    return {
+      x: clamp((event.clientX - rect.left) / rect.width, 0, 1),
+      y: clamp((event.clientY - rect.top) / rect.height, 0, 1),
     };
-  }, [dragging, onMouseMove, onMouseUp, onTouchMove, onTouchEnd]);
+  };
+
+  const startCropDrag = (mode, event) => {
+    const pointer = getPointerRatio(event);
+    if (!pointer) return;
+    event.preventDefault();
+    event.stopPropagation();
+    dragRef.current = {
+      mode,
+      pointerId: event.pointerId,
+      start: pointer,
+      origin: crop,
+    };
+    interactionLayerRef.current?.setPointerCapture?.(event.pointerId);
+  };
+
+  const resizeWithAspect = (mode, origin, pointer) => {
+    let anchorX;
+    let anchorY;
+    let draggedX = pointer.x;
+    let draggedY = pointer.y;
+
+    if (mode.includes("w")) anchorX = origin.x + origin.width;
+    else anchorX = origin.x;
+
+    if (mode.includes("n")) anchorY = origin.y + origin.height;
+    else anchorY = origin.y;
+
+    const directionX = mode.includes("w") ? -1 : 1;
+    const directionY = mode.includes("n") ? -1 : 1;
+    let width = Math.abs(draggedX - anchorX);
+    let height = width / PHOTO_ASPECT;
+
+    if (Math.abs(draggedY - anchorY) > height) {
+      height = Math.abs(draggedY - anchorY);
+      width = height * PHOTO_ASPECT;
+    }
+
+    const maxWidth = directionX > 0 ? 1 - anchorX : anchorX;
+    const maxHeight = directionY > 0 ? 1 - anchorY : anchorY;
+    const maxWidthByHeight = maxHeight * PHOTO_ASPECT;
+    width = clamp(width, 0.08, Math.min(maxWidth, maxWidthByHeight));
+    height = width / PHOTO_ASPECT;
+
+    const x = directionX > 0 ? anchorX : anchorX - width;
+    const y = directionY > 0 ? anchorY : anchorY - height;
+    return { x, y, width, height };
+  };
+
+  const updateCrop = (mode, origin, start, pointer) => {
+    if (mode === "move") {
+      return {
+        ...origin,
+        x: clamp(origin.x + pointer.x - start.x, 0, 1 - origin.width),
+        y: clamp(origin.y + pointer.y - start.y, 0, 1 - origin.height),
+      };
+    }
+    return resizeWithAspect(mode, origin, pointer);
+  };
+
+  const onPointerMove = (event) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    const pointer = getPointerRatio(event);
+    if (!pointer) return;
+    event.preventDefault();
+    setCrop(updateCrop(drag.mode, drag.origin, drag.start, pointer));
+  };
+
+  const endDrag = (event) => {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      interactionLayerRef.current?.releasePointerCapture?.(event.pointerId);
+      dragRef.current = null;
+    }
+  };
+
+  const resetCrop = () => {
+    if (imgRef.current) {
+      setCrop(getInitialPhotoCrop(imgRef.current));
+    };
+  };
 
   const handleConfirm = async () => {
     if (!imgRef.current) return;
-    const blob = await getCroppedBlob(imgRef.current, offset.x, offset.y, zoom, rotation);
+    const blob = await getCroppedBlob(imgRef.current, crop);
     onConfirm(blob);
   };
 
+  const cropStyle = {
+    left: `${crop.x * 100}%`,
+    top: `${crop.y * 100}%`,
+    width: `${crop.width * 100}%`,
+    height: `${crop.height * 100}%`,
+  };
+  const shadeStyle = {
+    top: { left: 0, top: 0, width: "100%", height: `${crop.y * 100}%` },
+    bottom: { left: 0, top: `${(crop.y + crop.height) * 100}%`, width: "100%", height: `${(1 - crop.y - crop.height) * 100}%` },
+    left: { left: 0, top: `${crop.y * 100}%`, width: `${crop.x * 100}%`, height: `${crop.height * 100}%` },
+    right: { left: `${(crop.x + crop.width) * 100}%`, top: `${crop.y * 100}%`, width: `${(1 - crop.x - crop.width) * 100}%`, height: `${crop.height * 100}%` },
+  };
+  const handles = [
+    { mode: "nw", className: "left-0 top-0 -translate-x-1/2 -translate-y-1/2 cursor-nwse-resize" },
+    { mode: "ne", className: "right-0 top-0 translate-x-1/2 -translate-y-1/2 cursor-nesw-resize" },
+    { mode: "sw", className: "bottom-0 left-0 -translate-x-1/2 translate-y-1/2 cursor-nesw-resize" },
+    { mode: "se", className: "bottom-0 right-0 translate-x-1/2 translate-y-1/2 cursor-nwse-resize" },
+  ];
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="sm:max-w-lg">
+      <DialogContent className="max-h-[92vh] overflow-y-auto sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>Foto bijsnijden — 35 × 45 mm pasfotoformaat</DialogTitle>
         </DialogHeader>
         <p className="text-sm text-muted-foreground">
-          Sleep de foto om het gezicht te centreren binnen het kader. Gebruik zoom en rotatie om de foto aan te passen.
+          Sleep de hoeken om de uitsnede aan te passen. Sleep het kader zelf om de pasfoto te verplaatsen.
         </p>
 
-        {/* Crop viewport */}
-        <div
-          className="relative mx-auto overflow-hidden rounded-md border-2 border-primary bg-black select-none"
-          style={{ width: CROP_W, height: CROP_H }}
-        >
-          {/* Rule-of-thirds grid overlay */}
-          <div className="pointer-events-none absolute inset-0 z-10">
-            <div className="absolute inset-0 border-2 border-white/70" />
-            <div className="absolute left-1/3 top-0 bottom-0 border-l border-white/20" />
-            <div className="absolute left-2/3 top-0 bottom-0 border-l border-white/20" />
-            <div className="absolute top-1/3 left-0 right-0 border-t border-white/20" />
-            <div className="absolute top-2/3 left-0 right-0 border-t border-white/20" />
-            {/* Head guide */}
-            <div className="absolute left-[20%] right-[20%] top-[8%] bottom-[30%] border border-dashed border-white/40 rounded-full" />
+        <div className="flex min-h-72 items-center justify-center rounded-lg border border-border bg-slate-950 p-2">
+          <div ref={imageFrameRef} className="relative max-h-[58vh] max-w-full touch-none select-none">
+            {imageSrc && (
+              <img
+                ref={imgRef}
+                src={imageSrc}
+                alt="crop preview"
+                draggable={false}
+                onLoad={handleImageLoad}
+                className="block max-h-[58vh] max-w-full rounded-md object-contain"
+              />
+            )}
+            <div
+              ref={interactionLayerRef}
+              className="absolute inset-0"
+              onPointerMove={onPointerMove}
+              onPointerUp={endDrag}
+              onPointerCancel={endDrag}
+            >
+              <div className="pointer-events-none absolute bg-black/55" style={shadeStyle.top} />
+              <div className="pointer-events-none absolute bg-black/55" style={shadeStyle.bottom} />
+              <div className="pointer-events-none absolute bg-black/55" style={shadeStyle.left} />
+              <div className="pointer-events-none absolute bg-black/55" style={shadeStyle.right} />
+              <div
+                className="absolute cursor-move border-2 border-primary bg-primary/5 shadow-[0_0_0_1px_rgba(255,255,255,0.55)]"
+                style={cropStyle}
+                onPointerDown={event => startCropDrag("move", event)}
+              >
+                <div className="pointer-events-none absolute left-1/3 top-0 h-full w-px bg-white/45" />
+                <div className="pointer-events-none absolute left-2/3 top-0 h-full w-px bg-white/45" />
+                <div className="pointer-events-none absolute left-0 top-1/3 h-px w-full bg-white/45" />
+                <div className="pointer-events-none absolute left-0 top-2/3 h-px w-full bg-white/45" />
+                <div className="pointer-events-none absolute left-[20%] right-[20%] top-[8%] bottom-[30%] rounded-full border border-dashed border-white/45" />
+                {handles.map(handle => (
+                  <button
+                    key={handle.mode}
+                    type="button"
+                    aria-label={`Pasfotohoek ${handle.mode} verplaatsen`}
+                    className={`absolute h-5 w-5 rounded-sm border-2 border-white bg-primary shadow-md focus:outline-none focus:ring-2 focus:ring-primary focus:ring-offset-2 focus:ring-offset-background ${handle.className}`}
+                    onPointerDown={event => startCropDrag(handle.mode, event)}
+                  />
+                ))}
+              </div>
+            </div>
           </div>
-
-          {imageSrc && (
-            <img
-              ref={imgRef}
-              src={imageSrc}
-              alt="crop preview"
-              draggable={false}
-              onMouseDown={onMouseDown}
-              onTouchStart={onTouchStart}
-              style={{
-                position: "absolute",
-                left: "50%",
-                top: "50%",
-                transform: `translate(calc(-50% + ${offset.x}px), calc(-50% + ${offset.y}px)) scale(${zoom}) rotate(${rotation}deg)`,
-                transformOrigin: "center",
-                cursor: dragging ? "grabbing" : "grab",
-                maxWidth: "none",
-                width: CROP_W,
-              }}
-            />
-          )}
-        </div>
-
-        {/* Controls */}
-        <div className="flex items-center justify-center gap-3">
-          <Button variant="outline" size="icon" onClick={() => setZoom(z => Math.max(0.3, parseFloat((z - 0.1).toFixed(1))))}>
-            <ZoomOut className="h-4 w-4" />
-          </Button>
-          <span className="text-sm text-muted-foreground w-14 text-center">{Math.round(zoom * 100)}%</span>
-          <Button variant="outline" size="icon" onClick={() => setZoom(z => Math.min(4, parseFloat((z + 0.1).toFixed(1))))}>
-            <ZoomIn className="h-4 w-4" />
-          </Button>
-          <Button variant="outline" size="icon" onClick={() => setRotation(r => (r + 90) % 360)}>
-            <RotateCw className="h-4 w-4" />
-          </Button>
         </div>
 
         <DialogFooter>
+          <Button variant="outline" onClick={resetCrop}>Uitsnede resetten</Button>
           <Button variant="outline" onClick={() => onOpenChange(false)}>Annuleren</Button>
           <Button onClick={handleConfirm} disabled={uploading}>
             {uploading ? "Uploaden..." : "Opslaan als pasfoto"}

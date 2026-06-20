@@ -507,56 +507,28 @@ function UploadGuideCard({ docType }) {
   );
 }
 
-function UploadQualityCard({ quality }) {
-  if (!quality) return null;
+function CriticalUploadNotice({ quality }) {
+  if (!quality || quality.status !== "poor") return null;
 
-  const tone = quality.status === "good"
-    ? "border-emerald-200 bg-emerald-50 text-emerald-950 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-100"
-    : quality.status === "poor"
-      ? "border-red-200 bg-red-50 text-red-950 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-100"
-      : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100";
-
-  const statusClasses = {
-    pass: "bg-emerald-500/10 text-emerald-700 dark:text-emerald-300",
-    warn: "bg-amber-500/10 text-amber-700 dark:text-amber-300",
-    fail: "bg-red-500/10 text-red-700 dark:text-red-300",
-  };
-
-  const statusIcons = {
-    pass: Check,
-    warn: AlertTriangle,
-    fail: X,
-  };
+  const failedChecks = (quality.checks || [])
+    .filter(check => check.status === "fail")
+    .slice(0, 2);
 
   return (
-    <div className={`rounded-lg border p-4 ${tone}`}>
-      <div className="flex flex-col gap-2 sm:flex-row sm:items-start sm:justify-between">
+    <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-950 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-100">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
         <div>
-          <p className="text-xs font-semibold uppercase tracking-wider opacity-75">Uploadcontrole</p>
-          <p className="mt-1 text-sm font-semibold">{quality.title}</p>
-          <p className="mt-1 text-xs opacity-80">{quality.summary}</p>
+          <p className="text-xs font-semibold">Nieuwe upload aanbevolen</p>
+          <p className="mt-0.5 text-xs opacity-85">
+            De scan lijkt onvoldoende bruikbaar. Maak bij voorkeur een scherpere foto of scan voordat je opslaat.
+          </p>
+          {failedChecks.length > 0 && (
+            <p className="mt-1 text-xs opacity-75">
+              Aandachtspunt: {failedChecks.map(check => check.detail || check.label).join(", ")}.
+            </p>
+          )}
         </div>
-        <div className="rounded-full border border-current/15 px-3 py-1 text-xs font-semibold">
-          Score {quality.score}%
-        </div>
-      </div>
-      <div className="mt-4 grid grid-cols-1 gap-2 sm:grid-cols-2 lg:grid-cols-3">
-        {quality.checks.map(check => {
-          const Icon = statusIcons[check.status] || AlertTriangle;
-          return (
-            <div key={check.key} className="rounded-md border border-current/10 bg-background/55 px-3 py-2">
-              <div className="flex items-start gap-2">
-                <span className={`mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full ${statusClasses[check.status] || statusClasses.warn}`}>
-                  <Icon className="h-3 w-3" />
-                </span>
-                <div className="min-w-0">
-                  <p className="text-xs font-medium text-foreground">{check.label}</p>
-                  {check.detail && <p className="mt-0.5 text-[11px] text-muted-foreground">{check.detail}</p>}
-                </div>
-              </div>
-            </div>
-          );
-        })}
       </div>
     </div>
   );
@@ -999,8 +971,6 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 </p>
               </div>
 
-              <UploadQualityCard quality={scanQuality} />
-
               <div className="grid grid-cols-1 gap-4 lg:grid-cols-[minmax(0,1fr)_340px]">
                 <div className="rounded-lg border border-border bg-card p-4">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -1052,6 +1022,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                       </div>
                     )}
                   </div>
+
+                  <CriticalUploadNotice quality={scanQuality} />
 
                   {isNonEu && (
                     <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-900 dark:text-blue-200 mt-4">
