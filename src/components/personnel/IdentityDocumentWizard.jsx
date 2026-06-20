@@ -1059,17 +1059,17 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                       Wijzig upload
                     </Button>
                   </div>
-                  <div className="space-y-3">
+                  <div className="grid grid-cols-2 gap-2">
                   {frontPreview && (
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant"}</p>
-                      <img src={frontPreview} alt="Voorkant" className="rounded-md border border-border w-full max-h-56 object-contain bg-muted/20" />
+                      <img src={frontPreview} alt="Voorkant" className="rounded-md border border-border w-full object-contain bg-muted/20" />
                     </div>
                   )}
                   {backPreview && (
                     <div>
                       <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant"}</p>
-                      <img src={backPreview} alt="Achterkant" className="rounded-md border border-border w-full max-h-56 object-contain bg-muted/20" />
+                      <img src={backPreview} alt="Achterkant" className="rounded-md border border-border w-full object-contain bg-muted/20" />
                     </div>
                   )}
                   </div>
