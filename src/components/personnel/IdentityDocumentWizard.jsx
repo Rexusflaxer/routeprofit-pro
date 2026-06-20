@@ -46,95 +46,147 @@ const ALL_COUNTRIES = Object.values(NATIONALITY_TO_COUNTRY)
 // ─── Image Crop Dialog ─────────────────────────────────────────────────────────
 
 function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
-  const canvasRef = useRef(null);
-  const [crop, setCrop] = useState({ x: 0, y: 0, w: 0, h: 0 });
+  const viewportRef = useRef(null);
   const [imgEl, setImgEl] = useState(null);
   const [imageError, setImageError] = useState("");
-  const [drawing, setDrawing] = useState(false);
-  const [startPos, setStartPos] = useState(null);
-  const containerRef = useRef(null);
+  const [viewSize, setViewSize] = useState({ width: 0, height: 0 });
+  const [zoom, setZoom] = useState(1);
+  const [offset, setOffset] = useState({ x: 0, y: 0 });
+  const dragRef = useRef(null);
 
   useEffect(() => {
     if (!imageSrc || !open) return;
     setImgEl(null);
     setImageError("");
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
     const img = new Image();
     img.onload = () => {
       setImgEl(img);
-      // Default crop = full image
-      setCrop({ x: 0, y: 0, w: img.width, h: img.height });
     };
     img.onerror = () => setImageError("De afbeelding kon niet worden geopend. Gebruik een JPG of PNG.");
     img.src = imageSrc;
   }, [imageSrc, open]);
 
   useEffect(() => {
-    if (!canvasRef.current || !imgEl) return;
-    const canvas = canvasRef.current;
-    const ctx = canvas.getContext("2d");
-    const maxW = Math.min(imgEl.width, 700);
-    const scale = maxW / imgEl.width;
-    canvas.width = imgEl.width * scale;
-    canvas.height = imgEl.height * scale;
-    canvas.dataset.scale = scale;
-    ctx.drawImage(imgEl, 0, 0, canvas.width, canvas.height);
-    // Draw crop overlay
-    const sx = crop.x * scale;
-    const sy = crop.y * scale;
-    const sw = crop.w * scale;
-    const sh = crop.h * scale;
-    ctx.fillStyle = "rgba(0,0,0,0.45)";
-    ctx.fillRect(0, 0, canvas.width, sy);
-    ctx.fillRect(0, sy + sh, canvas.width, canvas.height - (sy + sh));
-    ctx.fillRect(0, sy, sx, sh);
-    ctx.fillRect(sx + sw, sy, canvas.width - (sx + sw), sh);
-    ctx.strokeStyle = "#3b82f6";
-    ctx.lineWidth = 2;
-    ctx.strokeRect(sx, sy, sw, sh);
-  }, [imgEl, crop]);
+    if (!open || !viewportRef.current) return;
 
-  const getPos = (e) => {
-    const canvas = canvasRef.current;
-    const rect = canvas.getBoundingClientRect();
-    const scale = parseFloat(canvas.dataset.scale || 1);
-    const clientX = e.touches ? e.touches[0].clientX : e.clientX;
-    const clientY = e.touches ? e.touches[0].clientY : e.clientY;
-    return {
-      x: Math.max(0, Math.min(imgEl.width, (clientX - rect.left) / scale)),
-      y: Math.max(0, Math.min(imgEl.height, (clientY - rect.top) / scale)),
+    const updateSize = () => {
+      const rect = viewportRef.current?.getBoundingClientRect();
+      if (!rect) return;
+      setViewSize({
+        width: Math.round(rect.width),
+        height: Math.round(rect.height),
+      });
     };
-  };
 
-  const onMouseDown = (e) => {
-    const pos = getPos(e);
-    setStartPos(pos);
-    setDrawing(true);
-    setCrop({ x: pos.x, y: pos.y, w: 0, h: 0 });
-  };
+    updateSize();
 
-  const onMouseMove = (e) => {
-    if (!drawing || !startPos) return;
-    const pos = getPos(e);
-    setCrop({
-      x: Math.min(startPos.x, pos.x),
-      y: Math.min(startPos.y, pos.y),
-      w: Math.abs(pos.x - startPos.x),
-      h: Math.abs(pos.y - startPos.y),
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", updateSize);
+      return () => window.removeEventListener("resize", updateSize);
+    }
+
+    const observer = new ResizeObserver(updateSize);
+    observer.observe(viewportRef.current);
+    return () => observer.disconnect();
+  }, [open, imgEl]);
+
+  const getLayout = useCallback((nextZoom = zoom, nextOffset = offset) => {
+    if (!imgEl || !viewSize.width || !viewSize.height) return null;
+
+    const baseScale = Math.max(viewSize.width / imgEl.width, viewSize.height / imgEl.height);
+    const scale = baseScale * nextZoom;
+    const width = imgEl.width * scale;
+    const height = imgEl.height * scale;
+    return {
+      scale,
+      width,
+      height,
+      left: (viewSize.width - width) / 2 + nextOffset.x,
+      top: (viewSize.height - height) / 2 + nextOffset.y,
+    };
+  }, [imgEl, offset, viewSize.height, viewSize.width, zoom]);
+
+  const clampOffset = useCallback((nextOffset, nextZoom = zoom) => {
+    if (!imgEl || !viewSize.width || !viewSize.height) return nextOffset;
+    const layout = getLayout(nextZoom, { x: 0, y: 0 });
+    if (!layout) return nextOffset;
+
+    const maxX = Math.max(0, (layout.width - viewSize.width) / 2);
+    const maxY = Math.max(0, (layout.height - viewSize.height) / 2);
+    return {
+      x: Math.min(maxX, Math.max(-maxX, nextOffset.x)),
+      y: Math.min(maxY, Math.max(-maxY, nextOffset.y)),
+    };
+  }, [getLayout, imgEl, viewSize.height, viewSize.width, zoom]);
+
+  useEffect(() => {
+    setOffset(current => {
+      const next = clampOffset(current, zoom);
+      return next.x === current.x && next.y === current.y ? current : next;
     });
+  }, [clampOffset, zoom]);
+
+  const setZoomValue = (value) => {
+    const nextZoom = Math.min(4, Math.max(1, Number(value) || 1));
+    setZoom(nextZoom);
+    setOffset(current => clampOffset(current, nextZoom));
   };
 
-  const onMouseUp = () => setDrawing(false);
+  const onPointerDown = (event) => {
+    if (!imgEl) return;
+    event.preventDefault();
+    dragRef.current = {
+      pointerId: event.pointerId,
+      startX: event.clientX,
+      startY: event.clientY,
+      origin: offset,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+  };
+
+  const onPointerMove = (event) => {
+    const drag = dragRef.current;
+    if (!drag || drag.pointerId !== event.pointerId) return;
+    event.preventDefault();
+    const nextOffset = {
+      x: drag.origin.x + event.clientX - drag.startX,
+      y: drag.origin.y + event.clientY - drag.startY,
+    };
+    setOffset(clampOffset(nextOffset, zoom));
+  };
+
+  const endDrag = (event) => {
+    if (dragRef.current?.pointerId === event.pointerId) {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+      dragRef.current = null;
+    }
+  };
+
+  const onWheel = (event) => {
+    if (!imgEl) return;
+    event.preventDefault();
+    setZoomValue(zoom + (-event.deltaY * 0.0015));
+  };
 
   const applyCrop = () => {
+    if (!imgEl) return;
+    const layout = getLayout(zoom, clampOffset(offset, zoom));
+    if (!layout) return;
+
+    const sourceX = Math.max(0, -layout.left / layout.scale);
+    const sourceY = Math.max(0, -layout.top / layout.scale);
+    const sourceW = Math.min(imgEl.width - sourceX, viewSize.width / layout.scale);
+    const sourceH = Math.min(imgEl.height - sourceY, viewSize.height / layout.scale);
+
     const offscreen = document.createElement("canvas");
-    const finalCrop = crop.w < 10 || crop.h < 10
-      ? { x: 0, y: 0, w: imgEl.width, h: imgEl.height }
-      : crop;
-    offscreen.width = finalCrop.w;
-    offscreen.height = finalCrop.h;
+    offscreen.width = Math.max(1, Math.round(sourceW));
+    offscreen.height = Math.max(1, Math.round(sourceH));
     const ctx = offscreen.getContext("2d");
-    ctx.drawImage(imgEl, finalCrop.x, finalCrop.y, finalCrop.w, finalCrop.h, 0, 0, finalCrop.w, finalCrop.h);
+    ctx.drawImage(imgEl, sourceX, sourceY, sourceW, sourceH, 0, 0, offscreen.width, offscreen.height);
     offscreen.toBlob(blob => {
+      if (!blob) return;
       const url = URL.createObjectURL(blob);
       onCropped(url, blob);
       onClose();
@@ -142,43 +194,85 @@ function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
   };
 
   const resetCrop = () => {
-    if (imgEl) setCrop({ x: 0, y: 0, w: imgEl.width, h: imgEl.height });
+    setZoom(1);
+    setOffset({ x: 0, y: 0 });
   };
+
+  const imageAspect = imgEl ? imgEl.width / imgEl.height : 4 / 3;
+  const cropWidth = `min(100%, ${Math.min(760, Math.max(280, Math.round(440 * Math.min(1.55, Math.max(0.7, imageAspect)))))}px, ${Math.round(58 * imageAspect)}vh)`;
+  const layout = getLayout();
 
   return (
     <Dialog open={open} onOpenChange={open => !open && onClose()}>
-      <DialogContent className="max-w-3xl max-h-[90vh] overflow-y-auto">
+      <DialogContent className="max-w-3xl max-h-[92vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle className="flex items-center gap-2">
             <Crop className="w-4 h-4" /> Bijsnijden — {label}
           </DialogTitle>
         </DialogHeader>
         <p className="text-xs text-muted-foreground mb-3">
-          Teken een selectie op de afbeelding om het gewenste gebied bij te snijden. Klik op <strong>Toepassen</strong> om op te slaan.
+          Sleep de afbeelding binnen het kader en zoom in om randen of achtergrond weg te snijden.
         </p>
-        <div ref={containerRef} className="min-h-64 overflow-auto rounded-md border border-border bg-muted/30 flex items-center justify-center p-2">
+        <div className="rounded-lg border border-border bg-muted/20 p-3">
           {imageError ? (
             <p className="text-sm text-destructive">{imageError}</p>
           ) : !imgEl ? (
-            <div className="flex items-center gap-2 text-sm text-muted-foreground">
+            <div className="flex min-h-64 items-center justify-center gap-2 text-sm text-muted-foreground">
               <Loader2 className="h-4 w-4 animate-spin" />
               Afbeelding laden...
             </div>
           ) : (
-            <canvas
-              ref={canvasRef}
-              className="max-w-full cursor-crosshair select-none"
-              style={{ userSelect: "none" }}
-              onMouseDown={onMouseDown}
-              onMouseMove={onMouseMove}
-              onMouseUp={onMouseUp}
-              onMouseLeave={onMouseUp}
-            />
+            <>
+              <div
+                ref={viewportRef}
+                className="relative mx-auto max-h-[58vh] max-w-full touch-none overflow-hidden rounded-md border-2 border-primary/70 bg-slate-950 cursor-grab active:cursor-grabbing"
+                style={{ aspectRatio: imageAspect, width: cropWidth }}
+                onPointerDown={onPointerDown}
+                onPointerMove={onPointerMove}
+                onPointerUp={endDrag}
+                onPointerCancel={endDrag}
+                onWheel={onWheel}
+              >
+                {layout && (
+                  <img
+                    src={imageSrc}
+                    alt=""
+                    draggable="false"
+                    className="absolute max-w-none select-none"
+                    style={{
+                      width: layout.width,
+                      height: layout.height,
+                      left: layout.left,
+                      top: layout.top,
+                    }}
+                  />
+                )}
+                <div className="pointer-events-none absolute inset-0 ring-1 ring-inset ring-white/80">
+                  <div className="absolute left-1/3 top-0 h-full w-px bg-white/35" />
+                  <div className="absolute left-2/3 top-0 h-full w-px bg-white/35" />
+                  <div className="absolute left-0 top-1/3 h-px w-full bg-white/35" />
+                  <div className="absolute left-0 top-2/3 h-px w-full bg-white/35" />
+                </div>
+              </div>
+              <div className="mt-3 flex items-center gap-3">
+                <span className="text-xs text-muted-foreground">Zoom</span>
+                <input
+                  type="range"
+                  min="1"
+                  max="4"
+                  step="0.01"
+                  value={zoom}
+                  onChange={event => setZoomValue(event.target.value)}
+                  className="h-2 flex-1 accent-primary"
+                />
+                <span className="w-12 text-right text-xs tabular-nums text-muted-foreground">{Math.round(zoom * 100)}%</span>
+              </div>
+            </>
           )}
         </div>
         <div className="flex justify-between items-center mt-3">
           <Button variant="outline" size="sm" onClick={resetCrop}>
-            Selectie resetten
+            Uitsnede resetten
           </Button>
           <div className="flex gap-2">
             <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
