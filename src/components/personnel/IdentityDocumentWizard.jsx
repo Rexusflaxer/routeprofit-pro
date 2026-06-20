@@ -680,7 +680,7 @@ function DocumentPhotoViewer({ images }) {
 
       <div
         ref={containerRef}
-        className="relative flex-1 min-h-[220px] overflow-hidden rounded-md bg-muted/30 border border-border"
+        className="relative flex-1 min-h-[160px] max-h-[260px] overflow-hidden rounded-md bg-muted/30 border border-border"
         onWheel={onWheel}
         style={{ cursor: zoom > 1 ? "grab" : "default" }}
       >
