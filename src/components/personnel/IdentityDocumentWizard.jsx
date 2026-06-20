@@ -5,7 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
-import { ChevronLeft, ChevronRight, Check, X, Globe, AlertTriangle, ImageIcon, Crop, Loader2 } from "lucide-react";
+import { ChevronLeft, ChevronRight, Check, X, Globe, AlertTriangle, ImageIcon, Crop, Loader2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
 
 // EU/EEA nationalities that can carry an identity card
 const EU_EEA_NATIONALITIES = new Set([
@@ -623,6 +623,104 @@ function IssuingCountryField({ value, onChange, error, defaultCountry }) {
   );
 }
 
+// ─── Document Photo Viewer (zoom + pan) ───────────────────────────────────────
+
+function DocumentPhotoViewer({ images }) {
+  const [index, setIndex] = useState(0);
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const panRef = useRef(null);
+  const containerRef = useRef(null);
+
+  const current = images[index];
+
+  const resetView = () => { setZoom(1); setPan({ x: 0, y: 0 }); };
+
+  // Reset when switching photos
+  const goTo = (i) => { setIndex(i); resetView(); };
+
+  const onWheel = (e) => {
+    e.preventDefault();
+    const delta = e.deltaY < 0 ? 0.15 : -0.15;
+    setZoom(z => Math.min(5, Math.max(1, z + delta)));
+  };
+
+  const onPointerDown = (e) => {
+    if (zoom <= 1) return;
+    e.preventDefault();
+    panRef.current = { startX: e.clientX - pan.x, startY: e.clientY - pan.y, pointerId: e.pointerId };
+    e.currentTarget.setPointerCapture(e.pointerId);
+  };
+
+  const onPointerMove = (e) => {
+    if (!panRef.current || panRef.current.pointerId !== e.pointerId) return;
+    setPan({ x: e.clientX - panRef.current.startX, y: e.clientY - panRef.current.startY });
+  };
+
+  const onPointerUp = (e) => {
+    if (panRef.current?.pointerId === e.pointerId) panRef.current = null;
+  };
+
+  return (
+    <div className="rounded-lg border border-border bg-card p-3 flex flex-col gap-2 h-full">
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Upload controleren</p>
+        <div className="flex items-center gap-1">
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setZoom(z => Math.min(5, z + 0.3))} title="Inzoomen">
+            <ZoomIn className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={() => setZoom(z => Math.max(1, z - 0.3))} title="Uitzoomen">
+            <ZoomOut className="w-3.5 h-3.5" />
+          </Button>
+          <Button variant="ghost" size="sm" className="h-6 w-6 p-0" onClick={resetView} title="Reset">
+            <RotateCcw className="w-3.5 h-3.5" />
+          </Button>
+        </div>
+      </div>
+
+      <div
+        ref={containerRef}
+        className="relative flex-1 min-h-[220px] overflow-hidden rounded-md bg-muted/30 border border-border"
+        onWheel={onWheel}
+        style={{ cursor: zoom > 1 ? "grab" : "default" }}
+      >
+        <img
+          src={current.src}
+          alt={current.label}
+          draggable="false"
+          onPointerDown={onPointerDown}
+          onPointerMove={onPointerMove}
+          onPointerUp={onPointerUp}
+          onPointerCancel={onPointerUp}
+          style={{
+            transform: `translate(${pan.x}px, ${pan.y}px) scale(${zoom})`,
+            transformOrigin: "center center",
+            transition: panRef.current ? "none" : "transform 0.15s ease",
+            userSelect: "none",
+            cursor: zoom > 1 ? "grabbing" : "default",
+          }}
+          className="w-full h-full object-contain select-none"
+        />
+      </div>
+
+      <div className="flex items-center justify-between gap-2">
+        <p className="text-xs text-muted-foreground truncate">{current.label}</p>
+        {images.length > 1 && (
+          <div className="flex items-center gap-1 shrink-0">
+            <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={() => goTo((index - 1 + images.length) % images.length)}>
+              <ChevronLeft className="w-3 h-3" />
+            </Button>
+            <span className="text-xs text-muted-foreground">{index + 1}/{images.length}</span>
+            <Button variant="outline" size="sm" className="h-6 px-2 text-xs" onClick={() => goTo((index + 1) % images.length)}>
+              <ChevronRight className="w-3 h-3" />
+            </Button>
+          </div>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function WizardSteps({ step, labels }) {
   return (
     <div className="flex items-center gap-1 mb-4">
@@ -986,12 +1084,13 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
               <div>
                 <p className="text-sm font-medium text-foreground mb-1">Controleer en vul aan</p>
                 <p className="text-xs text-muted-foreground">
-                  Vergelijk de velden met de upload. Je kunt waarden direct aanpassen voordat je opslaat.
+                  Vergelijk de velden met de upload. Scroll met het muiswiel om in te zoomen, sleep om te verslepen.
                 </p>
               </div>
 
-              <div className="space-y-3">
-                <div className="rounded-lg border border-border bg-card p-4">
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                {/* Left: form fields */}
+                <div className="rounded-lg border border-border bg-card p-4 space-y-3">
                   <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                     <div>
                       <label className="text-xs text-muted-foreground mb-1 block">Documentnummer <span className="text-destructive">*</span></label>
@@ -1045,36 +1144,27 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   <CriticalUploadNotice quality={scanQuality} />
 
                   {isNonEu && (
-                    <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-900 dark:text-blue-200 mt-4">
+                    <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-900 dark:text-blue-200">
                       <AlertTriangle className="w-3.5 h-3.5 shrink-0 mt-0.5" />
                       <span>Voor niet-EU medewerkers is naast het paspoort een verblijfs- en/of werkvergunning vereist. Registreer deze apart onder het tabblad <strong>Compliance</strong>.</span>
                     </div>
                   )}
+
+                  <div className="pt-1">
+                    <Button variant="ghost" size="sm" onClick={() => setStep(2)} className="h-7 px-2 text-xs text-muted-foreground">
+                      Wijzig upload
+                    </Button>
+                  </div>
                 </div>
 
+                {/* Right: photo viewer */}
                 {(frontPreview || backPreview) && (
-                  <div className="rounded-lg border border-border bg-card p-3">
-                    <div className="flex items-center justify-between gap-2 mb-3">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Upload controleren</p>
-                      <Button variant="ghost" size="sm" onClick={() => setStep(2)} className="h-7 px-2 text-xs">
-                        Wijzig upload
-                      </Button>
-                    </div>
-                    <div className="grid grid-cols-2 gap-3">
-                      {frontPreview && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant"}</p>
-                          <img src={frontPreview} alt="Voorkant" className="rounded-md border border-border w-full max-h-48 object-contain bg-muted/20" />
-                        </div>
-                      )}
-                      {backPreview && (
-                        <div>
-                          <p className="text-xs text-muted-foreground mb-1">{docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant"}</p>
-                          <img src={backPreview} alt="Achterkant" className="rounded-md border border-border w-full max-h-48 object-contain bg-muted/20" />
-                        </div>
-                      )}
-                    </div>
-                  </div>
+                  <DocumentPhotoViewer
+                    images={[
+                      ...(frontPreview ? [{ src: frontPreview, label: docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant" }] : []),
+                      ...(backPreview ? [{ src: backPreview, label: docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant" }] : []),
+                    ]}
+                  />
                 )}
               </div>
 
