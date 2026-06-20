@@ -499,7 +499,6 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
                   className="max-h-32 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
                   draggable="false"
                 />
-                <GuidePin className="left-[32%] top-[14%]">5</GuidePin>
               </div>
             </GuideExampleCard>
           </div>
