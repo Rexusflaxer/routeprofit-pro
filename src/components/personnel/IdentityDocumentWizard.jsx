@@ -652,13 +652,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     setScanQuality(null);
   }, [docType, frontFile, backFile]);
 
-  useEffect(() => {
-    if (step < 2 || !wizardRef.current) return;
-    const raf = requestAnimationFrame(() => {
-      wizardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [step]);
+
 
   const applyRecognizedFields = useCallback((result) => {
     setForm(current => {
@@ -841,7 +835,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
               )}
 
               <div className="grid grid-cols-1 gap-2">
-                <button onClick={() => { setDocType("passport"); setStep(2); }}
+                <button onClick={() => { setDocType("passport"); setStep(2); setTimeout(() => { if (wizardRef.current) { const top = wizardRef.current.getBoundingClientRect().top + window.pageYOffset - 16; window.scrollTo({ top, behavior: "smooth" }); } }, 50); }}
                   className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
                   <div>
                     <span className="text-sm font-semibold text-foreground">Paspoort</span>
@@ -850,7 +844,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>
                 {isEuEea && (
-                  <button onClick={() => { setDocType("id_card"); setStep(2); }}
+                  <button onClick={() => { setDocType("id_card"); setStep(2); setTimeout(() => { if (wizardRef.current) { const top = wizardRef.current.getBoundingClientRect().top + window.pageYOffset - 16; window.scrollTo({ top, behavior: "smooth" }); } }, 50); }}
                     className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
                     <div>
                       <span className="text-sm font-semibold text-foreground">Identiteitskaart</span>
@@ -906,7 +900,15 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
               <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-                <Button size="sm" onClick={() => setStep(3)} disabled={!frontFile}>
+                <Button size="sm" onClick={() => {
+                  setStep(3);
+                  setTimeout(() => {
+                    if (wizardRef.current) {
+                      const top = wizardRef.current.getBoundingClientRect().top + window.pageYOffset - 16;
+                      window.scrollTo({ top, behavior: "smooth" });
+                    }
+                  }, 50);
+                }} disabled={!frontFile}>
                   Volgende <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
               </div>
