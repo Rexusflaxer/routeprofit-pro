@@ -159,7 +159,7 @@ function documentNumberVariants(value) {
 
 function findBsnInText(text) {
   const normalized = text.toUpperCase();
-  const labeled = normalized.match(/(?:BSN|BURGERSERVICENUMMER|PERSONAL\s+NUMBER|PERSOONLIJK\s+NUMMER)\D{0,45}(\d[\d\s.-]{7,16}\d)/);
+  const labeled = normalized.match(/(?:BSN|BURGERSERVICENUMMER|PERSOONS\s*NUMMER|PERSOONLIJK\s+NUMMER|PERSONAL\s+(?:NUMBER|NO\.?|N[O0]\.?)|IDENTIFIANT\s+PERSONNEL)\D{0,80}(\d[\d\s.-]{7,16}\d)/);
   if (labeled) {
     const candidate = onlyDigits(labeled[1]);
     if (candidate.length === 9) return candidate;
@@ -558,6 +558,16 @@ function resolveCropBox(crop, width, height) {
   }
 
   if (crop === "back_details") {
+    const aspect = width / height;
+    if (aspect < 1.05) {
+      return {
+        x: 0,
+        y: 0,
+        width,
+        height: Math.ceil(height * 0.42),
+      };
+    }
+
     return {
       x: Math.floor(width * 0.52),
       y: 0,
