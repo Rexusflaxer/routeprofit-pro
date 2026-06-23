@@ -1013,6 +1013,9 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
   const STEP_LABELS = ["Type", "Upload", "Controleren"];
   const scanPending = Boolean(frontFile) && recognizedUploadKey !== uploadKey;
+  const wizardTitle = !docType || step === 1
+    ? (isArchiveEntry ? "Document archiveren" : "Legitimatiebewijs toevoegen")
+    : (isArchiveEntry ? `${docMeta.label} archiveren` : `${docMeta.label} toevoegen`);
   const goBackFromUpload = () => {
     if (docTypeLocked) onClose();
     else setStep(1);
@@ -1027,7 +1030,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
-        {isArchiveEntry ? `${docMeta.label} archiveren` : `${docMeta.label} toevoegen`}
+        {wizardTitle}
         {nationality && (
           <span className="ml-2 text-muted-foreground font-normal normal-case tracking-normal">
             — {countryLabel} ({nationality})

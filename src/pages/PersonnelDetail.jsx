@@ -1145,8 +1145,6 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
   });
   const identityDocs = sortIdentityDocs(identityAllDocs.filter(d => !isArchivedIdentityDocument(d)));
   const identityArchived = sortIdentityDocs(identityAllDocs.filter(isArchivedIdentityDocument));
-  const activeIdentityKinds = new Set(identityDocs.map(identityDocumentKind));
-  const availableIdentityKinds = IDENTITY_DOCUMENT_KINDS.filter(item => !activeIdentityKinds.has(item.key));
   const hasActiveIdentity = identityDocs.some(d => ["passport", "id_card"].includes(identityDocumentKind(d)));
   const identityNeedsAttention = !hasActiveIdentity || identityDocs.some(d => getExpiryState(d.valid_until));
   const licenseDocs = dossier.documents.filter(d => d.category === "drivers_license" && !isArchivedIdentityDocument(d));
@@ -1154,7 +1152,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
   const routeExecutions = dossier.routeExecutions?.filter(r => r.employee_id === person.id).slice(0, 8) || [];
   const showIdentityWizard = Boolean(identityWizard);
 
-  const openIdentityWizard = (docType, archiveMode = false) => {
+  const openIdentityWizard = (docType = null, archiveMode = false) => {
     setShowIdentityArchive(false);
     setIdentityWizard({ docType, archiveMode });
   };
@@ -1199,22 +1197,18 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
                     <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
                       <ArrowLeft className="w-3 h-3 mr-1" /> Actieve documenten
                     </Button>
-                    {IDENTITY_DOCUMENT_KINDS.map(kind => (
-                      <Button key={kind.key} size="sm" variant="outline" onClick={() => openIdentityWizard(kind.key, true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-                        <Plus className="w-3 h-3 mr-1" /> Oud {kind.addLabel}
-                      </Button>
-                    ))}
+                    <Button size="sm" variant="outline" onClick={() => openIdentityWizard(null, true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                      <Plus className="w-3 h-3 mr-1" /> Oud document
+                    </Button>
                   </>
                 ) : (
                   <>
                     <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
                       <Archive className="w-3 h-3 mr-1" /> Archief {identityArchived.length > 0 ? `(${identityArchived.length})` : ""}
                     </Button>
-                    {availableIdentityKinds.map(kind => (
-                      <Button key={kind.key} size="sm" variant="outline" onClick={() => openIdentityWizard(kind.key)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-                        <Plus className="w-3 h-3 mr-1" /> {kind.addLabel}
-                      </Button>
-                    ))}
+                    <Button size="sm" variant="outline" onClick={() => openIdentityWizard()} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                      <Plus className="w-3 h-3 mr-1" /> Nieuw document
+                    </Button>
                   </>
                 )}
               </div>
@@ -1232,7 +1226,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
                     doc={doc}
                     archived
                     onPreview={setIdentityPreviewDoc}
-                    onRenew={openIdentityWizard}
+                    onRenew={() => openIdentityWizard()}
                   />
                 ))}
               </div>
@@ -1246,7 +1240,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
                   key={doc.id}
                   doc={doc}
                   onPreview={setIdentityPreviewDoc}
-                  onRenew={openIdentityWizard}
+                  onRenew={() => openIdentityWizard()}
                 />
               ))}
             </div>
