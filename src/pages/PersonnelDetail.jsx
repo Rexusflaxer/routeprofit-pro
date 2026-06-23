@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from "react";
+import React, { useEffect, useRef, useState } from "react";
 import PageTransition from "@/components/ui-custom/PageTransition";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
@@ -21,6 +21,7 @@ import {
   Check,
   ClipboardCheck,
   CreditCard,
+  Eye,
   FileBadge,
   FileText,
   Handshake,
@@ -28,6 +29,7 @@ import {
   Package,
   Pencil,
   Plus,
+  RefreshCw,
   ShieldCheck,
   Users,
   X,
@@ -242,6 +244,47 @@ function groupByPersonnel(items = []) {
     acc[item.personnel_id].push(item);
     return acc;
   }, {});
+}
+
+const IDENTITY_DOCUMENT_KINDS = [
+  { key: "passport", label: "Paspoort", addLabel: "Paspoort" },
+  { key: "id_card", label: "ID-kaart", addLabel: "ID-kaart" },
+  { key: "drivers_license", label: "Rijbewijs", addLabel: "Rijbewijs" },
+];
+const IDENTITY_TABLE_GRID = "grid grid-cols-[minmax(220px,1fr)_minmax(130px,160px)_minmax(110px,140px)_72px] gap-3";
+
+function isIdentityLikeDocument(doc) {
+  return doc?.category === "identity_document" || doc?.category === "drivers_license";
+}
+
+function identityDocumentKind(doc) {
+  if (doc?.metadata?.doc_type) return doc.metadata.doc_type;
+  if (doc?.category === "drivers_license") return "drivers_license";
+  const type = String(doc?.document_type || "").toLowerCase();
+  if (type.includes("rijbewijs")) return "drivers_license";
+  if (type.includes("id-kaart") || type.includes("identiteitskaart")) return "id_card";
+  if (type.includes("paspoort")) return "passport";
+  return "passport";
+}
+
+function identityDocumentKindLabel(kind) {
+  return IDENTITY_DOCUMENT_KINDS.find(item => item.key === kind)?.label || "Document";
+}
+
+function isArchivedIdentityDocument(doc) {
+  return doc?.metadata?.archived === true;
+}
+
+function identityDocumentUrls(doc) {
+  return {
+    front: doc?.front_file_url || doc?.metadata?.front_file_url || doc?.file_url || "",
+    back: doc?.back_file_url || doc?.metadata?.back_file_url || "",
+  };
+}
+
+function hasIdentityDocumentUpload(doc) {
+  const urls = identityDocumentUrls(doc);
+  return Boolean(urls.front || urls.back);
 }
 
 // ─── Small UI helpers ─────────────────────────────────────────────────────────
@@ -949,22 +992,172 @@ function PayrollTab({ person, documents }) {
   );
 }
 
+function IdentityDocumentPreviewDialog({ document, open, onOpenChange }) {
+  const urls = identityDocumentUrls(document);
+  const kind = identityDocumentKind(document);
+  const images = [
+    urls.front && {
+      key: "front",
+      label: kind === "passport" ? "Voorkant / houderpagina" : "Voorzijde",
+      url: urls.front,
+    },
+    urls.back && {
+      key: "back",
+      label: kind === "passport" ? "Achterkant / BSN-pagina" : "Achterzijde",
+      url: urls.back,
+    },
+  ].filter(Boolean);
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="max-w-5xl">
+        <DialogHeader>
+          <DialogTitle>{document?.document_type || identityDocumentKindLabel(kind)}</DialogTitle>
+        </DialogHeader>
+        {images.length === 0 ? (
+          <SmallEmpty text="Voor dit document is nog geen upload beschikbaar." />
+        ) : (
+          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+            {images.map(image => (
+              <div key={image.key} className="rounded-lg border border-border bg-muted/20 p-3">
+                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{image.label}</p>
+                <div className="flex max-h-[70vh] items-center justify-center overflow-auto rounded-md bg-background">
+                  <img src={image.url} alt={image.label} className="max-h-[70vh] w-auto max-w-full object-contain" />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew }) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
+  const expiry = getExpiryState(doc.valid_until);
+  const canPreview = hasIdentityDocumentUpload(doc);
+  const canRenew = !archived;
+  const kind = identityDocumentKind(doc);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleOutside = event => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [menuOpen]);
+
+  const openRow = () => {
+    if (archived) {
+      if (canPreview) onPreview(doc);
+      return;
+    }
+    if (expiry) {
+      setMenuOpen(current => !current);
+      return;
+    }
+    if (canPreview) onPreview(doc);
+  };
+
+  return (
+    <div
+      className={`${IDENTITY_TABLE_GRID} relative items-center px-5 py-3 transition-colors ${
+        canPreview || canRenew ? "cursor-pointer hover:bg-accent/35" : ""
+      } ${archived ? "opacity-75" : ""}`}
+      onClick={openRow}
+    >
+      <div className="min-w-0">
+        <p className={`truncate text-sm font-semibold ${archived ? "text-muted-foreground line-through" : "text-foreground"}`}>
+          {doc.document_type || identityDocumentKindLabel(kind)}
+        </p>
+        {archived && <p className="mt-0.5 text-xs text-muted-foreground">Archiefkopie</p>}
+      </div>
+      <span className="min-w-0 truncate text-sm text-muted-foreground">{doc.document_number || "-"}</span>
+      <div className="min-w-0 flex items-center gap-2">
+        <span className="text-sm text-foreground">{formatDate(doc.valid_until)}</span>
+        {expiry && !archived && <BadgePill className={expiry.className}>{expiry.label}</BadgePill>}
+      </div>
+      <div className="flex justify-end">
+        {canPreview && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={event => { event.stopPropagation(); onPreview(doc); }}
+            title="Document bekijken"
+          >
+            <Eye className="h-3.5 w-3.5" />
+          </Button>
+        )}
+      </div>
+
+      {menuOpen && (
+        <div
+          ref={menuRef}
+          className="absolute right-4 top-11 z-50 min-w-[210px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg"
+          onClick={event => event.stopPropagation()}
+        >
+          {canPreview && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+              onClick={() => { setMenuOpen(false); onPreview(doc); }}
+            >
+              <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+              Document bekijken
+            </button>
+          )}
+          {canRenew && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+              onClick={() => { setMenuOpen(false); onRenew(kind); }}
+            >
+              <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
+              {identityDocumentKindLabel(kind)} vernieuwen
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  );
+}
+
 // ─── Sidebar tabs panel ───────────────────────────────────────────────────────
 
 function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
-  const queryClient = useQueryClient();
   const [active, setActive] = useState(PERSONNEL_TABS[0].key);
-  const [showIdentityWizard, setShowIdentityWizard] = useState(false);
-  const [identityArchiveMode, setIdentityArchiveMode] = useState(false);
+  const [identityWizard, setIdentityWizard] = useState(null);
   const [showIdentityArchive, setShowIdentityArchive] = useState(false);
+  const [identityPreviewDoc, setIdentityPreviewDoc] = useState(null);
 
   const generalDocuments = dossier.documents.filter(d => !["identity_document","drivers_license","vog","cv","bank_account_proof","payroll_tax_statement"].includes(d.category));
-  const identityDocs = dossier.documents.filter(d => d.category === "identity_document" && !d.metadata?.archived);
-  const identityArchived = dossier.documents.filter(d => d.category === "identity_document" && d.metadata?.archived);
-  const hasActiveIdentity = identityDocs.length > 0;
-  const licenseDocs = dossier.documents.filter(d => d.category === "drivers_license");
+  const identityAllDocs = dossier.documents.filter(isIdentityLikeDocument);
+  const identityOrder = Object.fromEntries(IDENTITY_DOCUMENT_KINDS.map((item, index) => [item.key, index]));
+  const sortIdentityDocs = docs => [...docs].sort((a, b) => {
+    const kindDiff = (identityOrder[identityDocumentKind(a)] ?? 99) - (identityOrder[identityDocumentKind(b)] ?? 99);
+    if (kindDiff !== 0) return kindDiff;
+    return String(b.valid_until || "").localeCompare(String(a.valid_until || ""));
+  });
+  const identityDocs = sortIdentityDocs(identityAllDocs.filter(d => !isArchivedIdentityDocument(d)));
+  const identityArchived = sortIdentityDocs(identityAllDocs.filter(isArchivedIdentityDocument));
+  const activeIdentityKinds = new Set(identityDocs.map(identityDocumentKind));
+  const availableIdentityKinds = IDENTITY_DOCUMENT_KINDS.filter(item => !activeIdentityKinds.has(item.key));
+  const hasActiveIdentity = identityDocs.some(d => ["passport", "id_card"].includes(identityDocumentKind(d)));
+  const identityNeedsAttention = !hasActiveIdentity || identityDocs.some(d => getExpiryState(d.valid_until));
+  const licenseDocs = dossier.documents.filter(d => d.category === "drivers_license" && !isArchivedIdentityDocument(d));
   const cvDocs = dossier.documents.filter(d => d.category === "cv");
   const routeExecutions = dossier.routeExecutions?.filter(r => r.employee_id === person.id).slice(0, 8) || [];
+  const showIdentityWizard = Boolean(identityWizard);
+
+  const openIdentityWizard = (docType, archiveMode = false) => {
+    setShowIdentityArchive(false);
+    setIdentityWizard({ docType, archiveMode });
+  };
 
   const renderTab = () => {
     switch (active) {
@@ -979,117 +1172,91 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
       case "payroll": return <PayrollTab person={person} documents={dossier.documents} />;
       case "identity": return (
         <div className="flex flex-col h-full">
-          {/* Wizard inline */}
           <AnimatePresence>
             {showIdentityWizard && (
               <IdentityDocumentWizard
                 personnelId={person.id}
                 nationality={person.nationality}
-                isArchiveEntry={identityArchiveMode}
-                onClose={() => { setShowIdentityWizard(false); setIdentityArchiveMode(false); }}
-                onSaved={() => { setShowIdentityWizard(false); setIdentityArchiveMode(false); }}
+                isArchiveEntry={identityWizard.archiveMode}
+                initialDocType={identityWizard.docType}
+                onClose={() => setIdentityWizard(null)}
+                onSaved={() => setIdentityWizard(null)}
               />
             )}
           </AnimatePresence>
 
-          {/* Table header */}
-          <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-            <span className="flex-1 min-w-0">Type / omschrijving</span>
-            <span className="w-36 shrink-0">Documentnummer</span>
-            <span className="w-28 shrink-0">Geldig tot</span>
-            <span className="w-28 shrink-0">Status</span>
+          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/30 px-5 py-2">
+            <div className={`${IDENTITY_TABLE_GRID} min-w-[540px] flex-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+              <span>Type / omschrijving</span>
+              <span>Documentnummer</span>
+              <span>Geldig tot</span>
+              <span />
+            </div>
             {!showIdentityWizard && (
-              <div className="shrink-0 flex items-center gap-2">
+              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
                 {showIdentityArchive ? (
                   <>
                     <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
                       <ArrowLeft className="w-3 h-3 mr-1" /> Actieve documenten
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => { setIdentityArchiveMode(true); setShowIdentityWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-                      <Plus className="w-3 h-3 mr-1" /> Verlopen doc. toevoegen
-                    </Button>
+                    {IDENTITY_DOCUMENT_KINDS.map(kind => (
+                      <Button key={kind.key} size="sm" variant="outline" onClick={() => openIdentityWizard(kind.key, true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                        <Plus className="w-3 h-3 mr-1" /> Oud {kind.addLabel}
+                      </Button>
+                    ))}
                   </>
                 ) : (
                   <>
                     <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
                       <Archive className="w-3 h-3 mr-1" /> Archief {identityArchived.length > 0 ? `(${identityArchived.length})` : ""}
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => { setIdentityArchiveMode(false); setShowIdentityWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-                      <Plus className="w-3 h-3 mr-1" /> Nieuw document
-                    </Button>
+                    {availableIdentityKinds.map(kind => (
+                      <Button key={kind.key} size="sm" variant="outline" onClick={() => openIdentityWizard(kind.key)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                        <Plus className="w-3 h-3 mr-1" /> {kind.addLabel}
+                      </Button>
+                    ))}
                   </>
                 )}
               </div>
             )}
           </div>
 
-          {/* Rows — archief view */}
-          {showIdentityArchive && (
-            <div>
-              {identityArchived.length === 0 ? (
-                <p className="px-4 py-6 text-sm text-muted-foreground text-center">Geen verlopen documenten in het archief.</p>
-              ) : (
-                <div className="divide-y divide-border opacity-70">
-                  {identityArchived.map(doc => {
-                    const expiry = getExpiryState(doc.valid_until);
-                    return (
-                      <div key={doc.id} className="relative flex items-center px-4 py-2.5 group hover:opacity-80 transition-opacity">
-                        <div className="flex-1 min-w-0">
-                          <span className="text-sm text-muted-foreground line-through">{doc.document_type || "—"}</span>
-                        </div>
-                        <span className="w-36 shrink-0 text-xs text-muted-foreground">{doc.document_number ? `#${doc.document_number}` : "—"}</span>
-                        <div className="w-28 shrink-0 flex items-center gap-1.5">
-                          <span className="text-xs text-muted-foreground">{doc.valid_until ? formatDate(doc.valid_until) : "—"}</span>
-                          {expiry && <BadgePill className={expiry.className}>{expiry.label}</BadgePill>}
-                        </div>
-                        <div className="w-28 shrink-0"><BadgePill className="bg-slate-100 text-slate-500 dark:bg-slate-800 dark:text-slate-400">Gearchiveerd</BadgePill></div>
-                        <div className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                          <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                            onClick={async () => { await base44.entities.PersonnelDocument.delete(doc.id); queryClient.invalidateQueries({ queryKey: ["personnel-documents"] }); }} title="Verwijderen">
-                            <X className="w-3.5 h-3.5" />
-                          </Button>
-                        </div>
-                      </div>
-                    );
-                  })}
-                </div>
-              )}
-            </div>
-          )}
-
-          {/* Rows — actief */}
-          {!showIdentityArchive && identityDocs.length > 0 && (
+          {showIdentityArchive ? (
+            identityArchived.length === 0 ? (
+              <p className="px-5 py-8 text-center text-sm text-muted-foreground">Geen documenten in het archief.</p>
+            ) : (
+              <div className="divide-y divide-border">
+                {identityArchived.map(doc => (
+                  <IdentityDocumentRow
+                    key={doc.id}
+                    doc={doc}
+                    archived
+                    onPreview={setIdentityPreviewDoc}
+                    onRenew={openIdentityWizard}
+                  />
+                ))}
+              </div>
+            )
+          ) : identityDocs.length === 0 ? (
+            <p className="px-5 py-8 text-center text-sm text-muted-foreground">Nog geen legitimatiebewijs of rijbewijs geregistreerd.</p>
+          ) : (
             <div className="divide-y divide-border">
-              {identityDocs.map(doc => {
-                const expiry = getExpiryState(doc.valid_until);
-                return (
-                  <div key={doc.id} className="relative flex items-center px-4 py-3 group hover:bg-accent/30 transition-colors">
-                    <div className="flex-1 min-w-0">
-                      <span className="text-sm font-semibold text-foreground">{doc.document_type || "—"}</span>
-                    </div>
-                    <span className="w-36 shrink-0 text-sm text-muted-foreground">{doc.document_number ? `#${doc.document_number}` : "—"}</span>
-                    <div className="w-28 shrink-0 flex items-center gap-1.5">
-                      <span className="text-xs text-foreground">{doc.valid_until ? formatDate(doc.valid_until) : "—"}</span>
-                      {expiry && <BadgePill className={expiry.className}>{expiry.label}</BadgePill>}
-                    </div>
-                    <div className="w-28 shrink-0">
-                      <BadgePill className={doc.verification_status === "verified" ? "bg-emerald-100 text-emerald-700 dark:bg-emerald-900 dark:text-emerald-200" : "bg-amber-100 text-amber-700 dark:bg-amber-900/40 dark:text-amber-200"}>
-                        {VERIFICATION_LABELS[doc.verification_status] || doc.verification_status}
-                      </BadgePill>
-                    </div>
-                    <div className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
-                      <Button variant="ghost" size="icon" className="h-7 w-7 text-destructive hover:text-destructive hover:bg-destructive/10"
-                        onClick={async () => { await base44.entities.PersonnelDocument.delete(doc.id); queryClient.invalidateQueries({ queryKey: ["personnel-documents"] }); }} title="Verwijderen">
-                        <X className="w-3.5 h-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                );
-              })}
+              {identityDocs.map(doc => (
+                <IdentityDocumentRow
+                  key={doc.id}
+                  doc={doc}
+                  onPreview={setIdentityPreviewDoc}
+                  onRenew={openIdentityWizard}
+                />
+              ))}
             </div>
           )}
 
-
+          <IdentityDocumentPreviewDialog
+            document={identityPreviewDoc}
+            open={Boolean(identityPreviewDoc)}
+            onOpenChange={open => { if (!open) setIdentityPreviewDoc(null); }}
+          />
 
         </div>
       );
@@ -1228,7 +1395,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
       <div className="w-52 shrink-0 border-r border-border bg-muted/20 py-2">
         <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Dossier</p>
         {PERSONNEL_TABS.map(item => {
-          const needsAttention = item.key === "identity" && !hasActiveIdentity;
+          const needsAttention = item.key === "identity" && identityNeedsAttention;
           return (
             <button
               key={item.key}

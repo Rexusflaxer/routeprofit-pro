@@ -43,6 +43,40 @@ const ALL_COUNTRIES = Object.values(NATIONALITY_TO_COUNTRY)
   .filter((v, i, a) => a.indexOf(v) === i)
   .sort((a, b) => a.localeCompare(b, "nl"));
 
+const DOCUMENT_TYPE_META = {
+  passport: {
+    label: "Paspoort",
+    shortLabel: "paspoort",
+    category: "identity_document",
+    numberPlaceholder: "Bijv. NL1234567",
+    typeLabel: country => `Paspoort (${country})`,
+  },
+  id_card: {
+    label: "Identiteitskaart",
+    shortLabel: "identiteitskaart",
+    category: "identity_document",
+    numberPlaceholder: "Bijv. ID1234567NL",
+    typeLabel: country => `ID-kaart (${country})`,
+  },
+  drivers_license: {
+    label: "Rijbewijs",
+    shortLabel: "rijbewijs",
+    category: "drivers_license",
+    numberPlaceholder: "Bijv. 1234567890",
+    typeLabel: country => `Rijbewijs (${country})`,
+  },
+};
+
+function storedDocumentKind(doc) {
+  if (doc?.metadata?.doc_type) return doc.metadata.doc_type;
+  if (doc?.category === "drivers_license") return "drivers_license";
+  const type = String(doc?.document_type || "").toLowerCase();
+  if (type.includes("rijbewijs")) return "drivers_license";
+  if (type.includes("id-kaart") || type.includes("identiteitskaart")) return "id_card";
+  if (type.includes("paspoort")) return "passport";
+  return "";
+}
+
 // ─── Image Crop Dialog ─────────────────────────────────────────────────────────
 
 function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
@@ -405,50 +439,41 @@ function PassportGuideIllustration() {
   );
 }
 
-function IdCardGuideIllustration() {
+function DrivingLicenseGuideIllustration() {
   return (
-    <svg viewBox="0 0 520 210" role="img" aria-label="Schematisch voorbeeld van Nederlandse ID-kaart upload" className="h-40 w-[390px] max-w-full">
+    <svg viewBox="0 0 520 210" role="img" aria-label="Schematisch voorbeeld van Nederlands rijbewijs upload" className="h-40 w-[390px] max-w-full">
       <defs>
-        <linearGradient id="nlIdCard" x1="0" y1="0" x2="1" y2="1">
+        <linearGradient id="nlDrivingLicense" x1="0" y1="0" x2="1" y2="1">
           <stop offset="0" stopColor="#fde2ef" />
-          <stop offset="0.45" stopColor="#eef9ff" />
-          <stop offset="0.78" stopColor="#fff8cf" />
-          <stop offset="1" stopColor="#e6fbf2" />
+          <stop offset="0.5" stopColor="#f8c8dc" />
+          <stop offset="1" stopColor="#e9f2ff" />
         </linearGradient>
-        <pattern id="nlIdDots" width="18" height="18" patternUnits="userSpaceOnUse">
-          <circle cx="4" cy="5" r="1.2" fill="#0ea5e9" opacity="0.18" />
-          <circle cx="12" cy="13" r="1.1" fill="#be123c" opacity="0.14" />
+        <pattern id="licenseWaves" width="28" height="14" patternUnits="userSpaceOnUse">
+          <path d="M0 7c7-8 14 8 21 0s14 8 21 0" fill="none" stroke="#be185d" strokeWidth="1" opacity="0.18" />
         </pattern>
       </defs>
-
       <rect width="520" height="210" rx="14" fill="hsl(var(--muted))" opacity="0.32" />
-      <g transform="translate(36 34)">
-        <rect width="448" height="142" rx="12" fill="url(#nlIdCard)" stroke="#94a3b8" strokeWidth="1.5" />
-        <rect width="448" height="142" rx="12" fill="url(#nlIdDots)" opacity="0.7" />
-        <path d="M12 18h32M12 28h42M12 38h28" stroke="#334155" strokeWidth="3" strokeLinecap="round" opacity="0.72" />
-        <text x="18" y="21" fontSize="13" fontWeight="700" fill="#1e40af" letterSpacing="0.5">IDENTITEITSKAART</text>
-        <text x="216" y="21" fontSize="13" fontWeight="700" fill="#1e40af">KONINKRIJK DER</text>
-        <text x="336" y="21" fontSize="13" fontWeight="700" fill="#be123c">NEDERLANDEN</text>
-
-        <path d="M12 28c22 28 32 72 18 98M424 28c-22 28-32 72-18 98" fill="none" stroke="#f472b6" strokeWidth="3" opacity="0.42" />
-        <rect x="28" y="36" width="108" height="82" rx="6" fill="#e5e7eb" opacity="0.88" />
-        <circle cx="82" cy="64" r="22" fill="#475569" opacity="0.35" />
-        <path d="M44 116c14-22 62-22 76 0" fill="#475569" opacity="0.3" />
-        <text x="34" y="122" fontSize="17" fontWeight="700" fill="#475569" opacity="0.82">1980</text>
-
-        <path d="M164 43h88M164 58h78M164 73h114M164 88h92M164 103h122" stroke="#475569" strokeWidth="7" strokeLinecap="round" opacity="0.78" />
-        <path d="M164 118h78" stroke="#64748b" strokeWidth="4" strokeLinecap="round" opacity="0.65" />
-        <rect x="294" y="68" width="46" height="50" rx="5" fill="#bfdbfe" stroke="#93c5fd" />
-        <circle cx="317" cy="83" r="10" fill="#475569" opacity="0.48" />
-        <path d="M304 108c7-10 19-10 26 0" fill="#475569" opacity="0.4" />
-        <text x="298" y="118" fontSize="10" fontWeight="700" fill="#1e40af">80</text>
-
-        <rect x="362" y="78" width="34" height="20" fill="#f8fafc" />
-        <rect x="362" y="78" width="34" height="6" fill="#ef4444" />
-        <rect x="362" y="92" width="34" height="6" fill="#2563eb" />
-        <rect x="366" y="104" width="28" height="24" rx="3" fill="#1e40af" opacity="0.88" />
-        <path d="M372 114h16M372 120h16" stroke="#facc15" strokeWidth="2" strokeLinecap="round" />
-        <path d="M154 132h252" stroke="#0f172a" strokeWidth="4" strokeDasharray="12 7" opacity="0.86" />
+      <g transform="translate(28 38)">
+        <rect width="214" height="134" rx="12" fill="url(#nlDrivingLicense)" stroke="#c08497" strokeWidth="1.5" />
+        <rect width="214" height="134" rx="12" fill="url(#licenseWaves)" />
+        <rect x="18" y="16" width="50" height="32" rx="3" fill="#1d4ed8" />
+        <text x="31" y="38" fontSize="20" fontWeight="700" fill="#fff">NL</text>
+        <text x="80" y="30" fontSize="20" fontWeight="800" fill="#1d4ed8">RIJBEWIJS</text>
+        <rect x="22" y="56" width="58" height="58" rx="6" fill="#e5e7eb" />
+        <circle cx="51" cy="78" r="15" fill="#64748b" opacity="0.45" />
+        <path d="M31 110c8-15 32-15 40 0" fill="#64748b" opacity="0.38" />
+        <path d="M96 55h82M96 72h72M96 89h92M96 106h64" stroke="#475569" strokeWidth="6" strokeLinecap="round" opacity="0.78" />
+        <text x="94" y="124" fontSize="16" fontWeight="800" fill="#111827">AM-BE-C1E</text>
+        <path d="M16 128h184" stroke="#111827" strokeWidth="5" strokeDasharray="16 8" opacity="0.86" />
+      </g>
+      <g transform="translate(276 38)">
+        <rect width="214" height="134" rx="12" fill="url(#nlDrivingLicense)" stroke="#c08497" strokeWidth="1.5" />
+        <rect width="214" height="134" rx="12" fill="url(#licenseWaves)" />
+        <text x="22" y="27" fontSize="13" fontWeight="800" fill="#334155">BSN</text>
+        <path d="M22 42h68" stroke="#111827" strokeWidth="5" strokeLinecap="round" />
+        <rect x="28" y="58" width="44" height="44" rx="4" fill="#111827" opacity="0.75" />
+        <path d="M96 30h82M96 47h58M96 64h76M96 81h66M96 98h86" stroke="#2563eb" strokeWidth="5" strokeLinecap="round" opacity="0.72" />
+        <text x="96" y="122" fontSize="14" fontWeight="800" fill="#be123c" transform="rotate(-18 96 122)">SPECIMEN</text>
       </g>
     </svg>
   );
@@ -456,6 +481,8 @@ function IdCardGuideIllustration() {
 
 function UploadGuideCard({ docType, frontUpload, backUpload }) {
   const isPassport = docType === "passport";
+  const isIdCard = docType === "id_card";
+  const isDriversLicense = docType === "drivers_license";
 
   return (
     <div className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3 w-full">
@@ -475,14 +502,25 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
                 className="max-h-36 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
                 draggable="false"
               />
+            ) : isDriversLicense ? (
+              <DrivingLicenseGuideIllustration />
+            ) : isIdCard ? (
+              <img
+                src="/identity-guides/id-card-front-model-2024.jpg"
+                alt="Voorbeeld voorkant Nederlandse identiteitskaart"
+                className="max-h-36 w-auto rounded border border-border bg-white object-contain shadow-sm"
+                draggable="false"
+              />
             ) : (
-              <IdCardGuideIllustration />
+              null
             )}
           </div>
           <div className="px-2 py-1.5">
             <p className="text-[11px] leading-snug text-muted-foreground">
               {isPassport
                 ? "Houderpagina met pasfoto, persoonsgegevens, documentnummer en MRZ."
+                : isDriversLicense
+                  ? "Voorzijde met pasfoto, documentnummer, geldigheid en categorieen."
                 : "Voorzijde met pasfoto en kaartgegevens."}
             </p>
           </div>
@@ -507,16 +545,25 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
                 className="max-h-36 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
                 draggable="false"
               />
+            ) : isDriversLicense ? (
+              <DrivingLicenseGuideIllustration />
+            ) : isIdCard ? (
+              <img
+                src="/identity-guides/id-card-back-model-2024.jpg"
+                alt="Voorbeeld achterkant Nederlandse identiteitskaart"
+                className="max-h-36 w-auto rounded border border-border bg-white object-contain shadow-sm"
+                draggable="false"
+              />
             ) : (
-              <div className="flex items-center justify-center h-full">
-                <p className="text-[11px] text-muted-foreground text-center px-2">Upload de achterzijde met BSN en controlegegevens.</p>
-              </div>
+              null
             )}
           </div>
           <div className="px-2 py-1.5">
             <p className="text-[11px] leading-snug text-muted-foreground">
               {isPassport
                 ? "BSN-/titelpagina met persoonsnummer en documentnummer."
+                : isDriversLicense
+                  ? "Achterzijde met BSN, QR-code en categoriegegevens."
                 : "Achterzijde met BSN en controlegegevens."}
             </p>
           </div>
@@ -753,10 +800,12 @@ function WizardSteps({ step, labels }) {
 
 // ─── Main Wizard ───────────────────────────────────────────────────────────────
 
-export default function IdentityDocumentWizard({ personnelId, nationality, onClose, onSaved, isArchiveEntry = false }) {
+export default function IdentityDocumentWizard({ personnelId, nationality, onClose, onSaved, isArchiveEntry = false, initialDocType = null }) {
   const queryClient = useQueryClient();
-  const [step, setStep] = useState(1);
-  const [docType, setDocType] = useState(null);
+  const normalizedInitialDocType = DOCUMENT_TYPE_META[initialDocType] ? initialDocType : null;
+  const docTypeLocked = Boolean(normalizedInitialDocType);
+  const [step, setStep] = useState(normalizedInitialDocType ? 2 : 1);
+  const [docType, setDocType] = useState(normalizedInitialDocType);
   const [form, setForm] = useState({
     document_number: "",
     bsn: "",
@@ -781,6 +830,13 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const isDutch = nationality === "Nederlandse";
   const isNonEu = !!nationality && !isEuEea;
   const countryLabel = NATIONALITY_TO_COUNTRY[nationality] || nationality || "Onbekend";
+  const docMeta = DOCUMENT_TYPE_META[docType] || DOCUMENT_TYPE_META.passport;
+
+  useEffect(() => {
+    if (!normalizedInitialDocType) return;
+    setDocType(normalizedInitialDocType);
+    setStep(2);
+  }, [normalizedInitialDocType]);
 
   const { data: sensitiveData = [] } = useQuery({
     queryKey: ["personnel-sensitive-data", personnelId],
@@ -882,7 +938,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      const typeLabel = docType === "passport" ? "Paspoort" : "Identiteitskaart";
+      const activeDocMeta = DOCUMENT_TYPE_META[docType] || DOCUMENT_TYPE_META.passport;
       const country = form.issuing_country || countryLabel;
 
       // Upload foto's
@@ -902,25 +958,30 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
         setUploadingBack(false);
       }
 
-      // Archiveer bestaande documenten van hetzelfde type
-      const existing = await base44.entities.PersonnelDocument.filter({ personnel_id: personnelId, category: "identity_document" });
-      for (const doc of existing) {
-        if (doc.metadata?.doc_type === docType && doc.metadata?.archived !== true) {
-          await base44.entities.PersonnelDocument.update(doc.id, {
-            metadata: { ...doc.metadata, archived: true },
-          });
+      if (!isArchiveEntry) {
+        // Archiveer bestaande actieve documenten van hetzelfde type, zodat er maar een actief exemplaar blijft.
+        const existing = await base44.entities.PersonnelDocument.filter({ personnel_id: personnelId, category: activeDocMeta.category });
+        for (const doc of existing) {
+          if (storedDocumentKind(doc) === docType && doc.metadata?.archived !== true) {
+            await base44.entities.PersonnelDocument.update(doc.id, {
+              verification_status: "expired",
+              metadata: { ...(doc.metadata || {}), archived: true, archived_at: new Date().toISOString() },
+            });
+          }
         }
       }
 
       await base44.entities.PersonnelDocument.create({
         personnel_id: personnelId,
-        category: "identity_document",
-        document_type: `${typeLabel} (${country})`,
+        category: activeDocMeta.category,
+        document_type: activeDocMeta.typeLabel(country),
         document_number: form.document_number || null,
         valid_from: form.valid_from || null,
         valid_until: form.valid_until || null,
+        front_file_url: frontUrl,
+        back_file_url: backUrl,
         is_sensitive: true,
-        verification_status: isArchiveEntry ? "verified" : "pending_review",
+        verification_status: isArchiveEntry ? "expired" : "verified",
         metadata: {
           doc_type: docType,
           issuing_country: form.issuing_country,
@@ -952,6 +1013,10 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
   const STEP_LABELS = ["Type", "Upload", "Controleren"];
   const scanPending = Boolean(frontFile) && recognizedUploadKey !== uploadKey;
+  const goBackFromUpload = () => {
+    if (docTypeLocked) onClose();
+    else setStep(1);
+  };
 
   return (
     <motion.div
@@ -962,7 +1027,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
-        {isArchiveEntry ? "Verlopen legitimatiebewijs archiveren" : "Legitimatiebewijs toevoegen"}
+        {isArchiveEntry ? `${docMeta.label} archiveren` : `${docMeta.label} toevoegen`}
         {nationality && (
           <span className="ml-2 text-muted-foreground font-normal normal-case tracking-normal">
             — {countryLabel} ({nationality})
@@ -1006,6 +1071,14 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                     <ChevronRight className="w-4 h-4 text-muted-foreground" />
                   </button>
                 )}
+                <button onClick={() => { setDocType("drivers_license"); setStep(2); }}
+                  className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Rijbewijs</span>
+                    <span className="text-xs text-muted-foreground ml-2">Rijbewijs met voor- en achterzijde</span>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                </button>
               </div>
 
               <div className="flex justify-end pt-1">
@@ -1019,7 +1092,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
             <div className="space-y-4">
               <div>
                 <p className="text-sm font-medium text-foreground mb-0.5">
-                  Document uploaden — <span className="text-muted-foreground font-normal">{docType === "passport" ? "Paspoort" : "Identiteitskaart"}</span>
+                  Document uploaden — <span className="text-muted-foreground font-normal">{docMeta.label}</span>
                 </p>
                 <p className="text-xs text-muted-foreground">
                   Upload een duidelijke foto of scan. Na het uploaden kun je bijsnijden. De controle opent zodra de scan klaar is.
@@ -1033,6 +1106,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                     label={docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant"}
                     hint={docType === "passport"
                       ? "Upload hier de houderpagina met pasfoto, persoonsgegevens en MRZ."
+                      : docType === "drivers_license"
+                        ? "Upload hier de voorzijde met pasfoto, documentnummer en categorieen."
                       : "Upload hier de voorzijde met pasfoto en kaartgegevens."}
                     previewUrl={frontPreview}
                     onFileSelected={(file, preview) => { setFrontFile(file); setFrontPreview(preview); }}
@@ -1045,6 +1120,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                     label={docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant"}
                     hint={docType === "passport"
                       ? "Upload hier de BSN-/titelpagina of achterkant van de houderpagina."
+                      : docType === "drivers_license"
+                        ? "Upload hier de achterzijde met BSN, QR-code en categoriegegevens."
                       : "Upload hier de achterzijde met BSN en controlegegevens."}
                     previewUrl={backPreview}
                     onFileSelected={(file, preview) => { setBackFile(file); setBackPreview(preview); }}
@@ -1054,7 +1131,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
               />
 
               <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <Button variant="ghost" size="sm" onClick={goBackFromUpload}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <Button size="sm" onClick={() => setStep(3)} disabled={!frontFile}>
                   Volgende <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>
@@ -1097,7 +1174,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                       <label className="text-xs text-muted-foreground mb-1 block">Documentnummer <span className="text-destructive">*</span></label>
                       <Input value={form.document_number} onChange={e => set("document_number", e.target.value)}
                         className={`h-8 text-sm font-mono ${errors.document_number ? "border-destructive" : ""}`}
-                        placeholder={docType === "passport" ? "Bijv. NL1234567" : "Bijv. ID1234567NL"} />
+                        placeholder={docMeta.numberPlaceholder} />
                       {errors.document_number && <p className="text-xs text-destructive mt-1">{errors.document_number}</p>}
                     </div>
 
