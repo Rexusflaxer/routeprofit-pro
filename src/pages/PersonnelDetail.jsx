@@ -1152,9 +1152,9 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
   const routeExecutions = dossier.routeExecutions?.filter(r => r.employee_id === person.id).slice(0, 8) || [];
   const showIdentityWizard = Boolean(identityWizard);
 
-  const openIdentityWizard = (docType = null, archiveMode = false) => {
+  const openIdentityWizard = (archiveMode = false) => {
     setShowIdentityArchive(false);
-    setIdentityWizard({ docType, archiveMode });
+    setIdentityWizard({ archiveMode });
   };
 
   const renderTab = () => {
@@ -1176,7 +1176,6 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
                 personnelId={person.id}
                 nationality={person.nationality}
                 isArchiveEntry={identityWizard.archiveMode}
-                initialDocType={identityWizard.docType}
                 onClose={() => setIdentityWizard(null)}
                 onSaved={() => setIdentityWizard(null)}
               />
@@ -1197,7 +1196,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
                     <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
                       <ArrowLeft className="w-3 h-3 mr-1" /> Actieve documenten
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => openIdentityWizard(null, true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                    <Button size="sm" variant="outline" onClick={() => openIdentityWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
                       <Plus className="w-3 h-3 mr-1" /> Oud document
                     </Button>
                   </>
