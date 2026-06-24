@@ -19,6 +19,8 @@ import {
   BriefcaseBusiness,
   CalendarDays,
   Check,
+  ChevronLeft,
+  ChevronRight,
   ClipboardCheck,
   CreditCard,
   Eye,
@@ -251,7 +253,7 @@ const IDENTITY_DOCUMENT_KINDS = [
   { key: "id_card", label: "ID-kaart", addLabel: "ID-kaart" },
   { key: "drivers_license", label: "Rijbewijs", addLabel: "Rijbewijs" },
 ];
-const IDENTITY_TABLE_GRID = "grid grid-cols-[minmax(220px,1fr)_minmax(130px,160px)_minmax(110px,140px)_72px] gap-3";
+const IDENTITY_TABLE_GRID = "grid grid-cols-[minmax(220px,1fr)_170px_140px_300px] gap-3";
 
 function isIdentityLikeDocument(doc) {
   return doc?.category === "identity_document" || doc?.category === "drivers_license";
@@ -993,6 +995,7 @@ function PayrollTab({ person, documents }) {
 }
 
 function IdentityDocumentPreviewDialog({ document, open, onOpenChange }) {
+  const [activeImageIndex, setActiveImageIndex] = useState(0);
   const urls = identityDocumentUrls(document);
   const kind = identityDocumentKind(document);
   const images = [
@@ -1007,26 +1010,52 @@ function IdentityDocumentPreviewDialog({ document, open, onOpenChange }) {
       url: urls.back,
     },
   ].filter(Boolean);
+  const currentIndex = Math.min(activeImageIndex, Math.max(images.length - 1, 0));
+  const activeImage = images[currentIndex];
+
+  useEffect(() => {
+    if (open) setActiveImageIndex(0);
+  }, [document?.id, open]);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-5xl">
+      <DialogContent className="max-w-4xl">
         <DialogHeader>
           <DialogTitle>{document?.document_type || identityDocumentKindLabel(kind)}</DialogTitle>
         </DialogHeader>
         {images.length === 0 ? (
           <SmallEmpty text="Voor dit document is nog geen upload beschikbaar." />
         ) : (
-          <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-            {images.map(image => (
-              <div key={image.key} className="rounded-lg border border-border bg-muted/20 p-3">
-                <p className="mb-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">{image.label}</p>
-                <div className="flex max-h-[70vh] items-center justify-center overflow-auto rounded-md bg-background">
-                  <img src={image.url} alt={image.label} className="max-h-[70vh] w-auto max-w-full object-contain" />
-                </div>
-              </div>
-            ))}
+          <div className="space-y-3">
+            <div className="flex items-center justify-between gap-3">
+              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{activeImage.label}</p>
+              {images.length > 1 && (
+                <span className="text-xs text-muted-foreground">{currentIndex + 1} van {images.length}</span>
+              )}
+            </div>
+            <div className="flex max-h-[72vh] min-h-[360px] items-center justify-center overflow-auto rounded-lg border border-border bg-muted/20 p-3">
+              <img src={activeImage.url} alt={activeImage.label} className="max-h-[72vh] w-auto max-w-full object-contain" />
+            </div>
           </div>
+        )}
+        {images.length > 1 && (
+          <DialogFooter className="gap-2 sm:justify-between">
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => setActiveImageIndex(index => Math.max(index - 1, 0))}
+              disabled={currentIndex === 0}
+            >
+              <ChevronLeft className="mr-1 h-4 w-4" /> Vorige
+            </Button>
+            <Button
+              type="button"
+              onClick={() => setActiveImageIndex(index => Math.min(index + 1, images.length - 1))}
+              disabled={currentIndex === images.length - 1}
+            >
+              Volgende <ChevronRight className="ml-1 h-4 w-4" />
+            </Button>
+          </DialogFooter>
         )}
       </DialogContent>
     </Dialog>
@@ -1182,15 +1211,12 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
             )}
           </AnimatePresence>
 
-          <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/30 px-5 py-2">
-            <div className={`${IDENTITY_TABLE_GRID} min-w-[540px] flex-1 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
-              <span>Type / omschrijving</span>
-              <span>Documentnummer</span>
-              <span>Geldig tot</span>
-              <span />
-            </div>
+          <div className={`${IDENTITY_TABLE_GRID} items-center border-b border-border bg-muted/30 px-5 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+            <span>Type / omschrijving</span>
+            <span>Documentnummer</span>
+            <span>Geldig tot</span>
             {!showIdentityWizard && (
-              <div className="flex shrink-0 flex-wrap items-center justify-end gap-2">
+              <div className="flex flex-wrap items-center justify-end gap-2">
                 {showIdentityArchive ? (
                   <>
                     <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
@@ -1212,6 +1238,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
                 )}
               </div>
             )}
+            {showIdentityWizard && <span />}
           </div>
 
           {showIdentityArchive ? (
