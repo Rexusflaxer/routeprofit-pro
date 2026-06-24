@@ -1,4 +1,5 @@
 import { base44 } from "@/api/base44Client";
+import { buildAuditMetadata, formatAuditActorLabel } from "@/lib/auditTrail";
 
 const MIME_EXTENSION = {
   "application/pdf": "pdf",
@@ -466,6 +467,8 @@ export async function uploadManagedFile(input) {
     isSensitive = false,
     retentionUntil = null,
     metadata = {},
+    uploadedBy = null,
+    auditAction = "toegevoegd",
     folderSegments = [],
     version = 1
   } = input;
@@ -523,6 +526,10 @@ export async function uploadManagedFile(input) {
 
   const { file_url } = await base44.integrations.Core.UploadFile({ file: uploadFile });
   const security = sensitivityDefaults(isSensitive);
+  const uploadedByLabel = formatAuditActorLabel(uploadedBy);
+  const auditMetadata = uploadedBy
+    ? buildAuditMetadata(uploadedBy, auditAction, metadata)
+    : metadata;
 
   const managed = await base44.entities.ManagedFile.create({
     owner_type: ownerType,
@@ -568,9 +575,9 @@ export async function uploadManagedFile(input) {
     security_classification: security.security_classification,
     retention_until: retentionUntil || null,
     uploaded_at: new Date().toISOString(),
-    uploaded_by: null,
+    uploaded_by: uploadedByLabel || null,
     metadata: {
-      ...metadata,
+      ...auditMetadata,
       owner_label: ownerLabel || null,
       commercial_container_policy: "company-scoped-managed-files-v1",
       encryption_policy: isSensitive ? "client-side-file-encryption-v1" : "not-required",

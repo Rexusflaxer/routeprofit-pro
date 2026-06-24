@@ -10,6 +10,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { buildManagedFileDescriptor, updateManagedFileSource, uploadManagedFile } from "@/lib/managedFiles";
+import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import {
   AlertTriangle,
   Archive,
@@ -27,7 +28,7 @@ import {
 import { AnimatePresence, motion } from "framer-motion";
 
 const DELETE_PASSWORD = "verwijder";
-const INSURANCE_TABLE_GRID = "grid grid-cols-[minmax(220px,1.2fr)_minmax(180px,0.9fr)_minmax(108px,130px)_minmax(180px,260px)_minmax(230px,300px)] gap-3 xl:gap-4";
+const INSURANCE_TABLE_GRID = "grid grid-cols-[minmax(220px,1.2fr)_minmax(180px,0.9fr)_minmax(108px,130px)_minmax(180px,260px)_minmax(140px,180px)_minmax(230px,300px)] gap-3 xl:gap-4";
 const CUSTOM_PARTY_NEW_VALUE = "__new_party__";
 const CUSTOM_PARTY_NONE_VALUE = "__no_party__";
 
@@ -376,6 +377,11 @@ export default function CompanyInsurancesTab({ companyId, company }) {
     queryFn: () => base44.entities.CompanyInsurancePolicy.filter({ company_id: companyId }, "-created_date"),
     enabled: !!companyId,
   });
+  const { data: currentUser = null } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: () => base44.auth.me(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const companyActivities = useMemo(() => new Set(company?.activities || []), [company]);
   const insurerOptions = useMemo(() => partyOptionsFromPolicies(policies, "insurer_name"), [policies]);
@@ -456,14 +462,21 @@ export default function CompanyInsurancesTab({ companyId, company }) {
     });
   };
 
+  const withDocumentAudit = (data, action) => ({
+    ...data,
+    document_metadata: data.document_file_url
+      ? buildAuditMetadata(currentUser, action, data.document_metadata || {})
+      : data.document_metadata || null,
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (data) => {
-      const normalized = withCurrentDocumentDescriptor({
+      const normalized = withDocumentAudit(withCurrentDocumentDescriptor({
         ...data,
         status: deriveStatus(data),
         valid_until: data.has_no_expiry ? null : data.valid_until || null,
         renewal_notice_date: data.renewal_notice_date || null,
-      });
+      }), editingId ? "bijgewerkt" : "toegevoegd");
       const payload = {
         company_id: companyId,
         insurance_type: normalized.insurance_type,
@@ -636,6 +649,12 @@ export default function CompanyInsurancesTab({ companyId, company }) {
         isSensitive: true,
         folderSegments: ["verzekeringen", form.insurance_type || "overig", form.valid_until ? form.valid_until.slice(0, 4) : "doorlopend"],
         metadata: { insurance_type: form.insurance_type || null, policy_number: form.policy_number || null },
+        uploadedBy: currentUser,
+        auditAction: editingId ? "bijgewerkt" : "toegevoegd",
+      });
+      const nextMetadata = buildAuditMetadata(currentUser, editingId ? "bijgewerkt" : "toegevoegd", {
+        managed_file_id: result.managed_file_id,
+        folder_path: result.folder_path,
       });
       setForm(current => ({
         ...current,
@@ -644,7 +663,7 @@ export default function CompanyInsurancesTab({ companyId, company }) {
         document_file_id: result.managed_file_id,
         document_download_filename: result.download_filename,
         document_logical_path: result.logical_path,
-        document_metadata: { managed_file_id: result.managed_file_id, folder_path: result.folder_path },
+        document_metadata: nextMetadata,
       }));
     } finally {
       setUploading(false);
@@ -930,6 +949,7 @@ export default function CompanyInsurancesTab({ companyId, company }) {
           <span className="min-w-0 truncate">Verzekeraar</span>
           <span className="min-w-0 truncate">Status</span>
           <span className="min-w-0 truncate">Geldigheid</span>
+          <span className="min-w-0 truncate">Toegevoegd/vernieuwd door</span>
           <div className="flex min-w-0 justify-end gap-2">
             {archivedPolicies.length > 0 && (
               <Button size="sm" variant={showArchive ? "secondary" : "outline"} onClick={() => setShowArchive(current => !current)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
@@ -985,6 +1005,7 @@ export default function CompanyInsurancesTab({ companyId, company }) {
                   <span className="block truncate">{validityText(policy)}</span>
                   {policy.renewal_notice_date && <span className="block truncate text-xs">Controle: {policy.renewal_notice_date}</span>}
                 </div>
+                <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(policy)}</span>
                 <div className="flex min-w-0 justify-end gap-1">
                   {policy.document_file_url && (
                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPreview(policy)} title="Polisblad bekijken">

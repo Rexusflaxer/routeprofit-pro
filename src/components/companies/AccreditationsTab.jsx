@@ -6,15 +6,16 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Badge } from "@/components/ui/badge";
-import { AlertTriangle, Archive, Check, ChevronLeft, ChevronRight, Edit, Eye, FileText, Plus, RefreshCw, Search, Trash2, Upload, X } from "lucide-react";
+import { AlertTriangle, Archive, Check, ChevronLeft, ChevronRight, Edit, Eye, FileText, Plus, RefreshCw, Trash2, Upload, X } from "lucide-react";
 import { AnimatePresence, motion } from "framer-motion";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { getEffectiveWpbrLicenseType, getWpbrLicenseLabel, TECHNICAL_ACCREDITATION_OPTIONS } from "@/lib/teamhubServiceRules";
 import { buildManagedFileDescriptor, updateManagedFileSource, uploadManagedFile } from "@/lib/managedFiles";
+import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 
 const DELETE_PASSWORD = "verwijder";
 // Header and rows share this grid so status, validity, and actions cannot drift out of alignment.
-const ACCREDITATION_TABLE_GRID = "grid grid-cols-[minmax(120px,160px)_minmax(190px,1fr)_minmax(96px,116px)_minmax(180px,260px)_minmax(250px,360px)] gap-3 xl:gap-4";
+const ACCREDITATION_TABLE_GRID = "grid grid-cols-[minmax(120px,160px)_minmax(190px,1fr)_minmax(96px,116px)_minmax(180px,260px)_minmax(140px,180px)_minmax(250px,360px)] gap-3 xl:gap-4";
 
 const CATEGORY_OPTIONS = [
   { key: "technical_certification", label: "Technische erkenning" },
@@ -993,6 +994,7 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
       <div className="min-w-0">
         <ValidityText item={item} />
       </div>
+      <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item)}</span>
       <div className="min-w-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
         {item.document_file_url && (
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onPreview(item)} title="Document bekijken"><Eye className="h-3.5 w-3.5" /></Button>
@@ -1078,6 +1080,11 @@ export default function AccreditationsTab({ companyId, company }) {
     queryFn: () => base44.entities.CompanyBranchMembership.filter({ company_id: companyId }, "-created_date"),
     enabled: !!companyId,
   });
+  const { data: currentUser = null } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: () => base44.auth.me(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const branchRequiredActions = useMemo(
     () => requiredAccreditationActionsForMemberships(branchMemberships),
@@ -1154,9 +1161,17 @@ export default function AccreditationsTab({ companyId, company }) {
     });
   };
 
+  const withDocumentAudit = (data, action) => ({
+    ...data,
+    document_metadata: data.document_file_url
+      ? buildAuditMetadata(currentUser, action, data.document_metadata || {})
+      : data.document_metadata || null,
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (data) => {
-      const normalizedData = withCurrentDocumentDescriptor(data);
+      const action = editingId ? "bijgewerkt" : renewingId ? "vernieuwd" : "toegevoegd";
+      const normalizedData = withDocumentAudit(withCurrentDocumentDescriptor(data), action);
       const payload = {
         ...normalizedData,
         company_id: companyId,
@@ -1184,7 +1199,12 @@ export default function AccreditationsTab({ companyId, company }) {
       // Renewal: supersede existing active/expired records of same type
       if (renewingId) {
         const sameType = accreditations.filter(a => a.accreditation_type === normalizedData.accreditation_type && !isArchivedStatus(a.status));
-        await Promise.all(sameType.map(a => base44.entities.CompanyAccreditation.update(a.id, { status: "superseded" })));
+        await Promise.all(sameType.map(a => base44.entities.CompanyAccreditation.update(a.id, {
+          status: "superseded",
+          document_metadata: a.document_file_url
+            ? buildAuditMetadata(currentUser, "vernieuwd", a.document_metadata || {})
+            : a.document_metadata || null,
+        })));
       }
 
       const created = await base44.entities.CompanyAccreditation.create({ ...payload, status: "active" });
@@ -1420,6 +1440,12 @@ export default function AccreditationsTab({ companyId, company }) {
         isSensitive: true,
         folderSegments: ["erkenningen", form.category, form.accreditation_type],
         metadata: { category: form.category, accreditation_type: form.accreditation_type },
+        uploadedBy: currentUser,
+        auditAction: renewingId ? "vernieuwd" : "toegevoegd",
+      });
+      const nextMetadata = buildAuditMetadata(currentUser, renewingId ? "vernieuwd" : "toegevoegd", {
+        managed_file_id: result.managed_file_id,
+        folder_path: result.folder_path,
       });
       setForm(current => ({
         ...current,
@@ -1428,7 +1454,7 @@ export default function AccreditationsTab({ companyId, company }) {
         document_file_id: result.managed_file_id,
         document_download_filename: result.download_filename,
         document_logical_path: result.logical_path,
-        document_metadata: { managed_file_id: result.managed_file_id, folder_path: result.folder_path },
+        document_metadata: nextMetadata,
       }));
     } finally {
       setUploading(false);
@@ -1679,6 +1705,7 @@ export default function AccreditationsTab({ companyId, company }) {
         <span className="min-w-0">Erkenning</span>
         <span className="min-w-0">Status</span>
         <span className="min-w-0">Geldigheid</span>
+        <span className="min-w-0">Toegevoegd/vernieuwd door</span>
         <div className="min-w-0 flex flex-nowrap items-center justify-end gap-2">
           {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse mr-1">Archief</Badge>}
           {!showWizard && !deleteId && (

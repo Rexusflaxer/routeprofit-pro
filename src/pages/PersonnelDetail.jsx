@@ -43,6 +43,7 @@ import PersonnelContractsTab from "@/components/personnel/PersonnelContractsTab"
 import CostCalculator from "@/components/personnel/CostCalculator";
 import PhotoCropUpload from "@/components/personnel/PhotoCropUpload";
 import IdentityDocumentWizard from "@/components/personnel/IdentityDocumentWizard";
+import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -253,7 +254,7 @@ const IDENTITY_DOCUMENT_KINDS = [
   { key: "id_card", label: "ID-kaart", addLabel: "ID-kaart" },
   { key: "drivers_license", label: "Rijbewijs", addLabel: "Rijbewijs" },
 ];
-const IDENTITY_TABLE_GRID = "grid grid-cols-[minmax(220px,1fr)_170px_140px_300px] gap-3";
+const IDENTITY_TABLE_GRID = "grid grid-cols-[minmax(220px,1fr)_170px_140px_180px_180px] gap-3";
 
 function isIdentityLikeDocument(doc) {
   return doc?.category === "identity_document" || doc?.category === "drivers_license";
@@ -988,6 +989,7 @@ function PayrollTab({ person, documents }) {
           { key: "document_type", label: "Type" }, { key: "document_number", label: "Nummer" },
           { key: "valid_from", label: "Datum", render: r => formatDate(r.valid_from) },
           { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
+          { key: "audit_actor", label: "Toegevoegd/vernieuwd door", render: getAuditActorLabel },
         ]} />
       </SectionPanel>
     </div>
@@ -1109,6 +1111,7 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew }) {
         <span className="text-sm text-foreground">{formatDate(doc.valid_until)}</span>
         {expiry && !archived && <BadgePill className={expiry.className}>{expiry.label}</BadgePill>}
       </div>
+      <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(doc)}</span>
       <div className="flex justify-end">
         {canPreview && (
           <Button
@@ -1215,6 +1218,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
             <span>Type / omschrijving</span>
             <span>Documentnummer</span>
             <span>Geldig tot</span>
+            <span>Toegevoegd/vernieuwd door</span>
             {!showIdentityWizard && (
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {showIdentityArchive ? (
@@ -1287,6 +1291,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
             { key: "document_type", label: "Type" }, { key: "document_number", label: "Nummer" },
             { key: "valid_until", label: "Geldig tot", render: r => formatDate(r.valid_until) },
             { key: "verification_status", label: "Status", render: r => <BadgePill className={r.verification_status === "verified" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}>{VERIFICATION_LABELS[r.verification_status] || r.verification_status}</BadgePill> },
+            { key: "audit_actor", label: "Toegevoegd/vernieuwd door", render: getAuditActorLabel },
           ]} />
         </SectionPanel>
       );
@@ -1325,6 +1330,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
               { key: "document_number", label: "Nummer" }, { key: "document_type", label: "Type" },
               { key: "valid_until", label: "Geldig tot", render: r => formatDate(r.valid_until) },
               { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
+              { key: "audit_actor", label: "Toegevoegd/vernieuwd door", render: getAuditActorLabel },
             ]} />
           </SectionPanel>
         </div>
@@ -1342,6 +1348,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
               { key: "document_type", label: "Omschrijving" },
               { key: "valid_from", label: "Datum", render: r => formatDate(r.valid_from) },
               { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
+              { key: "audit_actor", label: "Toegevoegd/vernieuwd door", render: getAuditActorLabel },
             ]} />
           </SectionPanel>
         </div>
@@ -1466,6 +1473,7 @@ export default function PersonnelDetail() {
   const { data: reviews = [] } = useQuery({ queryKey: ["personnel-reviews"], queryFn: () => safeList("PersonnelPerformanceReview", "-created_date") });
   const { data: absences = [] } = useQuery({ queryKey: ["personnel-absences"], queryFn: () => safeList("PersonnelAbsence", "-created_date") });
   const { data: routeExecutions = [] } = useQuery({ queryKey: ["route-executions"], queryFn: () => safeList("RouteExecution", "-service_date") });
+  const { data: currentUser = null } = useQuery({ queryKey: ["current-user"], queryFn: () => base44.auth.me(), staleTime: 5 * 60 * 1000 });
 
   const person = allPersonnel.find(p => p.id === personnelId);
 
@@ -1493,7 +1501,10 @@ export default function PersonnelDetail() {
   };
 
   const createRecord = async (config, payload) => {
-    await base44.entities[config.entityName].create(payload);
+    const payloadWithAudit = config.entityName === "PersonnelDocument"
+      ? { ...payload, metadata: buildAuditMetadata(currentUser, "toegevoegd", payload.metadata || {}) }
+      : payload;
+    await base44.entities[config.entityName].create(payloadWithAudit);
     config.queryKeys.forEach(k => queryClient.invalidateQueries({ queryKey: [k] }));
   };
 

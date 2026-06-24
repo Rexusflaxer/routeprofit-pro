@@ -8,6 +8,7 @@ import { Eye, FileText, Upload, Plus, X, Check, ChevronRight, ChevronLeft, Edit,
 import { motion, AnimatePresence } from "framer-motion";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { buildManagedFileDescriptor, syncManagedFileDescriptor, uploadManagedFile } from "@/lib/managedFiles";
+import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 
 const WPBR_TYPES = [
   { key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
@@ -132,6 +133,11 @@ export default function WpbrTab({ companyId, company }) {
   const [deleteId, setDeleteId] = useState(null);
   const [showArchive, setShowArchive] = useState(false);
   const [isArchiveEntry, setIsArchiveEntry] = useState(false);
+  const { data: currentUser = null } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: () => base44.auth.me(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   useEffect(() => {
     if (showWizard) {
@@ -221,9 +227,17 @@ export default function WpbrTab({ companyId, company }) {
     });
   };
 
+  const withDocumentAudit = (data, action) => ({
+    ...data,
+    document_metadata: data.document_file_url
+      ? buildAuditMetadata(currentUser, action, data.document_metadata || {})
+      : data.document_metadata || null,
+  });
+
   const saveMutation = useMutation({
     mutationFn: async (data) => {
-      const normalizedData = withCurrentDocumentDescriptor(data);
+      const action = editingId ? "bijgewerkt" : renewingExpiredId ? "vernieuwd" : "toegevoegd";
+      const normalizedData = withDocumentAudit(withCurrentDocumentDescriptor(data), action);
       if (editingId) {
         await syncManagedDocumentDescriptor(normalizedData, editingId);
         return base44.entities.CompanyWpbrLicense.update(editingId, {
@@ -249,7 +263,12 @@ export default function WpbrTab({ companyId, company }) {
       }
       // Supersede all existing active/expired licenses of the same type (archive them)
       const sameType = licenses.filter((l) => l.license_type === normalizedData.license_type && l.status !== "superseded");
-      await Promise.all(sameType.map((l) => base44.entities.CompanyWpbrLicense.update(l.id, { status: "superseded" })));
+      await Promise.all(sameType.map((l) => base44.entities.CompanyWpbrLicense.update(l.id, {
+        status: "superseded",
+        document_metadata: l.document_file_url
+          ? buildAuditMetadata(currentUser, "vernieuwd", l.document_metadata || {})
+          : l.document_metadata || null,
+      })));
       const created = await base44.entities.CompanyWpbrLicense.create({ ...normalizedData, company_id: companyId, status: "active" });
       if (created?.id && normalizedData.document_file_id) {
         await syncManagedDocumentDescriptor(normalizedData, created.id);
@@ -366,6 +385,12 @@ export default function WpbrTab({ companyId, company }) {
         isSensitive: true,
         folderSegments: ["wpbr", form.license_type || "onbekend", validYear],
         metadata: { license_type: form.license_type || null, license_number: form.license_number || null },
+        uploadedBy: currentUser,
+        auditAction: renewingExpiredId ? "vernieuwd" : "toegevoegd",
+      });
+      const nextMetadata = buildAuditMetadata(currentUser, renewingExpiredId ? "vernieuwd" : "toegevoegd", {
+        managed_file_id: result.managed_file_id,
+        folder_path: result.folder_path,
       });
       setForm((f) => ({
         ...f,
@@ -374,7 +399,7 @@ export default function WpbrTab({ companyId, company }) {
         document_file_id: result.managed_file_id,
         document_download_filename: result.download_filename,
         document_logical_path: result.logical_path,
-        document_metadata: { managed_file_id: result.managed_file_id, folder_path: result.folder_path },
+        document_metadata: nextMetadata,
       }));
     } finally {
       setUploading(false);
@@ -548,6 +573,7 @@ export default function WpbrTab({ companyId, company }) {
         <span className="w-24 shrink-0">Nummer</span>
         <span className="w-28 shrink-0">Status</span>
         <span className="flex-1 min-w-0">Geldigheid</span>
+        <span className="w-40 shrink-0">Toegevoegd/vernieuwd door</span>
         {showArchive && <Badge className="mr-2 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
         {!showWizard && !deleteId && (
           <div className="shrink-0 flex items-center gap-2">
@@ -667,6 +693,7 @@ function LicenseCard({ license, onEdit, onDelete, onRenew, muted }) {
           {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
           {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
         </div>
+        <span className="w-40 shrink-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(license)}</span>
         <div className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
           {onEdit && (
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} title="Bewerken">

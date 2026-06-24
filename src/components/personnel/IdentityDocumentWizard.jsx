@@ -6,6 +6,7 @@ import { Input } from "@/components/ui/input";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import { ChevronLeft, ChevronRight, Check, X, Globe, AlertTriangle, ImageIcon, Crop, Loader2, ZoomIn, ZoomOut, RotateCcw } from "lucide-react";
+import { buildAuditMetadata } from "@/lib/auditTrail";
 
 // EU/EEA nationalities that can carry an identity card
 const EU_EEA_NATIONALITIES = new Set([
@@ -843,6 +844,11 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     queryFn: () => base44.entities.PersonnelSensitiveData.filter({ personnel_id: personnelId }),
     enabled: !!personnelId,
   });
+  const { data: currentUser = null } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: () => base44.auth.me(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const set = (field, val) => {
     setForm(f => ({ ...f, [field]: val }));
@@ -958,18 +964,28 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
         setUploadingBack(false);
       }
 
+      let replacedActiveDocument = false;
+      const actionAt = new Date().toISOString();
+
       if (!isArchiveEntry) {
         // Archiveer bestaande actieve documenten van hetzelfde type, zodat er maar een actief exemplaar blijft.
         const existing = await base44.entities.PersonnelDocument.filter({ personnel_id: personnelId, category: activeDocMeta.category });
         for (const doc of existing) {
           if (storedDocumentKind(doc) === docType && doc.metadata?.archived !== true) {
+            replacedActiveDocument = true;
             await base44.entities.PersonnelDocument.update(doc.id, {
               verification_status: "expired",
-              metadata: { ...(doc.metadata || {}), archived: true, archived_at: new Date().toISOString() },
+              metadata: buildAuditMetadata(currentUser, "vernieuwd", {
+                ...(doc.metadata || {}),
+                archived: true,
+                archived_at: actionAt,
+              }),
             });
           }
         }
       }
+
+      const auditAction = !isArchiveEntry && replacedActiveDocument ? "vernieuwd" : "toegevoegd";
 
       await base44.entities.PersonnelDocument.create({
         personnel_id: personnelId,
@@ -982,7 +998,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
         back_file_url: backUrl,
         is_sensitive: true,
         verification_status: isArchiveEntry ? "expired" : "verified",
-        metadata: {
+        metadata: buildAuditMetadata(currentUser, auditAction, {
           doc_type: docType,
           issuing_country: form.issuing_country,
           issuing_authority: form.issuing_authority || null,
@@ -991,7 +1007,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
           archived: isArchiveEntry,
           front_file_url: frontUrl,
           back_file_url: backUrl,
-        },
+        }),
       });
 
       if (form.bsn.trim()) {
