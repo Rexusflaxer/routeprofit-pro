@@ -43,6 +43,7 @@ import PersonnelContractsTab from "@/components/personnel/PersonnelContractsTab"
 import CostCalculator from "@/components/personnel/CostCalculator";
 import PhotoCropUpload from "@/components/personnel/PhotoCropUpload";
 import IdentityDocumentWizard from "@/components/personnel/IdentityDocumentWizard";
+import PayrollTab from "@/components/personnel/PayrollTab";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -963,39 +964,6 @@ function OverviewTab({ person, companies, dossier }) {
   );
 }
 
-function PayrollTab({ person, documents }) {
-  const relationship = getRelationshipType(person);
-  const payrollDocs = documents.filter(d => d.category === "payroll_tax_statement");
-  if (relationship === "self_employed") return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      <SectionPanel title="ZZP-bedrijfsgegevens" icon={BriefcaseBusiness}>
-        <FieldRow label="Bedrijfsnaam">{person.self_employed_company_name}</FieldRow>
-        <FieldRow label="KvK-nummer">{person.self_employed_kvk_number}</FieldRow>
-        <FieldRow label="Btw-nummer">{person.self_employed_vat_number}</FieldRow>
-        <FieldRow label="Aansprakelijkheid">{person.self_employed_liability_insurance}</FieldRow>
-        <FieldRow label="Standaard uurtarief">{formatCurrency(person.zzp_hourly_rate_excl_vat)}</FieldRow>
-      </SectionPanel>
-    </div>
-  );
-  return (
-    <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-      <SectionPanel title="Loonheffing" icon={Banknote}>
-        <FieldRow label="Loonheffingskorting">{person.payroll_tax_credit_applies === true ? "Ja" : person.payroll_tax_credit_applies === false ? "Nee" : "Onbekend"}</FieldRow>
-        <FieldRow label="Verklaring getekend op">{formatDate(person.payroll_tax_statement_signed_at)}</FieldRow>
-        <FieldRow label="Verklaring bestand">{person.payroll_tax_statement_download_filename || (person.payroll_tax_statement_file_url ? "Aanwezig" : "-")}</FieldRow>
-      </SectionPanel>
-      <SectionPanel title="Loonheffingsdocumenten" icon={FileText}>
-        <MiniTable emptyText="Nog geen loonheffingsdocumenten." rows={payrollDocs} columns={[
-          { key: "document_type", label: "Type" }, { key: "document_number", label: "Nummer" },
-          { key: "valid_from", label: "Datum", render: r => formatDate(r.valid_from) },
-          { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
-          { key: "audit_actor", label: "Toegevoegd/vernieuwd door", render: getAuditActorLabel },
-        ]} />
-      </SectionPanel>
-    </div>
-  );
-}
-
 function IdentityDocumentPreviewDialog({ document, open, onOpenChange }) {
   const [activeImageIndex, setActiveImageIndex] = useState(0);
   const urls = identityDocumentUrls(document);
@@ -1442,7 +1410,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
           );
         })}
       </div>
-      <div className={`min-w-0 flex-1 ${active === "identity" ? "" : "p-5 overflow-hidden"}`}>{renderTab()}</div>
+      <div className={`min-w-0 flex-1 ${["identity", "payroll"].includes(active) ? "" : "p-5 overflow-hidden"}`}>{renderTab()}</div>
     </div>
   );
 }
