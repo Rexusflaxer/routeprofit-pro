@@ -22,6 +22,7 @@ const WPBR_TYPES = [
 ];
 
 const DELETE_PASSWORD = "verwijder";
+const WPBR_TABLE_GRID = "grid grid-cols-[minmax(34px,48px)_minmax(72px,96px)_minmax(96px,112px)_minmax(170px,1fr)_minmax(120px,150px)_minmax(250px,max-content)] gap-3 xl:gap-4";
 
 const EMPTY_FORM = {
   license_type: "", license_number: "", valid_from: "", valid_until: "",
@@ -568,34 +569,39 @@ export default function WpbrTab({ companyId, company }) {
       </AnimatePresence>
 
       {/* Table header */}
-      <div className="flex items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="w-10 shrink-0">Type</span>
-        <span className="w-24 shrink-0">Nummer</span>
-        <span className="w-28 shrink-0">Status</span>
-        <span className="flex-1 min-w-0">Geldigheid</span>
-        <span className="w-40 shrink-0">Toegevoegd/vernieuwd door</span>
-        {showArchive && <Badge className="mr-2 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
+      <div className={`${WPBR_TABLE_GRID} items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+        <span className="min-w-0 truncate">Type</span>
+        <span className="min-w-0 truncate">Nummer</span>
+        <span className="min-w-0 truncate">Status</span>
+        <span className="min-w-0 truncate">Geldigheid</span>
+        <span className="min-w-0 truncate">Toegevoegd/vernieuwd door</span>
         {!showWizard && !deleteId && (
-          <div className="shrink-0 flex items-center gap-2">
+          <div className="min-w-0 flex flex-nowrap items-center justify-end gap-2">
+            {showArchive && <Badge className="shrink-0 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
             {showArchive ? (
               <>
-                <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <ChevronLeft className="w-3 h-3 mr-1" /> Actieve vergunningen
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(true); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(true); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <Plus className="w-3 h-3 mr-1" /> Voeg oude vergunning in archief
                 </Button>
               </>
             ) : (
               <>
-                <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <Archive className="w-3 h-3 mr-1" /> Archief {archivedLicenses.length > 0 ? `(${archivedLicenses.length})` : ""}
                 </Button>
-                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(false); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                <Button size="sm" variant="outline" onClick={() => { setIsArchiveEntry(false); setShowWizard(true); }} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                   <Plus className="w-3 h-3 mr-1" /> Nieuwe vergunning
                 </Button>
               </>
             )}
+          </div>
+        )}
+        {(showWizard || deleteId) && (
+          <div className="min-w-0 flex justify-end">
+            {showArchive && <Badge className="shrink-0 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
           </div>
         )}
       </div>
@@ -675,7 +681,7 @@ function LicenseCard({ license, onEdit, onDelete, onRenew, muted }) {
   return (
     <>
       <div
-        className={`relative flex items-center px-4 py-3 group transition-colors ${
+        className={`relative ${WPBR_TABLE_GRID} items-center px-4 py-3 group transition-colors ${
           expired && onRenew
             ? "cursor-pointer hover:bg-accent/30"
             : license.document_file_url
@@ -684,17 +690,17 @@ function LicenseCard({ license, onEdit, onDelete, onRenew, muted }) {
         }`}
         onClick={handleRowClick}
       >
-        <span className="w-10 shrink-0 text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
-        <span className="w-24 shrink-0 text-sm text-muted-foreground">{license.license_number ? `#${license.license_number}` : "—"}</span>
-        <div className="w-28 shrink-0">
+        <span className="min-w-0 truncate text-sm font-semibold text-foreground">{license.license_type || "?"}</span>
+        <span className="min-w-0 truncate text-sm text-muted-foreground">{license.license_number ? `#${license.license_number}` : "—"}</span>
+        <div className="min-w-0">
           <LicenseStatusBadge license={license} />
         </div>
-        <div className="flex-1 flex gap-4 text-xs text-muted-foreground">
+        <div className="min-w-0 flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
           {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
           {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
         </div>
-        <span className="w-40 shrink-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(license)}</span>
-        <div className="shrink-0 flex gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
+        <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(license)}</span>
+        <div className="min-w-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
           {onEdit && (
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} title="Bewerken">
               <Edit className="w-3.5 h-3.5" />
