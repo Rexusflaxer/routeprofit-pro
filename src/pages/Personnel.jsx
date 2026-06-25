@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import PageTransition from "@/components/ui-custom/PageTransition";
 import { base44 } from "@/api/base44Client";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
@@ -1546,9 +1546,44 @@ export default function Personnel() {
   const [subcontractorDialogOpen, setSubcontractorDialogOpen] = useState(false);
   const [editingSubcontractor, setEditingSubcontractor] = useState(null);
 
-  const { data: personnel = [] } = useQuery({ queryKey: ["personnel"], queryFn: () => base44.entities.Personnel.list() });
+  const { data: personnel = [], isSuccess: personnelLoaded } = useQuery({ queryKey: ["personnel"], queryFn: () => base44.entities.Personnel.list() });
   const { data: companies = [] } = useQuery({ queryKey: ["companies"], queryFn: () => base44.entities.Company.list() });
   const { data: subcontractors = [] } = useQuery({ queryKey: ["subcontractors"], queryFn: () => safeList("SubcontractorCompany", "-created_date") });
+  const { data: currentUser } = useQuery({ queryKey: ["current-user"], queryFn: () => base44.auth.me(), staleTime: 60_000 });
+
+  const ensuredOwnerRef = useRef(false);
+  useEffect(() => {
+    if (ensuredOwnerRef.current || !personnelLoaded || !currentUser?.email) return;
+    const email = currentUser.email.toLowerCase();
+    const exists = personnel.some(p =>
+      (p.linked_user_email && p.linked_user_email.toLowerCase() === email) ||
+      (p.email && p.email.toLowerCase() === email)
+    );
+    if (exists) { ensuredOwnerRef.current = true; return; }
+    ensuredOwnerRef.current = true;
+    const nameParts = (currentUser.full_name || "").trim().split(/\s+/);
+    const firstName = nameParts.length > 1 ? nameParts.slice(0, -1).join(" ") : (nameParts[0] || "");
+    const lastName = nameParts.length > 1 ? nameParts[nameParts.length - 1] : "";
+    base44.entities.Personnel.create({
+      name: currentUser.full_name || "",
+      first_name: firstName,
+      last_name: lastName,
+      email: currentUser.email,
+      linked_user_email: currentUser.email,
+      linked_user_id: currentUser.id,
+      linked_at: new Date().toISOString(),
+      employee_type: "loondienst",
+      relationship_type: "employee",
+      status: "active",
+      is_active: true,
+      hr_completeness_status: "incomplete",
+      country: "Nederland",
+      profile_data_policy: "profile_wins_after_acceptance",
+      profile_conflict_status: "none",
+      local_organization_copy_retained: true,
+    }).then(() => queryClient.invalidateQueries({ queryKey: ["personnel"] }))
+      .catch(() => {});
+  }, [currentUser, personnel, personnelLoaded, queryClient]);
 
   const counts = useMemo(() => {
     const employees = personnel.filter(item => getRelationshipType(item) === "employee").length;
