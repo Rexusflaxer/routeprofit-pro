@@ -949,7 +949,7 @@ export default function CompanyInsurancesTab({ companyId, company }) {
           <span className="min-w-0 truncate">Verzekeraar</span>
           <span className="min-w-0 truncate">Status</span>
           <span className="min-w-0 truncate">Geldigheid</span>
-          <span className="min-w-0 truncate">Toegevoegd/vernieuwd door</span>
+          <span className="min-w-0 truncate">Door</span>
           <div className="flex min-w-0 justify-end gap-2">
             {archivedPolicies.length > 0 && (
               <Button size="sm" variant={showArchive ? "secondary" : "outline"} onClick={() => setShowArchive(current => !current)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">

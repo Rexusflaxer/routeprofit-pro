@@ -499,7 +499,7 @@ export default function PayrollTab({ person, documents }) {
         <span>Type / omschrijving</span>
         <span>Documentnummer</span>
         <span>Geldig tot</span>
-        <span>Toegevoegd/vernieuwd door</span>
+        <span>Door</span>
         {!wizardOpen && (
           <div className="flex flex-wrap items-center justify-end gap-2">
             {showArchive ? (

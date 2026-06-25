@@ -1186,7 +1186,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
             <span>Type / omschrijving</span>
             <span>Documentnummer</span>
             <span>Geldig tot</span>
-            <span>Toegevoegd/vernieuwd door</span>
+            <span>Door</span>
             {!showIdentityWizard && (
               <div className="flex flex-wrap items-center justify-end gap-2">
                 {showIdentityArchive ? (
@@ -1259,7 +1259,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
             { key: "document_type", label: "Type" }, { key: "document_number", label: "Nummer" },
             { key: "valid_until", label: "Geldig tot", render: r => formatDate(r.valid_until) },
             { key: "verification_status", label: "Status", render: r => <BadgePill className={r.verification_status === "verified" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}>{VERIFICATION_LABELS[r.verification_status] || r.verification_status}</BadgePill> },
-            { key: "audit_actor", label: "Toegevoegd/vernieuwd door", render: getAuditActorLabel },
+            { key: "audit_actor", label: "Door", render: getAuditActorLabel },
           ]} />
         </SectionPanel>
       );
@@ -1298,7 +1298,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
               { key: "document_number", label: "Nummer" }, { key: "document_type", label: "Type" },
               { key: "valid_until", label: "Geldig tot", render: r => formatDate(r.valid_until) },
               { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
-              { key: "audit_actor", label: "Toegevoegd/vernieuwd door", render: getAuditActorLabel },
+              { key: "audit_actor", label: "Door", render: getAuditActorLabel },
             ]} />
           </SectionPanel>
         </div>
@@ -1316,7 +1316,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
               { key: "document_type", label: "Omschrijving" },
               { key: "valid_from", label: "Datum", render: r => formatDate(r.valid_from) },
               { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
-              { key: "audit_actor", label: "Toegevoegd/vernieuwd door", render: getAuditActorLabel },
+              { key: "audit_actor", label: "Door", render: getAuditActorLabel },
             ]} />
           </SectionPanel>
         </div>
