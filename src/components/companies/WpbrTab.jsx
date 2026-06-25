@@ -139,6 +139,11 @@ export default function WpbrTab({ companyId, company }) {
     queryFn: () => base44.auth.me(),
     staleTime: 5 * 60 * 1000,
   });
+  const { data: auditActors = [] } = useQuery({
+    queryKey: ["personnel"],
+    queryFn: () => base44.entities.Personnel.list(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   useEffect(() => {
     if (showWizard) {
@@ -231,7 +236,7 @@ export default function WpbrTab({ companyId, company }) {
   const withDocumentAudit = (data, action) => ({
     ...data,
     document_metadata: data.document_file_url
-      ? buildAuditMetadata(currentUser, action, data.document_metadata || {})
+      ? buildAuditMetadata(currentUser, action, data.document_metadata || {}, auditActors)
       : data.document_metadata || null,
   });
 
@@ -267,7 +272,7 @@ export default function WpbrTab({ companyId, company }) {
       await Promise.all(sameType.map((l) => base44.entities.CompanyWpbrLicense.update(l.id, {
         status: "superseded",
         document_metadata: l.document_file_url
-          ? buildAuditMetadata(currentUser, "vernieuwd", l.document_metadata || {})
+          ? buildAuditMetadata(currentUser, "vernieuwd", l.document_metadata || {}, auditActors)
           : l.document_metadata || null,
       })));
       const created = await base44.entities.CompanyWpbrLicense.create({ ...normalizedData, company_id: companyId, status: "active" });
@@ -387,12 +392,13 @@ export default function WpbrTab({ companyId, company }) {
         folderSegments: ["wpbr", form.license_type || "onbekend", validYear],
         metadata: { license_type: form.license_type || null, license_number: form.license_number || null },
         uploadedBy: currentUser,
+        auditActors,
         auditAction: renewingExpiredId ? "vernieuwd" : "toegevoegd",
       });
       const nextMetadata = buildAuditMetadata(currentUser, renewingExpiredId ? "vernieuwd" : "toegevoegd", {
         managed_file_id: result.managed_file_id,
         folder_path: result.folder_path,
-      });
+      }, auditActors);
       setForm((f) => ({
         ...f,
         document_file_url: result.file_url,
@@ -620,6 +626,7 @@ export default function WpbrTab({ companyId, company }) {
                 onEdit={() => startEdit(l)}
                 onDelete={() => setDeleteId(l.id)}
                 onRenew={isExpiredLicense(l) ? () => startRenew(l) : undefined}
+                auditActors={auditActors}
               />
             ))}
           </div>
@@ -633,7 +640,7 @@ export default function WpbrTab({ companyId, company }) {
             <p className="px-4 py-6 text-sm text-muted-foreground text-center">Geen vergunningen in het archief.</p>
           ) : (
             archivedLicenses.map((l) => (
-              <LicenseCard key={l.id} license={l} onDelete={() => setDeleteId(l.id)} muted />
+              <LicenseCard key={l.id} license={l} onDelete={() => setDeleteId(l.id)} auditActors={auditActors} muted />
             ))
           )}
         </div>
@@ -651,7 +658,7 @@ export default function WpbrTab({ companyId, company }) {
   );
 }
 
-function LicenseCard({ license, onEdit, onDelete, onRenew, muted }) {
+function LicenseCard({ license, onEdit, onDelete, onRenew, muted, auditActors = [] }) {
   const [previewOpen, setPreviewOpen] = useState(false);
   const [contextMenu, setContextMenu] = useState(null); // { x, y }
   const contextRef = useRef(null);
@@ -699,7 +706,7 @@ function LicenseCard({ license, onEdit, onDelete, onRenew, muted }) {
           {license.valid_from && <span>Vanaf: <strong className="text-foreground">{license.valid_from}</strong></span>}
           {license.valid_until && <span>Tot: <strong className="text-foreground">{license.valid_until}</strong></span>}
         </div>
-        <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(license)}</span>
+        <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(license, auditActors)}</span>
         <div className="min-w-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={(e) => e.stopPropagation()}>
           {onEdit && (
             <Button variant="ghost" size="icon" className="h-7 w-7" onClick={onEdit} title="Bewerken">

@@ -8,7 +8,7 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Archive, ArrowLeft, Banknote, BriefcaseBusiness, Check, Eye,
+  Archive, ArrowLeft, BriefcaseBusiness, Check, Eye,
   FileCheck2, FileText, ImageIcon, Loader2, Plus, X,
 } from "lucide-react";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
@@ -57,7 +57,7 @@ function isImageFile(url) {
 
 // ─── Document Row ─────────────────────────────────────────────────────────────
 
-function PayrollDocumentRow({ doc, archived = false, onPreview }) {
+function PayrollDocumentRow({ doc, archived = false, onPreview, auditActors = [] }) {
   const expiry = getExpiryState(doc.valid_until);
   const canPreview = hasPayrollDocumentUpload(doc);
 
@@ -85,7 +85,7 @@ function PayrollDocumentRow({ doc, archived = false, onPreview }) {
           <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${expiry.className}`}>{expiry.label}</span>
         )}
       </div>
-      <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(doc)}</span>
+      <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(doc, auditActors)}</span>
       <div className="flex justify-end">
         {canPreview && (
           <Button
@@ -143,7 +143,7 @@ function PayrollDocumentPreviewDialog({ document, open, onOpenChange }) {
 
 // ─── Wizard ───────────────────────────────────────────────────────────────────
 
-function PayrollDocumentWizard({ personnelId, isArchiveEntry = false, onClose, onSaved, currentUser }) {
+function PayrollDocumentWizard({ personnelId, isArchiveEntry = false, onClose, onSaved, currentUser, auditActors = [] }) {
   const queryClient = useQueryClient();
   const [form, setForm] = useState({
     document_type: "Loonheffingsverklaring",
@@ -213,7 +213,7 @@ function PayrollDocumentWizard({ personnelId, isArchiveEntry = false, onClose, o
                 ...(doc.metadata || {}),
                 archived: true,
                 archived_at: actionAt,
-              }),
+              }, auditActors),
             });
           }
         }
@@ -233,7 +233,7 @@ function PayrollDocumentWizard({ personnelId, isArchiveEntry = false, onClose, o
           doc_category: "payroll_tax_statement",
           archived: isArchiveEntry,
           front_file_url: fileUrl,
-        }),
+        }, auditActors),
       });
     },
     onSuccess: () => {
@@ -383,7 +383,7 @@ function ZzpDetailsSection({ person }) {
 
 // ─── Main Tab ─────────────────────────────────────────────────────────────────
 
-export default function PayrollTab({ person, documents }) {
+export default function PayrollTab({ person, documents, auditActors = [] }) {
   const queryClient = useQueryClient();
   const relationship = getRelationshipType(person);
   const [wizardOpen, setWizardOpen] = useState(false);
@@ -451,6 +451,7 @@ export default function PayrollTab({ person, documents }) {
             onClose={() => setWizardOpen(false)}
             onSaved={() => setWizardOpen(false)}
             currentUser={currentUser}
+            auditActors={auditActors}
           />
         )}
       </AnimatePresence>
@@ -533,7 +534,7 @@ export default function PayrollTab({ person, documents }) {
         ) : (
           <div className="divide-y divide-border">
             {sortedArchived.map(doc => (
-              <PayrollDocumentRow key={doc.id} doc={doc} archived onPreview={setPreviewDoc} />
+              <PayrollDocumentRow key={doc.id} doc={doc} archived onPreview={setPreviewDoc} auditActors={auditActors} />
             ))}
           </div>
         )
@@ -542,7 +543,7 @@ export default function PayrollTab({ person, documents }) {
       ) : (
         <div className="divide-y divide-border">
           {sortedActive.map(doc => (
-            <PayrollDocumentRow key={doc.id} doc={doc} onPreview={setPreviewDoc} />
+            <PayrollDocumentRow key={doc.id} doc={doc} onPreview={setPreviewDoc} auditActors={auditActors} />
           ))}
         </div>
       )}

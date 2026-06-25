@@ -937,7 +937,7 @@ function IssuerSelectField({ value, options, creating, onSelect, onCustomChange,
 }
 
 // Row with context menu for action/expired items, direct preview for items with document
-function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
+function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview, auditActors = [] }) {
   const [contextMenu, setContextMenu] = useState(null);
   const contextRef = useRef(null);
   const needsAction = isActionItem(item);
@@ -994,7 +994,7 @@ function AccreditationRow({ item, onEdit, onDelete, onRenew, onPreview }) {
       <div className="min-w-0">
         <ValidityText item={item} />
       </div>
-      <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item)}</span>
+      <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
       <div className="min-w-0 flex justify-end gap-1 opacity-0 group-hover:opacity-100 transition-opacity" onClick={e => e.stopPropagation()}>
         {item.document_file_url && (
           <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => onPreview(item)} title="Document bekijken"><Eye className="h-3.5 w-3.5" /></Button>
@@ -1085,6 +1085,11 @@ export default function AccreditationsTab({ companyId, company }) {
     queryFn: () => base44.auth.me(),
     staleTime: 5 * 60 * 1000,
   });
+  const { data: auditActors = [] } = useQuery({
+    queryKey: ["personnel"],
+    queryFn: () => base44.entities.Personnel.list(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const branchRequiredActions = useMemo(
     () => requiredAccreditationActionsForMemberships(branchMemberships),
@@ -1164,7 +1169,7 @@ export default function AccreditationsTab({ companyId, company }) {
   const withDocumentAudit = (data, action) => ({
     ...data,
     document_metadata: data.document_file_url
-      ? buildAuditMetadata(currentUser, action, data.document_metadata || {})
+      ? buildAuditMetadata(currentUser, action, data.document_metadata || {}, auditActors)
       : data.document_metadata || null,
   });
 
@@ -1202,7 +1207,7 @@ export default function AccreditationsTab({ companyId, company }) {
         await Promise.all(sameType.map(a => base44.entities.CompanyAccreditation.update(a.id, {
           status: "superseded",
           document_metadata: a.document_file_url
-            ? buildAuditMetadata(currentUser, "vernieuwd", a.document_metadata || {})
+            ? buildAuditMetadata(currentUser, "vernieuwd", a.document_metadata || {}, auditActors)
             : a.document_metadata || null,
         })));
       }
@@ -1441,12 +1446,13 @@ export default function AccreditationsTab({ companyId, company }) {
         folderSegments: ["erkenningen", form.category, form.accreditation_type],
         metadata: { category: form.category, accreditation_type: form.accreditation_type },
         uploadedBy: currentUser,
+        auditActors,
         auditAction: renewingId ? "vernieuwd" : "toegevoegd",
       });
       const nextMetadata = buildAuditMetadata(currentUser, renewingId ? "vernieuwd" : "toegevoegd", {
         managed_file_id: result.managed_file_id,
         folder_path: result.folder_path,
-      });
+      }, auditActors);
       setForm(current => ({
         ...current,
         document_file_url: result.file_url,
@@ -1746,6 +1752,7 @@ export default function AccreditationsTab({ companyId, company }) {
                 onDelete={setDeleteId}
                 onRenew={openRenew}
                 onPreview={setPreview}
+                auditActors={auditActors}
               />
             ))}
           </div>
@@ -1765,6 +1772,7 @@ export default function AccreditationsTab({ companyId, company }) {
                 onDelete={setDeleteId}
                 onRenew={undefined}
                 onPreview={setPreview}
+                auditActors={auditActors}
               />
             ))
           )}

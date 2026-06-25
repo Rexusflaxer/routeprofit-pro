@@ -801,7 +801,7 @@ function WizardSteps({ step, labels }) {
 
 // ─── Main Wizard ───────────────────────────────────────────────────────────────
 
-export default function IdentityDocumentWizard({ personnelId, nationality, onClose, onSaved, isArchiveEntry = false, initialDocType = null }) {
+export default function IdentityDocumentWizard({ personnelId, nationality, onClose, onSaved, isArchiveEntry = false, initialDocType = null, auditActors = [] }) {
   const queryClient = useQueryClient();
   const normalizedInitialDocType = DOCUMENT_TYPE_META[initialDocType] ? initialDocType : null;
   const docTypeLocked = Boolean(normalizedInitialDocType);
@@ -979,7 +979,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                 ...(doc.metadata || {}),
                 archived: true,
                 archived_at: actionAt,
-              }),
+              }, auditActors),
             });
           }
         }
@@ -1007,7 +1007,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
           archived: isArchiveEntry,
           front_file_url: frontUrl,
           back_file_url: backUrl,
-        }),
+        }, auditActors),
       });
 
       if (form.bsn.trim()) {

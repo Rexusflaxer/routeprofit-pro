@@ -3,7 +3,15 @@ function compact(value) {
 }
 
 function normalizeInitials(value) {
-  const clean = compact(value).replace(/\s+/g, "").replace(/\.+/g, ".");
+  const raw = compact(value).replace(/\s+/g, "");
+  const lettersOnly = raw.replace(/\./g, "");
+  if (/^[A-Za-z]{2,5}$/.test(raw)) {
+    return `${raw.toUpperCase().split("").join(".")}.`;
+  }
+  if (/^[A-Za-z]{2,5}$/.test(lettersOnly)) {
+    return `${lettersOnly.toUpperCase().split("").join(".")}.`;
+  }
+  const clean = raw.replace(/\.+/g, ".");
   if (!clean) return "";
   return clean.endsWith(".") ? clean : `${clean}.`;
 }
@@ -17,35 +25,119 @@ function initialsFromParts(parts) {
   return initials ? `${initials}.` : "";
 }
 
-export function formatAuditActorLabel(actor) {
+function isEmailLike(value) {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(compact(value));
+}
+
+function normalizeEmail(value) {
+  const clean = compact(value).toLowerCase();
+  return isEmailLike(clean) ? clean : "";
+}
+
+function uniqueValues(values) {
+  return [...new Set(values.map(compact).filter(Boolean))];
+}
+
+function actorEmailCandidates(actor) {
+  if (!actor) return [];
+  if (typeof actor === "string") return uniqueValues([normalizeEmail(actor)]);
+
+  const metadata = actor.metadata || actor.document_metadata || actor.proof_metadata || {};
+  return uniqueValues([
+    actor.email,
+    actor.user_email,
+    actor.login_email,
+    actor.linked_user_email,
+    actor.work_email,
+    actor.private_email,
+    actor.created_by_email,
+    actor.uploaded_by_email,
+    actor.last_action_by_email,
+    metadata.email,
+    metadata.user_email,
+    metadata.login_email,
+    metadata.linked_user_email,
+    metadata.created_by_email,
+    metadata.uploaded_by_email,
+    metadata.last_action_by_email,
+    isEmailLike(actor.full_name) ? actor.full_name : "",
+    isEmailLike(actor.display_name) ? actor.display_name : "",
+    isEmailLike(actor.name) ? actor.name : "",
+    isEmailLike(metadata.created_by_display) ? metadata.created_by_display : "",
+    isEmailLike(metadata.last_action_by_display) ? metadata.last_action_by_display : "",
+  ].map(normalizeEmail));
+}
+
+function asDirectory(actorDirectory) {
+  if (!actorDirectory) return [];
+  return Array.isArray(actorDirectory) ? actorDirectory : [actorDirectory];
+}
+
+function matchActorByEmail(email, actorDirectory) {
+  const normalizedEmail = normalizeEmail(email);
+  if (!normalizedEmail) return null;
+  return asDirectory(actorDirectory).find(candidate => actorEmailCandidates(candidate).includes(normalizedEmail)) || null;
+}
+
+export function resolveAuditActor(actor, actorDirectory = []) {
+  if (!actor) return actor;
+  const normalizedActor = typeof actor === "string"
+    ? { email: isEmailLike(actor) ? actor : null, full_name: isEmailLike(actor) ? "" : actor }
+    : actor;
+
+  for (const email of actorEmailCandidates(normalizedActor)) {
+    const match = matchActorByEmail(email, actorDirectory);
+    if (match) {
+      return {
+        ...normalizedActor,
+        ...match,
+        metadata: {
+          ...(match.metadata || {}),
+          ...(normalizedActor.metadata || {}),
+        },
+        email: normalizedActor.email || match.email || email,
+      };
+    }
+  }
+
+  return normalizedActor;
+}
+
+export function formatAuditActorLabel(actor, actorDirectory = []) {
   if (!actor) return "";
 
-  const metadata = actor.metadata || {};
-  const explicitInitials = normalizeInitials(actor.initials || actor.initialen || metadata.initials || metadata.initialen);
+  const resolvedActor = resolveAuditActor(actor, actorDirectory);
+  const metadata = resolvedActor.metadata || {};
+  const explicitInitials = normalizeInitials(resolvedActor.initials || resolvedActor.initialen || metadata.initials || metadata.initialen);
   const explicitLastName = compact(
-    actor.last_name ||
-    actor.lastname ||
-    actor.family_name ||
-    actor.surname ||
+    resolvedActor.last_name ||
+    resolvedActor.lastname ||
+    resolvedActor.family_name ||
+    resolvedActor.surname ||
+    resolvedActor.achternaam ||
     metadata.last_name ||
     metadata.lastname ||
     metadata.family_name ||
-    metadata.surname
+    metadata.surname ||
+    metadata.achternaam
   );
 
-  if (explicitInitials && explicitLastName) return `${explicitInitials} ${explicitLastName}`;
+  if (explicitInitials && explicitLastName) {
+    const prefix = compact(resolvedActor.name_prefix || resolvedActor.prefix || metadata.name_prefix || metadata.prefix);
+    return `${explicitInitials} ${[prefix, explicitLastName].filter(Boolean).join(" ")}`;
+  }
 
   const fullName = compact(
-    actor.full_name ||
-    actor.display_name ||
-    actor.name ||
-    [actor.first_name, actor.middle_name, actor.last_name].filter(Boolean).join(" ") ||
+    resolvedActor.full_name ||
+    resolvedActor.display_name ||
+    resolvedActor.name ||
+    [resolvedActor.first_name, resolvedActor.middle_name, resolvedActor.last_name].filter(Boolean).join(" ") ||
     metadata.full_name ||
     metadata.display_name ||
     metadata.name
   );
 
-  if (fullName) {
+  if (fullName && !isEmailLike(fullName)) {
     const parts = fullName.split(" ").filter(Boolean);
     if (parts.length > 1) {
       const lastName = parts[parts.length - 1];
@@ -55,15 +147,16 @@ export function formatAuditActorLabel(actor) {
     return fullName;
   }
 
-  return compact(actor.email) || "";
+  return "";
 }
 
-export function buildAuditMetadata(actor, action = "toegevoegd", previous = {}) {
+export function buildAuditMetadata(actor, action = "toegevoegd", previous = {}, actorDirectory = []) {
   const previousMetadata = previous || {};
   const now = new Date().toISOString();
-  const actorLabel = formatAuditActorLabel(actor) || "Onbekend";
-  const actorId = actor?.id || actor?.user_id || actor?.uid || null;
-  const actorEmail = actor?.email || null;
+  const resolvedActor = resolveAuditActor(actor, actorDirectory);
+  const actorLabel = formatAuditActorLabel(resolvedActor, actorDirectory) || "Onbekend";
+  const actorId = actor?.id || actor?.user_id || actor?.uid || resolvedActor?.id || resolvedActor?.user_id || resolvedActor?.uid || null;
+  const actorEmail = actorEmailCandidates(resolvedActor)[0] || actorEmailCandidates(actor)[0] || null;
 
   return {
     ...previousMetadata,
@@ -79,15 +172,41 @@ export function buildAuditMetadata(actor, action = "toegevoegd", previous = {}) 
   };
 }
 
-export function getAuditActorLabel(record) {
+export function getAuditActorLabel(record, actorDirectory = []) {
   const metadata = record?.metadata || record?.document_metadata || record?.proof_metadata || {};
-  return (
-    metadata.last_action_by_display ||
-    metadata.created_by_display ||
-    record?.uploaded_by_display ||
-    record?.created_by_display ||
-    record?.uploaded_by ||
-    record?.created_by ||
-    "-"
-  );
+  const emailCandidates = uniqueValues([
+    metadata.last_action_by_email,
+    metadata.created_by_email,
+    metadata.uploaded_by_email,
+    record?.last_action_by_email,
+    record?.created_by_email,
+    record?.uploaded_by_email,
+    record?.uploaded_by,
+    record?.created_by,
+  ].map(normalizeEmail));
+
+  for (const email of emailCandidates) {
+    const label = formatAuditActorLabel({ email }, actorDirectory);
+    if (label) return label;
+  }
+
+  const displayCandidates = uniqueValues([
+    metadata.last_action_by_display,
+    metadata.created_by_display,
+    record?.uploaded_by_display,
+    record?.created_by_display,
+    record?.uploaded_by,
+    record?.created_by
+  ]);
+
+  for (const displayValue of displayCandidates) {
+    if (isEmailLike(displayValue)) {
+      const label = formatAuditActorLabel({ email: displayValue }, actorDirectory);
+      if (label) return label;
+      continue;
+    }
+    return displayValue;
+  }
+
+  return "-";
 }

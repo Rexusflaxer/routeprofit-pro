@@ -468,6 +468,7 @@ export async function uploadManagedFile(input) {
     retentionUntil = null,
     metadata = {},
     uploadedBy = null,
+    auditActors = [],
     auditAction = "toegevoegd",
     folderSegments = [],
     version = 1
@@ -526,9 +527,9 @@ export async function uploadManagedFile(input) {
 
   const { file_url } = await base44.integrations.Core.UploadFile({ file: uploadFile });
   const security = sensitivityDefaults(isSensitive);
-  const uploadedByLabel = formatAuditActorLabel(uploadedBy);
+  const uploadedByLabel = formatAuditActorLabel(uploadedBy, auditActors);
   const auditMetadata = uploadedBy
-    ? buildAuditMetadata(uploadedBy, auditAction, metadata)
+    ? buildAuditMetadata(uploadedBy, auditAction, metadata, auditActors)
     : metadata;
 
   const managed = await base44.entities.ManagedFile.create({

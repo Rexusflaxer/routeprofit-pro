@@ -1032,7 +1032,7 @@ function IdentityDocumentPreviewDialog({ document, open, onOpenChange }) {
   );
 }
 
-function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew }) {
+function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, auditActors = [] }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const expiry = getExpiryState(doc.valid_until);
@@ -1079,7 +1079,7 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew }) {
         <span className="text-sm text-foreground">{formatDate(doc.valid_until)}</span>
         {expiry && !archived && <BadgePill className={expiry.className}>{expiry.label}</BadgePill>}
       </div>
-      <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(doc)}</span>
+      <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(doc, auditActors)}</span>
       <div className="flex justify-end">
         {canPreview && (
           <Button
@@ -1129,7 +1129,7 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew }) {
 
 // ─── Sidebar tabs panel ───────────────────────────────────────────────────────
 
-function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
+function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditActors = [] }) {
   const [active, setActive] = useState(PERSONNEL_TABS[0].key);
   const [identityWizard, setIdentityWizard] = useState(null);
   const [showIdentityArchive, setShowIdentityArchive] = useState(false);
@@ -1167,7 +1167,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
         </div>
       );
       case "overview": return <OverviewTab person={person} companies={companies} dossier={dossier} />;
-      case "payroll": return <PayrollTab person={person} documents={dossier.documents} />;
+      case "payroll": return <PayrollTab person={person} documents={dossier.documents} auditActors={auditActors} />;
       case "identity": return (
         <div className="flex flex-col h-full">
           <AnimatePresence>
@@ -1176,6 +1176,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
                 personnelId={person.id}
                 nationality={person.nationality}
                 isArchiveEntry={identityWizard.archiveMode}
+                auditActors={auditActors}
                 onClose={() => setIdentityWizard(null)}
                 onSaved={() => setIdentityWizard(null)}
               />
@@ -1225,6 +1226,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
                     archived
                     onPreview={setIdentityPreviewDoc}
                     onRenew={() => openIdentityWizard()}
+                    auditActors={auditActors}
                   />
                 ))}
               </div>
@@ -1239,6 +1241,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
                   doc={doc}
                   onPreview={setIdentityPreviewDoc}
                   onRenew={() => openIdentityWizard()}
+                  auditActors={auditActors}
                 />
               ))}
             </div>
@@ -1259,7 +1262,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord }) {
             { key: "document_type", label: "Type" }, { key: "document_number", label: "Nummer" },
             { key: "valid_until", label: "Geldig tot", render: r => formatDate(r.valid_until) },
             { key: "verification_status", label: "Status", render: r => <BadgePill className={r.verification_status === "verified" ? "bg-emerald-100 text-emerald-700" : "bg-amber-100 text-amber-700"}>{VERIFICATION_LABELS[r.verification_status] || r.verification_status}</BadgePill> },
-            { key: "audit_actor", label: "Door", render: getAuditActorLabel },
+            { key: "audit_actor", label: "Door", render: r => getAuditActorLabel(r, auditActors) },
           ]} />
         </SectionPanel>
       );
@@ -1470,7 +1473,7 @@ export default function PersonnelDetail() {
 
   const createRecord = async (config, payload) => {
     const payloadWithAudit = config.entityName === "PersonnelDocument"
-      ? { ...payload, metadata: buildAuditMetadata(currentUser, "toegevoegd", payload.metadata || {}) }
+      ? { ...payload, metadata: buildAuditMetadata(currentUser, "toegevoegd", payload.metadata || {}, allPersonnel) }
       : payload;
     await base44.entities[config.entityName].create(payloadWithAudit);
     config.queryKeys.forEach(k => queryClient.invalidateQueries({ queryKey: [k] }));
@@ -1528,6 +1531,7 @@ export default function PersonnelDetail() {
         person={person}
         companies={companies}
         dossier={dossier}
+        auditActors={allPersonnel}
         onAddRecord={type => setRecordDialogType(type)}
       />
 

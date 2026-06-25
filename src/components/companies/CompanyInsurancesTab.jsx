@@ -382,6 +382,11 @@ export default function CompanyInsurancesTab({ companyId, company }) {
     queryFn: () => base44.auth.me(),
     staleTime: 5 * 60 * 1000,
   });
+  const { data: auditActors = [] } = useQuery({
+    queryKey: ["personnel"],
+    queryFn: () => base44.entities.Personnel.list(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const companyActivities = useMemo(() => new Set(company?.activities || []), [company]);
   const insurerOptions = useMemo(() => partyOptionsFromPolicies(policies, "insurer_name"), [policies]);
@@ -465,7 +470,7 @@ export default function CompanyInsurancesTab({ companyId, company }) {
   const withDocumentAudit = (data, action) => ({
     ...data,
     document_metadata: data.document_file_url
-      ? buildAuditMetadata(currentUser, action, data.document_metadata || {})
+      ? buildAuditMetadata(currentUser, action, data.document_metadata || {}, auditActors)
       : data.document_metadata || null,
   });
 
@@ -650,12 +655,13 @@ export default function CompanyInsurancesTab({ companyId, company }) {
         folderSegments: ["verzekeringen", form.insurance_type || "overig", form.valid_until ? form.valid_until.slice(0, 4) : "doorlopend"],
         metadata: { insurance_type: form.insurance_type || null, policy_number: form.policy_number || null },
         uploadedBy: currentUser,
+        auditActors,
         auditAction: editingId ? "bijgewerkt" : "toegevoegd",
       });
       const nextMetadata = buildAuditMetadata(currentUser, editingId ? "bijgewerkt" : "toegevoegd", {
         managed_file_id: result.managed_file_id,
         folder_path: result.folder_path,
-      });
+      }, auditActors);
       setForm(current => ({
         ...current,
         document_file_url: result.file_url,
@@ -1005,7 +1011,7 @@ export default function CompanyInsurancesTab({ companyId, company }) {
                   <span className="block truncate">{validityText(policy)}</span>
                   {policy.renewal_notice_date && <span className="block truncate text-xs">Controle: {policy.renewal_notice_date}</span>}
                 </div>
-                <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(policy)}</span>
+                <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(policy, auditActors)}</span>
                 <div className="flex min-w-0 justify-end gap-1">
                   {policy.document_file_url && (
                     <Button variant="ghost" size="icon" className="h-7 w-7" onClick={() => setPreview(policy)} title="Polisblad bekijken">
