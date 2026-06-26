@@ -19,7 +19,7 @@ const DELETE_PASSWORD = "verwijder";
 const FORM_PDF_URL = "https://media.base44.com/files/public/698e307ed3aa4cab3729bbf1/4551ed708_model_opgaaf_gegevens_loonheffingen_lh0082z11fol-5.pdf";
 
 // Table grid: omschrijving | loonheffingskorting | vanaf | ouderenkorting | status | door | acties
-const PAYROLL_TABLE_GRID = "grid grid-cols-[minmax(140px,200px)_150px_120px_130px_120px_minmax(110px,1fr)_minmax(240px,max-content)] gap-3";
+const PAYROLL_TABLE_GRID = "grid grid-cols-[minmax(160px,200px)_minmax(140px,170px)_minmax(120px,140px)_minmax(120px,150px)_minmax(110px,130px)_minmax(110px,1fr)_minmax(240px,max-content)] gap-3";
 
 function formatDate(v, fallback = "-") {
   if (!v) return fallback;
