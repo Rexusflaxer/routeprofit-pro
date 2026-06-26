@@ -620,6 +620,31 @@ function CriticalUploadNotice({ quality }) {
   );
 }
 
+function UploadCompatibilityNotice({ compatibility }) {
+  if (!compatibility || compatibility.status !== "blocked" || !compatibility.issues?.length) return null;
+
+  return (
+    <div className="mt-4 rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-950 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-100">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div>
+          <p className="text-xs font-semibold">Controleer documenttype en uploadvak</p>
+          <p className="mt-0.5 text-xs opacity-85">
+            De upload lijkt niet te passen bij deze stap. Corrigeer de upload voordat je opslaat.
+          </p>
+          <div className="mt-1 space-y-0.5 text-xs opacity-85">
+            {compatibility.issues.slice(0, 2).map(issue => (
+              <p key={`${issue.label}-${issue.detail}`}>
+                {issue.label}: {issue.detail}
+              </p>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function IdentityMatchNotice({ match }) {
   if (!match || !["blocked", "review"].includes(match.status) || !match.issues?.length) return null;
 
@@ -1004,6 +1029,7 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
   const validateDetails = () => {
     const e = {};
     const personMatch = buildPersonMatchCheck(personnel, recognizedPerson);
+    const uploadCompatibility = scanQuality?.compatibility;
     const today = new Date().toISOString().split("T")[0];
     const documentNumber = normalizeDocumentNumber(form.document_number);
     const bsn = normalizeBsn(form.bsn);
@@ -1038,6 +1064,9 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
     if (personMatch.status === "blocked") {
       e.identity_match = "Het document lijkt niet bij deze medewerker te horen.";
     }
+    if (uploadCompatibility?.status === "blocked") {
+      e.upload_compatibility = "Controleer documenttype en uploadvak.";
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -1046,6 +1075,14 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
     mutationFn: async () => {
       const activeDocMeta = DOCUMENT_TYPE_META[docType] || DOCUMENT_TYPE_META.passport;
       const personMatch = buildPersonMatchCheck(personnel, recognizedPerson);
+      const uploadCompatibility = scanQuality?.compatibility;
+      if (uploadCompatibility?.status === "blocked") {
+        setErrors(current => ({
+          ...current,
+          upload_compatibility: "Controleer documenttype en uploadvak.",
+        }));
+        throw new Error("identity_upload_mismatch");
+      }
       if (personMatch.status === "blocked") {
         setErrors(current => ({
           ...current,
@@ -1189,7 +1226,7 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
       onClose();
     },
     onError: error => {
-      if (["duplicate_document_number", "conflicting_bsn", "duplicate_bsn", "identity_person_mismatch"].includes(error?.message)) return;
+      if (["duplicate_document_number", "conflicting_bsn", "duplicate_bsn", "identity_person_mismatch", "identity_upload_mismatch"].includes(error?.message)) return;
       console.error("Identity document save failed", error);
     },
   });
@@ -1197,6 +1234,8 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
   const STEP_LABELS = ["Type", "Upload", "Controleren"];
   const scanPending = Boolean(frontFile) && recognizedUploadKey !== uploadKey;
   const personMatch = buildPersonMatchCheck(personnel, recognizedPerson);
+  const uploadCompatibility = scanQuality?.compatibility;
+  const uploadCompatibilityBlocked = uploadCompatibility?.status === "blocked";
   const wizardTitle = !docType || step === 1
     ? (isArchiveEntry ? "Document archiveren" : "Legitimatiebewijs toevoegen")
     : (isArchiveEntry ? `${docMeta.label} archiveren` : `${docMeta.label} toevoegen`);
@@ -1405,6 +1444,7 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
                   </div>
 
                   <CriticalUploadNotice quality={scanQuality} />
+                  <UploadCompatibilityNotice compatibility={uploadCompatibility} />
                   <IdentityMatchNotice match={personMatch} />
 
                   {isNonEu && (
@@ -1436,7 +1476,7 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
                 <Button variant="ghost" size="sm" onClick={() => { setStep(2); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
-                  <Button size="sm" onClick={() => { if (validateDetails()) saveMutation.mutate(); }} disabled={saveMutation.isPending || recognizing}>
+                  <Button size="sm" onClick={() => { if (validateDetails()) saveMutation.mutate(); }} disabled={saveMutation.isPending || recognizing || uploadCompatibilityBlocked}>
                     <Check className="w-4 h-4 mr-1" />
                     {saveMutation.isPending ? "Opslaan..." : "Document opslaan"}
                   </Button>

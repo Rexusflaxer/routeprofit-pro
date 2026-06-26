@@ -711,6 +711,210 @@ function qualityCheck(key, label, status, detail = "") {
   return { key, label, status, detail };
 }
 
+const DOCUMENT_DETECTION_LABELS = {
+  passport: "paspoort",
+  id_card: "identiteitskaart",
+  drivers_license: "rijbewijs",
+};
+
+function normalizeDetectionText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+}
+
+function countPatternHits(text, patterns) {
+  return patterns.reduce((score, pattern) => score + (pattern.test(text) ? 1 : 0), 0);
+}
+
+function detectIdentityDocumentType(text) {
+  const normalized = normalizeDetectionText(text);
+  const scores = {
+    passport: countPatternHits(normalized, [
+      /\bPASPOORT\b/,
+      /\bPASSPORT\b/,
+      /\bPASSEPORT\b/,
+      /\bP<NLD/,
+      /^P[A-Z<]{1,2}/m,
+      /\bPASSPORT\s*\/\s*PASSEPORT\b/,
+    ]),
+    id_card: countPatternHits(normalized, [
+      /\bIDENTITEITSKAART\b/,
+      /\bIDENTITY\s+CARD\b/,
+      /\bCARTE\s+D[’']?IDENTITE\b/,
+      /\bI<NLD/,
+      /^I<[A-Z]{3}/m,
+      /\bNEDERLANDSE\s+IDENTITEITSKAART\b/,
+    ]),
+    drivers_license: countPatternHits(normalized, [
+      /\bRIJBEW[IJY]S\b/,
+      /\bDRIVING\s+LICEN[CS]E\b/,
+      /\bPERMIS\s+DE\s+CONDUIRE\b/,
+      /\bFUHRERSCHEIN\b/,
+      /\bRDW\b/,
+      /\bD[I1]NLD/,
+      /\bD[I1]NLD[A-Z0-9]{12,}/,
+    ]),
+  };
+
+  const [type, score] = Object.entries(scores).sort((a, b) => b[1] - a[1])[0] || ["", 0];
+  const secondScore = Object.entries(scores)
+    .filter(([candidate]) => candidate !== type)
+    .sort((a, b) => b[1] - a[1])[0]?.[1] || 0;
+
+  if (!type || score < 2 || score === secondScore) {
+    return { type: "", confidence: 0, scores };
+  }
+
+  return { type, confidence: score - secondScore, scores };
+}
+
+function scoreDocumentSide(text, docType) {
+  const normalized = normalizeDetectionText(text);
+
+  if (docType === "passport") {
+    return {
+      front: countPatternHits(normalized, [
+        /\bP<NLD/,
+        /^P[A-Z<]{1,2}/m,
+        /\bNAAM\s*\/\s*SURNAME\b/,
+        /\bVOORNAMEN\s*\/\s*GIVEN\s+NAMES\b/,
+        /\bGEBOORTEDATUM\s*\/\s*DATE\s+OF\s+BIRTH\b/,
+        /\bDATUM\s+VAN\s+AFGIFTE\b/,
+        /\bCAN\b/,
+      ]),
+      back: countPatternHits(normalized, [
+        /\bPERSOONSNR\.?\s*\/\s*PERSONAL\s+NO\b/,
+        /\bVERVOLG\s+NAAM\b/,
+        /\bCONTINUE\s+SURNAME\b/,
+        /\bEUROPESE\s+UNIE\b/,
+        /\bPASSPORT\s*\/\s*PASSEPORT\b/,
+        /\bMODEL\s+\d{3}\b/,
+      ]),
+    };
+  }
+
+  if (docType === "id_card") {
+    return {
+      front: countPatternHits(normalized, [
+        /\bIDENTITEITSKAART\b/,
+        /\bIDENTITY\s+CARD\b/,
+        /\bCARTE\s+D[’']?IDENTITE\b/,
+        /\bDOCUMENT\s+NO\b/,
+        /\bNAAM\s*\/\s*SURNAME\b/,
+        /\bVOORNAMEN\s*\/\s*GIVEN\s+NAMES\b/,
+        /\bDATUM\s+VAN\s+(AFGIFTE|ALGIFTE)\b/,
+        /\bDATE\s+OF\s+ISS/,
+        /\bGELDIG\s+TOT\b/,
+        /\bGELDIG\s+TOT\s*\/\s*DATE\s+OF\s+EXPIRY\b/,
+        /\bCAN\b/,
+      ]),
+      back: countPatternHits(normalized, [
+        /\bI<NLD/,
+        /^I<[A-Z]{3}/m,
+        /\bPERSOONSNR\.?\s*\/\s*PERSONAL\s+NO\b/,
+        /\bGEBOORTEPLAATS\s*\/\s*PLACE\s+OF\s+BIRTH\b/,
+        /\bINSTANTIE\s*\/\s*AUTHORITY\b/,
+        /\bVERVOLG\s+NAAM\b/,
+        /\bCONTINUE\s+SURNAME\b/,
+      ]),
+    };
+  }
+
+  if (docType === "drivers_license") {
+    return {
+      front: countPatternHits(normalized, [
+        /\bRIJBEW[IJY]S\b/,
+        /\bDRIVING\s+LICEN[CS]E\b/,
+        /\bPERMIS\s+DE\s+CONDUIRE\b/,
+        /\bFUHRERSCHEIN\b/,
+        /\bD[I1]NLD/,
+        /\bD[I1]NLD[A-Z0-9]{12,}/,
+        /\b4A\b/,
+        /\b4B\b/,
+        /\b4C\b/,
+      ]),
+      back: countPatternHits(normalized, [
+        /\bRDW\b/,
+        /\bBSN\b/,
+        /\bAM\b.*\bA1\b.*\bA2\b/s,
+        /\bA1\b.*\bA2\b.*\bB\b/s,
+        /\bD1E\b/,
+        /\bVERKLARING\b/,
+      ]),
+    };
+  }
+
+  return { front: 0, back: 0 };
+}
+
+function detectDocumentSide(text, docType) {
+  const scores = scoreDocumentSide(text, docType);
+  const side = scores.front >= scores.back ? "front" : "back";
+  const score = scores[side];
+  const otherScore = side === "front" ? scores.back : scores.front;
+  const confidence = score - otherScore;
+
+  if (score < 2 || confidence < 1) {
+    return { side: "", confidence: 0, scores };
+  }
+
+  return { side, confidence, scores };
+}
+
+export function analyzeIdentityUploadCompatibility({ docType, frontText = "", backText = "", hasBackFile = false } = {}) {
+  const issues = [];
+  const sides = [
+    { key: "front", label: "Voorkant", expectedSide: "front", text: frontText },
+    { key: "back", label: "Achterkant", expectedSide: "back", text: backText },
+  ].filter(side => side.key === "front" || hasBackFile);
+
+  const detected = {};
+  for (const side of sides) {
+    const documentType = detectIdentityDocumentType(side.text);
+    const documentSide = detectDocumentSide(side.text, docType);
+    detected[side.key] = { documentType, documentSide };
+
+    if (documentType.type && documentType.type !== docType && documentType.confidence >= 2) {
+      issues.push({
+        severity: "critical",
+        field: side.key,
+        label: `${side.label} lijkt geen ${DOCUMENT_DETECTION_LABELS[docType]}`,
+        detail: `${side.label} lijkt op een ${DOCUMENT_DETECTION_LABELS[documentType.type]}. Kies het juiste documenttype of upload de juiste afbeelding.`,
+      });
+    }
+
+    if (documentSide.side && documentSide.side !== side.expectedSide && documentSide.confidence >= 1) {
+      issues.push({
+        severity: "critical",
+        field: side.key,
+        label: `${side.label} lijkt omgewisseld`,
+        detail: `${side.label} lijkt de ${side.expectedSide === "front" ? "achterkant" : "voorkant"} van het document. Upload deze in het andere uploadvak.`,
+      });
+    }
+  }
+
+  if (
+    detected.front?.documentSide?.side === "back"
+    && detected.back?.documentSide?.side === "front"
+  ) {
+    issues.unshift({
+      severity: "critical",
+      field: "both",
+      label: "Voorkant en achterkant lijken omgewisseld",
+      detail: "Plaats de houderzijde bij voorkant en de BSN-/controlegegevens bij achterkant.",
+    });
+  }
+
+  const criticalIssues = issues.filter(issue => issue.severity === "critical");
+  return {
+    status: criticalIssues.length > 0 ? "blocked" : "ok",
+    issues: criticalIssues,
+    detected,
+  };
+}
+
 function thresholdStatus(value, passMinimum, warnMinimum) {
   if (value >= passMinimum) return "pass";
   if (value >= warnMinimum) return "warn";
@@ -843,7 +1047,7 @@ async function analyzeUploadedImages({ frontFile, backFile }) {
   return { checks, metrics };
 }
 
-function buildUploadQuality({ imageQuality, fields, docType, requiresBsn, hasBackFile }) {
+function buildUploadQuality({ imageQuality, fields, docType, requiresBsn, hasBackFile, compatibility }) {
   const checks = [...(imageQuality?.checks || [])];
   const isPassport = docType === "passport";
   const hasDates = Boolean(fields.valid_from && fields.valid_until);
@@ -906,6 +1110,7 @@ function buildUploadQuality({ imageQuality, fields, docType, requiresBsn, hasBac
         ? "De upload bevat meerdere technische aandachtspunten. Maak bij voorkeur een nieuwe scan of foto."
         : "De upload is bruikbaar, maar controleer de aandachtspunten voordat je opslaat.",
     checks,
+    compatibility,
   };
 }
 
@@ -1043,27 +1248,35 @@ export async function recognizeIdentityDocument({ frontFile, backFile, docType =
   try {
     const files = [frontFile, backFile].filter(Boolean);
     const textParts = [];
+    const sideTextParts = {
+      front: [],
+      back: [],
+    };
 
     await worker.setParameters({
       preserve_interword_spaces: "1",
       user_defined_dpi: "300",
     });
 
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
+      const side = index === 0 ? "front" : "back";
       const image = await imageToDataUrl(file);
       const { data } = await worker.recognize(image);
       textParts.push(data.text || "");
+      sideTextParts[side].push(data.text || "");
     }
 
     if (frontFile) {
       const image = await imageToDataUrl(frontFile, { crop: "passport_details" });
       const { data } = await worker.recognize(image);
       textParts.push(data.text || "");
+      sideTextParts.front.push(data.text || "");
     }
     if (backFile) {
       const image = await imageToDataUrl(backFile, { crop: "back_details" });
       const { data } = await worker.recognize(image);
       textParts.push(data.text || "");
+      sideTextParts.back.push(data.text || "");
     }
 
     if (docType === "drivers_license") {
@@ -1071,11 +1284,13 @@ export async function recognizeIdentityDocument({ frontFile, backFile, docType =
         const image = await imageToDataUrl(frontFile, { crop: "drivers_license_front" });
         const { data } = await worker.recognize(image);
         textParts.push(data.text || "");
+        sideTextParts.front.push(data.text || "");
       }
       if (backFile) {
         const image = await imageToDataUrl(backFile, { crop: "drivers_license_back" });
         const { data } = await worker.recognize(image);
         textParts.push(data.text || "");
+        sideTextParts.back.push(data.text || "");
       }
     }
 
@@ -1086,15 +1301,23 @@ export async function recognizeIdentityDocument({ frontFile, backFile, docType =
       user_defined_dpi: "300",
     });
 
-    for (const file of files) {
+    for (const [index, file] of files.entries()) {
+      const side = index === 0 ? "front" : "back";
       const image = await imageToDataUrl(file, { crop: "mrz" });
       const { data } = await worker.recognize(image);
       textParts.push(data.text || "");
+      sideTextParts[side].push(data.text || "");
     }
 
     const rawText = textParts.join("\n");
     const fields = parseIdentityOcrText(rawText, { docType });
     const imageQuality = await imageQualityPromise;
+    const compatibility = analyzeIdentityUploadCompatibility({
+      docType,
+      frontText: sideTextParts.front.join("\n"),
+      backText: sideTextParts.back.join("\n"),
+      hasBackFile: Boolean(backFile),
+    });
     return {
       ...fields,
       detected_fields: Object.entries(fields)
@@ -1106,6 +1329,7 @@ export async function recognizeIdentityDocument({ frontFile, backFile, docType =
         docType,
         requiresBsn,
         hasBackFile: Boolean(backFile),
+        compatibility,
       }),
     };
   } finally {
