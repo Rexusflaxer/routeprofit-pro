@@ -240,28 +240,37 @@ function ContextNavigation({ currentPageName, onNavigate, collapsed = false }) {
 
 function AppShell({ children, currentPageName }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(false);
+  const [collapsed, setCollapsed] = useState(true);
   const [autoHoverActive, setAutoHoverActive] = useState(false);
+  const sidebarRef = useRef(null);
 
   const handleMouseMove = (e) => {
     if (window.innerWidth < 1024) return; // Only on desktop
-    const nearLeftEdge = e.clientX < 40;
+    const nearLeftEdge = e.clientX < 80; // Trigger zone: 80px from left
+    
     if (nearLeftEdge && collapsed && !autoHoverActive) {
       setAutoHoverActive(true);
       setCollapsed(false);
     }
   };
 
-  const handleMouseLeave = () => {
-    if (autoHoverActive && collapsed === false) {
+  const handleMouseLeaveApp = () => {
+    if (autoHoverActive) {
+      setAutoHoverActive(false);
+      setCollapsed(true);
+    }
+  };
+
+  const handleMouseLeaveSidebar = () => {
+    if (autoHoverActive) {
       setAutoHoverActive(false);
       setCollapsed(true);
     }
   };
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-background text-foreground antialiased" onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
-      <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-in-out lg:block ${collapsed ? "w-16" : "w-64"}`} onMouseLeave={handleMouseLeave}>
+    <div className="min-h-screen overflow-x-hidden bg-background text-foreground antialiased" onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeaveApp}>
+      <aside ref={sidebarRef} className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-in-out lg:block ${collapsed ? "w-16" : "w-64"}`} onMouseLeave={handleMouseLeaveSidebar}>
         <ContextNavigation currentPageName={currentPageName} collapsed={collapsed} />
       </aside>
 
