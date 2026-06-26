@@ -230,9 +230,9 @@ function PayrollDocumentRow({
 
       <div className="flex justify-end gap-1">
         {isDraft && (
-          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={e => { e.stopPropagation(); onOpenWizardStep2?.(doc); }} title="Formulier invoeren">
-            <ChevronRight className="h-3.5 w-3.5" />
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            onClick={e => { e.stopPropagation(); onDelete?.(doc); }} title="Concept verwijderen">
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
         )}
         {canArchive && (
