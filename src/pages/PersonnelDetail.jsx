@@ -1332,6 +1332,13 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
   const [identityPreviewDoc, setIdentityPreviewDoc] = useState(null);
   const [identityDeleteDoc, setIdentityDeleteDoc] = useState(null);
   const [identityArchiveMessage, setIdentityArchiveMessage] = useState(null);
+
+  useEffect(() => {
+    if (!identityArchiveMessage) return undefined;
+    const timer = setTimeout(() => setIdentityArchiveMessage(null), 5000);
+    return () => clearTimeout(timer);
+  }, [identityArchiveMessage]);
+
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
     queryFn: () => base44.auth.me(),
@@ -1433,7 +1440,6 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
     },
     onSuccess: result => {
       if (result?.restored) {
-        setShowIdentityArchive(false);
         setIdentityArchiveMessage({
           type: "success",
           text: result.replacedCount > 0
@@ -1547,22 +1553,12 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
 
           {identityArchiveMessage && !showIdentityWizard && (
             <div className="px-5 pt-3">
-              <div className={`flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-xs ${
+              <div className={`flex items-start gap-3 rounded-md border px-3 py-2 text-xs ${
                 identityArchiveMessage.type === "success"
                   ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
                   : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
               }`}>
                 <span>{identityArchiveMessage.text}</span>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-5 w-5 shrink-0 opacity-70 hover:opacity-100"
-                  onClick={() => setIdentityArchiveMessage(null)}
-                  title="Melding sluiten"
-                >
-                  <X className="h-3 w-3" />
-                </Button>
               </div>
             </div>
           )}
