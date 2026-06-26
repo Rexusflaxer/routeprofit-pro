@@ -386,97 +386,15 @@ function DocumentSideUpload({ label, hint, previewUrl, onFileSelected, uploading
 
 // ─── Upload Guidance ──────────────────────────────────────────────────────────
 
-function GuideExampleCard({ title, target, description, children }) {
+function DrivingLicenseGuideImage({ side = "front" }) {
+  const isBack = side === "back";
   return (
-    <div className="w-full rounded-md border border-border bg-background/70 p-2 shadow-sm sm:w-[230px]">
-      <div className="mb-2 flex items-start justify-between gap-2">
-        <div className="min-w-0">
-          <p className="text-xs font-semibold text-foreground">{title}</p>
-          <p className="mt-0.5 text-[10px] uppercase tracking-wide text-primary">{target}</p>
-        </div>
-      </div>
-      {children}
-      <p className="mt-2 text-[11px] leading-snug text-muted-foreground">{description}</p>
-    </div>
-  );
-}
-
-function PassportGuideIllustration() {
-  return (
-    <div
-      role="img"
-      aria-label="Voorbeeld van de houderpagina en BSN-pagina van een Nederlands paspoort"
-      className="flex w-full max-w-full flex-col gap-3 sm:w-auto sm:flex-row"
-    >
-      <GuideExampleCard
-        title="Voorzijde"
-        target="Uploadvak links"
-        description="Houderpagina met pasfoto, persoonsgegevens, documentnummer, geldigheid en MRZ."
-      >
-        <div className="relative flex h-40 items-center justify-center rounded-md bg-sky-50/80 p-2 dark:bg-slate-950/40">
-          <img
-            src="/identity-guides/passport-holder-page-model-2024.jpg"
-            alt=""
-            className="max-h-36 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
-            draggable="false"
-          />
-        </div>
-      </GuideExampleCard>
-      <GuideExampleCard
-        title="Achterzijde"
-        target="Uploadvak rechts"
-        description="BSN-/titelpagina met persoonsnummer en documentnummer. Upload deze ook wanneer aanwezig."
-      >
-        <div className="relative flex h-40 items-center justify-center rounded-md bg-sky-50/80 p-2 dark:bg-slate-950/40">
-          <img
-            src="/identity-guides/passport-back-page-2021.jpg"
-            alt=""
-            className="max-h-36 w-auto rounded border border-[#6b1734] bg-white object-contain shadow-sm"
-            draggable="false"
-          />
-        </div>
-      </GuideExampleCard>
-    </div>
-  );
-}
-
-function DrivingLicenseGuideIllustration() {
-  return (
-    <svg viewBox="0 0 520 210" role="img" aria-label="Schematisch voorbeeld van Nederlands rijbewijs upload" className="h-40 w-[390px] max-w-full">
-      <defs>
-        <linearGradient id="nlDrivingLicense" x1="0" y1="0" x2="1" y2="1">
-          <stop offset="0" stopColor="#fde2ef" />
-          <stop offset="0.5" stopColor="#f8c8dc" />
-          <stop offset="1" stopColor="#e9f2ff" />
-        </linearGradient>
-        <pattern id="licenseWaves" width="28" height="14" patternUnits="userSpaceOnUse">
-          <path d="M0 7c7-8 14 8 21 0s14 8 21 0" fill="none" stroke="#be185d" strokeWidth="1" opacity="0.18" />
-        </pattern>
-      </defs>
-      <rect width="520" height="210" rx="14" fill="hsl(var(--muted))" opacity="0.32" />
-      <g transform="translate(28 38)">
-        <rect width="214" height="134" rx="12" fill="url(#nlDrivingLicense)" stroke="#c08497" strokeWidth="1.5" />
-        <rect width="214" height="134" rx="12" fill="url(#licenseWaves)" />
-        <rect x="18" y="16" width="50" height="32" rx="3" fill="#1d4ed8" />
-        <text x="31" y="38" fontSize="20" fontWeight="700" fill="#fff">NL</text>
-        <text x="80" y="30" fontSize="20" fontWeight="800" fill="#1d4ed8">RIJBEWIJS</text>
-        <rect x="22" y="56" width="58" height="58" rx="6" fill="#e5e7eb" />
-        <circle cx="51" cy="78" r="15" fill="#64748b" opacity="0.45" />
-        <path d="M31 110c8-15 32-15 40 0" fill="#64748b" opacity="0.38" />
-        <path d="M96 55h82M96 72h72M96 89h92M96 106h64" stroke="#475569" strokeWidth="6" strokeLinecap="round" opacity="0.78" />
-        <text x="94" y="124" fontSize="16" fontWeight="800" fill="#111827">AM-BE-C1E</text>
-        <path d="M16 128h184" stroke="#111827" strokeWidth="5" strokeDasharray="16 8" opacity="0.86" />
-      </g>
-      <g transform="translate(276 38)">
-        <rect width="214" height="134" rx="12" fill="url(#nlDrivingLicense)" stroke="#c08497" strokeWidth="1.5" />
-        <rect width="214" height="134" rx="12" fill="url(#licenseWaves)" />
-        <text x="22" y="27" fontSize="13" fontWeight="800" fill="#334155">BSN</text>
-        <path d="M22 42h68" stroke="#111827" strokeWidth="5" strokeLinecap="round" />
-        <rect x="28" y="58" width="44" height="44" rx="4" fill="#111827" opacity="0.75" />
-        <path d="M96 30h82M96 47h58M96 64h76M96 81h66M96 98h86" stroke="#2563eb" strokeWidth="5" strokeLinecap="round" opacity="0.72" />
-        <text x="96" y="122" fontSize="14" fontWeight="800" fill="#be123c" transform="rotate(-18 96 122)">SPECIMEN</text>
-      </g>
-    </svg>
+    <img
+      src={isBack ? "/identity-guides/driving-license-back.jpg" : "/identity-guides/driving-license-front.jpg"}
+      alt={isBack ? "Voorbeeld achterkant Nederlands rijbewijs" : "Voorbeeld voorkant Nederlands rijbewijs"}
+      className="max-h-36 w-auto rounded border border-border bg-white object-contain shadow-sm"
+      draggable="false"
+    />
   );
 }
 
@@ -504,7 +422,7 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
                 draggable="false"
               />
             ) : isDriversLicense ? (
-              <DrivingLicenseGuideIllustration />
+              <DrivingLicenseGuideImage side="front" />
             ) : isIdCard ? (
               <img
                 src="/identity-guides/id-card-front-model-2024.jpg"
@@ -547,7 +465,7 @@ function UploadGuideCard({ docType, frontUpload, backUpload }) {
                 draggable="false"
               />
             ) : isDriversLicense ? (
-              <DrivingLicenseGuideIllustration />
+              <DrivingLicenseGuideImage side="back" />
             ) : isIdCard ? (
               <img
                 src="/identity-guides/id-card-back-model-2024.jpg"
