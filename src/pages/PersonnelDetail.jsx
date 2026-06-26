@@ -323,12 +323,39 @@ function hasIdentityDocumentUpload(doc) {
   return Boolean(urls.front || urls.back);
 }
 
+function dateSortKey(value) {
+  if (!value) return "";
+  const text = String(value).trim();
+  const dutchDate = text.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dutchDate) return `${dutchDate[3]}-${dutchDate[2]}-${dutchDate[1]}`;
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().split("T")[0];
+  return text;
+}
+
 function identityActiveSortValue(doc) {
   return [
-    String(doc?.valid_until || ""),
+    dateSortKey(doc?.valid_until),
     String(doc?.updated_date || doc?.created_date || ""),
     String(doc?.id || ""),
   ].join("|");
+}
+
+function compareIdentityRestoreCandidates(a, b, restoreId) {
+  const validUntilDiff = dateSortKey(b?.valid_until).localeCompare(dateSortKey(a?.valid_until));
+  if (validUntilDiff !== 0) return validUntilDiff;
+
+  const aIsRestore = a?.id === restoreId;
+  const bIsRestore = b?.id === restoreId;
+  if (aIsRestore && !bIsRestore) return 1;
+  if (!aIsRestore && bIsRestore) return -1;
+
+  return identityActiveSortValue(b).localeCompare(identityActiveSortValue(a));
+}
+
+function verificationStatusForActiveIdentityDocument(doc) {
+  const today = new Date().toISOString().split("T")[0];
+  return doc?.valid_until && dateSortKey(doc.valid_until) < today ? "expired" : "verified";
 }
 
 function splitIdentityDocumentsByActiveState(docs) {
@@ -1166,13 +1193,24 @@ function IdentityDeleteConfirmDialog({ document, open, onOpenChange, onConfirm, 
   );
 }
 
-function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArchive, onDelete, auditActors = [] }) {
+function IdentityDocumentRow({
+  doc,
+  archived = false,
+  onPreview,
+  onRenew,
+  onArchive,
+  onRestore,
+  onDelete,
+  auditActors = [],
+  restorePending = false,
+}) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const expiry = getExpiryState(doc.valid_until);
   const canPreview = hasIdentityDocumentUpload(doc);
   const isExpired = !archived && isExpiredIdentityDocument(doc);
   const canArchive = !archived;
+  const canRestore = archived;
   const canDelete = archived;
   const kind = identityDocumentKind(doc);
 
@@ -1225,6 +1263,19 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArch
             title="Naar archief"
           >
             <Archive className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {canRestore && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={event => { event.stopPropagation(); onRestore?.(doc); }}
+            disabled={restorePending}
+            title="Terugzetten naar actief"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
           </Button>
         )}
         {canDelete && (
@@ -1280,6 +1331,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
   const [showIdentityArchive, setShowIdentityArchive] = useState(false);
   const [identityPreviewDoc, setIdentityPreviewDoc] = useState(null);
   const [identityDeleteDoc, setIdentityDeleteDoc] = useState(null);
+  const [identityArchiveMessage, setIdentityArchiveMessage] = useState(null);
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
     queryFn: () => base44.auth.me(),
@@ -1293,7 +1345,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
   const sortIdentityDocs = docs => [...docs].sort((a, b) => {
     const kindDiff = (identityOrder[identityDocumentKind(a)] ?? 99) - (identityOrder[identityDocumentKind(b)] ?? 99);
     if (kindDiff !== 0) return kindDiff;
-    return String(b.valid_until || "").localeCompare(String(a.valid_until || ""));
+    return dateSortKey(b.valid_until).localeCompare(dateSortKey(a.valid_until));
   });
   const identityDocs = sortIdentityDocs(identitySplit.active);
   const identityArchived = sortIdentityDocs(identitySplit.archived);
@@ -1306,6 +1358,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
 
   const openIdentityWizard = (archiveMode = false) => {
     setShowIdentityArchive(false);
+    setIdentityArchiveMessage(null);
     setIdentityWizard({ archiveMode });
   };
   const identityDocsToAutoArchive = useMemo(
@@ -1327,6 +1380,74 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
     }),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
+    },
+  });
+
+  const restoreIdentityMutation = useMutation({
+    mutationFn: async doc => {
+      const kind = identityDocumentKind(doc);
+      const allDocs = await base44.entities.PersonnelDocument.filter({ personnel_id: person.id }, "-created_date");
+      const sameKindActiveDocs = allDocs
+        .filter(item => item.id !== doc.id)
+        .filter(isIdentityLikeDocument)
+        .filter(item => identityDocumentKind(item) === kind)
+        .filter(item => !isArchivedIdentityDocument(item));
+
+      const winner = [doc, ...sameKindActiveDocs]
+        .sort((a, b) => compareIdentityRestoreCandidates(a, b, doc.id))[0];
+
+      if (winner?.id !== doc.id) {
+        return {
+          restored: false,
+          kind,
+          activeDoc: winner,
+        };
+      }
+
+      const now = new Date().toISOString();
+      await Promise.all(sameKindActiveDocs.map(activeDoc => base44.entities.PersonnelDocument.update(activeDoc.id, {
+        verification_status: "expired",
+        metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
+          ...(activeDoc.metadata || {}),
+          archived: true,
+          archived_at: now,
+          archived_reason: "Vervangen door teruggezet archiefdocument",
+        }, auditActors),
+      })));
+
+      await base44.entities.PersonnelDocument.update(doc.id, {
+        verification_status: verificationStatusForActiveIdentityDocument(doc),
+        metadata: buildAuditMetadata(currentUser, "teruggezet", {
+          ...(doc.metadata || {}),
+          archived: false,
+          archived_at: null,
+          restored_from_archive_at: now,
+        }, auditActors),
+      });
+
+      return {
+        restored: true,
+        kind,
+        replacedCount: sameKindActiveDocs.length,
+      };
+    },
+    onSuccess: result => {
+      if (result?.restored) {
+        setShowIdentityArchive(false);
+        setIdentityArchiveMessage({
+          type: "success",
+          text: result.replacedCount > 0
+            ? `${identityDocumentKindLabel(result.kind)} is teruggezet naar actief. Het eerdere actieve document van hetzelfde type is naar het archief gezet.`
+            : `${identityDocumentKindLabel(result.kind)} is teruggezet naar actieve documenten.`,
+        });
+      } else {
+        setIdentityArchiveMessage({
+          type: "warning",
+          text: `Niet teruggezet: er is al een nieuwer of even lang geldig actief ${identityDocumentKindLabel(result.kind).toLowerCase()}. Dit document blijft in het archief.`,
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["personnel-documents", person.id] });
     },
   });
 
@@ -1424,6 +1545,28 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
             )}
           </div>
 
+          {identityArchiveMessage && !showIdentityWizard && (
+            <div className="px-5 pt-3">
+              <div className={`flex items-start justify-between gap-3 rounded-md border px-3 py-2 text-xs ${
+                identityArchiveMessage.type === "success"
+                  ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+                  : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
+              }`}>
+                <span>{identityArchiveMessage.text}</span>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-5 w-5 shrink-0 opacity-70 hover:opacity-100"
+                  onClick={() => setIdentityArchiveMessage(null)}
+                  title="Melding sluiten"
+                >
+                  <X className="h-3 w-3" />
+                </Button>
+              </div>
+            </div>
+          )}
+
           {showIdentityArchive ? (
             identityArchived.length === 0 ? (
               <p className="px-5 py-8 text-center text-sm text-muted-foreground">Geen documenten in het archief.</p>
@@ -1437,8 +1580,10 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
                     onPreview={setIdentityPreviewDoc}
                     onRenew={() => openIdentityWizard()}
                     onArchive={archiveIdentityMutation.mutate}
+                    onRestore={restoreIdentityMutation.mutate}
                     onDelete={setIdentityDeleteDoc}
                     auditActors={auditActors}
+                    restorePending={restoreIdentityMutation.isPending}
                   />
                 ))}
               </div>
