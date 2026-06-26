@@ -1385,7 +1385,11 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
         archived_at: new Date().toISOString(),
       }, auditActors),
     }),
-    onSuccess: () => {
+    onSuccess: (_data, doc) => {
+      setIdentityArchiveMessage({
+        type: "success",
+        text: `${identityDocumentKindLabel(identityDocumentKind(doc))} is naar het archief gezet.`,
+      });
       queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
     },
   });
