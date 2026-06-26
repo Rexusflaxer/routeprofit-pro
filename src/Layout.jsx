@@ -5,7 +5,8 @@ import {
   LayoutDashboard, Users, Settings, Menu, X, CarFront, Smartphone,
   Search, Route, MapPin, CalendarCheck,
   FileText, SlidersHorizontal,
-  Database, ChevronDown, Building2, UserCircle, LogOut, Handshake, AlertTriangle
+  Database, ChevronDown, Building2, UserCircle, LogOut, Handshake, AlertTriangle,
+  PanelLeftClose, PanelLeftOpen,
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeProvider, useTheme } from "next-themes";
@@ -86,7 +87,7 @@ function ViewportSizeWarning({ className = "" }) {
   );
 }
 
-function UserProfileFooter({ onNavigate }) {
+function UserProfileFooter({ onNavigate, collapsed = false }) {
   const [open, setOpen] = useState(false);
   const ref = useRef(null);
   const navigate = useNavigate();
@@ -114,11 +115,11 @@ function UserProfileFooter({ onNavigate }) {
   };
 
   return (
-    <div ref={ref} className="relative border-t border-sidebar-border px-3 py-2.5">
+    <div ref={ref} className={`relative border-t border-sidebar-border ${collapsed ? "px-1.5" : "px-3"} py-2.5`}>
       <AnimatePresence>
         {open && (
           <motion.div
-            className="absolute bottom-full left-3 right-3 mb-1.5 z-50 rounded-lg border border-border bg-popover shadow-lg py-1 text-[13px]"
+            className={`absolute bottom-full mb-1.5 z-50 rounded-lg border border-border bg-popover shadow-lg py-1 text-[13px] ${collapsed ? "left-1 right-1" : "left-3 right-3"}`}
             initial={{ opacity: 0, y: 8 }}
             animate={{ opacity: 1, y: 0 }}
             exit={{ opacity: 0, y: 8 }}
@@ -151,41 +152,55 @@ function UserProfileFooter({ onNavigate }) {
       </AnimatePresence>
       <button
         onClick={() => setOpen(v => !v)}
-        className="flex w-full items-center gap-2.5 rounded-md px-1.5 py-1.5 hover:bg-sidebar-accent transition-colors"
+        className={`flex w-full items-center rounded-md px-1.5 py-1.5 hover:bg-sidebar-accent transition-colors ${collapsed ? "justify-center" : "gap-2.5"}`}
+        title={collapsed ? (user?.full_name || "Profiel") : undefined}
       >
         <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-[#1f7aff]/15 text-[#1f7aff] text-[11px] font-bold">
           {initials}
         </div>
-        <div className="min-w-0 flex-1 text-left">
-          <p className="truncate text-[13px] font-medium text-sidebar-foreground leading-tight">{user?.full_name || "Profiel"}</p>
-          <p className="truncate text-[11px] text-muted-foreground leading-tight">{user?.email || ""}</p>
-        </div>
-        <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+        {!collapsed && (
+          <>
+            <div className="min-w-0 flex-1 text-left">
+              <p className="truncate text-[13px] font-medium text-sidebar-foreground leading-tight">{user?.full_name || "Profiel"}</p>
+              <p className="truncate text-[11px] text-muted-foreground leading-tight">{user?.email || ""}</p>
+            </div>
+            <ChevronDown className={`h-3.5 w-3.5 shrink-0 text-muted-foreground transition-transform ${open ? "rotate-180" : ""}`} />
+          </>
+        )}
       </button>
     </div>
   );
 }
 
-function ContextNavigation({ currentPageName, onNavigate }) {
+function ContextNavigation({ currentPageName, onNavigate, collapsed = false }) {
   return (
     <div className="flex h-full flex-col">
-      <div className="border-b border-sidebar-border px-3 py-3">
-        <Link to={createPageUrl("Dashboard")} onClick={onNavigate} className="inline-flex items-center">
-          <LOQLogo className="h-7 w-auto max-w-[104px]" />
+      <div className={`border-b border-sidebar-border py-3 ${collapsed ? "px-2" : "px-3"}`}>
+        <Link to={createPageUrl("Dashboard")} onClick={onNavigate} className={`inline-flex items-center ${collapsed ? "w-full justify-center" : ""}`}>
+          {collapsed ? (
+            <div className="flex h-7 w-7 items-center justify-center rounded-md bg-[#1f7aff] text-white text-[13px] font-bold">L</div>
+          ) : (
+            <LOQLogo className="h-7 w-auto max-w-[104px]" />
+          )}
         </Link>
-        <div className="mt-3 flex h-8 items-center gap-2 rounded-md border border-sidebar-border bg-background/70 px-2 text-muted-foreground">
-          <Search className="h-3.5 w-3.5" />
-          <span className="text-[12px]">Search</span>
-        </div>
+        {!collapsed && (
+          <div className="mt-3 flex h-8 items-center gap-2 rounded-md border border-sidebar-border bg-background/70 px-2 text-muted-foreground">
+            <Search className="h-3.5 w-3.5" />
+            <span className="text-[12px]">Search</span>
+          </div>
+        )}
       </div>
 
-      <div className="flex-1 overflow-y-auto px-3 py-3">
+      <div className={`flex-1 overflow-y-auto py-3 ${collapsed ? "px-1.5" : "px-3"}`}>
         {CONTEXT_SECTIONS.map(section => (
-          <section key={section.label} className="mb-4">
-            <div className="mb-1.5 flex items-center justify-between">
-              <p className="text-[11px] font-semibold uppercase text-muted-foreground">{section.label}</p>
-              <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
-            </div>
+          <section key={section.label} className={collapsed ? "mb-4" : "mb-4"}>
+            {!collapsed && (
+              <div className="mb-1.5 flex items-center justify-between">
+                <p className="text-[11px] font-semibold uppercase text-muted-foreground">{section.label}</p>
+                <ChevronDown className="h-3.5 w-3.5 text-muted-foreground" />
+              </div>
+            )}
+            {collapsed && <div className="my-2 border-t border-sidebar-border/60" />}
             <div className="space-y-0.5">
               {section.items.map(item => {
                 const active = isActive(currentPageName, item);
@@ -194,14 +209,17 @@ function ContextNavigation({ currentPageName, onNavigate }) {
                     key={`${section.label}-${item.page}`}
                     to={createPageUrl(item.page)}
                     onClick={onNavigate}
-                    className={`flex h-8 items-center gap-2 rounded-md px-2 text-[13px] transition-colors ${
+                    title={collapsed ? item.name : undefined}
+                    className={`flex h-8 items-center rounded-md text-[13px] transition-colors ${
+                      collapsed ? "justify-center px-0" : "gap-2 px-2"
+                    } ${
                       active
                         ? "bg-[#1f7aff]/10 text-[#1f7aff]"
                         : "text-sidebar-foreground/80 hover:bg-sidebar-accent hover:text-sidebar-foreground"
                     }`}
                   >
-                    <item.icon className="h-3.5 w-3.5 shrink-0" />
-                    <span className="truncate">{item.name}</span>
+                    <item.icon className="h-4 w-4 shrink-0" />
+                    {!collapsed && <span className="truncate">{item.name}</span>}
                   </Link>
                 );
               })}
@@ -210,23 +228,36 @@ function ContextNavigation({ currentPageName, onNavigate }) {
         ))}
       </div>
 
-      <div className="hidden border-t border-sidebar-border px-3 py-2.5 lg:block 2xl:hidden">
-        <ViewportSizeWarning />
-      </div>
+      {!collapsed && (
+        <div className="hidden border-t border-sidebar-border px-3 py-2.5 lg:block 2xl:hidden">
+          <ViewportSizeWarning />
+        </div>
+      )}
 
-      <UserProfileFooter onNavigate={onNavigate} />
+      <UserProfileFooter onNavigate={onNavigate} collapsed={collapsed} />
     </div>
   );
 }
 
 function AppShell({ children, currentPageName }) {
   const [mobileOpen, setMobileOpen] = useState(false);
+  const [collapsed, setCollapsed] = useState(false);
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-background text-foreground antialiased">
-      <aside className="fixed inset-y-0 left-0 z-40 hidden w-64 border-r border-sidebar-border bg-sidebar lg:block">
-        <ContextNavigation currentPageName={currentPageName} />
+      <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-in-out lg:block ${collapsed ? "w-16" : "w-64"}`}>
+        <ContextNavigation currentPageName={currentPageName} collapsed={collapsed} />
       </aside>
+
+      {/* Desktop collapse toggle */}
+      <button
+        onClick={() => setCollapsed(v => !v)}
+        className="fixed top-3 z-50 hidden h-7 w-7 items-center justify-center rounded-md border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground lg:flex"
+        style={{ left: collapsed ? "44px" : "244px" }}
+        title={collapsed ? "Menu uitklappen" : "Menu inklappen"}
+      >
+        {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
+      </button>
 
       <header className="sticky left-0 top-0 z-40 w-screen max-w-full border-b border-border bg-[hsl(var(--topbar))] lg:hidden">
         <div className="flex h-12 items-center justify-between gap-3 px-3">
@@ -251,7 +282,7 @@ function AppShell({ children, currentPageName }) {
         )}
       </header>
 
-      <main className="min-h-screen min-w-0 overflow-x-hidden lg:pl-64">
+      <main className={`min-h-screen min-w-0 overflow-x-hidden transition-[padding] duration-200 ease-in-out ${collapsed ? "lg:pl-16" : "lg:pl-64"}`}>
         <div className="px-4 py-3 sm:px-5 lg:px-6">
           {children}
         </div>
