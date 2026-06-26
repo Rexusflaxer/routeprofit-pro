@@ -62,9 +62,9 @@ export default function DocumentPreviewPanel({ url, isPdf, fileName, onReplace }
         onWheel={!isPdf ? onWheel : undefined}
         style={{ cursor: !isPdf && zoom > 1 ? "grab" : "default" }}
       >
-        {isPdf ? (
+        {isPdf && url ? (
           <iframe src={url} title={fileName || "PDF preview"} className="w-full h-full border-0" />
-        ) : (
+        ) : !isPdf && url ? (
           <img
             src={url}
             alt={fileName || "Document"}
@@ -82,6 +82,10 @@ export default function DocumentPreviewPanel({ url, isPdf, fileName, onReplace }
             }}
             className="w-full h-full object-contain select-none"
           />
+        ) : (
+          <div className="flex items-center justify-center w-full h-full text-muted-foreground text-xs">
+            Geen document geüpload
+          </div>
         )}
       </div>
 
