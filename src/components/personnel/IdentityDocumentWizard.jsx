@@ -392,7 +392,7 @@ function DrivingLicenseGuideImage({ side = "front" }) {
     <img
       src={isBack ? "/identity-guides/driving-license-back.jpg" : "/identity-guides/driving-license-front.jpg"}
       alt={isBack ? "Voorbeeld achterkant Nederlands rijbewijs" : "Voorbeeld voorkant Nederlands rijbewijs"}
-      className="max-h-36 w-auto rounded border border-border bg-white object-contain shadow-sm"
+      className="h-36 w-[260px] rounded border border-border bg-white object-contain shadow-sm"
       draggable="false"
     />
   );
