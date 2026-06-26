@@ -5,8 +5,7 @@ import {
   LayoutDashboard, Users, Settings, Menu, X, CarFront, Smartphone,
   Search, Route, MapPin, CalendarCheck,
   FileText, SlidersHorizontal,
-  Database, ChevronDown, Building2, UserCircle, LogOut, Handshake, AlertTriangle,
-  PanelLeftClose, PanelLeftOpen,
+  Database, ChevronDown, Building2, UserCircle, LogOut, Handshake, AlertTriangle
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { ThemeProvider, useTheme } from "next-themes";
@@ -265,16 +264,6 @@ function AppShell({ children, currentPageName }) {
       <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-in-out lg:block ${collapsed ? "w-16" : "w-64"}`} onMouseLeave={handleMouseLeave}>
         <ContextNavigation currentPageName={currentPageName} collapsed={collapsed} />
       </aside>
-
-      {/* Desktop collapse toggle */}
-      <button
-        onClick={() => setCollapsed(v => !v)}
-        className="fixed top-3 z-50 hidden h-7 w-7 items-center justify-center rounded-md border border-border bg-card text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground lg:flex"
-        style={{ left: collapsed ? "44px" : "244px" }}
-        title={collapsed ? "Menu uitklappen" : "Menu inklappen"}
-      >
-        {collapsed ? <PanelLeftOpen className="h-4 w-4" /> : <PanelLeftClose className="h-4 w-4" />}
-      </button>
 
       <header className="sticky left-0 top-0 z-40 w-screen max-w-full border-b border-border bg-[hsl(var(--topbar))] lg:hidden">
         <div className="flex h-12 items-center justify-between gap-3 px-3">
