@@ -70,9 +70,13 @@ function dateSortKey(value) {
   return text;
 }
 
+function payrollFromDateSortKey(doc) {
+  return dateSortKey(doc?.metadata?.payroll_tax_credit_from || doc?.valid_until || "");
+}
+
 function payrollActiveSortValue(doc) {
   return [
-    dateSortKey(doc?.valid_until),
+    payrollFromDateSortKey(doc),
     String(doc?.updated_date || doc?.created_date || ""),
     String(doc?.id || ""),
   ].join("|");
@@ -90,8 +94,8 @@ function verificationStatusForActivePayrollDocument(doc) {
 }
 
 function comparePayrollRestoreCandidates(a, b, restoreId) {
-  const validUntilDiff = dateSortKey(b?.valid_until).localeCompare(dateSortKey(a?.valid_until));
-  if (validUntilDiff !== 0) return validUntilDiff;
+  const fromDiff = payrollFromDateSortKey(b).localeCompare(payrollFromDateSortKey(a));
+  if (fromDiff !== 0) return fromDiff;
   const aIsRestore = a?.id === restoreId;
   const bIsRestore = b?.id === restoreId;
   if (aIsRestore && !bIsRestore) return 1;
@@ -870,10 +874,15 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
   const restoreMutation = useMutation({
     mutationFn: async doc => {
       const allDocs = await base44.entities.PersonnelDocument.filter({ personnel_id: person.id, category: "payroll_tax_statement" }, "-created_date");
-      const sameActiveDocs = allDocs.filter(item => item.id !== doc.id).filter(item => !isArchivedPayrollDocument(item));
-      const winner = [doc, ...sameActiveDocs].sort((a, b) => comparePayrollRestoreCandidates(a, b, doc.id))[0];
+      // Concepten (drafts) in actief vervallen bij terugzetten van een archiefdocument
+      const drafts = allDocs.filter(item => item.id !== doc.id && isDraftPayrollDocument(item));
+      // Vergelijk tegen alle niet-concept documenten (zowel actief als archief)
+      const otherNonDraftDocs = allDocs.filter(item => item.id !== doc.id && !isDraftPayrollDocument(item));
+      const winner = [doc, ...otherNonDraftDocs].sort((a, b) => comparePayrollRestoreCandidates(a, b, doc.id))[0];
       if (winner?.id !== doc.id) return { restored: false };
       const now = new Date().toISOString();
+      await Promise.all(drafts.map(draft => base44.entities.PersonnelDocument.delete(draft.id)));
+      const sameActiveDocs = otherNonDraftDocs.filter(item => !isArchivedPayrollDocument(item));
       await Promise.all(sameActiveDocs.map(activeDoc => base44.entities.PersonnelDocument.update(activeDoc.id, {
         verification_status: "expired",
         metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
@@ -886,13 +895,17 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
           ...(doc.metadata || {}), archived: false, archived_at: null, restored_from_archive_at: now,
         }, auditActors),
       });
-      return { restored: true, replacedCount: sameActiveDocs.length };
+      return { restored: true, replacedCount: sameActiveDocs.length, voidedDrafts: drafts.length };
     },
     onSuccess: result => {
-      setArchiveMessage(result?.restored
-        ? { type: "success", text: result.replacedCount > 0 ? "Loonheffingsformulier is teruggezet. Het eerdere actieve document is gearchiveerd." : "Loonheffingsformulier is teruggezet naar actieve documenten." }
-        : { type: "warning", text: "Niet teruggezet: er is al een nieuwer actief document. Dit document blijft in het archief." }
-      );
+      if (!result?.restored) {
+        setArchiveMessage({ type: "warning", text: "Niet teruggezet: er is een nieuwer document. Maak het meest recente document actief of upload een nieuw formulier." });
+      } else {
+        const parts = [];
+        if (result.replacedCount > 0) parts.push("het eerdere actieve document is gearchiveerd");
+        if (result.voidedDrafts > 0) parts.push("het concept is vervallen");
+        setArchiveMessage({ type: "success", text: parts.length > 0 ? `Loonheffingsformulier is teruggezet naar actief. ${parts.join(" en ")}.` : "Loonheffingsformulier is teruggezet naar actief." });
+      }
       queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
     },
   });
