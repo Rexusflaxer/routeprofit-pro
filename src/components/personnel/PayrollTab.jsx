@@ -18,8 +18,8 @@ import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 const DELETE_PASSWORD = "verwijder";
 const FORM_PDF_URL = "https://media.base44.com/files/public/698e307ed3aa4cab3729bbf1/4551ed708_model_opgaaf_gegevens_loonheffingen_lh0082z11fol-5.pdf";
 
-// Table grid: omschrijving | loonheffingskorting | alleenstaande-ouderenkorting | status | door | acties
-const PAYROLL_TABLE_GRID = "grid grid-cols-[minmax(200px,1fr)_160px_200px_120px_150px_minmax(240px,max-content)] gap-3";
+// Table grid: omschrijving | loonheffingskorting | vanaf | ouderenkorting | status | door | acties
+const PAYROLL_TABLE_GRID = "grid grid-cols-[minmax(160px,1fr)_130px_110px_130px_120px_150px_minmax(240px,max-content)] gap-3";
 
 function formatDate(v, fallback = "-") {
   if (!v) return fallback;
@@ -209,22 +209,15 @@ function PayrollDocumentRow({
 
       {/* Loonheffingskorting */}
       <div className="min-w-0">
-        {lhk === true ? (
-          <div>
-            <span className="text-sm text-foreground">Ja</span>
-            {lhkFrom && <p className="text-xs text-muted-foreground">v.a. {formatDate(lhkFrom)}</p>}
-          </div>
-        ) : lhk === false ? (
-          <div>
-            <span className="text-sm text-foreground">Nee</span>
-            {lhkFrom && <p className="text-xs text-muted-foreground">v.a. {formatDate(lhkFrom)}</p>}
-          </div>
-        ) : (
-          <span className="text-sm text-muted-foreground">-</span>
-        )}
+        <span className="text-sm text-foreground">{lhkLabel(lhk)}</span>
       </div>
 
-      {/* Alleenstaande-ouderenkorting */}
+      {/* Vanaf */}
+      <div className="min-w-0">
+        <span className="text-sm text-muted-foreground">{lhkFrom ? formatDate(lhkFrom) : "-"}</span>
+      </div>
+
+      {/* Ouderenkorting */}
       <div className="min-w-0">
         <span className="text-sm text-foreground">{aok === true ? "Ja" : aok === false ? "Nee" : "-"}</span>
       </div>
@@ -939,7 +932,8 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
       <div className={`${PAYROLL_TABLE_GRID} items-center border-b border-border bg-muted/30 px-5 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
         <span>Omschrijving</span>
         <span>Loonheffingskorting</span>
-        <span>Alleenst.-ouderenkorting</span>
+        <span>Vanaf</span>
+        <span>Ouderenkorting</span>
         <span>Status</span>
         <span>Door</span>
         {!wizardOpen && (
