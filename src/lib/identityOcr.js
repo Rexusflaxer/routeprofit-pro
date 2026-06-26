@@ -90,6 +90,27 @@ function parseVisibleDate(value) {
   return null;
 }
 
+function parseCompactVisibleDate(value) {
+  const digits = ocrDigits(value);
+  const candidates = [];
+  if (digits.length < 8) return null;
+
+  for (let index = 0; index <= Math.min(2, digits.length - 8); index += 1) {
+    candidates.push(digits.slice(index, index + 8));
+  }
+
+  for (const candidate of [...new Set(candidates)]) {
+    const day = Number(candidate.slice(0, 2));
+    const month = Number(candidate.slice(2, 4));
+    const year = Number(candidate.slice(4, 8));
+    if (year < 1900 || year > 2099) continue;
+    const date = toIsoDate(year, month, day);
+    if (date) return date;
+  }
+
+  return null;
+}
+
 function findDateNearLabel(text, labels) {
   const upper = text.toUpperCase();
   for (const label of labels) {
@@ -107,11 +128,18 @@ function findDateNearFieldCode(text, fieldCode) {
   const code = String(fieldCode || "").toUpperCase();
   if (!/^\d[A-Z]$/.test(code)) return null;
 
-  const pattern = new RegExp(`(?:^|\\s)${code[0]}\\s*${code[1]}\\s*[:.]?\\s*`, "g");
-  for (const match of upper.matchAll(pattern)) {
-    const slice = upper.slice(match.index, match.index + 130);
-    const date = parseVisibleDate(slice);
-    if (date) return date;
+  const letterPattern = code[1] === "B"
+    ? "[B8V]"
+    : "A?";
+  const guard = code[1] === "A" ? "(?![B8V])" : "";
+  const pattern = new RegExp(`(?:^|[^A-Z0-9])${code[0]}\\s*${letterPattern}\\s*${guard}[:.]?\\s*`, "gi");
+
+  for (const line of upper.split(/\r?\n/)) {
+    for (const match of line.matchAll(pattern)) {
+      const slice = line.slice(match.index + match[0].length, match.index + match[0].length + 90);
+      const date = parseVisibleDate(slice) || parseCompactVisibleDate(slice);
+      if (date) return date;
+    }
   }
 
   return null;
@@ -241,8 +269,6 @@ function isLikelyDriversLicenseNumber(value) {
 function findDriversLicenseNumberInText(text) {
   const normalized = text.toUpperCase();
   const labeledCandidates = [];
-  const mrzNumber = findDriversLicenseNumberInMrz(text);
-  if (mrzNumber) return mrzNumber;
 
   const bsnAndDocument = normalized.match(/(?:BSN|BURGERSERVICENUMMER)\D{0,40}([0-9OQDILSB\s.-]{8,18})\s*[/|]\s*([0-9OQDILSB\s.-]{8,18})/);
   if (bsnAndDocument) labeledCandidates.push(ocrDigits(bsnAndDocument[2]));
@@ -262,10 +288,7 @@ function findDriversLicenseNumberInText(text) {
   const labeled = labeledCandidates.find(isLikelyDriversLicenseNumber);
   if (labeled) return labeled;
 
-  const candidates = normalized.match(/\b[0-9OQDILSB][0-9OQDILSB\s.-]{8,18}[0-9OQDILSB]\b/g) || [];
-  return candidates
-    .map(ocrDigits)
-    .find(isLikelyDriversLicenseNumber) || "";
+  return findDriversLicenseNumberInMrz(text);
 }
 
 function findDriversLicenseNumberInMrz(text) {
@@ -275,10 +298,16 @@ function findDriversLicenseNumberInMrz(text) {
     .flatMap(line => line.length > 44 ? line.match(/.{1,44}/g) || [line] : [line]);
 
   for (const line of lines) {
-    const index = line.indexOf("D1NLD");
-    if (index < 0) continue;
-    const candidate = ocrDigits(line.slice(index + 5, index + 16));
-    if (isLikelyDriversLicenseNumber(candidate.slice(0, 10))) return candidate.slice(0, 10);
+    const match = line.match(/D[1IL]NLD/);
+    if (!match) continue;
+    const digits = ocrDigits(line.slice(match.index + match[0].length, match.index + match[0].length + 18));
+    const candidates = [
+      digits.slice(1, 11),
+      digits.slice(0, 10),
+      digits.slice(2, 12),
+    ];
+    const candidate = candidates.find(isLikelyDriversLicenseNumber);
+    if (candidate) return candidate;
   }
 
   return "";
@@ -679,8 +708,6 @@ export function parseIdentityOcrText(text, { docType = "passport" } = {}) {
   const isDriversLicense = docType === "drivers_license";
   const mrz = extractMrz(text) || {};
   const visibleUntil = findDateNearLabel(text, [
-    "4B",
-    "4 B",
     "GELDIG TOT",
     "DATE OF EXPIRY",
     "EXPIRY DATE",
@@ -688,8 +715,6 @@ export function parseIdentityOcrText(text, { docType = "passport" } = {}) {
     "VALID TO",
   ]);
   const validFrom = findDateNearLabel(text, [
-    "4A",
-    "4 A",
     "DATUM VAN AFGIFTE",
     "DATE OF ISSUE",
     "ISSUED ON",
@@ -703,8 +728,8 @@ export function parseIdentityOcrText(text, { docType = "passport" } = {}) {
       || (isDriversLicense ? findDriversLicenseNumberInText(text) : "")
       || findDocumentNumberInText(text),
     bsn: mrz.bsn || findBsnInText(text),
-    valid_from: driversLicenseValidFrom || validFrom || "",
-    valid_until: mrz.valid_until || driversLicenseValidUntil || visibleUntil || "",
+    valid_from: isDriversLicense ? driversLicenseValidFrom || "" : validFrom || "",
+    valid_until: isDriversLicense ? driversLicenseValidUntil || "" : mrz.valid_until || visibleUntil || "",
     mrz_format: mrz.format || null,
   };
 }

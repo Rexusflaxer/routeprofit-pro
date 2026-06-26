@@ -819,6 +819,14 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   useEffect(() => {
     setRecognizedUploadKey("");
     setScanQuality(null);
+    setErrors({});
+    setForm(current => ({
+      ...current,
+      document_number: "",
+      bsn: "",
+      valid_from: "",
+      valid_until: "",
+    }));
   }, [docType, frontFile, backFile]);
 
   const applyRecognizedFields = useCallback((result) => {
