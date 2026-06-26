@@ -1,20 +1,20 @@
-import React, { useState, useEffect, useRef } from "react";
+import React, { useState, useEffect, useRef, useMemo } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  Archive, ArrowLeft, BriefcaseBusiness, Check, Eye,
-  FileCheck2, FileText, ImageIcon, Loader2, Plus, X,
+  AlertTriangle, Archive, ArrowLeft, Check, Eye,
+  FileCheck2, FileText, ImageIcon, Loader2, Plus, RefreshCw, Trash2, X,
 } from "lucide-react";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 
-const PAYROLL_TABLE_GRID = "grid grid-cols-[minmax(220px,1fr)_170px_140px_180px_180px] gap-3";
+const DELETE_PASSWORD = "verwijder";
+const PAYROLL_TABLE_GRID = "grid grid-cols-[minmax(160px,200px)_minmax(130px,170px)_minmax(96px,124px)_minmax(110px,140px)_minmax(110px,1fr)_minmax(280px,max-content)] gap-3";
 
 function formatDate(v, fallback = "-") {
   if (!v) return fallback;
@@ -56,51 +56,219 @@ function isImageFile(url) {
   return /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(url || "");
 }
 
+function dateSortKey(value) {
+  if (!value) return "";
+  const text = String(value).trim();
+  const dutchDate = text.match(/^(\d{2})-(\d{2})-(\d{4})$/);
+  if (dutchDate) return `${dutchDate[3]}-${dutchDate[2]}-${dutchDate[1]}`;
+  const parsed = new Date(text);
+  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().split("T")[0];
+  return text;
+}
+
+function payrollActiveSortValue(doc) {
+  return [
+    dateSortKey(doc?.valid_until),
+    String(doc?.updated_date || doc?.created_date || ""),
+    String(doc?.id || ""),
+  ].join("|");
+}
+
+function isExpiredPayrollDocument(doc) {
+  const today = new Date().toISOString().split("T")[0];
+  return (doc?.valid_until && dateSortKey(doc.valid_until) < today) || doc?.verification_status === "expired";
+}
+
+function verificationStatusForActivePayrollDocument(doc) {
+  const today = new Date().toISOString().split("T")[0];
+  return doc?.valid_until && dateSortKey(doc.valid_until) < today ? "expired" : "verified";
+}
+
+function comparePayrollRestoreCandidates(a, b, restoreId) {
+  const validUntilDiff = dateSortKey(b?.valid_until).localeCompare(dateSortKey(a?.valid_until));
+  if (validUntilDiff !== 0) return validUntilDiff;
+
+  const aIsRestore = a?.id === restoreId;
+  const bIsRestore = b?.id === restoreId;
+  if (aIsRestore && !bIsRestore) return 1;
+  if (!aIsRestore && bIsRestore) return -1;
+
+  return payrollActiveSortValue(b).localeCompare(payrollActiveSortValue(a));
+}
+
+function splitPayrollDocumentsByActiveState(docs) {
+  const nonArchived = [];
+  const archived = [];
+
+  for (const doc of docs) {
+    if (isArchivedPayrollDocument(doc)) {
+      archived.push(doc);
+    } else {
+      nonArchived.push(doc);
+    }
+  }
+
+  const sortedNonArchived = [...nonArchived].sort((a, b) =>
+    payrollActiveSortValue(b).localeCompare(payrollActiveSortValue(a))
+  );
+
+  const active = sortedNonArchived.slice(0, 1);
+  const effectiveArchived = sortedNonArchived.slice(1);
+
+  return {
+    active,
+    archived: [...archived, ...effectiveArchived],
+    effectiveArchived,
+  };
+}
+
+// ─── Status Badge ──────────────────────────────────────────────────────────────
+
+function PayrollStatusBadge({ doc, archived = false }) {
+  if (archived || isArchivedPayrollDocument(doc)) {
+    return <Badge className="text-xs bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 border-0 whitespace-nowrap">Gearchiveerd</Badge>;
+  }
+  if (isExpiredPayrollDocument(doc)) {
+    return <Badge className="text-xs bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 border-0 whitespace-nowrap">Actie vereist</Badge>;
+  }
+  if (doc?.verification_status === "verified") {
+    return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0 whitespace-nowrap">Actief</Badge>;
+  }
+  if (doc?.verification_status === "pending_review") {
+    return <Badge className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 border-0 whitespace-nowrap">In beoordeling</Badge>;
+  }
+  if (doc?.verification_status === "rejected") {
+    return <Badge className="text-xs bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 border-0 whitespace-nowrap">Afgekeurd</Badge>;
+  }
+  return <Badge className="text-xs bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border-0 whitespace-nowrap">Geüpload</Badge>;
+}
+
 // ─── Document Row ─────────────────────────────────────────────────────────────
 
-function PayrollDocumentRow({ doc, archived = false, onPreview, auditActors = [] }) {
+function PayrollDocumentRow({
+  doc,
+  archived = false,
+  onPreview,
+  onRenew,
+  onArchive,
+  onRestore,
+  onDelete,
+  auditActors = [],
+  restorePending = false,
+}) {
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef(null);
   const expiry = getExpiryState(doc.valid_until);
   const canPreview = hasPayrollDocumentUpload(doc);
+  const isExpired = !archived && isExpiredPayrollDocument(doc);
+  const canArchive = !archived;
+  const canRestore = archived;
+  const canDelete = archived;
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    const handleOutside = event => {
+      if (menuRef.current && !menuRef.current.contains(event.target)) setMenuOpen(false);
+    };
+    document.addEventListener("mousedown", handleOutside);
+    return () => document.removeEventListener("mousedown", handleOutside);
+  }, [menuOpen]);
 
   const openRow = () => {
-    if (canPreview) onPreview(doc);
+    if (isExpired) {
+      setMenuOpen(current => !current);
+    } else if (canPreview) {
+      onPreview?.(doc);
+    }
   };
 
   return (
     <div
       className={`${PAYROLL_TABLE_GRID} relative items-center px-5 py-3 transition-colors ${
-        canPreview ? "cursor-pointer hover:bg-accent/35" : ""
-      } ${archived ? "opacity-75" : ""}`}
+        isExpired || canPreview ? "cursor-pointer hover:bg-accent/35" : ""
+      }`}
       onClick={openRow}
     >
       <div className="min-w-0">
-        <p className={`truncate text-sm font-semibold ${archived ? "text-muted-foreground line-through" : "text-foreground"}`}>
+        <p className="truncate text-sm font-semibold text-foreground">
           {doc.document_type || "Loonheffingsverklaring"}
         </p>
-        {archived && <p className="mt-0.5 text-xs text-muted-foreground">Archiefkopie</p>}
       </div>
       <span className="min-w-0 truncate text-sm text-muted-foreground">{doc.document_number || "-"}</span>
+      <div className="min-w-0">
+        <PayrollStatusBadge doc={doc} archived={archived} />
+      </div>
       <div className="min-w-0 flex items-center gap-2">
         <span className="text-sm text-foreground">{formatDate(doc.valid_until)}</span>
-        {expiry && !archived && (
-          <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium ${expiry.className}`}>{expiry.label}</span>
-        )}
+        {expiry && !archived && <Badge className={`text-xs ${expiry.className} border-0 whitespace-nowrap`}>{expiry.label}</Badge>}
       </div>
       <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(doc, auditActors)}</span>
-      <div className="flex justify-end">
-        {canPreview && (
+      <div className="flex justify-end gap-1">
+        {canArchive && (
           <Button
             type="button"
             variant="ghost"
             size="icon"
             className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={event => { event.stopPropagation(); onPreview(doc); }}
-            title="Document bekijken"
+            onClick={event => { event.stopPropagation(); onArchive?.(doc); }}
+            title="Naar archief"
           >
-            <Eye className="h-3.5 w-3.5" />
+            <Archive className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {canRestore && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={event => { event.stopPropagation(); onRestore?.(doc); }}
+            disabled={restorePending}
+            title="Terugzetten naar actief"
+          >
+            <RefreshCw className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {canDelete && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            onClick={event => { event.stopPropagation(); onDelete?.(doc); }}
+            title="Definitief verwijderen"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
           </Button>
         )}
       </div>
+
+      {menuOpen && isExpired && (
+        <div
+          ref={menuRef}
+          className="absolute right-4 top-11 z-50 min-w-[210px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg"
+          onClick={event => event.stopPropagation()}
+        >
+          {canPreview && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+              onClick={() => { setMenuOpen(false); onPreview(doc); }}
+            >
+              <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+              Document bekijken
+            </button>
+          )}
+          <button
+            type="button"
+            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+            onClick={() => { setMenuOpen(false); onRenew(); }}
+          >
+            <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
+            Loonheffingsverklaring vernieuwen
+          </button>
+        </div>
+      )}
     </div>
   );
 }
@@ -137,6 +305,71 @@ function PayrollDocumentPreviewDialog({ document, open, onOpenChange }) {
             </div>
           </div>
         )}
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ─── Delete Confirm Dialog ─────────────────────────────────────────────────────
+
+function PayrollDeleteConfirmDialog({ document, open, onOpenChange, onConfirm, isPending }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+
+  useEffect(() => {
+    if (!open) {
+      setPassword("");
+      setError("");
+    }
+  }, [open]);
+
+  const handleConfirm = () => {
+    if (password !== DELETE_PASSWORD) {
+      setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`);
+      return;
+    }
+    onConfirm?.(document);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Document definitief verwijderen?</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <div className="text-sm">
+              <p className="font-medium text-foreground">
+                {document?.document_type || "Loonheffingsverklaring"} {document?.document_number ? `#${document.document_number}` : ""} wordt verwijderd.
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Deze actie is alleen bedoeld voor verkeerd toegevoegde archiefdocumenten.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">
+              Typ <strong className="font-mono text-foreground">{DELETE_PASSWORD}</strong> om te bevestigen
+            </Label>
+            <Input
+              value={password}
+              onChange={event => { setPassword(event.target.value); setError(""); }}
+              onKeyDown={event => event.key === "Enter" && handleConfirm()}
+              placeholder={DELETE_PASSWORD}
+              className={`h-9 font-mono ${error ? "border-destructive" : ""}`}
+              autoFocus
+            />
+            {error && <p className="text-xs text-destructive">{error}</p>}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>Annuleren</Button>
+          <Button variant="destructive" onClick={handleConfirm} disabled={isPending}>
+            <Trash2 className="mr-1 h-4 w-4" /> {isPending ? "Verwijderen..." : "Verwijderen"}
+          </Button>
+        </DialogFooter>
       </DialogContent>
     </Dialog>
   );
@@ -366,7 +599,7 @@ function ZzpDetailsSection({ person }) {
     <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
       <div className="rounded-lg border border-border bg-card">
         <div className="flex items-center gap-2 border-b border-border px-4 py-3">
-          <BriefcaseBusiness className="h-4 w-4 text-muted-foreground" />
+          <FileText className="h-4 w-4 text-muted-foreground" />
           <h3 className="text-sm font-semibold text-foreground">ZZP-bedrijfsgegevens</h3>
         </div>
         <div className="p-4">
@@ -391,6 +624,8 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
   const [wizardArchiveMode, setWizardArchiveMode] = useState(false);
   const [showArchive, setShowArchive] = useState(false);
   const [previewDoc, setPreviewDoc] = useState(null);
+  const [deleteDoc, setDeleteDoc] = useState(null);
+  const [archiveMessage, setArchiveMessage] = useState(null);
 
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
@@ -398,40 +633,136 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
     staleTime: 5 * 60 * 1000,
   });
 
-  // Loonheffingskorting state
-  const [creditApplies, setCreditApplies] = useState(
-    person.payroll_tax_credit_applies === true ? "true" :
-    person.payroll_tax_credit_applies === false ? "false" : "unknown"
+  useEffect(() => {
+    if (!archiveMessage) return undefined;
+    const timer = setTimeout(() => setArchiveMessage(null), 5000);
+    return () => clearTimeout(timer);
+  }, [archiveMessage]);
+
+  const payrollAllDocs = useMemo(
+    () => documents.filter(d => d.category === "payroll_tax_statement"),
+    [documents]
   );
-  const [signedAt, setSignedAt] = useState(person.payroll_tax_statement_signed_at || "");
-  const [creditSaved, setCreditSaved] = useState(false);
+  const payrollSplit = useMemo(
+    () => splitPayrollDocumentsByActiveState(payrollAllDocs),
+    [payrollAllDocs]
+  );
+  const sortDocs = docs => [...docs].sort((a, b) =>
+    dateSortKey(b.valid_until).localeCompare(dateSortKey(a.valid_until))
+  );
+  const sortedActive = sortDocs(payrollSplit.active);
+  const sortedArchived = sortDocs(payrollSplit.archived);
+
+  const docsToAutoArchive = useMemo(
+    () => payrollSplit.effectiveArchived.filter(doc => doc.metadata?.archived !== true),
+    [payrollSplit]
+  );
+  const docsToAutoArchiveSignature = docsToAutoArchive
+    .map(doc => `${doc.id}:${doc.valid_until || ""}`)
+    .join("|");
 
   useEffect(() => {
-    setCreditApplies(
-      person.payroll_tax_credit_applies === true ? "true" :
-      person.payroll_tax_credit_applies === false ? "false" : "unknown"
-    );
-    setSignedAt(person.payroll_tax_statement_signed_at || "");
-  }, [person]);
+    if (docsToAutoArchive.length === 0) return undefined;
 
-  const saveCreditMutation = useMutation({
-    mutationFn: () => base44.entities.Personnel.update(person.id, {
-      payroll_tax_credit_applies: creditApplies === "true" ? true : creditApplies === "false" ? false : null,
-      payroll_tax_statement_signed_at: signedAt || null,
+    let cancelled = false;
+    Promise.all(docsToAutoArchive.map(doc => base44.entities.PersonnelDocument.update(doc.id, {
+      verification_status: "expired",
+      metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
+        ...(doc.metadata || {}),
+        archived: true,
+        archived_at: new Date().toISOString(),
+      }, auditActors),
+    }))).then(() => {
+      if (!cancelled) queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
+    }).catch(error => {
+      console.error("Payroll document auto-archive failed", error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auditActors, currentUser, docsToAutoArchive, docsToAutoArchiveSignature, queryClient]);
+
+  const archiveMutation = useMutation({
+    mutationFn: doc => base44.entities.PersonnelDocument.update(doc.id, {
+      verification_status: "expired",
+      metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
+        ...(doc.metadata || {}),
+        archived: true,
+        archived_at: new Date().toISOString(),
+      }, auditActors),
     }),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ["personnel"] });
-      setCreditSaved(true);
-      setTimeout(() => setCreditSaved(false), 2000);
+    onSuccess: (_data, doc) => {
+      setArchiveMessage({
+        type: "success",
+        text: `${doc.document_type || "Loonheffingsverklaring"} is naar het archief gezet.`,
+      });
+      queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
     },
   });
 
-  const payrollDocs = documents.filter(d => d.category === "payroll_tax_statement");
-  const activeDocs = payrollDocs.filter(d => !isArchivedPayrollDocument(d));
-  const archivedDocs = payrollDocs.filter(d => isArchivedPayrollDocument(d));
-  const sortDocs = docs => [...docs].sort((a, b) => String(b.valid_until || "").localeCompare(String(a.valid_until || "")));
-  const sortedActive = sortDocs(activeDocs);
-  const sortedArchived = sortDocs(archivedDocs);
+  const restoreMutation = useMutation({
+    mutationFn: async doc => {
+      const allDocs = await base44.entities.PersonnelDocument.filter({ personnel_id: person.id, category: "payroll_tax_statement" }, "-created_date");
+      const sameActiveDocs = allDocs
+        .filter(item => item.id !== doc.id)
+        .filter(item => !isArchivedPayrollDocument(item));
+
+      const winner = [doc, ...sameActiveDocs]
+        .sort((a, b) => comparePayrollRestoreCandidates(a, b, doc.id))[0];
+
+      if (winner?.id !== doc.id) {
+        return { restored: false, activeDoc: winner };
+      }
+
+      const now = new Date().toISOString();
+      await Promise.all(sameActiveDocs.map(activeDoc => base44.entities.PersonnelDocument.update(activeDoc.id, {
+        verification_status: "expired",
+        metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
+          ...(activeDoc.metadata || {}),
+          archived: true,
+          archived_at: now,
+          archived_reason: "Vervangen door teruggezet archiefdocument",
+        }, auditActors),
+      })));
+
+      await base44.entities.PersonnelDocument.update(doc.id, {
+        verification_status: verificationStatusForActivePayrollDocument(doc),
+        metadata: buildAuditMetadata(currentUser, "teruggezet", {
+          ...(doc.metadata || {}),
+          archived: false,
+          archived_at: null,
+          restored_from_archive_at: now,
+        }, auditActors),
+      });
+
+      return { restored: true, replacedCount: sameActiveDocs.length };
+    },
+    onSuccess: result => {
+      if (result?.restored) {
+        setArchiveMessage({
+          type: "success",
+          text: result.replacedCount > 0
+            ? "Loonheffingsverklaring is teruggezet naar actief. Het eerdere actieve document is naar het archief gezet."
+            : "Loonheffingsverklaring is teruggezet naar actieve documenten.",
+        });
+      } else {
+        setArchiveMessage({
+          type: "warning",
+          text: "Niet teruggezet: er is al een nieuwer of even lang geldig actief document. Dit document blijft in het archief.",
+        });
+      }
+      queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
+    },
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: doc => base44.entities.PersonnelDocument.delete(doc.id),
+    onSuccess: () => {
+      setDeleteDoc(null);
+      queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
+    },
+  });
 
   if (relationship === "self_employed") {
     return <ZzpDetailsSection person={person} />;
@@ -457,49 +788,11 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
         )}
       </AnimatePresence>
 
-      {/* Loonheffingskorting section */}
-      <div className="border-b border-border bg-muted/20 px-5 py-3">
-        <div className="flex flex-wrap items-center gap-4">
-          <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Loonheffingskorting</span>
-          <Select value={creditApplies} onValueChange={v => { setCreditApplies(v); setCreditSaved(false); }}>
-            <SelectTrigger className="h-7 w-32 text-xs"><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="true">Ja</SelectItem>
-              <SelectItem value="false">Nee</SelectItem>
-              <SelectItem value="unknown">Onbekend</SelectItem>
-            </SelectContent>
-          </Select>
-          <div className="flex items-center gap-2">
-            <Label className="text-xs text-muted-foreground">Verklaring getekend op</Label>
-            <Input
-              type="date"
-              value={signedAt}
-              onChange={e => { setSignedAt(e.target.value); setCreditSaved(false); }}
-              className="h-7 w-36 text-xs"
-            />
-          </div>
-          <Button
-            size="sm"
-            variant="outline"
-            className="h-7 px-3 text-xs"
-            onClick={() => saveCreditMutation.mutate()}
-            disabled={saveCreditMutation.isPending}
-          >
-            {saveCreditMutation.isPending ? (
-              <><Loader2 className="mr-1 h-3 w-3 animate-spin" /> Opslaan...</>
-            ) : creditSaved ? (
-              <><Check className="mr-1 h-3 w-3" /> Opgeslagen</>
-            ) : (
-              <><Check className="mr-1 h-3 w-3" /> Opslaan</>
-            )}
-          </Button>
-        </div>
-      </div>
-
       {/* Table header */}
       <div className={`${PAYROLL_TABLE_GRID} items-center border-b border-border bg-muted/30 px-5 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
         <span>Type / omschrijving</span>
         <span>Documentnummer</span>
+        <span>Status</span>
         <span>Geldig tot</span>
         <span>Door</span>
         {!wizardOpen && (
@@ -533,6 +826,19 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
         )}
       </div>
 
+      {/* Archive message */}
+      {archiveMessage && !wizardOpen && (
+        <div className="px-5 pt-3">
+          <div className={`flex items-start gap-3 rounded-md border px-3 py-2 text-xs ${
+            archiveMessage.type === "success"
+              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
+              : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
+          }`}>
+            <span>{archiveMessage.text}</span>
+          </div>
+        </div>
+      )}
+
       {/* Table rows */}
       {showArchive ? (
         sortedArchived.length === 0 ? (
@@ -540,7 +846,18 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
         ) : (
           <div className="divide-y divide-border">
             {sortedArchived.map(doc => (
-              <PayrollDocumentRow key={doc.id} doc={doc} archived onPreview={setPreviewDoc} auditActors={auditActors} />
+              <PayrollDocumentRow
+                key={doc.id}
+                doc={doc}
+                archived
+                onPreview={setPreviewDoc}
+                onRenew={() => openWizard()}
+                onArchive={archiveMutation.mutate}
+                onRestore={restoreMutation.mutate}
+                onDelete={setDeleteDoc}
+                auditActors={auditActors}
+                restorePending={restoreMutation.isPending}
+              />
             ))}
           </div>
         )
@@ -549,7 +866,15 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
       ) : (
         <div className="divide-y divide-border">
           {sortedActive.map(doc => (
-            <PayrollDocumentRow key={doc.id} doc={doc} onPreview={setPreviewDoc} auditActors={auditActors} />
+            <PayrollDocumentRow
+              key={doc.id}
+              doc={doc}
+              onPreview={setPreviewDoc}
+              onRenew={() => openWizard()}
+              onArchive={archiveMutation.mutate}
+              onDelete={setDeleteDoc}
+              auditActors={auditActors}
+            />
           ))}
         </div>
       )}
@@ -558,6 +883,13 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
         document={previewDoc}
         open={Boolean(previewDoc)}
         onOpenChange={open => { if (!open) setPreviewDoc(null); }}
+      />
+      <PayrollDeleteConfirmDialog
+        document={deleteDoc}
+        open={Boolean(deleteDoc)}
+        onOpenChange={open => { if (!open) setDeleteDoc(null); }}
+        onConfirm={doc => deleteMutation.mutate(doc)}
+        isPending={deleteMutation.isPending}
       />
     </div>
   );
