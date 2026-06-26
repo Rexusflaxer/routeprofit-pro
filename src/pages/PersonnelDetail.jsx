@@ -1240,18 +1240,6 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArch
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         )}
-        {canPreview && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={event => { event.stopPropagation(); onPreview(doc); }}
-            title="Document bekijken"
-          >
-            <Eye className="h-3.5 w-3.5" />
-          </Button>
-        )}
       </div>
 
       {menuOpen && isExpired && (
