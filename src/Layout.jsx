@@ -240,13 +240,27 @@ function ContextNavigation({ currentPageName, onNavigate, collapsed = false }) {
 
 function AppShell({ children, currentPageName }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(true);
+  const [collapsed, setCollapsed] = useState(() => window.innerWidth < 1024);
   const [autoHoverActive, setAutoHoverActive] = useState(false);
   const sidebarRef = useRef(null);
 
+  useEffect(() => {
+    const handleResize = () => {
+      if (window.innerWidth >= 1024) {
+        setCollapsed(false);
+        setAutoHoverActive(false);
+      } else {
+        setCollapsed(true);
+      }
+    };
+
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   const handleMouseMove = (e) => {
-    if (window.innerWidth < 1024) return; // Only on desktop
-    const nearLeftEdge = e.clientX < 80; // Trigger zone: 80px from left
+    if (window.innerWidth >= 1024) return; // Only on narrow screens
+    const nearLeftEdge = e.clientX < 80;
     
     if (nearLeftEdge && collapsed && !autoHoverActive) {
       setAutoHoverActive(true);
@@ -255,14 +269,14 @@ function AppShell({ children, currentPageName }) {
   };
 
   const handleMouseLeaveApp = () => {
-    if (autoHoverActive) {
+    if (autoHoverActive && window.innerWidth < 1024) {
       setAutoHoverActive(false);
       setCollapsed(true);
     }
   };
 
   const handleMouseLeaveSidebar = () => {
-    if (autoHoverActive) {
+    if (autoHoverActive && window.innerWidth < 1024) {
       setAutoHoverActive(false);
       setCollapsed(true);
     }
