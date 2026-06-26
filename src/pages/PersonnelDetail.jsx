@@ -1383,6 +1383,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
             {showIdentityWizard && (
               <IdentityDocumentWizard
                 personnelId={person.id}
+                personnel={person}
                 nationality={person.nationality}
                 isArchiveEntry={identityWizard.archiveMode}
                 auditActors={auditActors}

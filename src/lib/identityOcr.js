@@ -39,6 +39,15 @@ function compact(value) {
   return String(value || "").replace(/\s+/g, " ").trim();
 }
 
+function cleanPersonText(value) {
+  return compact(value)
+    .replace(/[<]+/g, " ")
+    .replace(/\s+\/\s+/g, " ")
+    .replace(/[^A-Za-zÀ-ÿ' .-]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
 function onlyDigits(value) {
   return String(value || "").replace(/\D/g, "");
 }
@@ -189,6 +198,19 @@ function cleanMrzField(value) {
   return String(value || "").replace(/</g, "").trim();
 }
 
+function parseMrzNameField(value) {
+  const normalized = normalizeMrzLine(value)
+    .replace(/<+$/g, "")
+    .replace(/^P<[A-Z]{3}/, "");
+  if (!normalized) return {};
+
+  const [lastNamePart = "", givenNamesPart = ""] = normalized.split("<<");
+  return {
+    last_name: cleanPersonText(lastNamePart),
+    given_names: cleanPersonText(givenNamesPart),
+  };
+}
+
 function isLikelyDocumentNumber(value) {
   const normalized = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
   if (normalized.length < 7 || normalized.length > 12) return false;
@@ -313,6 +335,56 @@ function findDriversLicenseNumberInMrz(text) {
   return "";
 }
 
+function fieldValueOnSameLine(text, fieldNumber) {
+  const pattern = new RegExp(`(?:^|\\s)${fieldNumber}\\s*[:.]?\\s+([^\\n\\r]+)`, "i");
+  for (const rawLine of String(text || "").split(/\r?\n/)) {
+    const line = rawLine.replace(/\s+/g, " ").trim();
+    const match = line.match(pattern);
+    if (!match) continue;
+    const value = match[1]
+      .replace(/\s+\d+[a-z]?\s+.*$/i, "")
+      .replace(/\s{2,}.+$/g, "")
+      .trim();
+    if (value) return value;
+  }
+  return "";
+}
+
+function findDateNearNumberField(text, fieldNumber) {
+  const upper = String(text || "").toUpperCase();
+  const pattern = new RegExp(`(?:^|[^A-Z0-9])${fieldNumber}\\s*[:.]?\\s*`, "gi");
+  for (const line of upper.split(/\r?\n/)) {
+    for (const match of line.matchAll(pattern)) {
+      const slice = line.slice(match.index + match[0].length, match.index + match[0].length + 80);
+      const date = parseVisibleDate(slice) || parseCompactVisibleDate(slice);
+      if (date) return date;
+    }
+  }
+  return null;
+}
+
+function findDriversLicensePersonInText(text) {
+  const birthDate = findDateNearNumberField(text, "3") || "";
+  const lastName = cleanPersonText(fieldValueOnSameLine(text, "1"));
+  const givenNames = cleanPersonText(fieldValueOnSameLine(text, "2"));
+
+  return {
+    last_name: lastName,
+    given_names: givenNames,
+    birth_date: birthDate,
+  };
+}
+
+function mergePersonFields(...people) {
+  return people.reduce((merged, person) => ({
+    last_name: merged.last_name || person?.last_name || "",
+    given_names: merged.given_names || person?.given_names || "",
+    birth_date: merged.birth_date || person?.birth_date || "",
+    gender: merged.gender || person?.gender || "",
+    nationality_code: merged.nationality_code || person?.nationality_code || "",
+  }), {});
+}
+
 function scoreDocumentNumber(value) {
   const normalized = String(value || "");
   let score = 0;
@@ -350,11 +422,16 @@ function extractMrz(text) {
     if (/^P[A-Z<]/.test(first) && second.length >= 35) {
       const documentNumber = cleanMrzField(second.slice(0, 9)).replace(/[^A-Z0-9]/g, "");
       const documentNumberIsValid = isLikelyDocumentNumber(documentNumber) && hasValidMrzCheckDigit(second.slice(0, 9), second[9]);
+      const person = parseMrzNameField(first);
       return {
         format: "TD3",
         document_number: documentNumberIsValid ? documentNumber : "",
+        birth_date: mrzDateToIso(second.slice(13, 19), "birth"),
         valid_until: mrzDateToIso(second.slice(21, 27), "expiry"),
+        gender: second[20] || "",
+        nationality_code: second.slice(10, 13).replace(/</g, ""),
         bsn: findBsnInText(second.slice(28, 43)),
+        ...person,
       };
     }
   }
@@ -362,15 +439,21 @@ function extractMrz(text) {
   for (let i = 0; i < lines.length - 2; i += 1) {
     const first = lines[i];
     const second = lines[i + 1];
+    const third = lines[i + 2];
     if (/^[IA][A-Z<][A-Z]{3}/.test(first) && first[1] === "<" && first.length >= 25 && second.length >= 25) {
       const documentNumber = cleanMrzField(first.slice(5, 14)).replace(/[^A-Z0-9]/g, "");
       const documentNumberIsValid = isLikelyDocumentNumber(documentNumber) && hasValidMrzCheckDigit(first.slice(5, 14), first[14]);
       const optional = `${first.slice(15)} ${second.slice(18, 29)}`;
+      const person = parseMrzNameField(third || "");
       return {
         format: "TD1",
         document_number: documentNumberIsValid ? documentNumber : "",
+        birth_date: mrzDateToIso(second.slice(0, 6), "birth"),
         valid_until: mrzDateToIso(second.slice(8, 14), "expiry"),
+        gender: second[7] || "",
+        nationality_code: second.slice(15, 18).replace(/</g, ""),
         bsn: findBsnInText(optional),
+        ...person,
       };
     }
   }
@@ -380,22 +463,32 @@ function extractMrz(text) {
 
 function findPassportMrzSecondLine(lines) {
   const candidates = [];
-  for (const line of lines) {
+  lines.forEach((line, index) => {
     const withoutFillers = line.replace(/<+$/g, "");
     const compacted = withoutFillers.replace(/</g, "");
-    candidates.push(line, withoutFillers, compacted);
-  }
+    candidates.push(
+      { value: line, index },
+      { value: withoutFillers, index },
+      { value: compacted, index }
+    );
+  });
 
   for (const candidate of candidates) {
-    const match = candidate.match(/([A-Z0-9<]{9})(\d)[A-Z<]{0,2}NLD(\d{6})(\d)([MF<])(\d{6})(\d)/);
+    const match = candidate.value.match(/([A-Z0-9<]{9})(\d)[A-Z<]{0,2}NLD(\d{6})(\d)([MF<])(\d{6})(\d)/);
     if (!match) continue;
     const documentNumber = cleanMrzField(match[1]).replace(/[^A-Z0-9]/g, "");
     const documentNumberIsValid = isLikelyDocumentNumber(documentNumber) && hasValidMrzCheckDigit(match[1], match[2]);
+    const previousLine = candidate.index > 0 ? lines[candidate.index - 1] : "";
+    const person = /^P[A-Z<]/.test(previousLine) ? parseMrzNameField(previousLine) : {};
     return {
       format: "TD3",
       document_number: documentNumberIsValid ? documentNumber : "",
+      birth_date: mrzDateToIso(match[3], "birth"),
       valid_until: mrzDateToIso(match[6], "expiry"),
+      gender: match[5] || "",
+      nationality_code: "NLD",
       bsn: "",
+      ...person,
     };
   }
 
@@ -707,6 +800,8 @@ function resolveCropBox(crop, width, height) {
 export function parseIdentityOcrText(text, { docType = "passport" } = {}) {
   const isDriversLicense = docType === "drivers_license";
   const mrz = extractMrz(text) || {};
+  const driversLicensePerson = isDriversLicense ? findDriversLicensePersonInText(text) : {};
+  const person = mergePersonFields(mrz, driversLicensePerson);
   const visibleUntil = findDateNearLabel(text, [
     "GELDIG TOT",
     "DATE OF EXPIRY",
@@ -730,6 +825,7 @@ export function parseIdentityOcrText(text, { docType = "passport" } = {}) {
     bsn: mrz.bsn || findBsnInText(text),
     valid_from: isDriversLicense ? driversLicenseValidFrom || "" : validFrom || "",
     valid_until: isDriversLicense ? driversLicenseValidUntil || "" : mrz.valid_until || visibleUntil || "",
+    person,
     mrz_format: mrz.format || null,
   };
 }
@@ -803,7 +899,7 @@ export async function recognizeIdentityDocument({ frontFile, backFile, docType =
     return {
       ...fields,
       detected_fields: Object.entries(fields)
-        .filter(([key, value]) => key !== "mrz_format" && Boolean(value))
+        .filter(([key, value]) => !["mrz_format", "person"].includes(key) && Boolean(value))
         .map(([key]) => key),
       upload_quality: buildUploadQuality({
         imageQuality,

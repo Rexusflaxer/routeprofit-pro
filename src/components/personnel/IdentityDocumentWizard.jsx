@@ -96,6 +96,87 @@ function cleanCountryLabel(value) {
   return label;
 }
 
+function normalizeMatchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+}
+
+function matchTokens(value) {
+  return normalizeMatchText(value)
+    .split(/\s+/)
+    .filter(token => token.length > 1);
+}
+
+function namesOverlap(expected, recognized) {
+  const expectedTokens = matchTokens(expected);
+  const recognizedTokens = matchTokens(recognized);
+  if (!expectedTokens.length || !recognizedTokens.length) return null;
+
+  const expectedText = expectedTokens.join(" ");
+  const recognizedText = recognizedTokens.join(" ");
+  if (expectedText === recognizedText || expectedText.includes(recognizedText) || recognizedText.includes(expectedText)) return true;
+  return expectedTokens.some(token => recognizedTokens.includes(token));
+}
+
+function firstNameMatches(personnel, recognizedNames) {
+  const candidates = [
+    personnel?.legal_first_names,
+    personnel?.first_name,
+    personnel?.call_name,
+  ].filter(Boolean);
+  if (!candidates.length || !matchTokens(recognizedNames).length) return null;
+
+  return candidates.some(candidate => {
+    const expectedFirst = matchTokens(candidate)[0];
+    const recognized = matchTokens(recognizedNames);
+    return expectedFirst && recognized.includes(expectedFirst);
+  });
+}
+
+function buildPersonMatchCheck(personnel, recognizedPerson) {
+  if (!personnel || !recognizedPerson) return { status: "unknown", issues: [] };
+
+  const issues = [];
+  const recognizedBirthDate = recognizedPerson.birth_date || "";
+  const expectedBirthDate = personnel.date_of_birth || "";
+  if (expectedBirthDate && recognizedBirthDate && expectedBirthDate !== recognizedBirthDate) {
+    issues.push({
+      severity: "critical",
+      label: "Geboortedatum komt niet overeen",
+      detail: `Profiel: ${expectedBirthDate}. Document: ${recognizedBirthDate}.`,
+    });
+  }
+
+  const expectedLastName = [personnel.name_prefix, personnel.last_name].filter(Boolean).join(" ") || personnel.name || "";
+  const lastNameMatch = namesOverlap(expectedLastName, recognizedPerson.last_name);
+  if (lastNameMatch === false) {
+    issues.push({
+      severity: "critical",
+      label: "Achternaam komt niet overeen",
+      detail: `Profiel: ${expectedLastName}. Document: ${recognizedPerson.last_name}.`,
+    });
+  }
+
+  const firstNameMatch = firstNameMatches(personnel, recognizedPerson.given_names);
+  if (firstNameMatch === false) {
+    issues.push({
+      severity: "warning",
+      label: "Voornamen lijken af te wijken",
+      detail: `Profiel: ${personnel.legal_first_names || personnel.first_name || personnel.call_name}. Document: ${recognizedPerson.given_names}.`,
+    });
+  }
+
+  if (!issues.length) return { status: "matched", issues };
+  return {
+    status: issues.some(issue => issue.severity === "critical") ? "blocked" : "review",
+    issues,
+  };
+}
+
 // ─── Image Crop Dialog ─────────────────────────────────────────────────────────
 
 function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
@@ -539,6 +620,40 @@ function CriticalUploadNotice({ quality }) {
   );
 }
 
+function IdentityMatchNotice({ match }) {
+  if (!match || !["blocked", "review"].includes(match.status) || !match.issues?.length) return null;
+
+  const isBlocked = match.status === "blocked";
+  return (
+    <div className={`mt-4 rounded-md border px-3 py-2 ${
+      isBlocked
+        ? "border-red-200 bg-red-50 text-red-950 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-100"
+        : "border-amber-200 bg-amber-50 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100"
+    }`}>
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div>
+          <p className="text-xs font-semibold">
+            {isBlocked ? "Document lijkt bij een andere medewerker te horen" : "Controleer documenthouder"}
+          </p>
+          <p className="mt-0.5 text-xs opacity-85">
+            {isBlocked
+              ? "De herkende persoonsgegevens komen niet overeen met dit medewerkersprofiel. Controleer of het juiste document is geupload."
+              : "Niet alle herkende persoonsgegevens sluiten duidelijk aan op dit profiel. Controleer dit voordat je opslaat."}
+          </p>
+          <div className="mt-1 space-y-0.5 text-xs opacity-85">
+            {match.issues.map(issue => (
+              <p key={`${issue.label}-${issue.detail}`}>
+                {issue.label}: {issue.detail}
+              </p>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 // ─── Helpers ───────────────────────────────────────────────────────────────────
 
 function IssuingCountryField({ value, onChange, error, defaultCountry }) {
@@ -739,7 +854,7 @@ function WizardSteps({ step, labels }) {
 
 // ─── Main Wizard ───────────────────────────────────────────────────────────────
 
-export default function IdentityDocumentWizard({ personnelId, nationality, onClose, onSaved, isArchiveEntry = false, initialDocType = null, auditActors = [] }) {
+export default function IdentityDocumentWizard({ personnelId, personnel = null, nationality, onClose, onSaved, isArchiveEntry = false, initialDocType = null, auditActors = [] }) {
   const queryClient = useQueryClient();
   const normalizedInitialDocType = DOCUMENT_TYPE_META[initialDocType] ? initialDocType : null;
   const docTypeLocked = Boolean(normalizedInitialDocType);
@@ -762,6 +877,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const [uploadingBack, setUploadingBack] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
   const [recognizedUploadKey, setRecognizedUploadKey] = useState("");
+  const [recognizedPerson, setRecognizedPerson] = useState(null);
   const [scanQuality, setScanQuality] = useState(null);
   const latestUploadKeyRef = useRef("");
 
@@ -818,6 +934,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
   useEffect(() => {
     setRecognizedUploadKey("");
+    setRecognizedPerson(null);
     setScanQuality(null);
     setErrors({});
     setForm(current => ({
@@ -855,6 +972,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       });
       if (latestUploadKeyRef.current !== currentUploadKey) return;
       applyRecognizedFields(result);
+      setRecognizedPerson(result.person || null);
       setScanQuality(result.upload_quality || null);
       setRecognizedUploadKey(currentUploadKey);
     } catch (error) {
@@ -870,6 +988,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
             { key: "automatic_scan", label: "Automatische scan afgerond", status: "warn", detail: "Controleer documentnummer, BSN en geldigheid handmatig" },
           ],
         });
+        setRecognizedPerson(null);
         setRecognizedUploadKey(currentUploadKey);
       }
     } finally {
@@ -884,6 +1003,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
   const validateDetails = () => {
     const e = {};
+    const personMatch = buildPersonMatchCheck(personnel, recognizedPerson);
     const today = new Date().toISOString().split("T")[0];
     const documentNumber = normalizeDocumentNumber(form.document_number);
     const bsn = normalizeBsn(form.bsn);
@@ -915,6 +1035,9 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     } else if (duplicateBsnOwner) {
       e.bsn = "Dit BSN is al geregistreerd bij een ander personeelsprofiel.";
     }
+    if (personMatch.status === "blocked") {
+      e.identity_match = "Het document lijkt niet bij deze medewerker te horen.";
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -922,6 +1045,15 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const saveMutation = useMutation({
     mutationFn: async () => {
       const activeDocMeta = DOCUMENT_TYPE_META[docType] || DOCUMENT_TYPE_META.passport;
+      const personMatch = buildPersonMatchCheck(personnel, recognizedPerson);
+      if (personMatch.status === "blocked") {
+        setErrors(current => ({
+          ...current,
+          identity_match: "Het document lijkt niet bij deze medewerker te horen.",
+        }));
+        throw new Error("identity_person_mismatch");
+      }
+
       const country = form.issuing_country || countryLabel || "Nederland";
       const documentNumber = normalizeDocumentNumber(form.document_number);
       const allDocuments = await base44.entities.PersonnelDocument.list();
@@ -1057,13 +1189,14 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       onClose();
     },
     onError: error => {
-      if (["duplicate_document_number", "conflicting_bsn", "duplicate_bsn"].includes(error?.message)) return;
+      if (["duplicate_document_number", "conflicting_bsn", "duplicate_bsn", "identity_person_mismatch"].includes(error?.message)) return;
       console.error("Identity document save failed", error);
     },
   });
 
   const STEP_LABELS = ["Type", "Upload", "Controleren"];
   const scanPending = Boolean(frontFile) && recognizedUploadKey !== uploadKey;
+  const personMatch = buildPersonMatchCheck(personnel, recognizedPerson);
   const wizardTitle = !docType || step === 1
     ? (isArchiveEntry ? "Document archiveren" : "Legitimatiebewijs toevoegen")
     : (isArchiveEntry ? `${docMeta.label} archiveren` : `${docMeta.label} toevoegen`);
@@ -1272,6 +1405,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   </div>
 
                   <CriticalUploadNotice quality={scanQuality} />
+                  <IdentityMatchNotice match={personMatch} />
 
                   {isNonEu && (
                     <div className="flex items-start gap-2 rounded-md border border-blue-200 bg-blue-50 dark:border-blue-900/50 dark:bg-blue-950/30 px-3 py-2 text-xs text-blue-900 dark:text-blue-200">
