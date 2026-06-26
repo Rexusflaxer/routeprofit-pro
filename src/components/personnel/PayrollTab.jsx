@@ -5,6 +5,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
+import DocumentPreviewPanel from "@/components/personnel/DocumentPreviewPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -53,6 +54,10 @@ function hasPayrollDocumentUpload(doc) {
 
 function isImageFile(url) {
   return /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(url || "");
+}
+
+function isPdfUrl(url) {
+  return /\.pdf$/i.test(url || "");
 }
 
 function dateSortKey(value) {
@@ -428,10 +433,27 @@ function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, ex
       const reader = new FileReader();
       reader.onload = e => setFilePreview(e.target.result);
       reader.readAsDataURL(f);
+    } else if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) {
+      setFilePreview(URL.createObjectURL(f));
     } else {
       setFilePreview(null);
     }
   };
+
+  // Cleanup object URLs when file preview changes
+  useEffect(() => {
+    return () => {
+      if (filePreview && filePreview.startsWith("blob:")) {
+        URL.revokeObjectURL(filePreview);
+      }
+    };
+  }, [filePreview]);
+
+  const existingFileUrl = existingDraftDoc && hasPayrollDocumentUpload(existingDraftDoc) ? payrollDocumentFileUrl(existingDraftDoc) : null;
+  const previewUrl = filePreview || existingFileUrl;
+  const previewIsPdf = file
+    ? (file.type === "application/pdf" || /\.pdf$/i.test(file.name))
+    : isPdfUrl(existingFileUrl);
 
   const validate = () => {
     const e = {};
@@ -708,46 +730,37 @@ function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, ex
                   )}
                 </div>
 
-                {/* Right: upload */}
-                <div className="rounded-lg border border-border bg-card p-4 space-y-2">
-                  <div>
-                    <label className="text-xs font-medium text-muted-foreground block">Ingevuld formulier uploaden</label>
-                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/75">JPG, PNG of PDF — optioneel</p>
+                {/* Right: upload / preview */}
+                {previewUrl ? (
+                  <DocumentPreviewPanel
+                    url={previewUrl}
+                    isPdf={previewIsPdf}
+                    fileName={file?.name || "Bestaand bestand"}
+                    onReplace={() => fileInputRef.current?.click()}
+                  />
+                ) : (
+                  <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground block">Ingevuld formulier uploaden</label>
+                      <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/75">JPG, PNG of PDF — optioneel</p>
+                    </div>
+                    <div
+                      onClick={() => fileInputRef.current?.click()}
+                      className="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border hover:border-primary bg-muted/20 hover:bg-accent/30 cursor-pointer transition-colors min-h-[160px] overflow-hidden"
+                    >
+                      <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
+                      <span className="text-xs text-muted-foreground">Klik om te uploaden</span>
+                      <span className="text-[10px] text-muted-foreground/60">JPG, PNG of PDF</span>
+                      {uploading && (
+                        <div className="absolute inset-0 flex items-center justify-center bg-background/80">
+                          <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                        </div>
+                      )}
+                    </div>
                   </div>
-                  <div
-                    onClick={() => fileInputRef.current?.click()}
-                    className="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border hover:border-primary bg-muted/20 hover:bg-accent/30 cursor-pointer transition-colors min-h-[160px] overflow-hidden"
-                  >
-                    {filePreview ? (
-                      <img src={filePreview} alt="Preview" className="w-full h-40 object-contain" />
-                    ) : file ? (
-                      <div className="text-center">
-                        <FileCheck2 className="mx-auto h-8 w-8 text-primary" />
-                        <p className="mt-2 text-sm font-medium text-foreground">{file.name}</p>
-                        <p className="text-xs text-muted-foreground">Klik om te vervangen</p>
-                      </div>
-                    ) : existingDraftDoc && hasPayrollDocumentUpload(existingDraftDoc) ? (
-                      <div className="text-center">
-                        <FileCheck2 className="mx-auto h-8 w-8 text-primary" />
-                        <p className="mt-2 text-sm font-medium text-foreground">Bestaand bestand</p>
-                        <p className="text-xs text-muted-foreground">Klik om te vervangen</p>
-                      </div>
-                    ) : (
-                      <>
-                        <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
-                        <span className="text-xs text-muted-foreground">Klik om te uploaden</span>
-                        <span className="text-[10px] text-muted-foreground/60">JPG, PNG of PDF</span>
-                      </>
-                    )}
-                    {uploading && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-background/80">
-                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                      </div>
-                    )}
-                  </div>
-                  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden"
-                    onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
-                </div>
+                )}
+                <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden"
+                  onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
               </div>
 
               <div className="flex justify-between pt-1">
