@@ -58,7 +58,7 @@ export default function DocumentPreviewPanel({ url, isPdf, fileName, onReplace }
       </div>
 
       <div
-        className="relative flex-1 min-h-[200px] max-h-[320px] overflow-hidden rounded-md bg-muted/30 border border-border"
+        className="relative flex-1 min-h-[420px] max-h-[560px] overflow-hidden rounded-md bg-muted/30 border border-border"
         onWheel={!isPdf ? onWheel : undefined}
         style={{ cursor: !isPdf && zoom > 1 ? "grab" : "default" }}
       >
