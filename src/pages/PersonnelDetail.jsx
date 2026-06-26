@@ -294,7 +294,7 @@ function isExpiredIdentityDocument(doc) {
 
 function IdentityStatusBadge({ doc, archived = false }) {
   if (archived || isArchivedIdentityDocument(doc)) {
-    return <Badge className="text-xs bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse border-0 whitespace-nowrap">Gearchiveerd</Badge>;
+    return <Badge className="text-xs bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 border-0 whitespace-nowrap">Gearchiveerd</Badge>;
   }
   if (isExpiredIdentityDocument(doc)) {
     return <Badge className="text-xs bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 border-0 whitespace-nowrap">Actie vereist</Badge>;
