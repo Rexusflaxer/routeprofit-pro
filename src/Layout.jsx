@@ -242,10 +242,27 @@ function ContextNavigation({ currentPageName, onNavigate, collapsed = false }) {
 function AppShell({ children, currentPageName }) {
   const [mobileOpen, setMobileOpen] = useState(false);
   const [collapsed, setCollapsed] = useState(false);
+  const [autoHoverActive, setAutoHoverActive] = useState(false);
+
+  const handleMouseMove = (e) => {
+    if (window.innerWidth < 1024) return; // Only on desktop
+    const nearLeftEdge = e.clientX < 40;
+    if (nearLeftEdge && collapsed && !autoHoverActive) {
+      setAutoHoverActive(true);
+      setCollapsed(false);
+    }
+  };
+
+  const handleMouseLeave = () => {
+    if (autoHoverActive && collapsed === false) {
+      setAutoHoverActive(false);
+      setCollapsed(true);
+    }
+  };
 
   return (
-    <div className="min-h-screen overflow-x-hidden bg-background text-foreground antialiased">
-      <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-in-out lg:block ${collapsed ? "w-16" : "w-64"}`}>
+    <div className="min-h-screen overflow-x-hidden bg-background text-foreground antialiased" onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeave}>
+      <aside className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-in-out lg:block ${collapsed ? "w-16" : "w-64"}`} onMouseLeave={handleMouseLeave}>
         <ContextNavigation currentPageName={currentPageName} collapsed={collapsed} />
       </aside>
 
