@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  AlertTriangle, Archive, ArrowLeft, Check, ChevronRight, Download,
+  AlertTriangle, Archive, ArrowLeft, Check, ChevronLeft, ChevronRight, Download,
   Eye, FileCheck2, FileText, ImageIcon, Loader2, Plus, RefreshCw,
   Send, Trash2, Upload, X,
 } from "lucide-react";
@@ -364,6 +364,38 @@ function PayrollDeleteConfirmDialog({ document, open, onOpenChange, onConfirm, i
   );
 }
 
+// ─── Wizard Steps Indicator ───────────────────────────────────────────────────
+
+function WizardSteps({ step, labels }) {
+  return (
+    <div className="flex items-center gap-1 mb-4">
+      {labels.map((label, i) => (
+        <React.Fragment key={label}>
+          <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full transition-colors ${
+            i + 1 === step ? "bg-primary text-primary-foreground" :
+            i + 1 < step ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" :
+            "text-muted-foreground"}`}>
+            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
+              i + 1 === step ? "bg-primary-foreground text-primary" :
+              i + 1 < step ? "text-green-700 dark:text-green-300" :
+              "border border-muted-foreground/30 text-muted-foreground"}`}>
+              {i + 1 < step ? (
+                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
+                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                </svg>
+              ) : i + 1}
+            </span>
+            {label}
+          </div>
+          {i < labels.length - 1 && (
+            <div className={`h-px flex-1 ${i + 1 < step ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />
+          )}
+        </React.Fragment>
+      ))}
+    </div>
+  );
+}
+
 // ─── Wizard ───────────────────────────────────────────────────────────────────
 // step 1: keuze (aanbieden / handmatig uploaden / downloaden + concept)
 // step 2: loonheffingskorting vragen + upload (bij handmatig of bij concept-rij)
@@ -518,10 +550,12 @@ function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, ex
   });
 
   const wizardTitle = isArchiveEntry
-    ? "LOONHEFFINGSFORMULIER ARCHIVEREN"
+    ? "Loonheffingsformulier archiveren"
     : existingDraftDoc
-      ? "LOONHEFFINGSFORMULIER INVOEREN"
-      : "LOONHEFFINGSFORMULIER TOEVOEGEN";
+      ? "Loonheffingsformulier invoeren"
+      : "Loonheffingsformulier toevoegen";
+
+  const STEP_LABELS = ["Keuze", "Invoeren"];
 
   return (
     <motion.div
@@ -531,193 +565,219 @@ function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, ex
       transition={{ duration: 0.2 }}
       className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
     >
-      <div className="mb-4 flex items-center justify-between">
-        <p className="text-xs font-semibold uppercase tracking-wider text-primary">{wizardTitle}</p>
-        {step === 2 && !existingDraftDoc && (
-          <button type="button" onClick={() => setStep(1)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
-            <ArrowLeft className="h-3 w-3" /> Terug
-          </button>
-        )}
-      </div>
+      <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
+        {wizardTitle}
+      </p>
 
-      {/* ── Step 1: keuze ── */}
-      {step === 1 && (
-        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {/* Aanbieden aan medewerker (nog niet geïmplementeerd) */}
-          <button
-            type="button"
-            disabled
-            className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-border bg-muted/20 px-4 py-6 text-center opacity-50 cursor-not-allowed"
-          >
-            <Send className="h-8 w-8 text-muted-foreground/50" />
-            <div>
-              <p className="text-sm font-semibold text-foreground">Aanbieden aan medewerker</p>
-              <p className="mt-1 text-xs text-muted-foreground">Binnenkort beschikbaar via Teamhub</p>
-            </div>
-          </button>
+      <WizardSteps step={step} labels={STEP_LABELS} />
 
-          {/* Handmatig uploaden */}
-          <button
-            type="button"
-            onClick={() => setStep(2)}
-            className="flex flex-col items-center gap-3 rounded-lg border-2 border-border hover:border-primary bg-background hover:bg-accent/30 px-4 py-6 text-center cursor-pointer transition-colors"
-          >
-            <Upload className="h-8 w-8 text-primary" />
-            <div>
-              <p className="text-sm font-semibold text-foreground">Handmatig uploaden</p>
-              <p className="mt-1 text-xs text-muted-foreground">Vul het ingevulde formulier in en upload het document</p>
-            </div>
-            <ChevronRight className="h-4 w-4 text-primary" />
-          </button>
+      <AnimatePresence mode="wait">
+        <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
 
-          {/* Formulier downloaden */}
-          <button
-            type="button"
-            onClick={() => downloadAndCreateDraftMutation.mutate()}
-            disabled={downloadAndCreateDraftMutation.isPending}
-            className="flex flex-col items-center gap-3 rounded-lg border-2 border-border hover:border-primary bg-background hover:bg-accent/30 px-4 py-6 text-center cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-          >
-            {downloadAndCreateDraftMutation.isPending
-              ? <Loader2 className="h-8 w-8 text-muted-foreground animate-spin" />
-              : <Download className="h-8 w-8 text-muted-foreground" />
-            }
-            <div>
-              <p className="text-sm font-semibold text-foreground">Formulier downloaden en handmatig aanbieden</p>
-              <p className="mt-1 text-xs text-muted-foreground">Download het Belastingdienst-formulier en maak een concept aan om later in te voeren</p>
-            </div>
-          </button>
-        </div>
-      )}
+          {/* ── Step 1: keuze ── */}
+          {step === 1 && (
+            <div className="space-y-3">
+              <p className="text-sm font-medium text-foreground">Kies hoe je het loonheffingsformulier wilt aanbieden</p>
 
-      {/* ── Step 2: vragen + upload ── */}
-      {step === 2 && (
-        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
-          {/* Left: vragen */}
-          <div className="space-y-5">
-            {/* 2a Loonheffingskorting */}
-            <div>
-              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">2a — Loonheffingskorting toepassen?</Label>
-              <p className="mt-0.5 mb-2 text-xs text-muted-foreground">
-                U kunt de loonheffingskorting maar door 1 werkgever laten toepassen.
-              </p>
-              <div className="flex flex-col gap-2">
-                {[
-                  { value: "true", label: "Ja, toepassen" },
-                  { value: "false", label: "Nee, niet (meer) toepassen" },
-                ].map(opt => (
-                  <label key={opt.value} className={`flex items-center gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors ${
-                    lhkApplies === opt.value ? "border-primary bg-primary/5" : "border-border hover:bg-accent/30"
-                  }`}>
-                    <div className={`h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
-                      lhkApplies === opt.value ? "border-primary" : "border-muted-foreground/40"
-                    }`}>
-                      {lhkApplies === opt.value && <div className="h-2 w-2 rounded-full bg-primary" />}
+              <div className="grid grid-cols-1 gap-2">
+                {/* Aanbieden aan medewerker (nog niet geïmplementeerd) */}
+                <button
+                  type="button"
+                  disabled
+                  className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left opacity-50 cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    <Send className="w-4 h-4 text-muted-foreground" />
+                    <div>
+                      <span className="text-sm font-semibold text-foreground">Aanbieden aan medewerker</span>
+                      <span className="text-xs text-muted-foreground ml-2">Binnenkort beschikbaar via Teamhub</span>
                     </div>
-                    <input type="radio" className="sr-only" value={opt.value} checked={lhkApplies === opt.value}
-                      onChange={() => { setLhkApplies(opt.value); setErrors(e => ({ ...e, lhkApplies: undefined })); }} />
-                    <span className="text-sm font-medium">{opt.label}</span>
-                  </label>
-                ))}
+                  </div>
+                </button>
+
+                {/* Handmatig uploaden */}
+                <button
+                  type="button"
+                  onClick={() => setStep(2)}
+                  className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]"
+                >
+                  <div className="flex items-center gap-3">
+                    <Upload className="w-4 h-4 text-primary" />
+                    <div>
+                      <span className="text-sm font-semibold text-foreground">Handmatig uploaden</span>
+                      <span className="text-xs text-muted-foreground ml-2">Vul de vragen in en upload het ingevulde formulier</span>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                </button>
+
+                {/* Formulier downloaden */}
+                <button
+                  type="button"
+                  onClick={() => downloadAndCreateDraftMutation.mutate()}
+                  disabled={downloadAndCreateDraftMutation.isPending}
+                  className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
+                >
+                  <div className="flex items-center gap-3">
+                    {downloadAndCreateDraftMutation.isPending
+                      ? <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
+                      : <Download className="w-4 h-4 text-muted-foreground" />
+                    }
+                    <div>
+                      <span className="text-sm font-semibold text-foreground">Formulier downloaden en handmatig aanbieden</span>
+                      <span className="text-xs text-muted-foreground ml-2">Download het formulier en maak een concept aan om later in te voeren</span>
+                    </div>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                </button>
               </div>
-              {errors.lhkApplies && <p className="mt-1 text-xs text-destructive">{errors.lhkApplies}</p>}
 
-              {lhkApplies && (
-                <div className="mt-3">
-                  <Label className="text-xs text-muted-foreground">
-                    {lhkApplies === "true" ? "Toepassen vanaf" : "Niet meer toepassen vanaf"} <span className="text-destructive">*</span>
-                  </Label>
-                  <Input type="date" value={lhkFrom} onChange={e => { setLhkFrom(e.target.value); setErrors(err => ({ ...err, lhkFrom: undefined })); }}
-                    className={`mt-1 h-8 text-sm ${errors.lhkFrom ? "border-destructive" : ""}`} />
-                  {errors.lhkFrom && <p className="mt-1 text-xs text-destructive">{errors.lhkFrom}</p>}
-                </div>
-              )}
+              <div className="flex justify-end pt-1">
+                <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
+              </div>
             </div>
+          )}
 
-            {/* 2b Alleenstaande-ouderenkorting (alleen tonen als 2a = Ja) */}
-            {lhkApplies === "true" && (
+          {/* ── Step 2: vragen + upload ── */}
+          {step === 2 && (
+            <div className="space-y-4">
               <div>
-                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">2b — Alleenstaande-ouderenkorting toepassen?</Label>
-                <p className="mt-0.5 mb-2 text-xs text-muted-foreground">
-                  Alleen van toepassing als u recht hebt op AOW voor alleenstaanden.
+                <p className="text-sm font-medium text-foreground mb-0.5">Loonheffingsformulier invoeren</p>
+                <p className="text-xs text-muted-foreground">
+                  Vul de vragen in en upload het ingevulde formulier.
                 </p>
-                <div className="flex flex-col gap-2">
-                  {[
-                    { value: "true", label: "Ja" },
-                    { value: "false", label: "Nee" },
-                  ].map(opt => (
-                    <label key={opt.value} className={`flex items-center gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors ${
-                      aokApplies === opt.value ? "border-primary bg-primary/5" : "border-border hover:bg-accent/30"
-                    }`}>
-                      <div className={`h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
-                        aokApplies === opt.value ? "border-primary" : "border-muted-foreground/40"
-                      }`}>
-                        {aokApplies === opt.value && <div className="h-2 w-2 rounded-full bg-primary" />}
+              </div>
+
+              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
+                {/* Left: vragen */}
+                <div className="rounded-lg border border-border bg-card p-4 space-y-4">
+                  {/* 2a Loonheffingskorting */}
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground block">2a — Loonheffingskorting toepassen? <span className="text-destructive">*</span></label>
+                    <p className="mt-0.5 mb-2 text-[11px] leading-snug text-muted-foreground/75">
+                      U kunt de loonheffingskorting maar door 1 werkgever laten toepassen.
+                    </p>
+                    <div className="flex flex-col gap-2">
+                      {[
+                        { value: "true", label: "Ja, toepassen" },
+                        { value: "false", label: "Nee, niet (meer) toepassen" },
+                      ].map(opt => (
+                        <label key={opt.value} className={`flex items-center gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors ${
+                          lhkApplies === opt.value ? "border-primary bg-primary/5" : "border-border hover:bg-accent/30"
+                        }`}>
+                          <div className={`h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                            lhkApplies === opt.value ? "border-primary" : "border-muted-foreground/40"
+                          }`}>
+                            {lhkApplies === opt.value && <div className="h-2 w-2 rounded-full bg-primary" />}
+                          </div>
+                          <input type="radio" className="sr-only" value={opt.value} checked={lhkApplies === opt.value}
+                            onChange={() => { setLhkApplies(opt.value); setErrors(e => ({ ...e, lhkApplies: undefined })); }} />
+                          <span className="text-sm font-medium">{opt.label}</span>
+                        </label>
+                      ))}
+                    </div>
+                    {errors.lhkApplies && <p className="mt-1 text-xs text-destructive">{errors.lhkApplies}</p>}
+
+                    {lhkApplies && (
+                      <div className="mt-3">
+                        <label className="text-xs text-muted-foreground mb-1 block">
+                          {lhkApplies === "true" ? "Toepassen vanaf" : "Niet meer toepassen vanaf"} <span className="text-destructive">*</span>
+                        </label>
+                        <Input type="date" value={lhkFrom} onChange={e => { setLhkFrom(e.target.value); setErrors(err => ({ ...err, lhkFrom: undefined })); }}
+                          className={`h-8 text-sm ${errors.lhkFrom ? "border-destructive" : ""}`} />
+                        {errors.lhkFrom && <p className="text-xs text-destructive mt-1">{errors.lhkFrom}</p>}
                       </div>
-                      <input type="radio" className="sr-only" value={opt.value} checked={aokApplies === opt.value}
-                        onChange={() => setAokApplies(opt.value)} />
-                      <span className="text-sm font-medium">{opt.label}</span>
-                    </label>
-                  ))}
+                    )}
+                  </div>
+
+                  {/* 2b Alleenstaande-ouderenkorting (alleen tonen als 2a = Ja) */}
+                  {lhkApplies === "true" && (
+                    <div>
+                      <label className="text-xs font-medium text-muted-foreground block">2b — Alleenstaande-ouderenkorting toepassen?</label>
+                      <p className="mt-0.5 mb-2 text-[11px] leading-snug text-muted-foreground/75">
+                        Alleen van toepassing als u recht hebt op AOW voor alleenstaanden.
+                      </p>
+                      <div className="flex flex-col gap-2">
+                        {[
+                          { value: "true", label: "Ja" },
+                          { value: "false", label: "Nee" },
+                        ].map(opt => (
+                          <label key={opt.value} className={`flex items-center gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors ${
+                            aokApplies === opt.value ? "border-primary bg-primary/5" : "border-border hover:bg-accent/30"
+                          }`}>
+                            <div className={`h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                              aokApplies === opt.value ? "border-primary" : "border-muted-foreground/40"
+                            }`}>
+                              {aokApplies === opt.value && <div className="h-2 w-2 rounded-full bg-primary" />}
+                            </div>
+                            <input type="radio" className="sr-only" value={opt.value} checked={aokApplies === opt.value}
+                              onChange={() => setAokApplies(opt.value)} />
+                            <span className="text-sm font-medium">{opt.label}</span>
+                          </label>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Right: upload */}
+                <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground block">Ingevuld formulier uploaden</label>
+                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/75">JPG, PNG of PDF — optioneel</p>
+                  </div>
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border hover:border-primary bg-muted/20 hover:bg-accent/30 cursor-pointer transition-colors min-h-[160px] overflow-hidden"
+                  >
+                    {filePreview ? (
+                      <img src={filePreview} alt="Preview" className="w-full h-40 object-contain" />
+                    ) : file ? (
+                      <div className="text-center">
+                        <FileCheck2 className="mx-auto h-8 w-8 text-primary" />
+                        <p className="mt-2 text-sm font-medium text-foreground">{file.name}</p>
+                        <p className="text-xs text-muted-foreground">Klik om te vervangen</p>
+                      </div>
+                    ) : existingDraftDoc && hasPayrollDocumentUpload(existingDraftDoc) ? (
+                      <div className="text-center">
+                        <FileCheck2 className="mx-auto h-8 w-8 text-primary" />
+                        <p className="mt-2 text-sm font-medium text-foreground">Bestaand bestand</p>
+                        <p className="text-xs text-muted-foreground">Klik om te vervangen</p>
+                      </div>
+                    ) : (
+                      <>
+                        <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
+                        <span className="text-xs text-muted-foreground">Klik om te uploaden</span>
+                        <span className="text-[10px] text-muted-foreground/60">JPG, PNG of PDF</span>
+                      </>
+                    )}
+                    {uploading && (
+                      <div className="absolute inset-0 flex items-center justify-center bg-background/80">
+                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                      </div>
+                    )}
+                  </div>
+                  <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden"
+                    onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
                 </div>
               </div>
-            )}
-          </div>
 
-          {/* Right: upload */}
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Ingevuld formulier uploaden</Label>
-            <div
-              onClick={() => fileInputRef.current?.click()}
-              className="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border hover:border-primary bg-muted/20 hover:bg-accent/30 cursor-pointer transition-colors min-h-[180px] overflow-hidden"
-            >
-              {filePreview ? (
-                <img src={filePreview} alt="Preview" className="w-full h-44 object-contain" />
-              ) : file ? (
-                <div className="text-center">
-                  <FileCheck2 className="mx-auto h-8 w-8 text-primary" />
-                  <p className="mt-2 text-sm font-medium text-foreground">{file.name}</p>
-                  <p className="text-xs text-muted-foreground">Klik om te vervangen</p>
+              <div className="flex justify-between pt-1">
+                <Button variant="ghost" size="sm" onClick={() => existingDraftDoc ? onClose() : setStep(1)}>
+                  <ChevronLeft className="w-4 h-4 mr-1" /> Terug
+                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
+                  <Button size="sm" onClick={() => { if (validate()) saveMutation.mutate(); }} disabled={saveMutation.isPending || uploading}>
+                    <Check className="w-4 h-4 mr-1" />
+                    {saveMutation.isPending ? "Opslaan..." : "Formulier opslaan"}
+                  </Button>
                 </div>
-              ) : existingDraftDoc && hasPayrollDocumentUpload(existingDraftDoc) ? (
-                <div className="text-center">
-                  <FileCheck2 className="mx-auto h-8 w-8 text-primary" />
-                  <p className="mt-2 text-sm font-medium text-foreground">Bestaand bestand</p>
-                  <p className="text-xs text-muted-foreground">Klik om te vervangen</p>
-                </div>
-              ) : (
-                <>
-                  <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
-                  <span className="text-xs text-muted-foreground">Klik om te uploaden</span>
-                  <span className="text-[10px] text-muted-foreground/60">JPG, PNG of PDF — optioneel</span>
-                </>
-              )}
-              {uploading && (
-                <div className="absolute inset-0 flex items-center justify-center bg-background/80">
-                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                </div>
-              )}
+              </div>
             </div>
-            <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden"
-              onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
-          </div>
-        </div>
-      )}
-
-      {/* Footer buttons */}
-      {(step === 2 || (step === 1 && false)) && (
-        <div className="mt-5 flex justify-end gap-2">
-          <Button variant="ghost" size="sm" onClick={onClose}><X className="mr-1 h-4 w-4" /> Annuleren</Button>
-          <Button size="sm" onClick={() => { if (validate()) saveMutation.mutate(); }} disabled={saveMutation.isPending || uploading}>
-            <Check className="mr-1 h-4 w-4" />
-            {saveMutation.isPending ? "Opslaan..." : "Formulier opslaan"}
-          </Button>
-        </div>
-      )}
-      {step === 1 && (
-        <div className="mt-4 flex justify-end">
-          <Button variant="ghost" size="sm" onClick={onClose}><X className="mr-1 h-4 w-4" /> Annuleren</Button>
-        </div>
-      )}
+          )}
+        </motion.div>
+      </AnimatePresence>
     </motion.div>
   );
 }
