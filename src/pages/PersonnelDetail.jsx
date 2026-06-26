@@ -1189,29 +1189,34 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
             <span>Geldig tot</span>
             <span>Door</span>
             {!showIdentityWizard && (
-              <div className="flex flex-wrap items-center justify-end gap-2">
+              <div className="flex flex-nowrap items-center justify-end gap-2">
+                {showIdentityArchive && <Badge className="shrink-0 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
                 {showIdentityArchive ? (
                   <>
-                    <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                    <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                       <ArrowLeft className="w-3 h-3 mr-1" /> Actieve documenten
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => openIdentityWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
-                      <Plus className="w-3 h-3 mr-1" /> Oud document
+                    <Button size="sm" variant="outline" onClick={() => openIdentityWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
+                      <Plus className="w-3 h-3 mr-1" /> Voeg oud document in archief
                     </Button>
                   </>
                 ) : (
                   <>
-                    <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                    <Button size="sm" variant="outline" onClick={() => setShowIdentityArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                       <Archive className="w-3 h-3 mr-1" /> Archief {identityArchived.length > 0 ? `(${identityArchived.length})` : ""}
                     </Button>
-                    <Button size="sm" variant="outline" onClick={() => openIdentityWizard()} className="h-7 px-2 text-xs font-medium normal-case tracking-normal">
+                    <Button size="sm" variant="outline" onClick={() => openIdentityWizard()} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
                       <Plus className="w-3 h-3 mr-1" /> Nieuw document
                     </Button>
                   </>
                 )}
               </div>
             )}
-            {showIdentityWizard && <span />}
+            {showIdentityWizard && (
+              <div className="flex justify-end">
+                {showIdentityArchive && <Badge className="shrink-0 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
+              </div>
+            )}
           </div>
 
           {showIdentityArchive ? (
