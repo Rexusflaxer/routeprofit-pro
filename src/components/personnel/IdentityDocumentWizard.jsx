@@ -389,12 +389,14 @@ function DocumentSideUpload({ label, hint, previewUrl, onFileSelected, uploading
 function DrivingLicenseGuideImage({ side = "front" }) {
   const isBack = side === "back";
   return (
-    <img
-      src={isBack ? "/identity-guides/driving-license-back.jpg" : "/identity-guides/driving-license-front.jpg"}
-      alt={isBack ? "Voorbeeld achterkant Nederlands rijbewijs" : "Voorbeeld voorkant Nederlands rijbewijs"}
-      className="h-36 w-[260px] rounded border border-border bg-white object-contain shadow-sm"
-      draggable="false"
-    />
+    <div className="flex h-36 w-[260px] items-center justify-center overflow-hidden rounded border border-border bg-white shadow-sm">
+      <img
+        src={isBack ? "/identity-guides/driving-license-back.jpg" : "/identity-guides/driving-license-front.jpg"}
+        alt={isBack ? "Voorbeeld achterkant Nederlands rijbewijs" : "Voorbeeld voorkant Nederlands rijbewijs"}
+        className={`h-full w-full object-contain ${isBack ? "scale-[1.14]" : ""}`}
+        draggable="false"
+      />
+    </div>
   );
 }
 
@@ -998,16 +1000,14 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>
-                {isEuEea && (
-                  <button onClick={() => { setDocType("id_card"); setStep(2); }}
-                    className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
-                    <div>
-                      <span className="text-sm font-semibold text-foreground">Identiteitskaart</span>
-                      <span className="text-xs text-muted-foreground ml-2">{countryLabel} ID-kaart</span>
-                    </div>
-                    <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                  </button>
-                )}
+                <button onClick={() => { setDocType("id_card"); setStep(2); }}
+                  className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Identiteitskaart</span>
+                    <span className="text-xs text-muted-foreground ml-2">{countryLabel} ID-kaart</span>
+                  </div>
+                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
+                </button>
                 <button onClick={() => { setDocType("drivers_license"); setStep(2); }}
                   className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
                   <div>
