@@ -8,13 +8,17 @@ import { Badge } from "@/components/ui/badge";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  AlertTriangle, Archive, ArrowLeft, Check, Eye,
-  FileCheck2, FileText, ImageIcon, Loader2, Plus, RefreshCw, Trash2, X,
+  AlertTriangle, Archive, ArrowLeft, Check, ChevronRight, Download,
+  Eye, FileCheck2, FileText, ImageIcon, Loader2, Plus, RefreshCw,
+  Send, Trash2, Upload, X,
 } from "lucide-react";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 
 const DELETE_PASSWORD = "verwijder";
-const PAYROLL_TABLE_GRID = "grid grid-cols-[minmax(160px,200px)_minmax(130px,170px)_minmax(96px,124px)_minmax(110px,140px)_minmax(110px,1fr)_minmax(280px,max-content)] gap-3";
+const FORM_PDF_URL = "https://media.base44.com/files/public/698e307ed3aa4cab3729bbf1/4551ed708_model_opgaaf_gegevens_loonheffingen_lh0082z11fol-5.pdf";
+
+// Table grid: omschrijving | loonheffingskorting | alleenstaande-ouderenkorting | status | door | acties
+const PAYROLL_TABLE_GRID = "grid grid-cols-[minmax(200px,1fr)_160px_200px_120px_150px_minmax(240px,max-content)] gap-3";
 
 function formatDate(v, fallback = "-") {
   if (!v) return fallback;
@@ -27,21 +31,16 @@ function formatCurrency(v) {
   return new Intl.NumberFormat("nl-NL", { style: "currency", currency: "EUR" }).format(Number(v || 0));
 }
 
-function getExpiryState(value) {
-  if (!value) return null;
-  const diffDays = (new Date(value) - new Date()) / 86400000;
-  if (diffDays < 0) return { label: "Verlopen", className: "bg-red-50 text-red-700 dark:bg-red-950 dark:text-red-200" };
-  if (diffDays <= 30) return { label: "<30 dagen", className: "bg-orange-100 text-orange-700" };
-  if (diffDays <= 90) return { label: "<90 dagen", className: "bg-amber-100 text-amber-700" };
-  return null;
-}
-
 function getRelationshipType(p) {
   return p.relationship_type || (p.employee_type === "zzp" ? "self_employed" : "employee");
 }
 
 function isArchivedPayrollDocument(doc) {
   return doc?.metadata?.archived === true;
+}
+
+function isDraftPayrollDocument(doc) {
+  return doc?.verification_status === "pending_review" && doc?.metadata?.draft === true;
 }
 
 function payrollDocumentFileUrl(doc) {
@@ -75,6 +74,7 @@ function payrollActiveSortValue(doc) {
 }
 
 function isExpiredPayrollDocument(doc) {
+  if (isDraftPayrollDocument(doc)) return false;
   const today = new Date().toISOString().split("T")[0];
   return (doc?.valid_until && dateSortKey(doc.valid_until) < today) || doc?.verification_status === "expired";
 }
@@ -87,19 +87,16 @@ function verificationStatusForActivePayrollDocument(doc) {
 function comparePayrollRestoreCandidates(a, b, restoreId) {
   const validUntilDiff = dateSortKey(b?.valid_until).localeCompare(dateSortKey(a?.valid_until));
   if (validUntilDiff !== 0) return validUntilDiff;
-
   const aIsRestore = a?.id === restoreId;
   const bIsRestore = b?.id === restoreId;
   if (aIsRestore && !bIsRestore) return 1;
   if (!aIsRestore && bIsRestore) return -1;
-
   return payrollActiveSortValue(b).localeCompare(payrollActiveSortValue(a));
 }
 
 function splitPayrollDocumentsByActiveState(docs) {
   const nonArchived = [];
   const archived = [];
-
   for (const doc of docs) {
     if (isArchivedPayrollDocument(doc)) {
       archived.push(doc);
@@ -107,19 +104,27 @@ function splitPayrollDocumentsByActiveState(docs) {
       nonArchived.push(doc);
     }
   }
-
-  const sortedNonArchived = [...nonArchived].sort((a, b) =>
-    payrollActiveSortValue(b).localeCompare(payrollActiveSortValue(a))
-  );
-
-  const active = sortedNonArchived.slice(0, 1);
-  const effectiveArchived = sortedNonArchived.slice(1);
-
+  const drafts = nonArchived.filter(isDraftPayrollDocument);
+  const regular = nonArchived.filter(d => !isDraftPayrollDocument(d));
+  const sortedRegular = [...regular].sort((a, b) => payrollActiveSortValue(b).localeCompare(payrollActiveSortValue(a)));
+  const active = sortedRegular.slice(0, 1);
+  const effectiveArchived = sortedRegular.slice(1);
   return {
-    active,
+    active: [...active, ...drafts],
     archived: [...archived, ...effectiveArchived],
     effectiveArchived,
   };
+}
+
+function lhkLabel(val) {
+  if (val === true) return "Ja";
+  if (val === false) return "Nee";
+  return "-";
+}
+
+function lhkFromDateLabel(val) {
+  if (!val) return null;
+  return formatDate(val);
 }
 
 // ─── Status Badge ──────────────────────────────────────────────────────────────
@@ -127,6 +132,9 @@ function splitPayrollDocumentsByActiveState(docs) {
 function PayrollStatusBadge({ doc, archived = false }) {
   if (archived || isArchivedPayrollDocument(doc)) {
     return <Badge className="text-xs bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 border-0 whitespace-nowrap">Gearchiveerd</Badge>;
+  }
+  if (isDraftPayrollDocument(doc)) {
+    return <Badge className="text-xs bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border-0 whitespace-nowrap">Concept</Badge>;
   }
   if (isExpiredPayrollDocument(doc)) {
     return <Badge className="text-xs bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 border-0 whitespace-nowrap">Actie vereist</Badge>;
@@ -137,31 +145,22 @@ function PayrollStatusBadge({ doc, archived = false }) {
   if (doc?.verification_status === "pending_review") {
     return <Badge className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 border-0 whitespace-nowrap">In beoordeling</Badge>;
   }
-  if (doc?.verification_status === "rejected") {
-    return <Badge className="text-xs bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 border-0 whitespace-nowrap">Afgekeurd</Badge>;
-  }
   return <Badge className="text-xs bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border-0 whitespace-nowrap">Geüpload</Badge>;
 }
 
 // ─── Document Row ─────────────────────────────────────────────────────────────
 
 function PayrollDocumentRow({
-  doc,
-  archived = false,
-  onPreview,
-  onRenew,
-  onArchive,
-  onRestore,
-  onDelete,
-  auditActors = [],
-  restorePending = false,
+  doc, archived = false,
+  onPreview, onOpenWizardStep2, onArchive, onRestore, onDelete,
+  auditActors = [], restorePending = false,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
-  const expiry = getExpiryState(doc.valid_until);
   const canPreview = hasPayrollDocumentUpload(doc);
   const isExpired = !archived && isExpiredPayrollDocument(doc);
-  const canArchive = !archived;
+  const isDraft = isDraftPayrollDocument(doc);
+  const canArchive = !archived && !isDraft;
   const canRestore = archived;
   const canDelete = archived;
 
@@ -175,97 +174,112 @@ function PayrollDocumentRow({
   }, [menuOpen]);
 
   const openRow = () => {
-    if (isExpired) {
-      setMenuOpen(current => !current);
+    if (isDraft) {
+      onOpenWizardStep2?.(doc);
+    } else if (isExpired) {
+      setMenuOpen(cur => !cur);
     } else if (canPreview) {
       onPreview?.(doc);
     }
   };
 
+  const meta = doc?.metadata || {};
+  const lhk = meta.payroll_tax_credit_applies;
+  const lhkFrom = meta.payroll_tax_credit_from;
+  const aok = meta.single_elderly_credit_applies;
+
   return (
     <div
       className={`${PAYROLL_TABLE_GRID} relative items-center px-5 py-3 transition-colors ${
-        isExpired || canPreview ? "cursor-pointer hover:bg-accent/35" : ""
+        isDraft || isExpired || canPreview ? "cursor-pointer hover:bg-accent/35" : ""
       }`}
       onClick={openRow}
     >
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-foreground">
-          {doc.document_type || "Loonheffingsverklaring"}
+          Loonheffingsformulier
         </p>
+        {isDraft && <p className="mt-0.5 text-xs text-muted-foreground">Klik om het formulier in te voeren</p>}
       </div>
-      <span className="min-w-0 truncate text-sm text-muted-foreground">{doc.document_number || "-"}</span>
+
+      {/* Loonheffingskorting */}
+      <div className="min-w-0">
+        {lhk === true ? (
+          <div>
+            <span className="text-sm text-foreground">Ja</span>
+            {lhkFrom && <p className="text-xs text-muted-foreground">v.a. {formatDate(lhkFrom)}</p>}
+          </div>
+        ) : lhk === false ? (
+          <div>
+            <span className="text-sm text-foreground">Nee</span>
+            {lhkFrom && <p className="text-xs text-muted-foreground">v.a. {formatDate(lhkFrom)}</p>}
+          </div>
+        ) : (
+          <span className="text-sm text-muted-foreground">-</span>
+        )}
+      </div>
+
+      {/* Alleenstaande-ouderenkorting */}
+      <div className="min-w-0">
+        <span className="text-sm text-foreground">{aok === true ? "Ja" : aok === false ? "Nee" : "-"}</span>
+      </div>
+
       <div className="min-w-0">
         <PayrollStatusBadge doc={doc} archived={archived} />
       </div>
-      <div className="min-w-0 flex items-center gap-2">
-        <span className="text-sm text-foreground">{formatDate(doc.valid_until)}</span>
-        {expiry && !archived && <Badge className={`text-xs ${expiry.className} border-0 whitespace-nowrap`}>{expiry.label}</Badge>}
-      </div>
+
       <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(doc, auditActors)}</span>
+
       <div className="flex justify-end gap-1">
+        {isDraft && (
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={e => { e.stopPropagation(); onOpenWizardStep2?.(doc); }} title="Formulier invoeren">
+            <ChevronRight className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {canPreview && !isDraft && (
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={e => { e.stopPropagation(); onPreview(doc); }} title="Document bekijken">
+            <Eye className="h-3.5 w-3.5" />
+          </Button>
+        )}
         {canArchive && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={event => { event.stopPropagation(); onArchive?.(doc); }}
-            title="Naar archief"
-          >
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={e => { e.stopPropagation(); onArchive?.(doc); }} title="Naar archief">
             <Archive className="h-3.5 w-3.5" />
           </Button>
         )}
         {canRestore && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={event => { event.stopPropagation(); onRestore?.(doc); }}
-            disabled={restorePending}
-            title="Terugzetten naar actief"
-          >
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={e => { e.stopPropagation(); onRestore?.(doc); }} disabled={restorePending} title="Terugzetten naar actief">
             <RefreshCw className="h-3.5 w-3.5" />
           </Button>
         )}
         {canDelete && (
-          <Button
-            type="button"
-            variant="ghost"
-            size="icon"
-            className="h-7 w-7 text-muted-foreground hover:text-destructive"
-            onClick={event => { event.stopPropagation(); onDelete?.(doc); }}
-            title="Definitief verwijderen"
-          >
+          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            onClick={e => { e.stopPropagation(); onDelete?.(doc); }} title="Definitief verwijderen">
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         )}
       </div>
 
       {menuOpen && isExpired && (
-        <div
-          ref={menuRef}
+        <div ref={menuRef}
           className="absolute right-4 top-11 z-50 min-w-[210px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg"
-          onClick={event => event.stopPropagation()}
-        >
+          onClick={e => e.stopPropagation()}>
           {canPreview && (
-            <button
-              type="button"
+            <button type="button"
               className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
-              onClick={() => { setMenuOpen(false); onPreview(doc); }}
-            >
+              onClick={() => { setMenuOpen(false); onPreview(doc); }}>
               <Eye className="h-3.5 w-3.5 text-muted-foreground" />
               Document bekijken
             </button>
           )}
-          <button
-            type="button"
+          <button type="button"
             className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
-            onClick={() => { setMenuOpen(false); onRenew(); }}
-          >
+            onClick={() => { setMenuOpen(false); onOpenWizardStep2?.(null); }}>
             <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
-            Loonheffingsverklaring vernieuwen
+            Loonheffingsformulier vernieuwen
           </button>
         </div>
       )}
@@ -277,12 +291,11 @@ function PayrollDocumentRow({
 
 function PayrollDocumentPreviewDialog({ document, open, onOpenChange }) {
   const fileUrl = payrollDocumentFileUrl(document);
-
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl">
         <DialogHeader>
-          <DialogTitle>{document?.document_type || "Loonheffingsverklaring"}</DialogTitle>
+          <DialogTitle>Loonheffingsformulier</DialogTitle>
         </DialogHeader>
         {!fileUrl ? (
           <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
@@ -298,9 +311,7 @@ function PayrollDocumentPreviewDialog({ document, open, onOpenChange }) {
               <FileText className="mx-auto h-12 w-12 text-muted-foreground/50" />
               <p className="mt-3 text-sm text-muted-foreground">Dit is een PDF-document.</p>
               <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block">
-                <Button variant="outline" size="sm">
-                  <Eye className="mr-1 h-4 w-4" /> Openen in nieuw venster
-                </Button>
+                <Button variant="outline" size="sm"><Eye className="mr-1 h-4 w-4" /> Openen in nieuw venster</Button>
               </a>
             </div>
           </div>
@@ -315,52 +326,30 @@ function PayrollDocumentPreviewDialog({ document, open, onOpenChange }) {
 function PayrollDeleteConfirmDialog({ document, open, onOpenChange, onConfirm, isPending }) {
   const [password, setPassword] = useState("");
   const [error, setError] = useState("");
-
-  useEffect(() => {
-    if (!open) {
-      setPassword("");
-      setError("");
-    }
-  }, [open]);
+  useEffect(() => { if (!open) { setPassword(""); setError(""); } }, [open]);
 
   const handleConfirm = () => {
-    if (password !== DELETE_PASSWORD) {
-      setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`);
-      return;
-    }
+    if (password !== DELETE_PASSWORD) { setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`); return; }
     onConfirm?.(document);
   };
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
-        <DialogHeader>
-          <DialogTitle>Document definitief verwijderen?</DialogTitle>
-        </DialogHeader>
+        <DialogHeader><DialogTitle>Document definitief verwijderen?</DialogTitle></DialogHeader>
         <div className="space-y-4">
           <div className="flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-3">
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <div className="text-sm">
-              <p className="font-medium text-foreground">
-                {document?.document_type || "Loonheffingsverklaring"} {document?.document_number ? `#${document.document_number}` : ""} wordt verwijderd.
-              </p>
-              <p className="mt-1 text-xs text-muted-foreground">
-                Deze actie is alleen bedoeld voor verkeerd toegevoegde archiefdocumenten.
-              </p>
+              <p className="font-medium text-foreground">Loonheffingsformulier wordt verwijderd.</p>
+              <p className="mt-1 text-xs text-muted-foreground">Deze actie is alleen bedoeld voor verkeerd toegevoegde archiefdocumenten.</p>
             </div>
           </div>
           <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">
-              Typ <strong className="font-mono text-foreground">{DELETE_PASSWORD}</strong> om te bevestigen
-            </Label>
-            <Input
-              value={password}
-              onChange={event => { setPassword(event.target.value); setError(""); }}
-              onKeyDown={event => event.key === "Enter" && handleConfirm()}
-              placeholder={DELETE_PASSWORD}
-              className={`h-9 font-mono ${error ? "border-destructive" : ""}`}
-              autoFocus
-            />
+            <Label className="text-xs text-muted-foreground">Typ <strong className="font-mono text-foreground">{DELETE_PASSWORD}</strong> om te bevestigen</Label>
+            <Input value={password} onChange={e => { setPassword(e.target.value); setError(""); }}
+              onKeyDown={e => e.key === "Enter" && handleConfirm()} placeholder={DELETE_PASSWORD}
+              className={`h-9 font-mono ${error ? "border-destructive" : ""}`} autoFocus />
             {error && <p className="text-xs text-destructive">{error}</p>}
           </div>
         </div>
@@ -376,26 +365,29 @@ function PayrollDeleteConfirmDialog({ document, open, onOpenChange, onConfirm, i
 }
 
 // ─── Wizard ───────────────────────────────────────────────────────────────────
+// step 1: keuze (aanbieden / handmatig uploaden / downloaden + concept)
+// step 2: loonheffingskorting vragen + upload (bij handmatig of bij concept-rij)
 
-function PayrollDocumentWizard({ personnelId, isArchiveEntry = false, onClose, onSaved, currentUser, auditActors = [] }) {
+function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, existingDraftDoc = null, onClose, onSaved, currentUser, auditActors = [] }) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState({
-    document_type: "Loonheffingsverklaring",
-    document_number: "",
-    valid_from: "",
-    valid_until: "",
-  });
+
+  // When coming from a draft row, skip step 1 and go straight to step 2
+  const [step, setStep] = useState(existingDraftDoc ? 2 : 1);
+
+  const [lhkApplies, setLhkApplies] = useState(
+    existingDraftDoc?.metadata?.payroll_tax_credit_applies === true ? "true" :
+    existingDraftDoc?.metadata?.payroll_tax_credit_applies === false ? "false" : ""
+  );
+  const [lhkFrom, setLhkFrom] = useState(existingDraftDoc?.metadata?.payroll_tax_credit_from || "");
+  const [aokApplies, setAokApplies] = useState(
+    existingDraftDoc?.metadata?.single_elderly_credit_applies === true ? "true" :
+    existingDraftDoc?.metadata?.single_elderly_credit_applies === false ? "false" : ""
+  );
   const [file, setFile] = useState(null);
   const [filePreview, setFilePreview] = useState(null);
   const [uploading, setUploading] = useState(false);
   const [errors, setErrors] = useState({});
   const fileInputRef = useRef(null);
-  const today = new Date().toISOString().split("T")[0];
-
-  const set = (field, val) => {
-    setForm(f => ({ ...f, [field]: val }));
-    setErrors(e => ({ ...e, [field]: undefined }));
-  };
 
   const handleFile = (f) => {
     if (!f) return;
@@ -411,23 +403,59 @@ function PayrollDocumentWizard({ personnelId, isArchiveEntry = false, onClose, o
 
   const validate = () => {
     const e = {};
-    if (!form.valid_from) e.valid_from = "Verplicht";
-    if (!form.valid_until) {
-      e.valid_until = "Verplicht";
-    } else if (isArchiveEntry && form.valid_until >= today) {
-      e.valid_until = "Archief is voor verlopen documenten (einddatum moet in het verleden liggen).";
-    } else if (!isArchiveEntry && form.valid_until <= today) {
-      e.valid_until = "Document is verlopen — voeg verlopen documenten toe via het archief.";
-    } else if (form.valid_from && form.valid_until <= form.valid_from) {
-      e.valid_until = "Geldig tot moet later zijn dan geldig vanaf";
-    }
+    if (!lhkApplies) e.lhkApplies = "Verplicht";
+    if (lhkApplies === "true" && !lhkFrom) e.lhkFrom = "Verplicht als loonheffingskorting van toepassing is";
+    if (lhkApplies === "false" && !lhkFrom) e.lhkFrom = "Verplicht (datum niet meer van toepassing)";
     setErrors(e);
     return Object.keys(e).length === 0;
   };
 
+  // Download PDF and create a concept record
+  const downloadAndCreateDraftMutation = useMutation({
+    mutationFn: async () => {
+      // Archive existing active docs
+      const existing = await base44.entities.PersonnelDocument.filter({ personnel_id: personnelId, category: "payroll_tax_statement" });
+      const actionAt = new Date().toISOString();
+      for (const doc of existing) {
+        if (!doc.metadata?.archived && !isDraftPayrollDocument(doc)) {
+          await base44.entities.PersonnelDocument.update(doc.id, {
+            verification_status: "expired",
+            metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
+              ...(doc.metadata || {}),
+              archived: true,
+              archived_at: actionAt,
+            }, auditActors),
+          });
+        }
+      }
+      await base44.entities.PersonnelDocument.create({
+        personnel_id: personnelId,
+        category: "payroll_tax_statement",
+        document_type: "Loonheffingsformulier",
+        is_sensitive: true,
+        verification_status: "pending_review",
+        metadata: buildAuditMetadata(currentUser, "concept aangemaakt", {
+          doc_category: "payroll_tax_statement",
+          draft: true,
+        }, auditActors),
+      });
+    },
+    onSuccess: () => {
+      // Trigger download
+      const a = window.document.createElement("a");
+      a.href = FORM_PDF_URL;
+      a.download = "Loonheffingsformulier_belastingdienst.pdf";
+      a.target = "_blank";
+      a.click();
+      queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
+      onClose();
+    },
+  });
+
+  // Save step 2 (manual upload or filling in existing draft)
   const saveMutation = useMutation({
     mutationFn: async () => {
-      let fileUrl = null;
+      let fileUrl = existingDraftDoc ? payrollDocumentFileUrl(existingDraftDoc) : null;
       if (file) {
         setUploading(true);
         const res = await base44.integrations.Core.UploadFile({ file });
@@ -435,12 +463,32 @@ function PayrollDocumentWizard({ personnelId, isArchiveEntry = false, onClose, o
         setUploading(false);
       }
 
-      // Archive existing active payroll tax statement documents when adding a new active one
-      if (!isArchiveEntry) {
+      const creditApplies = lhkApplies === "true" ? true : lhkApplies === "false" ? false : null;
+      const singleElderlyApplies = aokApplies === "true" ? true : aokApplies === "false" ? false : null;
+
+      const metaPayload = {
+        doc_category: "payroll_tax_statement",
+        archived: isArchiveEntry,
+        front_file_url: fileUrl,
+        payroll_tax_credit_applies: creditApplies,
+        payroll_tax_credit_from: lhkFrom || null,
+        single_elderly_credit_applies: singleElderlyApplies,
+        draft: false,
+      };
+
+      if (existingDraftDoc) {
+        // Update the existing draft to complete
+        await base44.entities.PersonnelDocument.update(existingDraftDoc.id, {
+          front_file_url: fileUrl,
+          verification_status: isArchiveEntry ? "expired" : "verified",
+          metadata: buildAuditMetadata(currentUser, "ingevuld", metaPayload, auditActors),
+        });
+      } else {
+        // Archive existing active docs first
         const existing = await base44.entities.PersonnelDocument.filter({ personnel_id: personnelId, category: "payroll_tax_statement" });
         const actionAt = new Date().toISOString();
         for (const doc of existing) {
-          if (!doc.metadata?.archived) {
+          if (!doc.metadata?.archived && !isDraftPayrollDocument(doc)) {
             await base44.entities.PersonnelDocument.update(doc.id, {
               verification_status: "expired",
               metadata: buildAuditMetadata(currentUser, "vernieuwd", {
@@ -451,24 +499,16 @@ function PayrollDocumentWizard({ personnelId, isArchiveEntry = false, onClose, o
             });
           }
         }
-      }
-
-      await base44.entities.PersonnelDocument.create({
-        personnel_id: personnelId,
-        category: "payroll_tax_statement",
-        document_type: form.document_type || "Loonheffingsverklaring",
-        document_number: form.document_number || null,
-        valid_from: form.valid_from || null,
-        valid_until: form.valid_until || null,
-        front_file_url: fileUrl,
-        is_sensitive: true,
-        verification_status: isArchiveEntry ? "expired" : "verified",
-        metadata: buildAuditMetadata(currentUser, isArchiveEntry ? "gearchiveerd" : "toegevoegd", {
-          doc_category: "payroll_tax_statement",
-          archived: isArchiveEntry,
+        await base44.entities.PersonnelDocument.create({
+          personnel_id: personnelId,
+          category: "payroll_tax_statement",
+          document_type: "Loonheffingsformulier",
           front_file_url: fileUrl,
-        }, auditActors),
-      });
+          is_sensitive: true,
+          verification_status: isArchiveEntry ? "expired" : "verified",
+          metadata: buildAuditMetadata(currentUser, isArchiveEntry ? "gearchiveerd" : "toegevoegd", metaPayload, auditActors),
+        });
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
@@ -477,7 +517,11 @@ function PayrollDocumentWizard({ personnelId, isArchiveEntry = false, onClose, o
     },
   });
 
-  const wizardTitle = isArchiveEntry ? "Loonheffingsdocument archiveren" : "Loonheffingsdocument toevoegen";
+  const wizardTitle = isArchiveEntry
+    ? "LOONHEFFINGSFORMULIER ARCHIVEREN"
+    : existingDraftDoc
+      ? "LOONHEFFINGSFORMULIER INVOEREN"
+      : "LOONHEFFINGSFORMULIER TOEVOEGEN";
 
   return (
     <motion.div
@@ -487,100 +531,193 @@ function PayrollDocumentWizard({ personnelId, isArchiveEntry = false, onClose, o
       transition={{ duration: 0.2 }}
       className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
     >
-      <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">{wizardTitle}</p>
+      <div className="mb-4 flex items-center justify-between">
+        <p className="text-xs font-semibold uppercase tracking-wider text-primary">{wizardTitle}</p>
+        {step === 2 && !existingDraftDoc && (
+          <button type="button" onClick={() => setStep(1)} className="flex items-center gap-1 text-xs text-muted-foreground hover:text-foreground transition-colors">
+            <ArrowLeft className="h-3 w-3" /> Terug
+          </button>
+        )}
+      </div>
 
-      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        {/* Left: form fields */}
-        <div className="space-y-3">
-          <div>
-            <Label className="text-xs text-muted-foreground">Type / omschrijving</Label>
-            <Input
-              value={form.document_type}
-              onChange={e => set("document_type", e.target.value)}
-              className="h-8 text-sm"
-              placeholder="Loonheffingsverklaring"
-            />
-          </div>
-          <div>
-            <Label className="text-xs text-muted-foreground">Documentnummer</Label>
-            <Input
-              value={form.document_number}
-              onChange={e => set("document_number", e.target.value)}
-              className="h-8 text-sm"
-              placeholder="Optioneel"
-            />
-          </div>
-          <div className="grid grid-cols-2 gap-3">
-            <div>
-              <Label className="text-xs text-muted-foreground">Geldig vanaf <span className="text-destructive">*</span></Label>
-              <Input
-                type="date"
-                value={form.valid_from}
-                onChange={e => set("valid_from", e.target.value)}
-                className={`h-8 text-sm ${errors.valid_from ? "border-destructive" : ""}`}
-              />
-              {errors.valid_from && <p className="mt-1 text-xs text-destructive">{errors.valid_from}</p>}
-            </div>
-            <div>
-              <Label className="text-xs text-muted-foreground">Geldig tot <span className="text-destructive">*</span></Label>
-              <Input
-                type="date"
-                value={form.valid_until}
-                onChange={e => set("valid_until", e.target.value)}
-                className={`h-8 text-sm ${errors.valid_until ? "border-destructive" : ""}`}
-                max={isArchiveEntry ? today : undefined}
-                min={isArchiveEntry ? undefined : today}
-              />
-              {errors.valid_until && <p className="mt-1 text-xs text-destructive">{errors.valid_until}</p>}
-            </div>
-          </div>
-        </div>
-
-        {/* Right: file upload */}
-        <div className="space-y-2">
-          <Label className="text-xs text-muted-foreground">Document uploaden</Label>
-          <div
-            onClick={() => fileInputRef.current?.click()}
-            className="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border hover:border-primary bg-muted/20 hover:bg-accent/30 cursor-pointer transition-colors min-h-[160px] overflow-hidden"
+      {/* ── Step 1: keuze ── */}
+      {step === 1 && (
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          {/* Aanbieden aan medewerker (nog niet geïmplementeerd) */}
+          <button
+            type="button"
+            disabled
+            className="flex flex-col items-center gap-3 rounded-lg border-2 border-dashed border-border bg-muted/20 px-4 py-6 text-center opacity-50 cursor-not-allowed"
           >
-            {filePreview ? (
-              <img src={filePreview} alt="Preview" className="w-full h-40 object-contain" />
-            ) : file ? (
-              <div className="text-center">
-                <FileCheck2 className="mx-auto h-8 w-8 text-primary" />
-                <p className="mt-2 text-sm font-medium text-foreground">{file.name}</p>
-                <p className="text-xs text-muted-foreground">Klik om te vervangen</p>
+            <Send className="h-8 w-8 text-muted-foreground/50" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">Aanbieden aan medewerker</p>
+              <p className="mt-1 text-xs text-muted-foreground">Binnenkort beschikbaar via Teamhub</p>
+            </div>
+          </button>
+
+          {/* Handmatig uploaden */}
+          <button
+            type="button"
+            onClick={() => setStep(2)}
+            className="flex flex-col items-center gap-3 rounded-lg border-2 border-border hover:border-primary bg-background hover:bg-accent/30 px-4 py-6 text-center cursor-pointer transition-colors"
+          >
+            <Upload className="h-8 w-8 text-primary" />
+            <div>
+              <p className="text-sm font-semibold text-foreground">Handmatig uploaden</p>
+              <p className="mt-1 text-xs text-muted-foreground">Vul het ingevulde formulier in en upload het document</p>
+            </div>
+            <ChevronRight className="h-4 w-4 text-primary" />
+          </button>
+
+          {/* Formulier downloaden */}
+          <button
+            type="button"
+            onClick={() => downloadAndCreateDraftMutation.mutate()}
+            disabled={downloadAndCreateDraftMutation.isPending}
+            className="flex flex-col items-center gap-3 rounded-lg border-2 border-border hover:border-primary bg-background hover:bg-accent/30 px-4 py-6 text-center cursor-pointer transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {downloadAndCreateDraftMutation.isPending
+              ? <Loader2 className="h-8 w-8 text-muted-foreground animate-spin" />
+              : <Download className="h-8 w-8 text-muted-foreground" />
+            }
+            <div>
+              <p className="text-sm font-semibold text-foreground">Formulier downloaden en handmatig aanbieden</p>
+              <p className="mt-1 text-xs text-muted-foreground">Download het Belastingdienst-formulier en maak een concept aan om later in te voeren</p>
+            </div>
+          </button>
+        </div>
+      )}
+
+      {/* ── Step 2: vragen + upload ── */}
+      {step === 2 && (
+        <div className="grid grid-cols-1 gap-6 lg:grid-cols-2">
+          {/* Left: vragen */}
+          <div className="space-y-5">
+            {/* 2a Loonheffingskorting */}
+            <div>
+              <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">2a — Loonheffingskorting toepassen?</Label>
+              <p className="mt-0.5 mb-2 text-xs text-muted-foreground">
+                U kunt de loonheffingskorting maar door 1 werkgever laten toepassen.
+              </p>
+              <div className="flex flex-col gap-2">
+                {[
+                  { value: "true", label: "Ja, toepassen" },
+                  { value: "false", label: "Nee, niet (meer) toepassen" },
+                ].map(opt => (
+                  <label key={opt.value} className={`flex items-center gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors ${
+                    lhkApplies === opt.value ? "border-primary bg-primary/5" : "border-border hover:bg-accent/30"
+                  }`}>
+                    <div className={`h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                      lhkApplies === opt.value ? "border-primary" : "border-muted-foreground/40"
+                    }`}>
+                      {lhkApplies === opt.value && <div className="h-2 w-2 rounded-full bg-primary" />}
+                    </div>
+                    <input type="radio" className="sr-only" value={opt.value} checked={lhkApplies === opt.value}
+                      onChange={() => { setLhkApplies(opt.value); setErrors(e => ({ ...e, lhkApplies: undefined })); }} />
+                    <span className="text-sm font-medium">{opt.label}</span>
+                  </label>
+                ))}
               </div>
-            ) : (
-              <>
-                <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
-                <span className="text-xs text-muted-foreground">Klik om te uploaden</span>
-                <span className="text-[10px] text-muted-foreground/60">JPG, PNG of PDF</span>
-              </>
-            )}
-            {uploading && (
-              <div className="absolute inset-0 flex items-center justify-center bg-background/80">
-                <Loader2 className="h-5 w-5 animate-spin text-primary" />
+              {errors.lhkApplies && <p className="mt-1 text-xs text-destructive">{errors.lhkApplies}</p>}
+
+              {lhkApplies && (
+                <div className="mt-3">
+                  <Label className="text-xs text-muted-foreground">
+                    {lhkApplies === "true" ? "Toepassen vanaf" : "Niet meer toepassen vanaf"} <span className="text-destructive">*</span>
+                  </Label>
+                  <Input type="date" value={lhkFrom} onChange={e => { setLhkFrom(e.target.value); setErrors(err => ({ ...err, lhkFrom: undefined })); }}
+                    className={`mt-1 h-8 text-sm ${errors.lhkFrom ? "border-destructive" : ""}`} />
+                  {errors.lhkFrom && <p className="mt-1 text-xs text-destructive">{errors.lhkFrom}</p>}
+                </div>
+              )}
+            </div>
+
+            {/* 2b Alleenstaande-ouderenkorting (alleen tonen als 2a = Ja) */}
+            {lhkApplies === "true" && (
+              <div>
+                <Label className="text-xs font-semibold text-muted-foreground uppercase tracking-wider">2b — Alleenstaande-ouderenkorting toepassen?</Label>
+                <p className="mt-0.5 mb-2 text-xs text-muted-foreground">
+                  Alleen van toepassing als u recht hebt op AOW voor alleenstaanden.
+                </p>
+                <div className="flex flex-col gap-2">
+                  {[
+                    { value: "true", label: "Ja" },
+                    { value: "false", label: "Nee" },
+                  ].map(opt => (
+                    <label key={opt.value} className={`flex items-center gap-3 rounded-md border px-3 py-2.5 cursor-pointer transition-colors ${
+                      aokApplies === opt.value ? "border-primary bg-primary/5" : "border-border hover:bg-accent/30"
+                    }`}>
+                      <div className={`h-4 w-4 shrink-0 rounded-full border-2 flex items-center justify-center ${
+                        aokApplies === opt.value ? "border-primary" : "border-muted-foreground/40"
+                      }`}>
+                        {aokApplies === opt.value && <div className="h-2 w-2 rounded-full bg-primary" />}
+                      </div>
+                      <input type="radio" className="sr-only" value={opt.value} checked={aokApplies === opt.value}
+                        onChange={() => setAokApplies(opt.value)} />
+                      <span className="text-sm font-medium">{opt.label}</span>
+                    </label>
+                  ))}
+                </div>
               </div>
             )}
           </div>
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*,application/pdf"
-            className="hidden"
-            onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }}
-          />
-        </div>
-      </div>
 
-      <div className="mt-4 flex justify-end gap-2">
-        <Button variant="ghost" size="sm" onClick={onClose}><X className="mr-1 h-4 w-4" /> Annuleren</Button>
-        <Button size="sm" onClick={() => { if (validate()) saveMutation.mutate(); }} disabled={saveMutation.isPending || uploading}>
-          <Check className="mr-1 h-4 w-4" />
-          {saveMutation.isPending ? "Opslaan..." : "Document opslaan"}
-        </Button>
-      </div>
+          {/* Right: upload */}
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">Ingevuld formulier uploaden</Label>
+            <div
+              onClick={() => fileInputRef.current?.click()}
+              className="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border hover:border-primary bg-muted/20 hover:bg-accent/30 cursor-pointer transition-colors min-h-[180px] overflow-hidden"
+            >
+              {filePreview ? (
+                <img src={filePreview} alt="Preview" className="w-full h-44 object-contain" />
+              ) : file ? (
+                <div className="text-center">
+                  <FileCheck2 className="mx-auto h-8 w-8 text-primary" />
+                  <p className="mt-2 text-sm font-medium text-foreground">{file.name}</p>
+                  <p className="text-xs text-muted-foreground">Klik om te vervangen</p>
+                </div>
+              ) : existingDraftDoc && hasPayrollDocumentUpload(existingDraftDoc) ? (
+                <div className="text-center">
+                  <FileCheck2 className="mx-auto h-8 w-8 text-primary" />
+                  <p className="mt-2 text-sm font-medium text-foreground">Bestaand bestand</p>
+                  <p className="text-xs text-muted-foreground">Klik om te vervangen</p>
+                </div>
+              ) : (
+                <>
+                  <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
+                  <span className="text-xs text-muted-foreground">Klik om te uploaden</span>
+                  <span className="text-[10px] text-muted-foreground/60">JPG, PNG of PDF — optioneel</span>
+                </>
+              )}
+              {uploading && (
+                <div className="absolute inset-0 flex items-center justify-center bg-background/80">
+                  <Loader2 className="h-5 w-5 animate-spin text-primary" />
+                </div>
+              )}
+            </div>
+            <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden"
+              onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+          </div>
+        </div>
+      )}
+
+      {/* Footer buttons */}
+      {(step === 2 || (step === 1 && false)) && (
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" size="sm" onClick={onClose}><X className="mr-1 h-4 w-4" /> Annuleren</Button>
+          <Button size="sm" onClick={() => { if (validate()) saveMutation.mutate(); }} disabled={saveMutation.isPending || uploading}>
+            <Check className="mr-1 h-4 w-4" />
+            {saveMutation.isPending ? "Opslaan..." : "Formulier opslaan"}
+          </Button>
+        </div>
+      )}
+      {step === 1 && (
+        <div className="mt-4 flex justify-end">
+          <Button variant="ghost" size="sm" onClick={onClose}><X className="mr-1 h-4 w-4" /> Annuleren</Button>
+        </div>
+      )}
     </motion.div>
   );
 }
@@ -622,6 +759,7 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
   const relationship = getRelationshipType(person);
   const [wizardOpen, setWizardOpen] = useState(false);
   const [wizardArchiveMode, setWizardArchiveMode] = useState(false);
+  const [wizardDraftDoc, setWizardDraftDoc] = useState(null);
   const [showArchive, setShowArchive] = useState(false);
   const [previewDoc, setPreviewDoc] = useState(null);
   const [deleteDoc, setDeleteDoc] = useState(null);
@@ -639,17 +777,14 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
     return () => clearTimeout(timer);
   }, [archiveMessage]);
 
-  const payrollAllDocs = useMemo(
-    () => documents.filter(d => d.category === "payroll_tax_statement"),
-    [documents]
-  );
-  const payrollSplit = useMemo(
-    () => splitPayrollDocumentsByActiveState(payrollAllDocs),
-    [payrollAllDocs]
-  );
-  const sortDocs = docs => [...docs].sort((a, b) =>
-    dateSortKey(b.valid_until).localeCompare(dateSortKey(a.valid_until))
-  );
+  const payrollAllDocs = useMemo(() => documents.filter(d => d.category === "payroll_tax_statement"), [documents]);
+  const payrollSplit = useMemo(() => splitPayrollDocumentsByActiveState(payrollAllDocs), [payrollAllDocs]);
+  const sortDocs = docs => [...docs].sort((a, b) => {
+    // drafts always first
+    if (isDraftPayrollDocument(a) && !isDraftPayrollDocument(b)) return -1;
+    if (!isDraftPayrollDocument(a) && isDraftPayrollDocument(b)) return 1;
+    return dateSortKey(b.valid_until).localeCompare(dateSortKey(a.valid_until));
+  });
   const sortedActive = sortDocs(payrollSplit.active);
   const sortedArchived = sortDocs(payrollSplit.archived);
 
@@ -657,46 +792,30 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
     () => payrollSplit.effectiveArchived.filter(doc => doc.metadata?.archived !== true),
     [payrollSplit]
   );
-  const docsToAutoArchiveSignature = docsToAutoArchive
-    .map(doc => `${doc.id}:${doc.valid_until || ""}`)
-    .join("|");
+  const docsToAutoArchiveSignature = docsToAutoArchive.map(doc => `${doc.id}:${doc.valid_until || ""}`).join("|");
 
   useEffect(() => {
     if (docsToAutoArchive.length === 0) return undefined;
-
     let cancelled = false;
     Promise.all(docsToAutoArchive.map(doc => base44.entities.PersonnelDocument.update(doc.id, {
       verification_status: "expired",
       metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
-        ...(doc.metadata || {}),
-        archived: true,
-        archived_at: new Date().toISOString(),
+        ...(doc.metadata || {}), archived: true, archived_at: new Date().toISOString(),
       }, auditActors),
-    }))).then(() => {
-      if (!cancelled) queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
-    }).catch(error => {
-      console.error("Payroll document auto-archive failed", error);
-    });
-
-    return () => {
-      cancelled = true;
-    };
+    }))).then(() => { if (!cancelled) queryClient.invalidateQueries({ queryKey: ["personnel-documents"] }); })
+      .catch(err => console.error("Payroll auto-archive failed", err));
+    return () => { cancelled = true; };
   }, [auditActors, currentUser, docsToAutoArchive, docsToAutoArchiveSignature, queryClient]);
 
   const archiveMutation = useMutation({
     mutationFn: doc => base44.entities.PersonnelDocument.update(doc.id, {
       verification_status: "expired",
       metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
-        ...(doc.metadata || {}),
-        archived: true,
-        archived_at: new Date().toISOString(),
+        ...(doc.metadata || {}), archived: true, archived_at: new Date().toISOString(),
       }, auditActors),
     }),
-    onSuccess: (_data, doc) => {
-      setArchiveMessage({
-        type: "success",
-        text: `${doc.document_type || "Loonheffingsverklaring"} is naar het archief gezet.`,
-      });
+    onSuccess: () => {
+      setArchiveMessage({ type: "success", text: "Loonheffingsformulier is naar het archief gezet." });
       queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
     },
   });
@@ -704,72 +823,43 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
   const restoreMutation = useMutation({
     mutationFn: async doc => {
       const allDocs = await base44.entities.PersonnelDocument.filter({ personnel_id: person.id, category: "payroll_tax_statement" }, "-created_date");
-      const sameActiveDocs = allDocs
-        .filter(item => item.id !== doc.id)
-        .filter(item => !isArchivedPayrollDocument(item));
-
-      const winner = [doc, ...sameActiveDocs]
-        .sort((a, b) => comparePayrollRestoreCandidates(a, b, doc.id))[0];
-
-      if (winner?.id !== doc.id) {
-        return { restored: false, activeDoc: winner };
-      }
-
+      const sameActiveDocs = allDocs.filter(item => item.id !== doc.id).filter(item => !isArchivedPayrollDocument(item));
+      const winner = [doc, ...sameActiveDocs].sort((a, b) => comparePayrollRestoreCandidates(a, b, doc.id))[0];
+      if (winner?.id !== doc.id) return { restored: false };
       const now = new Date().toISOString();
       await Promise.all(sameActiveDocs.map(activeDoc => base44.entities.PersonnelDocument.update(activeDoc.id, {
         verification_status: "expired",
         metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
-          ...(activeDoc.metadata || {}),
-          archived: true,
-          archived_at: now,
-          archived_reason: "Vervangen door teruggezet archiefdocument",
+          ...(activeDoc.metadata || {}), archived: true, archived_at: now, archived_reason: "Vervangen door teruggezet archiefdocument",
         }, auditActors),
       })));
-
       await base44.entities.PersonnelDocument.update(doc.id, {
         verification_status: verificationStatusForActivePayrollDocument(doc),
         metadata: buildAuditMetadata(currentUser, "teruggezet", {
-          ...(doc.metadata || {}),
-          archived: false,
-          archived_at: null,
-          restored_from_archive_at: now,
+          ...(doc.metadata || {}), archived: false, archived_at: null, restored_from_archive_at: now,
         }, auditActors),
       });
-
       return { restored: true, replacedCount: sameActiveDocs.length };
     },
     onSuccess: result => {
-      if (result?.restored) {
-        setArchiveMessage({
-          type: "success",
-          text: result.replacedCount > 0
-            ? "Loonheffingsverklaring is teruggezet naar actief. Het eerdere actieve document is naar het archief gezet."
-            : "Loonheffingsverklaring is teruggezet naar actieve documenten.",
-        });
-      } else {
-        setArchiveMessage({
-          type: "warning",
-          text: "Niet teruggezet: er is al een nieuwer of even lang geldig actief document. Dit document blijft in het archief.",
-        });
-      }
+      setArchiveMessage(result?.restored
+        ? { type: "success", text: result.replacedCount > 0 ? "Loonheffingsformulier is teruggezet. Het eerdere actieve document is gearchiveerd." : "Loonheffingsformulier is teruggezet naar actieve documenten." }
+        : { type: "warning", text: "Niet teruggezet: er is al een nieuwer actief document. Dit document blijft in het archief." }
+      );
       queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
     },
   });
 
   const deleteMutation = useMutation({
     mutationFn: doc => base44.entities.PersonnelDocument.delete(doc.id),
-    onSuccess: () => {
-      setDeleteDoc(null);
-      queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
-    },
+    onSuccess: () => { setDeleteDoc(null); queryClient.invalidateQueries({ queryKey: ["personnel-documents"] }); },
   });
 
-  if (relationship === "self_employed") {
-    return <ZzpDetailsSection person={person} />;
-  }
+  if (relationship === "self_employed") return <ZzpDetailsSection person={person} />;
 
-  const openWizard = (archiveMode = false) => {
+  const openWizard = (archiveMode = false, draftDoc = null) => {
     setWizardArchiveMode(archiveMode);
+    setWizardDraftDoc(draftDoc);
     setWizardOpen(true);
   };
 
@@ -779,9 +869,11 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
         {wizardOpen && (
           <PayrollDocumentWizard
             personnelId={person.id}
+            person={person}
             isArchiveEntry={wizardArchiveMode}
-            onClose={() => setWizardOpen(false)}
-            onSaved={() => setWizardOpen(false)}
+            existingDraftDoc={wizardDraftDoc}
+            onClose={() => { setWizardOpen(false); setWizardDraftDoc(null); }}
+            onSaved={() => { setWizardOpen(false); setWizardDraftDoc(null); }}
             currentUser={currentUser}
             auditActors={auditActors}
           />
@@ -790,14 +882,14 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
 
       {/* Table header */}
       <div className={`${PAYROLL_TABLE_GRID} items-center border-b border-border bg-muted/30 px-5 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
-        <span>Type / omschrijving</span>
-        <span>Documentnummer</span>
+        <span>Omschrijving</span>
+        <span>Loonheffingskorting</span>
+        <span>Alleenst.-ouderenkorting</span>
         <span>Status</span>
-        <span>Geldig tot</span>
         <span>Door</span>
         {!wizardOpen && (
           <div className="flex flex-nowrap items-center justify-end gap-2">
-            {showArchive && <Badge className="shrink-0 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
+            {showArchive && <Badge className="shrink-0 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300">Archief</Badge>}
             {showArchive ? (
               <>
                 <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
@@ -813,7 +905,7 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
                   <Archive className="w-3 h-3 mr-1" /> Archief {sortedArchived.length > 0 ? `(${sortedArchived.length})` : ""}
                 </Button>
                 <Button size="sm" variant="outline" onClick={() => openWizard(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
-                  <Plus className="w-3 h-3 mr-1" /> Nieuw document
+                  <Plus className="w-3 h-3 mr-1" /> Nieuw formulier
                 </Button>
               </>
             )}
@@ -821,7 +913,7 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
         )}
         {wizardOpen && (
           <div className="flex justify-end">
-            {showArchive && <Badge className="shrink-0 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
+            {showArchive && <Badge className="shrink-0 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300">Archief</Badge>}
           </div>
         )}
       </div>
@@ -846,12 +938,9 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
         ) : (
           <div className="divide-y divide-border">
             {sortedArchived.map(doc => (
-              <PayrollDocumentRow
-                key={doc.id}
-                doc={doc}
-                archived
+              <PayrollDocumentRow key={doc.id} doc={doc} archived
                 onPreview={setPreviewDoc}
-                onRenew={() => openWizard()}
+                onOpenWizardStep2={draft => openWizard(false, draft)}
                 onArchive={archiveMutation.mutate}
                 onRestore={restoreMutation.mutate}
                 onDelete={setDeleteDoc}
@@ -862,15 +951,13 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
           </div>
         )
       ) : sortedActive.length === 0 ? (
-        <p className="px-5 py-8 text-center text-sm text-muted-foreground">Nog geen loonheffingsdocumenten geregistreerd.</p>
+        <p className="px-5 py-8 text-center text-sm text-muted-foreground">Nog geen loonheffingsformulieren geregistreerd.</p>
       ) : (
         <div className="divide-y divide-border">
           {sortedActive.map(doc => (
-            <PayrollDocumentRow
-              key={doc.id}
-              doc={doc}
+            <PayrollDocumentRow key={doc.id} doc={doc}
               onPreview={setPreviewDoc}
-              onRenew={() => openWizard()}
+              onOpenWizardStep2={draft => openWizard(false, draft)}
               onArchive={archiveMutation.mutate}
               onDelete={setDeleteDoc}
               auditActors={auditActors}
@@ -880,13 +967,11 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
       )}
 
       <PayrollDocumentPreviewDialog
-        document={previewDoc}
-        open={Boolean(previewDoc)}
+        document={previewDoc} open={Boolean(previewDoc)}
         onOpenChange={open => { if (!open) setPreviewDoc(null); }}
       />
       <PayrollDeleteConfirmDialog
-        document={deleteDoc}
-        open={Boolean(deleteDoc)}
+        document={deleteDoc} open={Boolean(deleteDoc)}
         onOpenChange={open => { if (!open) setDeleteDoc(null); }}
         onConfirm={doc => deleteMutation.mutate(doc)}
         isPending={deleteMutation.isPending}
