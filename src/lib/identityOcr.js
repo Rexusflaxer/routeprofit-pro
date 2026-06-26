@@ -45,7 +45,8 @@ function cleanPersonText(value) {
     .replace(/\s+\/\s+/g, " ")
     .replace(/[^A-Za-zÀ-ÿ' .-]/g, " ")
     .replace(/\s+/g, " ")
-    .trim();
+    .trim()
+    .replace(/^[ .'-]+|[ .'-]+$/g, "");
 }
 
 function onlyDigits(value) {
@@ -99,6 +100,42 @@ function parseVisibleDate(value) {
   return null;
 }
 
+function extractVisibleDates(value) {
+  const text = String(value || "").toUpperCase();
+  const dates = [];
+  const addDate = (date, index) => {
+    if (!date) return;
+    dates.push({ date, index });
+  };
+
+  const numericPattern = /\b([0-3OQDILSB]?[0-9OQDILSB])[\s./-]([01OQDILSB]?[0-9OQDILSB])[\s./-]((?:19|20)?[0-9OQDILSB]{2})\b/g;
+  for (const match of text.matchAll(numericPattern)) {
+    const year = parseYear(ocrDigits(match[3]));
+    addDate(year ? toIsoDate(year, Number(ocrDigits(match[2])), Number(ocrDigits(match[1]))) : null, match.index);
+  }
+
+  const namedPattern = /\b([0-3]?\d)\s+([A-ZÀ-ÿ]{3,10}(?:\/[A-ZÀ-ÿ]{3,10})?)\s+((?:19|20)?\d{2})\b/g;
+  for (const match of text.matchAll(namedPattern)) {
+    const monthToken = match[2]
+      .normalize("NFD")
+      .replace(/[\u0300-\u036f]/g, "")
+      .split("/")
+      .find(Boolean);
+    const month = MONTHS[monthToken];
+    const year = parseYear(match[3]);
+    addDate(month && year ? toIsoDate(year, month, Number(match[1])) : null, match.index);
+  }
+
+  const seen = new Set();
+  return dates
+    .sort((a, b) => a.index - b.index)
+    .filter(item => {
+      if (seen.has(item.date)) return false;
+      seen.add(item.date);
+      return true;
+    });
+}
+
 function parseCompactVisibleDate(value) {
   const digits = ocrDigits(value);
   const candidates = [];
@@ -126,10 +163,135 @@ function findDateNearLabel(text, labels) {
     const index = upper.indexOf(label);
     if (index < 0) continue;
     const slice = upper.slice(index, index + 220);
-    const date = parseVisibleDate(slice);
+    const date = parseVisibleDate(slice) || extractVisibleDates(slice)[0]?.date;
     if (date) return date;
   }
   return null;
+}
+
+function findVisibleBirthDate(text) {
+  const labeled = findDateNearLabel(text, [
+    "GEBOORTEDATUM",
+    "DATE OF BIRTH",
+    "DATE OF BIRTH",
+    "BIRTH",
+    "NAISSANCE",
+  ]);
+  if (labeled) return labeled;
+
+  const currentYear = new Date().getFullYear();
+  const dates = extractVisibleDates(text)
+    .map(item => item.date)
+    .filter(date => Number(date.slice(0, 4)) <= currentYear - 5)
+    .sort();
+  return dates[0] || "";
+}
+
+function isLikelyVisiblePersonName(value) {
+  const text = cleanPersonText(value);
+  if (text.length < 3 || text.length > 60) return false;
+  if (/\d/.test(value)) return false;
+
+  const upper = text.toUpperCase();
+  if (/\b(NEDERLAND|NEDERLANDSE|NEDERIANDSE|KINGDOM|KONINKRIJK|IDENTITEITSKAART|IDENTITY|CARTE|DOCUMENT|DATUM|DATE|GELDIG|GEBOORTE|BIRTH|PLACE|PERSOONSNR|PERSONAL|NATIONALITEIT|NATIONALITY|GESLACHT|SEX|CAN|PASPOORT|RIJBEWIJS|SPECIMEN)\b/.test(upper)) {
+    return false;
+  }
+
+  return /[A-Za-zÀ-ÿ]{3}/.test(text);
+}
+
+function findVisiblePersonNameAfterLabel(lines, labelPattern) {
+  for (let index = 0; index < lines.length; index += 1) {
+    const upperLine = lines[index].toUpperCase();
+    if (/VERVOLG\s+NAAM|CONTINUE\s+SURNAME/.test(upperLine)) continue;
+    if (!labelPattern.test(upperLine)) continue;
+    for (let offset = 1; offset <= 3; offset += 1) {
+      const candidate = cleanPersonText(lines[index + offset] || "");
+      if (isLikelyVisiblePersonName(candidate)) return candidate;
+    }
+  }
+  return "";
+}
+
+function findFallbackIdCardVisibleNames(lines) {
+  const documentLineIndex = lines.findIndex(line => {
+    const tokens = line.toUpperCase().match(/[A-Z0-9]{8,10}/g) || [];
+    return tokens.some(token => isLikelyIdCardNumber(token.length === 10 ? token.slice(0, 9) : token));
+  });
+  if (documentLineIndex < 0) return {};
+
+  const names = [];
+  for (let index = documentLineIndex + 1; index < Math.min(lines.length, documentLineIndex + 9); index += 1) {
+    const line = lines[index];
+    const upperLine = line.toUpperCase();
+    if (extractVisibleDates(line).length > 0) break;
+    if (/\b(NEDERLAND|NEDERLANDSE|NEDERIANDSE|NATIONALITEIT|NATIONALITY|GESLACHT|SEX|DATUM|DATE|CAN)\b/.test(upperLine)) break;
+
+    const candidate = cleanPersonText(line);
+    if (isLikelyVisiblePersonName(candidate)) names.push(candidate);
+  }
+
+  if (!names.length) return {};
+
+  return {
+    last_name: names[0] || "",
+    given_names: names.slice(1).at(-1) || "",
+  };
+}
+
+function findVisibleIdentityPerson(text, { docType = "" } = {}) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .filter(Boolean);
+
+  const fallback = docType === "id_card" ? findFallbackIdCardVisibleNames(lines) : {};
+
+  return {
+    last_name: findVisiblePersonNameAfterLabel(lines, /\b(NAAM|SURNAME|NOM)\b/) || fallback.last_name || "",
+    given_names: findVisiblePersonNameAfterLabel(lines, /\b(VOORNAMEN|GIVEN\s+NAMES|PRENOMS|PRÉNOMS)\b/) || fallback.given_names || "",
+    birth_date: findVisibleBirthDate(text),
+  };
+}
+
+function findVisibleIssueDate(text, expiryDate = "", birthDate = "") {
+  const labeled = findDateNearLabel(text, [
+    "DATUM VAN AFGIFTE",
+    "DATUM VAN ALGIFTE",
+    "DATE OF ISSUE",
+    "DATE OF ISS",
+    "ISSUED ON",
+    "ISSWE",
+    "AFGIFTE",
+    "ALGIFTE",
+  ]);
+  if (labeled) return labeled;
+
+  const today = new Date().toISOString().split("T")[0];
+  const dates = extractVisibleDates(text)
+    .map(item => item.date)
+    .filter(date => date !== birthDate && date !== expiryDate && date <= today)
+    .sort();
+  return dates[0] || "";
+}
+
+function findVisibleExpiryDate(text) {
+  const labeled = findDateNearLabel(text, [
+    "GELDIG TOT",
+    "DATE OF EXPIRY",
+    "DATE OF EXPI",
+    "EXPIRY DATE",
+    "VALID UNTIL",
+    "VALID TO",
+  ]);
+  if (labeled) return labeled;
+
+  const today = new Date().toISOString().split("T")[0];
+  const dates = extractVisibleDates(text)
+    .map(item => item.date)
+    .filter(date => date > today)
+    .sort();
+  return dates.at(-1) || "";
 }
 
 function findDateNearFieldCode(text, fieldCode) {
@@ -279,6 +441,47 @@ function findDocumentNumberInText(text) {
   return candidates
     .flatMap(documentNumberVariants)
     .sort((a, b) => scoreDocumentNumber(b) - scoreDocumentNumber(a))[0] || "";
+}
+
+function isLikelyIdCardNumber(value) {
+  const normalized = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  if (normalized.length !== 9) return false;
+  if (!/[A-Z]/.test(normalized) || !/\d/.test(normalized)) return false;
+  if (/^(NEDERLAND|NEDERIAND|KINGDOMO|IDENTITE)$/i.test(normalized)) return false;
+  return true;
+}
+
+function scoreIdCardNumber(value) {
+  const normalized = String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+  let score = 0;
+  if (normalized.length === 9) score += 20;
+  if (/^[I1L][A-Z0-9]{8}$/.test(normalized)) score += 14;
+  if (/^[A-Z]{2}\d/.test(normalized)) score += 6;
+  if (normalized.endsWith("0")) score -= 2;
+  score += (normalized.match(/[A-Z]/g) || []).length * 0.8;
+  score += (normalized.match(/\d/g) || []).length * 0.5;
+  return score;
+}
+
+function findIdCardNumberInText(text) {
+  const normalized = String(text || "").toUpperCase();
+  const candidates = [];
+
+  const labelPattern = /DOCUMENT(?:\s+|\s*-\s*)NUMMER|DOCUMENT\s+NO\.?|DOCUMENT\s+NUMBER|IDENTITEITSKAARTNUMMER/g;
+  for (const match of normalized.matchAll(labelPattern)) {
+    const after = normalized.slice(match.index + match[0].length, match.index + match[0].length + 80);
+    candidates.push(...(after.match(/\b[A-Z0-9][A-Z0-9\s-]{7,12}[A-Z0-9]\b/g) || []));
+  }
+
+  candidates.push(...(normalized.match(/\b[A-Z][A-Z0-9]{8,9}\b/g) || []));
+
+  return candidates
+    .flatMap(candidate => {
+      const clean = candidate.replace(/[^A-Z0-9]/g, "");
+      return clean.length === 10 ? [clean.slice(0, 9), clean.slice(1, 10)] : [clean];
+    })
+    .filter(isLikelyIdCardNumber)
+    .sort((a, b) => scoreIdCardNumber(b) - scoreIdCardNumber(a))[0] || "";
 }
 
 function isLikelyDriversLicenseNumber(value) {
@@ -799,28 +1002,24 @@ function resolveCropBox(crop, width, height) {
 
 export function parseIdentityOcrText(text, { docType = "passport" } = {}) {
   const isDriversLicense = docType === "drivers_license";
+  const isIdCard = docType === "id_card";
   const mrz = extractMrz(text) || {};
   const driversLicensePerson = isDriversLicense ? findDriversLicensePersonInText(text) : {};
-  const person = mergePersonFields(mrz, driversLicensePerson);
-  const visibleUntil = findDateNearLabel(text, [
-    "GELDIG TOT",
-    "DATE OF EXPIRY",
-    "EXPIRY DATE",
-    "VALID UNTIL",
-    "VALID TO",
-  ]);
-  const validFrom = findDateNearLabel(text, [
-    "DATUM VAN AFGIFTE",
-    "DATE OF ISSUE",
-    "ISSUED ON",
-    "AFGIFTE",
-  ]);
+  const visiblePerson = isDriversLicense ? {} : findVisibleIdentityPerson(text, { docType });
+  const person = mergePersonFields(mrz, driversLicensePerson, visiblePerson);
+  const visibleUntil = isDriversLicense ? "" : findVisibleExpiryDate(text);
+  const validFrom = isDriversLicense ? "" : findVisibleIssueDate(
+    text,
+    mrz.valid_until || visibleUntil,
+    mrz.birth_date || visiblePerson.birth_date
+  );
   const driversLicenseValidFrom = isDriversLicense ? findDateNearFieldCode(text, "4A") : "";
   const driversLicenseValidUntil = isDriversLicense ? findDateNearFieldCode(text, "4B") : "";
 
   return {
     document_number: mrz.document_number
       || (isDriversLicense ? findDriversLicenseNumberInText(text) : "")
+      || (isIdCard ? findIdCardNumberInText(text) : "")
       || findDocumentNumberInText(text),
     bsn: mrz.bsn || findBsnInText(text),
     valid_from: isDriversLicense ? driversLicenseValidFrom || "" : validFrom || "",

@@ -1031,7 +1031,7 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
     if (isDutch && !bsn) e.bsn = "BSN is verplicht voor Nederlandse documenten.";
     else if (bsn && bsn.length !== 9) e.bsn = "BSN moet uit 9 cijfers bestaan.";
     else if (existingSensitiveBsn && bsn && existingSensitiveBsn !== bsn) {
-      e.bsn = "Dit BSN komt niet overeen met het al geregistreerde BSN van deze medewerker.";
+      e.bsn = "Dit BSN komt niet overeen met het opgeslagen BSN in dit personeelsprofiel.";
     } else if (duplicateBsnOwner) {
       e.bsn = "Dit BSN is al geregistreerd bij een ander personeelsprofiel.";
     }
@@ -1079,7 +1079,7 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
       if (bsn && existingSensitiveBsn && existingSensitiveBsn !== bsn) {
         setErrors(current => ({
           ...current,
-          bsn: "Dit BSN komt niet overeen met het al geregistreerde BSN van deze medewerker.",
+          bsn: "Dit BSN komt niet overeen met het opgeslagen BSN in dit personeelsprofiel.",
         }));
         throw new Error("conflicting_bsn");
       }
