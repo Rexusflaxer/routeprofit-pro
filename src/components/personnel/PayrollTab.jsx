@@ -739,34 +739,38 @@ function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, ex
                 </div>
 
                 {/* Right: upload / preview */}
-                {previewUrl ? (
-                  <DocumentPreviewPanel
-                    url={previewUrl}
-                    isPdf={previewIsPdf}
-                    fileName={file?.name || "Bestaand bestand"}
-                    onReplace={() => fileInputRef.current?.click()}
-                  />
-                ) : (
-                  <div className="rounded-lg border border-border bg-card p-4 space-y-2">
-                    <div>
-                      <label className="text-xs font-medium text-muted-foreground block">Ingevuld formulier uploaden</label>
-                      <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/75">JPG, PNG of PDF — optioneel</p>
-                    </div>
-                    <div
-                      onClick={() => fileInputRef.current?.click()}
-                      className="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border hover:border-primary bg-muted/20 hover:bg-accent/30 cursor-pointer transition-colors min-h-[160px] overflow-hidden"
-                    >
-                      <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
-                      <span className="text-xs text-muted-foreground">Klik om te uploaden</span>
-                      <span className="text-[10px] text-muted-foreground/60">JPG, PNG of PDF</span>
+                <div className="rounded-lg border border-border bg-card p-4 space-y-2">
+                  {previewUrl && (
+                    <>
+                      <DocumentPreviewPanel
+                        url={previewUrl}
+                        isPdf={previewIsPdf}
+                        fileName={file?.name || "Bestaand bestand"}
+                        onReplace={() => fileInputRef.current?.click()}
+                      />
+                      <div className="border-t border-border pt-2" />
+                    </>
+                  )}
+                  <div>
+                    <label className="text-xs font-medium text-muted-foreground block">
+                      {previewUrl ? "Formulier vervangen" : "Ingevuld formulier uploaden"}
+                    </label>
+                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/75">JPG, PNG of PDF — optioneel</p>
+                  </div>
+                  <div
+                    onClick={() => fileInputRef.current?.click()}
+                    className="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border hover:border-primary bg-muted/20 hover:bg-accent/30 cursor-pointer transition-colors min-h-[160px] overflow-hidden"
+                  >
+                    <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
+                    <span className="text-xs text-muted-foreground">{previewUrl ? "Klik om te vervangen" : "Klik om te uploaden"}</span>
+                    <span className="text-[10px] text-muted-foreground/60">JPG, PNG of PDF</span>
                       {uploading && (
                         <div className="absolute inset-0 flex items-center justify-center bg-background/80">
                           <Loader2 className="h-5 w-5 animate-spin text-primary" />
                         </div>
                       )}
                     </div>
-                  </div>
-                )}
+                </div>
                 <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden"
                   onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
               </div>
