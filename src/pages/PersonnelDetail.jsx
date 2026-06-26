@@ -33,6 +33,7 @@ import {
   Plus,
   RefreshCw,
   ShieldCheck,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
@@ -255,6 +256,7 @@ const IDENTITY_DOCUMENT_KINDS = [
   { key: "id_card", label: "ID-kaart", addLabel: "ID-kaart" },
   { key: "drivers_license", label: "Rijbewijs", addLabel: "Rijbewijs" },
 ];
+const DELETE_PASSWORD = "verwijder";
 const IDENTITY_TABLE_GRID = "grid grid-cols-[minmax(160px,200px)_minmax(130px,170px)_minmax(110px,140px)_minmax(110px,1fr)_minmax(280px,max-content)] gap-3";
 
 function isIdentityLikeDocument(doc) {
@@ -1032,12 +1034,78 @@ function IdentityDocumentPreviewDialog({ document, open, onOpenChange }) {
   );
 }
 
-function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, auditActors = [] }) {
+function IdentityDeleteConfirmDialog({ document, open, onOpenChange, onConfirm, isPending }) {
+  const [password, setPassword] = useState("");
+  const [error, setError] = useState("");
+  const kind = identityDocumentKind(document);
+
+  useEffect(() => {
+    if (!open) {
+      setPassword("");
+      setError("");
+    }
+  }, [open]);
+
+  const handleConfirm = () => {
+    if (password !== DELETE_PASSWORD) {
+      setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`);
+      return;
+    }
+    onConfirm?.(document);
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-lg">
+        <DialogHeader>
+          <DialogTitle>Document definitief verwijderen?</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4">
+          <div className="flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-3">
+            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
+            <div className="text-sm">
+              <p className="font-medium text-foreground">
+                {identityDocumentKindLabel(kind)} {document?.document_number ? `#${document.document_number}` : ""} wordt verwijderd.
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                Deze actie is alleen bedoeld voor verkeerd toegevoegde archiefdocumenten.
+              </p>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label className="text-xs text-muted-foreground">
+              Typ <strong className="font-mono text-foreground">{DELETE_PASSWORD}</strong> om te bevestigen
+            </Label>
+            <Input
+              value={password}
+              onChange={event => { setPassword(event.target.value); setError(""); }}
+              onKeyDown={event => event.key === "Enter" && handleConfirm()}
+              placeholder={DELETE_PASSWORD}
+              className={`h-9 font-mono ${error ? "border-destructive" : ""}`}
+              autoFocus
+            />
+            {error && <p className="text-xs text-destructive">{error}</p>}
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>Annuleren</Button>
+          <Button variant="destructive" onClick={handleConfirm} disabled={isPending}>
+            <Trash2 className="mr-1 h-4 w-4" /> {isPending ? "Verwijderen..." : "Verwijderen"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArchive, onDelete, auditActors = [] }) {
   const [menuOpen, setMenuOpen] = useState(false);
   const menuRef = useRef(null);
   const expiry = getExpiryState(doc.valid_until);
   const canPreview = hasIdentityDocumentUpload(doc);
   const canRenew = !archived;
+  const canArchive = !archived;
+  const canDelete = archived;
   const kind = identityDocumentKind(doc);
 
   useEffect(() => {
@@ -1050,15 +1118,9 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, auditA
   }, [menuOpen]);
 
   const openRow = () => {
-    if (archived) {
-      if (canPreview) onPreview(doc);
-      return;
-    }
-    if (expiry) {
+    if (canPreview || canRenew || canArchive || canDelete) {
       setMenuOpen(current => !current);
-      return;
     }
-    if (canPreview) onPreview(doc);
   };
 
   return (
@@ -1121,6 +1183,26 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, auditA
               {identityDocumentKindLabel(kind)} vernieuwen
             </button>
           )}
+          {canArchive && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+              onClick={() => { setMenuOpen(false); onArchive(doc); }}
+            >
+              <Archive className="h-3.5 w-3.5 text-muted-foreground" />
+              Naar archief
+            </button>
+          )}
+          {canDelete && (
+            <button
+              type="button"
+              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-destructive transition-colors hover:bg-destructive/10"
+              onClick={() => { setMenuOpen(false); onDelete(doc); }}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+              Definitief verwijderen
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1130,10 +1212,17 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, auditA
 // ─── Sidebar tabs panel ───────────────────────────────────────────────────────
 
 function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditActors = [] }) {
+  const queryClient = useQueryClient();
   const [active, setActive] = useState(PERSONNEL_TABS[0].key);
   const [identityWizard, setIdentityWizard] = useState(null);
   const [showIdentityArchive, setShowIdentityArchive] = useState(false);
   const [identityPreviewDoc, setIdentityPreviewDoc] = useState(null);
+  const [identityDeleteDoc, setIdentityDeleteDoc] = useState(null);
+  const { data: currentUser = null } = useQuery({
+    queryKey: ["current-user"],
+    queryFn: () => base44.auth.me(),
+    staleTime: 5 * 60 * 1000,
+  });
 
   const generalDocuments = dossier.documents.filter(d => !["identity_document","drivers_license","vog","cv","bank_account_proof","payroll_tax_statement"].includes(d.category));
   const identityAllDocs = dossier.documents.filter(isIdentityLikeDocument);
@@ -1156,6 +1245,28 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
     setShowIdentityArchive(false);
     setIdentityWizard({ archiveMode });
   };
+
+  const archiveIdentityMutation = useMutation({
+    mutationFn: doc => base44.entities.PersonnelDocument.update(doc.id, {
+      verification_status: "expired",
+      metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
+        ...(doc.metadata || {}),
+        archived: true,
+        archived_at: new Date().toISOString(),
+      }, auditActors),
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
+    },
+  });
+
+  const deleteIdentityMutation = useMutation({
+    mutationFn: doc => base44.entities.PersonnelDocument.delete(doc.id),
+    onSuccess: () => {
+      setIdentityDeleteDoc(null);
+      queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
+    },
+  });
 
   const renderTab = () => {
     switch (active) {
@@ -1231,6 +1342,8 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
                     archived
                     onPreview={setIdentityPreviewDoc}
                     onRenew={() => openIdentityWizard()}
+                    onArchive={archiveIdentityMutation.mutate}
+                    onDelete={setIdentityDeleteDoc}
                     auditActors={auditActors}
                   />
                 ))}
@@ -1246,6 +1359,8 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
                   doc={doc}
                   onPreview={setIdentityPreviewDoc}
                   onRenew={() => openIdentityWizard()}
+                  onArchive={archiveIdentityMutation.mutate}
+                  onDelete={setIdentityDeleteDoc}
                   auditActors={auditActors}
                 />
               ))}
@@ -1256,6 +1371,13 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
             document={identityPreviewDoc}
             open={Boolean(identityPreviewDoc)}
             onOpenChange={open => { if (!open) setIdentityPreviewDoc(null); }}
+          />
+          <IdentityDeleteConfirmDialog
+            document={identityDeleteDoc}
+            open={Boolean(identityDeleteDoc)}
+            onOpenChange={open => { if (!open) setIdentityDeleteDoc(null); }}
+            onConfirm={doc => deleteIdentityMutation.mutate(doc)}
+            isPending={deleteIdentityMutation.isPending}
           />
 
         </div>

@@ -78,6 +78,18 @@ function storedDocumentKind(doc) {
   return "";
 }
 
+function isIdentityLikeDocument(doc) {
+  return doc?.category === "identity_document" || doc?.category === "drivers_license";
+}
+
+function normalizeDocumentNumber(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9]/g, "");
+}
+
+function normalizeBsn(value) {
+  return String(value || "").replace(/\D/g, "");
+}
+
 // ─── Image Crop Dialog ─────────────────────────────────────────────────────────
 
 function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
@@ -750,7 +762,9 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const isEuEea = EU_EEA_NATIONALITIES.has(nationality);
   const isDutch = nationality === "Nederlandse";
   const isNonEu = !!nationality && !isEuEea;
-  const countryLabel = NATIONALITY_TO_COUNTRY[nationality] || nationality || "Onbekend";
+  const countryLabel = NATIONALITY_TO_COUNTRY[nationality] || nationality || "";
+  const passportChoiceLabel = countryLabel ? `${countryLabel} paspoort` : "Houderpagina en BSN-/titelpagina";
+  const idCardChoiceLabel = countryLabel ? `${countryLabel} ID-kaart` : "Voor- en achterzijde";
   const docMeta = DOCUMENT_TYPE_META[docType] || DOCUMENT_TYPE_META.passport;
 
   useEffect(() => {
@@ -762,6 +776,16 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const { data: sensitiveData = [] } = useQuery({
     queryKey: ["personnel-sensitive-data", personnelId],
     queryFn: () => base44.entities.PersonnelSensitiveData.filter({ personnel_id: personnelId }),
+    enabled: !!personnelId,
+  });
+  const { data: allSensitiveData = [] } = useQuery({
+    queryKey: ["personnel-sensitive-data"],
+    queryFn: () => base44.entities.PersonnelSensitiveData.list(),
+    staleTime: 5 * 60 * 1000,
+  });
+  const { data: personnelDocuments = [] } = useQuery({
+    queryKey: ["personnel-documents", personnelId],
+    queryFn: () => base44.entities.PersonnelDocument.filter({ personnel_id: personnelId }, "-created_date"),
     enabled: !!personnelId,
   });
   const { data: currentUser = null } = useQuery({
@@ -846,7 +870,18 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const validateDetails = () => {
     const e = {};
     const today = new Date().toISOString().split("T")[0];
+    const documentNumber = normalizeDocumentNumber(form.document_number);
+    const bsn = normalizeBsn(form.bsn);
+    const existingSensitiveBsn = normalizeBsn(sensitiveData.find(item => normalizeBsn(item.bsn))?.bsn);
+    const duplicateDocument = personnelDocuments
+      .filter(isIdentityLikeDocument)
+      .find(doc => normalizeDocumentNumber(doc.document_number) === documentNumber);
+    const duplicateBsnOwner = bsn
+      ? allSensitiveData.find(item => item.personnel_id !== personnelId && normalizeBsn(item.bsn) === bsn)
+      : null;
+
     if (!form.document_number.trim()) e.document_number = "Verplicht";
+    else if (duplicateDocument) e.document_number = "Dit documentnummer is al geregistreerd bij dit personeelsprofiel.";
     if (!form.valid_from) e.valid_from = "Verplicht";
     if (!form.valid_until) {
       e.valid_until = "Verplicht";
@@ -858,6 +893,13 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       e.valid_until = "Geldig tot moet later zijn dan geldig vanaf";
     }
     if (!form.issuing_country.trim()) e.issuing_country = "Verplicht";
+    if (isDutch && !bsn) e.bsn = "BSN is verplicht voor Nederlandse documenten.";
+    else if (bsn && bsn.length !== 9) e.bsn = "BSN moet uit 9 cijfers bestaan.";
+    else if (existingSensitiveBsn && bsn && existingSensitiveBsn !== bsn) {
+      e.bsn = "Dit BSN komt niet overeen met het al geregistreerde BSN van deze medewerker.";
+    } else if (duplicateBsnOwner) {
+      e.bsn = "Dit BSN is al geregistreerd bij een ander personeelsprofiel.";
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -865,7 +907,40 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const saveMutation = useMutation({
     mutationFn: async () => {
       const activeDocMeta = DOCUMENT_TYPE_META[docType] || DOCUMENT_TYPE_META.passport;
-      const country = form.issuing_country || countryLabel;
+      const country = form.issuing_country || countryLabel || "Nederland";
+      const documentNumber = normalizeDocumentNumber(form.document_number);
+      const existingDocs = await base44.entities.PersonnelDocument.filter({ personnel_id: personnelId });
+      const duplicateDocument = existingDocs
+        .filter(isIdentityLikeDocument)
+        .find(doc => normalizeDocumentNumber(doc.document_number) === documentNumber);
+
+      if (duplicateDocument) {
+        setErrors(current => ({
+          ...current,
+          document_number: "Dit documentnummer is al geregistreerd bij dit personeelsprofiel.",
+        }));
+        throw new Error("duplicate_document_number");
+      }
+
+      const bsn = normalizeBsn(form.bsn);
+      const existingSensitiveBsn = normalizeBsn(sensitiveData.find(item => normalizeBsn(item.bsn))?.bsn);
+      const duplicateBsnOwner = bsn
+        ? allSensitiveData.find(item => item.personnel_id !== personnelId && normalizeBsn(item.bsn) === bsn)
+        : null;
+      if (bsn && existingSensitiveBsn && existingSensitiveBsn !== bsn) {
+        setErrors(current => ({
+          ...current,
+          bsn: "Dit BSN komt niet overeen met het al geregistreerde BSN van deze medewerker.",
+        }));
+        throw new Error("conflicting_bsn");
+      }
+      if (duplicateBsnOwner) {
+        setErrors(current => ({
+          ...current,
+          bsn: "Dit BSN is al geregistreerd bij een ander personeelsprofiel.",
+        }));
+        throw new Error("duplicate_bsn");
+      }
 
       // Upload foto's
       let frontUrl = null;
@@ -886,12 +961,24 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
       let replacedActiveDocument = false;
       const actionAt = new Date().toISOString();
+      let newDocumentArchived = isArchiveEntry;
 
       if (!isArchiveEntry) {
-        // Archiveer bestaande actieve documenten van hetzelfde type, zodat er maar een actief exemplaar blijft.
-        const existing = await base44.entities.PersonnelDocument.filter({ personnel_id: personnelId, category: activeDocMeta.category });
-        for (const doc of existing) {
-          if (storedDocumentKind(doc) === docType && doc.metadata?.archived !== true) {
+        const activeSameTypeDocs = existingDocs
+          .filter(doc => storedDocumentKind(doc) === docType && doc.metadata?.archived !== true);
+        const winner = [
+          ...activeSameTypeDocs.map(doc => ({ id: doc.id, validUntil: doc.valid_until || "", isNew: false })),
+          { id: "__new__", validUntil: form.valid_until || "", isNew: true },
+        ].sort((a, b) => {
+          const dateDiff = String(b.validUntil).localeCompare(String(a.validUntil));
+          if (dateDiff !== 0) return dateDiff;
+          return Number(b.isNew) - Number(a.isNew);
+        })[0];
+
+        newDocumentArchived = winner?.id !== "__new__";
+
+        for (const doc of activeSameTypeDocs) {
+          if (winner?.id !== doc.id) {
             replacedActiveDocument = true;
             await base44.entities.PersonnelDocument.update(doc.id, {
               verification_status: "expired",
@@ -905,45 +992,56 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
         }
       }
 
-      const auditAction = !isArchiveEntry && replacedActiveDocument ? "vernieuwd" : "toegevoegd";
+      const auditAction = newDocumentArchived
+        ? "gearchiveerd"
+        : !isArchiveEntry && replacedActiveDocument
+          ? "vernieuwd"
+          : "toegevoegd";
 
       await base44.entities.PersonnelDocument.create({
         personnel_id: personnelId,
         category: activeDocMeta.category,
         document_type: activeDocMeta.typeLabel(country),
-        document_number: form.document_number || null,
+        document_number: documentNumber || null,
         valid_from: form.valid_from || null,
         valid_until: form.valid_until || null,
         front_file_url: frontUrl,
         back_file_url: backUrl,
         is_sensitive: true,
-        verification_status: isArchiveEntry ? "expired" : "verified",
+        verification_status: newDocumentArchived ? "expired" : "verified",
         metadata: buildAuditMetadata(currentUser, auditAction, {
           doc_type: docType,
-          issuing_country: form.issuing_country,
+          issuing_country: country,
           issuing_authority: form.issuing_authority || null,
           nationality,
           is_eu_eea: isEuEea,
-          archived: isArchiveEntry,
+          archived: newDocumentArchived,
+          archived_at: newDocumentArchived ? actionAt : null,
           front_file_url: frontUrl,
           back_file_url: backUrl,
         }, auditActors),
       });
 
-      if (form.bsn.trim()) {
+      if (bsn) {
         const existingSensitive = sensitiveData[0];
         if (existingSensitive) {
-          await base44.entities.PersonnelSensitiveData.update(existingSensitive.id, { bsn: form.bsn.trim() });
+          await base44.entities.PersonnelSensitiveData.update(existingSensitive.id, { bsn });
         } else {
-          await base44.entities.PersonnelSensitiveData.create({ personnel_id: personnelId, bsn: form.bsn.trim() });
+          await base44.entities.PersonnelSensitiveData.create({ personnel_id: personnelId, bsn });
         }
         queryClient.invalidateQueries({ queryKey: ["personnel-sensitive-data", personnelId] });
+        queryClient.invalidateQueries({ queryKey: ["personnel-sensitive-data"] });
       }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
+      queryClient.invalidateQueries({ queryKey: ["personnel-documents", personnelId] });
       onSaved?.();
       onClose();
+    },
+    onError: error => {
+      if (["duplicate_document_number", "conflicting_bsn", "duplicate_bsn"].includes(error?.message)) return;
+      console.error("Identity document save failed", error);
     },
   });
 
@@ -996,7 +1094,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
                   <div>
                     <span className="text-sm font-semibold text-foreground">Paspoort</span>
-                    <span className="text-xs text-muted-foreground ml-2">{countryLabel} paspoort</span>
+                    <span className="text-xs text-muted-foreground ml-2">{passportChoiceLabel}</span>
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>
@@ -1004,7 +1102,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
                   <div>
                     <span className="text-sm font-semibold text-foreground">Identiteitskaart</span>
-                    <span className="text-xs text-muted-foreground ml-2">{countryLabel} ID-kaart</span>
+                    <span className="text-xs text-muted-foreground ml-2">{idCardChoiceLabel}</span>
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>

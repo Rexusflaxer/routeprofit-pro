@@ -43,6 +43,16 @@ function onlyDigits(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function ocrDigits(value) {
+  return String(value || "")
+    .toUpperCase()
+    .replace(/[OQD]/g, "0")
+    .replace(/[IL]/g, "1")
+    .replace(/[S]/g, "5")
+    .replace(/[B]/g, "8")
+    .replace(/\D/g, "");
+}
+
 function toIsoDate(year, month, day) {
   const yyyy = String(year).padStart(4, "0");
   const mm = String(month).padStart(2, "0");
@@ -89,6 +99,21 @@ function findDateNearLabel(text, labels) {
     const date = parseVisibleDate(slice);
     if (date) return date;
   }
+  return null;
+}
+
+function findDateNearFieldCode(text, fieldCode) {
+  const upper = text.toUpperCase();
+  const code = String(fieldCode || "").toUpperCase();
+  if (!/^\d[A-Z]$/.test(code)) return null;
+
+  const pattern = new RegExp(`(?:^|\\s)${code[0]}\\s*${code[1]}\\s*[:.]?\\s*`, "g");
+  for (const match of upper.matchAll(pattern)) {
+    const slice = upper.slice(match.index, match.index + 130);
+    const date = parseVisibleDate(slice);
+    if (date) return date;
+  }
+
   return null;
 }
 
@@ -159,15 +184,15 @@ function documentNumberVariants(value) {
 
 function findBsnInText(text) {
   const normalized = text.toUpperCase();
-  const labeled = normalized.match(/(?:BSN|BURGERSERVICENUMMER|PERSOONS\s*NUMMER|PERSOONLIJK\s+NUMMER|PERSONAL\s+(?:NUMBER|NO\.?|N[O0]\.?)|IDENTIFIANT\s+PERSONNEL)\D{0,80}(\d[\d\s.-]{7,16}\d)/);
+  const labeled = normalized.match(/(?:BSN|BURGERSERVICENUMMER|PERSOONS\s*NUMMER|PERSOONLIJK\s+NUMMER|PERSONAL\s+(?:NUMBER|NO\.?|N[O0]\.?)|IDENTIFIANT\s+PERSONNEL)\D{0,80}([0-9OQDILSB][0-9OQDILSB\s.-]{7,16}[0-9OQDILSB])/);
   if (labeled) {
-    const candidate = onlyDigits(labeled[1]);
+    const candidate = ocrDigits(labeled[1]);
     if (candidate.length === 9) return candidate;
   }
 
-  const candidates = normalized.match(/\b\d[\d\s.-]{7,16}\d\b/g) || [];
+  const candidates = normalized.match(/\b[0-9OQDILSB][0-9OQDILSB\s.-]{7,16}[0-9OQDILSB]\b/g) || [];
   for (const candidate of candidates) {
-    const digits = onlyDigits(candidate);
+    const digits = ocrDigits(candidate);
     if (digits.length === 9 && isLikelyBsn(digits)) return digits;
   }
   return "";
@@ -204,6 +229,41 @@ function findDocumentNumberInText(text) {
   return candidates
     .flatMap(documentNumberVariants)
     .sort((a, b) => scoreDocumentNumber(b) - scoreDocumentNumber(a))[0] || "";
+}
+
+function isLikelyDriversLicenseNumber(value) {
+  const normalized = ocrDigits(value);
+  if (normalized.length !== 10) return false;
+  if (/^0{10}$/.test(normalized)) return false;
+  return true;
+}
+
+function findDriversLicenseNumberInText(text) {
+  const normalized = text.toUpperCase();
+  const labeledCandidates = [];
+
+  const bsnAndDocument = normalized.match(/(?:BSN|BURGERSERVICENUMMER)\D{0,40}([0-9OQDILSB\s.-]{8,18})\s*[/|]\s*([0-9OQDILSB\s.-]{8,18})/);
+  if (bsnAndDocument) labeledCandidates.push(ocrDigits(bsnAndDocument[2]));
+
+  const labelPatterns = [
+    /\b5\s*[:.]?\s*([0-9OQDILSB][0-9OQDILSB\s.-]{8,18}[0-9OQDILSB])/g,
+    /RIJBEWIJS(?:\s*NUMMER|\s*NO\.?)?\D{0,50}([0-9OQDILSB][0-9OQDILSB\s.-]{8,18}[0-9OQDILSB])/g,
+    /DRIVING\s+LICEN[CS]E(?:\s*(?:NO\.?|NUMBER))?\D{0,50}([0-9OQDILSB][0-9OQDILSB\s.-]{8,18}[0-9OQDILSB])/g,
+  ];
+
+  for (const pattern of labelPatterns) {
+    for (const match of normalized.matchAll(pattern)) {
+      labeledCandidates.push(ocrDigits(match[1]));
+    }
+  }
+
+  const labeled = labeledCandidates.find(isLikelyDriversLicenseNumber);
+  if (labeled) return labeled;
+
+  const candidates = normalized.match(/\b[0-9OQDILSB][0-9OQDILSB\s.-]{8,18}[0-9OQDILSB]\b/g) || [];
+  return candidates
+    .map(ocrDigits)
+    .find(isLikelyDriversLicenseNumber) || "";
 }
 
 function scoreDocumentNumber(value) {
@@ -576,12 +636,33 @@ function resolveCropBox(crop, width, height) {
     };
   }
 
+  if (crop === "drivers_license_front") {
+    return {
+      x: Math.floor(width * 0.16),
+      y: Math.floor(height * 0.14),
+      width: Math.ceil(width * 0.72),
+      height: Math.ceil(height * 0.62),
+    };
+  }
+
+  if (crop === "drivers_license_back") {
+    return {
+      x: 0,
+      y: 0,
+      width: Math.ceil(width * 0.52),
+      height: Math.ceil(height * 0.42),
+    };
+  }
+
   return { x: 0, y: 0, width, height };
 }
 
-export function parseIdentityOcrText(text) {
+export function parseIdentityOcrText(text, { docType = "passport" } = {}) {
+  const isDriversLicense = docType === "drivers_license";
   const mrz = extractMrz(text) || {};
   const visibleUntil = findDateNearLabel(text, [
+    "4B",
+    "4 B",
     "GELDIG TOT",
     "DATE OF EXPIRY",
     "EXPIRY DATE",
@@ -589,17 +670,23 @@ export function parseIdentityOcrText(text) {
     "VALID TO",
   ]);
   const validFrom = findDateNearLabel(text, [
+    "4A",
+    "4 A",
     "DATUM VAN AFGIFTE",
     "DATE OF ISSUE",
     "ISSUED ON",
     "AFGIFTE",
   ]);
+  const driversLicenseValidFrom = isDriversLicense ? findDateNearFieldCode(text, "4A") : "";
+  const driversLicenseValidUntil = isDriversLicense ? findDateNearFieldCode(text, "4B") : "";
 
   return {
-    document_number: mrz.document_number || findDocumentNumberInText(text),
+    document_number: mrz.document_number
+      || (isDriversLicense ? findDriversLicenseNumberInText(text) : "")
+      || findDocumentNumberInText(text),
     bsn: mrz.bsn || findBsnInText(text),
-    valid_from: validFrom || "",
-    valid_until: mrz.valid_until || visibleUntil || "",
+    valid_from: driversLicenseValidFrom || validFrom || "",
+    valid_until: mrz.valid_until || driversLicenseValidUntil || visibleUntil || "",
     mrz_format: mrz.format || null,
   };
 }
@@ -641,6 +728,19 @@ export async function recognizeIdentityDocument({ frontFile, backFile, docType =
       textParts.push(data.text || "");
     }
 
+    if (docType === "drivers_license") {
+      if (frontFile) {
+        const image = await imageToDataUrl(frontFile, { crop: "drivers_license_front" });
+        const { data } = await worker.recognize(image);
+        textParts.push(data.text || "");
+      }
+      if (backFile) {
+        const image = await imageToDataUrl(backFile, { crop: "drivers_license_back" });
+        const { data } = await worker.recognize(image);
+        textParts.push(data.text || "");
+      }
+    }
+
     await worker.setParameters({
       tessedit_char_whitelist: MRZ_CHARS,
       tessedit_pageseg_mode: "6",
@@ -655,7 +755,7 @@ export async function recognizeIdentityDocument({ frontFile, backFile, docType =
     }
 
     const rawText = textParts.join("\n");
-    const fields = parseIdentityOcrText(rawText);
+    const fields = parseIdentityOcrText(rawText, { docType });
     const imageQuality = await imageQualityPromise;
     return {
       ...fields,
