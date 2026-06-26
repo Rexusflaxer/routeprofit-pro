@@ -255,7 +255,7 @@ const IDENTITY_DOCUMENT_KINDS = [
   { key: "id_card", label: "ID-kaart", addLabel: "ID-kaart" },
   { key: "drivers_license", label: "Rijbewijs", addLabel: "Rijbewijs" },
 ];
-const IDENTITY_TABLE_GRID = "grid grid-cols-[minmax(220px,1fr)_170px_140px_180px_180px] gap-3";
+const IDENTITY_TABLE_GRID = "grid grid-cols-[minmax(110px,140px)_minmax(130px,170px)_minmax(110px,140px)_minmax(110px,150px)_minmax(280px,max-content)] gap-3";
 
 function isIdentityLikeDocument(doc) {
   return doc?.category === "identity_document" || doc?.category === "drivers_license";
