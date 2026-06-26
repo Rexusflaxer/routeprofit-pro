@@ -1571,7 +1571,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
             identityArchived.length === 0 ? (
               <p className="px-5 py-8 text-center text-sm text-muted-foreground">Geen documenten in het archief.</p>
             ) : (
-              <div className="divide-y divide-border">
+              <div className="divide-y divide-border bg-purple-50/60 dark:bg-purple-950/20">
                 {identityArchived.map(doc => (
                   <IdentityDocumentRow
                     key={doc.id}
