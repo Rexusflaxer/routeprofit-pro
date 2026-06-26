@@ -240,13 +240,13 @@ function ContextNavigation({ currentPageName, onNavigate, collapsed = false }) {
 
 function AppShell({ children, currentPageName }) {
   const [mobileOpen, setMobileOpen] = useState(false);
-  const [collapsed, setCollapsed] = useState(() => window.innerWidth < 1024);
+  const [collapsed, setCollapsed] = useState(() => window.innerWidth < 1280);
   const [autoHoverActive, setAutoHoverActive] = useState(false);
   const sidebarRef = useRef(null);
 
   useEffect(() => {
     const handleResize = () => {
-      if (window.innerWidth >= 1024) {
+      if (window.innerWidth >= 1280) {
         setCollapsed(false);
         setAutoHoverActive(false);
       } else {
@@ -255,11 +255,12 @@ function AppShell({ children, currentPageName }) {
     };
 
     window.addEventListener("resize", handleResize);
+    handleResize(); // Call on mount
     return () => window.removeEventListener("resize", handleResize);
   }, []);
 
   const handleMouseMove = (e) => {
-    if (window.innerWidth >= 1024) return; // Only on narrow screens
+    if (window.innerWidth >= 1280) return; // Only on narrow screens
     const nearLeftEdge = e.clientX < 80;
     
     if (nearLeftEdge && collapsed && !autoHoverActive) {
@@ -269,14 +270,14 @@ function AppShell({ children, currentPageName }) {
   };
 
   const handleMouseLeaveApp = () => {
-    if (autoHoverActive && window.innerWidth < 1024) {
+    if (autoHoverActive && window.innerWidth < 1280) {
       setAutoHoverActive(false);
       setCollapsed(true);
     }
   };
 
   const handleMouseLeaveSidebar = () => {
-    if (autoHoverActive && window.innerWidth < 1024) {
+    if (autoHoverActive && window.innerWidth < 1280) {
       setAutoHoverActive(false);
       setCollapsed(true);
     }
@@ -284,7 +285,7 @@ function AppShell({ children, currentPageName }) {
 
   return (
     <div className="min-h-screen overflow-x-hidden bg-background text-foreground antialiased" onMouseMove={handleMouseMove} onMouseLeave={handleMouseLeaveApp}>
-      <aside ref={sidebarRef} className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-in-out lg:block ${collapsed ? "w-16" : "w-64"}`} onMouseLeave={handleMouseLeaveSidebar}>
+      <aside ref={sidebarRef} className={`fixed inset-y-0 left-0 z-40 hidden border-r border-sidebar-border bg-sidebar transition-[width] duration-200 ease-in-out xl:block ${collapsed ? "w-16" : "w-64"}`} onMouseLeave={handleMouseLeaveSidebar}>
         <ContextNavigation currentPageName={currentPageName} collapsed={collapsed} />
       </aside>
 
@@ -311,7 +312,7 @@ function AppShell({ children, currentPageName }) {
         )}
       </header>
 
-      <main className={`min-h-screen min-w-0 overflow-x-hidden transition-[padding] duration-200 ease-in-out ${collapsed ? "lg:pl-16" : "lg:pl-64"}`}>
+      <main className={`min-h-screen min-w-0 overflow-x-hidden transition-[padding] duration-200 ease-in-out ${collapsed ? "xl:pl-16" : "xl:pl-64"}`}>
         <div className="px-4 py-3 sm:px-5 lg:px-6">
           {children}
         </div>
