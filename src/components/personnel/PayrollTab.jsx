@@ -242,12 +242,6 @@ function PayrollDocumentRow({
             <ChevronRight className="h-3.5 w-3.5" />
           </Button>
         )}
-        {canPreview && !isDraft && (
-          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={e => { e.stopPropagation(); onPreview(doc); }} title="Document bekijken">
-            <Eye className="h-3.5 w-3.5" />
-          </Button>
-        )}
         {canArchive && (
           <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
             onClick={e => { e.stopPropagation(); onArchive?.(doc); }} title="Naar archief">
