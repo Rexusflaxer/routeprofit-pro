@@ -157,7 +157,7 @@ function PayrollStatusBadge({ doc, archived = false }) {
 
 function PayrollDocumentRow({
   doc, archived = false,
-  onPreview, onOpenWizardStep2, onArchive, onRestore, onDelete,
+  onPreview, onOpenWizardStep2, onArchive, onRestore, onDelete, onDeleteImmediate,
   auditActors = [], restorePending = false,
 }) {
   const [menuOpen, setMenuOpen] = useState(false);
@@ -231,7 +231,7 @@ function PayrollDocumentRow({
       <div className="flex justify-end gap-1">
         {isDraft && (
           <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-            onClick={e => { e.stopPropagation(); onDelete?.(doc); }} title="Concept verwijderen">
+            onClick={e => { e.stopPropagation(); (onDeleteImmediate || onDelete)?.(doc); }} title="Concept verwijderen">
             <Trash2 className="h-3.5 w-3.5" />
           </Button>
         )}
@@ -1009,6 +1009,7 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
               onOpenWizardStep2={draft => openWizard(false, draft)}
               onArchive={archiveMutation.mutate}
               onDelete={setDeleteDoc}
+              onDeleteImmediate={deleteMutation.mutate}
               auditActors={auditActors}
             />
           ))}
