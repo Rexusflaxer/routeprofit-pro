@@ -528,11 +528,13 @@ function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, ex
           metadata: buildAuditMetadata(currentUser, "ingevuld", metaPayload, auditActors),
         });
       } else {
-        // Archive existing active docs first
+        // Archive existing active docs first; void any open concept (draft)
         const existing = await base44.entities.PersonnelDocument.filter({ personnel_id: personnelId, category: "payroll_tax_statement" });
         const actionAt = new Date().toISOString();
         for (const doc of existing) {
-          if (!doc.metadata?.archived && !isDraftPayrollDocument(doc)) {
+          if (isDraftPayrollDocument(doc)) {
+            await base44.entities.PersonnelDocument.delete(doc.id);
+          } else if (!doc.metadata?.archived) {
             await base44.entities.PersonnelDocument.update(doc.id, {
               verification_status: "expired",
               metadata: buildAuditMetadata(currentUser, "vernieuwd", {
