@@ -9,9 +9,9 @@ import DocumentPreviewPanel from "@/components/personnel/DocumentPreviewPanel";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  AlertTriangle, Archive, ArrowLeft, Check, ChevronLeft, ChevronRight, Download,
-  Eye, FileCheck2, FileText, ImageIcon, Loader2, Plus, RefreshCw,
-  Send, Trash2, Upload, X,
+  AlertTriangle, Archive, ArrowLeft, Check, ChevronLeft, ChevronRight,
+  Eye, FileText, ImageIcon, Loader2, Plus, RefreshCw,
+  Trash2, X,
 } from "lucide-react";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 
@@ -58,6 +58,12 @@ function isImageFile(url) {
 
 function isPdfUrl(url) {
   return /\.pdf$/i.test(url || "");
+}
+
+function isPdfPayrollDocument(doc) {
+  const metadata = doc?.metadata || {};
+  const type = String(metadata.mime_type || metadata.file_type || metadata.content_type || "").toLowerCase();
+  return isPdfUrl(payrollDocumentFileUrl(doc)) || isPdfUrl(metadata.file_name) || type.includes("pdf");
 }
 
 function dateSortKey(value) {
@@ -286,9 +292,11 @@ function PayrollDocumentRow({
 
 function PayrollDocumentPreviewDialog({ document, open, onOpenChange }) {
   const fileUrl = payrollDocumentFileUrl(document);
+  const fileName = document?.file_name || document?.metadata?.file_name || document?.document_type || "Loonheffingsformulier";
+  const isPdf = isPdfPayrollDocument(document);
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="max-w-4xl">
+      <DialogContent className="max-w-5xl">
         <DialogHeader>
           <DialogTitle>Loonheffingsformulier</DialogTitle>
         </DialogHeader>
@@ -296,19 +304,13 @@ function PayrollDocumentPreviewDialog({ document, open, onOpenChange }) {
           <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
             Voor dit document is nog geen upload beschikbaar.
           </p>
-        ) : isImageFile(fileUrl) ? (
-          <div className="flex max-h-[72vh] min-h-[360px] items-center justify-center overflow-auto rounded-lg border border-border bg-muted/20 p-3">
-            <img src={fileUrl} alt="Document" className="max-h-[72vh] w-auto max-w-full object-contain" />
-          </div>
         ) : (
-          <div className="flex min-h-[360px] items-center justify-center rounded-lg border border-border bg-muted/20 p-6">
-            <div className="text-center">
-              <FileText className="mx-auto h-12 w-12 text-muted-foreground/50" />
-              <p className="mt-3 text-sm text-muted-foreground">Dit is een PDF-document.</p>
-              <a href={fileUrl} target="_blank" rel="noopener noreferrer" className="mt-3 inline-block">
-                <Button variant="outline" size="sm"><Eye className="mr-1 h-4 w-4" /> Openen in nieuw venster</Button>
-              </a>
-            </div>
+          <div className="h-[72vh] min-h-[420px]">
+            <DocumentPreviewPanel
+              url={fileUrl}
+              isPdf={isPdf}
+              fileName={fileName}
+            />
           </div>
         )}
       </DialogContent>
