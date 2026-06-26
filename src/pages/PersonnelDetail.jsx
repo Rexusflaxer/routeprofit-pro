@@ -294,7 +294,7 @@ function isExpiredIdentityDocument(doc) {
 
 function IdentityStatusBadge({ doc, archived = false }) {
   if (archived || isArchivedIdentityDocument(doc)) {
-    return <Badge variant="outline" className="text-xs text-muted-foreground whitespace-nowrap">Gearchiveerd</Badge>;
+    return <Badge className="text-xs bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse border-0 whitespace-nowrap">Gearchiveerd</Badge>;
   }
   if (isExpiredIdentityDocument(doc)) {
     return <Badge className="text-xs bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 border-0 whitespace-nowrap">Actie vereist</Badge>;
@@ -1197,14 +1197,13 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArch
     <div
       className={`${IDENTITY_TABLE_GRID} relative items-center px-5 py-3 transition-colors ${
         isExpired || canPreview ? "cursor-pointer hover:bg-accent/35" : ""
-      } ${archived ? "opacity-75" : ""}`}
+      }`}
       onClick={openRow}
     >
       <div className="min-w-0">
-        <p className={`truncate text-sm font-semibold ${archived ? "text-muted-foreground line-through" : "text-foreground"}`}>
+        <p className="truncate text-sm font-semibold text-foreground">
           {identityDocumentDisplayType(doc)}
         </p>
-        {archived && <p className="mt-0.5 text-xs text-muted-foreground">Archiefkopie</p>}
       </div>
       <span className="min-w-0 truncate text-sm text-muted-foreground">{doc.document_number || "-"}</span>
       <div className="min-w-0">
