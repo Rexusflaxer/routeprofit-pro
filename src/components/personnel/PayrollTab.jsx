@@ -395,7 +395,7 @@ function WizardSteps({ step, labels }) {
 // step 1: keuze (aanbieden / handmatig uploaden / downloaden + concept)
 // step 2: loonheffingskorting vragen + upload (bij handmatig of bij concept-rij)
 
-function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, existingDraftDoc = null, onClose, onSaved, currentUser, auditActors = [] }) {
+function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, existingDraftDoc = null, existingDocs = [], onClose, onSaved, currentUser, auditActors = [] }) {
   const queryClient = useQueryClient();
 
   // When coming from a draft row, skip step 1 and go straight to step 2
@@ -450,6 +450,22 @@ function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, ex
     if (!lhkApplies) e.lhkApplies = "Verplicht";
     if (lhkApplies === "true" && !lhkFrom) e.lhkFrom = "Verplicht als loonheffingskorting van toepassing is";
     if (lhkApplies === "false" && !lhkFrom) e.lhkFrom = "Verplicht (datum niet meer van toepassing)";
+    if (lhkFrom) {
+      const newKey = dateSortKey(lhkFrom);
+      const otherDocs = (existingDocs || []).filter(d => d.id !== existingDraftDoc?.id && !isDraftPayrollDocument(d));
+      const duplicate = otherDocs.some(d => payrollFromDateSortKey(d) === newKey);
+      if (duplicate) {
+        e.lhkFrom = "Er bestaat al een document met deze vanaf-datum.";
+      } else if (!isArchiveEntry) {
+        const maxKey = otherDocs.reduce((max, d) => {
+          const key = payrollFromDateSortKey(d);
+          return key > max ? key : max;
+        }, "");
+        if (maxKey && newKey <= maxKey) {
+          e.lhkFrom = "Dit document is niet nieuwer. Voeg een ouder document toe via het archief.";
+        }
+      }
+    }
     setErrors(e);
     return Object.keys(e).length === 0;
   };
@@ -934,6 +950,7 @@ export default function PayrollTab({ person, documents, auditActors = [] }) {
             person={person}
             isArchiveEntry={wizardArchiveMode}
             existingDraftDoc={wizardDraftDoc}
+            existingDocs={payrollAllDocs}
             onClose={() => { setWizardOpen(false); setWizardDraftDoc(null); }}
             onSaved={() => { setWizardOpen(false); setWizardDraftDoc(null); }}
             currentUser={currentUser}
