@@ -586,12 +586,9 @@ function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, ex
                   disabled
                   className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left opacity-50 cursor-not-allowed"
                 >
-                  <div className="flex items-center gap-3">
-                    <Send className="w-4 h-4 text-muted-foreground" />
-                    <div>
-                      <span className="text-sm font-semibold text-foreground">Aanbieden aan medewerker</span>
-                      <span className="text-xs text-muted-foreground ml-2">Binnenkort beschikbaar via Teamhub</span>
-                    </div>
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Aanbieden aan medewerker</span>
+                    <span className="text-xs text-muted-foreground ml-2">Binnenkort beschikbaar via Teamhub</span>
                   </div>
                 </button>
 
@@ -601,12 +598,9 @@ function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, ex
                   onClick={() => setStep(2)}
                   className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]"
                 >
-                  <div className="flex items-center gap-3">
-                    <Upload className="w-4 h-4 text-primary" />
-                    <div>
-                      <span className="text-sm font-semibold text-foreground">Handmatig uploaden</span>
-                      <span className="text-xs text-muted-foreground ml-2">Vul de vragen in en upload het ingevulde formulier</span>
-                    </div>
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Handmatig uploaden</span>
+                    <span className="text-xs text-muted-foreground ml-2">Vul de vragen in en upload het ingevulde formulier</span>
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>
@@ -618,15 +612,9 @@ function PayrollDocumentWizard({ personnelId, person, isArchiveEntry = false, ex
                   disabled={downloadAndCreateDraftMutation.isPending}
                   className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] disabled:opacity-50 disabled:cursor-not-allowed"
                 >
-                  <div className="flex items-center gap-3">
-                    {downloadAndCreateDraftMutation.isPending
-                      ? <Loader2 className="w-4 h-4 text-muted-foreground animate-spin" />
-                      : <Download className="w-4 h-4 text-muted-foreground" />
-                    }
-                    <div>
-                      <span className="text-sm font-semibold text-foreground">Formulier downloaden en handmatig aanbieden</span>
-                      <span className="text-xs text-muted-foreground ml-2">Download het formulier en maak een concept aan om later in te voeren</span>
-                    </div>
+                  <div>
+                    <span className="text-sm font-semibold text-foreground">Formulier downloaden en handmatig aanbieden</span>
+                    <span className="text-xs text-muted-foreground ml-2">Download het formulier en maak een concept aan om later in te voeren</span>
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>
