@@ -204,7 +204,6 @@ function PayrollDocumentRow({
         <p className="truncate text-sm font-semibold text-foreground">
           Loonheffingsformulier
         </p>
-        {isDraft && <p className="mt-0.5 text-xs text-muted-foreground">Klik om het formulier in te voeren</p>}
       </div>
 
       {/* Loonheffingskorting */}
