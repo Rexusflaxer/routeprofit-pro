@@ -70,10 +70,10 @@ function parseYear(value) {
 
 function parseVisibleDate(value) {
   const text = compact(value).toUpperCase();
-  const numeric = text.match(/\b([0-3]?\d)[\s./-]([01]?\d)[\s./-]((?:19|20)?\d{2})\b/);
+  const numeric = text.match(/\b([0-3OQDILSB]?[0-9OQDILSB])[\s./-]([01OQDILSB]?[0-9OQDILSB])[\s./-]((?:19|20)?[0-9OQDILSB]{2})\b/);
   if (numeric) {
-    const year = parseYear(numeric[3]);
-    return year ? toIsoDate(year, Number(numeric[2]), Number(numeric[1])) : null;
+    const year = parseYear(ocrDigits(numeric[3]));
+    return year ? toIsoDate(year, Number(ocrDigits(numeric[2])), Number(ocrDigits(numeric[1]))) : null;
   }
 
   const named = text.match(/\b([0-3]?\d)\s+([A-ZÀ-ÿ]{3,10}(?:\/[A-ZÀ-ÿ]{3,10})?)\s+((?:19|20)?\d{2})\b/);
@@ -241,6 +241,8 @@ function isLikelyDriversLicenseNumber(value) {
 function findDriversLicenseNumberInText(text) {
   const normalized = text.toUpperCase();
   const labeledCandidates = [];
+  const mrzNumber = findDriversLicenseNumberInMrz(text);
+  if (mrzNumber) return mrzNumber;
 
   const bsnAndDocument = normalized.match(/(?:BSN|BURGERSERVICENUMMER)\D{0,40}([0-9OQDILSB\s.-]{8,18})\s*[/|]\s*([0-9OQDILSB\s.-]{8,18})/);
   if (bsnAndDocument) labeledCandidates.push(ocrDigits(bsnAndDocument[2]));
@@ -264,6 +266,22 @@ function findDriversLicenseNumberInText(text) {
   return candidates
     .map(ocrDigits)
     .find(isLikelyDriversLicenseNumber) || "";
+}
+
+function findDriversLicenseNumberInMrz(text) {
+  const lines = text
+    .split(/\r?\n/)
+    .map(line => normalizeMrzLine(line))
+    .flatMap(line => line.length > 44 ? line.match(/.{1,44}/g) || [line] : [line]);
+
+  for (const line of lines) {
+    const index = line.indexOf("D1NLD");
+    if (index < 0) continue;
+    const candidate = ocrDigits(line.slice(index + 5, index + 16));
+    if (isLikelyDriversLicenseNumber(candidate.slice(0, 10))) return candidate.slice(0, 10);
+  }
+
+  return "";
 }
 
 function scoreDocumentNumber(value) {

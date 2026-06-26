@@ -90,6 +90,12 @@ function normalizeBsn(value) {
   return String(value || "").replace(/\D/g, "");
 }
 
+function cleanCountryLabel(value) {
+  const label = String(value || "").trim();
+  if (!label || /^(onbekend|unknown|null|undefined)$/i.test(label)) return "";
+  return label;
+}
+
 // ─── Image Crop Dialog ─────────────────────────────────────────────────────────
 
 function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
@@ -744,7 +750,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     bsn: "",
     valid_from: "",
     valid_until: "",
-    issuing_country: NATIONALITY_TO_COUNTRY[nationality] || "",
+    issuing_country: cleanCountryLabel(NATIONALITY_TO_COUNTRY[nationality] || nationality),
     issuing_authority: "",
   });
   const [errors, setErrors] = useState({});
@@ -762,9 +768,10 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
   const isEuEea = EU_EEA_NATIONALITIES.has(nationality);
   const isDutch = nationality === "Nederlandse";
   const isNonEu = !!nationality && !isEuEea;
-  const countryLabel = NATIONALITY_TO_COUNTRY[nationality] || nationality || "";
-  const passportChoiceLabel = countryLabel ? `${countryLabel} paspoort` : "Houderpagina en BSN-/titelpagina";
-  const idCardChoiceLabel = countryLabel ? `${countryLabel} ID-kaart` : "Voor- en achterzijde";
+  const nationalityLabel = cleanCountryLabel(nationality);
+  const countryLabel = cleanCountryLabel(NATIONALITY_TO_COUNTRY[nationality] || nationality);
+  const passportChoiceLabel = countryLabel ? `${countryLabel} paspoort` : "";
+  const idCardChoiceLabel = countryLabel ? `${countryLabel} ID-kaart` : "";
   const docMeta = DOCUMENT_TYPE_META[docType] || DOCUMENT_TYPE_META.passport;
 
   useEffect(() => {
@@ -909,7 +916,8 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
       const activeDocMeta = DOCUMENT_TYPE_META[docType] || DOCUMENT_TYPE_META.passport;
       const country = form.issuing_country || countryLabel || "Nederland";
       const documentNumber = normalizeDocumentNumber(form.document_number);
-      const existingDocs = await base44.entities.PersonnelDocument.filter({ personnel_id: personnelId });
+      const allDocuments = await base44.entities.PersonnelDocument.list();
+      const existingDocs = allDocuments.filter(doc => doc.personnel_id === personnelId);
       const duplicateDocument = existingDocs
         .filter(isIdentityLikeDocument)
         .find(doc => normalizeDocumentNumber(doc.document_number) === documentNumber);
@@ -924,8 +932,9 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
 
       const bsn = normalizeBsn(form.bsn);
       const existingSensitiveBsn = normalizeBsn(sensitiveData.find(item => normalizeBsn(item.bsn))?.bsn);
+      const latestSensitiveData = await base44.entities.PersonnelSensitiveData.list();
       const duplicateBsnOwner = bsn
-        ? allSensitiveData.find(item => item.personnel_id !== personnelId && normalizeBsn(item.bsn) === bsn)
+        ? latestSensitiveData.find(item => item.personnel_id !== personnelId && normalizeBsn(item.bsn) === bsn)
         : null;
       if (bsn && existingSensitiveBsn && existingSensitiveBsn !== bsn) {
         setErrors(current => ({
@@ -1065,9 +1074,9 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">
         {wizardTitle}
-        {nationality && (
+        {(countryLabel || nationalityLabel) && (
           <span className="ml-2 text-muted-foreground font-normal normal-case tracking-normal">
-            — {countryLabel} ({nationality})
+            — {[countryLabel, nationalityLabel ? `(${nationalityLabel})` : ""].filter(Boolean).join(" ")}
           </span>
         )}
       </p>
@@ -1094,7 +1103,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
                   <div>
                     <span className="text-sm font-semibold text-foreground">Paspoort</span>
-                    <span className="text-xs text-muted-foreground ml-2">{passportChoiceLabel}</span>
+                    {passportChoiceLabel && <span className="text-xs text-muted-foreground ml-2">{passportChoiceLabel}</span>}
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>
@@ -1102,7 +1111,7 @@ export default function IdentityDocumentWizard({ personnelId, nationality, onClo
                   className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
                   <div>
                     <span className="text-sm font-semibold text-foreground">Identiteitskaart</span>
-                    <span className="text-xs text-muted-foreground ml-2">{idCardChoiceLabel}</span>
+                    {idCardChoiceLabel && <span className="text-xs text-muted-foreground ml-2">{idCardChoiceLabel}</span>}
                   </div>
                   <ChevronRight className="w-4 h-4 text-muted-foreground" />
                 </button>

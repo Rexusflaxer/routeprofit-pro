@@ -1,4 +1,4 @@
-import React, { useEffect, useRef, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import PageTransition from "@/components/ui-custom/PageTransition";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
@@ -277,6 +277,12 @@ function identityDocumentKindLabel(kind) {
   return IDENTITY_DOCUMENT_KINDS.find(item => item.key === kind)?.label || "Document";
 }
 
+function identityDocumentDisplayType(doc) {
+  const value = String(doc?.document_type || "").trim();
+  if (!value || /onbekend/i.test(value)) return identityDocumentKindLabel(identityDocumentKind(doc));
+  return value;
+}
+
 function isArchivedIdentityDocument(doc) {
   return doc?.metadata?.archived === true;
 }
@@ -291,6 +297,44 @@ function identityDocumentUrls(doc) {
 function hasIdentityDocumentUpload(doc) {
   const urls = identityDocumentUrls(doc);
   return Boolean(urls.front || urls.back);
+}
+
+function identityActiveSortValue(doc) {
+  return [
+    String(doc?.valid_until || ""),
+    String(doc?.updated_date || doc?.created_date || ""),
+    String(doc?.id || ""),
+  ].join("|");
+}
+
+function splitIdentityDocumentsByActiveState(docs) {
+  const activeByKind = new Map();
+  const archived = [];
+
+  for (const doc of docs) {
+    if (isArchivedIdentityDocument(doc)) {
+      archived.push(doc);
+      continue;
+    }
+
+    const kind = identityDocumentKind(doc);
+    if (!activeByKind.has(kind)) activeByKind.set(kind, []);
+    activeByKind.get(kind).push(doc);
+  }
+
+  const active = [];
+  const effectiveArchived = [];
+  for (const group of activeByKind.values()) {
+    const sorted = [...group].sort((a, b) => identityActiveSortValue(b).localeCompare(identityActiveSortValue(a)));
+    active.push(sorted[0]);
+    effectiveArchived.push(...sorted.slice(1));
+  }
+
+  return {
+    active,
+    archived: [...archived, ...effectiveArchived],
+    effectiveArchived,
+  };
 }
 
 // ─── Small UI helpers ─────────────────────────────────────────────────────────
@@ -993,7 +1037,7 @@ function IdentityDocumentPreviewDialog({ document, open, onOpenChange }) {
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-4xl">
         <DialogHeader>
-          <DialogTitle>{document?.document_type || identityDocumentKindLabel(kind)}</DialogTitle>
+          <DialogTitle>{identityDocumentDisplayType(document)}</DialogTitle>
         </DialogHeader>
         {images.length === 0 ? (
           <SmallEmpty text="Voor dit document is nog geen upload beschikbaar." />
@@ -1065,7 +1109,7 @@ function IdentityDeleteConfirmDialog({ document, open, onOpenChange, onConfirm, 
             <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
             <div className="text-sm">
               <p className="font-medium text-foreground">
-                {identityDocumentKindLabel(kind)} {document?.document_number ? `#${document.document_number}` : ""} wordt verwijderd.
+                {identityDocumentDisplayType(document)} {document?.document_number ? `#${document.document_number}` : ""} wordt verwijderd.
               </p>
               <p className="mt-1 text-xs text-muted-foreground">
                 Deze actie is alleen bedoeld voor verkeerd toegevoegde archiefdocumenten.
@@ -1132,7 +1176,7 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArch
     >
       <div className="min-w-0">
         <p className={`truncate text-sm font-semibold ${archived ? "text-muted-foreground line-through" : "text-foreground"}`}>
-          {doc.document_type || identityDocumentKindLabel(kind)}
+          {identityDocumentDisplayType(doc)}
         </p>
         {archived && <p className="mt-0.5 text-xs text-muted-foreground">Archiefkopie</p>}
       </div>
@@ -1142,7 +1186,31 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArch
         {expiry && !archived && <BadgePill className={expiry.className}>{expiry.label}</BadgePill>}
       </div>
       <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(doc, auditActors)}</span>
-      <div className="flex justify-end">
+      <div className="flex justify-end gap-1">
+        {canArchive && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={event => { event.stopPropagation(); onArchive?.(doc); }}
+            title="Naar archief"
+          >
+            <Archive className="h-3.5 w-3.5" />
+          </Button>
+        )}
+        {canDelete && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-destructive"
+            onClick={event => { event.stopPropagation(); onDelete?.(doc); }}
+            title="Definitief verwijderen"
+          >
+            <Trash2 className="h-3.5 w-3.5" />
+          </Button>
+        )}
         {canPreview && (
           <Button
             type="button"
@@ -1225,15 +1293,16 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
   });
 
   const generalDocuments = dossier.documents.filter(d => !["identity_document","drivers_license","vog","cv","bank_account_proof","payroll_tax_statement"].includes(d.category));
-  const identityAllDocs = dossier.documents.filter(isIdentityLikeDocument);
+  const identityAllDocs = useMemo(() => dossier.documents.filter(isIdentityLikeDocument), [dossier.documents]);
+  const identitySplit = useMemo(() => splitIdentityDocumentsByActiveState(identityAllDocs), [identityAllDocs]);
   const identityOrder = Object.fromEntries(IDENTITY_DOCUMENT_KINDS.map((item, index) => [item.key, index]));
   const sortIdentityDocs = docs => [...docs].sort((a, b) => {
     const kindDiff = (identityOrder[identityDocumentKind(a)] ?? 99) - (identityOrder[identityDocumentKind(b)] ?? 99);
     if (kindDiff !== 0) return kindDiff;
     return String(b.valid_until || "").localeCompare(String(a.valid_until || ""));
   });
-  const identityDocs = sortIdentityDocs(identityAllDocs.filter(d => !isArchivedIdentityDocument(d)));
-  const identityArchived = sortIdentityDocs(identityAllDocs.filter(isArchivedIdentityDocument));
+  const identityDocs = sortIdentityDocs(identitySplit.active);
+  const identityArchived = sortIdentityDocs(identitySplit.archived);
   const hasActiveIdentity = identityDocs.some(d => ["passport", "id_card"].includes(identityDocumentKind(d)));
   const identityNeedsAttention = !hasActiveIdentity || identityDocs.some(d => getExpiryState(d.valid_until));
   const licenseDocs = dossier.documents.filter(d => d.category === "drivers_license" && !isArchivedIdentityDocument(d));
@@ -1245,6 +1314,13 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
     setShowIdentityArchive(false);
     setIdentityWizard({ archiveMode });
   };
+  const identityDocsToAutoArchive = useMemo(
+    () => identitySplit.effectiveArchived.filter(doc => doc.metadata?.archived !== true),
+    [identitySplit]
+  );
+  const identityDocsToAutoArchiveSignature = identityDocsToAutoArchive
+    .map(doc => `${doc.id}:${identityDocumentKind(doc)}:${doc.valid_until || ""}`)
+    .join("|");
 
   const archiveIdentityMutation = useMutation({
     mutationFn: doc => base44.entities.PersonnelDocument.update(doc.id, {
@@ -1267,6 +1343,28 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
       queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
     },
   });
+
+  useEffect(() => {
+    if (identityDocsToAutoArchive.length === 0) return undefined;
+
+    let cancelled = false;
+    Promise.all(identityDocsToAutoArchive.map(doc => base44.entities.PersonnelDocument.update(doc.id, {
+      verification_status: "expired",
+      metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
+        ...(doc.metadata || {}),
+        archived: true,
+        archived_at: new Date().toISOString(),
+      }, auditActors),
+    }))).then(() => {
+      if (!cancelled) queryClient.invalidateQueries({ queryKey: ["personnel-documents"] });
+    }).catch(error => {
+      console.error("Identity document auto-archive failed", error);
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [auditActors, currentUser, identityDocsToAutoArchive, identityDocsToAutoArchiveSignature, queryClient]);
 
   const renderTab = () => {
     switch (active) {
