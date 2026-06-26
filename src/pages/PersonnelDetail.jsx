@@ -1171,7 +1171,7 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArch
   const menuRef = useRef(null);
   const expiry = getExpiryState(doc.valid_until);
   const canPreview = hasIdentityDocumentUpload(doc);
-  const canRenew = !archived;
+  const isExpired = !archived && isExpiredIdentityDocument(doc);
   const canArchive = !archived;
   const canDelete = archived;
   const kind = identityDocumentKind(doc);
@@ -1186,15 +1186,17 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArch
   }, [menuOpen]);
 
   const openRow = () => {
-    if (canPreview || canRenew || canArchive || canDelete) {
+    if (isExpired) {
       setMenuOpen(current => !current);
+    } else if (canPreview) {
+      onPreview?.(doc);
     }
   };
 
   return (
     <div
       className={`${IDENTITY_TABLE_GRID} relative items-center px-5 py-3 transition-colors ${
-        canPreview || canRenew ? "cursor-pointer hover:bg-accent/35" : ""
+        isExpired || canPreview ? "cursor-pointer hover:bg-accent/35" : ""
       } ${archived ? "opacity-75" : ""}`}
       onClick={openRow}
     >
@@ -1252,7 +1254,7 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArch
         )}
       </div>
 
-      {menuOpen && (
+      {menuOpen && isExpired && (
         <div
           ref={menuRef}
           className="absolute right-4 top-11 z-50 min-w-[210px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg"
@@ -1268,36 +1270,14 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArch
               Document bekijken
             </button>
           )}
-          {canRenew && (
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
-              onClick={() => { setMenuOpen(false); onRenew(kind); }}
-            >
-              <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
-              {identityDocumentKindLabel(kind)} vernieuwen
-            </button>
-          )}
-          {canArchive && (
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
-              onClick={() => { setMenuOpen(false); onArchive(doc); }}
-            >
-              <Archive className="h-3.5 w-3.5 text-muted-foreground" />
-              Naar archief
-            </button>
-          )}
-          {canDelete && (
-            <button
-              type="button"
-              className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-destructive transition-colors hover:bg-destructive/10"
-              onClick={() => { setMenuOpen(false); onDelete(doc); }}
-            >
-              <Trash2 className="h-3.5 w-3.5" />
-              Definitief verwijderen
-            </button>
-          )}
+          <button
+            type="button"
+            className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+            onClick={() => { setMenuOpen(false); onRenew(kind); }}
+          >
+            <RefreshCw className="h-3.5 w-3.5 text-amber-500" />
+            {identityDocumentKindLabel(kind)} vernieuwen
+          </button>
         </div>
       )}
     </div>
