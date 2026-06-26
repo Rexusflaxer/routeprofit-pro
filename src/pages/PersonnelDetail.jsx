@@ -257,7 +257,7 @@ const IDENTITY_DOCUMENT_KINDS = [
   { key: "drivers_license", label: "Rijbewijs", addLabel: "Rijbewijs" },
 ];
 const DELETE_PASSWORD = "verwijder";
-const IDENTITY_TABLE_GRID = "grid grid-cols-[minmax(160px,200px)_minmax(130px,170px)_minmax(110px,140px)_minmax(110px,1fr)_minmax(280px,max-content)] gap-3";
+const IDENTITY_TABLE_GRID = "grid grid-cols-[minmax(160px,200px)_minmax(130px,170px)_minmax(96px,124px)_minmax(110px,140px)_minmax(110px,1fr)_minmax(280px,max-content)] gap-3";
 
 function isIdentityLikeDocument(doc) {
   return doc?.category === "identity_document" || doc?.category === "drivers_license";
@@ -285,6 +285,30 @@ function identityDocumentDisplayType(doc) {
 
 function isArchivedIdentityDocument(doc) {
   return doc?.metadata?.archived === true;
+}
+
+function isExpiredIdentityDocument(doc) {
+  const today = new Date().toISOString().split("T")[0];
+  return (doc?.valid_until && doc.valid_until < today) || doc?.verification_status === "expired";
+}
+
+function IdentityStatusBadge({ doc, archived = false }) {
+  if (archived || isArchivedIdentityDocument(doc)) {
+    return <Badge variant="outline" className="text-xs text-muted-foreground whitespace-nowrap">Gearchiveerd</Badge>;
+  }
+  if (isExpiredIdentityDocument(doc)) {
+    return <Badge className="text-xs bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 border-0 whitespace-nowrap">Actie vereist</Badge>;
+  }
+  if (doc?.verification_status === "verified") {
+    return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0 whitespace-nowrap">Actief</Badge>;
+  }
+  if (doc?.verification_status === "pending_review") {
+    return <Badge className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 border-0 whitespace-nowrap">In beoordeling</Badge>;
+  }
+  if (doc?.verification_status === "rejected") {
+    return <Badge className="text-xs bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 border-0 whitespace-nowrap">Afgekeurd</Badge>;
+  }
+  return <Badge className="text-xs bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border-0 whitespace-nowrap">Geüpload</Badge>;
 }
 
 function identityDocumentUrls(doc) {
@@ -1181,6 +1205,9 @@ function IdentityDocumentRow({ doc, archived = false, onPreview, onRenew, onArch
         {archived && <p className="mt-0.5 text-xs text-muted-foreground">Archiefkopie</p>}
       </div>
       <span className="min-w-0 truncate text-sm text-muted-foreground">{doc.document_number || "-"}</span>
+      <div className="min-w-0">
+        <IdentityStatusBadge doc={doc} archived={archived} />
+      </div>
       <div className="min-w-0 flex items-center gap-2">
         <span className="text-sm text-foreground">{formatDate(doc.valid_until)}</span>
         {expiry && !archived && <BadgePill className={expiry.className}>{expiry.label}</BadgePill>}
@@ -1396,6 +1423,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
           <div className={`${IDENTITY_TABLE_GRID} items-center border-b border-border bg-muted/30 px-5 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
             <span>Type / omschrijving</span>
             <span>Documentnummer</span>
+            <span>Status</span>
             <span>Geldig tot</span>
             <span>Door</span>
             {!showIdentityWizard && (
