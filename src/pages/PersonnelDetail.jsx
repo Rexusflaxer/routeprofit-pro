@@ -1503,7 +1503,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
       case "overview": return <OverviewTab person={person} companies={companies} dossier={dossier} />;
       case "payroll": return <PayrollTab person={person} documents={dossier.documents} auditActors={auditActors} />;
       case "identity": return (
-        <div className={`flex flex-col h-full ${showIdentityArchive ? "bg-purple-50/60 dark:bg-purple-950/20" : ""}`}>
+        <div className="flex flex-col h-full">
           <AnimatePresence>
             {showIdentityWizard && (
               <IdentityDocumentWizard
@@ -1518,7 +1518,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
             )}
           </AnimatePresence>
 
-          <div className={`${IDENTITY_TABLE_GRID} items-center border-b border-border ${showIdentityArchive ? "bg-purple-100/70 dark:bg-purple-900/30" : "bg-muted/30"} px-5 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+          <div className={`${IDENTITY_TABLE_GRID} items-center border-b border-border bg-muted/30 px-5 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
             <span>Type / omschrijving</span>
             <span>Documentnummer</span>
             <span>Status</span>
@@ -1571,7 +1571,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
             identityArchived.length === 0 ? (
               <p className="px-5 py-8 text-center text-sm text-muted-foreground">Geen documenten in het archief.</p>
             ) : (
-              <div className="divide-y divide-border bg-purple-50/60 dark:bg-purple-950/20">
+              <div className="divide-y divide-border">
                 {identityArchived.map(doc => (
                   <IdentityDocumentRow
                     key={doc.id}
