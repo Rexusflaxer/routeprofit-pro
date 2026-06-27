@@ -302,7 +302,7 @@ function BankUploadGuideCard({ frontUpload, backUpload }) {
           </div>
           <div className="px-2 py-1.5">
             <p className="text-[11px] leading-snug text-muted-foreground">
-              Voorzijde met IBAN, rekeninghouder en banklogo.
+              Voorzijde met chip.
             </p>
           </div>
         </div>
@@ -322,7 +322,7 @@ function BankUploadGuideCard({ frontUpload, backUpload }) {
           </div>
           <div className="px-2 py-1.5">
             <p className="text-[11px] leading-snug text-muted-foreground">
-              Achterzijde met handtekening en CVV-code.
+              Achterzijde van de pas.
             </p>
           </div>
         </div>
@@ -538,7 +538,7 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
                 frontUpload={
                   <DocumentSideUpload
                     label="Voorkant"
-                    hint="Upload hier de voorzijde met IBAN en rekeninghouder."
+                    hint="Upload hier de voorzijde met chip."
                     previewUrl={frontPreview}
                     onFileSelected={(file, preview) => { setFrontFile(file); setFrontPreview(preview); }}
                   />
@@ -546,7 +546,7 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
                 backUpload={
                   <DocumentSideUpload
                     label="Achterkant"
-                    hint="Upload hier de achterzijde met handtekening en CVV."
+                    hint="Upload hier de achterzijde."
                     previewUrl={backPreview}
                     onFileSelected={(file, preview) => { setBackFile(file); setBackPreview(preview); }}
                   />
