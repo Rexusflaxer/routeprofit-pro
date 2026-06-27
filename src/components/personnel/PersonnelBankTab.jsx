@@ -267,7 +267,7 @@ function WizardSteps({ step, labels }) {
 
 function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClose, onSaved, currentUser, auditActors = [] }) {
   const queryClient = useQueryClient();
-  const [step, setStep] = useState(1);
+  const [step, setStep] = useState(2);
   const [iban, setIban] = useState("");
   const [accountHolderName, setAccountHolderName] = useState("");
   const [bankName, setBankName] = useState("");
@@ -431,7 +431,6 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
   });
 
   const wizardTitle = isArchiveEntry ? "Bankrekening archiveren" : "Bankrekening toevoegen";
-  const STEP_LABELS = ["Keuze", "Gegevens"];
 
   return (
     <motion.div
@@ -442,35 +441,8 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
       className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">{wizardTitle}</p>
-      <WizardSteps step={step} labels={STEP_LABELS} />
       <AnimatePresence mode="wait">
         <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
-
-          {step === 1 && (
-            <div className="space-y-3">
-              <p className="text-sm font-medium text-foreground">Kies hoe je de bankrekening wilt toevoegen</p>
-              <div className="grid grid-cols-1 gap-2">
-                <button type="button" disabled
-                  className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left opacity-50 cursor-not-allowed">
-                  <div>
-                    <span className="text-sm font-semibold text-foreground">Aanbieden aan medewerker</span>
-                    <span className="text-xs text-muted-foreground ml-2">Binnenkort beschikbaar via Teamhub</span>
-                  </div>
-                </button>
-                <button type="button" onClick={() => setStep(2)}
-                  className="flex items-center justify-between px-4 py-3 rounded-lg border border-border bg-card text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]">
-                  <div>
-                    <span className="text-sm font-semibold text-foreground">Handmatig invoeren</span>
-                    <span className="text-xs text-muted-foreground ml-2">Vul de rekeninggegevens in en upload het bankbewijs</span>
-                  </div>
-                  <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                </button>
-              </div>
-              <div className="flex justify-end pt-1">
-                <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
-              </div>
-            </div>
-          )}
 
           {step === 2 && (
             <div className="space-y-4">
@@ -538,7 +510,7 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
               <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden"
                 onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
               <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
                   <Button size="sm" onClick={() => { if (validate()) saveMutation.mutate(); }} disabled={saveMutation.isPending || uploading}>
