@@ -1,4 +1,4 @@
-import React, { useState, useRef, useMemo, useCallback } from "react";
+import React, { useEffect, useState, useRef, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -22,7 +22,7 @@ import {
 } from "lucide-react";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { prepareBankAccountSensitiveData } from "@/lib/sensitiveFields";
-import { uploadManagedFile } from "@/lib/managedFiles";
+import { prepareManagedFilePreview, revokeManagedFilePreview, uploadManagedFile } from "@/lib/managedFiles";
 import { detectBankNameFromIban, recognizeBankCard } from "@/lib/bankOcr";
 import bankCardGuideBack from "@/assets/bank-guides/abn-amro-bank-card-back.png";
 import bankCardGuideFront from "@/assets/bank-guides/abn-amro-bank-card-front.png";
@@ -32,7 +32,7 @@ const BANK_CARD_GUIDE_IMAGES = {
   back: bankCardGuideBack,
 };
 
-const BANK_TABLE_GRID = "grid grid-cols-[minmax(240px,1.35fr)_minmax(130px,0.75fr)_minmax(130px,0.7fr)_minmax(130px,0.8fr)_minmax(84px,max-content)] gap-4";
+const BANK_TABLE_GRID = "grid grid-cols-[minmax(240px,1.25fr)_minmax(150px,0.75fr)_minmax(140px,0.55fr)_minmax(160px,0.7fr)_minmax(72px,72px)] gap-5";
 
 function isArchivedBankAccount(acc) {
   return acc?.metadata?.archived === true;
@@ -59,51 +59,58 @@ function isPdfUrl(url) {
   return /\.pdf($|\?)/i.test(url || "");
 }
 
-function bankAccountProofImages(acc) {
+function bankAccountProofDescriptors(acc) {
   if (!acc) return [];
   const meta = acc.metadata || {};
   const frontUrl = acc.proof_front_file_url || meta.proof_front_file_url || "";
   const backUrl = acc.proof_back_file_url || meta.proof_back_file_url || "";
   const legacyUrl = acc.proof_file_url || meta.proof_file_url || "";
-  const images = [];
+  const descriptors = [];
 
-  if (frontUrl && isImageFile(frontUrl)) {
-    images.push({
-      src: frontUrl,
+  if (frontUrl || acc.proof_front_file_id || meta.proof_front_file_id) {
+    descriptors.push({
+      key: "front",
+      fileUrl: frontUrl,
+      managedFileId: acc.proof_front_file_id || meta.proof_front_file_id || null,
       label: "Voorkant bankpas",
       fileName: acc.proof_front_download_filename || "Voorkant bankpas",
     });
   }
-  if (backUrl && backUrl !== frontUrl && isImageFile(backUrl)) {
-    images.push({
-      src: backUrl,
+  if ((backUrl || acc.proof_back_file_id || meta.proof_back_file_id) && backUrl !== frontUrl) {
+    descriptors.push({
+      key: "back",
+      fileUrl: backUrl,
+      managedFileId: acc.proof_back_file_id || meta.proof_back_file_id || null,
       label: "Achterkant bankpas",
       fileName: acc.proof_back_download_filename || "Achterkant bankpas",
     });
   }
-  if (!images.length && legacyUrl && isImageFile(legacyUrl)) {
-    images.push({
-      src: legacyUrl,
+  if (!descriptors.length && (legacyUrl || acc.proof_file_id || meta.proof_file_id)) {
+    descriptors.push({
+      key: "legacy",
+      fileUrl: legacyUrl,
+      managedFileId: acc.proof_file_id || meta.proof_file_id || null,
       label: "Bankbewijs",
       fileName: acc.proof_download_filename || "Bankbewijs",
     });
   }
 
-  return images;
+  return descriptors;
 }
 
 function bankAccountFileUrl(acc) {
-  const image = bankAccountProofImages(acc)[0];
-  return image?.src || acc?.proof_file_url || acc?.metadata?.proof_file_url || "";
+  const descriptor = bankAccountProofDescriptors(acc)[0];
+  return descriptor?.fileUrl || acc?.proof_file_url || acc?.metadata?.proof_file_url || "";
 }
 
 function hasBankAccountUpload(acc) {
-  return Boolean(bankAccountFileUrl(acc));
+  return bankAccountProofDescriptors(acc).length > 0 || Boolean(bankAccountFileUrl(acc));
 }
 
 function isPdfBankAccount(acc) {
   const url = bankAccountFileUrl(acc);
-  return !bankAccountProofImages(acc).length && isPdfUrl(url);
+  const descriptor = bankAccountProofDescriptors(acc)[0];
+  return isPdfUrl(descriptor?.fileName || url);
 }
 
 function isVerifiedBankAccount(acc) {
@@ -276,17 +283,17 @@ function BankAccountRow({ acc, onPreview, onOpenActions, auditActors = [] }) {
 
   return (
     <div
-      className={`${BANK_TABLE_GRID} items-center px-5 py-4 transition-colors ${rowClickable ? "cursor-pointer hover:bg-accent/35" : ""}`}
+      className={`${BANK_TABLE_GRID} items-start px-5 py-4 transition-colors ${rowClickable ? "cursor-pointer hover:bg-accent/35" : ""}`}
       onClick={handleRowClick}
     >
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-foreground">{ibanDisplay}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">Primair</p>
       </div>
-      <span className="min-w-0 truncate text-sm text-muted-foreground">{acc?.bank_name || "-"}</span>
-      <div className="min-w-0"><BankStatusBadge acc={acc} /></div>
-      <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(acc, auditActors)}</span>
-      <div className="flex justify-end gap-1">
+      <span className="min-w-0 truncate pt-0.5 text-sm text-muted-foreground">{acc?.bank_name || "-"}</span>
+      <div className="min-w-0 pt-0.5"><BankStatusBadge acc={acc} /></div>
+      <span className="min-w-0 truncate pt-0.5 text-sm text-muted-foreground">{getAuditActorLabel(acc, auditActors)}</span>
+      <div className="flex justify-end gap-1 pt-0.5">
         {canPreview && (
           <Button
             type="button"
@@ -323,27 +330,131 @@ function BankAccountRow({ acc, onPreview, onOpenActions, auditActors = [] }) {
 }
 
 function BankAccountPreviewDialog({ account, open, onOpenChange }) {
-  const images = bankAccountProofImages(account);
+  const [preparedPreviews, setPreparedPreviews] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const descriptors = useMemo(() => bankAccountProofDescriptors(account), [account]);
   const fileUrl = bankAccountFileUrl(account);
-  const fileName = account?.proof_download_filename || "Bankbewijs";
-  const isPdf = isPdfBankAccount(account);
+
+  const releasePreparedPreviews = useCallback((previews) => {
+    for (const item of previews || []) {
+      revokeManagedFilePreview(item.preview);
+    }
+  }, []);
+
+  useEffect(() => {
+    if (!open) {
+      setLoading(false);
+      setError("");
+      setPreparedPreviews((current) => {
+        releasePreparedPreviews(current);
+        return [];
+      });
+      return undefined;
+    }
+
+    if (!descriptors.length) {
+      setLoading(false);
+      setError("");
+      setPreparedPreviews((current) => {
+        releasePreparedPreviews(current);
+        return [];
+      });
+      return undefined;
+    }
+
+    let active = true;
+    setLoading(true);
+    setError("");
+    setPreparedPreviews((current) => {
+      releasePreparedPreviews(current);
+      return [];
+    });
+
+    Promise.all(descriptors.map(async descriptor => {
+      const preview = await prepareManagedFilePreview({
+        managedFileId: descriptor.managedFileId,
+        fileUrl: descriptor.fileUrl,
+        filename: descriptor.fileName,
+      });
+      return { ...descriptor, preview };
+    }))
+      .then(nextPreviews => {
+        if (!active) {
+          releasePreparedPreviews(nextPreviews);
+          return;
+        }
+        setPreparedPreviews(nextPreviews);
+      })
+      .catch(err => {
+        if (!active) return;
+        console.error("Bank account proof preview failed:", err);
+        setError(err?.message || "Bankbewijs kon niet veilig worden geopend.");
+      })
+      .finally(() => {
+        if (active) setLoading(false);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [open, descriptors, releasePreparedPreviews]);
+
+  useEffect(() => () => {
+    releasePreparedPreviews(preparedPreviews);
+  }, [preparedPreviews, releasePreparedPreviews]);
+
+  const imagePreviews = preparedPreviews.filter(item => {
+    const mimeType = item.preview?.mimeType || "";
+    const filename = item.preview?.filename || item.fileName || "";
+    return mimeType.startsWith("image/") || isImageFile(filename);
+  });
+  const fallbackPreview = preparedPreviews[0]?.preview || null;
+  const fallbackFileName = preparedPreviews[0]?.preview?.filename || preparedPreviews[0]?.fileName || "Bankbewijs";
+  const fallbackIsPdf = fallbackPreview
+    ? fallbackPreview.mimeType === "application/pdf" || isPdfUrl(fallbackPreview.filename || fallbackFileName)
+    : isPdfBankAccount(account);
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl">
         <DialogHeader><DialogTitle>Bankbewijs</DialogTitle></DialogHeader>
-        {!fileUrl ? (
+        {!descriptors.length && !fileUrl ? (
           <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
             Voor deze rekening is nog geen bankbewijs beschikbaar.
           </p>
-        ) : images.length ? (
+        ) : loading ? (
+          <div className="flex min-h-[420px] items-center justify-center rounded-lg border border-border bg-card text-sm text-muted-foreground">
+            <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+            Bankbewijs wordt veilig geopend...
+          </div>
+        ) : error ? (
+          <div className="flex min-h-[420px] items-center justify-center rounded-lg border border-destructive/30 bg-destructive/5 p-6 text-center">
+            <div>
+              <AlertTriangle className="mx-auto mb-3 h-6 w-6 text-destructive" />
+              <p className="text-sm font-medium text-foreground">Bankbewijs kan niet worden geopend.</p>
+              <p className="mt-1 text-xs text-muted-foreground">{error}</p>
+            </div>
+          </div>
+        ) : imagePreviews.length ? (
           <div className="min-h-[420px]">
-            <DocumentPhotoViewer images={images} />
+            <DocumentPhotoViewer
+              images={imagePreviews.map(item => ({
+                src: item.preview.url,
+                url: item.preview.url,
+                label: item.label,
+                fileName: item.preview.filename || item.fileName,
+              }))}
+            />
+          </div>
+        ) : fallbackPreview ? (
+          <div className="h-[72vh] min-h-[420px]">
+            <DocumentPreviewPanel url={fallbackPreview.url} isPdf={fallbackIsPdf} fileName={fallbackFileName} />
           </div>
         ) : (
-          <div className="h-[72vh] min-h-[420px]">
-            <DocumentPreviewPanel url={fileUrl} isPdf={isPdf} fileName={fileName} />
-          </div>
+          <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
+            Voorbeeld niet beschikbaar.
+          </p>
         )}
       </DialogContent>
     </Dialog>
