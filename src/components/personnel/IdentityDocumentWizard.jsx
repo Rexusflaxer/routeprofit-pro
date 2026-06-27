@@ -179,7 +179,7 @@ function buildPersonMatchCheck(personnel, recognizedPerson) {
 
 // ─── Image Crop Dialog ─────────────────────────────────────────────────────────
 
-function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
+export function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
   const imageFrameRef = useRef(null);
   const interactionLayerRef = useRef(null);
   const [imgEl, setImgEl] = useState(null);
@@ -415,7 +415,7 @@ function ImageCropDialog({ open, onClose, imageSrc, onCropped, label }) {
 
 // ─── Document Side Upload ──────────────────────────────────────────────────────
 
-function DocumentSideUpload({ label, hint, previewUrl, onFileSelected, uploading, required }) {
+export function DocumentSideUpload({ label, hint, previewUrl, onFileSelected, uploading, required }) {
   const [cropOpen, setCropOpen] = useState(false);
   const [rawImageSrc, setRawImageSrc] = useState(null);
   const fileInputRef = useRef(null);
@@ -751,7 +751,7 @@ function IssuingCountryField({ value, onChange, error, defaultCountry }) {
 
 // ─── Document Photo Viewer (zoom + pan) ───────────────────────────────────────
 
-function DocumentPhotoViewer({ images }) {
+export function DocumentPhotoViewer({ images }) {
   const [index, setIndex] = useState(0);
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });

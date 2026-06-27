@@ -1,12 +1,12 @@
-import React, { useState, useRef, useEffect, useMemo } from "react";
+import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
-import { useDebouncedCallback } from "@/hooks/useDebouncedCallback";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Badge } from "@/components/ui/badge";
 import DocumentPreviewPanel from "@/components/personnel/DocumentPreviewPanel";
+import { ImageCropDialog, DocumentSideUpload, DocumentPhotoViewer } from "@/components/personnel/IdentityDocumentWizard";
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import {
@@ -16,6 +16,10 @@ import {
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { prepareBankAccountSensitiveData } from "@/lib/sensitiveFields";
 import { uploadManagedFile } from "@/lib/managedFiles";
+import { recognizeBankCard } from "@/lib/bankOcr";
+
+const BANK_CARD_FRONT_EXAMPLE = "https://media.base44.com/images/public/698e307ed3aa4cab3729bbf1/4859a7a0b_generated_image.png";
+const BANK_CARD_BACK_EXAMPLE = "https://media.base44.com/images/public/698e307ed3aa4cab3729bbf1/8d7a4fd81_generated_image.png";
 
 const DELETE_PASSWORD = "verwijder";
 const BANK_TABLE_GRID = "grid grid-cols-[minmax(140px,180px)_minmax(120px,160px)_minmax(100px,140px)_minmax(130px,160px)_minmax(110px,130px)_minmax(110px,1fr)_minmax(240px,max-content)] gap-3";
@@ -265,37 +269,83 @@ function WizardSteps({ step, labels }) {
 
 // ─── Wizard ──────────────────────────────────────────────────────────────────
 
+function BankCardGuideImage({ side = "front" }) {
+  const isBack = side === "back";
+  return (
+    <div className="flex h-36 w-[260px] items-center justify-center overflow-hidden rounded border border-border bg-white shadow-sm">
+      <img
+        src={isBack ? BANK_CARD_BACK_EXAMPLE : BANK_CARD_FRONT_EXAMPLE}
+        alt={isBack ? "Voorbeeld achterkant bankpas" : "Voorbeeld voorkant bankpas"}
+        className="h-full w-full object-contain"
+        draggable="false"
+      />
+    </div>
+  );
+}
+
+function BankUploadGuideCard({ frontUpload, backUpload }) {
+  return (
+    <div className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3 w-full">
+      <div className="flex items-stretch gap-4">
+        <div className="w-1/2 flex flex-col gap-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Voorkant</p>
+          {frontUpload}
+        </div>
+        <div className="w-px bg-border self-stretch" />
+        <div className="w-1/2 flex flex-col">
+          <div className="flex flex-1 items-center justify-center p-2 min-h-[120px]">
+            <BankCardGuideImage side="front" />
+          </div>
+          <div className="px-2 py-1.5">
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Voorzijde met IBAN, rekeninghouder en banklogo.
+            </p>
+          </div>
+        </div>
+      </div>
+
+      <div className="h-px bg-border" />
+
+      <div className="flex items-stretch gap-4">
+        <div className="w-1/2 flex flex-col gap-1.5">
+          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Achterkant</p>
+          {backUpload}
+        </div>
+        <div className="w-px bg-border self-stretch" />
+        <div className="w-1/2 flex flex-col">
+          <div className="flex flex-1 items-center justify-center p-2 min-h-[120px]">
+            <BankCardGuideImage side="back" />
+          </div>
+          <div className="px-2 py-1.5">
+            <p className="text-[11px] leading-snug text-muted-foreground">
+              Achterzijde met handtekening en CVV-code.
+            </p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClose, onSaved, currentUser, auditActors = [] }) {
   const queryClient = useQueryClient();
-  const [step, setStep] = useState(2);
+  const [step, setStep] = useState(1);
   const [iban, setIban] = useState("");
   const [accountHolderName, setAccountHolderName] = useState("");
   const [bankName, setBankName] = useState("");
   const [validFrom, setValidFrom] = useState("");
   const [validUntil, setValidUntil] = useState("");
   const [notes, setNotes] = useState("");
-  const [file, setFile] = useState(null);
-  const [filePreview, setFilePreview] = useState(null);
+  const [frontFile, setFrontFile] = useState(null);
+  const [frontPreview, setFrontPreview] = useState(null);
+  const [backFile, setBackFile] = useState(null);
+  const [backPreview, setBackPreview] = useState(null);
   const [uploading, setUploading] = useState(false);
-  const [lookingUpIban, setLookingUpIban] = useState(false);
+  const [recognizing, setRecognizing] = useState(false);
+  const [recognizedUploadKey, setRecognizedUploadKey] = useState("");
+  const [scanNotice, setScanNotice] = useState(null);
   const [errors, setErrors] = useState({});
-  const fileInputRef = useRef(null);
-
-  const doIbanLookup = useDebouncedCallback(async (ibanValue) => {
-    const cleanIban = ibanValue.replace(/\s/g, "");
-    if (!cleanIban || cleanIban.length < 15) return;
-    setLookingUpIban(true);
-    try {
-      const res = await base44.functions.invoke("lookupIbanBic", { iban: cleanIban });
-      if (res.data?.status === "found" || res.data?.status === "partial") {
-        if (res.data.bankName) setBankName(res.data.bankName);
-      }
-    } catch (err) {
-      console.log("IBAN lookup error:", err.message);
-    } finally {
-      setLookingUpIban(false);
-    }
-  }, 800);
+  const latestUploadKeyRef = useRef("");
 
   const formatIban = (value) => {
     const cleaned = value.replace(/\s/g, "").toUpperCase();
@@ -303,31 +353,54 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
     return chunks.join(" ");
   };
 
-  const handleFile = (f) => {
-    if (!f) return;
-    setFile(f);
-    if (isImageFile(f.name)) {
-      const reader = new FileReader();
-      reader.onload = e => setFilePreview(e.target.result);
-      reader.readAsDataURL(f);
-    } else if (f.type === "application/pdf" || /\.pdf$/i.test(f.name)) {
-      setFilePreview(URL.createObjectURL(f));
-    } else {
-      setFilePreview(null);
-    }
-  };
+  const uploadKey = [
+    frontFile ? `${frontFile.name}-${frontFile.size}-${frontFile.lastModified}` : "",
+    backFile ? `${backFile.name}-${backFile.size}-${backFile.lastModified}` : "",
+  ].join("|");
 
   useEffect(() => {
-    return () => {
-      if (filePreview && filePreview.startsWith("blob:")) {
-        URL.revokeObjectURL(filePreview);
-      }
-    };
-  }, [filePreview]);
+    latestUploadKeyRef.current = uploadKey;
+  }, [uploadKey]);
 
-  const previewIsPdf = file
-    ? (file.type === "application/pdf" || /\.pdf$/i.test(file.name))
-    : false;
+  const applyRecognizedFields = useCallback((result) => {
+    if (result.iban && !iban) setIban(formatIban(result.iban));
+    if (result.account_holder_name && !accountHolderName) setAccountHolderName(result.account_holder_name);
+    if (result.bank_name && !bankName) setBankName(result.bank_name);
+  }, [iban, accountHolderName, bankName]);
+
+  const runRecognition = useCallback(async () => {
+    if ((!frontFile && !backFile) || recognizing) return;
+    if (recognizedUploadKey === uploadKey) return;
+
+    const currentUploadKey = uploadKey;
+    setRecognizing(true);
+    setScanNotice(null);
+    try {
+      const result = await recognizeBankCard({ frontFile, backFile });
+      if (latestUploadKeyRef.current !== currentUploadKey) return;
+      applyRecognizedFields(result);
+      setRecognizedUploadKey(currentUploadKey);
+      const detected = result.detected_fields || [];
+      if (detected.length > 0) {
+        setScanNotice({ type: "success", text: `Bankpas gescand — ${detected.map(f => ({ iban: "IBAN", account_holder_name: "rekeninghouder", bank_name: "bank" }[f])).join(", ")} herkend.` });
+      } else {
+        setScanNotice({ type: "info", text: "Geen gegevens automatisch herkend. Vul de velden handmatig in." });
+      }
+    } catch (error) {
+      console.error("Bank card OCR failed", error);
+      if (latestUploadKeyRef.current === currentUploadKey) {
+        setScanNotice({ type: "info", text: "De scan kon niet volledig worden afgerond. Vul de velden handmatig in." });
+        setRecognizedUploadKey(currentUploadKey);
+      }
+    } finally {
+      setRecognizing(false);
+    }
+  }, [applyRecognizedFields, backFile, frontFile, recognizedUploadKey, recognizing, uploadKey]);
+
+  useEffect(() => {
+    if (step !== 1 || (!frontFile && !backFile) || recognizing || recognizedUploadKey === uploadKey) return;
+    runRecognition();
+  }, [frontFile, backFile, recognizedUploadKey, recognizing, runRecognition, step, uploadKey]);
 
   const validate = () => {
     const e = {};
@@ -347,12 +420,13 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
       let proofDownloadFilename = null;
       let proofLogicalPath = null;
 
-      if (file) {
+      if (frontFile || backFile) {
         setUploading(true);
         const cleanIban = iban.replace(/\s/g, "");
         const ibanMasked = cleanIban.slice(0, 4) + "****" + cleanIban.slice(-4);
+        const fileToUpload = frontFile || backFile;
         const uploaded = await uploadManagedFile({
-          file,
+          file: fileToUpload,
           ownerType: "personnel",
           ownerId: personnelId,
           companyId: person?.primary_company_id || null,
@@ -431,6 +505,8 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
   });
 
   const wizardTitle = isArchiveEntry ? "Bankrekening archiveren" : "Bankrekening toevoegen";
+  const STEP_LABELS = ["Upload", "Controleren"];
+  const scanPending = (Boolean(frontFile) || Boolean(backFile)) && recognizedUploadKey !== uploadKey && recognizing;
 
   return (
     <motion.div
@@ -441,20 +517,94 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
       className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
     >
       <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">{wizardTitle}</p>
+      <WizardSteps step={step} labels={STEP_LABELS} />
       <AnimatePresence mode="wait">
         <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
 
-          {step === 2 && (
+          {step === 1 && (
             <div className="space-y-4">
               <div>
-                <p className="text-sm font-medium text-foreground mb-0.5">Rekeninggegevens invoeren</p>
-                <p className="text-xs text-muted-foreground">Vul de IBAN in en upload het bankbewijs.</p>
+                <p className="text-sm font-medium text-foreground mb-0.5">Bankpas uploaden</p>
+                <p className="text-xs text-muted-foreground">
+                  Upload een foto van de voor- en achterkant van de bankpas. Na het uploaden worden de gegevens automatisch gescand. Uploaden is niet verplicht — je kunt ook handmatig invullen.
+                </p>
               </div>
+
+              <BankUploadGuideCard
+                frontUpload={
+                  <DocumentSideUpload
+                    label="Voorkant"
+                    hint="Upload hier de voorzijde met IBAN en rekeninghouder."
+                    previewUrl={frontPreview}
+                    onFileSelected={(file, preview) => { setFrontFile(file); setFrontPreview(preview); }}
+                  />
+                }
+                backUpload={
+                  <DocumentSideUpload
+                    label="Achterkant"
+                    hint="Upload hier de achterzijde met handtekening en CVV."
+                    previewUrl={backPreview}
+                    onFileSelected={(file, preview) => { setBackFile(file); setBackPreview(preview); }}
+                  />
+                }
+              />
+
+              {scanPending && (
+                <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
+                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
+                  Bankpas scannen...
+                </div>
+              )}
+
+              <div className="flex justify-between pt-1">
+                <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
+                <Button size="sm" onClick={() => setStep(2)} disabled={scanPending}>
+                  {frontFile || backFile ? "Volgende" : "Handmatig invullen"} <ChevronRight className="w-4 h-4 ml-1" />
+                </Button>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && scanPending && (
+            <div className="space-y-4">
+              <div className="flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-border bg-card px-6 py-12 text-center">
+                <Loader2 className="mb-4 h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm font-medium text-foreground">Scan verwerken</p>
+                <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                  De bankpas wordt gelezen. Zodra dit klaar is, opent de controle automatisch.
+                </p>
+              </div>
+              <div className="flex justify-between pt-1">
+                <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
+              </div>
+            </div>
+          )}
+
+          {step === 2 && !scanPending && (
+            <div className="space-y-4">
+              <div>
+                <p className="text-sm font-medium text-foreground mb-1">Controleer en vul aan</p>
+                <p className="text-xs text-muted-foreground">
+                  Vergelijk de velden met de upload. Scroll met het muiswiel om in te zoomen, sleep om te verslepen.
+                </p>
+              </div>
+
+              {scanNotice && (
+                <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
+                  scanNotice.type === "success"
+                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200"
+                    : "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200"
+                }`}>
+                  <span>{scanNotice.text}</span>
+                </div>
+              )}
+
               <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
                 <div className="rounded-lg border border-border bg-card p-4 space-y-4">
                   <div className="space-y-1">
-                    <Label>IBAN * {lookingUpIban && <span className="text-xs text-muted-foreground ml-1">(gegevens ophalen...)</span>}</Label>
-                    <Input value={iban} onChange={e => { const formatted = formatIban(e.target.value); setIban(formatted); setErrors(er => ({ ...er, iban: undefined })); doIbanLookup(formatted); }} placeholder="NL91 ABNA 0417 1643 00" className={errors.iban ? "border-destructive" : ""} />
+                    <Label>IBAN *</Label>
+                    <Input value={iban} onChange={e => { const formatted = formatIban(e.target.value); setIban(formatted); setErrors(er => ({ ...er, iban: undefined })); }} placeholder="NL91 ABNA 0417 1643 00" className={errors.iban ? "border-destructive" : ""} />
                     {errors.iban && <p className="text-xs text-destructive">{errors.iban}</p>}
                   </div>
                   <div className="space-y-1">
@@ -463,7 +613,7 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
                   </div>
                   <div className="space-y-1">
                     <Label>Bank</Label>
-                    <Input value={bankName} onChange={e => setBankName(e.target.value)} placeholder="Wordt automatisch ingevuld na IBAN" />
+                    <Input value={bankName} onChange={e => setBankName(e.target.value)} placeholder="Naam van de bank" />
                   </div>
                   <div className="grid grid-cols-2 gap-3">
                     <div className="space-y-1">
@@ -479,38 +629,25 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
                     <Label>Notities <span className="font-normal text-muted-foreground">(optioneel)</span></Label>
                     <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Bijv. Hoofdrekening of spaarrekening" />
                   </div>
+                  <div className="pt-1">
+                    <Button variant="ghost" size="sm" onClick={() => setStep(1)} className="h-7 px-2 text-xs text-muted-foreground">
+                      Wijzig upload
+                    </Button>
+                  </div>
                 </div>
 
-                <div className="rounded-lg border border-border bg-card p-4 space-y-2">
-                  {filePreview && (
-                    <>
-                      <DocumentPreviewPanel url={filePreview} isPdf={previewIsPdf} fileName={file?.name || "Bestand"} onReplace={() => fileInputRef.current?.click()} />
-                      <div className="border-t border-border pt-2" />
-                    </>
-                  )}
-                  <div>
-                    <Label className="text-xs font-medium text-muted-foreground block">
-                      {filePreview ? "Bankbewijs vervangen" : "Bankbewijs uploaden"}
-                    </Label>
-                    <p className="mt-0.5 text-[11px] leading-snug text-muted-foreground/75">JPG, PNG of PDF — optioneel</p>
-                  </div>
-                  <div onClick={() => fileInputRef.current?.click()}
-                    className="relative flex flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border hover:border-primary bg-muted/20 hover:bg-accent/30 cursor-pointer transition-colors min-h-[160px] overflow-hidden">
-                    <ImageIcon className="h-8 w-8 text-muted-foreground/50" />
-                    <span className="text-xs text-muted-foreground">{filePreview ? "Klik om te vervangen" : "Klik om te uploaden"}</span>
-                    <span className="text-[10px] text-muted-foreground/60">JPG, PNG of PDF</span>
-                    {uploading && (
-                      <div className="absolute inset-0 flex items-center justify-center bg-background/80">
-                        <Loader2 className="h-5 w-5 animate-spin text-primary" />
-                      </div>
-                    )}
-                  </div>
-                </div>
+                {(frontPreview || backPreview) && (
+                  <DocumentPhotoViewer
+                    images={[
+                      ...(frontPreview ? [{ src: frontPreview, label: "Voorkant" }] : []),
+                      ...(backPreview ? [{ src: backPreview, label: "Achterkant" }] : []),
+                    ]}
+                  />
+                )}
               </div>
-              <input ref={fileInputRef} type="file" accept="image/*,application/pdf" className="hidden"
-                onChange={e => { const f = e.target.files?.[0]; if (f) handleFile(f); e.target.value = ""; }} />
+
               <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
                   <Button size="sm" onClick={() => { if (validate()) saveMutation.mutate(); }} disabled={saveMutation.isPending || uploading}>
