@@ -111,6 +111,45 @@ function matchTokens(value) {
     .filter(token => token.length > 1);
 }
 
+const OCR_NAME_LABEL_TOKENS = new Set([
+  "NAAM",
+  "SURNAME",
+  "NAME",
+  "NAMES",
+  "VOORNAMEN",
+  "GIVEN",
+  "PRENOMS",
+  "NOM",
+  "PERSOON",
+  "PERSOONS",
+  "PERSOONSNR",
+  "PERSONAL",
+  "PERSONNEL",
+  "IDENTIFIANT",
+  "NUMMER",
+  "NUMBER",
+  "NO",
+  "DOCUMENT",
+  "DATUM",
+  "DATE",
+  "BIRTH",
+  "GEBOORTE",
+  "GELDIG",
+  "VALID",
+  "NATIONALITEIT",
+  "NATIONALITY",
+  "GESLACHT",
+  "SEX",
+  "CAN",
+]);
+
+function safeRecognizedPersonName(value) {
+  const tokens = matchTokens(value);
+  if (!tokens.length) return "";
+  if (tokens.some(token => OCR_NAME_LABEL_TOKENS.has(token))) return "";
+  return value;
+}
+
 function namesOverlap(expected, recognized) {
   const expectedTokens = matchTokens(expected);
   const recognizedTokens = matchTokens(recognized);
@@ -152,21 +191,23 @@ function buildPersonMatchCheck(personnel, recognizedPerson) {
   }
 
   const expectedLastName = [personnel.name_prefix, personnel.last_name].filter(Boolean).join(" ") || personnel.name || "";
-  const lastNameMatch = namesOverlap(expectedLastName, recognizedPerson.last_name);
+  const recognizedLastName = safeRecognizedPersonName(recognizedPerson.last_name);
+  const lastNameMatch = namesOverlap(expectedLastName, recognizedLastName);
   if (lastNameMatch === false) {
     issues.push({
       severity: "critical",
       label: "Achternaam komt niet overeen",
-      detail: `Profiel: ${expectedLastName}. Document: ${recognizedPerson.last_name}.`,
+      detail: `Profiel: ${expectedLastName}. Document: ${recognizedLastName}.`,
     });
   }
 
-  const firstNameMatch = firstNameMatches(personnel, recognizedPerson.given_names);
+  const recognizedGivenNames = safeRecognizedPersonName(recognizedPerson.given_names);
+  const firstNameMatch = firstNameMatches(personnel, recognizedGivenNames);
   if (firstNameMatch === false) {
     issues.push({
       severity: "warning",
       label: "Voornamen lijken af te wijken",
-      detail: `Profiel: ${personnel.legal_first_names || personnel.first_name || personnel.call_name}. Document: ${recognizedPerson.given_names}.`,
+      detail: `Profiel: ${personnel.legal_first_names || personnel.first_name || personnel.call_name}. Document: ${recognizedGivenNames}.`,
     });
   }
 

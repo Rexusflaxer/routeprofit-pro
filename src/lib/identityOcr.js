@@ -193,11 +193,16 @@ function isLikelyVisiblePersonName(value) {
   if (/\d/.test(value)) return false;
 
   const upper = text.toUpperCase();
-  if (/\b(NEDERLAND|NEDERLANDSE|NEDERIANDSE|KINGDOM|KONINKRIJK|IDENTITEITSKAART|IDENTITY|CARTE|DOCUMENT|DATUM|DATE|GELDIG|GEBOORTE|BIRTH|PLACE|PERSOONSNR|PERSONAL|NATIONALITEIT|NATIONALITY|GESLACHT|SEX|CAN|PASPOORT|RIJBEWIJS|SPECIMEN)\b/.test(upper)) {
+  if (/\b(NEDERLAND|NEDERLANDSE|NEDERIANDSE|KINGDOM|KONINKRIJK|IDENTITEITSKAART|IDENTITY|CARTE|DOCUMENT|DATUM|DATE|GELDIG|GEBOORTE|BIRTH|PLACE|PERSOON|PERSOONS|PERSOONSNR|PERSONAL|PERSONNEL|IDENTIFIANT|NUMMER|NUMBER|NO|NAAM|SURNAME|NAME|NAMES|VOORNAMEN|GIVEN|PRENOMS|PRÉNOMS|NOM|NATIONALITEIT|NATIONALITY|GESLACHT|SEX|LENGTE|HEIGHT|TAILLE|CAN|MODEL|SERIE|PASPOORT|PASSPORT|RIJBEWIJS|SPECIMEN|VERVOLG|CONTINUE|SUITE|INSTANTIE|AUTHORITY|HANDTEKENING|SIGNATURE)\b/.test(upper)) {
     return false;
   }
 
   return /[A-Za-zÀ-ÿ]{3}/.test(text);
+}
+
+function isIdentityFieldLabelLine(value) {
+  const upper = cleanPersonText(value).toUpperCase();
+  return /\b(NAAM|SURNAME|NAME|VOORNAMEN|GIVEN|NAMES|PRENOMS|PRÉNOMS|NOM|PERSOON|PERSOONS|PERSOONSNR|PERSONAL|PERSONNEL|IDENTIFIANT|NUMMER|NUMBER|NO|GEBOORTE|BIRTH|DATUM|DATE|GELDIG|NATIONALITEIT|NATIONALITY|GESLACHT|SEX|LENGTE|HEIGHT|TAILLE|CAN|INSTANTIE|AUTHORITY|HANDTEKENING|SIGNATURE|VERVOLG|CONTINUE|SUITE)\b/.test(upper);
 }
 
 function findVisiblePersonNameAfterLabel(lines, labelPattern) {
@@ -206,8 +211,9 @@ function findVisiblePersonNameAfterLabel(lines, labelPattern) {
     if (/VERVOLG\s+NAAM|CONTINUE\s+SURNAME/.test(upperLine)) continue;
     if (!labelPattern.test(upperLine)) continue;
     for (let offset = 1; offset <= 3; offset += 1) {
-      const candidate = cleanPersonText(lines[index + offset] || "");
-      if (isLikelyVisiblePersonName(candidate)) return candidate;
+      const rawCandidate = lines[index + offset] || "";
+      if (isIdentityFieldLabelLine(rawCandidate)) continue;
+      if (isLikelyVisiblePersonName(rawCandidate)) return cleanPersonText(rawCandidate);
     }
   }
   return "";
@@ -227,8 +233,7 @@ function findFallbackIdCardVisibleNames(lines) {
     if (extractVisibleDates(line).length > 0) break;
     if (/\b(NEDERLAND|NEDERLANDSE|NEDERIANDSE|NATIONALITEIT|NATIONALITY|GESLACHT|SEX|DATUM|DATE|CAN)\b/.test(upperLine)) break;
 
-    const candidate = cleanPersonText(line);
-    if (isLikelyVisiblePersonName(candidate)) names.push(candidate);
+    if (isLikelyVisiblePersonName(line)) names.push(cleanPersonText(line));
   }
 
   if (!names.length) return {};
