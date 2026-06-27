@@ -560,9 +560,12 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
 
               <div className="flex justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
-                <Button size="sm" onClick={() => setStep(2)} disabled={scanPending}>
-                  {frontFile || backFile ? "Volgende" : "Handmatig invullen"} <ChevronRight className="w-4 h-4 ml-1" />
-                </Button>
+                <div className="flex gap-2">
+                  <Button variant="outline" size="sm" onClick={() => setStep(2)}>Overslaan</Button>
+                  <Button size="sm" onClick={() => setStep(2)} disabled={scanPending}>
+                    Volgende <ChevronRight className="w-4 h-4 ml-1" />
+                  </Button>
+                </div>
               </div>
             </div>
           )}
