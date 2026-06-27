@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useMemo, useCallback } from "react";
+import React, { useState, useRef, useMemo, useCallback } from "react";
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -10,8 +10,15 @@ import { DocumentSideUpload, DocumentPhotoViewer } from "@/components/personnel/
 import { Dialog, DialogContent, DialogHeader, DialogTitle, DialogFooter } from "@/components/ui/dialog";
 import { motion, AnimatePresence } from "framer-motion";
 import {
-  AlertTriangle, Archive, ArrowLeft, Check, ChevronLeft, ChevronRight,
-  Loader2, Plus, RefreshCw, Trash2, X,
+  AlertTriangle,
+  Check,
+  ChevronLeft,
+  ChevronRight,
+  Eye,
+  Loader2,
+  Plus,
+  ShieldCheck,
+  X,
 } from "lucide-react";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { prepareBankAccountSensitiveData } from "@/lib/sensitiveFields";
@@ -25,150 +32,221 @@ const BANK_CARD_GUIDE_IMAGES = {
   back: bankCardGuideBack,
 };
 
-const DELETE_PASSWORD = "verwijder";
-const BANK_TABLE_GRID = "grid grid-cols-[minmax(140px,180px)_minmax(120px,160px)_minmax(100px,140px)_minmax(130px,160px)_minmax(110px,130px)_minmax(110px,1fr)_minmax(240px,max-content)] gap-3";
-
-function formatDate(v, fallback = "-") {
-  if (!v) return fallback;
-  const d = new Date(v);
-  return Number.isNaN(d.getTime()) ? String(v) : d.toLocaleDateString("nl-NL", { day: "2-digit", month: "2-digit", year: "numeric" });
-}
+const BANK_TABLE_GRID = "grid grid-cols-[minmax(240px,1.35fr)_minmax(130px,0.75fr)_minmax(130px,0.7fr)_minmax(130px,0.8fr)_minmax(84px,max-content)] gap-4";
 
 function isArchivedBankAccount(acc) {
   return acc?.metadata?.archived === true;
 }
 
+function cleanIban(value) {
+  return String(value || "").toUpperCase().replace(/[^A-Z0-9*]/g, "");
+}
+
+function formatIbanInput(value) {
+  const cleaned = cleanIban(value).slice(0, 34);
+  return (cleaned.match(/.{1,4}/g) || []).join(" ");
+}
+
+function isMaskedIban(value) {
+  return cleanIban(value).includes("*");
+}
+
+function isImageFile(url) {
+  return /\.(jpg|jpeg|png|gif|webp|bmp|avif)$/i.test(url || "");
+}
+
+function isPdfUrl(url) {
+  return /\.pdf($|\?)/i.test(url || "");
+}
+
+function bankAccountProofImages(acc) {
+  if (!acc) return [];
+  const meta = acc.metadata || {};
+  const frontUrl = acc.proof_front_file_url || meta.proof_front_file_url || "";
+  const backUrl = acc.proof_back_file_url || meta.proof_back_file_url || "";
+  const legacyUrl = acc.proof_file_url || meta.proof_file_url || "";
+  const images = [];
+
+  if (frontUrl && isImageFile(frontUrl)) {
+    images.push({
+      src: frontUrl,
+      label: "Voorkant bankpas",
+      fileName: acc.proof_front_download_filename || "Voorkant bankpas",
+    });
+  }
+  if (backUrl && backUrl !== frontUrl && isImageFile(backUrl)) {
+    images.push({
+      src: backUrl,
+      label: "Achterkant bankpas",
+      fileName: acc.proof_back_download_filename || "Achterkant bankpas",
+    });
+  }
+  if (!images.length && legacyUrl && isImageFile(legacyUrl)) {
+    images.push({
+      src: legacyUrl,
+      label: "Bankbewijs",
+      fileName: acc.proof_download_filename || "Bankbewijs",
+    });
+  }
+
+  return images;
+}
+
 function bankAccountFileUrl(acc) {
-  return acc?.proof_file_url || "";
+  const image = bankAccountProofImages(acc)[0];
+  return image?.src || acc?.proof_file_url || acc?.metadata?.proof_file_url || "";
 }
 
 function hasBankAccountUpload(acc) {
   return Boolean(bankAccountFileUrl(acc));
 }
 
-function isImageFile(url) {
-  return /\.(jpg|jpeg|png|gif|webp|bmp)$/i.test(url || "");
-}
-
-function isPdfUrl(url) {
-  return /\.pdf$/i.test(url || "");
-}
-
 function isPdfBankAccount(acc) {
-  return isPdfUrl(bankAccountFileUrl(acc));
+  const url = bankAccountFileUrl(acc);
+  return !bankAccountProofImages(acc).length && isPdfUrl(url);
 }
 
-function dateSortKey(value) {
-  if (!value) return "";
-  const text = String(value).trim();
-  const dutchDate = text.match(/^(\d{2})-(\d{2})-(\d{4})$/);
-  if (dutchDate) return `${dutchDate[3]}-${dutchDate[2]}-${dutchDate[1]}`;
-  const parsed = new Date(text);
-  if (!Number.isNaN(parsed.getTime())) return parsed.toISOString().split("T")[0];
-  return text;
+function isVerifiedBankAccount(acc) {
+  return acc?.verification_status === "verified";
 }
 
-function bankAccountSortValue(acc) {
-  return [
-    dateSortKey(acc?.valid_from),
-    String(acc?.updated_date || acc?.created_date || ""),
-    String(acc?.id || ""),
-  ].join("|");
+function activeBankAccounts(accounts) {
+  return [...(accounts || [])]
+    .filter(acc => !isArchivedBankAccount(acc))
+    .sort((a, b) => String(b.updated_date || b.created_date || b.id || "").localeCompare(String(a.updated_date || a.created_date || a.id || "")));
 }
 
-function isExpiredBankAccount(acc) {
-  const today = new Date().toISOString().split("T")[0];
-  return (acc?.valid_until && dateSortKey(acc.valid_until) < today) || acc?.verification_status === "expired";
+function normalizeMatchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
 }
 
-function verificationStatusForActiveBankAccount(acc) {
-  const today = new Date().toISOString().split("T")[0];
-  return acc?.valid_until && dateSortKey(acc.valid_until) < today ? "expired" : "verified";
+function matchTokens(value) {
+  return normalizeMatchText(value).split(/\s+/).filter(token => token.length > 1);
 }
 
-function splitBankAccountsByActiveState(accounts) {
-  const active = [];
-  const archived = [];
-  for (const acc of accounts) {
-    if (isArchivedBankAccount(acc)) {
-      archived.push(acc);
-    } else {
-      active.push(acc);
-    }
+function namesOverlap(expected, recognized) {
+  const expectedTokens = matchTokens(expected);
+  const recognizedTokens = matchTokens(recognized);
+  if (!expectedTokens.length || !recognizedTokens.length) return null;
+
+  const expectedText = expectedTokens.join(" ");
+  const recognizedText = recognizedTokens.join(" ");
+  if (expectedText === recognizedText || expectedText.includes(recognizedText) || recognizedText.includes(expectedText)) {
+    return true;
   }
-  const sortedActive = [...active].sort((a, b) => bankAccountSortValue(b).localeCompare(bankAccountSortValue(a)));
+  return expectedTokens.some(token => recognizedTokens.includes(token));
+}
+
+function profileNameForMatch(person) {
+  const fullName = [
+    person?.legal_first_names || person?.first_name || person?.call_name,
+    person?.name_prefix,
+    person?.last_name,
+  ].filter(Boolean).join(" ");
+  return fullName || person?.name || "";
+}
+
+function profileLastNameForMatch(person) {
+  return [person?.name_prefix, person?.last_name].filter(Boolean).join(" ") || person?.name || "";
+}
+
+function buildBankHolderMatch(person, recognizedHolder) {
+  const holder = String(recognizedHolder || "").trim();
+  if (!holder) return { status: "unknown", profile_name: profileNameForMatch(person), recognized_holder: "" };
+
+  const profileName = profileNameForMatch(person);
+  const profileLastName = profileLastNameForMatch(person);
+  const fullMatch = namesOverlap(profileName, holder);
+  const lastNameMatch = namesOverlap(profileLastName, holder);
+
+  if (fullMatch === false && lastNameMatch === false) {
+    return {
+      status: "review",
+      profile_name: profileName,
+      recognized_holder: holder,
+      issues: [
+        "De herkende rekeninghouder lijkt niet overeen te komen met dit medewerkersprofiel.",
+      ],
+    };
+  }
+
   return {
-    active: sortedActive,
-    archived: [...archived].sort((a, b) => bankAccountSortValue(b).localeCompare(bankAccountSortValue(a))),
+    status: fullMatch === null && lastNameMatch === null ? "unknown" : "matched",
+    profile_name: profileName,
+    recognized_holder: holder,
+    issues: [],
   };
 }
 
-// ─── Status Badge ────────────────────────────────────────────────────────────
-
-function BankStatusBadge({ acc, archived = false }) {
-  if (archived || isArchivedBankAccount(acc)) {
-    return <Badge className="text-xs bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 border-0 whitespace-nowrap">Gearchiveerd</Badge>;
+function BankStatusBadge({ acc }) {
+  if (isVerifiedBankAccount(acc)) {
+    return <Badge className="whitespace-nowrap border-0 bg-green-100 text-xs text-green-800 dark:bg-green-900/45 dark:text-green-200">Geverifieerd</Badge>;
   }
-  if (isExpiredBankAccount(acc)) {
-    return <Badge className="text-xs bg-amber-100 text-amber-900 dark:bg-amber-900/40 dark:text-amber-200 border-0 whitespace-nowrap">Actie vereist</Badge>;
-  }
-  if (acc?.verification_status === "verified") {
-    return <Badge className="text-xs bg-green-100 text-green-800 dark:bg-green-800 dark:text-green-200 border-0 whitespace-nowrap">Actief</Badge>;
-  }
-  if (acc?.verification_status === "pending_review") {
-    return <Badge className="text-xs bg-blue-100 text-blue-800 dark:bg-blue-900 dark:text-blue-200 border-0 whitespace-nowrap">In beoordeling</Badge>;
-  }
-  if (acc?.verification_status === "rejected") {
-    return <Badge className="text-xs bg-red-100 text-red-800 dark:bg-red-900 dark:text-red-200 border-0 whitespace-nowrap">Afgekeurd</Badge>;
-  }
-  return <Badge className="text-xs bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300 border-0 whitespace-nowrap">Onbekend</Badge>;
+  return <Badge className="whitespace-nowrap border-0 bg-amber-100 text-xs text-amber-900 dark:bg-amber-900/45 dark:text-amber-200">Niet geverifieerd</Badge>;
 }
 
-// ─── Bank Account Row ────────────────────────────────────────────────────────
-
-function BankAccountRow({
-  acc, archived = false,
-  onPreview, onArchive, onRestore, onDelete,
-  auditActors = [], restorePending = false,
-}) {
+function BankAccountRow({ acc, onPreview, onOpenActions, auditActors = [] }) {
+  const isVerified = isVerifiedBankAccount(acc);
   const canPreview = hasBankAccountUpload(acc);
-  const canArchive = !archived;
-  const canRestore = archived;
-  const canDelete = archived;
+  const rowClickable = isVerified ? canPreview : true;
   const ibanDisplay = acc?.iban_masked || acc?.iban || "-";
-  const validity = [formatDate(acc?.valid_from), formatDate(acc?.valid_until)].filter(v => v !== "-").join(" — ");
+
+  const handleRowClick = () => {
+    if (isVerified && canPreview) {
+      onPreview?.(acc);
+      return;
+    }
+    if (!isVerified) {
+      onOpenActions?.(acc);
+    }
+  };
 
   return (
     <div
-      className={`${BANK_TABLE_GRID} relative items-center px-5 py-3 transition-colors ${canPreview ? "cursor-pointer hover:bg-accent/35" : ""}`}
-      onClick={() => canPreview && onPreview?.(acc)}
+      className={`${BANK_TABLE_GRID} items-center px-5 py-4 transition-colors ${rowClickable ? "cursor-pointer hover:bg-accent/35" : ""}`}
+      onClick={handleRowClick}
     >
       <div className="min-w-0">
         <p className="truncate text-sm font-semibold text-foreground">{ibanDisplay}</p>
-        {acc?.is_primary && !archived && <span className="text-xs text-primary">Primair</span>}
+        <p className="mt-0.5 text-xs text-muted-foreground">Primair</p>
       </div>
-      <span className="min-w-0 truncate text-sm text-muted-foreground">{acc?.account_holder_name || "-"}</span>
       <span className="min-w-0 truncate text-sm text-muted-foreground">{acc?.bank_name || "-"}</span>
-      <span className="min-w-0 truncate text-sm text-muted-foreground">{validity || "-"}</span>
-      <div className="min-w-0"><BankStatusBadge acc={acc} archived={archived} /></div>
+      <div className="min-w-0"><BankStatusBadge acc={acc} /></div>
       <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(acc, auditActors)}</span>
       <div className="flex justify-end gap-1">
-        {canArchive && (
-          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={e => { e.stopPropagation(); onArchive?.(acc); }} title="Naar archief">
-            <Archive className="h-3.5 w-3.5" />
+        {canPreview && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={event => {
+              event.stopPropagation();
+              onPreview?.(acc);
+            }}
+            title="Document inzien"
+          >
+            <Eye className="h-3.5 w-3.5" />
           </Button>
         )}
-        {canRestore && (
-          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground"
-            onClick={e => { e.stopPropagation(); onRestore?.(acc); }} disabled={restorePending} title="Terugzetten naar actief">
-            <RefreshCw className="h-3.5 w-3.5" />
-          </Button>
-        )}
-        {canDelete && (
-          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive"
-            onClick={e => { e.stopPropagation(); onDelete?.(acc); }} title="Definitief verwijderen">
-            <Trash2 className="h-3.5 w-3.5" />
+        {!isVerified && (
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="h-7 w-7 text-muted-foreground hover:text-foreground"
+            onClick={event => {
+              event.stopPropagation();
+              onOpenActions?.(acc);
+            }}
+            title="Bankpas verifiëren"
+          >
+            <ShieldCheck className="h-3.5 w-3.5" />
           </Button>
         )}
       </div>
@@ -176,12 +254,12 @@ function BankAccountRow({
   );
 }
 
-// ─── Preview Dialog ──────────────────────────────────────────────────────────
-
 function BankAccountPreviewDialog({ account, open, onOpenChange }) {
+  const images = bankAccountProofImages(account);
   const fileUrl = bankAccountFileUrl(account);
   const fileName = account?.proof_download_filename || "Bankbewijs";
   const isPdf = isPdfBankAccount(account);
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-5xl">
@@ -190,6 +268,10 @@ function BankAccountPreviewDialog({ account, open, onOpenChange }) {
           <p className="rounded-md border border-dashed border-border px-3 py-6 text-center text-sm text-muted-foreground">
             Voor deze rekening is nog geen bankbewijs beschikbaar.
           </p>
+        ) : images.length ? (
+          <div className="min-h-[420px]">
+            <DocumentPhotoViewer images={images} />
+          </div>
         ) : (
           <div className="h-[72vh] min-h-[420px]">
             <DocumentPreviewPanel url={fileUrl} isPdf={isPdf} fileName={fileName} />
@@ -200,78 +282,106 @@ function BankAccountPreviewDialog({ account, open, onOpenChange }) {
   );
 }
 
-// ─── Delete Confirm Dialog ───────────────────────────────────────────────────
+function BankAccountActionsDialog({ account, open, onOpenChange, onPreview, onVerify }) {
+  const canPreview = hasBankAccountUpload(account);
 
-function BankDeleteConfirmDialog({ account, open, onOpenChange, onConfirm, isPending }) {
-  const [password, setPassword] = useState("");
-  const [error, setError] = useState("");
-  useEffect(() => { if (!open) { setPassword(""); setError(""); } }, [open]);
-  const handleConfirm = () => {
-    if (password !== DELETE_PASSWORD) { setError(`Typ "${DELETE_PASSWORD}" om te bevestigen`); return; }
-    onConfirm?.(account);
-  };
+  return (
+    <Dialog open={open} onOpenChange={onOpenChange}>
+      <DialogContent className="sm:max-w-md">
+        <DialogHeader><DialogTitle>Bankrekening controleren</DialogTitle></DialogHeader>
+        <div className="space-y-3">
+          <p className="text-sm text-muted-foreground">
+            Deze bankrekening is nog niet met een upload geverifieerd.
+          </p>
+          <div className="flex flex-col gap-2">
+            {canPreview && (
+              <Button
+                type="button"
+                variant="outline"
+                className="justify-start"
+                onClick={() => {
+                  onOpenChange(false);
+                  onPreview(account);
+                }}
+              >
+                <Eye className="mr-2 h-4 w-4" />
+                Document inzien
+              </Button>
+            )}
+            <Button
+              type="button"
+              className="justify-start"
+              onClick={() => {
+                onOpenChange(false);
+                onVerify(account);
+              }}
+            >
+              <ShieldCheck className="mr-2 h-4 w-4" />
+              Bankpas verifiëren
+            </Button>
+          </div>
+        </div>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function BankReplaceConfirmDialog({ open, onOpenChange, onConfirm }) {
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
-        <DialogHeader><DialogTitle>Rekening definitief verwijderen?</DialogTitle></DialogHeader>
-        <div className="space-y-4">
-          <div className="flex items-start gap-3 rounded-md border border-destructive/30 bg-destructive/5 px-3 py-3">
-            <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-destructive" />
-            <div className="text-sm">
-              <p className="font-medium text-foreground">Bankrekening {account?.iban_masked || account?.iban} wordt verwijderd.</p>
-              <p className="mt-1 text-xs text-muted-foreground">Deze actie is alleen bedoeld voor verkeerd toegevoegde rekeningen.</p>
-            </div>
-          </div>
-          <div className="space-y-2">
-            <Label className="text-xs text-muted-foreground">Typ <strong className="font-mono text-foreground">{DELETE_PASSWORD}</strong> om te bevestigen</Label>
-            <Input value={password} onChange={e => { setPassword(e.target.value); setError(""); }}
-              onKeyDown={e => e.key === "Enter" && handleConfirm()} placeholder={DELETE_PASSWORD}
-              className={`h-9 font-mono ${error ? "border-destructive" : ""}`} autoFocus />
-            {error && <p className="text-xs text-destructive">{error}</p>}
+        <DialogHeader><DialogTitle>Bankrekening vervangen?</DialogTitle></DialogHeader>
+        <div className="flex items-start gap-3 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-3">
+          <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+          <div className="text-sm">
+            <p className="font-medium text-foreground">Er staat al een bankrekening actief.</p>
+            <p className="mt-1 text-xs text-muted-foreground">
+              Als je doorgaat en opslaat, wordt de huidige bankrekening vervangen. Voor bankrekeningen wordt geen archief bewaard.
+            </p>
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={() => onOpenChange(false)} disabled={isPending}>Annuleren</Button>
-          <Button variant="destructive" onClick={handleConfirm} disabled={isPending}>
-            <Trash2 className="mr-1 h-4 w-4" /> {isPending ? "Verwijderen..." : "Verwijderen"}
-          </Button>
+          <Button variant="outline" onClick={() => onOpenChange(false)}>Annuleren</Button>
+          <Button onClick={onConfirm}>Vervangen en doorgaan</Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
   );
 }
 
-// ─── Wizard Steps ────────────────────────────────────────────────────────────
-
 function WizardSteps({ step, labels }) {
   return (
-    <div className="flex items-center gap-1 mb-4">
-      {labels.map((label, i) => (
+    <div className="mb-4 flex items-center gap-1">
+      {labels.map((label, index) => (
         <React.Fragment key={label}>
-          <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full transition-colors ${
-            i + 1 === step ? "bg-primary text-primary-foreground" :
-            i + 1 < step ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" :
-            "text-muted-foreground"}`}>
-            <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold ${
-              i + 1 === step ? "bg-primary-foreground text-primary" :
-              i + 1 < step ? "text-green-700 dark:text-green-300" :
-              "border border-muted-foreground/30 text-muted-foreground"}`}>
-              {i + 1 < step ? (
-                <svg className="w-3 h-3" fill="currentColor" viewBox="0 0 20 20">
-                  <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
-                </svg>
-              ) : i + 1}
+          <div className={`flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium transition-colors ${
+            index + 1 === step
+              ? "bg-primary text-primary-foreground"
+              : index + 1 < step
+                ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300"
+                : "text-muted-foreground"
+          }`}>
+            <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${
+              index + 1 === step
+                ? "bg-primary-foreground text-primary"
+                : index + 1 < step
+                  ? "text-green-700 dark:text-green-300"
+                  : "border border-muted-foreground/30 text-muted-foreground"
+            }`}>
+              {index + 1 < step ? (
+                <Check className="h-3 w-3" />
+              ) : index + 1}
             </span>
             {label}
           </div>
-          {i < labels.length - 1 && <div className={`h-px flex-1 ${i + 1 < step ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />}
+          {index < labels.length - 1 && (
+            <div className={`h-px flex-1 ${index + 1 < step ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />
+          )}
         </React.Fragment>
       ))}
     </div>
   );
 }
-
-// ─── Wizard ──────────────────────────────────────────────────────────────────
 
 function BankCardGuideImage({ side = "front" }) {
   const isBack = side === "back";
@@ -287,20 +397,16 @@ function BankCardGuideImage({ side = "front" }) {
 
 function BankUploadGuideCard({ frontUpload, backUpload }) {
   return (
-    <div className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3 w-full">
+    <div className="flex w-full flex-col gap-3 rounded-lg border border-border bg-card p-4">
       <div className="flex items-stretch gap-4">
-        <div className="w-1/2 flex flex-col gap-1.5">
-          {frontUpload}
-        </div>
-        <div className="w-px bg-border self-stretch" />
-        <div className="w-1/2 flex flex-col">
-          <div className="flex flex-1 items-center justify-center p-2 min-h-[120px]">
+        <div className="flex w-1/2 flex-col gap-1.5">{frontUpload}</div>
+        <div className="w-px self-stretch bg-border" />
+        <div className="flex w-1/2 flex-col">
+          <div className="flex min-h-[120px] flex-1 items-center justify-center p-2">
             <BankCardGuideImage side="front" />
           </div>
           <div className="px-2 py-1.5">
-            <p className="text-[11px] leading-snug text-muted-foreground">
-              Voorzijde met chip.
-            </p>
+            <p className="text-[11px] leading-snug text-muted-foreground">Voorzijde met chip.</p>
           </div>
         </div>
       </div>
@@ -308,18 +414,14 @@ function BankUploadGuideCard({ frontUpload, backUpload }) {
       <div className="h-px bg-border" />
 
       <div className="flex items-stretch gap-4">
-        <div className="w-1/2 flex flex-col gap-1.5">
-          {backUpload}
-        </div>
-        <div className="w-px bg-border self-stretch" />
-        <div className="w-1/2 flex flex-col">
-          <div className="flex flex-1 items-center justify-center p-2 min-h-[120px]">
+        <div className="flex w-1/2 flex-col gap-1.5">{backUpload}</div>
+        <div className="w-px self-stretch bg-border" />
+        <div className="flex w-1/2 flex-col">
+          <div className="flex min-h-[120px] flex-1 items-center justify-center p-2">
             <BankCardGuideImage side="back" />
           </div>
           <div className="px-2 py-1.5">
-            <p className="text-[11px] leading-snug text-muted-foreground">
-              Achterzijde van de pas.
-            </p>
+            <p className="text-[11px] leading-snug text-muted-foreground">Achterzijde van de pas.</p>
           </div>
         </div>
       </div>
@@ -327,15 +429,44 @@ function BankUploadGuideCard({ frontUpload, backUpload }) {
   );
 }
 
-function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClose, onSaved, currentUser, auditActors = [] }) {
+function BankHolderMatchNotice({ match }) {
+  if (!match || match.status !== "review") return null;
+
+  return (
+    <div className="mt-4 flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-3">
+      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
+      <div className="text-sm">
+        <p className="font-medium text-foreground">Controleer rekeninghouder</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          De bankpas lijkt mogelijk bij iemand anders te horen.
+        </p>
+        <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
+          <span>Profiel: <strong className="text-foreground">{match.profile_name || "-"}</strong></span>
+          <span>Bankpas: <strong className="text-foreground">{match.recognized_holder || "-"}</strong></span>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BankAccountWizard({
+  personnelId,
+  person,
+  existingAccount = null,
+  replaceAccounts = [],
+  onClose,
+  onSaved,
+  currentUser,
+  auditActors = [],
+}) {
   const queryClient = useQueryClient();
   const [step, setStep] = useState(1);
-  const [iban, setIban] = useState("");
-  const [accountHolderName, setAccountHolderName] = useState("");
-  const [bankName, setBankName] = useState("");
-  const [validFrom, setValidFrom] = useState("");
-  const [validUntil, setValidUntil] = useState("");
-  const [notes, setNotes] = useState("");
+  const [iban, setIban] = useState(() => {
+    const value = existingAccount?.iban_masked || existingAccount?.iban || "";
+    return isMaskedIban(value) ? "" : formatIbanInput(value);
+  });
+  const [bankName, setBankName] = useState(existingAccount?.bank_name || "");
+  const [notes, setNotes] = useState(existingAccount?.notes || "");
   const [frontFile, setFrontFile] = useState(null);
   const [frontPreview, setFrontPreview] = useState(null);
   const [backFile, setBackFile] = useState(null);
@@ -343,53 +474,39 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
   const [uploading, setUploading] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
   const [recognizedUploadKey, setRecognizedUploadKey] = useState("");
-  const [scanNotice, setScanNotice] = useState(null);
+  const [recognizedHolderName, setRecognizedHolderName] = useState(existingAccount?.metadata?.recognized_account_holder_name || "");
+  const [holderMatch, setHolderMatch] = useState(null);
   const [errors, setErrors] = useState({});
   const latestUploadKeyRef = useRef("");
-
-  const formatIban = (value) => {
-    const cleaned = value.replace(/\s/g, "").toUpperCase();
-    const chunks = cleaned.match(/.{1,4}/g) || [];
-    return chunks.join(" ");
-  };
 
   const uploadKey = [
     frontFile ? `${frontFile.name}-${frontFile.size}-${frontFile.lastModified}` : "",
     backFile ? `${backFile.name}-${backFile.size}-${backFile.lastModified}` : "",
   ].join("|");
 
-  useEffect(() => {
-    latestUploadKeyRef.current = uploadKey;
-  }, [uploadKey]);
+  latestUploadKeyRef.current = uploadKey;
 
   const applyRecognizedFields = useCallback((result) => {
-    if (result.iban && !iban) setIban(formatIban(result.iban));
-    if (result.account_holder_name && !accountHolderName) setAccountHolderName(result.account_holder_name);
+    if (result.iban) setIban(formatIbanInput(result.iban));
     if (result.bank_name && !bankName) setBankName(result.bank_name);
-  }, [iban, accountHolderName, bankName]);
+    const holder = result.account_holder_name || "";
+    setRecognizedHolderName(holder);
+    setHolderMatch(buildBankHolderMatch(person, holder));
+  }, [bankName, person]);
 
   const runRecognition = useCallback(async () => {
-    if ((!frontFile && !backFile) || recognizing) return;
-    if (recognizedUploadKey === uploadKey) return;
+    if ((!frontFile && !backFile) || recognizing || recognizedUploadKey === uploadKey) return;
 
     const currentUploadKey = uploadKey;
     setRecognizing(true);
-    setScanNotice(null);
     try {
       const result = await recognizeBankCard({ frontFile, backFile });
       if (latestUploadKeyRef.current !== currentUploadKey) return;
       applyRecognizedFields(result);
       setRecognizedUploadKey(currentUploadKey);
-      const detected = result.detected_fields || [];
-      if (detected.length > 0) {
-        setScanNotice({ type: "success", text: `Bankpas gescand — ${detected.map(f => ({ iban: "IBAN", account_holder_name: "rekeninghouder", bank_name: "bank" }[f])).join(", ")} herkend.` });
-      } else {
-        setScanNotice({ type: "info", text: "Geen gegevens automatisch herkend. Vul de velden handmatig in." });
-      }
     } catch (error) {
       console.error("Bank card OCR failed", error);
       if (latestUploadKeyRef.current === currentUploadKey) {
-        setScanNotice({ type: "info", text: "De scan kon niet volledig worden afgerond. Vul de velden handmatig in." });
         setRecognizedUploadKey(currentUploadKey);
       }
     } finally {
@@ -397,105 +514,132 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
     }
   }, [applyRecognizedFields, backFile, frontFile, recognizedUploadKey, recognizing, uploadKey]);
 
-  useEffect(() => {
-    if (step !== 1 || (!frontFile && !backFile) || recognizing || recognizedUploadKey === uploadKey) return;
-    runRecognition();
-  }, [frontFile, backFile, recognizedUploadKey, recognizing, runRecognition, step, uploadKey]);
-
   const validate = () => {
-    const e = {};
-    const cleanIban = iban.replace(/\s/g, "");
+    const nextErrors = {};
+    const normalizedIban = cleanIban(iban);
     const ibanPattern = /^[A-Z]{2}[0-9]{2}[A-Z0-9]{11,30}$/;
-    if (!cleanIban) e.iban = "Verplicht";
-    else if (cleanIban.length < 15) e.iban = "IBAN te kort";
-    else if (!ibanPattern.test(cleanIban)) e.iban = "Ongeldig IBAN formaat";
-    setErrors(e);
-    return Object.keys(e).length === 0;
+
+    if (!normalizedIban) nextErrors.iban = "Verplicht";
+    else if (isMaskedIban(normalizedIban)) nextErrors.iban = "Vul het volledige IBAN in";
+    else if (normalizedIban.length < 15) nextErrors.iban = "IBAN te kort";
+    else if (!ibanPattern.test(normalizedIban)) nextErrors.iban = "Ongeldig IBAN formaat";
+
+    setErrors(nextErrors);
+    return Object.keys(nextErrors).length === 0;
+  };
+
+  const uploadProofFile = async (file, side, ibanMasked) => {
+    if (!file) return null;
+    const sideLabel = side === "front" ? "Voorkant bankpas" : "Achterkant bankpas";
+    return uploadManagedFile({
+      file,
+      ownerType: "personnel",
+      ownerId: personnelId,
+      companyId: person?.primary_company_id || null,
+      ownerLabel: person?.name || "Medewerker",
+      domain: "hr",
+      category: "bank_account_proof",
+      sourceEntity: "PersonnelBankAccount",
+      sourceField: side === "front" ? "proof_front_file_url" : "proof_back_file_url",
+      documentLabel: sideLabel,
+      documentNumber: ibanMasked,
+      isSensitive: true,
+      uploadedBy: currentUser,
+      auditActors,
+      auditAction: existingAccount ? "geverifieerd" : "toegevoegd",
+      folderSegments: ["bank", ibanMasked, side],
+    });
   };
 
   const saveMutation = useMutation({
     mutationFn: async () => {
-      let proofFileUrl = null;
-      let proofFileId = null;
-      let proofDownloadFilename = null;
-      let proofLogicalPath = null;
+      const normalizedIban = cleanIban(iban);
+      const ibanMasked = `${normalizedIban.slice(0, 4)}****${normalizedIban.slice(-4)}`;
+      const hasUpload = Boolean(frontFile || backFile);
+      let frontUpload = null;
+      let backUpload = null;
 
-      if (frontFile || backFile) {
+      if (hasUpload) {
         setUploading(true);
-        const cleanIban = iban.replace(/\s/g, "");
-        const ibanMasked = cleanIban.slice(0, 4) + "****" + cleanIban.slice(-4);
-        const fileToUpload = frontFile || backFile;
-        const uploaded = await uploadManagedFile({
-          file: fileToUpload,
-          ownerType: "personnel",
-          ownerId: personnelId,
-          companyId: person?.primary_company_id || null,
-          ownerLabel: person?.name || "Medewerker",
-          domain: "hr",
-          category: "bank_account_proof",
-          sourceEntity: "PersonnelBankAccount",
-          sourceField: "proof_file_url",
-          documentLabel: "Bankbewijs",
-          documentNumber: ibanMasked,
-          isSensitive: true,
-          uploadedBy: currentUser,
-          auditActors,
-          auditAction: "toegevoegd",
-          folderSegments: ["bank", ibanMasked],
-        });
-        proofFileUrl = uploaded.file_url;
-        proofFileId = uploaded.managed_file_id;
-        proofDownloadFilename = uploaded.download_filename;
-        proofLogicalPath = uploaded.logical_path;
-        setUploading(false);
-      }
-
-      const sensitiveData = await prepareBankAccountSensitiveData(
-        { iban: iban.replace(/\s/g, "") },
-        { owner_type: "personnel", owner_id: personnelId, source_entity: "PersonnelBankAccount", source_field: "iban" }
-      );
-
-      if (!isArchiveEntry) {
-        const existing = await base44.entities.PersonnelBankAccount.filter({ personnel_id: personnelId });
-        const actionAt = new Date().toISOString();
-        for (const acc of existing) {
-          if (!acc.metadata?.archived) {
-            await base44.entities.PersonnelBankAccount.update(acc.id, {
-              is_primary: false,
-              metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
-                ...(acc.metadata || {}),
-                archived: true,
-                archived_at: actionAt,
-              }, auditActors),
-            });
-          }
+        try {
+          frontUpload = await uploadProofFile(frontFile, "front", ibanMasked);
+          backUpload = await uploadProofFile(backFile, "back", ibanMasked);
+        } finally {
+          setUploading(false);
         }
       }
 
-      const metaPayload = {
-        archived: isArchiveEntry,
-        proof_file_url: proofFileUrl,
-      };
+      const sensitiveData = await prepareBankAccountSensitiveData(
+        { iban: normalizedIban },
+        { owner_type: "personnel", owner_id: personnelId, source_entity: "PersonnelBankAccount", source_field: "iban" }
+      );
 
-      await base44.entities.PersonnelBankAccount.create({
+      let activeExistingToReplace = [];
+      if (!existingAccount) {
+        const existing = await base44.entities.PersonnelBankAccount.filter({ personnel_id: personnelId });
+        activeExistingToReplace = existing.filter(acc => !isArchivedBankAccount(acc));
+      }
+
+      const frontProofUrl = frontUpload?.file_url || existingAccount?.proof_front_file_url || null;
+      const backProofUrl = backUpload?.file_url || existingAccount?.proof_back_file_url || null;
+      const primaryProof = frontUpload || backUpload || null;
+      const proofFileUrl = primaryProof?.file_url || existingAccount?.proof_file_url || frontProofUrl || backProofUrl || null;
+
+      const commonPayload = {
         personnel_id: personnelId,
         iban: sensitiveData.iban,
         iban_masked: sensitiveData.iban_masked,
         iban_encrypted_payload: sensitiveData.iban_encrypted_payload,
         sensitive_payload_version: sensitiveData.sensitive_payload_version,
-        account_holder_name: accountHolderName || null,
+        account_holder_name: null,
         bank_name: bankName || null,
-        valid_from: validFrom || null,
-        valid_until: validUntil || null,
+        valid_from: null,
+        valid_until: null,
         proof_file_url: proofFileUrl,
-        proof_file_id: proofFileId,
-        proof_download_filename: proofDownloadFilename,
-        proof_logical_path: proofLogicalPath,
-        is_primary: !isArchiveEntry,
-        verification_status: isArchiveEntry ? "expired" : "verified",
+        proof_file_id: primaryProof?.managed_file_id || existingAccount?.proof_file_id || null,
+        proof_download_filename: primaryProof?.download_filename || existingAccount?.proof_download_filename || null,
+        proof_logical_path: primaryProof?.logical_path || existingAccount?.proof_logical_path || null,
+        proof_front_file_url: frontProofUrl,
+        proof_front_file_id: frontUpload?.managed_file_id || existingAccount?.proof_front_file_id || null,
+        proof_front_download_filename: frontUpload?.download_filename || existingAccount?.proof_front_download_filename || null,
+        proof_front_logical_path: frontUpload?.logical_path || existingAccount?.proof_front_logical_path || null,
+        proof_back_file_url: backProofUrl,
+        proof_back_file_id: backUpload?.managed_file_id || existingAccount?.proof_back_file_id || null,
+        proof_back_download_filename: backUpload?.download_filename || existingAccount?.proof_back_download_filename || null,
+        proof_back_logical_path: backUpload?.logical_path || existingAccount?.proof_back_logical_path || null,
+        is_primary: true,
+        verification_status: hasUpload ? "verified" : "pending_review",
         notes: notes || null,
-        metadata: buildAuditMetadata(currentUser, isArchiveEntry ? "gearchiveerd" : "toegevoegd", metaPayload, auditActors),
+      };
+
+      const metaPayload = {
+        ...(existingAccount?.metadata || {}),
+        archived: false,
+        proof_file_url: proofFileUrl,
+        proof_front_file_url: frontProofUrl,
+        proof_back_file_url: backProofUrl,
+        verification_source: hasUpload ? "bank_card_upload" : "manual",
+        recognized_account_holder_name: recognizedHolderName || null,
+        bank_holder_match: holderMatch || null,
+        replaced_bank_account_ids: existingAccount ? [] : replaceAccounts.map(acc => acc.id),
+      };
+
+      if (existingAccount) {
+        await base44.entities.PersonnelBankAccount.update(existingAccount.id, {
+          ...commonPayload,
+          metadata: buildAuditMetadata(currentUser, hasUpload ? "geverifieerd" : "bijgewerkt", metaPayload, auditActors),
+        });
+        return;
+      }
+
+      await base44.entities.PersonnelBankAccount.create({
+        ...commonPayload,
+        metadata: buildAuditMetadata(currentUser, hasUpload ? "toegevoegd en geverifieerd" : "toegevoegd", metaPayload, auditActors),
       });
+
+      for (const acc of activeExistingToReplace) {
+        await base44.entities.PersonnelBankAccount.delete(acc.id);
+      }
     },
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ["personnel-bank-accounts"] });
@@ -504,9 +648,16 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
     },
   });
 
-  const wizardTitle = isArchiveEntry ? "Bankrekening archiveren" : "Bankrekening toevoegen";
+  const goToReview = async () => {
+    setStep(2);
+    if ((frontFile || backFile) && recognizedUploadKey !== uploadKey) {
+      await runRecognition();
+    }
+  };
+
+  const wizardTitle = existingAccount ? "Bankrekening verifiëren" : "Bankrekening toevoegen";
   const STEP_LABELS = ["Upload", "Controleren"];
-  const scanPending = (Boolean(frontFile) || Boolean(backFile)) && recognizedUploadKey !== uploadKey && recognizing;
+  const scanPending = step === 2 && recognizing;
 
   return (
     <motion.div
@@ -516,17 +667,16 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
       transition={{ duration: 0.2 }}
       className="scroll-mt-4 border-b border-primary/30 bg-muted/20 p-5"
     >
-      <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">{wizardTitle}</p>
+      <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">{wizardTitle}</p>
       <WizardSteps step={step} labels={STEP_LABELS} />
       <AnimatePresence mode="wait">
         <motion.div key={step} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
-
           {step === 1 && (
             <div className="space-y-4">
               <div>
-                <p className="text-sm font-medium text-foreground mb-0.5">Bankpas uploaden</p>
+                <p className="mb-0.5 text-sm font-medium text-foreground">Bankpas uploaden</p>
                 <p className="text-xs text-muted-foreground">
-                  Upload een foto van de voor- en achterkant van de bankpas. Na het uploaden worden de gegevens automatisch gescand. Uploaden is niet verplicht — je kunt ook handmatig invullen.
+                  Upload een foto van de voor- en achterkant van de bankpas. Na het klikken op Volgende worden de gegevens automatisch gelezen. Uploaden is niet verplicht.
                 </p>
               </div>
 
@@ -549,19 +699,12 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
                 }
               />
 
-              {scanPending && (
-                <div className="flex items-center gap-2 rounded-md border border-border bg-card px-3 py-2 text-xs text-muted-foreground">
-                  <Loader2 className="h-3.5 w-3.5 animate-spin text-primary" />
-                  Bankpas scannen...
-                </div>
-              )}
-
               <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
+                <Button variant="ghost" size="sm" onClick={onClose}><X className="mr-1 h-4 w-4" /> Annuleren</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => setStep(2)}>Overslaan</Button>
-                  <Button size="sm" onClick={() => setStep(2)} disabled={scanPending || (!frontFile && !backFile)}>
-                    Volgende <ChevronRight className="w-4 h-4 ml-1" />
+                  <Button size="sm" onClick={goToReview} disabled={!frontFile && !backFile}>
+                    Volgende <ChevronRight className="ml-1 h-4 w-4" />
                   </Button>
                 </div>
               </div>
@@ -578,7 +721,7 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
                 </p>
               </div>
               <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <Button variant="ghost" size="sm" onClick={() => setStep(1)}><ChevronLeft className="mr-1 h-4 w-4" /> Terug</Button>
                 <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
               </div>
             </div>
@@ -587,52 +730,39 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
           {step === 2 && !scanPending && (
             <div className="space-y-4">
               <div>
-                <p className="text-sm font-medium text-foreground mb-1">Controleer en vul aan</p>
+                <p className="mb-1 text-sm font-medium text-foreground">Controleer en vul aan</p>
                 <p className="text-xs text-muted-foreground">
-                  Vergelijk de velden met de upload. Scroll met het muiswiel om in te zoomen, sleep om te verslepen.
+                  De herkende gegevens zijn alvast ingevuld. Controleer deze voordat je opslaat.
                 </p>
               </div>
 
-              {scanNotice && (
-                <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
-                  scanNotice.type === "success"
-                    ? "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/20 dark:text-emerald-200"
-                    : "border-blue-200 bg-blue-50 text-blue-800 dark:border-blue-900/60 dark:bg-blue-950/20 dark:text-blue-200"
-                }`}>
-                  <span>{scanNotice.text}</span>
-                </div>
-              )}
-
-              <div className="grid grid-cols-1 lg:grid-cols-2 gap-4 items-start">
-                <div className="rounded-lg border border-border bg-card p-4 space-y-4">
-                  <div className="space-y-1">
-                    <Label>IBAN *</Label>
-                    <Input value={iban} onChange={e => { const formatted = formatIban(e.target.value); setIban(formatted); setErrors(er => ({ ...er, iban: undefined })); }} placeholder="NL91 ABNA 0417 1643 00" className={errors.iban ? "border-destructive" : ""} />
-                    {errors.iban && <p className="text-xs text-destructive">{errors.iban}</p>}
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Rekeninghouder</Label>
-                    <Input value={accountHolderName} onChange={e => setAccountHolderName(e.target.value)} placeholder="Naam van de rekeninghouder" />
-                  </div>
-                  <div className="space-y-1">
-                    <Label>Bank</Label>
-                    <Input value={bankName} onChange={e => setBankName(e.target.value)} placeholder="Naam van de bank" />
-                  </div>
-                  <div className="grid grid-cols-2 gap-3">
+              <div className="grid grid-cols-1 items-start gap-4 lg:grid-cols-2">
+                <div className="rounded-lg border border-border bg-card p-4">
+                  <div className="space-y-4">
                     <div className="space-y-1">
-                      <Label>Geldig vanaf</Label>
-                      <Input type="date" value={validFrom} onChange={e => setValidFrom(e.target.value)} />
+                      <Label>IBAN *</Label>
+                      <Input
+                        value={iban}
+                        onChange={event => {
+                          setIban(formatIbanInput(event.target.value));
+                          setErrors(current => ({ ...current, iban: undefined }));
+                        }}
+                        placeholder="NL91 ABNA 0417 1643 00"
+                        className={errors.iban ? "border-destructive" : ""}
+                      />
+                      {errors.iban && <p className="text-xs text-destructive">{errors.iban}</p>}
                     </div>
                     <div className="space-y-1">
-                      <Label>Geldig tot</Label>
-                      <Input type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} />
+                      <Label>Bank</Label>
+                      <Input value={bankName} onChange={event => setBankName(event.target.value)} placeholder="Naam van de bank" />
+                    </div>
+                    <div className="space-y-1">
+                      <Label>Notities <span className="font-normal text-muted-foreground">(optioneel)</span></Label>
+                      <Input value={notes} onChange={event => setNotes(event.target.value)} placeholder="Bijv. salarisrekening" />
                     </div>
                   </div>
-                  <div className="space-y-1">
-                    <Label>Notities <span className="font-normal text-muted-foreground">(optioneel)</span></Label>
-                    <Input value={notes} onChange={e => setNotes(e.target.value)} placeholder="Bijv. Hoofdrekening of spaarrekening" />
-                  </div>
-                  <div className="pt-1">
+                  <BankHolderMatchNotice match={holderMatch} />
+                  <div className="pt-3">
                     <Button variant="ghost" size="sm" onClick={() => setStep(1)} className="h-7 px-2 text-xs text-muted-foreground">
                       Wijzig upload
                     </Button>
@@ -650,12 +780,12 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
               </div>
 
               <div className="flex justify-between pt-1">
-                <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+                <Button variant="ghost" size="sm" onClick={() => { setStep(1); setErrors({}); }}><ChevronLeft className="mr-1 h-4 w-4" /> Terug</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
                   <Button size="sm" onClick={() => { if (validate()) saveMutation.mutate(); }} disabled={saveMutation.isPending || uploading}>
-                    <Check className="w-4 h-4 mr-1" />
-                    {saveMutation.isPending ? "Opslaan..." : "Rekening opslaan"}
+                    <Check className="mr-1 h-4 w-4" />
+                    {saveMutation.isPending || uploading ? "Opslaan..." : "Rekening opslaan"}
                   </Button>
                 </div>
               </div>
@@ -667,16 +797,12 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
   );
 }
 
-// ─── Main Tab ────────────────────────────────────────────────────────────────
-
 export default function PersonnelBankTab({ person, bankAccounts, auditActors = [] }) {
-  const queryClient = useQueryClient();
   const [wizardOpen, setWizardOpen] = useState(false);
-  const [wizardArchiveMode, setWizardArchiveMode] = useState(false);
-  const [showArchive, setShowArchive] = useState(false);
+  const [wizardAccount, setWizardAccount] = useState(null);
+  const [replaceDialogOpen, setReplaceDialogOpen] = useState(false);
   const [previewAcc, setPreviewAcc] = useState(null);
-  const [deleteAcc, setDeleteAcc] = useState(null);
-  const [archiveMessage, setArchiveMessage] = useState(null);
+  const [actionAcc, setActionAcc] = useState(null);
 
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
@@ -684,72 +810,26 @@ export default function PersonnelBankTab({ person, bankAccounts, auditActors = [
     staleTime: 5 * 60 * 1000,
   });
 
-  useEffect(() => {
-    if (!archiveMessage) return undefined;
-    const timer = setTimeout(() => setArchiveMessage(null), 5000);
-    return () => clearTimeout(timer);
-  }, [archiveMessage]);
+  const activeAccounts = useMemo(() => activeBankAccounts(bankAccounts), [bankAccounts]);
+  const displayedAccounts = activeAccounts.slice(0, 1);
 
-  const bankSplit = useMemo(() => splitBankAccountsByActiveState(bankAccounts), [bankAccounts]);
-  const sortedActive = bankSplit.active;
-  const sortedArchived = bankSplit.archived;
+  const openNewWizard = () => {
+    setWizardAccount(null);
+    if (activeAccounts.length > 0) {
+      setReplaceDialogOpen(true);
+      return;
+    }
+    setWizardOpen(true);
+  };
 
-  const archiveMutation = useMutation({
-    mutationFn: acc => base44.entities.PersonnelBankAccount.update(acc.id, {
-      is_primary: false,
-      metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
-        ...(acc.metadata || {}),
-        archived: true,
-        archived_at: new Date().toISOString(),
-      }, auditActors),
-    }),
-    onSuccess: () => {
-      setArchiveMessage({ type: "success", text: "Bankrekening is naar het archief gezet." });
-      queryClient.invalidateQueries({ queryKey: ["personnel-bank-accounts"] });
-    },
-  });
+  const confirmReplace = () => {
+    setReplaceDialogOpen(false);
+    setWizardAccount(null);
+    setWizardOpen(true);
+  };
 
-  const restoreMutation = useMutation({
-    mutationFn: async acc => {
-      const existing = await base44.entities.PersonnelBankAccount.filter({ personnel_id: person.id });
-      const now = new Date().toISOString();
-      for (const existingAcc of existing) {
-        if (existingAcc.id !== acc.id && !existingAcc.metadata?.archived) {
-          await base44.entities.PersonnelBankAccount.update(existingAcc.id, {
-            is_primary: false,
-            metadata: buildAuditMetadata(currentUser, "gearchiveerd", {
-              ...(existingAcc.metadata || {}),
-              archived: true,
-              archived_at: now,
-              archived_reason: "Vervangen door teruggezet archiefdocument",
-            }, auditActors),
-          });
-        }
-      }
-      await base44.entities.PersonnelBankAccount.update(acc.id, {
-        is_primary: true,
-        verification_status: verificationStatusForActiveBankAccount(acc),
-        metadata: buildAuditMetadata(currentUser, "teruggezet", {
-          ...(acc.metadata || {}),
-          archived: false,
-          archived_at: null,
-          restored_from_archive_at: now,
-        }, auditActors),
-      });
-    },
-    onSuccess: () => {
-      setArchiveMessage({ type: "success", text: "Bankrekening is teruggezet naar actief." });
-      queryClient.invalidateQueries({ queryKey: ["personnel-bank-accounts"] });
-    },
-  });
-
-  const deleteMutation = useMutation({
-    mutationFn: acc => base44.entities.PersonnelBankAccount.delete(acc.id),
-    onSuccess: () => { setDeleteAcc(null); queryClient.invalidateQueries({ queryKey: ["personnel-bank-accounts"] }); },
-  });
-
-  const openWizard = (archiveMode = false) => {
-    setWizardArchiveMode(archiveMode);
+  const openVerifyWizard = (account) => {
+    setWizardAccount(account);
     setWizardOpen(true);
   };
 
@@ -760,106 +840,66 @@ export default function PersonnelBankTab({ person, bankAccounts, auditActors = [
           <BankAccountWizard
             personnelId={person.id}
             person={person}
-            isArchiveEntry={wizardArchiveMode}
-            onClose={() => setWizardOpen(false)}
-            onSaved={() => setWizardOpen(false)}
+            existingAccount={wizardAccount}
+            replaceAccounts={wizardAccount ? [] : activeAccounts}
             currentUser={currentUser}
             auditActors={auditActors}
+            onClose={() => {
+              setWizardOpen(false);
+              setWizardAccount(null);
+            }}
           />
         )}
       </AnimatePresence>
 
-      <div className={`${BANK_TABLE_GRID} items-center border-b border-border bg-muted/30 px-5 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+      <div className={`border-b border-border/70 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground ${BANK_TABLE_GRID}`}>
         <span>IBAN</span>
-        <span>Rekeninghouder</span>
         <span>Bank</span>
-        <span>Geldig</span>
         <span>Status</span>
         <span>Door</span>
-        {!wizardOpen && (
-          <div className="flex flex-nowrap items-center justify-end gap-2">
-            {showArchive && <Badge className="shrink-0 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300">Archief</Badge>}
-            {showArchive ? (
-              <>
-                <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
-                  <ArrowLeft className="w-3 h-3 mr-1" /> Actieve rekeningen
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => openWizard(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
-                  <Plus className="w-3 h-3 mr-1" /> Voeg oude rekening in archief
-                </Button>
-              </>
-            ) : (
-              <>
-                <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
-                  <Archive className="w-3 h-3 mr-1" /> Archief {sortedArchived.length > 0 ? `(${sortedArchived.length})` : ""}
-                </Button>
-                <Button size="sm" variant="outline" onClick={() => openWizard(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap">
-                  <Plus className="w-3 h-3 mr-1" /> Nieuwe rekening
-                </Button>
-              </>
-            )}
-          </div>
-        )}
-        {wizardOpen && (
-          <div className="flex justify-end">
-            {showArchive && <Badge className="shrink-0 bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300">Archief</Badge>}
-          </div>
-        )}
+        <div className="flex justify-end">
+          {!wizardOpen && (
+            <Button size="sm" variant="outline" onClick={openNewWizard}>
+              <Plus className="mr-1 h-4 w-4" /> Nieuwe rekening
+            </Button>
+          )}
+        </div>
       </div>
 
-      {archiveMessage && !wizardOpen && (
-        <div className="px-5 pt-3">
-          <div className={`flex items-start gap-3 rounded-md border px-3 py-2 text-xs ${
-            archiveMessage.type === "success"
-              ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
-              : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
-          }`}>
-            <span>{archiveMessage.text}</span>
-          </div>
-        </div>
-      )}
-
-      {showArchive ? (
-        sortedArchived.length === 0 ? (
-          <p className="px-5 py-8 text-center text-sm text-muted-foreground">Geen rekeningen in het archief.</p>
-        ) : (
-          <div className="divide-y divide-border">
-            {sortedArchived.map(acc => (
-              <BankAccountRow key={acc.id} acc={acc} archived
-                onPreview={setPreviewAcc}
-                onArchive={archiveMutation.mutate}
-                onRestore={restoreMutation.mutate}
-                onDelete={setDeleteAcc}
-                auditActors={auditActors}
-                restorePending={restoreMutation.isPending}
-              />
-            ))}
-          </div>
-        )
-      ) : sortedActive.length === 0 ? (
-        <p className="px-5 py-8 text-center text-sm text-muted-foreground">Nog geen bankrekening geregistreerd.</p>
-      ) : (
-        <div className="divide-y divide-border">
-          {sortedActive.map(acc => (
-            <BankAccountRow key={acc.id} acc={acc}
-              onPreview={setPreviewAcc}
-              onArchive={archiveMutation.mutate}
-              onDelete={setDeleteAcc}
+      {displayedAccounts.length > 0 ? (
+        <div className="divide-y divide-border/70">
+          {displayedAccounts.map(account => (
+            <BankAccountRow
+              key={account.id}
+              acc={account}
               auditActors={auditActors}
+              onPreview={setPreviewAcc}
+              onOpenActions={setActionAcc}
             />
           ))}
+        </div>
+      ) : (
+        <div className="flex flex-1 items-center justify-center px-5 py-14 text-center">
+          <p className="text-sm text-muted-foreground">Nog geen bankrekening geregistreerd.</p>
         </div>
       )}
 
       <BankAccountPreviewDialog
-        account={previewAcc} open={Boolean(previewAcc)}
-        onOpenChange={open => { if (!open) setPreviewAcc(null); }}
+        account={previewAcc}
+        open={Boolean(previewAcc)}
+        onOpenChange={open => !open && setPreviewAcc(null)}
       />
-      <BankDeleteConfirmDialog
-        account={deleteAcc} open={Boolean(deleteAcc)}
-        onOpenChange={open => { if (!open) setDeleteAcc(null); }}
-        onConfirm={acc => deleteMutation.mutate(acc)}
-        isPending={deleteMutation.isPending}
+      <BankAccountActionsDialog
+        account={actionAcc}
+        open={Boolean(actionAcc)}
+        onOpenChange={open => !open && setActionAcc(null)}
+        onPreview={setPreviewAcc}
+        onVerify={openVerifyWizard}
+      />
+      <BankReplaceConfirmDialog
+        open={replaceDialogOpen}
+        onOpenChange={setReplaceDialogOpen}
+        onConfirm={confirmReplace}
       />
     </div>
   );

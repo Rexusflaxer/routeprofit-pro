@@ -67,6 +67,12 @@
       ],
       "description": "ManagedFile ID voor het bankbewijs"
     },
+    "proof_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "proof_download_filename": {
       "type": [
         "string",
@@ -74,6 +80,54 @@
       ]
     },
     "proof_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proof_front_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proof_front_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proof_front_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proof_front_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proof_back_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proof_back_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proof_back_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "proof_back_logical_path": {
       "type": [
         "string",
         "null"
