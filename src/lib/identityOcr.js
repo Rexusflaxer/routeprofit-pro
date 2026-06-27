@@ -304,21 +304,111 @@ function findDateNearFieldCode(text, fieldCode) {
   const code = String(fieldCode || "").toUpperCase();
   if (!/^\d[A-Z]$/.test(code)) return null;
 
-  const letterPattern = code[1] === "B"
-    ? "[B8V]"
-    : "A?";
-  const guard = code[1] === "A" ? "(?![B8V])" : "";
-  const pattern = new RegExp(`(?:^|[^A-Z0-9])${code[0]}\\s*${letterPattern}\\s*${guard}[:.]?\\s*`, "gi");
+  const patterns = code === "4A"
+    ? [
+        /(?:^|[^A-Z0-9])4\s*A\s*[:.]?\s*/gi,
+        /(?:^|[^A-Z0-9])4(?=[0-3OQDILSB][0-9OQDILSB][01OQDILSB][0-9OQDILSB](?:19|20)?[0-9OQDILSB]{2})/gi,
+      ]
+    : code === "4B"
+      ? [/(?:^|[^A-Z0-9])4\s*[B8V]\s*[:.]?\s*/gi]
+      : [new RegExp(`(?:^|[^A-Z0-9])${code[0]}\\s*${code[1]}\\s*[:.]?\\s*`, "gi")];
 
   for (const line of upper.split(/\r?\n/)) {
-    for (const match of line.matchAll(pattern)) {
-      const slice = line.slice(match.index + match[0].length, match.index + match[0].length + 90);
-      const date = parseVisibleDate(slice) || parseCompactVisibleDate(slice);
-      if (date) return date;
+    for (const pattern of patterns) {
+      for (const match of line.matchAll(pattern)) {
+        const slice = line.slice(match.index + match[0].length, match.index + match[0].length + 90);
+        const date = parseVisibleDate(slice) || parseCompactVisibleDate(slice);
+        if (date) return date;
+      }
     }
   }
 
   return null;
+}
+
+function parseFirstVisibleOrCompactDate(value) {
+  return parseVisibleDate(value) || extractVisibleDates(value)[0]?.date || parseCompactVisibleDate(value) || "";
+}
+
+function findDriversLicenseIssueDateBeforeExpiryCode(value) {
+  const upper = String(value || "").toUpperCase();
+  const candidates = [];
+  const patterns = [
+    /(?:^|[^A-Z0-9])4\s*A\s*[:.]?\s*([0-3OQDILSB]?[0-9OQDILSB][\s./-]?[01OQDILSB]?[0-9OQDILSB][\s./-]?(?:(?:19|20)?[0-9OQDILSB]{2}))/gi,
+    /(?:^|[^A-Z0-9])4\s*([0-3OQDILSB][0-9OQDILSB][\s./-]?[01OQDILSB][0-9OQDILSB][\s./-]?(?:(?:19|20)?[0-9OQDILSB]{2}))/gi,
+  ];
+
+  for (const pattern of patterns) {
+    for (const match of upper.matchAll(pattern)) {
+      const date = parseVisibleDate(match[1]) || parseCompactVisibleDate(match[1]);
+      if (date) candidates.push(date);
+    }
+  }
+
+  return candidates.at(-1) || "";
+}
+
+function isPlausibleDriversLicenseValidity(validFrom, validUntil) {
+  if (!validFrom || !validUntil || validUntil <= validFrom) return false;
+  const fromYear = Number(validFrom.slice(0, 4));
+  const untilYear = Number(validUntil.slice(0, 4));
+  return untilYear - fromYear <= 20;
+}
+
+function findDriversLicenseValidityFromVisibleDates(text, birthDate = "") {
+  const today = new Date().toISOString().split("T")[0];
+  const dates = Array.from(new Set(
+    extractVisibleDates(text)
+      .map(item => item.date)
+      .filter(date => date && date !== birthDate)
+  ));
+  const validUntilCandidates = dates
+    .filter(date => date > today)
+    .sort((a, b) => a.localeCompare(b));
+
+  for (const validUntil of validUntilCandidates) {
+    const validFrom = dates
+      .filter(date => date < validUntil && date <= today)
+      .sort((a, b) => b.localeCompare(a))[0] || "";
+    if (isPlausibleDriversLicenseValidity(validFrom, validUntil)) {
+      return { valid_from: validFrom, valid_until: validUntil };
+    }
+  }
+
+  return { valid_from: "", valid_until: "" };
+}
+
+function findDriversLicenseValidityDates(text, birthDate = "") {
+  const upper = String(text || "").toUpperCase();
+  const expiryCodePattern = /(?:^|[^A-Z0-9])4\s*[B8V]\s*[:.]?\s*/gi;
+
+  for (const line of upper.split(/\r?\n/)) {
+    for (const match of line.matchAll(expiryCodePattern)) {
+      const beforeExpiry = line.slice(0, match.index + match[0].length);
+      const afterExpiry = line.slice(match.index + match[0].length, match.index + match[0].length + 90);
+      const validFrom = findDateNearFieldCode(beforeExpiry, "4A") || findDriversLicenseIssueDateBeforeExpiryCode(beforeExpiry);
+      const validUntil = parseFirstVisibleOrCompactDate(afterExpiry);
+      if (isPlausibleDriversLicenseValidity(validFrom, validUntil)) {
+        return { valid_from: validFrom, valid_until: validUntil };
+      }
+    }
+  }
+
+  const validFrom = findDateNearFieldCode(upper, "4A") || "";
+  const validUntil = findDateNearFieldCode(upper, "4B") || "";
+  if (isPlausibleDriversLicenseValidity(validFrom, validUntil)) {
+    return { valid_from: validFrom, valid_until: validUntil };
+  }
+
+  const visibleValidity = findDriversLicenseValidityFromVisibleDates(upper, birthDate);
+  if (isPlausibleDriversLicenseValidity(visibleValidity.valid_from, visibleValidity.valid_until)) {
+    return visibleValidity;
+  }
+
+  return {
+    valid_from: validFrom,
+    valid_until: validUntil,
+  };
 }
 
 function normalizeMrzLine(line) {
@@ -1223,8 +1313,7 @@ export function parseIdentityOcrText(text, { docType = "passport" } = {}) {
     mrz.valid_until || visibleUntil,
     mrz.birth_date || visiblePerson.birth_date
   );
-  const driversLicenseValidFrom = isDriversLicense ? findDateNearFieldCode(text, "4A") : "";
-  const driversLicenseValidUntil = isDriversLicense ? findDateNearFieldCode(text, "4B") : "";
+  const driversLicenseValidity = isDriversLicense ? findDriversLicenseValidityDates(text, person.birth_date) : {};
 
   return {
     document_number: mrz.document_number
@@ -1232,8 +1321,8 @@ export function parseIdentityOcrText(text, { docType = "passport" } = {}) {
       || (isIdCard ? findIdCardNumberInText(text) : "")
       || findDocumentNumberInText(text),
     bsn: mrz.bsn || findBsnInText(text),
-    valid_from: isDriversLicense ? driversLicenseValidFrom || "" : validFrom || "",
-    valid_until: isDriversLicense ? driversLicenseValidUntil || "" : mrz.valid_until || visibleUntil || "",
+    valid_from: isDriversLicense ? driversLicenseValidity.valid_from || "" : validFrom || "",
+    valid_until: isDriversLicense ? driversLicenseValidity.valid_until || "" : mrz.valid_until || visibleUntil || "",
     person,
     mrz_format: mrz.format || null,
   };
