@@ -19,8 +19,8 @@ import { uploadManagedFile } from "@/lib/managedFiles";
 import { recognizeBankCard } from "@/lib/bankOcr";
 
 const BANK_CARD_GUIDE_IMAGES = {
-  front: "/bank-guides/ing-bank-card-front.png",
-  back: "/bank-guides/ing-bank-card-back.png",
+  front: "/bank-guides/abn-amro-bank-card-front.png",
+  back: "/bank-guides/abn-amro-bank-card-back.png",
 };
 
 const DELETE_PASSWORD = "verwijder";
