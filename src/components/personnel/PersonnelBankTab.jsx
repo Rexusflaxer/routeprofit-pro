@@ -379,7 +379,6 @@ function BankAccountWizard({
     return isMaskedIban(value) ? "" : formatIbanInput(value);
   });
   const [bankName, setBankName] = useState(existingAccount?.bank_name || "");
-  const [notes, setNotes] = useState(existingAccount?.notes || "");
   const [frontFile, setFrontFile] = useState(null);
   const [frontPreview, setFrontPreview] = useState(null);
   const [backFile, setBackFile] = useState(null);
@@ -534,7 +533,6 @@ function BankAccountWizard({
         proof_back_logical_path: backUpload?.logical_path || existingAccount?.proof_back_logical_path || null,
         is_primary: true,
         verification_status: hasUpload ? "verified" : "pending_review",
-        notes: notes || null,
       };
 
       const metaPayload = {
@@ -678,10 +676,7 @@ function BankAccountWizard({
                       <Label>Bank</Label>
                       <Input value={bankName} onChange={event => setBankName(event.target.value)} placeholder="Naam van de bank" />
                     </div>
-                    <div className="space-y-1">
-                      <Label>Notities <span className="font-normal text-muted-foreground">(optioneel)</span></Label>
-                      <Input value={notes} onChange={event => setNotes(event.target.value)} placeholder="Bijv. salarisrekening" />
-                    </div>
+
                   </div>
                   <div className="pt-3">
                     <Button variant="ghost" size="sm" onClick={() => setStep(1)} className="h-7 px-2 text-xs text-muted-foreground">
