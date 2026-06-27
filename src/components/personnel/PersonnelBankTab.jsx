@@ -18,8 +18,7 @@ import { prepareBankAccountSensitiveData } from "@/lib/sensitiveFields";
 import { uploadManagedFile } from "@/lib/managedFiles";
 import { recognizeBankCard } from "@/lib/bankOcr";
 
-const BANK_CARD_FRONT_EXAMPLE = "https://media.base44.com/images/public/698e307ed3aa4cab3729bbf1/4859a7a0b_generated_image.png";
-const BANK_CARD_BACK_EXAMPLE = "https://media.base44.com/images/public/698e307ed3aa4cab3729bbf1/8d7a4fd81_generated_image.png";
+const BANK_CARD_SOURCE_IMAGE = "https://media.base44.com/images/public/698e307ed3aa4cab3729bbf1/18c07282b_ING016-07-Betaalpas_nfc_voorbeeld_300dpi_tcm14-136604.jpg";
 
 const DELETE_PASSWORD = "verwijder";
 const BANK_TABLE_GRID = "grid grid-cols-[minmax(140px,180px)_minmax(120px,160px)_minmax(100px,140px)_minmax(130px,160px)_minmax(110px,130px)_minmax(110px,1fr)_minmax(240px,max-content)] gap-3";
@@ -271,15 +270,20 @@ function WizardSteps({ step, labels }) {
 
 function BankCardGuideImage({ side = "front" }) {
   const isBack = side === "back";
+  // Source image has three sections side by side: front (left), back (center), contactless (right).
+  // CSS background cropping shows only the relevant third.
   return (
-    <div className="flex h-36 w-[260px] items-center justify-center overflow-hidden rounded border border-border bg-white shadow-sm">
-      <img
-        src={isBack ? BANK_CARD_BACK_EXAMPLE : BANK_CARD_FRONT_EXAMPLE}
-        alt={isBack ? "Voorbeeld achterkant bankpas" : "Voorbeeld voorkant bankpas"}
-        className="h-full w-full object-contain"
-        draggable="false"
-      />
-    </div>
+    <div
+      className="h-36 w-[260px] rounded border border-border bg-white shadow-sm"
+      style={{
+        backgroundImage: `url(${BANK_CARD_SOURCE_IMAGE})`,
+        backgroundSize: "300% auto",
+        backgroundPosition: isBack ? "50% center" : "0% center",
+        backgroundRepeat: "no-repeat",
+      }}
+      role="img"
+      aria-label={isBack ? "Voorbeeld achterkant bankpas" : "Voorbeeld voorkant bankpas"}
+    />
   );
 }
 
