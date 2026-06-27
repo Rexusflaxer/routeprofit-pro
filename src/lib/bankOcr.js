@@ -1,7 +1,7 @@
 // OCR helpers for bank card / bank statement uploads.
-// Uses tesseract.js (already installed) to extract only the IBAN from
-// uploaded front/back images of a bank card. Bank name is derived from the
-// typed or recognized IBAN in the UI.
+// Uses tesseract.js (already installed) to extract the IBAN and background
+// account-holder text from uploaded front/back images of a bank card.
+// Bank name is derived from the typed or recognized IBAN in the UI.
 
 function normalizeIban(value) {
   return String(value || "")
@@ -13,6 +13,10 @@ function formatIban(value) {
   const clean = normalizeIban(value);
   if (!clean) return "";
   return clean.replace(/(.{4})/g, "$1 ").trim();
+}
+
+function compact(value) {
+  return String(value || "").replace(/\s+/g, " ").trim();
 }
 
 // IBAN pattern: 2 letters country code, 2 digits check, then 11-30 alphanumeric
@@ -165,6 +169,51 @@ function findIbanInText(text) {
   return "";
 }
 
+function isLikelyPersonName(value) {
+  const text = compact(value)
+    .replace(/[|]/g, " ")
+    .replace(/\s+/g, " ");
+  if (text.length < 4 || text.length > 64) return false;
+  if (/[0-9<>]/.test(text)) return false;
+  if (/\b(ABN\s*[·.\-]?\s*AMRO|RABOBANK|ING|BUNQ|MAESTRO|MASTERCARD|VISA|DEBIT|BETAALPAS)\b/i.test(text)) return false;
+  if (/\b(BANK|BANKIER|IBAN|BIC|SWIFT|KAARTHOUDER|CARDHOLDER|CARD|HOLDER|NAAM|NAME|CVV|CVC|VALID|GELDIG|THRU|EUR|EURO|CREDIT|DEBIT|PAS|CHIP|CONTACTLESS|CONTACTLOOS|VPAY|PIN|GIRO|REKENING|NUMMER|NR)\b/i.test(text)) return false;
+
+  const words = text.split(/\s+/).filter(Boolean);
+  if (words.length < 2) return false;
+  return words.every(word => /^[A-ZÀ-ÿ][A-ZÀ-ÿa-zà-ÿ'’.-]*$/u.test(word));
+}
+
+function findAccountHolderInText(text) {
+  const lines = String(text || "")
+    .split(/\r?\n/)
+    .map(line => compact(line))
+    .filter(Boolean);
+
+  const labelPatterns = [
+    /\b(?:KAARTHOUDER|CARDHOLDER|CARD\s+HOLDER|NAAM|NAME)\b/i,
+  ];
+
+  for (const pattern of labelPatterns) {
+    for (let index = 0; index < lines.length; index += 1) {
+      if (!pattern.test(lines[index])) continue;
+
+      const sameLine = compact(lines[index].replace(pattern, "").replace(/^[:.\-\s]+/, ""));
+      if (sameLine && isLikelyPersonName(sameLine)) return sameLine;
+
+      for (let offset = 1; offset <= 2; offset += 1) {
+        const candidate = compact(lines[index + offset] || "");
+        if (candidate && isLikelyPersonName(candidate)) return candidate;
+      }
+    }
+  }
+
+  for (const line of lines) {
+    if (isLikelyPersonName(line)) return line;
+  }
+
+  return "";
+}
+
 export function detectBankNameFromIban(iban) {
   if (iban) {
     const clean = normalizeIban(iban);
@@ -244,9 +293,11 @@ export async function recognizeBankCard({ frontFile, backFile, onProgress }) {
 
     const rawText = textParts.join("\n");
     const iban = findIbanInText(rawText);
+    const accountHolderName = findAccountHolderInText(rawText);
 
     return {
       iban: iban ? formatIban(iban) : "",
+      account_holder_name: accountHolderName || "",
       raw_text: rawText,
       detected_fields: iban ? ["iban"] : [],
     };

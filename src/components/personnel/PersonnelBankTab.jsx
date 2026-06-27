@@ -116,6 +116,86 @@ function activeBankAccounts(accounts) {
     .sort((a, b) => String(b.updated_date || b.created_date || b.id || "").localeCompare(String(a.updated_date || a.created_date || a.id || "")));
 }
 
+function normalizeMatchText(value) {
+  return String(value || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/IJ/g, "Y")
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim();
+}
+
+function matchTokens(value) {
+  return normalizeMatchText(value)
+    .split(/\s+/)
+    .filter(token => token.length > 1);
+}
+
+function countTokenMatches(expected, recognized) {
+  const expectedTokens = matchTokens(expected);
+  const recognizedTokens = matchTokens(recognized);
+  if (!expectedTokens.length || !recognizedTokens.length) return 0;
+
+  return expectedTokens.filter(expectedToken => (
+    recognizedTokens.some(recognizedToken => (
+      recognizedToken === expectedToken
+      || recognizedToken.includes(expectedToken)
+      || expectedToken.includes(recognizedToken)
+    ))
+  )).length;
+}
+
+function profileNameForMatch(person) {
+  return [
+    person?.legal_first_names || person?.first_name || person?.call_name,
+    person?.name_prefix,
+    person?.last_name,
+  ].filter(Boolean).join(" ") || person?.name || "";
+}
+
+function profileLastNameForMatch(person) {
+  return [person?.name_prefix, person?.last_name].filter(Boolean).join(" ") || "";
+}
+
+function buildBankHolderMatch(person, recognizedHolder) {
+  const holder = String(recognizedHolder || "").trim();
+  const profileName = profileNameForMatch(person);
+  const profileLastName = profileLastNameForMatch(person);
+
+  if (!holder || !matchTokens(profileName).length) {
+    return {
+      status: "unknown",
+      profile_name: profileName,
+      recognized_holder: holder,
+      issues: [],
+    };
+  }
+
+  const lastNameTokens = matchTokens(profileLastName);
+  const lastNameMatches = lastNameTokens.length ? countTokenMatches(profileLastName, holder) > 0 : false;
+  const fullNameMatchCount = countTokenMatches(profileName, holder);
+  const hasConfidentMatch = lastNameMatches || fullNameMatchCount >= 2 || (!lastNameTokens.length && fullNameMatchCount >= 1);
+
+  if (hasConfidentMatch) {
+    return {
+      status: "matched",
+      profile_name: profileName,
+      recognized_holder: holder,
+      issues: [],
+    };
+  }
+
+  return {
+    status: "review",
+    profile_name: profileName,
+    recognized_holder: holder,
+    issues: [
+      "De rekeninghouder op de bankpas lijkt niet overeen te komen met dit medewerkersprofiel.",
+    ],
+  };
+}
+
 function BankStatusBadge({ acc }) {
   if (isVerifiedBankAccount(acc)) {
     return <Badge className="whitespace-nowrap border-0 bg-green-100 text-xs text-green-800 dark:bg-green-900/45 dark:text-green-200">Geverifieerd</Badge>;
@@ -362,6 +442,28 @@ function BankUploadGuideCard({ frontUpload, backUpload }) {
   );
 }
 
+function BankHolderMatchNotice({ match }) {
+  if (!match || match.status !== "review") return null;
+
+  return (
+    <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-amber-950 dark:border-amber-900/60 dark:bg-amber-950/20 dark:text-amber-100">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div>
+          <p className="text-xs font-semibold">Controleer rekeninghouder</p>
+          <p className="mt-0.5 text-xs opacity-85">
+            De herkende naam op de bankpas lijkt niet bij dit medewerkersprofiel te horen.
+          </p>
+          <div className="mt-1 space-y-0.5 text-xs opacity-85">
+            <p>Profiel: {match.profile_name || "Onbekend"}</p>
+            <p>Bankpas: {match.recognized_holder || "Niet herkend"}</p>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BankAccountWizard({
   personnelId,
   person,
@@ -386,6 +488,8 @@ function BankAccountWizard({
   const [uploading, setUploading] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
   const [recognizedUploadKey, setRecognizedUploadKey] = useState("");
+  const [recognizedHolderName, setRecognizedHolderName] = useState(existingAccount?.metadata?.recognized_account_holder_name || "");
+  const [holderMatch, setHolderMatch] = useState(existingAccount?.metadata?.bank_holder_match || null);
   const [errors, setErrors] = useState({});
   const latestUploadKeyRef = useRef("");
 
@@ -412,11 +516,20 @@ function BankAccountWizard({
     }
   }, []);
 
+  const resetRecognition = useCallback(() => {
+    setRecognizedUploadKey("");
+    setRecognizedHolderName("");
+    setHolderMatch(null);
+  }, []);
+
   const applyRecognizedFields = useCallback((result) => {
     if (result.iban) {
       handleIbanChange(result.iban);
     }
-  }, [handleIbanChange]);
+    const holderName = result.account_holder_name || "";
+    setRecognizedHolderName(holderName);
+    setHolderMatch(buildBankHolderMatch(person, holderName));
+  }, [handleIbanChange, person]);
 
   const runRecognition = useCallback(async () => {
     if ((!frontFile && !backFile) || recognizing || recognizedUploadKey === uploadKey) return;
@@ -542,6 +655,8 @@ function BankAccountWizard({
         proof_front_file_url: frontProofUrl,
         proof_back_file_url: backProofUrl,
         verification_source: hasUpload ? "bank_card_upload" : "manual",
+        recognized_account_holder_name: hasUpload ? recognizedHolderName || null : null,
+        bank_holder_match: hasUpload ? holderMatch : null,
         replaced_bank_account_ids: existingAccount ? [] : replaceAccounts.map(acc => acc.id),
       };
 
@@ -607,7 +722,11 @@ function BankAccountWizard({
                     label="Voorkant"
                     hint="Upload hier de voorzijde met chip."
                     previewUrl={frontPreview}
-                    onFileSelected={(file, preview) => { setFrontFile(file); setFrontPreview(preview); }}
+                    onFileSelected={(file, preview) => {
+                      setFrontFile(file);
+                      setFrontPreview(preview);
+                      resetRecognition();
+                    }}
                   />
                 }
                 backUpload={
@@ -615,7 +734,11 @@ function BankAccountWizard({
                     label="Achterkant"
                     hint="Upload hier de achterzijde."
                     previewUrl={backPreview}
-                    onFileSelected={(file, preview) => { setBackFile(file); setBackPreview(preview); }}
+                    onFileSelected={(file, preview) => {
+                      setBackFile(file);
+                      setBackPreview(preview);
+                      resetRecognition();
+                    }}
                   />
                 }
               />
@@ -676,7 +799,7 @@ function BankAccountWizard({
                       <Label>Bank</Label>
                       <Input value={bankName} onChange={event => setBankName(event.target.value)} placeholder="Naam van de bank" />
                     </div>
-
+                    <BankHolderMatchNotice match={holderMatch} />
                   </div>
                   <div className="pt-3">
                     <Button variant="ghost" size="sm" onClick={() => setStep(1)} className="h-7 px-2 text-xs text-muted-foreground">
