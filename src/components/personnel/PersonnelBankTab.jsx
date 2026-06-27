@@ -196,6 +196,61 @@ function buildBankHolderMatch(person, recognizedHolder) {
   };
 }
 
+function uniqueNormalizedItems(items) {
+  const seen = new Set();
+  const unique = [];
+
+  for (const item of items || []) {
+    const label = String(item || "").trim();
+    const normalized = normalizeMatchText(label);
+    if (!label || !normalized || seen.has(normalized)) continue;
+    seen.add(normalized);
+    unique.push(label);
+  }
+
+  return unique;
+}
+
+function holderNamesConflict(firstHolder, secondHolder) {
+  if (!firstHolder || !secondHolder) return false;
+  const firstLastToken = matchTokens(firstHolder).at(-1);
+  const secondLastToken = matchTokens(secondHolder).at(-1);
+  if (firstLastToken && secondLastToken && (
+    firstLastToken === secondLastToken
+    || firstLastToken.includes(secondLastToken)
+    || secondLastToken.includes(firstLastToken)
+  )) {
+    return false;
+  }
+  return countTokenMatches(firstHolder, secondHolder) === 0;
+}
+
+function buildBankUploadConsistency(result) {
+  const sideResults = result?.side_results || [];
+  const ibans = uniqueNormalizedItems(result?.detected_ibans || sideResults.map(side => side.iban));
+  const banks = uniqueNormalizedItems(sideResults.map(side => side.bank_name));
+  const holders = uniqueNormalizedItems(result?.detected_account_holders || sideResults.map(side => side.account_holder_name));
+  const issues = [];
+
+  if (ibans.length > 1) {
+    issues.push("Voor- en achterkant bevatten verschillende IBAN-nummers.");
+  }
+  if (banks.length > 1) {
+    issues.push("Voor- en achterkant lijken van verschillende banken te zijn.");
+  }
+  if (holders.length > 1) {
+    const hasHolderConflict = holders.some((holder, index) => (
+      holders.slice(index + 1).some(otherHolder => holderNamesConflict(holder, otherHolder))
+    ));
+    if (hasHolderConflict) {
+      issues.push("Voor- en achterkant lijken van verschillende rekeninghouders te zijn.");
+    }
+  }
+
+  if (!issues.length) return { status: "matched", issues: [] };
+  return { status: "blocked", issues, ibans, banks, holders };
+}
+
 function BankStatusBadge({ acc }) {
   if (isVerifiedBankAccount(acc)) {
     return <Badge className="whitespace-nowrap border-0 bg-green-100 text-xs text-green-800 dark:bg-green-900/45 dark:text-green-200">Geverifieerd</Badge>;
@@ -464,6 +519,29 @@ function BankHolderMatchNotice({ match }) {
   );
 }
 
+function BankUploadConsistencyNotice({ consistency }) {
+  if (!consistency || consistency.status !== "blocked" || !consistency.issues?.length) return null;
+
+  return (
+    <div className="rounded-md border border-red-200 bg-red-50 px-3 py-2 text-red-950 dark:border-red-900/60 dark:bg-red-950/20 dark:text-red-100">
+      <div className="flex items-start gap-2">
+        <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />
+        <div>
+          <p className="text-xs font-semibold">Controleer voor- en achterkant</p>
+          <p className="mt-0.5 text-xs opacity-85">
+            De uploads lijken niet bij dezelfde bankpas te horen. Upload de juiste voor- en achterkant opnieuw.
+          </p>
+          <div className="mt-1 space-y-0.5 text-xs opacity-85">
+            {consistency.issues.map(issue => (
+              <p key={issue}>{issue}</p>
+            ))}
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BankAccountWizard({
   personnelId,
   person,
@@ -490,6 +568,7 @@ function BankAccountWizard({
   const [recognizedUploadKey, setRecognizedUploadKey] = useState("");
   const [recognizedHolderName, setRecognizedHolderName] = useState(existingAccount?.metadata?.recognized_account_holder_name || "");
   const [holderMatch, setHolderMatch] = useState(existingAccount?.metadata?.bank_holder_match || null);
+  const [uploadConsistency, setUploadConsistency] = useState(existingAccount?.metadata?.bank_upload_consistency || null);
   const [errors, setErrors] = useState({});
   const latestUploadKeyRef = useRef("");
 
@@ -520,6 +599,7 @@ function BankAccountWizard({
     setRecognizedUploadKey("");
     setRecognizedHolderName("");
     setHolderMatch(null);
+    setUploadConsistency(null);
   }, []);
 
   const applyRecognizedFields = useCallback((result) => {
@@ -529,6 +609,7 @@ function BankAccountWizard({
     const holderName = result.account_holder_name || "";
     setRecognizedHolderName(holderName);
     setHolderMatch(buildBankHolderMatch(person, holderName));
+    setUploadConsistency(buildBankUploadConsistency(result));
   }, [handleIbanChange, person]);
 
   const runRecognition = useCallback(async () => {
@@ -560,6 +641,9 @@ function BankAccountWizard({
     else if (isMaskedIban(normalizedIban)) nextErrors.iban = "Vul het volledige IBAN in";
     else if (normalizedIban.length < 15) nextErrors.iban = "IBAN te kort";
     else if (!ibanPattern.test(normalizedIban)) nextErrors.iban = "Ongeldig IBAN formaat";
+    if (uploadConsistency?.status === "blocked") {
+      nextErrors.upload_consistency = "Controleer de voor- en achterkant van de bankpas.";
+    }
 
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -657,6 +741,7 @@ function BankAccountWizard({
         verification_source: hasUpload ? "bank_card_upload" : "manual",
         recognized_account_holder_name: hasUpload ? recognizedHolderName || null : null,
         bank_holder_match: hasUpload ? holderMatch : null,
+        bank_upload_consistency: hasUpload ? uploadConsistency : null,
         replaced_bank_account_ids: existingAccount ? [] : replaceAccounts.map(acc => acc.id),
       };
 
@@ -799,7 +884,9 @@ function BankAccountWizard({
                       <Label>Bank</Label>
                       <Input value={bankName} onChange={event => setBankName(event.target.value)} placeholder="Naam van de bank" />
                     </div>
+                    <BankUploadConsistencyNotice consistency={uploadConsistency} />
                     <BankHolderMatchNotice match={holderMatch} />
+                    {errors.upload_consistency && <p className="text-xs text-destructive">{errors.upload_consistency}</p>}
                   </div>
                   <div className="pt-3">
                     <Button variant="ghost" size="sm" onClick={() => setStep(1)} className="h-7 px-2 text-xs text-muted-foreground">

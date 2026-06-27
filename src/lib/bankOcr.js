@@ -130,43 +130,63 @@ function normalizePotentialIban(value) {
   return "";
 }
 
-function findIbanInText(text) {
+function collectIbanCandidates(text) {
   const upper = String(text || "").toUpperCase();
   const candidates = [];
 
   // Try with spaces first (as printed on cards)
-  const spacedMatches = upper.match(/\b[A-Z]{2}[\s.\-]?[0-9OQDILSZB]{2}(?:[\s.\-]?[A-Z0-9]{2,4}){3,8}\b/g) || [];
+  const spacedMatches = upper.match(/\b[A-Z]{2}[\s.\-]?[0-9OQDILSZBG]{2}(?:[\s.\-]?[A-Z0-9]{2,4}){3,8}\b/g) || [];
   candidates.push(...spacedMatches);
 
   // Dutch bank cards are often printed as "NL67 ABNA 0464 8530 36"; OCR may
   // confuse O/0 and I/1, so collect a compact NL candidate and correct it.
   const compactText = normalizeIban(upper);
-  const dutchMatches = compactText.match(/N[L1I][0-9OQDILSZB]{2}[A-Z0-9]{4}[A-Z0-9]{10}/g) || [];
+  const dutchMatches = compactText.match(/N[L1I][0-9OQDILSZBG]{2}[A-Z0-9]{4}[A-Z0-9]{10}/g) || [];
   candidates.push(...dutchMatches);
 
   // Try compact/general IBAN candidates.
   const compactMatches = compactText.match(/[A-Z]{2}\d{2}[A-Z0-9]{11,30}/g) || [];
   candidates.push(...compactMatches);
 
-  for (const candidate of candidates) {
-    const normalized = normalizePotentialIban(candidate);
-    if (normalized) {
-      return normalized;
-    }
-  }
-
   // Try compact fallback without checksum, for countries/cards where OCR drops
   // one trailing character. This keeps old behavior but only after stronger tries.
   const match = upper.match(IBAN_REGEX);
-  if (match) return normalizeIban(match[1]);
+  if (match) candidates.push(normalizeIban(match[1]));
 
   // Try loose: find any sequence that looks like an IBAN
   const loose = upper.match(/\b(NL|BE|DE|FR|GB|ES|IT|AT|CH|LU|IE|PT|FI|EE|LV|LT|CY|MT|SI|SK|BG|RO|HR|PL|CZ|HU|DK|SE|NO|IS)[0-9]{2}[A-Z0-9]{8,30}\b/);
   if (loose) {
     const clean = normalizeIban(loose[0]);
-    if (clean.length >= 15 && clean.length <= 34) return clean;
+    if (clean.length >= 15 && clean.length <= 34) candidates.push(clean);
   }
-  return "";
+
+  return candidates;
+}
+
+function findIbansInText(text) {
+  const found = [];
+
+  for (const candidate of collectIbanCandidates(text)) {
+    const normalized = normalizePotentialIban(candidate);
+    if (normalized && !found.includes(normalized)) {
+      found.push(normalized);
+    }
+  }
+
+  const upper = String(text || "").toUpperCase();
+  const fallback = upper.match(IBAN_REGEX);
+  if (fallback) {
+    const normalized = normalizeIban(fallback[1]);
+    if (normalized && !found.includes(normalized)) {
+      found.push(normalized);
+    }
+  }
+
+  return found;
+}
+
+function findIbanInText(text) {
+  return findIbansInText(text)[0] || "";
 }
 
 function isLikelyPersonName(value) {
@@ -225,6 +245,23 @@ export function detectBankNameFromIban(iban) {
   return "";
 }
 
+function detectBankNameInText(text) {
+  const normalized = String(text || "")
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase();
+
+  if (/\bABN[\s·.\-]*AMRO\b/.test(normalized) || /\bABNA\b/.test(normalized)) return "ABN AMRO";
+  if (/\bRABO(?:BANK)?\b/.test(normalized) || /\bCOOPERATIEVE\s+RABOBANK\b/.test(normalized)) return "Rabobank";
+  if (/\bINGB?\b/.test(normalized) || /\bING\s+BANK\b/.test(normalized)) return "ING";
+  if (/\bBUNQ\b/.test(normalized)) return "bunq";
+  if (/\bSNS\b/.test(normalized)) return "SNS Bank";
+  if (/\bASN\b/.test(normalized)) return "ASN Bank";
+  if (/\bREGIOBANK\b/.test(normalized)) return "RegioBank";
+  if (/\bTRIODOS\b/.test(normalized)) return "Triodos Bank";
+  return "";
+}
+
 function loadImage(source) {
   return new Promise((resolve, reject) => {
     const img = new Image();
@@ -234,33 +271,43 @@ function loadImage(source) {
   });
 }
 
-async function imageToDataUrl(file) {
+function canvasToDataUrl(image, crop, targetWidth = 2400) {
+  const sourceWidth = image.naturalWidth || image.width;
+  const sourceHeight = image.naturalHeight || image.height;
+  const cropX = Math.max(0, Math.round((crop?.x ?? 0) * sourceWidth));
+  const cropY = Math.max(0, Math.round((crop?.y ?? 0) * sourceHeight));
+  const cropWidth = Math.max(1, Math.round((crop?.width ?? 1) * sourceWidth));
+  const cropHeight = Math.max(1, Math.round((crop?.height ?? 1) * sourceHeight));
+  const scale = Math.min(2.4, targetWidth / cropWidth);
+  const outputWidth = Math.max(1, Math.round(cropWidth * scale));
+  const outputHeight = Math.max(1, Math.round(cropHeight * scale));
+  const canvas = document.createElement("canvas");
+  canvas.width = outputWidth;
+  canvas.height = outputHeight;
+  const ctx = canvas.getContext("2d");
+  ctx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, outputWidth, outputHeight);
+
+  const imageData = ctx.getImageData(0, 0, outputWidth, outputHeight);
+  const data = imageData.data;
+  for (let i = 0; i < data.length; i += 4) {
+    const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
+    const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.45 + 128));
+    data[i] = contrasted;
+    data[i + 1] = contrasted;
+    data[i + 2] = contrasted;
+  }
+  ctx.putImageData(imageData, 0, 0);
+  return canvas.toDataURL("image/jpeg", 0.94);
+}
+
+async function imageToDataUrls(file) {
   const image = await loadImage(file);
   try {
-    const sourceWidth = image.naturalWidth || image.width;
-    const sourceHeight = image.naturalHeight || image.height;
-    const maxWidth = 2200;
-    const scale = Math.min(1.8, maxWidth / sourceWidth);
-    const targetWidth = Math.max(1, Math.round(sourceWidth * scale));
-    const targetHeight = Math.max(1, Math.round(sourceHeight * scale));
-    const canvas = document.createElement("canvas");
-    canvas.width = targetWidth;
-    canvas.height = targetHeight;
-    const ctx = canvas.getContext("2d");
-    ctx.drawImage(image, 0, 0, sourceWidth, sourceHeight, 0, 0, targetWidth, targetHeight);
-
-    // Enhance contrast for better OCR
-    const imageData = ctx.getImageData(0, 0, targetWidth, targetHeight);
-    const data = imageData.data;
-    for (let i = 0; i < data.length; i += 4) {
-      const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-      const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.35 + 128));
-      data[i] = contrasted;
-      data[i + 1] = contrasted;
-      data[i + 2] = contrasted;
-    }
-    ctx.putImageData(imageData, 0, 0);
-    return canvas.toDataURL("image/jpeg", 0.92);
+    return [
+      canvasToDataUrl(image, { x: 0, y: 0, width: 1, height: 1 }, 2400),
+      canvasToDataUrl(image, { x: 0, y: 0, width: 1, height: 0.55 }, 2600),
+      canvasToDataUrl(image, { x: 0, y: 0.45, width: 1, height: 0.55 }, 2600),
+    ];
   } finally {
     URL.revokeObjectURL(image.src);
   }
@@ -283,21 +330,67 @@ export async function recognizeBankCard({ frontFile, backFile, onProgress }) {
     });
 
     const textParts = [];
-    const files = [frontFile, backFile].filter(Boolean);
+    const sideResults = [];
+    const files = [
+      { side: "front", file: frontFile },
+      { side: "back", file: backFile },
+    ].filter(item => Boolean(item.file));
 
-    for (const file of files) {
-      const image = await imageToDataUrl(file);
-      const { data } = await worker.recognize(image);
-      textParts.push(data.text || "");
+    for (const { side, file } of files) {
+      const sideTextParts = [];
+      const images = await imageToDataUrls(file);
+      for (const image of images) {
+        const { data } = await worker.recognize(image);
+        sideTextParts.push(data.text || "");
+      }
+
+      const sideText = sideTextParts.join("\n");
+      const sideIbans = findIbansInText(sideText);
+      const sideIban = sideIbans[0] || "";
+      const sideBankName = detectBankNameFromIban(sideIban) || detectBankNameInText(sideText);
+      const sideHolderName = findAccountHolderInText(sideText);
+
+      sideResults.push({
+        side,
+        iban: sideIban ? formatIban(sideIban) : "",
+        iban_raw: sideIban,
+        account_holder_name: sideHolderName || "",
+        bank_name: sideBankName || "",
+      });
+      textParts.push(`[${side}]\n${sideText}`);
     }
 
     const rawText = textParts.join("\n");
-    const iban = findIbanInText(rawText);
-    const accountHolderName = findAccountHolderInText(rawText);
+    const ibans = [];
+    const accountHolderNames = [];
+
+    for (const result of sideResults) {
+      if (result.iban_raw && !ibans.includes(result.iban_raw)) {
+        ibans.push(result.iban_raw);
+      }
+      if (result.account_holder_name && !accountHolderNames.includes(result.account_holder_name)) {
+        accountHolderNames.push(result.account_holder_name);
+      }
+    }
+
+    const fallbackIban = findIbanInText(rawText);
+    if (fallbackIban && !ibans.includes(fallbackIban)) {
+      ibans.push(fallbackIban);
+    }
+    const fallbackHolderName = findAccountHolderInText(rawText);
+    if (fallbackHolderName && !accountHolderNames.includes(fallbackHolderName)) {
+      accountHolderNames.push(fallbackHolderName);
+    }
+
+    const iban = ibans[0] || "";
+    const accountHolderName = accountHolderNames[0] || "";
 
     return {
       iban: iban ? formatIban(iban) : "",
       account_holder_name: accountHolderName || "",
+      side_results: sideResults,
+      detected_ibans: ibans.map(formatIban),
+      detected_account_holders: accountHolderNames,
       raw_text: rawText,
       detected_fields: iban ? ["iban"] : [],
     };
