@@ -1327,11 +1327,15 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
                 docType={docType}
                 frontUpload={
                   <DocumentSideUpload
-                    label={docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)" : "Voorkant"}
+                    label={
+                      docType === "passport" ? "Voorkant (pasfoto / persoonsgegevens)"
+                      : docType === "drivers_license" ? "Voorkant (pasfoto / categorieën)"
+                      : "Voorkant (pasfoto / kaartgegevens)"
+                    }
                     hint={docType === "passport"
                       ? "Upload hier de houderpagina met pasfoto, persoonsgegevens en MRZ."
                       : docType === "drivers_license"
-                        ? "Upload hier de voorzijde met pasfoto, documentnummer en categorieen."
+                        ? "Upload hier de voorzijde met pasfoto, documentnummer en categorieën."
                       : "Upload hier de voorzijde met pasfoto en kaartgegevens."}
                     previewUrl={frontPreview}
                     onFileSelected={(file, preview) => { setFrontFile(file); setFrontPreview(preview); }}
@@ -1341,7 +1345,11 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
                 }
                 backUpload={
                   <DocumentSideUpload
-                    label={docType === "passport" ? "Achterkant (BSN-pagina)" : "Achterkant"}
+                    label={
+                      docType === "passport" ? "Achterkant (BSN-pagina)"
+                      : docType === "drivers_license" ? "Achterkant (BSN / QR-code)"
+                      : "Achterkant (BSN / controlegegevens)"
+                    }
                     hint={docType === "passport"
                       ? "Upload hier de BSN-/titelpagina of achterkant van de houderpagina."
                       : docType === "drivers_license"
