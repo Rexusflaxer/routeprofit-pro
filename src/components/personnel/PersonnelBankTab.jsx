@@ -292,7 +292,6 @@ function BankUploadGuideCard({ frontUpload, backUpload }) {
     <div className="rounded-lg border border-border bg-card p-4 flex flex-col gap-3 w-full">
       <div className="flex items-stretch gap-4">
         <div className="w-1/2 flex flex-col gap-1.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Voorkant</p>
           {frontUpload}
         </div>
         <div className="w-px bg-border self-stretch" />
@@ -312,7 +311,6 @@ function BankUploadGuideCard({ frontUpload, backUpload }) {
 
       <div className="flex items-stretch gap-4">
         <div className="w-1/2 flex flex-col gap-1.5">
-          <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Achterkant</p>
           {backUpload}
         </div>
         <div className="w-px bg-border self-stretch" />
