@@ -562,7 +562,7 @@ function BankAccountWizard({ personnelId, person, isArchiveEntry = false, onClos
                 <Button variant="ghost" size="sm" onClick={onClose}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
                 <div className="flex gap-2">
                   <Button variant="outline" size="sm" onClick={() => setStep(2)}>Overslaan</Button>
-                  <Button size="sm" onClick={() => setStep(2)} disabled={scanPending}>
+                  <Button size="sm" onClick={() => setStep(2)} disabled={scanPending || (!frontFile && !backFile)}>
                     Volgende <ChevronRight className="w-4 h-4 ml-1" />
                   </Button>
                 </div>
