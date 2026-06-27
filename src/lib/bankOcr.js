@@ -200,6 +200,10 @@ function isLikelyPersonName(value) {
 
   const words = text.split(/\s+/).filter(Boolean);
   if (words.length < 2) return false;
+  const longWordCount = words.filter(word => word.replace(/[.'’-]/g, "").length >= 3).length;
+  const initialCount = words.filter(word => /^[A-ZÀ-ÿ]\.?$/u.test(word)).length;
+  if (longWordCount < 2 && !(initialCount >= 1 && longWordCount >= 1)) return false;
+
   return words.every(word => /^[A-ZÀ-ÿ][A-ZÀ-ÿa-zà-ÿ'’.-]*$/u.test(word));
 }
 
@@ -271,7 +275,12 @@ function loadImage(source) {
   });
 }
 
-function canvasToDataUrl(image, crop, targetWidth = 2400) {
+function canvasToDataUrl(image, crop, targetWidth = 2400, options = {}) {
+  const {
+    mode = "gray",
+    contrast = 1.45,
+    quality = 0.94,
+  } = options;
   const sourceWidth = image.naturalWidth || image.width;
   const sourceHeight = image.naturalHeight || image.height;
   const cropX = Math.max(0, Math.round((crop?.x ?? 0) * sourceWidth));
@@ -287,17 +296,21 @@ function canvasToDataUrl(image, crop, targetWidth = 2400) {
   const ctx = canvas.getContext("2d");
   ctx.drawImage(image, cropX, cropY, cropWidth, cropHeight, 0, 0, outputWidth, outputHeight);
 
+  if (mode === "color") {
+    return canvas.toDataURL("image/jpeg", quality);
+  }
+
   const imageData = ctx.getImageData(0, 0, outputWidth, outputHeight);
   const data = imageData.data;
   for (let i = 0; i < data.length; i += 4) {
     const gray = data[i] * 0.299 + data[i + 1] * 0.587 + data[i + 2] * 0.114;
-    const contrasted = Math.max(0, Math.min(255, (gray - 128) * 1.45 + 128));
+    const contrasted = Math.max(0, Math.min(255, (gray - 128) * contrast + 128));
     data[i] = contrasted;
     data[i + 1] = contrasted;
     data[i + 2] = contrasted;
   }
   ctx.putImageData(imageData, 0, 0);
-  return canvas.toDataURL("image/jpeg", 0.94);
+  return canvas.toDataURL("image/jpeg", quality);
 }
 
 async function imageToDataUrls(file) {
@@ -307,6 +320,23 @@ async function imageToDataUrls(file) {
       canvasToDataUrl(image, { x: 0, y: 0, width: 1, height: 1 }, 2400),
       canvasToDataUrl(image, { x: 0, y: 0, width: 1, height: 0.55 }, 2600),
       canvasToDataUrl(image, { x: 0, y: 0.45, width: 1, height: 0.55 }, 2600),
+    ];
+  } finally {
+    URL.revokeObjectURL(image.src);
+  }
+}
+
+async function imageToIbanDataUrls(file) {
+  const image = await loadImage(file);
+  try {
+    return [
+      // Dutch debit cards often print the IBAN on a low-contrast lower band.
+      canvasToDataUrl(image, { x: 0, y: 0.46, width: 1, height: 0.46 }, 3600, { contrast: 1.9 }),
+      canvasToDataUrl(image, { x: 0, y: 0.48, width: 0.78, height: 0.42 }, 3600, { contrast: 1.9 }),
+      // Some banks place IBAN/account data on the upper-left back side.
+      canvasToDataUrl(image, { x: 0, y: 0, width: 0.85, height: 0.5 }, 3400, { contrast: 1.7 }),
+      // Keep one color pass because embossed text can lose detail in grayscale.
+      canvasToDataUrl(image, { x: 0, y: 0.44, width: 1, height: 0.5 }, 3400, { mode: "color", quality: 0.96 }),
     ];
   } finally {
     URL.revokeObjectURL(image.src);
@@ -344,8 +374,33 @@ export async function recognizeBankCard({ frontFile, backFile, onProgress }) {
         sideTextParts.push(data.text || "");
       }
 
-      const sideText = sideTextParts.join("\n");
-      const sideIbans = findIbansInText(sideText);
+      let sideText = sideTextParts.join("\n");
+      let sideIbans = findIbansInText(sideText);
+      if (!sideIbans.length) {
+        await worker.setParameters({
+          preserve_interword_spaces: "1",
+          user_defined_dpi: "300",
+          tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ",
+          tessedit_pageseg_mode: "6",
+        });
+
+        const ibanImages = await imageToIbanDataUrls(file);
+        for (const image of ibanImages) {
+          const { data } = await worker.recognize(image);
+          sideTextParts.push(data.text || "");
+        }
+
+        await worker.setParameters({
+          preserve_interword_spaces: "1",
+          user_defined_dpi: "300",
+          tessedit_char_whitelist: "",
+          tessedit_pageseg_mode: "3",
+        });
+
+        sideText = sideTextParts.join("\n");
+        sideIbans = findIbansInText(sideText);
+      }
+
       const sideIban = sideIbans[0] || "";
       const sideBankName = detectBankNameFromIban(sideIban) || detectBankNameInText(sideText);
       const sideHolderName = findAccountHolderInText(sideText);
