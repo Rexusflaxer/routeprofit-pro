@@ -68,6 +68,8 @@ const DOCUMENT_TYPE_META = {
   },
 };
 
+const IDENTITY_OCR_VERSION = "2026-06-28-drivers-license-validity";
+
 function storedDocumentKind(doc) {
   if (doc?.metadata?.doc_type) return doc.metadata.doc_type;
   if (doc?.category === "drivers_license") return "drivers_license";
@@ -989,6 +991,7 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
   };
 
   const uploadKey = [
+    IDENTITY_OCR_VERSION,
     docType || "",
     frontFile ? `${frontFile.name}-${frontFile.size}-${frontFile.lastModified}` : "",
     backFile ? `${backFile.name}-${backFile.size}-${backFile.lastModified}` : "",
@@ -1016,7 +1019,7 @@ export default function IdentityDocumentWizard({ personnelId, personnel = null, 
     setForm(current => {
       const next = { ...current };
       for (const field of ["document_number", "bsn", "valid_from", "valid_until"]) {
-        if (!next[field] && result?.[field]) next[field] = result[field];
+        if (result?.[field]) next[field] = result[field];
       }
       return next;
     });
