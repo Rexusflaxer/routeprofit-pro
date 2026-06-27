@@ -330,12 +330,18 @@ async function imageToIbanDataUrls(file) {
   const image = await loadImage(file);
   try {
     return [
+      // Tight lower-left crops target the actual "rekening nr." line on cards
+      // such as ABN AMRO, where the embossed IBAN has very low contrast.
+      canvasToDataUrl(image, { x: 0, y: 0.62, width: 0.8, height: 0.36 }, 4200, { contrast: 2.2 }),
+      canvasToDataUrl(image, { x: 0, y: 0.68, width: 0.72, height: 0.28 }, 4400, { contrast: 2.45 }),
+      canvasToDataUrl(image, { x: 0, y: 0.72, width: 0.66, height: 0.22 }, 4400, { contrast: 2.5 }),
       // Dutch debit cards often print the IBAN on a low-contrast lower band.
       canvasToDataUrl(image, { x: 0, y: 0.46, width: 1, height: 0.46 }, 3600, { contrast: 1.9 }),
       canvasToDataUrl(image, { x: 0, y: 0.48, width: 0.78, height: 0.42 }, 3600, { contrast: 1.9 }),
       // Some banks place IBAN/account data on the upper-left back side.
       canvasToDataUrl(image, { x: 0, y: 0, width: 0.85, height: 0.5 }, 3400, { contrast: 1.7 }),
-      // Keep one color pass because embossed text can lose detail in grayscale.
+      // Keep color passes because embossed text can lose detail in grayscale.
+      canvasToDataUrl(image, { x: 0, y: 0.62, width: 0.8, height: 0.36 }, 4200, { mode: "color", quality: 0.96 }),
       canvasToDataUrl(image, { x: 0, y: 0.44, width: 1, height: 0.5 }, 3400, { mode: "color", quality: 0.96 }),
     ];
   } finally {
@@ -368,7 +374,14 @@ export async function recognizeBankCard({ frontFile, backFile, onProgress }) {
 
     for (const { side, file } of files) {
       const sideTextParts = [];
-      const images = await imageToDataUrls(file);
+      await worker.setParameters({
+        preserve_interword_spaces: "1",
+        user_defined_dpi: "300",
+        tessedit_char_whitelist: "",
+        tessedit_pageseg_mode: "11",
+      });
+
+      const images = [file, ...(await imageToDataUrls(file))];
       for (const image of images) {
         const { data } = await worker.recognize(image);
         sideTextParts.push(data.text || "");
@@ -376,30 +389,22 @@ export async function recognizeBankCard({ frontFile, backFile, onProgress }) {
 
       let sideText = sideTextParts.join("\n");
       let sideIbans = findIbansInText(sideText);
-      if (!sideIbans.length) {
-        await worker.setParameters({
-          preserve_interword_spaces: "1",
-          user_defined_dpi: "300",
-          tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ",
-          tessedit_pageseg_mode: "6",
-        });
 
-        const ibanImages = await imageToIbanDataUrls(file);
-        for (const image of ibanImages) {
-          const { data } = await worker.recognize(image);
-          sideTextParts.push(data.text || "");
-        }
+      await worker.setParameters({
+        preserve_interword_spaces: "1",
+        user_defined_dpi: "300",
+        tessedit_char_whitelist: "ABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789 ",
+        tessedit_pageseg_mode: "6",
+      });
 
-        await worker.setParameters({
-          preserve_interword_spaces: "1",
-          user_defined_dpi: "300",
-          tessedit_char_whitelist: "",
-          tessedit_pageseg_mode: "3",
-        });
-
-        sideText = sideTextParts.join("\n");
-        sideIbans = findIbansInText(sideText);
+      const ibanImages = [file, ...(await imageToIbanDataUrls(file))];
+      for (const image of ibanImages) {
+        const { data } = await worker.recognize(image);
+        sideTextParts.push(data.text || "");
       }
+
+      sideText = sideTextParts.join("\n");
+      sideIbans = findIbansInText(sideText);
 
       const sideIban = sideIbans[0] || "";
       const sideBankName = detectBankNameFromIban(sideIban) || detectBankNameInText(sideText);
