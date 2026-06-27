@@ -1,10 +1,7 @@
 // OCR helpers for bank card / bank statement uploads.
-// Uses tesseract.js (already installed) to extract IBAN, account holder name
-// and bank name from uploaded front/back images of a bank card.
-
-function compact(value) {
-  return String(value || "").replace(/\s+/g, " ").trim();
-}
+// Uses tesseract.js (already installed) to extract only the IBAN from
+// uploaded front/back images of a bank card. Bank name is derived from the
+// typed or recognized IBAN in the UI.
 
 function normalizeIban(value) {
   return String(value || "")
@@ -45,7 +42,6 @@ const DUTCH_BANK_MAP = {
   FLOR: "Florius",
   HANB: "Handelsbanken",
   ICBC: "ICBC",
-  INGB: "ING",
   KASA: "KAS Bank",
   KOEX: "Korea Exchange Bank",
   LOYD: "Lloyds TSB Bank",
@@ -64,19 +60,102 @@ const DUTCH_BANK_MAP = {
   ZWBT: "Zwitserse Bank",
 };
 
-function findIbanInText(text) {
-  const upper = String(text || "").toUpperCase();
-  // Try with spaces first (as printed on cards)
-  const spaced = upper.match(/\b([A-Z]{2}\d{2}(?:\s?[A-Z0-9]{4}){2,7}\s?[A-Z0-9]{0,4})\b/);
-  if (spaced) {
-    const clean = normalizeIban(spaced[1]);
-    if (clean.length >= 15 && clean.length <= 34 && IBAN_REGEX.test(clean)) {
-      return clean;
+function digitFromOcr(value) {
+  const char = String(value || "").toUpperCase();
+  return ({
+    O: "0",
+    Q: "0",
+    D: "0",
+    I: "1",
+    L: "1",
+    Z: "2",
+    S: "5",
+    B: "8",
+    G: "6",
+  }[char]) || char;
+}
+
+function letterFromOcr(value) {
+  const char = String(value || "").toUpperCase();
+  return ({
+    0: "O",
+    1: "I",
+    5: "S",
+    8: "B",
+  }[char]) || char;
+}
+
+function normalizeDutchIbanCandidate(value) {
+  const clean = normalizeIban(value);
+  if (clean.length < 18) return clean;
+
+  const chars = clean.slice(0, 18).split("");
+  if (chars[0] !== "N") return clean;
+  chars[1] = chars[1] === "1" || chars[1] === "I" ? "L" : chars[1];
+  chars[2] = digitFromOcr(chars[2]);
+  chars[3] = digitFromOcr(chars[3]);
+  for (let index = 4; index < 8; index += 1) chars[index] = letterFromOcr(chars[index]);
+  for (let index = 8; index < 18; index += 1) chars[index] = digitFromOcr(chars[index]);
+  return chars.join("");
+}
+
+function ibanChecksumValid(iban) {
+  const clean = normalizeIban(iban);
+  if (!/^[A-Z]{2}\d{2}[A-Z0-9]{11,30}$/.test(clean)) return false;
+
+  const rearranged = `${clean.slice(4)}${clean.slice(0, 4)}`;
+  let remainder = 0;
+  for (const char of rearranged) {
+    const value = /[A-Z]/.test(char) ? String(char.charCodeAt(0) - 55) : char;
+    for (const digit of value) {
+      remainder = (remainder * 10 + Number(digit)) % 97;
     }
   }
-  // Try compact
+  return remainder === 1;
+}
+
+function normalizePotentialIban(value) {
+  const clean = normalizeIban(value);
+  if (clean.startsWith("NL") || clean.startsWith("N1") || clean.startsWith("NI")) {
+    const dutch = normalizeDutchIbanCandidate(clean);
+    if (dutch.length === 18 && DUTCH_BANK_MAP[dutch.slice(4, 8)] && ibanChecksumValid(dutch)) {
+      return dutch;
+    }
+  }
+  if (ibanChecksumValid(clean)) return clean;
+  return "";
+}
+
+function findIbanInText(text) {
+  const upper = String(text || "").toUpperCase();
+  const candidates = [];
+
+  // Try with spaces first (as printed on cards)
+  const spacedMatches = upper.match(/\b[A-Z]{2}[\s.\-]?[0-9OQDILSZB]{2}(?:[\s.\-]?[A-Z0-9]{2,4}){3,8}\b/g) || [];
+  candidates.push(...spacedMatches);
+
+  // Dutch bank cards are often printed as "NL67 ABNA 0464 8530 36"; OCR may
+  // confuse O/0 and I/1, so collect a compact NL candidate and correct it.
+  const compactText = normalizeIban(upper);
+  const dutchMatches = compactText.match(/N[L1I][0-9OQDILSZB]{2}[A-Z0-9]{4}[A-Z0-9]{10}/g) || [];
+  candidates.push(...dutchMatches);
+
+  // Try compact/general IBAN candidates.
+  const compactMatches = compactText.match(/[A-Z]{2}\d{2}[A-Z0-9]{11,30}/g) || [];
+  candidates.push(...compactMatches);
+
+  for (const candidate of candidates) {
+    const normalized = normalizePotentialIban(candidate);
+    if (normalized) {
+      return normalized;
+    }
+  }
+
+  // Try compact fallback without checksum, for countries/cards where OCR drops
+  // one trailing character. This keeps old behavior but only after stronger tries.
   const match = upper.match(IBAN_REGEX);
   if (match) return normalizeIban(match[1]);
+
   // Try loose: find any sequence that looks like an IBAN
   const loose = upper.match(/\b(NL|BE|DE|FR|GB|ES|IT|AT|CH|LU|IE|PT|FI|EE|LV|LT|CY|MT|SI|SK|BG|RO|HR|PL|CZ|HU|DK|SE|NO|IS)[0-9]{2}[A-Z0-9]{8,30}\b/);
   if (loose) {
@@ -86,67 +165,7 @@ function findIbanInText(text) {
   return "";
 }
 
-function findAccountHolderInText(text) {
-  const lines = String(text || "")
-    .split(/\r?\n/)
-    .map(line => compact(line))
-    .filter(Boolean);
-
-  // Look for label "Kaarthouder" / "Cardholder" / "Naam"
-  const labelPatterns = [
-    /\b(?:KAARTHOUDER|CARDHOLDER|CARD\s+HOLDER|NAAM|NAME)\b/i,
-  ];
-
-  for (const pattern of labelPatterns) {
-    for (let i = 0; i < lines.length; i++) {
-      if (pattern.test(lines[i])) {
-        // Value might be on same line after the label, or on the next line
-        const sameLine = lines[i].replace(pattern, "").replace(/[:.]\s*/, "").trim();
-        if (sameLine && isLikelyPersonName(sameLine)) return sameLine;
-        for (let offset = 1; offset <= 2; offset++) {
-          const candidate = compact(lines[i + offset] || "");
-          if (candidate && isLikelyPersonName(candidate)) return candidate;
-        }
-      }
-    }
-  }
-
-  // Fallback: look for a line that looks like a person name (not a bank name, not IBAN, not numbers)
-  for (const line of lines) {
-    if (isLikelyPersonName(line)) return line;
-  }
-
-  return "";
-}
-
-function isLikelyPersonName(value) {
-  const text = compact(value);
-  if (text.length < 3 || text.length > 40) return false;
-  if (/\d/.test(text)) return false;
-  if (/\b(BANK|BANKIER|IBAN|BIC|SWIFT|KAARTHOUDER|CARDHOLDER|CARD|HOLDER|NAAM|NAME|CVV|CVC|VALID|GELDIG|THRU|EUR|EURO|CREDIT|DEBIT|PAS|CHIP|CONTACTLESS|CONTACTLOOS|MAESTRO|VISA|MASTERCARD|VPAY|PIN|GIRO|REKENING|NUMMER)\b/i.test(text)) {
-    return false;
-  }
-  // Must contain at least one space (first + last name) or be a single capitalized word
-  const words = text.split(/\s+/);
-  if (words.length < 1) return false;
-  // Check that words look like name parts (start with uppercase, contain letters)
-  return words.every(w => /^[A-ZÀ-ÿ][a-zà-ÿ''-]*$/.test(w)) && words.length >= 1;
-}
-
-function findBankNameInText(text, iban) {
-  const upper = String(text || "").toUpperCase();
-  // Check for known bank names in text
-  const knownBanks = [
-    "ABN AMRO", "RABOBANK", "ING", "BUNQ", "ARGENTA", "SNS BANK", "REGIOBANK",
-    "TRIODOS BANK", "KNAB", "VAN LANSCHOT", "ASN BANK", "MONEYOU", "NIBC BANK",
-    "BINCKBANK", "CREDIT EUROPE BANK", "FLORIUS", "HANDelsbanken".toUpperCase(),
-    "SOCIÉTÉ GÉNÉRALE", "STAALBANKIERS", "FRIESLAND BANK", "ACHMEA BANK",
-  ];
-  for (const bank of knownBanks) {
-    if (upper.includes(bank.toUpperCase())) return bank;
-  }
-
-  // Derive from Dutch IBAN bank code
+export function detectBankNameFromIban(iban) {
   if (iban) {
     const clean = normalizeIban(iban);
     if (clean.startsWith("NL")) {
@@ -154,7 +173,6 @@ function findBankNameInText(text, iban) {
       if (DUTCH_BANK_MAP[bankCode]) return DUTCH_BANK_MAP[bankCode];
     }
   }
-
   return "";
 }
 
@@ -226,17 +244,11 @@ export async function recognizeBankCard({ frontFile, backFile, onProgress }) {
 
     const rawText = textParts.join("\n");
     const iban = findIbanInText(rawText);
-    const accountHolderName = findAccountHolderInText(rawText);
-    const bankName = findBankNameInText(rawText, iban);
 
     return {
       iban: iban ? formatIban(iban) : "",
-      account_holder_name: accountHolderName || "",
-      bank_name: bankName || "",
       raw_text: rawText,
-      detected_fields: ["iban", "account_holder_name", "bank_name"].filter(
-        key => ({ iban, account_holder_name: accountHolderName, bank_name: bankName }[key])
-      ),
+      detected_fields: iban ? ["iban"] : [],
     };
   } finally {
     await worker.terminate();

@@ -23,7 +23,7 @@ import {
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { prepareBankAccountSensitiveData } from "@/lib/sensitiveFields";
 import { uploadManagedFile } from "@/lib/managedFiles";
-import { recognizeBankCard } from "@/lib/bankOcr";
+import { detectBankNameFromIban, recognizeBankCard } from "@/lib/bankOcr";
 import bankCardGuideBack from "@/assets/bank-guides/abn-amro-bank-card-back.png";
 import bankCardGuideFront from "@/assets/bank-guides/abn-amro-bank-card-front.png";
 
@@ -114,73 +114,6 @@ function activeBankAccounts(accounts) {
   return [...(accounts || [])]
     .filter(acc => !isArchivedBankAccount(acc))
     .sort((a, b) => String(b.updated_date || b.created_date || b.id || "").localeCompare(String(a.updated_date || a.created_date || a.id || "")));
-}
-
-function normalizeMatchText(value) {
-  return String(value || "")
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, " ")
-    .trim();
-}
-
-function matchTokens(value) {
-  return normalizeMatchText(value).split(/\s+/).filter(token => token.length > 1);
-}
-
-function namesOverlap(expected, recognized) {
-  const expectedTokens = matchTokens(expected);
-  const recognizedTokens = matchTokens(recognized);
-  if (!expectedTokens.length || !recognizedTokens.length) return null;
-
-  const expectedText = expectedTokens.join(" ");
-  const recognizedText = recognizedTokens.join(" ");
-  if (expectedText === recognizedText || expectedText.includes(recognizedText) || recognizedText.includes(expectedText)) {
-    return true;
-  }
-  return expectedTokens.some(token => recognizedTokens.includes(token));
-}
-
-function profileNameForMatch(person) {
-  const fullName = [
-    person?.legal_first_names || person?.first_name || person?.call_name,
-    person?.name_prefix,
-    person?.last_name,
-  ].filter(Boolean).join(" ");
-  return fullName || person?.name || "";
-}
-
-function profileLastNameForMatch(person) {
-  return [person?.name_prefix, person?.last_name].filter(Boolean).join(" ") || person?.name || "";
-}
-
-function buildBankHolderMatch(person, recognizedHolder) {
-  const holder = String(recognizedHolder || "").trim();
-  if (!holder) return { status: "unknown", profile_name: profileNameForMatch(person), recognized_holder: "" };
-
-  const profileName = profileNameForMatch(person);
-  const profileLastName = profileLastNameForMatch(person);
-  const fullMatch = namesOverlap(profileName, holder);
-  const lastNameMatch = namesOverlap(profileLastName, holder);
-
-  if (fullMatch === false && lastNameMatch === false) {
-    return {
-      status: "review",
-      profile_name: profileName,
-      recognized_holder: holder,
-      issues: [
-        "De herkende rekeninghouder lijkt niet overeen te komen met dit medewerkersprofiel.",
-      ],
-    };
-  }
-
-  return {
-    status: fullMatch === null && lastNameMatch === null ? "unknown" : "matched",
-    profile_name: profileName,
-    recognized_holder: holder,
-    issues: [],
-  };
 }
 
 function BankStatusBadge({ acc }) {
@@ -429,26 +362,6 @@ function BankUploadGuideCard({ frontUpload, backUpload }) {
   );
 }
 
-function BankHolderMatchNotice({ match }) {
-  if (!match || match.status !== "review") return null;
-
-  return (
-    <div className="mt-4 flex items-start gap-3 rounded-md border border-amber-500/40 bg-amber-500/10 px-3 py-3">
-      <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0 text-amber-500" />
-      <div className="text-sm">
-        <p className="font-medium text-foreground">Controleer rekeninghouder</p>
-        <p className="mt-1 text-xs text-muted-foreground">
-          De bankpas lijkt mogelijk bij iemand anders te horen.
-        </p>
-        <div className="mt-2 grid gap-1 text-xs text-muted-foreground sm:grid-cols-2">
-          <span>Profiel: <strong className="text-foreground">{match.profile_name || "-"}</strong></span>
-          <span>Bankpas: <strong className="text-foreground">{match.recognized_holder || "-"}</strong></span>
-        </div>
-      </div>
-    </div>
-  );
-}
-
 function BankAccountWizard({
   personnelId,
   person,
@@ -474,8 +387,6 @@ function BankAccountWizard({
   const [uploading, setUploading] = useState(false);
   const [recognizing, setRecognizing] = useState(false);
   const [recognizedUploadKey, setRecognizedUploadKey] = useState("");
-  const [recognizedHolderName, setRecognizedHolderName] = useState(existingAccount?.metadata?.recognized_account_holder_name || "");
-  const [holderMatch, setHolderMatch] = useState(null);
   const [errors, setErrors] = useState({});
   const latestUploadKeyRef = useRef("");
 
@@ -486,13 +397,27 @@ function BankAccountWizard({
 
   latestUploadKeyRef.current = uploadKey;
 
+  const handleIbanChange = useCallback((value) => {
+    const formatted = formatIbanInput(value);
+    setIban(formatted);
+    setErrors(current => ({ ...current, iban: undefined }));
+
+    const detectedBank = detectBankNameFromIban(formatted);
+    if (detectedBank) {
+      setBankName(detectedBank);
+    } else {
+      const normalized = cleanIban(formatted);
+      if (!normalized || (normalized.startsWith("NL") && normalized.length >= 8)) {
+        setBankName("");
+      }
+    }
+  }, []);
+
   const applyRecognizedFields = useCallback((result) => {
-    if (result.iban) setIban(formatIbanInput(result.iban));
-    if (result.bank_name && !bankName) setBankName(result.bank_name);
-    const holder = result.account_holder_name || "";
-    setRecognizedHolderName(holder);
-    setHolderMatch(buildBankHolderMatch(person, holder));
-  }, [bankName, person]);
+    if (result.iban) {
+      handleIbanChange(result.iban);
+    }
+  }, [handleIbanChange]);
 
   const runRecognition = useCallback(async () => {
     if ((!frontFile && !backFile) || recognizing || recognizedUploadKey === uploadKey) return;
@@ -619,8 +544,6 @@ function BankAccountWizard({
         proof_front_file_url: frontProofUrl,
         proof_back_file_url: backProofUrl,
         verification_source: hasUpload ? "bank_card_upload" : "manual",
-        recognized_account_holder_name: recognizedHolderName || null,
-        bank_holder_match: holderMatch || null,
         replaced_bank_account_ids: existingAccount ? [] : replaceAccounts.map(acc => acc.id),
       };
 
@@ -715,9 +638,9 @@ function BankAccountWizard({
             <div className="space-y-4">
               <div className="flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-border bg-card px-6 py-12 text-center">
                 <Loader2 className="mb-4 h-8 w-8 animate-spin text-primary" />
-                <p className="text-sm font-medium text-foreground">Scan verwerken</p>
+                <p className="text-sm font-medium text-foreground">IBAN lezen</p>
                 <p className="mt-1 max-w-md text-xs text-muted-foreground">
-                  De bankpas wordt gelezen. Zodra dit klaar is, opent de controle automatisch.
+                  De upload wordt gecontroleerd op een IBAN. Zodra dit klaar is, opent de controle automatisch.
                 </p>
               </div>
               <div className="flex justify-between pt-1">
@@ -732,7 +655,7 @@ function BankAccountWizard({
               <div>
                 <p className="mb-1 text-sm font-medium text-foreground">Controleer en vul aan</p>
                 <p className="text-xs text-muted-foreground">
-                  De herkende gegevens zijn alvast ingevuld. Controleer deze voordat je opslaat.
+                  Als er een IBAN is herkend, is deze alvast ingevuld. De banknaam wordt automatisch uit het IBAN afgeleid.
                 </p>
               </div>
 
@@ -744,8 +667,7 @@ function BankAccountWizard({
                       <Input
                         value={iban}
                         onChange={event => {
-                          setIban(formatIbanInput(event.target.value));
-                          setErrors(current => ({ ...current, iban: undefined }));
+                          handleIbanChange(event.target.value);
                         }}
                         placeholder="NL91 ABNA 0417 1643 00"
                         className={errors.iban ? "border-destructive" : ""}
@@ -761,7 +683,6 @@ function BankAccountWizard({
                       <Input value={notes} onChange={event => setNotes(event.target.value)} placeholder="Bijv. salarisrekening" />
                     </div>
                   </div>
-                  <BankHolderMatchNotice match={holderMatch} />
                   <div className="pt-3">
                     <Button variant="ghost" size="sm" onClick={() => setStep(1)} className="h-7 px-2 text-xs text-muted-foreground">
                       Wijzig upload
