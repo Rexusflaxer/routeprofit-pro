@@ -98,6 +98,14 @@
         "string",
         "null"
       ]
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Audit metadata en archiveringsstatus"
     }
   },
   "required": [

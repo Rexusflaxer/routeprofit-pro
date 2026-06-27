@@ -45,6 +45,7 @@ import CostCalculator from "@/components/personnel/CostCalculator";
 import PhotoCropUpload from "@/components/personnel/PhotoCropUpload";
 import IdentityDocumentWizard from "@/components/personnel/IdentityDocumentWizard";
 import PayrollTab from "@/components/personnel/PayrollTab";
+import PersonnelBankTab from "@/components/personnel/PersonnelBankTab";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
@@ -185,7 +186,7 @@ const QUALIFICATION_TYPES = [
 const PERSONNEL_TABS = [
   { key: "identity", label: "Identiteit", icon: BadgeCheck },
   { key: "payroll", label: "Loonheffing", icon: Banknote },
-  { key: "bank-mobility", label: "Bank & mobiliteit", icon: CreditCard },
+  { key: "bank", label: "Bank", icon: Banknote },
   { key: "contracts", label: "Contracten/kosten", icon: BriefcaseBusiness },
   { key: "compliance", label: "Compliance", icon: ShieldCheck },
   { key: "documents", label: "Documenten", icon: FileText },
@@ -1358,7 +1359,6 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
   const identityArchived = sortIdentityDocs(identitySplit.archived);
   const hasActiveIdentity = identityDocs.some(d => ["passport", "id_card"].includes(identityDocumentKind(d)));
   const identityNeedsAttention = !hasActiveIdentity || identityDocs.some(d => getExpiryState(d.valid_until));
-  const licenseDocs = dossier.documents.filter(d => d.category === "drivers_license" && !isArchivedIdentityDocument(d));
   const cvDocs = dossier.documents.filter(d => d.category === "cv");
   const routeExecutions = dossier.routeExecutions?.filter(r => r.employee_id === person.id).slice(0, 8) || [];
   const showIdentityWizard = Boolean(identityWizard);
@@ -1652,26 +1652,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
           </SectionPanel>
         </div>
       );
-      case "bank-mobility": return (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <SectionPanel title="Bankrekeningen" icon={Banknote}>
-            <MiniTable emptyText="Nog geen bankrekening." rows={dossier.bankAccounts} columns={[
-              { key: "iban", label: "IBAN", render: r => r.iban_masked || r.iban },
-              { key: "account_holder_name", label: "Rekeninghouder" }, { key: "bank_name", label: "Bank" },
-              { key: "valid_from", label: "Startdatum", render: r => formatDate(r.valid_from) },
-              { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
-            ]} />
-          </SectionPanel>
-          <SectionPanel title="Rijbewijzen" icon={FileBadge}>
-            <MiniTable emptyText="Nog geen rijbewijs." rows={licenseDocs} columns={[
-              { key: "document_number", label: "Nummer" }, { key: "document_type", label: "Type" },
-              { key: "valid_until", label: "Geldig tot", render: r => formatDate(r.valid_until) },
-              { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
-              { key: "audit_actor", label: "Door", render: getAuditActorLabel },
-            ]} />
-          </SectionPanel>
-        </div>
-      );
+      case "bank": return <PersonnelBankTab person={person} bankAccounts={dossier.bankAccounts} auditActors={auditActors} />;
       case "ice": return (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <SectionPanel title="ICE-contactpersonen" icon={Users} action={<Button size="sm" variant="outline" onClick={() => onAddRecord("emergencyContact")}><Plus className="mr-1 h-4 w-4" />Contact</Button>}>
@@ -1779,7 +1760,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
           );
         })}
       </div>
-      <div className={`min-w-0 flex-1 ${["identity", "payroll"].includes(active) ? "" : "p-5 overflow-hidden"}`}>{renderTab()}</div>
+      <div className={`min-w-0 flex-1 ${["identity", "payroll", "bank"].includes(active) ? "" : "p-5 overflow-hidden"}`}>{renderTab()}</div>
     </div>
   );
 }
