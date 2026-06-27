@@ -17,10 +17,12 @@ import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { prepareBankAccountSensitiveData } from "@/lib/sensitiveFields";
 import { uploadManagedFile } from "@/lib/managedFiles";
 import { recognizeBankCard } from "@/lib/bankOcr";
+import bankCardGuideBack from "@/assets/bank-guides/abn-amro-bank-card-back.png";
+import bankCardGuideFront from "@/assets/bank-guides/abn-amro-bank-card-front.png";
 
 const BANK_CARD_GUIDE_IMAGES = {
-  front: "/bank-guides/abn-amro-bank-card-front.png",
-  back: "/bank-guides/abn-amro-bank-card-back.png",
+  front: bankCardGuideFront,
+  back: bankCardGuideBack,
 };
 
 const DELETE_PASSWORD = "verwijder";
