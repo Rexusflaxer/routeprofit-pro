@@ -364,10 +364,11 @@ export default function CompanySidebarPanel({
                       onClick={() => { setActive(item.key); setTemplateSubtab(child.key); setTemplatesExpanded(true); }}
                       className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left
                         ${isActive && templateSubtab === child.key
-                          ? "bg-background text-foreground border-r-2 border-primary"
+                          ? "text-foreground font-medium"
                           : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
                         }`}
                     >
+                      <span className={`h-2 w-2 rounded-full shrink-0 ${isActive && templateSubtab === child.key ? "bg-primary" : "bg-transparent"}`} />
                       <span className="flex-1">{child.label}</span>
                     </button>
                   ))}

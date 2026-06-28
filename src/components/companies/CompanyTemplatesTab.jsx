@@ -389,7 +389,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         </div>
       )}
 
-      {subTab === "letterhead" && (
       <section className="rounded-lg border border-border">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
           <div>
@@ -487,9 +486,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           </div>
         </div>
       </section>
-      )}
 
-      {subTab === "contract_templates" && (
       <section className="rounded-lg border border-border">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
           <div>
@@ -695,7 +692,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           </div>
         </div>
       </section>
-      )}
 
       <ManagedFilePreviewDialog
         open={!!previewFile}
