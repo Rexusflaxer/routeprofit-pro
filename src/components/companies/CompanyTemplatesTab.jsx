@@ -125,6 +125,7 @@ const DEFAULT_LETTERHEAD_MARGINS = {
   left: 20,
 };
 const DEFAULT_LETTERHEAD_BACKGROUND_FIT = "contain";
+const DEFAULT_LETTERHEAD_PAGE_BACKGROUND = "#ffffff";
 const DESIGN_LAYER_DEFAULTS = {
   text: {
     type: "text",
@@ -273,11 +274,25 @@ function normalizeBackgroundFit(source = {}) {
   return LETTERHEAD_BACKGROUND_FITS.some(option => option.value === fit) ? fit : DEFAULT_LETTERHEAD_BACKGROUND_FIT;
 }
 
+function normalizePageBackground(source = {}) {
+  const color = source.page_background_color || source.document_settings?.page_background_color || source.metadata?.page_background_color;
+  return /^#[0-9a-f]{6}$/i.test(String(color || "")) ? color : DEFAULT_LETTERHEAD_PAGE_BACKGROUND;
+}
+
 function imageLooksA4(assetInfo) {
   if (!assetInfo?.width || !assetInfo?.height) return null;
   const ratio = assetInfo.width / assetInfo.height;
   const a4Ratio = 210 / 297;
   return Math.abs(ratio - a4Ratio) < 0.04;
+}
+
+function getAssetRatioDescription(assetInfo) {
+  if (!assetInfo?.width || !assetInfo?.height) return null;
+  const ratio = assetInfo.width / assetInfo.height;
+  if (imageLooksA4(assetInfo)) return "A4 staand";
+  if (ratio > 1.05) return "Liggend of breed";
+  if (ratio < 0.55) return "Smal staand";
+  return "Afwijkende verhouding";
 }
 
 function toArrayText(value) {
@@ -449,6 +464,7 @@ function LetterheadPreview({
   mode = "margins",
   sourceMode = LETTERHEAD_SOURCE_MODES.upload,
   backgroundFit = DEFAULT_LETTERHEAD_BACKGROUND_FIT,
+  pageBackgroundColor = DEFAULT_LETTERHEAD_PAGE_BACKGROUND,
   designLayers = [],
   assetInfo = null,
   interactive = false,
@@ -469,6 +485,7 @@ function LetterheadPreview({
   const looksA4 = imageLooksA4(assetInfo);
   const objectFit = backgroundFit === "stretch" ? "fill" : backgroundFit;
   const canEditLayers = interactive && sourceMode === LETTERHEAD_SOURCE_MODES.design;
+  const ratioDescription = getAssetRatioDescription(assetInfo);
 
   useEffect(() => {
     updateLayerRef.current = onUpdateLayer;
@@ -556,11 +573,16 @@ function LetterheadPreview({
   };
 
   return (
-    <div className="rounded-lg border border-border bg-background/50 p-4">
-      <div className="mx-auto w-full max-w-[430px]">
+    <div className="rounded-lg border border-border bg-muted/20 p-4">
+      <div className="mb-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+        <span className="font-semibold uppercase tracking-wider">A4-pagina</span>
+        <span>210 x 297 mm</span>
+      </div>
+      <div className="mx-auto w-full max-w-[430px] rounded-xl bg-slate-950/5 p-3 dark:bg-black/25">
         <div
           ref={pageRef}
-          className="relative mx-auto aspect-[210/297] overflow-hidden rounded-[2px] border border-slate-200 bg-white shadow-[0_14px_40px_rgba(0,0,0,0.14)]"
+          className="relative mx-auto aspect-[210/297] overflow-hidden rounded-[2px] shadow-[0_18px_46px_rgba(15,23,42,0.18)] ring-1 ring-slate-950/15 dark:ring-white/15"
+          style={{ backgroundColor: pageBackgroundColor }}
           onPointerDown={event => {
             if (canEditLayers && event.target === event.currentTarget) onSelectLayer?.(null);
           }}
@@ -574,12 +596,12 @@ function LetterheadPreview({
             />
           )}
           {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isPdf && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white p-8 text-center">
-              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
+              <div className="rounded border border-slate-200 bg-white/90 px-3 py-2 text-xs font-medium text-slate-600 shadow-sm">
                 PDF-briefpapier geselecteerd
               </div>
-              <p className="mt-2 max-w-[220px] text-[10px] leading-snug text-slate-400">
-                De A4-pagina en marges blijven exact. Gebruik JPG of PNG als je het ontwerp pixelprecies in deze preview wilt zien.
+              <p className="mt-2 max-w-[220px] text-[10px] leading-snug text-slate-500">
+                De marges worden op een vaste A4-pagina gezet. Open het bestand om de PDF zelf te controleren.
               </p>
             </div>
           )}
@@ -600,7 +622,7 @@ function LetterheadPreview({
             </div>
           )}
           <div
-            className={`absolute rounded-[2px] border ${mode === "sample" ? "border-primary/45 bg-white/72" : "border-dashed border-primary/75 bg-primary/5"}`}
+            className={`absolute rounded-[2px] border ${mode === "sample" ? "border-sky-500/25 bg-white/76" : "border-dashed border-sky-500/85 bg-sky-500/5"}`}
             style={{
               top: `${top}%`,
               right: `${right}%`,
@@ -626,21 +648,23 @@ function LetterheadPreview({
                 </div>
               </div>
             ) : (
-              <div className="flex h-full items-center justify-center px-3 text-center text-[10px] font-medium text-primary">
-                Contentvlak
+              <div className="flex h-full items-center justify-center px-3 text-center">
+                <span className="rounded bg-background/85 px-2 py-1 text-[10px] font-medium text-sky-700 shadow-sm dark:bg-slate-950/85 dark:text-sky-300">
+                  Tekstgebied
+                </span>
               </div>
             )}
           </div>
         </div>
-        <p className="mt-2 text-center text-xs text-muted-foreground">
-          Marges: {margins.top} / {margins.right} / {margins.bottom} / {margins.left} mm
-        </p>
-        {sourceMode === LETTERHEAD_SOURCE_MODES.upload && looksA4 === false && (
-          <p className="mx-auto mt-2 max-w-[320px] text-center text-xs text-amber-600 dark:text-amber-300">
-            De upload lijkt geen A4-verhouding te hebben. Kies bij voorkeur passend of upload een A4-bestand.
-          </p>
-        )}
       </div>
+      <p className="mt-2 text-center text-xs text-muted-foreground">
+        Marges: {margins.top} / {margins.right} / {margins.bottom} / {margins.left} mm
+      </p>
+      {sourceMode === LETTERHEAD_SOURCE_MODES.upload && looksA4 === false && (
+        <p className="mx-auto mt-2 max-w-[320px] text-center text-xs text-amber-600 dark:text-amber-300">
+          De upload is {ratioDescription?.toLowerCase() || "geen A4-verhouding"}. Met Passend blijft alles zichtbaar; Vullend kan randen afsnijden.
+        </p>
+      )}
     </div>
   );
 }
@@ -700,6 +724,7 @@ function initialLetterhead(companyId) {
     status: "active",
     source_mode: LETTERHEAD_SOURCE_MODES.upload,
     background_fit: DEFAULT_LETTERHEAD_BACKGROUND_FIT,
+    page_background_color: DEFAULT_LETTERHEAD_PAGE_BACKGROUND,
     design_layers: [],
     file: null,
     margin_top_mm: DEFAULT_LETTERHEAD_MARGINS.top,
@@ -728,10 +753,12 @@ function legacyLetterhead(company) {
     margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
     source_mode: LETTERHEAD_SOURCE_MODES.upload,
     background_fit: DEFAULT_LETTERHEAD_BACKGROUND_FIT,
+    page_background_color: DEFAULT_LETTERHEAD_PAGE_BACKGROUND,
     design_layers: [],
     document_settings: {
       source_mode: LETTERHEAD_SOURCE_MODES.upload,
       background_fit: DEFAULT_LETTERHEAD_BACKGROUND_FIT,
+      page_background_color: DEFAULT_LETTERHEAD_PAGE_BACKGROUND,
       margins_mm: DEFAULT_LETTERHEAD_MARGINS,
       design_layers: [],
     },
@@ -801,6 +828,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const letterheadMargins = normalizeLetterheadMargins(letterheadForm);
   const letterheadSourceMode = normalizeSourceMode(letterheadForm);
   const letterheadBackgroundFit = normalizeBackgroundFit(letterheadForm);
+  const letterheadPageBackground = normalizePageBackground(letterheadForm);
   const letterheadDesignLayers = normalizeDesignLayers(letterheadForm);
   const letterheadUsesUpload = letterheadSourceMode === LETTERHEAD_SOURCE_MODES.upload;
 
@@ -876,6 +904,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       const previous = editingLetterheadId ? letterheads.find(item => item.id === editingLetterheadId) || {} : {};
       const margins = normalizeLetterheadMargins(letterheadForm);
       const backgroundFit = normalizeBackgroundFit(letterheadForm);
+      const pageBackgroundColor = normalizePageBackground(letterheadForm);
       const storedDesignLayers = sourceMode === LETTERHEAD_SOURCE_MODES.design ? designLayers : [];
       const otherActiveLetterheads = letterheads.filter(item => item.id !== editingLetterheadId && item.status !== "archived");
       const hasOtherDefault = otherActiveLetterheads.some(item => item.is_default);
@@ -893,6 +922,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           ...(previous.document_settings || {}),
           source_mode: sourceMode,
           background_fit: backgroundFit,
+          page_background_color: pageBackgroundColor,
           margins_mm: margins,
           design_layers: storedDesignLayers,
         },
@@ -900,6 +930,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           ...auditMetadata,
           source_mode: sourceMode,
           background_fit: backgroundFit,
+          page_background_color: pageBackgroundColor,
           margins_mm: margins,
           design_layers: storedDesignLayers,
         },
@@ -1055,6 +1086,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       status: record.status || "active",
       source_mode: normalizeSourceMode(record),
       background_fit: normalizeBackgroundFit(record),
+      page_background_color: normalizePageBackground(record),
       design_layers: normalizeDesignLayers(record),
       file: null,
       margin_top_mm: margins.top,
@@ -1252,6 +1284,43 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     });
   };
 
+  const alignLetterheadLayer = (layerId, alignment, scope = "page") => {
+    setLetterheadForm(prev => {
+      const margins = normalizeLetterheadMargins(prev);
+      const contentLeft = (margins.left / 210) * 100;
+      const contentTop = (margins.top / 297) * 100;
+      const contentRight = (margins.right / 210) * 100;
+      const contentBottom = (margins.bottom / 297) * 100;
+      const bounds = scope === "content"
+        ? {
+            x: contentLeft,
+            y: contentTop,
+            width: Math.max(1, 100 - contentLeft - contentRight),
+            height: Math.max(1, 100 - contentTop - contentBottom),
+          }
+        : { x: 0, y: 0, width: 100, height: 100 };
+      const nextLayers = normalizeDesignLayers(prev).map(layer => {
+        if (layer.id !== layerId) return layer;
+        const geometry = getLayerGeometry(layer);
+        const updates = {};
+
+        if (alignment === "left") updates.x = bounds.x;
+        if (alignment === "centerX") updates.x = bounds.x + ((bounds.width - geometry.width) / 2);
+        if (alignment === "right") updates.x = bounds.x + bounds.width - geometry.width;
+        if (alignment === "top") updates.y = bounds.y;
+        if (alignment === "centerY") updates.y = bounds.y + ((bounds.height - geometry.height) / 2);
+        if (alignment === "bottom") updates.y = bounds.y + bounds.height - geometry.height;
+        if (alignment === "contentWidth") {
+          updates.x = bounds.x;
+          updates.width = bounds.width;
+        }
+
+        return normalizeDesignLayer({ ...layer, ...updates });
+      });
+      return { ...prev, design_layers: nextLayers };
+    });
+  };
+
   const renderLetterheadLayerEditor = (layer, index) => {
     const isText = layer.type === "text";
     const isShape = layer.type === "rectangle" || layer.type === "line";
@@ -1395,6 +1464,27 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 onChange={event => updateLetterheadLayer(layer.id, { height: event.target.value })}
               />
             </div>
+          </div>
+
+          <div className="rounded-md border border-border/70 bg-muted/20 p-2">
+            <p className="mb-2 text-xs font-medium text-muted-foreground">Snel uitlijnen</p>
+            <div className="grid grid-cols-3 gap-1">
+              <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => alignLetterheadLayer(layer.id, "left")}>Links</Button>
+              <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => alignLetterheadLayer(layer.id, "centerX")}>Midden</Button>
+              <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => alignLetterheadLayer(layer.id, "right")}>Rechts</Button>
+              <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => alignLetterheadLayer(layer.id, "top")}>Boven</Button>
+              <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => alignLetterheadLayer(layer.id, "centerY")}>Verticaal</Button>
+              <Button type="button" variant="outline" size="sm" className="h-8 px-2 text-xs" onClick={() => alignLetterheadLayer(layer.id, "bottom")}>Onder</Button>
+            </div>
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="mt-2 h-8 w-full text-xs"
+              onClick={() => alignLetterheadLayer(layer.id, "contentWidth", "content")}
+            >
+              Breedte van tekstgebied
+            </Button>
           </div>
 
           <div className="grid grid-cols-2 gap-2">
@@ -1566,6 +1656,23 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         <Square className="mr-1 h-4 w-4" />
                         Vlak
                       </Button>
+                      <Button type="button" variant="outline" onClick={() => addLetterheadLayer("line")}>
+                        <Minus className="mr-1 h-4 w-4" />
+                        Lijn
+                      </Button>
+                      <label className="inline-flex h-10 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-4 py-2 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
+                        <ImageIcon className="mr-1 h-4 w-4" />
+                        Logo
+                        <input
+                          type="file"
+                          accept="image/*"
+                          className="hidden"
+                          onChange={event => {
+                            addLetterheadImageLayer(event.target.files?.[0]);
+                            event.target.value = "";
+                          }}
+                        />
+                      </label>
                     </div>
                   </div>
                 )}
@@ -1624,14 +1731,29 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         De pagina blijft altijd A4. Kies hoe een afwijkende upload op het A4-vel wordt geplaatst.
                       </p>
                       {letterheadAssetInfo && (
-                        <p className={`mt-3 rounded-md border px-3 py-2 text-xs ${
+                        <div className={`mt-3 rounded-md border px-3 py-2 text-xs ${
                           imageLooksA4(letterheadAssetInfo)
                             ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
                             : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-200"
                         }`}>
-                          Afbeelding: {letterheadAssetInfo.width} x {letterheadAssetInfo.height}px
-                          {imageLooksA4(letterheadAssetInfo) === false ? " - verhouding wijkt af van A4." : " - verhouding lijkt A4."}
-                        </p>
+                          <div className="flex flex-wrap items-center justify-between gap-2">
+                            <span>
+                              Afbeelding: {letterheadAssetInfo.width} x {letterheadAssetInfo.height}px
+                              {imageLooksA4(letterheadAssetInfo) === false ? " - verhouding wijkt af van A4." : " - verhouding lijkt A4."}
+                            </span>
+                            {imageLooksA4(letterheadAssetInfo) === false && letterheadBackgroundFit !== "contain" && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-7 bg-background/60 px-2 text-xs"
+                                onClick={() => setLetterheadForm(prev => ({ ...prev, background_fit: "contain" }))}
+                              >
+                                Passend gebruiken
+                              </Button>
+                            )}
+                          </div>
+                        </div>
                       )}
                       <div className="mt-3 grid gap-2">
                         {LETTERHEAD_BACKGROUND_FITS.map(option => (
@@ -1657,6 +1779,31 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         <div>
                           <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ontwerplagen</p>
                           <p className="mt-1 text-xs text-muted-foreground">Werk met lagen voor tekst, logo, lijnen en vlakken.</p>
+                        </div>
+                      </div>
+                      <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-3">
+                        <div className="flex flex-wrap items-center justify-between gap-3">
+                          <div>
+                            <p className="text-xs font-medium text-muted-foreground">Paginakleur</p>
+                            <p className="mt-0.5 text-[11px] text-muted-foreground">Achtergrond van het A4-briefpapier.</p>
+                          </div>
+                          <div className="flex items-center gap-2">
+                            <Input
+                              type="color"
+                              className="h-9 w-14 p-1"
+                              value={letterheadPageBackground}
+                              onChange={event => setLetterheadForm(prev => ({ ...prev, page_background_color: event.target.value }))}
+                            />
+                            <Button
+                              type="button"
+                              variant="ghost"
+                              size="sm"
+                              className="h-8 text-xs"
+                              onClick={() => setLetterheadForm(prev => ({ ...prev, page_background_color: DEFAULT_LETTERHEAD_PAGE_BACKGROUND }))}
+                            >
+                              Wit
+                            </Button>
+                          </div>
                         </div>
                       </div>
                       <div className="mt-3 grid grid-cols-2 gap-2">
@@ -1705,6 +1852,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   margins={letterheadMargins}
                   sourceMode={letterheadSourceMode}
                   backgroundFit={letterheadBackgroundFit}
+                  pageBackgroundColor={letterheadPageBackground}
                   designLayers={letterheadDesignLayers}
                   assetInfo={letterheadAssetInfo}
                   interactive={letterheadSourceMode === LETTERHEAD_SOURCE_MODES.design}
@@ -1735,6 +1883,18 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     <p className="text-xs uppercase tracking-wider text-muted-foreground">Marges</p>
                     <p className="mt-1 text-sm font-medium text-foreground">{marginLabel(letterheadForm)}</p>
                   </div>
+                  {!letterheadUsesUpload && (
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Achtergrond</p>
+                      <div className="mt-1 flex items-center gap-2">
+                        <span
+                          className="h-4 w-4 rounded border border-border"
+                          style={{ backgroundColor: letterheadPageBackground }}
+                        />
+                        <span className="text-sm font-medium text-foreground">{letterheadPageBackground.toUpperCase()}</span>
+                      </div>
+                    </div>
+                  )}
                   {letterheadUsesUpload && (
                     <div className="rounded-lg border border-border bg-background/40 p-3">
                       <p className="text-xs uppercase tracking-wider text-muted-foreground">Weergave</p>
@@ -1752,6 +1912,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   mode="sample"
                   sourceMode={letterheadSourceMode}
                   backgroundFit={letterheadBackgroundFit}
+                  pageBackgroundColor={letterheadPageBackground}
                   designLayers={letterheadDesignLayers}
                   assetInfo={letterheadAssetInfo}
                 />
