@@ -253,7 +253,7 @@ export default function CompanySidebarPanel({
   };
 
   const [active, setActive] = useState(getInitialActiveTab);
-  const [templateSubtab, setTemplateSubtab] = useState(null);
+  const [templateSubtab, setTemplateSubtab] = useState("letterhead");
   const [templatesExpanded, setTemplatesExpanded] = useState(false);
 
   const { data: accreditations = [] } = useQuery({
@@ -341,7 +341,16 @@ export default function CompanySidebarPanel({
           return (
             <div key={item.key}>
               <button
-                onClick={() => item.children ? (setActive(item.key), setTemplatesExpanded(prev => !prev)) : (setActive(item.key), setTemplatesExpanded(false))}
+                onClick={() => {
+                  if (item.children) {
+                    setActive(item.key);
+                    setTemplateSubtab(prev => prev || item.children[0].key);
+                    setTemplatesExpanded(prev => !prev);
+                    return;
+                  }
+                  setActive(item.key);
+                  setTemplatesExpanded(false);
+                }}
                 className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium transition-colors text-left
                   ${isActive
                     ? "bg-background text-foreground border-r-2 border-primary"

@@ -1,5 +1,6 @@
-import React, { useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "framer-motion";
 import { base44 } from "@/api/base44Client";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { Button } from "@/components/ui/button";
@@ -13,10 +14,11 @@ import { uploadManagedFile } from "@/lib/managedFiles";
 import {
   Archive,
   CheckCircle,
+  ChevronLeft,
+  ChevronRight,
   Copy,
+  Edit,
   Eye,
-  FileText,
-  Layers,
   Plus,
   Save,
   Upload,
@@ -95,12 +97,10 @@ const DEFAULT_TEMPLATE_BODY = [
   "De contractvorm is {{contract.contractvorm}} met {{contract.uren_per_week}} uur per week, tenzij schriftelijk anders overeengekomen.",
 ].join("\n");
 
-function formatDate(value) {
-  if (!value) return "-";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return String(value);
-  return date.toLocaleDateString("nl-NL", { day: "2-digit", month: "2-digit", year: "numeric" });
-}
+const LETTERHEAD_TABLE_GRID = "grid grid-cols-[minmax(220px,1.5fr)_minmax(110px,130px)_minmax(100px,120px)_minmax(140px,180px)_minmax(160px,max-content)] gap-3 xl:gap-4";
+const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(240px,1.4fr)_minmax(72px,92px)_minmax(120px,150px)_minmax(220px,1fr)_minmax(140px,180px)_minmax(168px,max-content)] gap-3 xl:gap-4";
+const LETTERHEAD_STEPS = ["Gegevens", "Upload", "Controle"];
+const TEMPLATE_STEPS = ["Scope", "Inhoud", "Controle"];
 
 function toArrayText(value) {
   return Array.isArray(value) ? value.join(", ") : "";
@@ -121,6 +121,43 @@ function extractPlaceholders(body) {
 function statusBadge(status) {
   const key = status || "draft";
   return <Badge className={`${TEMPLATE_STATUS_STYLES[key] || TEMPLATE_STATUS_STYLES.draft} text-xs`}>{TEMPLATE_STATUS[key] || key}</Badge>;
+}
+
+function WizardSteps({ labels, step }) {
+  return (
+    <div className="mb-4 flex items-center gap-1">
+      {labels.map((label, index) => {
+        const position = index + 1;
+        const complete = position < step;
+        const current = position === step;
+        return (
+          <React.Fragment key={label}>
+            <div className={`flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium transition-colors ${
+              current ? "bg-primary text-primary-foreground" :
+              complete ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" :
+              "text-muted-foreground"
+            }`}>
+              <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${
+                current ? "bg-primary-foreground text-primary" :
+                complete ? "text-green-700 dark:text-green-300" :
+                "border border-muted-foreground/30 text-muted-foreground"
+              }`}>
+                {complete ? (
+                  <svg className="h-3 w-3" fill="currentColor" viewBox="0 0 20 20">
+                    <path fillRule="evenodd" d="M16.707 5.293a1 1 0 010 1.414l-8 8a1 1 0 01-1.414 0l-4-4a1 1 0 011.414-1.414L8 12.586l7.293-7.293a1 1 0 011.414 0z" clipRule="evenodd" />
+                  </svg>
+                ) : position}
+              </span>
+              {label}
+            </div>
+            {index < labels.length - 1 && (
+              <div className={`h-px flex-1 ${complete ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />
+            )}
+          </React.Fragment>
+        );
+      })}
+    </div>
+  );
 }
 
 function initialTemplate(companyId) {
@@ -175,12 +212,20 @@ function legacyLetterhead(company) {
 
 export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const queryClient = useQueryClient();
+  const letterheadWizardRef = useRef(null);
+  const templateWizardRef = useRef(null);
   const [letterheadForm, setLetterheadForm] = useState(() => initialLetterhead(companyId));
   const [templateForm, setTemplateForm] = useState(() => initialTemplate(companyId));
   const [editingLetterheadId, setEditingLetterheadId] = useState(null);
   const [editingTemplateId, setEditingTemplateId] = useState(null);
+  const [letterheadWizardOpen, setLetterheadWizardOpen] = useState(false);
+  const [templateWizardOpen, setTemplateWizardOpen] = useState(false);
+  const [letterheadStep, setLetterheadStep] = useState(1);
+  const [templateStep, setTemplateStep] = useState(1);
   const [previewFile, setPreviewFile] = useState(null);
   const [message, setMessage] = useState(null);
+
+  const activeSubTab = subTab || "letterhead";
 
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
@@ -213,6 +258,26 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
 
   const activeLetterheads = allLetterheads.filter(item => item.status !== "archived");
   const placeholders = extractPlaceholders(templateForm.body);
+  const currentEditingLetterhead = editingLetterheadId
+    ? letterheads.find(item => item.id === editingLetterheadId)
+    : null;
+  const letterheadHasExistingFile = Boolean(currentEditingLetterhead?.file_url || currentEditingLetterhead?.file_id);
+
+  useEffect(() => {
+    if (!letterheadWizardOpen) return undefined;
+    const timer = setTimeout(() => {
+      letterheadWizardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 160);
+    return () => clearTimeout(timer);
+  }, [letterheadWizardOpen, letterheadStep]);
+
+  useEffect(() => {
+    if (!templateWizardOpen) return undefined;
+    const timer = setTimeout(() => {
+      templateWizardRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+    }, 160);
+    return () => clearTimeout(timer);
+  }, [templateWizardOpen, templateStep]);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["company-letterheads", companyId] });
@@ -279,6 +344,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     onSuccess: () => {
       setLetterheadForm(initialLetterhead(companyId));
       setEditingLetterheadId(null);
+      setLetterheadWizardOpen(false);
+      setLetterheadStep(1);
       setMessage({ type: "success", text: "Briefpapier opgeslagen." });
       refresh();
     },
@@ -324,6 +391,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     onSuccess: () => {
       setTemplateForm(initialTemplate(companyId));
       setEditingTemplateId(null);
+      setTemplateWizardOpen(false);
+      setTemplateStep(1);
       setMessage({ type: "success", text: "Contracttemplate opgeslagen." });
       refresh();
     },
@@ -351,7 +420,88 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     refresh();
   };
 
+  const startNewLetterhead = () => {
+    setMessage(null);
+    setEditingLetterheadId(null);
+    setLetterheadForm(initialLetterhead(companyId));
+    setLetterheadStep(1);
+    setLetterheadWizardOpen(true);
+  };
+
+  const startEditLetterhead = (record) => {
+    if (record.legacy) {
+      setMessage({ type: "error", text: "Legacy-briefpapier kan niet direct worden bewerkt. Maak een nieuwe standaardvariant aan." });
+      return;
+    }
+    setMessage(null);
+    setEditingLetterheadId(record.id);
+    setLetterheadForm({
+      company_id: companyId,
+      name: record.name || "",
+      description: record.description || "",
+      is_default: !!record.is_default,
+      status: record.status || "active",
+      file: null,
+    });
+    setLetterheadStep(1);
+    setLetterheadWizardOpen(true);
+  };
+
+  const cancelLetterheadWizard = () => {
+    setLetterheadForm(initialLetterhead(companyId));
+    setEditingLetterheadId(null);
+    setLetterheadStep(1);
+    setLetterheadWizardOpen(false);
+  };
+
+  const nextLetterheadStep = () => {
+    if (letterheadStep === 1 && !letterheadForm.name.trim()) {
+      setMessage({ type: "error", text: "Vul eerst een naam voor het briefpapier in." });
+      return;
+    }
+    if (letterheadStep === 2 && !letterheadForm.file && !letterheadHasExistingFile) {
+      setMessage({ type: "error", text: "Upload eerst het briefpapier." });
+      return;
+    }
+    setMessage(null);
+    setLetterheadStep(step => Math.min(step + 1, LETTERHEAD_STEPS.length));
+  };
+
+  const startNewTemplate = () => {
+    setMessage(null);
+    setEditingTemplateId(null);
+    setTemplateForm(initialTemplate(companyId));
+    setTemplateStep(1);
+    setTemplateWizardOpen(true);
+  };
+
+  const startEditTemplate = (record) => {
+    setMessage(null);
+    setEditingTemplateId(record.id);
+    setTemplateForm({
+      company_id: companyId,
+      name: record.name || "",
+      description: record.description || "",
+      template_type: record.template_type || "employment_contract",
+      contract_form_scope: record.contract_form_scope || "any",
+      employment_model_scope: record.employment_model_scope || "any",
+      probation_scope: record.probation_scope || "any",
+      duration_type_scope: record.duration_type_scope || "any",
+      duration_options_text: toArrayText(record.duration_options),
+      visible_in_contract_wizard: record.visible_in_contract_wizard !== false,
+      cao_key: record.cao_key || "none",
+      function_type: record.function_type || "",
+      default_letterhead_id: record.default_letterhead_id || "none",
+      version: record.version || 1,
+      status: record.status || "draft",
+      body: record.body || DEFAULT_TEMPLATE_BODY,
+    });
+    setTemplateStep(1);
+    setTemplateWizardOpen(true);
+  };
+
   const createNewTemplateVersion = (record) => {
+    setMessage(null);
     setEditingTemplateId(null);
     setTemplateForm({
       company_id: companyId,
@@ -371,327 +521,494 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       status: "draft",
       body: record.body || DEFAULT_TEMPLATE_BODY,
     });
+    setTemplateStep(1);
+    setTemplateWizardOpen(true);
   };
 
-  return (
-    <div className="p-5 space-y-6">
-      <div>
-        <p className="text-xs font-semibold uppercase tracking-wider text-primary">Sjablonen</p>
-        <h3 className="mt-1 text-lg font-semibold text-foreground">Briefpapier en contracttemplates</h3>
-        <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-          Gepubliceerde templates worden gebruikt bij het aanmaken van arbeidscontracten. Oude contracten blijven altijd een eigen PDF-snapshot houden.
-        </p>
-      </div>
+  const cancelTemplateWizard = () => {
+    setTemplateForm(initialTemplate(companyId));
+    setEditingTemplateId(null);
+    setTemplateStep(1);
+    setTemplateWizardOpen(false);
+  };
 
+  const nextTemplateStep = () => {
+    if (templateStep === 1 && !templateForm.name.trim()) {
+      setMessage({ type: "error", text: "Vul eerst een naam voor de template in." });
+      return;
+    }
+    if (templateStep === 2 && !templateForm.body.trim()) {
+      setMessage({ type: "error", text: "Vul eerst de template-inhoud in." });
+      return;
+    }
+    setMessage(null);
+    setTemplateStep(step => Math.min(step + 1, TEMPLATE_STEPS.length));
+  };
+
+  const renderLetterheadWizard = () => (
+    <AnimatePresence>
+      {letterheadWizardOpen && (
+        <motion.div
+          ref={letterheadWizardRef}
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: "auto", opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          className="overflow-hidden border-b border-primary/30 bg-muted/15"
+        >
+          <div className="p-5">
+            <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-primary">
+              {editingLetterheadId ? "Briefpapier bewerken" : "Briefpapier toevoegen"}
+            </p>
+            <WizardSteps labels={LETTERHEAD_STEPS} step={letterheadStep} />
+
+            {letterheadStep === 1 && (
+              <div className="grid gap-4 lg:grid-cols-2">
+                <div className="space-y-2">
+                  <Label>Naam *</Label>
+                  <Input
+                    value={letterheadForm.name}
+                    onChange={event => setLetterheadForm(prev => ({ ...prev, name: event.target.value }))}
+                    placeholder="Bijv. Standaard briefpapier"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Omschrijving</Label>
+                  <Input
+                    value={letterheadForm.description}
+                    onChange={event => setLetterheadForm(prev => ({ ...prev, description: event.target.value }))}
+                    placeholder="Optioneel"
+                  />
+                </div>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={!!letterheadForm.is_default}
+                    onChange={event => setLetterheadForm(prev => ({ ...prev, is_default: event.target.checked }))}
+                  />
+                  Standaard briefpapier
+                </label>
+              </div>
+            )}
+
+            {letterheadStep === 2 && (
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
+                <label className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background/40 p-5 text-center hover:bg-background/70">
+                  <Upload className="h-6 w-6 text-muted-foreground" />
+                  <span className="mt-2 text-sm font-medium text-foreground">{letterheadForm.file?.name || "Upload PDF of afbeelding"}</span>
+                  <span className="mt-1 text-xs text-muted-foreground">PDF, JPG of PNG</span>
+                  <input
+                    type="file"
+                    accept=".pdf,image/*"
+                    className="hidden"
+                    onChange={event => setLetterheadForm(prev => ({ ...prev, file: event.target.files?.[0] || null }))}
+                  />
+                </label>
+                <div className="rounded-lg border border-border bg-background/40 p-4 text-sm text-muted-foreground">
+                  <p className="font-medium text-foreground">Document</p>
+                  <p className="mt-2">
+                    {letterheadForm.file
+                      ? letterheadForm.file.name
+                      : letterheadHasExistingFile
+                        ? currentEditingLetterhead?.download_filename || "Bestaand bestand blijft gekoppeld."
+                        : "Nog geen bestand gekozen."}
+                  </p>
+                  {letterheadHasExistingFile && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-4"
+                      onClick={() => setPreviewFile({
+                        managedFileId: currentEditingLetterhead.file_id,
+                        fileUrl: currentEditingLetterhead.file_url,
+                        filename: currentEditingLetterhead.download_filename,
+                        title: currentEditingLetterhead.name,
+                      })}
+                    >
+                      <Eye className="mr-1 h-4 w-4" />
+                      Huidig bestand bekijken
+                    </Button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            {letterheadStep === 3 && (
+              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Naam</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{letterheadForm.name || "-"}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Standaard</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{letterheadForm.is_default ? "Ja" : "Nee"}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3 lg:col-span-2">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Upload</p>
+                  <p className="mt-1 truncate text-sm font-medium text-foreground">{letterheadForm.file?.name || currentEditingLetterhead?.download_filename || "-"}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+              <Button type="button" variant="ghost" onClick={cancelLetterheadWizard}>
+                <X className="mr-1 h-4 w-4" />
+                Annuleren
+              </Button>
+              <div className="flex gap-2">
+                {letterheadStep > 1 && (
+                  <Button type="button" variant="outline" onClick={() => setLetterheadStep(step => step - 1)}>
+                    <ChevronLeft className="mr-1 h-4 w-4" />
+                    Terug
+                  </Button>
+                )}
+                {letterheadStep < LETTERHEAD_STEPS.length ? (
+                  <Button type="button" onClick={nextLetterheadStep}>
+                    Volgende
+                    <ChevronRight className="ml-1 h-4 w-4" />
+                  </Button>
+                ) : (
+                  <Button type="button" onClick={() => saveLetterheadMutation.mutate()} disabled={saveLetterheadMutation.isPending}>
+                    <Save className="mr-1 h-4 w-4" />
+                    {saveLetterheadMutation.isPending ? "Opslaan..." : "Briefpapier opslaan"}
+                  </Button>
+                )}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
+  const renderLetterheadTab = () => (
+    <div className="flex h-full min-h-[360px] flex-col">
+      {renderLetterheadWizard()}
+      <div className={`${LETTERHEAD_TABLE_GRID} items-center border-b border-border bg-muted/20 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+        <span>Naam</span>
+        <span>Status</span>
+        <span>Standaard</span>
+        <span>Door</span>
+        <div className="flex justify-end">
+          <Button type="button" variant="outline" size="sm" onClick={startNewLetterhead} disabled={letterheadWizardOpen}>
+            <Plus className="mr-1 h-4 w-4" />
+            Nieuw briefpapier
+          </Button>
+        </div>
+      </div>
+      <div className="flex-1">
+        {allLetterheads.length === 0 ? (
+          <div className="flex min-h-[180px] items-center justify-center px-5 py-8 text-center text-sm text-muted-foreground">
+            Nog geen briefpapier ingesteld.
+          </div>
+        ) : allLetterheads.map(item => (
+          <div
+            key={item.id}
+            className={`${LETTERHEAD_TABLE_GRID} items-start border-b border-border px-5 py-4 text-sm transition-colors hover:bg-accent/35`}
+          >
+            <div className="min-w-0">
+              <p className="truncate font-semibold text-foreground">{item.name}</p>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.description || item.download_filename || "-"}</p>
+            </div>
+            <div>{item.status === "archived" ? statusBadge("archived") : <Badge className="border-0 bg-green-100 text-xs text-green-800 dark:bg-green-900/45 dark:text-green-200">Actief</Badge>}</div>
+            <span className="text-sm text-muted-foreground">{item.is_default ? "Ja" : "Nee"}</span>
+            <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
+            <div className="flex justify-end gap-1">
+              {(item.file_id || item.file_url) && (
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => setPreviewFile({
+                  managedFileId: item.file_id,
+                  fileUrl: item.file_url,
+                  filename: item.download_filename,
+                  title: item.name,
+                })}>
+                  <Eye className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              {!item.legacy && (
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => startEditLetterhead(item)}>
+                  <Edit className="h-3.5 w-3.5" />
+                </Button>
+              )}
+              {!item.legacy && item.status !== "archived" && (
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => archiveLetterhead(item)}>
+                  <Archive className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  const renderTemplateWizard = () => (
+    <AnimatePresence>
+      {templateWizardOpen && (
+        <motion.div
+          ref={templateWizardRef}
+          initial={{ height: 0, opacity: 0 }}
+          animate={{ height: "auto", opacity: 1 }}
+          exit={{ height: 0, opacity: 0 }}
+          className="overflow-hidden border-b border-primary/30 bg-muted/15"
+        >
+          <div className="p-5">
+            <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-primary">
+              {editingTemplateId ? "Contracttemplate bewerken" : "Contracttemplate toevoegen"}
+            </p>
+            <WizardSteps labels={TEMPLATE_STEPS} step={templateStep} />
+
+            {templateStep === 1 && (
+              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
+                <div className="space-y-2 xl:col-span-2">
+                  <Label>Naam *</Label>
+                  <Input
+                    value={templateForm.name}
+                    onChange={event => setTemplateForm(prev => ({ ...prev, name: event.target.value }))}
+                    placeholder="Arbeidsovereenkomst bepaalde tijd"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Versie</Label>
+                  <Input
+                    type="number"
+                    min="1"
+                    value={templateForm.version}
+                    onChange={event => setTemplateForm(prev => ({ ...prev, version: event.target.value }))}
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Contractvorm</Label>
+                  <Select value={templateForm.contract_form_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, contract_form_scope: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CONTRACT_FORM_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Urenmodel</Label>
+                  <Select value={templateForm.employment_model_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, employment_model_scope: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {EMPLOYMENT_MODEL_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Proeftijd</Label>
+                  <Select value={templateForm.probation_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, probation_scope: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {PROBATION_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Duursoort</Label>
+                  <Select value={templateForm.duration_type_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, duration_type_scope: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {DURATION_TYPE_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>CAO</Label>
+                  <Select value={templateForm.cao_key || "none"} onValueChange={value => setTemplateForm(prev => ({ ...prev, cao_key: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      {CAO_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+                <div className="space-y-2">
+                  <Label>Standaard briefpapier</Label>
+                  <Select value={templateForm.default_letterhead_id || "none"} onValueChange={value => setTemplateForm(prev => ({ ...prev, default_letterhead_id: value }))}>
+                    <SelectTrigger><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Geen vaste keuze</SelectItem>
+                      {activeLetterheads.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
+                    </SelectContent>
+                  </Select>
+                </div>
+              </div>
+            )}
+
+            {templateStep === 2 && (
+              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Omschrijving</Label>
+                    <Input
+                      value={templateForm.description}
+                      onChange={event => setTemplateForm(prev => ({ ...prev, description: event.target.value }))}
+                      placeholder="Interne toelichting"
+                    />
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Duurkeuzes</Label>
+                    <Input
+                      value={templateForm.duration_options_text || ""}
+                      onChange={event => setTemplateForm(prev => ({ ...prev, duration_options_text: event.target.value }))}
+                      placeholder="Optioneel, bijv. 6_months, 1_year, free"
+                    />
+                  </div>
+                  <label className="flex items-center gap-2 text-sm">
+                    <input
+                      type="checkbox"
+                      checked={templateForm.visible_in_contract_wizard !== false}
+                      onChange={event => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: event.target.checked }))}
+                    />
+                    Zichtbaar in medewerker-contractwizard
+                  </label>
+                  <div className="space-y-2">
+                    <Label>Template-inhoud *</Label>
+                    <Textarea
+                      rows={16}
+                      value={templateForm.body}
+                      onChange={event => setTemplateForm(prev => ({ ...prev, body: event.target.value }))}
+                    />
+                  </div>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
+                  <div className="mt-3 flex flex-wrap gap-1">
+                    {placeholders.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">Geen placeholders gevonden.</span>
+                    ) : placeholders.map(placeholder => (
+                      <Badge key={placeholder} variant="outline" className="text-xs">{placeholder}</Badge>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            )}
+
+            {templateStep === 3 && (
+              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Status</p>
+                  <div className="mt-1">{statusBadge(templateForm.status)}</div>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Contractvorm</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{CONTRACT_FORM_SCOPES.find(scope => scope.value === (templateForm.contract_form_scope || "any"))?.label || "-"}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Urenmodel</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{EMPLOYMENT_MODEL_SCOPES.find(scope => scope.value === (templateForm.employment_model_scope || "any"))?.label || "-"}</p>
+                </div>
+                <div className="rounded-lg border border-border bg-background/40 p-3">
+                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Placeholders</p>
+                  <p className="mt-1 text-sm font-medium text-foreground">{placeholders.length}</p>
+                </div>
+              </div>
+            )}
+
+            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+              <Button type="button" variant="ghost" onClick={cancelTemplateWizard}>
+                <X className="mr-1 h-4 w-4" />
+                Annuleren
+              </Button>
+              <div className="flex flex-wrap justify-end gap-2">
+                {templateStep > 1 && (
+                  <Button type="button" variant="outline" onClick={() => setTemplateStep(step => step - 1)}>
+                    <ChevronLeft className="mr-1 h-4 w-4" />
+                    Terug
+                  </Button>
+                )}
+                {templateStep < TEMPLATE_STEPS.length ? (
+                  <Button type="button" onClick={nextTemplateStep}>
+                    Volgende
+                    <ChevronRight className="ml-1 h-4 w-4" />
+                  </Button>
+                ) : (
+                  <>
+                    <Button type="button" variant="outline" onClick={() => saveTemplateMutation.mutate("draft")} disabled={saveTemplateMutation.isPending}>
+                      <Save className="mr-1 h-4 w-4" />
+                      Concept
+                    </Button>
+                    <Button type="button" variant="outline" onClick={() => saveTemplateMutation.mutate("review")} disabled={saveTemplateMutation.isPending}>
+                      Review
+                    </Button>
+                    <Button type="button" onClick={() => saveTemplateMutation.mutate("published")} disabled={saveTemplateMutation.isPending}>
+                      <CheckCircle className="mr-1 h-4 w-4" />
+                      Publiceren
+                    </Button>
+                  </>
+                )}
+              </div>
+            </div>
+          </div>
+        </motion.div>
+      )}
+    </AnimatePresence>
+  );
+
+  const renderTemplateTab = () => (
+    <div className="flex h-full min-h-[360px] flex-col">
+      {renderTemplateWizard()}
+      <div className={`${TEMPLATE_TABLE_GRID} items-center border-b border-border bg-muted/20 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+        <span>Template</span>
+        <span>Versie</span>
+        <span>Status</span>
+        <span>Scope</span>
+        <span>Door</span>
+        <div className="flex justify-end">
+          <Button type="button" variant="outline" size="sm" onClick={startNewTemplate} disabled={templateWizardOpen}>
+            <Plus className="mr-1 h-4 w-4" />
+            Nieuwe template
+          </Button>
+        </div>
+      </div>
+      <div className="flex-1">
+        {templates.length === 0 ? (
+          <div className="flex min-h-[180px] items-center justify-center px-5 py-8 text-center text-sm text-muted-foreground">
+            Nog geen contracttemplates aangemaakt.
+          </div>
+        ) : templates.map(item => (
+          <div
+            key={item.id}
+            className={`${TEMPLATE_TABLE_GRID} items-start border-b border-border px-5 py-4 text-sm transition-colors hover:bg-accent/35`}
+          >
+            <div className="min-w-0">
+              <p className="truncate font-semibold text-foreground">{item.name}</p>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.description || "-"}</p>
+            </div>
+            <span className="text-sm text-muted-foreground">v{item.version || 1}</span>
+            <div>{statusBadge(item.status)}</div>
+            <div className="min-w-0 text-sm text-muted-foreground">
+              <p className="truncate">{CONTRACT_FORM_SCOPES.find(scope => scope.value === (item.contract_form_scope || "any"))?.label || "Alle contractvormen"}</p>
+              <p className="mt-0.5 truncate text-xs">{EMPLOYMENT_MODEL_SCOPES.find(scope => scope.value === (item.employment_model_scope || "any"))?.label || "Alle urenmodellen"}</p>
+            </div>
+            <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
+            <div className="flex justify-end gap-1">
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => startEditTemplate(item)}>
+                <Edit className="h-3.5 w-3.5" />
+              </Button>
+              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => createNewTemplateVersion(item)}>
+                <Copy className="h-3.5 w-3.5" />
+              </Button>
+              {item.status !== "archived" && (
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => archiveTemplate(item)}>
+                  <Archive className="h-3.5 w-3.5" />
+                </Button>
+              )}
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+
+  return (
+    <div className="flex h-full min-h-[420px] flex-col">
       {message && (
-        <div className={`rounded-lg border p-3 text-sm ${message.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"}`}>
+        <div className={`border-b p-3 text-sm ${message.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"}`}>
           {message.text}
         </div>
       )}
 
-      <section className="rounded-lg border border-border">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
-          <div>
-            <p className="font-semibold text-foreground">Briefpapier</p>
-            <p className="text-xs text-muted-foreground">Meerdere varianten per bedrijf, waarvan een standaardvariant.</p>
-          </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => {
-            setEditingLetterheadId(null);
-            setLetterheadForm(initialLetterhead(companyId));
-          }}>
-            <Plus className="mr-1 h-4 w-4" /> Nieuw briefpapier
-          </Button>
-        </div>
-        <div className="grid gap-4 p-4 lg:grid-cols-[1fr_420px]">
-          <div className="overflow-hidden rounded-lg border border-border">
-            <div className="grid grid-cols-[minmax(180px,1fr)_120px_140px_120px_96px] divide-x divide-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <div className="px-4 py-3">Naam</div>
-              <div className="px-4 py-3">Status</div>
-              <div className="px-4 py-3">Standaard</div>
-              <div className="px-4 py-3">Door</div>
-              <div className="px-4 py-3" />
-            </div>
-            {allLetterheads.length === 0 && <div className="flex min-h-[120px] items-center justify-center border-t border-border px-4 py-6 text-center text-sm text-muted-foreground">Nog geen briefpapier ingesteld.</div>}
-            {allLetterheads.map(item => (
-              <div key={item.id} className="grid grid-cols-[minmax(180px,1fr)_120px_140px_120px_96px] divide-x divide-border items-center border-t border-border text-sm">
-                <div className="min-w-0 px-4 py-3">
-                  <p className="truncate font-medium text-foreground">{item.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">{item.description || item.download_filename || "-"}</p>
-                </div>
-                <div className="px-4 py-3">{item.status === "archived" ? statusBadge("archived") : <Badge className="bg-emerald-100 text-emerald-700 text-xs">Actief</Badge>}</div>
-                <div className="px-4 py-3 text-muted-foreground">{item.is_default ? "Ja" : "Nee"}</div>
-                <div className="truncate px-4 py-3 text-muted-foreground">{getAuditActorLabel(item, auditActors)}</div>
-                <div className="flex justify-end gap-1 px-4 py-3">
-                  {(item.file_id || item.file_url) && (
-                    <Button type="button" variant="ghost" size="icon" onClick={() => setPreviewFile({
-                      managedFileId: item.file_id,
-                      fileUrl: item.file_url,
-                      filename: item.download_filename,
-                      title: item.name,
-                    })}>
-                      <Eye className="h-4 w-4" />
-                    </Button>
-                  )}
-                  {!item.legacy && (
-                    <Button type="button" variant="ghost" size="icon" onClick={() => archiveLetterhead(item)}>
-                      <Archive className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="rounded-lg border border-border p-4 space-y-3">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold">{editingLetterheadId ? "Briefpapier bewerken" : "Briefpapier toevoegen"}</p>
-              {editingLetterheadId && (
-                <Button type="button" variant="ghost" size="icon" onClick={() => {
-                  setEditingLetterheadId(null);
-                  setLetterheadForm(initialLetterhead(companyId));
-                }}>
-                  <X className="h-4 w-4" />
-                </Button>
-              )}
-            </div>
-            <div className="space-y-1">
-              <Label>Naam</Label>
-              <Input value={letterheadForm.name} onChange={event => setLetterheadForm(prev => ({ ...prev, name: event.target.value }))} placeholder="Bijv. Standaard LOQ briefpapier" />
-            </div>
-            <div className="space-y-1">
-              <Label>Omschrijving</Label>
-              <Input value={letterheadForm.description} onChange={event => setLetterheadForm(prev => ({ ...prev, description: event.target.value }))} placeholder="Optioneel" />
-            </div>
-            <label className="flex min-h-[110px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/20 p-4 text-center hover:bg-muted/40">
-              <Upload className="h-5 w-5 text-muted-foreground" />
-              <span className="mt-2 text-sm font-medium">{letterheadForm.file?.name || "Upload PDF of afbeelding"}</span>
-              <input
-                type="file"
-                accept=".pdf,image/*"
-                className="hidden"
-                onChange={event => setLetterheadForm(prev => ({ ...prev, file: event.target.files?.[0] || null }))}
-              />
-            </label>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={!!letterheadForm.is_default}
-                onChange={event => setLetterheadForm(prev => ({ ...prev, is_default: event.target.checked }))}
-              />
-              Standaard briefpapier
-            </label>
-            <Button type="button" onClick={() => saveLetterheadMutation.mutate()} disabled={saveLetterheadMutation.isPending}>
-              <Save className="mr-1 h-4 w-4" /> {saveLetterheadMutation.isPending ? "Opslaan..." : "Briefpapier opslaan"}
-            </Button>
-          </div>
-        </div>
-      </section>
-
-      <section className="rounded-lg border border-border">
-        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
-          <div>
-            <p className="font-semibold text-foreground">Contracttemplates</p>
-            <p className="text-xs text-muted-foreground">Concept, review en gepubliceerde versies. Een gepubliceerde template aanpassen maakt automatisch een nieuwe versie.</p>
-          </div>
-          <Button type="button" variant="outline" size="sm" onClick={() => {
-            setEditingTemplateId(null);
-            setTemplateForm(initialTemplate(companyId));
-          }}>
-            <Plus className="mr-1 h-4 w-4" /> Nieuwe template
-          </Button>
-        </div>
-        <div className="grid gap-4 p-4 xl:grid-cols-[1fr_520px]">
-          <div className="overflow-hidden rounded-lg border border-border">
-            <div className="grid grid-cols-[minmax(220px,1.3fr)_90px_120px_180px_120px_120px] divide-x divide-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <div className="px-4 py-3">Template</div>
-              <div className="px-4 py-3">Versie</div>
-              <div className="px-4 py-3">Status</div>
-              <div className="px-4 py-3">Scope</div>
-              <div className="px-4 py-3">Door</div>
-              <div className="px-4 py-3" />
-            </div>
-            {templates.length === 0 && <div className="flex min-h-[120px] items-center justify-center border-t border-border px-4 py-6 text-center text-sm text-muted-foreground">Nog geen contracttemplates aangemaakt.</div>}
-            {templates.map(item => (
-              <div key={item.id} className="grid grid-cols-[minmax(220px,1.3fr)_90px_120px_180px_120px_120px] divide-x divide-border items-center border-t border-border text-sm">
-                <div className="min-w-0 px-4 py-3">
-                  <p className="truncate font-medium text-foreground">{item.name}</p>
-                  <p className="truncate text-xs text-muted-foreground">{item.description || "-"}</p>
-                </div>
-                <div className="px-4 py-3 text-muted-foreground">v{item.version || 1}</div>
-                <div className="px-4 py-3">{statusBadge(item.status)}</div>
-                <div className="min-w-0 px-4 py-3 text-muted-foreground">
-                  <p className="truncate">{CONTRACT_FORM_SCOPES.find(scope => scope.value === (item.contract_form_scope || "any"))?.label || "Alle contractvormen"}</p>
-                  <p className="truncate text-xs">{EMPLOYMENT_MODEL_SCOPES.find(scope => scope.value === (item.employment_model_scope || "any"))?.label || "Alle urenmodellen"}</p>
-                </div>
-                <div className="truncate px-4 py-3 text-muted-foreground">{getAuditActorLabel(item, auditActors)}</div>
-                <div className="flex justify-end gap-1 px-4 py-3">
-                  <Button type="button" variant="ghost" size="icon" onClick={() => {
-                    setEditingTemplateId(item.id);
-                    setTemplateForm({
-                      company_id: companyId,
-                      name: item.name || "",
-                      description: item.description || "",
-                      template_type: item.template_type || "employment_contract",
-                      contract_form_scope: item.contract_form_scope || "any",
-                      employment_model_scope: item.employment_model_scope || "any",
-                      probation_scope: item.probation_scope || "any",
-                      duration_type_scope: item.duration_type_scope || "any",
-                      duration_options_text: toArrayText(item.duration_options),
-                      visible_in_contract_wizard: item.visible_in_contract_wizard !== false,
-                      cao_key: item.cao_key || "none",
-                      function_type: item.function_type || "",
-                      default_letterhead_id: item.default_letterhead_id || "none",
-                      version: item.version || 1,
-                      status: item.status || "draft",
-                      body: item.body || DEFAULT_TEMPLATE_BODY,
-                    });
-                  }}>
-                    <FileText className="h-4 w-4" />
-                  </Button>
-                  <Button type="button" variant="ghost" size="icon" onClick={() => createNewTemplateVersion(item)}>
-                    <Copy className="h-4 w-4" />
-                  </Button>
-                  {item.status !== "archived" && (
-                    <Button type="button" variant="ghost" size="icon" onClick={() => archiveTemplate(item)}>
-                      <Archive className="h-4 w-4" />
-                    </Button>
-                  )}
-                </div>
-              </div>
-            ))}
-          </div>
-
-          <div className="rounded-lg border border-border p-4 space-y-3">
-            <div className="flex items-center gap-2">
-              <Layers className="h-4 w-4 text-primary" />
-              <p className="text-sm font-semibold">{editingTemplateId ? "Template bewerken" : "Template opstellen"}</p>
-            </div>
-            <div className="grid gap-3 md:grid-cols-2">
-              <div className="space-y-1">
-                <Label>Naam</Label>
-                <Input value={templateForm.name} onChange={event => setTemplateForm(prev => ({ ...prev, name: event.target.value }))} placeholder="Arbeidsovereenkomst bepaalde tijd" />
-              </div>
-              <div className="space-y-1">
-                <Label>Versie</Label>
-                <Input type="number" min="1" value={templateForm.version} onChange={event => setTemplateForm(prev => ({ ...prev, version: event.target.value }))} />
-              </div>
-              <div className="space-y-1">
-                <Label>Status</Label>
-                <Select value={templateForm.status} onValueChange={value => setTemplateForm(prev => ({ ...prev, status: value }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="draft">Concept</SelectItem>
-                    <SelectItem value="review">Review</SelectItem>
-                    <SelectItem value="published">Gepubliceerd</SelectItem>
-                    <SelectItem value="archived">Gearchiveerd</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Contractvorm</Label>
-                <Select value={templateForm.contract_form_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, contract_form_scope: value }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {CONTRACT_FORM_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Urenmodel</Label>
-                <Select value={templateForm.employment_model_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, employment_model_scope: value }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {EMPLOYMENT_MODEL_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Proeftijd</Label>
-                <Select value={templateForm.probation_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, probation_scope: value }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {PROBATION_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Duursoort</Label>
-                <Select value={templateForm.duration_type_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, duration_type_scope: value }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {DURATION_TYPE_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>CAO</Label>
-                <Select value={templateForm.cao_key || "none"} onValueChange={value => setTemplateForm(prev => ({ ...prev, cao_key: value }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    {CAO_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-1">
-                <Label>Standaard briefpapier</Label>
-                <Select value={templateForm.default_letterhead_id || "none"} onValueChange={value => setTemplateForm(prev => ({ ...prev, default_letterhead_id: value }))}>
-                  <SelectTrigger><SelectValue /></SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="none">Geen vaste keuze</SelectItem>
-                    {activeLetterheads.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
-                  </SelectContent>
-                </Select>
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label>Omschrijving</Label>
-              <Input value={templateForm.description} onChange={event => setTemplateForm(prev => ({ ...prev, description: event.target.value }))} placeholder="Interne toelichting" />
-            </div>
-            <div className="space-y-1">
-              <Label>Duurkeuzes</Label>
-              <Input
-                value={templateForm.duration_options_text || ""}
-                onChange={event => setTemplateForm(prev => ({ ...prev, duration_options_text: event.target.value }))}
-                placeholder="Optioneel, bijv. 6_months, 1_year, free"
-              />
-              <p className="text-xs text-muted-foreground">Laat leeg als de template bij alle duurkeuzes binnen de gekozen duursoort hoort.</p>
-            </div>
-            <label className="flex items-center gap-2 text-sm">
-              <input
-                type="checkbox"
-                checked={templateForm.visible_in_contract_wizard !== false}
-                onChange={event => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: event.target.checked }))}
-              />
-              Zichtbaar in medewerker-contractwizard
-            </label>
-            <div className="space-y-1">
-              <Label>Template-inhoud</Label>
-              <Textarea rows={14} value={templateForm.body} onChange={event => setTemplateForm(prev => ({ ...prev, body: event.target.value }))} />
-            </div>
-            <div className="rounded-lg border border-border bg-muted/20 p-3">
-              <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
-              <div className="mt-2 flex flex-wrap gap-1">
-                {placeholders.length === 0 ? (
-                  <span className="text-xs text-muted-foreground">Geen placeholders gevonden.</span>
-                ) : placeholders.map(placeholder => (
-                  <Badge key={placeholder} variant="outline" className="text-xs">{placeholder}</Badge>
-                ))}
-              </div>
-            </div>
-            <div className="flex flex-wrap justify-end gap-2">
-              <Button type="button" variant="outline" onClick={() => saveTemplateMutation.mutate("draft")} disabled={saveTemplateMutation.isPending}>
-                <Save className="mr-1 h-4 w-4" /> Concept opslaan
-              </Button>
-              <Button type="button" variant="outline" onClick={() => saveTemplateMutation.mutate("review")} disabled={saveTemplateMutation.isPending}>
-                Review
-              </Button>
-              <Button type="button" onClick={() => saveTemplateMutation.mutate("published")} disabled={saveTemplateMutation.isPending}>
-                <CheckCircle className="mr-1 h-4 w-4" /> Publiceren
-              </Button>
-            </div>
-          </div>
-        </div>
-      </section>
+      {activeSubTab === "contract_templates" ? renderTemplateTab() : renderLetterheadTab()}
 
       <ManagedFilePreviewDialog
         open={!!previewFile}
