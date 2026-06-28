@@ -88,6 +88,74 @@
       ],
       "description": "Voor parttime arbeidsovereenkomsten: vast model of groeimodel conform CAO PB artikel 11."
     },
+    "contract_model": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "UX-contractmodel uit de wizard, zoals fulltime_fixed, min_max_fixed of oproep_indefinite."
+    },
+    "probation_agreed": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Of in dit contract een proeftijd is afgesproken."
+    },
+    "duration_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "fixed",
+        "indefinite",
+        null
+      ],
+      "description": "Duursoort uit de contractwizard."
+    },
+    "duration_option": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Gekozen duur uit de wizard, bijvoorbeeld 6_months, 1_year of free."
+    },
+    "duration_label": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Leesbare snapshot van de gekozen contractduur."
+    },
+    "wage_table_year": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Jaar van de salaristabel die is gebruikt bij contractaanmaak."
+    },
+    "hourly_rate_snapshot": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Uurloon uit de gekozen salaristabel/trede op het moment van contractaanmaak."
+    },
+    "template_name_snapshot": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Naam van het gebruikte sjabloon op het moment van genereren."
+    },
+    "letterhead_name_snapshot": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Naam van het gebruikte briefpapier op het moment van genereren."
+    },
     "employment_contract_model_rule_status": {
       "type": [
         "string",

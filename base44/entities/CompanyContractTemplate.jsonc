@@ -30,6 +30,55 @@
       ],
       "description": "Optioneel contractvorm-bereik, zoals fulltime, parttime, oproep of min-max."
     },
+    "employment_model_scope": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optioneel uren-/dienstverbandmodel voor filtering in de contractwizard, zoals fulltime, parttime_fixed, min_max of call_agreement."
+    },
+    "probation_scope": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "any",
+        "with_probation",
+        "without_probation",
+        "not_applicable",
+        null
+      ],
+      "description": "Geeft aan of dit sjabloon bedoeld is voor contracten met of zonder proeftijd."
+    },
+    "duration_type_scope": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "any",
+        "fixed",
+        "indefinite",
+        null
+      ],
+      "description": "Duursoort waarop het sjabloon van toepassing is."
+    },
+    "duration_options": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "description": "Optionele duurkeuzes waarvoor dit sjabloon zichtbaar is, bijv. 6_months, 1_year of free."
+    },
+    "visible_in_contract_wizard": {
+      "type": "boolean",
+      "default": true,
+      "description": "Als false blijft de template beheersbaar maar verschijnt hij niet in de medewerker-contractwizard."
+    },
     "cao_key": {
       "type": [
         "string",

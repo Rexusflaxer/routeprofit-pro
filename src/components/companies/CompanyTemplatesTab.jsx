@@ -46,6 +46,30 @@ const CONTRACT_FORM_SCOPES = [
   { value: "zzp", label: "ZZP / opdracht" },
 ];
 
+const EMPLOYMENT_MODEL_SCOPES = [
+  { value: "any", label: "Alle urenmodellen" },
+  { value: "fulltime", label: "Fulltime" },
+  { value: "parttime_fixed", label: "Parttime vast" },
+  { value: "parttime_growth", label: "Parttime groeimodel" },
+  { value: "call_agreement", label: "Oproep / nuluren" },
+  { value: "min_max", label: "Min-max" },
+  { value: "internship", label: "Stage" },
+  { value: "zzp", label: "ZZP / opdracht" },
+];
+
+const PROBATION_SCOPES = [
+  { value: "any", label: "Met en zonder proeftijd" },
+  { value: "with_probation", label: "Alleen met proeftijd" },
+  { value: "without_probation", label: "Alleen zonder proeftijd" },
+  { value: "not_applicable", label: "Niet van toepassing" },
+];
+
+const DURATION_TYPE_SCOPES = [
+  { value: "any", label: "Bepaalde en onbepaalde tijd" },
+  { value: "fixed", label: "Alleen bepaalde tijd" },
+  { value: "indefinite", label: "Alleen onbepaalde tijd" },
+];
+
 const CAO_OPTIONS = [
   { value: "cao_particuliere_beveiliging", label: "CAO Particuliere Beveiliging" },
   { value: "cao_evenementen_horecabeveiliging", label: "CAO Evenementen- en Horecabeveiliging" },
@@ -78,6 +102,17 @@ function formatDate(value) {
   return date.toLocaleDateString("nl-NL", { day: "2-digit", month: "2-digit", year: "numeric" });
 }
 
+function toArrayText(value) {
+  return Array.isArray(value) ? value.join(", ") : "";
+}
+
+function fromArrayText(value) {
+  return String(value || "")
+    .split(",")
+    .map(item => item.trim())
+    .filter(Boolean);
+}
+
 function extractPlaceholders(body) {
   const matches = String(body || "").match(/\{\{\s*[^}]+\s*\}\}/g) || [];
   return [...new Set(matches.map(item => item.replace(/[{}]/g, "").trim()))];
@@ -95,6 +130,11 @@ function initialTemplate(companyId) {
     description: "",
     template_type: "employment_contract",
     contract_form_scope: "any",
+    employment_model_scope: "any",
+    probation_scope: "any",
+    duration_type_scope: "any",
+    duration_options_text: "",
+    visible_in_contract_wizard: true,
     cao_key: "none",
     function_type: "",
     default_letterhead_id: "none",
@@ -258,6 +298,11 @@ export default function CompanyTemplatesTab({ companyId, company }) {
         description: templateForm.description || null,
         template_type: templateForm.template_type || "employment_contract",
         contract_form_scope: templateForm.contract_form_scope === "any" ? null : templateForm.contract_form_scope,
+        employment_model_scope: templateForm.employment_model_scope === "any" ? null : templateForm.employment_model_scope,
+        probation_scope: templateForm.probation_scope === "any" ? null : templateForm.probation_scope,
+        duration_type_scope: templateForm.duration_type_scope === "any" ? null : templateForm.duration_type_scope,
+        duration_options: fromArrayText(templateForm.duration_options_text),
+        visible_in_contract_wizard: templateForm.visible_in_contract_wizard !== false,
         cao_key: templateForm.cao_key === "none" ? null : templateForm.cao_key,
         function_type: templateForm.function_type || null,
         default_letterhead_id: templateForm.default_letterhead_id === "none" ? null : templateForm.default_letterhead_id,
@@ -314,6 +359,11 @@ export default function CompanyTemplatesTab({ companyId, company }) {
       description: record.description || "",
       template_type: record.template_type || "employment_contract",
       contract_form_scope: record.contract_form_scope || "any",
+      employment_model_scope: record.employment_model_scope || "any",
+      probation_scope: record.probation_scope || "any",
+      duration_type_scope: record.duration_type_scope || "any",
+      duration_options_text: toArrayText(record.duration_options),
+      visible_in_contract_wizard: record.visible_in_contract_wizard !== false,
       cao_key: record.cao_key || "none",
       function_type: record.function_type || "",
       default_letterhead_id: record.default_letterhead_id || "none",
@@ -452,7 +502,7 @@ export default function CompanyTemplatesTab({ companyId, company }) {
         </div>
         <div className="grid gap-4 p-4 xl:grid-cols-[1fr_520px]">
           <div className="overflow-hidden rounded-lg border border-border">
-            <div className="grid grid-cols-[minmax(220px,1.3fr)_90px_120px_130px_120px_120px] bg-muted/30 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+            <div className="grid grid-cols-[minmax(220px,1.3fr)_90px_120px_180px_120px_120px] bg-muted/30 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
               <div>Template</div>
               <div>Versie</div>
               <div>Status</div>
@@ -462,14 +512,17 @@ export default function CompanyTemplatesTab({ companyId, company }) {
             </div>
             {templates.length === 0 && <div className="p-6 text-center text-sm text-muted-foreground">Nog geen contracttemplates aangemaakt.</div>}
             {templates.map(item => (
-              <div key={item.id} className="grid grid-cols-[minmax(220px,1.3fr)_90px_120px_130px_120px_120px] items-center border-t border-border px-4 py-3 text-sm">
+              <div key={item.id} className="grid grid-cols-[minmax(220px,1.3fr)_90px_120px_180px_120px_120px] items-center border-t border-border px-4 py-3 text-sm">
                 <div className="min-w-0">
                   <p className="truncate font-medium text-foreground">{item.name}</p>
                   <p className="truncate text-xs text-muted-foreground">{item.description || "-"}</p>
                 </div>
                 <div className="text-muted-foreground">v{item.version || 1}</div>
                 <div>{statusBadge(item.status)}</div>
-                <div className="truncate text-muted-foreground">{CONTRACT_FORM_SCOPES.find(scope => scope.value === (item.contract_form_scope || "any"))?.label || "Alle"}</div>
+                <div className="min-w-0 text-muted-foreground">
+                  <p className="truncate">{CONTRACT_FORM_SCOPES.find(scope => scope.value === (item.contract_form_scope || "any"))?.label || "Alle contractvormen"}</p>
+                  <p className="truncate text-xs">{EMPLOYMENT_MODEL_SCOPES.find(scope => scope.value === (item.employment_model_scope || "any"))?.label || "Alle urenmodellen"}</p>
+                </div>
                 <div className="truncate text-muted-foreground">{getAuditActorLabel(item, auditActors)}</div>
                 <div className="flex justify-end gap-1">
                   <Button type="button" variant="ghost" size="icon" onClick={() => {
@@ -480,6 +533,11 @@ export default function CompanyTemplatesTab({ companyId, company }) {
                       description: item.description || "",
                       template_type: item.template_type || "employment_contract",
                       contract_form_scope: item.contract_form_scope || "any",
+                      employment_model_scope: item.employment_model_scope || "any",
+                      probation_scope: item.probation_scope || "any",
+                      duration_type_scope: item.duration_type_scope || "any",
+                      duration_options_text: toArrayText(item.duration_options),
+                      visible_in_contract_wizard: item.visible_in_contract_wizard !== false,
                       cao_key: item.cao_key || "none",
                       function_type: item.function_type || "",
                       default_letterhead_id: item.default_letterhead_id || "none",
@@ -539,6 +597,33 @@ export default function CompanyTemplatesTab({ companyId, company }) {
                 </Select>
               </div>
               <div className="space-y-1">
+                <Label>Urenmodel</Label>
+                <Select value={templateForm.employment_model_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, employment_model_scope: value }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {EMPLOYMENT_MODEL_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Proeftijd</Label>
+                <Select value={templateForm.probation_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, probation_scope: value }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {PROBATION_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
+                <Label>Duursoort</Label>
+                <Select value={templateForm.duration_type_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, duration_type_scope: value }))}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    {DURATION_TYPE_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-1">
                 <Label>CAO</Label>
                 <Select value={templateForm.cao_key || "none"} onValueChange={value => setTemplateForm(prev => ({ ...prev, cao_key: value }))}>
                   <SelectTrigger><SelectValue /></SelectTrigger>
@@ -562,6 +647,23 @@ export default function CompanyTemplatesTab({ companyId, company }) {
               <Label>Omschrijving</Label>
               <Input value={templateForm.description} onChange={event => setTemplateForm(prev => ({ ...prev, description: event.target.value }))} placeholder="Interne toelichting" />
             </div>
+            <div className="space-y-1">
+              <Label>Duurkeuzes</Label>
+              <Input
+                value={templateForm.duration_options_text || ""}
+                onChange={event => setTemplateForm(prev => ({ ...prev, duration_options_text: event.target.value }))}
+                placeholder="Optioneel, bijv. 6_months, 1_year, free"
+              />
+              <p className="text-xs text-muted-foreground">Laat leeg als de template bij alle duurkeuzes binnen de gekozen duursoort hoort.</p>
+            </div>
+            <label className="flex items-center gap-2 text-sm">
+              <input
+                type="checkbox"
+                checked={templateForm.visible_in_contract_wizard !== false}
+                onChange={event => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: event.target.checked }))}
+              />
+              Zichtbaar in medewerker-contractwizard
+            </label>
             <div className="space-y-1">
               <Label>Template-inhoud</Label>
               <Textarea rows={14} value={templateForm.body} onChange={event => setTemplateForm(prev => ({ ...prev, body: event.target.value }))} />

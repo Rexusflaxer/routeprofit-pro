@@ -21,6 +21,7 @@ import {
   sanitizeTeamhubServiceTypes,
 } from "@/lib/teamhubServiceRules";
 import TeamhubRegionPicker from "./TeamhubRegionPicker";
+import CompanyTemplatesTab from "./CompanyTemplatesTab";
 
 const ACTIVITIES = [
   { key: "private_security", label: "Particulier beveiligingsbedrijf" },
@@ -222,6 +223,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
           <TabsTrigger value="branding">Branding</TabsTrigger>
           <TabsTrigger value="teamhub">LOQ Teamhub</TabsTrigger>
           <TabsTrigger value="cao">CAO's</TabsTrigger>
+          <TabsTrigger value="templates">Sjablonen</TabsTrigger>
         </TabsList>
 
         {/* IDENTITEIT */}
@@ -562,6 +564,17 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
               </SelectContent>
             </Select>
           </div>
+        </TabsContent>
+
+        {/* SJABLONEN */}
+        <TabsContent value="templates" className="pt-2">
+          {company?.id ? (
+            <CompanyTemplatesTab companyId={company.id} company={form} />
+          ) : (
+            <div className="rounded-lg border border-border bg-muted/30 p-4 text-sm text-muted-foreground">
+              Sla het bedrijf eerst op voordat je briefpapier en contracttemplates toevoegt.
+            </div>
+          )}
         </TabsContent>
       </Tabs>
 
