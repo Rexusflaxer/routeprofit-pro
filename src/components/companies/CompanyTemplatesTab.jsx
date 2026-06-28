@@ -127,6 +127,8 @@ const DEFAULT_LETTERHEAD_MARGINS = {
   bottom: 25,
   left: 20,
 };
+const LETTERHEAD_MIN_TEXT_WIDTH_MM = 45;
+const LETTERHEAD_MIN_TEXT_HEIGHT_MM = 55;
 const DEFAULT_LETTERHEAD_BACKGROUND_FIT = "contain";
 const DEFAULT_LETTERHEAD_PAGE_BACKGROUND = "#ffffff";
 const DEFAULT_LETTERHEAD_EDITOR_OPTIONS = {
@@ -200,6 +202,15 @@ function normalizeLetterheadMargins(source = {}) {
   };
 }
 
+function clampDraggedLetterheadMargin(edge, value, margins) {
+  const rounded = clampMargin(value);
+  if (edge === "left") return Math.min(rounded, Math.max(0, 210 - margins.right - LETTERHEAD_MIN_TEXT_WIDTH_MM));
+  if (edge === "right") return Math.min(rounded, Math.max(0, 210 - margins.left - LETTERHEAD_MIN_TEXT_WIDTH_MM));
+  if (edge === "top") return Math.min(rounded, Math.max(0, 297 - margins.bottom - LETTERHEAD_MIN_TEXT_HEIGHT_MM));
+  if (edge === "bottom") return Math.min(rounded, Math.max(0, 297 - margins.top - LETTERHEAD_MIN_TEXT_HEIGHT_MM));
+  return rounded;
+}
+
 function marginLabel(source) {
   const margins = normalizeLetterheadMargins(source);
   return `${margins.top}/${margins.right}/${margins.bottom}/${margins.left} mm`;
@@ -207,6 +218,11 @@ function marginLabel(source) {
 
 function fileLooksLikePdf(fileUrl = "", filename = "", fileType = "") {
   return String(fileType).toLowerCase().includes("pdf") || /\.pdf($|\?)/i.test(fileUrl) || /\.pdf$/i.test(filename);
+}
+
+function withPdfPreviewParameters(fileUrl = "") {
+  if (!fileUrl || fileUrl.includes("#")) return fileUrl;
+  return `${fileUrl}#toolbar=0&navpanes=0&scrollbar=0&page=1&view=Fit`;
 }
 
 function fileLooksLikeImage(fileUrl = "", filename = "", fileType = "") {
@@ -500,13 +516,17 @@ function LetterheadPreview({
   selectedLayerId = null,
   onSelectLayer,
   onUpdateLayer,
+  onChangeMargins,
+  allowMarginDrag = false,
   showGrid = false,
   snapToGrid = false,
   gridSize = 1,
 }) {
   const pageRef = useRef(null);
   const updateLayerRef = useRef(onUpdateLayer);
+  const changeMarginsRef = useRef(onChangeMargins);
   const [interaction, setInteraction] = useState(null);
+  const [marginInteraction, setMarginInteraction] = useState(null);
   const top = (margins.top / 297) * 100;
   const right = (margins.right / 210) * 100;
   const bottom = (margins.bottom / 297) * 100;
@@ -523,6 +543,39 @@ function LetterheadPreview({
   useEffect(() => {
     updateLayerRef.current = onUpdateLayer;
   }, [onUpdateLayer]);
+
+  useEffect(() => {
+    changeMarginsRef.current = onChangeMargins;
+  }, [onChangeMargins]);
+
+  useEffect(() => {
+    if (!marginInteraction) return undefined;
+
+    const handlePointerMove = (event) => {
+      if (!marginInteraction.pageWidth || !marginInteraction.pageHeight) return;
+      const localX = Math.min(Math.max(event.clientX - marginInteraction.pageLeft, 0), marginInteraction.pageWidth);
+      const localY = Math.min(Math.max(event.clientY - marginInteraction.pageTop, 0), marginInteraction.pageHeight);
+      const horizontalMm = (localX / marginInteraction.pageWidth) * 210;
+      const verticalMm = (localY / marginInteraction.pageHeight) * 297;
+      let value = 0;
+      if (marginInteraction.edge === "left") value = horizontalMm;
+      if (marginInteraction.edge === "right") value = 210 - horizontalMm;
+      if (marginInteraction.edge === "top") value = verticalMm;
+      if (marginInteraction.edge === "bottom") value = 297 - verticalMm;
+      changeMarginsRef.current?.({
+        ...marginInteraction.startMargins,
+        [marginInteraction.edge]: clampDraggedLetterheadMargin(marginInteraction.edge, value, marginInteraction.startMargins),
+      });
+    };
+
+    const stopInteraction = () => setMarginInteraction(null);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopInteraction, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopInteraction);
+    };
+  }, [marginInteraction]);
 
   useEffect(() => {
     if (!interaction) return undefined;
@@ -574,6 +627,22 @@ function LetterheadPreview({
       pageWidth: rect.width,
       pageHeight: rect.height,
       startGeometry: getLayerGeometry(layer),
+    });
+  };
+
+  const startMarginInteraction = (event, edge) => {
+    if (!allowMarginDrag || !pageRef.current) return;
+    const rect = pageRef.current.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setMarginInteraction({
+      edge,
+      pageLeft: rect.left,
+      pageTop: rect.top,
+      pageWidth: rect.width,
+      pageHeight: rect.height,
+      startMargins: { ...margins },
     });
   };
 
@@ -666,14 +735,26 @@ function LetterheadPreview({
             />
           )}
           {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isPdf && (
-            <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
-              <div className="rounded border border-slate-200 bg-white/90 px-3 py-2 text-xs font-medium text-slate-600 shadow-sm">
-                PDF-briefpapier geselecteerd
+            <object
+              data={withPdfPreviewParameters(source)}
+              type="application/pdf"
+              aria-label={filename || "PDF-briefpapier"}
+              className="absolute inset-0 h-full w-full bg-white"
+            >
+              <iframe
+                title={filename || "PDF-briefpapier"}
+                src={withPdfPreviewParameters(source)}
+                className="absolute inset-0 h-full w-full border-0 bg-white"
+              />
+              <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
+                <div className="rounded border border-slate-200 bg-white/90 px-3 py-2 text-xs font-medium text-slate-600 shadow-sm">
+                  PDF-briefpapier geselecteerd
+                </div>
+                <p className="mt-2 max-w-[220px] text-[10px] leading-snug text-slate-500">
+                  Deze browser kan de PDF niet inline tonen. Controleer het bestand via de previewknop.
+                </p>
               </div>
-              <p className="mt-2 max-w-[220px] text-[10px] leading-snug text-slate-500">
-                De marges worden op een vaste A4-pagina gezet. Open het bestand om de PDF zelf te controleren.
-              </p>
-            </div>
+            </object>
           )}
           {hasSource && !isImage && !isPdf && (
             <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
@@ -701,7 +782,11 @@ function LetterheadPreview({
             </div>
           )}
           <div
-            className={`absolute rounded-[2px] border ${mode === "sample" ? "border-sky-500/25 bg-white/76" : "border-dashed border-sky-500/85 bg-sky-500/5"}`}
+            className={`absolute rounded-[2px] border ${
+              mode === "sample" || allowMarginDrag
+                ? "border-sky-500/40 bg-white/82 shadow-sm backdrop-blur-[1px] dark:bg-slate-950/78"
+                : "border-dashed border-sky-500/85 bg-sky-500/5"
+            }`}
             style={{
               top: `${top}%`,
               right: `${right}%`,
@@ -709,7 +794,35 @@ function LetterheadPreview({
               left: `${left}%`,
             }}
           >
-            {mode === "sample" ? (
+            {allowMarginDrag && (
+              <>
+                <button
+                  type="button"
+                  aria-label="Bovenmarge slepen"
+                  className="absolute -top-2 left-1/2 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
+                  onPointerDown={event => startMarginInteraction(event, "top")}
+                />
+                <button
+                  type="button"
+                  aria-label="Ondermarge slepen"
+                  className="absolute -bottom-2 left-1/2 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
+                  onPointerDown={event => startMarginInteraction(event, "bottom")}
+                />
+                <button
+                  type="button"
+                  aria-label="Linkermarge slepen"
+                  className="absolute -left-2 top-1/2 h-16 w-4 -translate-y-1/2 cursor-ew-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
+                  onPointerDown={event => startMarginInteraction(event, "left")}
+                />
+                <button
+                  type="button"
+                  aria-label="Rechtermarge slepen"
+                  className="absolute -right-2 top-1/2 h-16 w-4 -translate-y-1/2 cursor-ew-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
+                  onPointerDown={event => startMarginInteraction(event, "right")}
+                />
+              </>
+            )}
+            {mode === "sample" || allowMarginDrag ? (
               <div className="h-full overflow-hidden p-[7%] text-[8px] leading-snug text-slate-800 sm:text-[9px]">
                 <p className="mb-3 text-[11px] font-bold text-slate-950">Arbeidsovereenkomst</p>
                 <p className="mb-3">Ondergetekenden verklaren hierbij de arbeidsovereenkomst aan te gaan conform de gekozen contractvorm, CAO en functie-indeling.</p>
@@ -912,6 +1025,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const letterheadDesignLayers = normalizeDesignLayers(letterheadForm);
   const letterheadUsesUpload = letterheadSourceMode === LETTERHEAD_SOURCE_MODES.upload;
   const companyDisplayName = company?.trade_name || company?.name || company?.company_name || company?.legal_name || "Bedrijfsnaam";
+  const letterheadPreviewIsPdf = letterheadUsesUpload && fileLooksLikePdf(letterheadPreviewSource, letterheadPreviewFilename, letterheadPreviewType);
+  const letterheadPreviewIsImage = letterheadUsesUpload && fileLooksLikeImage(letterheadPreviewSource, letterheadPreviewFilename, letterheadPreviewType);
+  const letterheadImageLooksA4 = letterheadPreviewIsImage && letterheadAssetInfo ? imageLooksA4(letterheadAssetInfo) : null;
+  const showUploadFitOptions = letterheadPreviewIsImage && letterheadImageLooksA4 === false;
 
   useEffect(() => {
     if (!letterheadForm.file) {
@@ -1949,7 +2066,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 <div className="space-y-4">
                   <div className="rounded-lg border border-border bg-background/40 p-4">
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Marges</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Stel in waar de contracttekst over het briefpapier heen mag komen.</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Stel in waar de contracttekst over het briefpapier heen mag komen. Je kunt ook de blauwe randen in de preview slepen.
+                    </p>
                     <div className="mt-4 grid grid-cols-2 gap-3">
                       <MarginInput
                         label="Boven"
@@ -1991,52 +2110,60 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
 
                   {letterheadUsesUpload ? (
                     <div className="rounded-lg border border-border bg-background/40 p-4">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Uploadweergave</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        De pagina blijft altijd A4. Kies hoe een afwijkende upload op het A4-vel wordt geplaatst.
-                      </p>
-                      {letterheadAssetInfo && (
-                        <div className={`mt-3 rounded-md border px-3 py-2 text-xs ${
-                          imageLooksA4(letterheadAssetInfo)
-                            ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
-                            : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-200"
-                        }`}>
-                          <div className="flex flex-wrap items-center justify-between gap-2">
-                            <span>
-                              Afbeelding: {letterheadAssetInfo.width} x {letterheadAssetInfo.height}px
-                              {imageLooksA4(letterheadAssetInfo) === false ? " - verhouding wijkt af van A4." : " - verhouding lijkt A4."}
-                            </span>
-                            {imageLooksA4(letterheadAssetInfo) === false && letterheadBackgroundFit !== "contain" && (
-                              <Button
-                                type="button"
-                                variant="outline"
-                                size="sm"
-                                className="h-7 bg-background/60 px-2 text-xs"
-                                onClick={() => setLetterheadForm(prev => ({ ...prev, background_fit: "contain" }))}
-                              >
-                                Passend gebruiken
-                              </Button>
-                            )}
+                      <div className="flex flex-wrap items-start justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Geselecteerd briefpapier</p>
+                          <p className="mt-1 max-w-[330px] truncate text-sm font-semibold text-foreground">
+                            {letterheadForm.file?.name || currentEditingLetterhead?.download_filename || "Geen bestand geselecteerd"}
+                          </p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            {letterheadPreviewIsPdf
+                              ? "PDF wordt hieronder direct op een A4-pagina getoond."
+                              : letterheadPreviewIsImage && letterheadAssetInfo
+                                ? `${letterheadAssetInfo.width} x ${letterheadAssetInfo.height}px${letterheadImageLooksA4 === false ? " - geen A4-verhouding" : " - lijkt A4"}`
+                                : "Gebruik bij voorkeur een staande A4-PDF, JPG of PNG."}
+                          </p>
+                        </div>
+                        <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
+                          <Upload className="mr-1 h-4 w-4" />
+                          Bestand wijzigen
+                          <input
+                            type="file"
+                            accept=".pdf,image/*"
+                            className="hidden"
+                            onChange={event => {
+                              const file = event.target.files?.[0];
+                              if (file) setLetterheadForm(prev => ({ ...prev, file }));
+                              event.target.value = "";
+                            }}
+                          />
+                        </label>
+                      </div>
+                      {showUploadFitOptions && (
+                        <div className="mt-4 rounded-md border border-amber-500/25 bg-amber-500/10 p-3">
+                          <div className="flex flex-wrap items-start justify-between gap-3">
+                            <div>
+                              <p className="text-sm font-semibold text-amber-800 dark:text-amber-100">Afbeelding wijkt af van A4</p>
+                              <p className="mt-1 text-xs text-amber-700 dark:text-amber-200">
+                                Laat de upload passend staan als alles zichtbaar moet blijven. Kies vullend alleen wanneer randen afgesneden mogen worden.
+                              </p>
+                            </div>
+                            <Select
+                              value={letterheadBackgroundFit}
+                              onValueChange={value => setLetterheadForm(prev => ({ ...prev, background_fit: value }))}
+                            >
+                              <SelectTrigger className="h-9 w-[170px] bg-background/80">
+                                <SelectValue />
+                              </SelectTrigger>
+                              <SelectContent>
+                                {LETTERHEAD_BACKGROUND_FITS.map(option => (
+                                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                                ))}
+                              </SelectContent>
+                            </Select>
                           </div>
                         </div>
                       )}
-                      <div className="mt-3 grid gap-2">
-                        {LETTERHEAD_BACKGROUND_FITS.map(option => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            className={`rounded-lg border p-3 text-left transition-colors ${
-                              letterheadBackgroundFit === option.value
-                                ? "border-primary bg-primary/10"
-                                : "border-border bg-background/35 hover:bg-background/70"
-                            }`}
-                            onClick={() => setLetterheadForm(prev => ({ ...prev, background_fit: option.value }))}
-                          >
-                            <span className="text-sm font-semibold text-foreground">{option.label}</span>
-                            <span className="mt-1 block text-xs text-muted-foreground">{option.description}</span>
-                          </button>
-                        ))}
-                      </div>
                     </div>
                   ) : (
                     <div className="rounded-lg border border-border bg-background/40 p-4">
@@ -2175,6 +2302,14 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   selectedLayerId={selectedLetterheadLayerId}
                   onSelectLayer={setSelectedLetterheadLayerId}
                   onUpdateLayer={updateLetterheadLayer}
+                  onChangeMargins={nextMargins => setLetterheadForm(prev => ({
+                    ...prev,
+                    margin_top_mm: nextMargins.top,
+                    margin_right_mm: nextMargins.right,
+                    margin_bottom_mm: nextMargins.bottom,
+                    margin_left_mm: nextMargins.left,
+                  }))}
+                  allowMarginDrag
                   showGrid={letterheadEditorOptions.showGrid}
                   snapToGrid={letterheadEditorOptions.snapToGrid}
                   gridSize={letterheadEditorOptions.gridSize}
