@@ -341,7 +341,7 @@ export default function CompanySidebarPanel({
           return (
             <div key={item.key}>
               <button
-                onClick={() => item.children ? setTemplatesExpanded(prev => !prev) : (setActive(item.key), setTemplatesExpanded(false))}
+                onClick={() => item.children ? (setActive(item.key), setTemplatesExpanded(prev => !prev)) : (setActive(item.key), setTemplatesExpanded(false))}
                 className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium transition-colors text-left
                   ${isActive
                     ? "bg-background text-foreground border-r-2 border-primary"
