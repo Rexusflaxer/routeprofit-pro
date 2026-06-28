@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { AlertTriangle, Archive, Award, BookOpen, CreditCard, FileText, Handshake, Lock, Mail, MapPin, RotateCcw, Shield, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, Award, BookOpen, ChevronDown, CreditCard, FileText, Handshake, Lock, Mail, MapPin, RotateCcw, Shield, ShieldCheck, Trash2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -20,7 +20,10 @@ import CompanyTemplatesTab from "./CompanyTemplatesTab";
 const MENU_ITEMS = [
   { key: "wpbr", label: "WPBR-vergunning", icon: Shield },
   { key: "cao", label: "CAO", icon: BookOpen },
-  { key: "templates", label: "Sjablonen", icon: FileText },
+  { key: "templates", label: "Sjablonen", icon: FileText, children: [
+    { key: "letterhead", label: "Briefpapier" },
+    { key: "contract_templates", label: "Contracttemplates" },
+  ] },
   { key: "branch_memberships", label: "Branchevereniging", icon: Handshake },
   { key: "accreditations", label: "Erkenningen", icon: Award },
   { key: "insurances", label: "Verzekeringen", icon: ShieldCheck },
@@ -250,6 +253,8 @@ export default function CompanySidebarPanel({
   };
 
   const [active, setActive] = useState(getInitialActiveTab);
+  const [templateSubtab, setTemplateSubtab] = useState(null);
+  const [templatesExpanded, setTemplatesExpanded] = useState(false);
 
   const { data: accreditations = [] } = useQuery({
     queryKey: ["company-accreditations", companyId],
@@ -332,21 +337,43 @@ export default function CompanySidebarPanel({
             (item.key === "insurances" && hasInsuranceAlert) ||
             (item.key === "teamhub" && hasTeamhubAction) ||
             (item.key === "email" && hasEmailAction);
+          const isActive = active === item.key;
           return (
-            <button
-              key={item.key}
-              onClick={() => setActive(item.key)}
-              className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium transition-colors text-left
-                ${active === item.key
-                  ? "bg-background text-foreground border-r-2 border-primary"
-                  : hasAlert
-                    ? "border-r-2 border-amber-500 text-amber-600 dark:text-amber-400 hover:bg-background/60"
-                    : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
-                }`}
-            >
-              <item.icon className={`w-4 h-4 shrink-0 ${hasAlert && active !== item.key ? "text-amber-500" : ""}`} />
-              <span className="flex-1">{item.label}</span>
-            </button>
+            <div key={item.key}>
+              <button
+                onClick={() => item.children ? setTemplatesExpanded(prev => !prev) : (setActive(item.key), setTemplatesExpanded(false))}
+                className={`w-full flex items-center gap-2.5 px-4 py-2.5 text-sm font-medium transition-colors text-left
+                  ${isActive
+                    ? "bg-background text-foreground border-r-2 border-primary"
+                    : hasAlert
+                      ? "border-r-2 border-amber-500 text-amber-600 dark:text-amber-400 hover:bg-background/60"
+                      : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
+                  }`}
+              >
+                <item.icon className={`w-4 h-4 shrink-0 ${hasAlert && !isActive ? "text-amber-500" : ""}`} />
+                <span className="flex-1">{item.label}</span>
+                {item.children && (
+                  <ChevronDown className={`w-3.5 h-3.5 shrink-0 text-muted-foreground transition-transform ${templatesExpanded ? "rotate-180" : ""}`} />
+                )}
+              </button>
+              {item.children && templatesExpanded && (
+                <div className="ml-4 border-l border-border pl-1.5">
+                  {item.children.map(child => (
+                    <button
+                      key={child.key}
+                      onClick={() => { setActive(item.key); setTemplateSubtab(child.key); setTemplatesExpanded(true); }}
+                      className={`w-full flex items-center gap-2 px-3 py-2 text-sm transition-colors text-left
+                        ${isActive && templateSubtab === child.key
+                          ? "bg-background text-foreground border-r-2 border-primary"
+                          : "text-muted-foreground hover:bg-background/60 hover:text-foreground"
+                        }`}
+                    >
+                      <span className="flex-1">{child.label}</span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           );
         })}
       </div>
@@ -383,7 +410,7 @@ export default function CompanySidebarPanel({
         )}
 
         {active === "templates" && (
-          <CompanyTemplatesTab companyId={companyId} company={company} />
+          <CompanyTemplatesTab companyId={companyId} company={company} subTab={templateSubtab} />
         )}
 
         {active === "branch_memberships" && (

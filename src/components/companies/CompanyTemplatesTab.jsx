@@ -173,7 +173,7 @@ function legacyLetterhead(company) {
   };
 }
 
-export default function CompanyTemplatesTab({ companyId, company }) {
+export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const queryClient = useQueryClient();
   const [letterheadForm, setLetterheadForm] = useState(() => initialLetterhead(companyId));
   const [templateForm, setTemplateForm] = useState(() => initialTemplate(companyId));
@@ -389,6 +389,7 @@ export default function CompanyTemplatesTab({ companyId, company }) {
         </div>
       )}
 
+      {subTab === "letterhead" && (
       <section className="rounded-lg border border-border">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
           <div>
@@ -486,7 +487,9 @@ export default function CompanyTemplatesTab({ companyId, company }) {
           </div>
         </div>
       </section>
+      )}
 
+      {subTab === "contract_templates" && (
       <section className="rounded-lg border border-border">
         <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border p-4">
           <div>
@@ -692,6 +695,7 @@ export default function CompanyTemplatesTab({ companyId, company }) {
           </div>
         </div>
       </section>
+      )}
 
       <ManagedFilePreviewDialog
         open={!!previewFile}
