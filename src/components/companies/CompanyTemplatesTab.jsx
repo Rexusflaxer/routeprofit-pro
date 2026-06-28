@@ -13,15 +13,23 @@ import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { uploadManagedFile } from "@/lib/managedFiles";
 import {
   Archive,
+  ArrowDown,
+  ArrowUp,
   CheckCircle,
   ChevronLeft,
   ChevronRight,
   Copy,
   Edit,
   Eye,
+  Image as ImageIcon,
+  Layers,
+  Minus,
   Plus,
   Save,
+  Square,
   Upload,
+  Trash2,
+  Type,
   X,
 } from "lucide-react";
 
@@ -101,11 +109,69 @@ const LETTERHEAD_TABLE_GRID = "grid grid-cols-[minmax(220px,1.5fr)_minmax(110px,
 const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(240px,1.4fr)_minmax(72px,92px)_minmax(120px,150px)_minmax(220px,1fr)_minmax(140px,180px)_minmax(168px,max-content)] gap-3 xl:gap-4";
 const LETTERHEAD_STEPS = ["Upload", "Marges", "Controle"];
 const TEMPLATE_STEPS = ["Scope", "Inhoud", "Controle"];
+const LETTERHEAD_SOURCE_MODES = {
+  upload: "upload",
+  design: "design",
+};
+const LETTERHEAD_BACKGROUND_FITS = [
+  { value: "contain", label: "Passend", description: "Hele upload blijft zichtbaar. Beste keuze bij afwijkende formaten." },
+  { value: "cover", label: "Vullend", description: "Vult A4 volledig en snijdt randen af als het formaat afwijkt." },
+  { value: "stretch", label: "Uitrekken", description: "Rekt de upload exact naar A4. Alleen gebruiken als de verhouding klopt." },
+];
 const DEFAULT_LETTERHEAD_MARGINS = {
   top: 25,
   right: 20,
   bottom: 25,
   left: 20,
+};
+const DEFAULT_LETTERHEAD_BACKGROUND_FIT = "contain";
+const DESIGN_LAYER_DEFAULTS = {
+  text: {
+    type: "text",
+    label: "Tekst",
+    text: "Bedrijfsnaam",
+    x: 16,
+    y: 12,
+    width: 48,
+    height: 6,
+    color: "#111827",
+    font_size: 12,
+    font_weight: 700,
+    align: "left",
+    opacity: 100,
+  },
+  rectangle: {
+    type: "rectangle",
+    label: "Vlak",
+    x: 0,
+    y: 0,
+    width: 100,
+    height: 9,
+    background_color: "#1d4ed8",
+    border_color: "#1d4ed8",
+    border_width: 0,
+    opacity: 100,
+  },
+  line: {
+    type: "line",
+    label: "Lijn",
+    x: 10,
+    y: 90,
+    width: 80,
+    height: 1,
+    background_color: "#1d4ed8",
+    opacity: 100,
+  },
+  image: {
+    type: "image",
+    label: "Afbeelding",
+    x: 12,
+    y: 10,
+    width: 24,
+    height: 10,
+    object_fit: "contain",
+    opacity: 100,
+  },
 };
 
 function clampMargin(value, fallback = 20) {
@@ -136,6 +202,58 @@ function fileLooksLikePdf(fileUrl = "", filename = "", fileType = "") {
 
 function fileLooksLikeImage(fileUrl = "", filename = "", fileType = "") {
   return String(fileType).toLowerCase().startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|avif)($|\?)/i.test(fileUrl) || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(filename);
+}
+
+function createLayerId() {
+  return `layer_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function clampPercent(value, fallback = 0) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(100, Math.max(0, Math.round(number)));
+}
+
+function clampLayerSize(value, fallback = 10) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(100, Math.max(1, Math.round(number)));
+}
+
+function normalizeDesignLayer(layer = {}) {
+  const defaults = DESIGN_LAYER_DEFAULTS[layer.type] || DESIGN_LAYER_DEFAULTS.text;
+  return {
+    ...defaults,
+    ...layer,
+    id: layer.id || createLayerId(),
+    x: clampPercent(layer.x ?? defaults.x),
+    y: clampPercent(layer.y ?? defaults.y),
+    width: clampLayerSize(layer.width ?? defaults.width),
+    height: clampLayerSize(layer.height ?? defaults.height),
+    opacity: clampPercent(layer.opacity ?? defaults.opacity ?? 100, defaults.opacity ?? 100),
+  };
+}
+
+function normalizeDesignLayers(source = {}) {
+  const layers = source.design_layers || source.document_settings?.design_layers || source.metadata?.design_layers || [];
+  return Array.isArray(layers) ? layers.map(normalizeDesignLayer) : [];
+}
+
+function normalizeSourceMode(source = {}) {
+  const mode = source.source_mode || source.document_settings?.source_mode || source.metadata?.source_mode;
+  return mode === LETTERHEAD_SOURCE_MODES.design ? LETTERHEAD_SOURCE_MODES.design : LETTERHEAD_SOURCE_MODES.upload;
+}
+
+function normalizeBackgroundFit(source = {}) {
+  const fit = source.background_fit || source.document_settings?.background_fit || source.metadata?.background_fit;
+  return LETTERHEAD_BACKGROUND_FITS.some(option => option.value === fit) ? fit : DEFAULT_LETTERHEAD_BACKGROUND_FIT;
+}
+
+function imageLooksA4(assetInfo) {
+  if (!assetInfo?.width || !assetInfo?.height) return null;
+  const ratio = assetInfo.width / assetInfo.height;
+  const a4Ratio = 210 / 297;
+  return Math.abs(ratio - a4Ratio) < 0.04;
 }
 
 function toArrayText(value) {
@@ -196,7 +314,90 @@ function WizardSteps({ labels, step }) {
   );
 }
 
-function LetterheadPreview({ source, filename, fileType, margins, mode = "margins" }) {
+function renderDesignLayer(layer) {
+  const style = {
+    left: `${layer.x}%`,
+    top: `${layer.y}%`,
+    width: `${layer.width}%`,
+    height: `${layer.height}%`,
+    opacity: (layer.opacity ?? 100) / 100,
+  };
+
+  if (layer.type === "rectangle") {
+    return (
+      <div
+        key={layer.id}
+        className="absolute"
+        style={{
+          ...style,
+          backgroundColor: layer.background_color || "#1d4ed8",
+          border: `${layer.border_width || 0}px solid ${layer.border_color || layer.background_color || "#1d4ed8"}`,
+        }}
+      />
+    );
+  }
+
+  if (layer.type === "line") {
+    return (
+      <div
+        key={layer.id}
+        className="absolute"
+        style={{
+          ...style,
+          height: `${Math.max(1, Number(layer.height) || 1)}%`,
+          backgroundColor: layer.background_color || "#1d4ed8",
+        }}
+      />
+    );
+  }
+
+  if (layer.type === "image") {
+    return (
+      <div key={layer.id} className="absolute overflow-hidden" style={style}>
+        {layer.src ? (
+          <img
+            src={layer.src}
+            alt={layer.label || "Afbeelding"}
+            className="h-full w-full"
+            style={{ objectFit: layer.object_fit || "contain" }}
+          />
+        ) : (
+          <div className="flex h-full w-full items-center justify-center rounded border border-dashed border-slate-300 text-[8px] text-slate-400">
+            Afbeelding
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return (
+    <div
+      key={layer.id}
+      className="absolute overflow-hidden whitespace-pre-wrap leading-tight"
+      style={{
+        ...style,
+        color: layer.color || "#111827",
+        fontSize: `${layer.font_size || 12}px`,
+        fontWeight: layer.font_weight || 400,
+        textAlign: layer.align || "left",
+      }}
+    >
+      {layer.text || "Tekst"}
+    </div>
+  );
+}
+
+function LetterheadPreview({
+  source,
+  filename,
+  fileType,
+  margins,
+  mode = "margins",
+  sourceMode = LETTERHEAD_SOURCE_MODES.upload,
+  backgroundFit = DEFAULT_LETTERHEAD_BACKGROUND_FIT,
+  designLayers = [],
+  assetInfo = null,
+}) {
   const top = (margins.top / 297) * 100;
   const right = (margins.right / 210) * 100;
   const bottom = (margins.bottom / 297) * 100;
@@ -204,33 +405,49 @@ function LetterheadPreview({ source, filename, fileType, margins, mode = "margin
   const isPdf = fileLooksLikePdf(source, filename, fileType);
   const isImage = fileLooksLikeImage(source, filename, fileType);
   const hasSource = Boolean(source);
+  const looksA4 = imageLooksA4(assetInfo);
+  const objectFit = backgroundFit === "stretch" ? "fill" : backgroundFit;
 
   return (
     <div className="rounded-lg border border-border bg-background/50 p-4">
-      <div className="mx-auto w-full max-w-[390px]">
-        <div className="relative aspect-[210/297] overflow-hidden rounded-sm border border-border bg-white shadow-sm">
-          {hasSource && isImage && (
-            <img src={source} alt={filename || "Briefpapier"} className="absolute inset-0 h-full w-full object-cover" />
-          )}
-          {hasSource && isPdf && (
-            <iframe
-              title={filename || "Briefpapier"}
+      <div className="mx-auto w-full max-w-[430px]">
+        <div className="relative mx-auto aspect-[210/297] overflow-hidden rounded-[2px] border border-slate-300 bg-white shadow-[0_14px_40px_rgba(0,0,0,0.18)]">
+          {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isImage && (
+            <img
               src={source}
-              className="absolute inset-0 h-full w-full border-0 bg-white"
+              alt={filename || "Briefpapier"}
+              className="absolute inset-0 h-full w-full"
+              style={{ objectFit }}
             />
+          )}
+          {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isPdf && (
+            <div className="absolute inset-0 flex flex-col items-center justify-center bg-white p-8 text-center">
+              <div className="rounded border border-slate-200 bg-slate-50 px-3 py-2 text-xs font-medium text-slate-600">
+                PDF-briefpapier geselecteerd
+              </div>
+              <p className="mt-2 max-w-[220px] text-[10px] leading-snug text-slate-400">
+                De A4-pagina en marges blijven exact. Gebruik JPG of PNG als je het ontwerp pixelprecies in deze preview wilt zien.
+              </p>
+            </div>
           )}
           {hasSource && !isImage && !isPdf && (
             <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
               {filename || "Bestand geselecteerd"}
             </div>
           )}
-          {!hasSource && (
+          {sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.map(renderDesignLayer)}
+          {sourceMode === LETTERHEAD_SOURCE_MODES.upload && !hasSource && (
             <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
               Upload eerst een PDF, JPG of PNG.
             </div>
           )}
+          {sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.length === 0 && (
+            <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
+              Voeg links lagen toe om briefpapier te ontwerpen.
+            </div>
+          )}
           <div
-            className={`absolute rounded-sm border ${mode === "sample" ? "border-primary/50 bg-white/72" : "border-dashed border-primary/70 bg-primary/5"}`}
+            className={`absolute rounded-[2px] border ${mode === "sample" ? "border-primary/45 bg-white/72" : "border-dashed border-primary/75 bg-primary/5"}`}
             style={{
               top: `${top}%`,
               right: `${right}%`,
@@ -265,6 +482,11 @@ function LetterheadPreview({ source, filename, fileType, margins, mode = "margin
         <p className="mt-2 text-center text-xs text-muted-foreground">
           Marges: {margins.top} / {margins.right} / {margins.bottom} / {margins.left} mm
         </p>
+        {sourceMode === LETTERHEAD_SOURCE_MODES.upload && looksA4 === false && (
+          <p className="mx-auto mt-2 max-w-[320px] text-center text-xs text-amber-600 dark:text-amber-300">
+            De upload lijkt geen A4-verhouding te hebben. Kies bij voorkeur passend of upload een A4-bestand.
+          </p>
+        )}
       </div>
     </div>
   );
@@ -287,6 +509,13 @@ function MarginInput({ label, value, onChange }) {
       </div>
     </div>
   );
+}
+
+function LayerIcon({ type }) {
+  if (type === "rectangle") return <Square className="h-3.5 w-3.5" />;
+  if (type === "line") return <Minus className="h-3.5 w-3.5" />;
+  if (type === "image") return <ImageIcon className="h-3.5 w-3.5" />;
+  return <Type className="h-3.5 w-3.5" />;
 }
 
 function initialTemplate(companyId) {
@@ -316,6 +545,9 @@ function initialLetterhead(companyId) {
     name: "",
     is_default: false,
     status: "active",
+    source_mode: LETTERHEAD_SOURCE_MODES.upload,
+    background_fit: DEFAULT_LETTERHEAD_BACKGROUND_FIT,
+    design_layers: [],
     file: null,
     margin_top_mm: DEFAULT_LETTERHEAD_MARGINS.top,
     margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
@@ -341,6 +573,15 @@ function legacyLetterhead(company) {
     margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
     margin_bottom_mm: DEFAULT_LETTERHEAD_MARGINS.bottom,
     margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
+    source_mode: LETTERHEAD_SOURCE_MODES.upload,
+    background_fit: DEFAULT_LETTERHEAD_BACKGROUND_FIT,
+    design_layers: [],
+    document_settings: {
+      source_mode: LETTERHEAD_SOURCE_MODES.upload,
+      background_fit: DEFAULT_LETTERHEAD_BACKGROUND_FIT,
+      margins_mm: DEFAULT_LETTERHEAD_MARGINS,
+      design_layers: [],
+    },
     legacy: true,
     metadata: { created_by_display: "Legacy" },
   };
@@ -361,6 +602,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [previewFile, setPreviewFile] = useState(null);
   const [message, setMessage] = useState(null);
   const [letterheadPreviewUrl, setLetterheadPreviewUrl] = useState("");
+  const [letterheadAssetInfo, setLetterheadAssetInfo] = useState(null);
 
   const activeSubTab = subTab || "letterhead";
 
@@ -403,6 +645,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const letterheadPreviewFilename = letterheadForm.file?.name || currentEditingLetterhead?.download_filename || "";
   const letterheadPreviewType = letterheadForm.file?.type || "";
   const letterheadMargins = normalizeLetterheadMargins(letterheadForm);
+  const letterheadSourceMode = normalizeSourceMode(letterheadForm);
+  const letterheadBackgroundFit = normalizeBackgroundFit(letterheadForm);
+  const letterheadDesignLayers = normalizeDesignLayers(letterheadForm);
+  const letterheadUsesUpload = letterheadSourceMode === LETTERHEAD_SOURCE_MODES.upload;
 
   useEffect(() => {
     if (!letterheadForm.file) {
@@ -413,6 +659,24 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     setLetterheadPreviewUrl(url);
     return () => URL.revokeObjectURL(url);
   }, [letterheadForm.file]);
+
+  useEffect(() => {
+    setLetterheadAssetInfo(null);
+    if (!letterheadPreviewSource || !fileLooksLikeImage(letterheadPreviewSource, letterheadPreviewFilename, letterheadPreviewType)) return undefined;
+    if (typeof window === "undefined") return undefined;
+    let cancelled = false;
+    const image = new window.Image();
+    image.onload = () => {
+      if (!cancelled) setLetterheadAssetInfo({ width: image.naturalWidth, height: image.naturalHeight });
+    };
+    image.onerror = () => {
+      if (!cancelled) setLetterheadAssetInfo(null);
+    };
+    image.src = letterheadPreviewSource;
+    return () => {
+      cancelled = true;
+    };
+  }, [letterheadPreviewSource, letterheadPreviewFilename, letterheadPreviewType]);
 
   useEffect(() => {
     if (!letterheadWizardOpen) return undefined;
@@ -440,10 +704,15 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const saveLetterheadMutation = useMutation({
     mutationFn: async () => {
       if (!letterheadForm.name.trim()) throw new Error("Vul een naam voor het briefpapier in.");
-      if (!editingLetterheadId && !letterheadForm.file) throw new Error("Upload eerst het briefpapier.");
+      const sourceMode = normalizeSourceMode(letterheadForm);
+      const designLayers = normalizeDesignLayers(letterheadForm);
+      if (sourceMode === LETTERHEAD_SOURCE_MODES.upload && !editingLetterheadId && !letterheadForm.file) throw new Error("Upload eerst het briefpapier.");
+      if (sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.length === 0) throw new Error("Voeg minimaal één laag toe aan het briefpapier.");
 
       const previous = editingLetterheadId ? letterheads.find(item => item.id === editingLetterheadId) || {} : {};
       const margins = normalizeLetterheadMargins(letterheadForm);
+      const backgroundFit = normalizeBackgroundFit(letterheadForm);
+      const storedDesignLayers = sourceMode === LETTERHEAD_SOURCE_MODES.design ? designLayers : [];
       const otherActiveLetterheads = letterheads.filter(item => item.id !== editingLetterheadId && item.status !== "archived");
       const hasOtherDefault = otherActiveLetterheads.some(item => item.is_default);
       const shouldBeDefault = editingLetterheadId
@@ -458,16 +727,30 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         status: "active",
         document_settings: {
           ...(previous.document_settings || {}),
+          source_mode: sourceMode,
+          background_fit: backgroundFit,
           margins_mm: margins,
+          design_layers: storedDesignLayers,
         },
         metadata: {
           ...auditMetadata,
+          source_mode: sourceMode,
+          background_fit: backgroundFit,
           margins_mm: margins,
+          design_layers: storedDesignLayers,
         },
+        ...(sourceMode === LETTERHEAD_SOURCE_MODES.design
+          ? {
+              file_url: null,
+              file_id: null,
+              download_filename: null,
+              logical_path: null,
+            }
+          : {}),
       };
 
       let payload = basePayload;
-      if (letterheadForm.file) {
+      if (sourceMode === LETTERHEAD_SOURCE_MODES.upload && letterheadForm.file) {
         const result = await uploadManagedFile({
           file: letterheadForm.file,
           ownerType: "company",
@@ -606,6 +889,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       name: record.name || "",
       is_default: !!record.is_default,
       status: record.status || "active",
+      source_mode: normalizeSourceMode(record),
+      background_fit: normalizeBackgroundFit(record),
+      design_layers: normalizeDesignLayers(record),
       file: null,
       margin_top_mm: margins.top,
       margin_right_mm: margins.right,
@@ -629,14 +915,20 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         setMessage({ type: "error", text: "Vul eerst een naam voor het briefpapier in." });
         return;
       }
-      if (!letterheadForm.file && !letterheadHasExistingFile) {
+      if (letterheadUsesUpload && !letterheadForm.file && !letterheadHasExistingFile) {
         setMessage({ type: "error", text: "Upload eerst het briefpapier." });
         return;
       }
     }
-    if (letterheadStep === 2 && !letterheadPreviewSource) {
-      setMessage({ type: "error", text: "Upload eerst het briefpapier." });
-      return;
+    if (letterheadStep === 2) {
+      if (letterheadUsesUpload && !letterheadPreviewSource) {
+        setMessage({ type: "error", text: "Upload eerst het briefpapier." });
+        return;
+      }
+      if (!letterheadUsesUpload && letterheadDesignLayers.length === 0) {
+        setMessage({ type: "error", text: "Voeg minimaal één laag toe aan het briefpapier." });
+        return;
+      }
     }
     setMessage(null);
     setLetterheadStep(step => Math.min(step + 1, LETTERHEAD_STEPS.length));
@@ -720,6 +1012,250 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     setTemplateStep(step => Math.min(step + 1, TEMPLATE_STEPS.length));
   };
 
+  const updateLetterheadLayer = (layerId, updates) => {
+    setLetterheadForm(prev => ({
+      ...prev,
+      design_layers: normalizeDesignLayers(prev).map(layer => (
+        layer.id === layerId ? normalizeDesignLayer({ ...layer, ...updates }) : layer
+      )),
+    }));
+  };
+
+  const addLetterheadLayer = (type) => {
+    const layer = normalizeDesignLayer({ ...DESIGN_LAYER_DEFAULTS[type], id: createLayerId() });
+    setLetterheadForm(prev => ({
+      ...prev,
+      source_mode: LETTERHEAD_SOURCE_MODES.design,
+      design_layers: [...normalizeDesignLayers(prev), layer],
+    }));
+  };
+
+  const addLetterheadImageLayer = (file) => {
+    if (!file) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      const layer = normalizeDesignLayer({
+        ...DESIGN_LAYER_DEFAULTS.image,
+        id: createLayerId(),
+        label: file.name || "Afbeelding",
+        src: reader.result,
+      });
+      setLetterheadForm(prev => ({
+        ...prev,
+        source_mode: LETTERHEAD_SOURCE_MODES.design,
+        design_layers: [...normalizeDesignLayers(prev), layer],
+      }));
+    };
+    reader.readAsDataURL(file);
+  };
+
+  const removeLetterheadLayer = (layerId) => {
+    setLetterheadForm(prev => ({
+      ...prev,
+      design_layers: normalizeDesignLayers(prev).filter(layer => layer.id !== layerId),
+    }));
+  };
+
+  const moveLetterheadLayer = (layerId, direction) => {
+    setLetterheadForm(prev => {
+      const layers = normalizeDesignLayers(prev);
+      const index = layers.findIndex(layer => layer.id === layerId);
+      const nextIndex = index + direction;
+      if (index < 0 || nextIndex < 0 || nextIndex >= layers.length) return prev;
+      const nextLayers = [...layers];
+      const [layer] = nextLayers.splice(index, 1);
+      nextLayers.splice(nextIndex, 0, layer);
+      return { ...prev, design_layers: nextLayers };
+    });
+  };
+
+  const renderLetterheadLayerEditor = (layer, index) => {
+    const isText = layer.type === "text";
+    const isShape = layer.type === "rectangle" || layer.type === "line";
+    const isImage = layer.type === "image";
+
+    return (
+      <div key={layer.id} className="rounded-lg border border-border bg-background/45 p-3">
+        <div className="flex items-start justify-between gap-3">
+          <div className="min-w-0">
+            <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
+              <LayerIcon type={layer.type} />
+              {layer.label || DESIGN_LAYER_DEFAULTS[layer.type]?.label || "Laag"}
+            </p>
+            <p className="mt-0.5 text-xs text-muted-foreground">Laag {index + 1}</p>
+          </div>
+          <div className="flex shrink-0 gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => moveLetterheadLayer(layer.id, -1)}
+              disabled={index === 0}
+            >
+              <ArrowUp className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={() => moveLetterheadLayer(layer.id, 1)}
+              disabled={index === letterheadDesignLayers.length - 1}
+            >
+              <ArrowDown className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7 text-muted-foreground hover:text-destructive"
+              onClick={() => removeLetterheadLayer(layer.id)}
+            >
+              <Trash2 className="h-3.5 w-3.5" />
+            </Button>
+          </div>
+        </div>
+
+        <div className="mt-3 space-y-3">
+          <div className="space-y-1.5">
+            <Label className="text-xs">Naam laag</Label>
+            <Input
+              className="h-9"
+              value={layer.label || ""}
+              onChange={event => updateLetterheadLayer(layer.id, { label: event.target.value })}
+            />
+          </div>
+
+          {isText && (
+            <div className="space-y-1.5">
+              <Label className="text-xs">Tekst</Label>
+              <Textarea
+                value={layer.text || ""}
+                onChange={event => updateLetterheadLayer(layer.id, { text: event.target.value })}
+                rows={3}
+              />
+            </div>
+          )}
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">X</Label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                className="h-9"
+                value={layer.x}
+                onChange={event => updateLetterheadLayer(layer.id, { x: event.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Y</Label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                className="h-9"
+                value={layer.y}
+                onChange={event => updateLetterheadLayer(layer.id, { y: event.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Breedte</Label>
+              <Input
+                type="number"
+                min="1"
+                max="100"
+                className="h-9"
+                value={layer.width}
+                onChange={event => updateLetterheadLayer(layer.id, { width: event.target.value })}
+              />
+            </div>
+            <div className="space-y-1.5">
+              <Label className="text-xs">Hoogte</Label>
+              <Input
+                type="number"
+                min="1"
+                max="100"
+                className="h-9"
+                value={layer.height}
+                onChange={event => updateLetterheadLayer(layer.id, { height: event.target.value })}
+              />
+            </div>
+          </div>
+
+          <div className="grid grid-cols-2 gap-2">
+            <div className="space-y-1.5">
+              <Label className="text-xs">Dekking</Label>
+              <Input
+                type="number"
+                min="0"
+                max="100"
+                className="h-9"
+                value={layer.opacity}
+                onChange={event => updateLetterheadLayer(layer.id, { opacity: event.target.value })}
+              />
+            </div>
+            {isText && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Tekstgrootte</Label>
+                <Input
+                  type="number"
+                  min="6"
+                  max="48"
+                  className="h-9"
+                  value={layer.font_size || 12}
+                  onChange={event => updateLetterheadLayer(layer.id, { font_size: Number(event.target.value) || 12 })}
+                />
+              </div>
+            )}
+            {isImage && (
+              <div className="space-y-1.5">
+                <Label className="text-xs">Passend maken</Label>
+                <Select value={layer.object_fit || "contain"} onValueChange={value => updateLetterheadLayer(layer.id, { object_fit: value })}>
+                  <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="contain">Passend</SelectItem>
+                    <SelectItem value="cover">Vullend</SelectItem>
+                    <SelectItem value="fill">Uitrekken</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            )}
+          </div>
+
+          {(isText || isShape) && (
+            <div className="grid grid-cols-2 gap-2">
+              <div className="space-y-1.5">
+                <Label className="text-xs">{isText ? "Tekstkleur" : "Kleur"}</Label>
+                <Input
+                  type="color"
+                  className="h-9 p-1"
+                  value={isText ? (layer.color || "#111827") : (layer.background_color || "#1d4ed8")}
+                  onChange={event => updateLetterheadLayer(layer.id, isText ? { color: event.target.value } : { background_color: event.target.value })}
+                />
+              </div>
+              {isText && (
+                <div className="space-y-1.5">
+                  <Label className="text-xs">Uitlijning</Label>
+                  <Select value={layer.align || "left"} onValueChange={value => updateLetterheadLayer(layer.id, { align: value })}>
+                    <SelectTrigger className="h-9"><SelectValue /></SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="left">Links</SelectItem>
+                      <SelectItem value="center">Midden</SelectItem>
+                      <SelectItem value="right">Rechts</SelectItem>
+                    </SelectContent>
+                  </Select>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+      </div>
+    );
+  };
+
   const renderLetterheadWizard = () => (
     <AnimatePresence>
       {letterheadWizardOpen && (
@@ -747,6 +1283,33 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                       placeholder="Bijv. Standaard briefpapier"
                     />
                   </div>
+                  <div className="space-y-2">
+                    <Label>Manier van maken</Label>
+                    <div className="grid gap-2">
+                      <button
+                        type="button"
+                        className={`rounded-lg border p-3 text-left transition-colors ${letterheadUsesUpload ? "border-primary bg-primary/10" : "border-border bg-background/35 hover:bg-background/70"}`}
+                        onClick={() => setLetterheadForm(prev => ({ ...prev, source_mode: LETTERHEAD_SOURCE_MODES.upload }))}
+                      >
+                        <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                          <Upload className="h-4 w-4" />
+                          Bestaand briefpapier uploaden
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">Gebruik een A4-PDF, JPG of PNG als basis.</span>
+                      </button>
+                      <button
+                        type="button"
+                        className={`rounded-lg border p-3 text-left transition-colors ${!letterheadUsesUpload ? "border-primary bg-primary/10" : "border-border bg-background/35 hover:bg-background/70"}`}
+                        onClick={() => setLetterheadForm(prev => ({ ...prev, source_mode: LETTERHEAD_SOURCE_MODES.design }))}
+                      >
+                        <span className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                          <Layers className="h-4 w-4" />
+                          Zelf briefpapier ontwerpen
+                        </span>
+                        <span className="mt-1 block text-xs text-muted-foreground">Maak een ontwerp met lagen zoals tekst, vlakken, lijnen en logo.</span>
+                      </button>
+                    </div>
+                  </div>
                   {letterheadHasExistingFile && (
                     <Button
                       type="button"
@@ -764,70 +1327,174 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     </Button>
                   )}
                 </div>
-                <label className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background/40 p-5 text-center transition-colors hover:bg-background/70">
-                  <Upload className="h-6 w-6 text-muted-foreground" />
-                  <span className="mt-2 text-sm font-medium text-foreground">
-                    {letterheadForm.file?.name || (letterheadHasExistingFile ? "Vervang PDF of afbeelding" : "Upload PDF of afbeelding")}
-                  </span>
-                  <span className="mt-1 text-xs text-muted-foreground">PDF, JPG of PNG</span>
-                  <input
-                    type="file"
-                    accept=".pdf,image/*"
-                    className="hidden"
-                    onChange={event => setLetterheadForm(prev => ({ ...prev, file: event.target.files?.[0] || null }))}
-                  />
-                </label>
+                {letterheadUsesUpload ? (
+                  <label className="flex min-h-[260px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background/40 p-5 text-center transition-colors hover:bg-background/70">
+                    <Upload className="h-7 w-7 text-muted-foreground" />
+                    <span className="mt-2 text-sm font-medium text-foreground">
+                      {letterheadForm.file?.name || (letterheadHasExistingFile ? "Vervang PDF of afbeelding" : "Upload PDF of afbeelding")}
+                    </span>
+                    <span className="mt-1 text-xs text-muted-foreground">Gebruik bij voorkeur A4 staand. PDF, JPG of PNG.</span>
+                    <input
+                      type="file"
+                      accept=".pdf,image/*"
+                      className="hidden"
+                      onChange={event => setLetterheadForm(prev => ({ ...prev, file: event.target.files?.[0] || null }))}
+                    />
+                  </label>
+                ) : (
+                  <div className="flex min-h-[260px] flex-col justify-center rounded-lg border border-border bg-background/40 p-5">
+                    <p className="text-sm font-semibold text-foreground">Ontwerp starten</p>
+                    <p className="mt-1 text-sm text-muted-foreground">In de volgende stap kun je lagen toevoegen en direct op een A4-pagina controleren.</p>
+                    <div className="mt-4 grid gap-2 sm:grid-cols-2">
+                      <Button type="button" variant="outline" onClick={() => addLetterheadLayer("text")}>
+                        <Type className="mr-1 h-4 w-4" />
+                        Tekstlaag
+                      </Button>
+                      <Button type="button" variant="outline" onClick={() => addLetterheadLayer("rectangle")}>
+                        <Square className="mr-1 h-4 w-4" />
+                        Vlak
+                      </Button>
+                    </div>
+                  </div>
+                )}
               </div>
             )}
 
             {letterheadStep === 2 && (
-              <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
-                <div className="rounded-lg border border-border bg-background/40 p-4">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Marges</p>
-                  <p className="mt-1 text-xs text-muted-foreground">Stel in waar de contracttekst over het briefpapier heen mag komen.</p>
-                  <div className="mt-4 grid grid-cols-2 gap-3">
-                    <MarginInput
-                      label="Boven"
-                      value={letterheadMargins.top}
-                      onChange={value => setLetterheadForm(prev => ({ ...prev, margin_top_mm: value }))}
-                    />
-                    <MarginInput
-                      label="Rechts"
-                      value={letterheadMargins.right}
-                      onChange={value => setLetterheadForm(prev => ({ ...prev, margin_right_mm: value }))}
-                    />
-                    <MarginInput
-                      label="Onder"
-                      value={letterheadMargins.bottom}
-                      onChange={value => setLetterheadForm(prev => ({ ...prev, margin_bottom_mm: value }))}
-                    />
-                    <MarginInput
-                      label="Links"
-                      value={letterheadMargins.left}
-                      onChange={value => setLetterheadForm(prev => ({ ...prev, margin_left_mm: value }))}
-                    />
+              <div className="grid gap-5 xl:grid-cols-[minmax(360px,460px)_minmax(0,1fr)]">
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-border bg-background/40 p-4">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Marges</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Stel in waar de contracttekst over het briefpapier heen mag komen.</p>
+                    <div className="mt-4 grid grid-cols-2 gap-3">
+                      <MarginInput
+                        label="Boven"
+                        value={letterheadMargins.top}
+                        onChange={value => setLetterheadForm(prev => ({ ...prev, margin_top_mm: value }))}
+                      />
+                      <MarginInput
+                        label="Rechts"
+                        value={letterheadMargins.right}
+                        onChange={value => setLetterheadForm(prev => ({ ...prev, margin_right_mm: value }))}
+                      />
+                      <MarginInput
+                        label="Onder"
+                        value={letterheadMargins.bottom}
+                        onChange={value => setLetterheadForm(prev => ({ ...prev, margin_bottom_mm: value }))}
+                      />
+                      <MarginInput
+                        label="Links"
+                        value={letterheadMargins.left}
+                        onChange={value => setLetterheadForm(prev => ({ ...prev, margin_left_mm: value }))}
+                      />
+                    </div>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      className="mt-4"
+                      onClick={() => setLetterheadForm(prev => ({
+                        ...prev,
+                        margin_top_mm: DEFAULT_LETTERHEAD_MARGINS.top,
+                        margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
+                        margin_bottom_mm: DEFAULT_LETTERHEAD_MARGINS.bottom,
+                        margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
+                      }))}
+                    >
+                      Marges resetten
+                    </Button>
                   </div>
-                  <Button
-                    type="button"
-                    variant="outline"
-                    size="sm"
-                    className="mt-4"
-                    onClick={() => setLetterheadForm(prev => ({
-                      ...prev,
-                      margin_top_mm: DEFAULT_LETTERHEAD_MARGINS.top,
-                      margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
-                      margin_bottom_mm: DEFAULT_LETTERHEAD_MARGINS.bottom,
-                      margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
-                    }))}
-                  >
-                    Marges resetten
-                  </Button>
+
+                  {letterheadUsesUpload ? (
+                    <div className="rounded-lg border border-border bg-background/40 p-4">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Uploadweergave</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        De pagina blijft altijd A4. Kies hoe een afwijkende upload op het A4-vel wordt geplaatst.
+                      </p>
+                      {letterheadAssetInfo && (
+                        <p className={`mt-3 rounded-md border px-3 py-2 text-xs ${
+                          imageLooksA4(letterheadAssetInfo)
+                            ? "border-emerald-500/25 bg-emerald-500/10 text-emerald-700 dark:text-emerald-200"
+                            : "border-amber-500/25 bg-amber-500/10 text-amber-700 dark:text-amber-200"
+                        }`}>
+                          Afbeelding: {letterheadAssetInfo.width} x {letterheadAssetInfo.height}px
+                          {imageLooksA4(letterheadAssetInfo) === false ? " - verhouding wijkt af van A4." : " - verhouding lijkt A4."}
+                        </p>
+                      )}
+                      <div className="mt-3 grid gap-2">
+                        {LETTERHEAD_BACKGROUND_FITS.map(option => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            className={`rounded-lg border p-3 text-left transition-colors ${
+                              letterheadBackgroundFit === option.value
+                                ? "border-primary bg-primary/10"
+                                : "border-border bg-background/35 hover:bg-background/70"
+                            }`}
+                            onClick={() => setLetterheadForm(prev => ({ ...prev, background_fit: option.value }))}
+                          >
+                            <span className="text-sm font-semibold text-foreground">{option.label}</span>
+                            <span className="mt-1 block text-xs text-muted-foreground">{option.description}</span>
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  ) : (
+                    <div className="rounded-lg border border-border bg-background/40 p-4">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Ontwerplagen</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Werk met lagen voor tekst, logo, lijnen en vlakken.</p>
+                        </div>
+                      </div>
+                      <div className="mt-3 grid grid-cols-2 gap-2">
+                        <Button type="button" variant="outline" size="sm" onClick={() => addLetterheadLayer("text")}>
+                          <Type className="mr-1 h-4 w-4" />
+                          Tekst
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => addLetterheadLayer("rectangle")}>
+                          <Square className="mr-1 h-4 w-4" />
+                          Vlak
+                        </Button>
+                        <Button type="button" variant="outline" size="sm" onClick={() => addLetterheadLayer("line")}>
+                          <Minus className="mr-1 h-4 w-4" />
+                          Lijn
+                        </Button>
+                        <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
+                          <ImageIcon className="mr-1 h-4 w-4" />
+                          Logo
+                          <input
+                            type="file"
+                            accept="image/*"
+                            className="hidden"
+                            onChange={event => {
+                              addLetterheadImageLayer(event.target.files?.[0]);
+                              event.target.value = "";
+                            }}
+                          />
+                        </label>
+                      </div>
+                      <div className="mt-4 max-h-[540px] space-y-3 overflow-auto pr-1">
+                        {letterheadDesignLayers.length === 0 ? (
+                          <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                            Nog geen lagen. Voeg bijvoorbeeld een tekstlaag of logo toe.
+                          </div>
+                        ) : (
+                          letterheadDesignLayers.map(renderLetterheadLayerEditor)
+                        )}
+                      </div>
+                    </div>
+                  )}
                 </div>
                 <LetterheadPreview
                   source={letterheadPreviewSource}
                   filename={letterheadPreviewFilename}
                   fileType={letterheadPreviewType}
                   margins={letterheadMargins}
+                  sourceMode={letterheadSourceMode}
+                  backgroundFit={letterheadBackgroundFit}
+                  designLayers={letterheadDesignLayers}
+                  assetInfo={letterheadAssetInfo}
                 />
               </div>
             )}
@@ -840,13 +1507,26 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     <p className="mt-1 text-sm font-medium text-foreground">{letterheadForm.name || "-"}</p>
                   </div>
                   <div className="rounded-lg border border-border bg-background/40 p-3">
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Upload</p>
-                    <p className="mt-1 truncate text-sm font-medium text-foreground">{letterheadForm.file?.name || currentEditingLetterhead?.download_filename || "-"}</p>
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Type</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">{letterheadUsesUpload ? "Upload" : "Zelf ontworpen"}</p>
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      {letterheadUsesUpload
+                        ? (letterheadForm.file?.name || currentEditingLetterhead?.download_filename || "-")
+                        : `${letterheadDesignLayers.length} lagen`}
+                    </p>
                   </div>
                   <div className="rounded-lg border border-border bg-background/40 p-3">
                     <p className="text-xs uppercase tracking-wider text-muted-foreground">Marges</p>
                     <p className="mt-1 text-sm font-medium text-foreground">{marginLabel(letterheadForm)}</p>
                   </div>
+                  {letterheadUsesUpload && (
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Weergave</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">
+                        {LETTERHEAD_BACKGROUND_FITS.find(option => option.value === letterheadBackgroundFit)?.label || "Passend"}
+                      </p>
+                    </div>
+                  )}
                 </div>
                 <LetterheadPreview
                   source={letterheadPreviewSource}
@@ -854,6 +1534,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   fileType={letterheadPreviewType}
                   margins={letterheadMargins}
                   mode="sample"
+                  sourceMode={letterheadSourceMode}
+                  backgroundFit={letterheadBackgroundFit}
+                  designLayers={letterheadDesignLayers}
+                  assetInfo={letterheadAssetInfo}
                 />
               </div>
             )}
