@@ -1,0 +1,73 @@
+{
+  "name": "CompanyLetterhead",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "description": "Bedrijf waar dit briefpapier bij hoort."
+    },
+    "name": {
+      "type": "string",
+      "description": "Naam van het briefpapier, bijvoorbeeld Standaard of Juridisch."
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "is_default": {
+      "type": "boolean",
+      "default": false
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_settings": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "description": "Instellingen voor marges, positie en schaal bij documentgeneratie."
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "company_id",
+    "name"
+  ]
+}

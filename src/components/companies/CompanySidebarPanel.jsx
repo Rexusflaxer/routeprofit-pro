@@ -1,5 +1,5 @@
 import React, { useState } from "react";
-import { AlertTriangle, Archive, Award, BookOpen, CreditCard, Handshake, Lock, Mail, MapPin, RotateCcw, Shield, ShieldCheck, Trash2 } from "lucide-react";
+import { AlertTriangle, Archive, Award, BookOpen, CreditCard, FileText, Handshake, Lock, Mail, MapPin, RotateCcw, Shield, ShieldCheck, Trash2 } from "lucide-react";
 import { useQuery } from "@tanstack/react-query";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
@@ -15,10 +15,12 @@ import AccreditationsTab from "./AccreditationsTab";
 import BranchMembershipsTab from "./BranchMembershipsTab";
 import CompanyEmailTab from "./CompanyEmailTab";
 import CompanyInsurancesTab from "./CompanyInsurancesTab";
+import CompanyTemplatesTab from "./CompanyTemplatesTab";
 
 const MENU_ITEMS = [
   { key: "wpbr", label: "WPBR-vergunning", icon: Shield },
   { key: "cao", label: "CAO", icon: BookOpen },
+  { key: "templates", label: "Sjablonen", icon: FileText },
   { key: "branch_memberships", label: "Branchevereniging", icon: Handshake },
   { key: "accreditations", label: "Erkenningen", icon: Award },
   { key: "insurances", label: "Verzekeringen", icon: ShieldCheck },
@@ -378,6 +380,10 @@ export default function CompanySidebarPanel({
 
         {active === "cao" && (
           <CaoTab companyId={companyId} />
+        )}
+
+        {active === "templates" && (
+          <CompanyTemplatesTab companyId={companyId} company={company} />
         )}
 
         {active === "branch_memberships" && (

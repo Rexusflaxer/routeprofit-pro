@@ -1,0 +1,100 @@
+{
+  "name": "CompanyContractTemplate",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "description": "Bedrijf waar dit contractsjabloon bij hoort."
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "template_type": {
+      "type": "string",
+      "enum": [
+        "employment_contract",
+        "assignment_agreement"
+      ],
+      "default": "employment_contract"
+    },
+    "contract_form_scope": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Optioneel contractvorm-bereik, zoals fulltime, parttime, oproep of min-max."
+    },
+    "cao_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "function_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "default_letterhead_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "review",
+        "published",
+        "archived"
+      ],
+      "default": "draft"
+    },
+    "body": {
+      "type": "string",
+      "description": "Template-inhoud met placeholders zoals {{medewerker.naam}}, {{bedrijf.naam}} en {{contract.startdatum}}."
+    },
+    "clauses": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object"
+      },
+      "description": "Optionele geordende clausules/artikelen voor latere fijnmazige bewerking."
+    },
+    "placeholders": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      }
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ]
+    }
+  },
+  "required": [
+    "company_id",
+    "name",
+    "body"
+  ]
+}

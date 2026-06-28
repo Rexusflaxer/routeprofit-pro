@@ -1604,6 +1604,102 @@
       "default": true,
       "description": "Is dit het huidige actieve contract?"
     },
+    "source_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "generated",
+        "uploaded_existing",
+        null
+      ],
+      "description": "Of het contract uit een sjabloon is gegenereerd of als bestaand contract is toegevoegd."
+    },
+    "template_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "template_version": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "letterhead_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "generated_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "generated_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "generated_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "generated_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signed_file_url": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signed_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signed_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signed_logical_path": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_status": {
+      "type": "string",
+      "enum": [
+        "concept",
+        "generated",
+        "signed",
+        "active",
+        "archived",
+        "expired"
+      ],
+      "default": "concept"
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ]
+    },
     "notes": {
       "type": [
         "string",

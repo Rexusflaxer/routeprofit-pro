@@ -39,13 +39,11 @@ import {
   ShieldCheck,
   Trash2,
   Upload,
-  UserCheck,
   Users,
   X,
 } from "lucide-react";
 import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
-import CostCalculator from "../components/personnel/CostCalculator";
 import PersonnelAccessTab from "../components/personnel/PersonnelAccessTab";
 import PersonnelContractsTab from "../components/personnel/PersonnelContractsTab";
 import { uploadManagedFile } from "@/lib/managedFiles";
@@ -1106,7 +1104,7 @@ const PERSONNEL_DETAIL_MENU_ITEMS = [
   { key: "compliance", label: "Compliance", icon: ShieldCheck },
   { key: "bank-mobility", label: "Bank & mobiliteit", icon: CreditCard },
   { key: "ice", label: "ICE", icon: Users },
-  { key: "contracts", label: "Contracten/kosten", icon: BriefcaseBusiness },
+  { key: "contracts", label: "Contracten", icon: BriefcaseBusiness },
   { key: "planning", label: "Planning/restricties", icon: CalendarDays },
   { key: "materials", label: "Materiaal", icon: Package },
   { key: "notes", label: "Notities/gesprekken", icon: MessageSquareText },
@@ -1224,14 +1222,7 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
     }
 
     if (active === "contracts") {
-      return (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_420px]">
-          <PersonnelContractsTab personnel={person} companies={companies} />
-          <SectionPanel title="Kostenberekening" icon={BriefcaseBusiness}>
-            <CostCalculator personnel={person} />
-          </SectionPanel>
-        </div>
-      );
+      return <PersonnelContractsTab personnel={person} companies={companies} />;
     }
 
     if (active === "planning") {

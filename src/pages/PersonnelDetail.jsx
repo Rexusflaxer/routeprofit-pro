@@ -22,7 +22,6 @@ import {
   ChevronLeft,
   ChevronRight,
   ClipboardCheck,
-  CreditCard,
   Eye,
   FileBadge,
   FileText,
@@ -41,7 +40,6 @@ import { useNavigate } from "react-router-dom";
 import { AnimatePresence } from "framer-motion";
 import PersonnelAccessTab from "@/components/personnel/PersonnelAccessTab";
 import PersonnelContractsTab from "@/components/personnel/PersonnelContractsTab";
-import CostCalculator from "@/components/personnel/CostCalculator";
 import PhotoCropUpload from "@/components/personnel/PhotoCropUpload";
 import IdentityDocumentWizard from "@/components/personnel/IdentityDocumentWizard";
 import PayrollTab from "@/components/personnel/PayrollTab";
@@ -187,7 +185,7 @@ const PERSONNEL_TABS = [
   { key: "identity", label: "Identiteit", icon: BadgeCheck },
   { key: "payroll", label: "Loonheffing", icon: Banknote },
   { key: "bank", label: "Bank", icon: Banknote },
-  { key: "contracts", label: "Contracten/kosten", icon: BriefcaseBusiness },
+  { key: "contracts", label: "Contracten", icon: BriefcaseBusiness },
   { key: "compliance", label: "Compliance", icon: ShieldCheck },
   { key: "documents", label: "Documenten", icon: FileText },
   { key: "planning", label: "Planning/restricties", icon: CalendarDays },
@@ -1671,12 +1669,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
           </SectionPanel>
         </div>
       );
-      case "contracts": return (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-[1fr_420px]">
-          <PersonnelContractsTab personnel={person} companies={companies} />
-          <SectionPanel title="Kostenberekening" icon={BriefcaseBusiness}><CostCalculator personnel={person} /></SectionPanel>
-        </div>
-      );
+      case "contracts": return <PersonnelContractsTab personnel={person} companies={companies} />;
       case "planning": return (
         <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
           <SectionPanel title="Klant/object restricties" icon={ClipboardCheck} action={<Button size="sm" variant="outline" onClick={() => onAddRecord("restriction")}><Plus className="mr-1 h-4 w-4" />Restrictie</Button>}>
