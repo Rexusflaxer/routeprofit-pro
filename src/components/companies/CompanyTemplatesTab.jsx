@@ -208,28 +208,52 @@ function createLayerId() {
   return `layer_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
 }
 
+function roundOne(value) {
+  return Math.round(Number(value) * 10) / 10;
+}
+
 function clampPercent(value, fallback = 0) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
-  return Math.min(100, Math.max(0, Math.round(number)));
+  return roundOne(Math.min(100, Math.max(0, number)));
 }
 
 function clampLayerSize(value, fallback = 10) {
   const number = Number(value);
   if (!Number.isFinite(number)) return fallback;
-  return Math.min(100, Math.max(1, Math.round(number)));
+  return roundOne(Math.min(100, Math.max(1, number)));
+}
+
+function clampLayerCoordinate(value, size = 1) {
+  const number = Number(value);
+  const max = Math.max(0, 100 - Number(size || 1));
+  if (!Number.isFinite(number)) return 0;
+  return roundOne(Math.min(max, Math.max(0, number)));
+}
+
+function getLayerGeometry(layer = {}) {
+  const width = clampLayerSize(layer.width, 10);
+  const height = clampLayerSize(layer.height, 10);
+  return {
+    x: clampLayerCoordinate(layer.x, width),
+    y: clampLayerCoordinate(layer.y, height),
+    width,
+    height,
+  };
 }
 
 function normalizeDesignLayer(layer = {}) {
   const defaults = DESIGN_LAYER_DEFAULTS[layer.type] || DESIGN_LAYER_DEFAULTS.text;
+  const width = clampLayerSize(layer.width ?? defaults.width);
+  const height = clampLayerSize(layer.height ?? defaults.height);
   return {
     ...defaults,
     ...layer,
     id: layer.id || createLayerId(),
-    x: clampPercent(layer.x ?? defaults.x),
-    y: clampPercent(layer.y ?? defaults.y),
-    width: clampLayerSize(layer.width ?? defaults.width),
-    height: clampLayerSize(layer.height ?? defaults.height),
+    x: clampLayerCoordinate(layer.x ?? defaults.x, width),
+    y: clampLayerCoordinate(layer.y ?? defaults.y, height),
+    width,
+    height,
     opacity: clampPercent(layer.opacity ?? defaults.opacity ?? 100, defaults.opacity ?? 100),
   };
 }
@@ -314,22 +338,23 @@ function WizardSteps({ labels, step }) {
   );
 }
 
-function renderDesignLayer(layer) {
-  const style = {
-    left: `${layer.x}%`,
-    top: `${layer.y}%`,
-    width: `${layer.width}%`,
-    height: `${layer.height}%`,
+function getDesignLayerStyle(layer) {
+  const geometry = getLayerGeometry(layer);
+  return {
+    left: `${geometry.x}%`,
+    top: `${geometry.y}%`,
+    width: `${geometry.width}%`,
+    height: `${geometry.height}%`,
     opacity: (layer.opacity ?? 100) / 100,
   };
+}
 
+function renderDesignLayerContent(layer) {
   if (layer.type === "rectangle") {
     return (
       <div
-        key={layer.id}
-        className="absolute"
+        className="h-full w-full"
         style={{
-          ...style,
           backgroundColor: layer.background_color || "#1d4ed8",
           border: `${layer.border_width || 0}px solid ${layer.border_color || layer.background_color || "#1d4ed8"}`,
         }}
@@ -340,42 +365,31 @@ function renderDesignLayer(layer) {
   if (layer.type === "line") {
     return (
       <div
-        key={layer.id}
-        className="absolute"
-        style={{
-          ...style,
-          height: `${Math.max(1, Number(layer.height) || 1)}%`,
-          backgroundColor: layer.background_color || "#1d4ed8",
-        }}
+        className="h-full w-full"
+        style={{ backgroundColor: layer.background_color || "#1d4ed8" }}
       />
     );
   }
 
   if (layer.type === "image") {
-    return (
-      <div key={layer.id} className="absolute overflow-hidden" style={style}>
-        {layer.src ? (
-          <img
-            src={layer.src}
-            alt={layer.label || "Afbeelding"}
-            className="h-full w-full"
-            style={{ objectFit: layer.object_fit || "contain" }}
-          />
-        ) : (
-          <div className="flex h-full w-full items-center justify-center rounded border border-dashed border-slate-300 text-[8px] text-slate-400">
-            Afbeelding
-          </div>
-        )}
+    return layer.src ? (
+      <img
+        src={layer.src}
+        alt={layer.label || "Afbeelding"}
+        className="h-full w-full"
+        style={{ objectFit: layer.object_fit || "contain" }}
+      />
+    ) : (
+      <div className="flex h-full w-full items-center justify-center rounded border border-dashed border-slate-300 text-[8px] text-slate-400">
+        Afbeelding
       </div>
     );
   }
 
   return (
     <div
-      key={layer.id}
-      className="absolute overflow-hidden whitespace-pre-wrap leading-tight"
+      className="h-full w-full overflow-hidden whitespace-pre-wrap leading-tight"
       style={{
-        ...style,
         color: layer.color || "#111827",
         fontSize: `${layer.font_size || 12}px`,
         fontWeight: layer.font_weight || 400,
@@ -385,6 +399,46 @@ function renderDesignLayer(layer) {
       {layer.text || "Tekst"}
     </div>
   );
+}
+
+function renderDesignLayer(layer) {
+  const style = {
+    ...getDesignLayerStyle(layer),
+    height: layer.type === "line" ? `${Math.max(1, Number(layer.height) || 1)}%` : `${getLayerGeometry(layer).height}%`,
+  };
+
+  return (
+    <div key={layer.id} className="absolute overflow-hidden" style={style}>
+      {renderDesignLayerContent(layer)}
+    </div>
+  );
+}
+
+const DESIGN_LAYER_RESIZE_HANDLES = [
+  { key: "nw", className: "left-0 top-0 cursor-nwse-resize border-l-2 border-t-2" },
+  { key: "ne", className: "right-0 top-0 cursor-nesw-resize border-r-2 border-t-2" },
+  { key: "sw", className: "bottom-0 left-0 cursor-nesw-resize border-b-2 border-l-2" },
+  { key: "se", className: "bottom-0 right-0 cursor-nwse-resize border-b-2 border-r-2" },
+];
+
+function resizeLayerGeometry(start, deltaX, deltaY, handle) {
+  const minSize = 2;
+  let left = start.x;
+  let top = start.y;
+  let right = start.x + start.width;
+  let bottom = start.y + start.height;
+
+  if (handle.includes("e")) right = Math.min(100, Math.max(left + minSize, right + deltaX));
+  if (handle.includes("s")) bottom = Math.min(100, Math.max(top + minSize, bottom + deltaY));
+  if (handle.includes("w")) left = Math.max(0, Math.min(right - minSize, left + deltaX));
+  if (handle.includes("n")) top = Math.max(0, Math.min(bottom - minSize, top + deltaY));
+
+  return {
+    x: roundOne(left),
+    y: roundOne(top),
+    width: roundOne(right - left),
+    height: roundOne(bottom - top),
+  };
 }
 
 function LetterheadPreview({
@@ -397,7 +451,14 @@ function LetterheadPreview({
   backgroundFit = DEFAULT_LETTERHEAD_BACKGROUND_FIT,
   designLayers = [],
   assetInfo = null,
+  interactive = false,
+  selectedLayerId = null,
+  onSelectLayer,
+  onUpdateLayer,
 }) {
+  const pageRef = useRef(null);
+  const updateLayerRef = useRef(onUpdateLayer);
+  const [interaction, setInteraction] = useState(null);
   const top = (margins.top / 297) * 100;
   const right = (margins.right / 210) * 100;
   const bottom = (margins.bottom / 297) * 100;
@@ -407,11 +468,103 @@ function LetterheadPreview({
   const hasSource = Boolean(source);
   const looksA4 = imageLooksA4(assetInfo);
   const objectFit = backgroundFit === "stretch" ? "fill" : backgroundFit;
+  const canEditLayers = interactive && sourceMode === LETTERHEAD_SOURCE_MODES.design;
+
+  useEffect(() => {
+    updateLayerRef.current = onUpdateLayer;
+  }, [onUpdateLayer]);
+
+  useEffect(() => {
+    if (!interaction) return undefined;
+
+    const handlePointerMove = (event) => {
+      const deltaX = ((event.clientX - interaction.startClientX) / interaction.pageWidth) * 100;
+      const deltaY = ((event.clientY - interaction.startClientY) / interaction.pageHeight) * 100;
+      if (interaction.mode === "move") {
+        updateLayerRef.current?.(interaction.layerId, {
+          x: clampLayerCoordinate(interaction.startGeometry.x + deltaX, interaction.startGeometry.width),
+          y: clampLayerCoordinate(interaction.startGeometry.y + deltaY, interaction.startGeometry.height),
+        });
+        return;
+      }
+      updateLayerRef.current?.(
+        interaction.layerId,
+        resizeLayerGeometry(interaction.startGeometry, deltaX, deltaY, interaction.handle)
+      );
+    };
+
+    const stopInteraction = () => setInteraction(null);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopInteraction, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopInteraction);
+    };
+  }, [interaction]);
+
+  const startLayerInteraction = (event, layer, mode, handle = null) => {
+    if (!canEditLayers || !pageRef.current) return;
+    const rect = pageRef.current.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    event.preventDefault();
+    event.stopPropagation();
+    onSelectLayer?.(layer.id);
+    setInteraction({
+      layerId: layer.id,
+      mode,
+      handle,
+      startClientX: event.clientX,
+      startClientY: event.clientY,
+      pageWidth: rect.width,
+      pageHeight: rect.height,
+      startGeometry: getLayerGeometry(layer),
+    });
+  };
+
+  const renderInteractiveLayer = (layer) => {
+    const selected = selectedLayerId === layer.id;
+    const style = {
+      ...getDesignLayerStyle(layer),
+      height: layer.type === "line" ? `${Math.max(1, Number(layer.height) || 1)}%` : `${getLayerGeometry(layer).height}%`,
+    };
+    return (
+      <div
+        key={layer.id}
+        className={`absolute overflow-visible ${selected ? "z-20" : "z-10"} cursor-move outline-none`}
+        style={style}
+        onPointerDown={event => startLayerInteraction(event, layer, "move")}
+      >
+        <div className="h-full w-full overflow-hidden">
+          {renderDesignLayerContent(layer)}
+        </div>
+        {selected && (
+          <>
+            <div className="pointer-events-none absolute inset-0 border border-primary/90 ring-2 ring-primary/20" />
+            {DESIGN_LAYER_RESIZE_HANDLES.map(handle => (
+              <button
+                key={handle.key}
+                type="button"
+                aria-label={`Laag ${handle.key} vergroten`}
+                className={`absolute h-4 w-4 border-primary bg-transparent ${handle.className}`}
+                onPointerDown={event => startLayerInteraction(event, layer, "resize", handle.key)}
+              />
+            ))}
+          </>
+        )}
+      </div>
+    );
+  };
 
   return (
     <div className="rounded-lg border border-border bg-background/50 p-4">
       <div className="mx-auto w-full max-w-[430px]">
-        <div className="relative mx-auto aspect-[210/297] overflow-hidden rounded-[2px] border border-slate-300 bg-white shadow-[0_14px_40px_rgba(0,0,0,0.18)]">
+        <div
+          ref={pageRef}
+          className="relative mx-auto aspect-[210/297] overflow-hidden rounded-[2px] border border-slate-200 bg-white shadow-[0_14px_40px_rgba(0,0,0,0.14)]"
+          onPointerDown={event => {
+            if (canEditLayers && event.target === event.currentTarget) onSelectLayer?.(null);
+          }}
+        >
           {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isImage && (
             <img
               src={source}
@@ -435,7 +588,7 @@ function LetterheadPreview({
               {filename || "Bestand geselecteerd"}
             </div>
           )}
-          {sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.map(renderDesignLayer)}
+          {sourceMode === LETTERHEAD_SOURCE_MODES.design && (canEditLayers ? designLayers.map(renderInteractiveLayer) : designLayers.map(renderDesignLayer))}
           {sourceMode === LETTERHEAD_SOURCE_MODES.upload && !hasSource && (
             <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
               Upload eerst een PDF, JPG of PNG.
@@ -603,6 +756,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [message, setMessage] = useState(null);
   const [letterheadPreviewUrl, setLetterheadPreviewUrl] = useState("");
   const [letterheadAssetInfo, setLetterheadAssetInfo] = useState(null);
+  const [selectedLetterheadLayerId, setSelectedLetterheadLayerId] = useState(null);
 
   const activeSubTab = subTab || "letterhead";
 
@@ -693,6 +847,16 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     }, 160);
     return () => clearTimeout(timer);
   }, [templateWizardOpen, templateStep]);
+
+  useEffect(() => {
+    if (!letterheadWizardOpen || letterheadSourceMode !== LETTERHEAD_SOURCE_MODES.design) {
+      if (selectedLetterheadLayerId) setSelectedLetterheadLayerId(null);
+      return;
+    }
+    if (selectedLetterheadLayerId && !letterheadDesignLayers.some(layer => layer.id === selectedLetterheadLayerId)) {
+      setSelectedLetterheadLayerId(null);
+    }
+  }, [letterheadWizardOpen, letterheadSourceMode, letterheadDesignLayers, selectedLetterheadLayerId]);
 
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["company-letterheads", companyId] });
@@ -1028,6 +1192,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       source_mode: LETTERHEAD_SOURCE_MODES.design,
       design_layers: [...normalizeDesignLayers(prev), layer],
     }));
+    setSelectedLetterheadLayerId(layer.id);
   };
 
   const addLetterheadImageLayer = (file) => {
@@ -1045,6 +1210,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         source_mode: LETTERHEAD_SOURCE_MODES.design,
         design_layers: [...normalizeDesignLayers(prev), layer],
       }));
+      setSelectedLetterheadLayerId(layer.id);
     };
     reader.readAsDataURL(file);
   };
@@ -1054,6 +1220,23 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       ...prev,
       design_layers: normalizeDesignLayers(prev).filter(layer => layer.id !== layerId),
     }));
+    if (selectedLetterheadLayerId === layerId) setSelectedLetterheadLayerId(null);
+  };
+
+  const duplicateLetterheadLayer = (layer) => {
+    const duplicate = normalizeDesignLayer({
+      ...layer,
+      id: createLayerId(),
+      label: `${layer.label || DESIGN_LAYER_DEFAULTS[layer.type]?.label || "Laag"} kopie`,
+      x: clampLayerCoordinate(Number(layer.x || 0) + 3, layer.width),
+      y: clampLayerCoordinate(Number(layer.y || 0) + 3, layer.height),
+    });
+    setLetterheadForm(prev => ({
+      ...prev,
+      source_mode: LETTERHEAD_SOURCE_MODES.design,
+      design_layers: [...normalizeDesignLayers(prev), duplicate],
+    }));
+    setSelectedLetterheadLayerId(duplicate.id);
   };
 
   const moveLetterheadLayer = (layerId, direction) => {
@@ -1075,7 +1258,15 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     const isImage = layer.type === "image";
 
     return (
-      <div key={layer.id} className="rounded-lg border border-border bg-background/45 p-3">
+      <div
+        key={layer.id}
+        className={`rounded-lg border p-3 text-left transition-colors ${
+          selectedLetterheadLayerId === layer.id
+            ? "border-primary bg-primary/10"
+            : "border-border bg-background/45"
+        }`}
+        onClick={() => setSelectedLetterheadLayerId(layer.id)}
+      >
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="flex items-center gap-1.5 text-sm font-semibold text-foreground">
@@ -1090,7 +1281,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               variant="ghost"
               size="icon"
               className="h-7 w-7"
-              onClick={() => moveLetterheadLayer(layer.id, -1)}
+              onClick={event => {
+                event.stopPropagation();
+                moveLetterheadLayer(layer.id, -1);
+              }}
               disabled={index === 0}
             >
               <ArrowUp className="h-3.5 w-3.5" />
@@ -1100,7 +1294,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               variant="ghost"
               size="icon"
               className="h-7 w-7"
-              onClick={() => moveLetterheadLayer(layer.id, 1)}
+              onClick={event => {
+                event.stopPropagation();
+                moveLetterheadLayer(layer.id, 1);
+              }}
               disabled={index === letterheadDesignLayers.length - 1}
             >
               <ArrowDown className="h-3.5 w-3.5" />
@@ -1109,8 +1306,23 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               type="button"
               variant="ghost"
               size="icon"
+              className="h-7 w-7"
+              onClick={event => {
+                event.stopPropagation();
+                duplicateLetterheadLayer(layer);
+              }}
+            >
+              <Copy className="h-3.5 w-3.5" />
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
               className="h-7 w-7 text-muted-foreground hover:text-destructive"
-              onClick={() => removeLetterheadLayer(layer.id)}
+              onClick={event => {
+                event.stopPropagation();
+                removeLetterheadLayer(layer.id);
+              }}
             >
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
@@ -1495,6 +1707,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   backgroundFit={letterheadBackgroundFit}
                   designLayers={letterheadDesignLayers}
                   assetInfo={letterheadAssetInfo}
+                  interactive={letterheadSourceMode === LETTERHEAD_SOURCE_MODES.design}
+                  selectedLayerId={selectedLetterheadLayerId}
+                  onSelectLayer={setSelectedLetterheadLayerId}
+                  onUpdateLayer={updateLetterheadLayer}
                 />
               </div>
             )}
