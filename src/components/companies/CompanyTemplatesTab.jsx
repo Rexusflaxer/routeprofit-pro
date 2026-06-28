@@ -99,8 +99,44 @@ const DEFAULT_TEMPLATE_BODY = [
 
 const LETTERHEAD_TABLE_GRID = "grid grid-cols-[minmax(220px,1.5fr)_minmax(110px,130px)_minmax(100px,120px)_minmax(140px,180px)_minmax(160px,max-content)] gap-3 xl:gap-4";
 const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(240px,1.4fr)_minmax(72px,92px)_minmax(120px,150px)_minmax(220px,1fr)_minmax(140px,180px)_minmax(168px,max-content)] gap-3 xl:gap-4";
-const LETTERHEAD_STEPS = ["Gegevens", "Upload", "Controle"];
+const LETTERHEAD_STEPS = ["Upload", "Marges", "Controle"];
 const TEMPLATE_STEPS = ["Scope", "Inhoud", "Controle"];
+const DEFAULT_LETTERHEAD_MARGINS = {
+  top: 25,
+  right: 20,
+  bottom: 25,
+  left: 20,
+};
+
+function clampMargin(value, fallback = 20) {
+  const number = Number(value);
+  if (!Number.isFinite(number)) return fallback;
+  return Math.min(90, Math.max(0, Math.round(number)));
+}
+
+function normalizeLetterheadMargins(source = {}) {
+  const metadataMargins = source.metadata?.margins_mm || {};
+  const documentSettingsMargins = source.document_settings?.margins_mm || {};
+  return {
+    top: clampMargin(source.margin_top_mm ?? documentSettingsMargins.top ?? metadataMargins.top, DEFAULT_LETTERHEAD_MARGINS.top),
+    right: clampMargin(source.margin_right_mm ?? documentSettingsMargins.right ?? metadataMargins.right, DEFAULT_LETTERHEAD_MARGINS.right),
+    bottom: clampMargin(source.margin_bottom_mm ?? documentSettingsMargins.bottom ?? metadataMargins.bottom, DEFAULT_LETTERHEAD_MARGINS.bottom),
+    left: clampMargin(source.margin_left_mm ?? documentSettingsMargins.left ?? metadataMargins.left, DEFAULT_LETTERHEAD_MARGINS.left),
+  };
+}
+
+function marginLabel(source) {
+  const margins = normalizeLetterheadMargins(source);
+  return `${margins.top}/${margins.right}/${margins.bottom}/${margins.left} mm`;
+}
+
+function fileLooksLikePdf(fileUrl = "", filename = "", fileType = "") {
+  return String(fileType).toLowerCase().includes("pdf") || /\.pdf($|\?)/i.test(fileUrl) || /\.pdf$/i.test(filename);
+}
+
+function fileLooksLikeImage(fileUrl = "", filename = "", fileType = "") {
+  return String(fileType).toLowerCase().startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|avif)($|\?)/i.test(fileUrl) || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(filename);
+}
 
 function toArrayText(value) {
   return Array.isArray(value) ? value.join(", ") : "";
@@ -160,6 +196,99 @@ function WizardSteps({ labels, step }) {
   );
 }
 
+function LetterheadPreview({ source, filename, fileType, margins, mode = "margins" }) {
+  const top = (margins.top / 297) * 100;
+  const right = (margins.right / 210) * 100;
+  const bottom = (margins.bottom / 297) * 100;
+  const left = (margins.left / 210) * 100;
+  const isPdf = fileLooksLikePdf(source, filename, fileType);
+  const isImage = fileLooksLikeImage(source, filename, fileType);
+  const hasSource = Boolean(source);
+
+  return (
+    <div className="rounded-lg border border-border bg-background/50 p-4">
+      <div className="mx-auto w-full max-w-[390px]">
+        <div className="relative aspect-[210/297] overflow-hidden rounded-sm border border-border bg-white shadow-sm">
+          {hasSource && isImage && (
+            <img src={source} alt={filename || "Briefpapier"} className="absolute inset-0 h-full w-full object-cover" />
+          )}
+          {hasSource && isPdf && (
+            <iframe
+              title={filename || "Briefpapier"}
+              src={source}
+              className="absolute inset-0 h-full w-full border-0 bg-white"
+            />
+          )}
+          {hasSource && !isImage && !isPdf && (
+            <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
+              {filename || "Bestand geselecteerd"}
+            </div>
+          )}
+          {!hasSource && (
+            <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
+              Upload eerst een PDF, JPG of PNG.
+            </div>
+          )}
+          <div
+            className={`absolute rounded-sm border ${mode === "sample" ? "border-primary/50 bg-white/72" : "border-dashed border-primary/70 bg-primary/5"}`}
+            style={{
+              top: `${top}%`,
+              right: `${right}%`,
+              bottom: `${bottom}%`,
+              left: `${left}%`,
+            }}
+          >
+            {mode === "sample" ? (
+              <div className="h-full overflow-hidden p-[7%] text-[8px] leading-snug text-slate-800 sm:text-[9px]">
+                <p className="mb-3 text-[11px] font-bold text-slate-950">Arbeidsovereenkomst</p>
+                <p className="mb-3">Ondergetekenden verklaren hierbij de arbeidsovereenkomst aan te gaan conform de gekozen contractvorm, CAO en functie-indeling.</p>
+                <div className="space-y-1.5">
+                  <div className="h-1.5 w-full rounded bg-slate-300" />
+                  <div className="h-1.5 w-11/12 rounded bg-slate-300" />
+                  <div className="h-1.5 w-10/12 rounded bg-slate-300" />
+                  <div className="h-1.5 w-8/12 rounded bg-slate-300" />
+                </div>
+                <p className="mt-5 font-semibold">Artikel 1 - Functie en duur</p>
+                <div className="mt-2 space-y-1.5">
+                  <div className="h-1.5 w-full rounded bg-slate-200" />
+                  <div className="h-1.5 w-full rounded bg-slate-200" />
+                  <div className="h-1.5 w-9/12 rounded bg-slate-200" />
+                </div>
+              </div>
+            ) : (
+              <div className="flex h-full items-center justify-center px-3 text-center text-[10px] font-medium text-primary">
+                Contentvlak
+              </div>
+            )}
+          </div>
+        </div>
+        <p className="mt-2 text-center text-xs text-muted-foreground">
+          Marges: {margins.top} / {margins.right} / {margins.bottom} / {margins.left} mm
+        </p>
+      </div>
+    </div>
+  );
+}
+
+function MarginInput({ label, value, onChange }) {
+  return (
+    <div className="space-y-1.5">
+      <Label className="text-xs">{label}</Label>
+      <div className="flex items-center gap-2">
+        <Input
+          type="number"
+          min="0"
+          max="90"
+          value={value}
+          onChange={event => onChange(clampMargin(event.target.value))}
+          className="h-9"
+        />
+        <span className="text-xs text-muted-foreground">mm</span>
+      </div>
+    </div>
+  );
+}
+
 function initialTemplate(companyId) {
   return {
     company_id: companyId,
@@ -185,10 +314,13 @@ function initialLetterhead(companyId) {
   return {
     company_id: companyId,
     name: "",
-    description: "",
     is_default: false,
     status: "active",
     file: null,
+    margin_top_mm: DEFAULT_LETTERHEAD_MARGINS.top,
+    margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
+    margin_bottom_mm: DEFAULT_LETTERHEAD_MARGINS.bottom,
+    margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
   };
 }
 
@@ -205,6 +337,10 @@ function legacyLetterhead(company) {
     file_id: company.letterhead_file_id,
     download_filename: company.letterhead_download_filename,
     logical_path: company.letterhead_logical_path,
+    margin_top_mm: DEFAULT_LETTERHEAD_MARGINS.top,
+    margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
+    margin_bottom_mm: DEFAULT_LETTERHEAD_MARGINS.bottom,
+    margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
     legacy: true,
     metadata: { created_by_display: "Legacy" },
   };
@@ -224,6 +360,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [templateStep, setTemplateStep] = useState(1);
   const [previewFile, setPreviewFile] = useState(null);
   const [message, setMessage] = useState(null);
+  const [letterheadPreviewUrl, setLetterheadPreviewUrl] = useState("");
 
   const activeSubTab = subTab || "letterhead";
 
@@ -262,6 +399,20 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     ? letterheads.find(item => item.id === editingLetterheadId)
     : null;
   const letterheadHasExistingFile = Boolean(currentEditingLetterhead?.file_url || currentEditingLetterhead?.file_id);
+  const letterheadPreviewSource = letterheadPreviewUrl || currentEditingLetterhead?.file_url || "";
+  const letterheadPreviewFilename = letterheadForm.file?.name || currentEditingLetterhead?.download_filename || "";
+  const letterheadPreviewType = letterheadForm.file?.type || "";
+  const letterheadMargins = normalizeLetterheadMargins(letterheadForm);
+
+  useEffect(() => {
+    if (!letterheadForm.file) {
+      setLetterheadPreviewUrl("");
+      return undefined;
+    }
+    const url = URL.createObjectURL(letterheadForm.file);
+    setLetterheadPreviewUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [letterheadForm.file]);
 
   useEffect(() => {
     if (!letterheadWizardOpen) return undefined;
@@ -292,13 +443,27 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       if (!editingLetterheadId && !letterheadForm.file) throw new Error("Upload eerst het briefpapier.");
 
       const previous = editingLetterheadId ? letterheads.find(item => item.id === editingLetterheadId) || {} : {};
+      const margins = normalizeLetterheadMargins(letterheadForm);
+      const otherActiveLetterheads = letterheads.filter(item => item.id !== editingLetterheadId && item.status !== "archived");
+      const hasOtherDefault = otherActiveLetterheads.some(item => item.is_default);
+      const shouldBeDefault = editingLetterheadId
+        ? Boolean(previous.is_default || (!hasOtherDefault && otherActiveLetterheads.length === 0))
+        : !hasOtherDefault;
+      const auditMetadata = buildAuditMetadata(currentUser, editingLetterheadId ? "gewijzigd" : "toegevoegd", previous.metadata || {}, auditActors);
       const basePayload = {
         company_id: companyId,
         name: letterheadForm.name.trim(),
-        description: letterheadForm.description || null,
-        is_default: !!letterheadForm.is_default,
+        description: null,
+        is_default: shouldBeDefault,
         status: "active",
-        metadata: buildAuditMetadata(currentUser, editingLetterheadId ? "gewijzigd" : "toegevoegd", previous.metadata || {}, auditActors),
+        document_settings: {
+          ...(previous.document_settings || {}),
+          margins_mm: margins,
+        },
+        metadata: {
+          ...auditMetadata,
+          margins_mm: margins,
+        },
       };
 
       let payload = basePayload;
@@ -333,7 +498,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         ? await base44.entities.CompanyLetterhead.update(editingLetterheadId, payload)
         : await base44.entities.CompanyLetterhead.create(payload);
 
-      if (letterheadForm.is_default) {
+      if (shouldBeDefault) {
         await Promise.all(letterheads
           .filter(item => item.id !== record.id && item.is_default)
           .map(item => base44.entities.CompanyLetterhead.update(item.id, { is_default: false })));
@@ -435,13 +600,17 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     }
     setMessage(null);
     setEditingLetterheadId(record.id);
+    const margins = normalizeLetterheadMargins(record);
     setLetterheadForm({
       company_id: companyId,
       name: record.name || "",
-      description: record.description || "",
       is_default: !!record.is_default,
       status: record.status || "active",
       file: null,
+      margin_top_mm: margins.top,
+      margin_right_mm: margins.right,
+      margin_bottom_mm: margins.bottom,
+      margin_left_mm: margins.left,
     });
     setLetterheadStep(1);
     setLetterheadWizardOpen(true);
@@ -455,11 +624,17 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   };
 
   const nextLetterheadStep = () => {
-    if (letterheadStep === 1 && !letterheadForm.name.trim()) {
-      setMessage({ type: "error", text: "Vul eerst een naam voor het briefpapier in." });
-      return;
+    if (letterheadStep === 1) {
+      if (!letterheadForm.name.trim()) {
+        setMessage({ type: "error", text: "Vul eerst een naam voor het briefpapier in." });
+        return;
+      }
+      if (!letterheadForm.file && !letterheadHasExistingFile) {
+        setMessage({ type: "error", text: "Upload eerst het briefpapier." });
+        return;
+      }
     }
-    if (letterheadStep === 2 && !letterheadForm.file && !letterheadHasExistingFile) {
+    if (letterheadStep === 2 && !letterheadPreviewSource) {
       setMessage({ type: "error", text: "Upload eerst het briefpapier." });
       return;
     }
@@ -562,62 +737,21 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
             <WizardSteps labels={LETTERHEAD_STEPS} step={letterheadStep} />
 
             {letterheadStep === 1 && (
-              <div className="grid gap-4 lg:grid-cols-2">
-                <div className="space-y-2">
-                  <Label>Naam *</Label>
-                  <Input
-                    value={letterheadForm.name}
-                    onChange={event => setLetterheadForm(prev => ({ ...prev, name: event.target.value }))}
-                    placeholder="Bijv. Standaard briefpapier"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Omschrijving</Label>
-                  <Input
-                    value={letterheadForm.description}
-                    onChange={event => setLetterheadForm(prev => ({ ...prev, description: event.target.value }))}
-                    placeholder="Optioneel"
-                  />
-                </div>
-                <label className="flex items-center gap-2 text-sm">
-                  <input
-                    type="checkbox"
-                    checked={!!letterheadForm.is_default}
-                    onChange={event => setLetterheadForm(prev => ({ ...prev, is_default: event.target.checked }))}
-                  />
-                  Standaard briefpapier
-                </label>
-              </div>
-            )}
-
-            {letterheadStep === 2 && (
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_320px]">
-                <label className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background/40 p-5 text-center hover:bg-background/70">
-                  <Upload className="h-6 w-6 text-muted-foreground" />
-                  <span className="mt-2 text-sm font-medium text-foreground">{letterheadForm.file?.name || "Upload PDF of afbeelding"}</span>
-                  <span className="mt-1 text-xs text-muted-foreground">PDF, JPG of PNG</span>
-                  <input
-                    type="file"
-                    accept=".pdf,image/*"
-                    className="hidden"
-                    onChange={event => setLetterheadForm(prev => ({ ...prev, file: event.target.files?.[0] || null }))}
-                  />
-                </label>
-                <div className="rounded-lg border border-border bg-background/40 p-4 text-sm text-muted-foreground">
-                  <p className="font-medium text-foreground">Document</p>
-                  <p className="mt-2">
-                    {letterheadForm.file
-                      ? letterheadForm.file.name
-                      : letterheadHasExistingFile
-                        ? currentEditingLetterhead?.download_filename || "Bestaand bestand blijft gekoppeld."
-                        : "Nog geen bestand gekozen."}
-                  </p>
+              <div className="grid gap-4 lg:grid-cols-[minmax(280px,420px)_minmax(0,1fr)]">
+                <div className="space-y-4">
+                  <div className="space-y-2">
+                    <Label>Naam *</Label>
+                    <Input
+                      value={letterheadForm.name}
+                      onChange={event => setLetterheadForm(prev => ({ ...prev, name: event.target.value }))}
+                      placeholder="Bijv. Standaard briefpapier"
+                    />
+                  </div>
                   {letterheadHasExistingFile && (
                     <Button
                       type="button"
                       variant="outline"
                       size="sm"
-                      className="mt-4"
                       onClick={() => setPreviewFile({
                         managedFileId: currentEditingLetterhead.file_id,
                         fileUrl: currentEditingLetterhead.file_url,
@@ -630,23 +764,97 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     </Button>
                   )}
                 </div>
+                <label className="flex min-h-[180px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-background/40 p-5 text-center transition-colors hover:bg-background/70">
+                  <Upload className="h-6 w-6 text-muted-foreground" />
+                  <span className="mt-2 text-sm font-medium text-foreground">
+                    {letterheadForm.file?.name || (letterheadHasExistingFile ? "Vervang PDF of afbeelding" : "Upload PDF of afbeelding")}
+                  </span>
+                  <span className="mt-1 text-xs text-muted-foreground">PDF, JPG of PNG</span>
+                  <input
+                    type="file"
+                    accept=".pdf,image/*"
+                    className="hidden"
+                    onChange={event => setLetterheadForm(prev => ({ ...prev, file: event.target.files?.[0] || null }))}
+                  />
+                </label>
+              </div>
+            )}
+
+            {letterheadStep === 2 && (
+              <div className="grid gap-5 lg:grid-cols-[320px_minmax(0,1fr)]">
+                <div className="rounded-lg border border-border bg-background/40 p-4">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Marges</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Stel in waar de contracttekst over het briefpapier heen mag komen.</p>
+                  <div className="mt-4 grid grid-cols-2 gap-3">
+                    <MarginInput
+                      label="Boven"
+                      value={letterheadMargins.top}
+                      onChange={value => setLetterheadForm(prev => ({ ...prev, margin_top_mm: value }))}
+                    />
+                    <MarginInput
+                      label="Rechts"
+                      value={letterheadMargins.right}
+                      onChange={value => setLetterheadForm(prev => ({ ...prev, margin_right_mm: value }))}
+                    />
+                    <MarginInput
+                      label="Onder"
+                      value={letterheadMargins.bottom}
+                      onChange={value => setLetterheadForm(prev => ({ ...prev, margin_bottom_mm: value }))}
+                    />
+                    <MarginInput
+                      label="Links"
+                      value={letterheadMargins.left}
+                      onChange={value => setLetterheadForm(prev => ({ ...prev, margin_left_mm: value }))}
+                    />
+                  </div>
+                  <Button
+                    type="button"
+                    variant="outline"
+                    size="sm"
+                    className="mt-4"
+                    onClick={() => setLetterheadForm(prev => ({
+                      ...prev,
+                      margin_top_mm: DEFAULT_LETTERHEAD_MARGINS.top,
+                      margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
+                      margin_bottom_mm: DEFAULT_LETTERHEAD_MARGINS.bottom,
+                      margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
+                    }))}
+                  >
+                    Marges resetten
+                  </Button>
+                </div>
+                <LetterheadPreview
+                  source={letterheadPreviewSource}
+                  filename={letterheadPreviewFilename}
+                  fileType={letterheadPreviewType}
+                  margins={letterheadMargins}
+                />
               </div>
             )}
 
             {letterheadStep === 3 && (
-              <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-                <div className="rounded-lg border border-border bg-background/40 p-3">
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Naam</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{letterheadForm.name || "-"}</p>
+              <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Naam</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">{letterheadForm.name || "-"}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Upload</p>
+                    <p className="mt-1 truncate text-sm font-medium text-foreground">{letterheadForm.file?.name || currentEditingLetterhead?.download_filename || "-"}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Marges</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">{marginLabel(letterheadForm)}</p>
+                  </div>
                 </div>
-                <div className="rounded-lg border border-border bg-background/40 p-3">
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Standaard</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{letterheadForm.is_default ? "Ja" : "Nee"}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-background/40 p-3 lg:col-span-2">
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Upload</p>
-                  <p className="mt-1 truncate text-sm font-medium text-foreground">{letterheadForm.file?.name || currentEditingLetterhead?.download_filename || "-"}</p>
-                </div>
+                <LetterheadPreview
+                  source={letterheadPreviewSource}
+                  filename={letterheadPreviewFilename}
+                  fileType={letterheadPreviewType}
+                  margins={letterheadMargins}
+                  mode="sample"
+                />
               </div>
             )}
 
@@ -686,8 +894,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       {renderLetterheadWizard()}
       <div className={`${LETTERHEAD_TABLE_GRID} items-center border-b border-border bg-muted/20 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
         <span>Naam</span>
+        <span>Marges</span>
         <span>Status</span>
-        <span>Standaard</span>
         <span>Door</span>
         <div className="flex justify-end">
           <Button type="button" variant="outline" size="sm" onClick={startNewLetterhead} disabled={letterheadWizardOpen}>
@@ -708,10 +916,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           >
             <div className="min-w-0">
               <p className="truncate font-semibold text-foreground">{item.name}</p>
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.description || item.download_filename || "-"}</p>
+              <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.download_filename || "Briefpapier"}</p>
             </div>
+            <span className="text-sm text-muted-foreground">{marginLabel(item)}</span>
             <div>{item.status === "archived" ? statusBadge("archived") : <Badge className="border-0 bg-green-100 text-xs text-green-800 dark:bg-green-900/45 dark:text-green-200">Actief</Badge>}</div>
-            <span className="text-sm text-muted-foreground">{item.is_default ? "Ja" : "Nee"}</span>
             <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
             <div className="flex justify-end gap-1">
               {(item.file_id || item.file_url) && (
