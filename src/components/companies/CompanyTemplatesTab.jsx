@@ -404,24 +404,24 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         </div>
         <div className="grid gap-4 p-4 lg:grid-cols-[1fr_420px]">
           <div className="overflow-hidden rounded-lg border border-border">
-            <div className="grid grid-cols-[minmax(180px,1fr)_120px_140px_120px_96px] bg-muted/30 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <div>Naam</div>
-              <div>Status</div>
-              <div>Standaard</div>
-              <div>Door</div>
-              <div />
+            <div className="grid grid-cols-[minmax(180px,1fr)_120px_140px_120px_96px] divide-x divide-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <div className="px-4 py-3">Naam</div>
+              <div className="px-4 py-3">Status</div>
+              <div className="px-4 py-3">Standaard</div>
+              <div className="px-4 py-3">Door</div>
+              <div className="px-4 py-3" />
             </div>
             {allLetterheads.length === 0 && <div className="flex min-h-[120px] items-center justify-center border-t border-border px-4 py-6 text-center text-sm text-muted-foreground">Nog geen briefpapier ingesteld.</div>}
             {allLetterheads.map(item => (
-              <div key={item.id} className="grid grid-cols-[minmax(180px,1fr)_120px_140px_120px_96px] items-center border-t border-border px-4 py-3 text-sm">
-                <div className="min-w-0">
+              <div key={item.id} className="grid grid-cols-[minmax(180px,1fr)_120px_140px_120px_96px] divide-x divide-border items-center border-t border-border text-sm">
+                <div className="min-w-0 px-4 py-3">
                   <p className="truncate font-medium text-foreground">{item.name}</p>
                   <p className="truncate text-xs text-muted-foreground">{item.description || item.download_filename || "-"}</p>
                 </div>
-                <div>{item.status === "archived" ? statusBadge("archived") : <Badge className="bg-emerald-100 text-emerald-700 text-xs">Actief</Badge>}</div>
-                <div className="text-muted-foreground">{item.is_default ? "Ja" : "Nee"}</div>
-                <div className="truncate text-muted-foreground">{getAuditActorLabel(item, auditActors)}</div>
-                <div className="flex justify-end gap-1">
+                <div className="px-4 py-3">{item.status === "archived" ? statusBadge("archived") : <Badge className="bg-emerald-100 text-emerald-700 text-xs">Actief</Badge>}</div>
+                <div className="px-4 py-3 text-muted-foreground">{item.is_default ? "Ja" : "Nee"}</div>
+                <div className="truncate px-4 py-3 text-muted-foreground">{getAuditActorLabel(item, auditActors)}</div>
+                <div className="flex justify-end gap-1 px-4 py-3">
                   {(item.file_id || item.file_url) && (
                     <Button type="button" variant="ghost" size="icon" onClick={() => setPreviewFile({
                       managedFileId: item.file_id,
@@ -502,29 +502,29 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         </div>
         <div className="grid gap-4 p-4 xl:grid-cols-[1fr_520px]">
           <div className="overflow-hidden rounded-lg border border-border">
-            <div className="grid grid-cols-[minmax(220px,1.3fr)_90px_120px_180px_120px_120px] bg-muted/30 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-              <div>Template</div>
-              <div>Versie</div>
-              <div>Status</div>
-              <div>Scope</div>
-              <div>Door</div>
-              <div />
+            <div className="grid grid-cols-[minmax(220px,1.3fr)_90px_120px_180px_120px_120px] divide-x divide-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              <div className="px-4 py-3">Template</div>
+              <div className="px-4 py-3">Versie</div>
+              <div className="px-4 py-3">Status</div>
+              <div className="px-4 py-3">Scope</div>
+              <div className="px-4 py-3">Door</div>
+              <div className="px-4 py-3" />
             </div>
             {templates.length === 0 && <div className="flex min-h-[120px] items-center justify-center border-t border-border px-4 py-6 text-center text-sm text-muted-foreground">Nog geen contracttemplates aangemaakt.</div>}
             {templates.map(item => (
-              <div key={item.id} className="grid grid-cols-[minmax(220px,1.3fr)_90px_120px_180px_120px_120px] items-center border-t border-border px-4 py-3 text-sm">
-                <div className="min-w-0">
+              <div key={item.id} className="grid grid-cols-[minmax(220px,1.3fr)_90px_120px_180px_120px_120px] divide-x divide-border items-center border-t border-border text-sm">
+                <div className="min-w-0 px-4 py-3">
                   <p className="truncate font-medium text-foreground">{item.name}</p>
                   <p className="truncate text-xs text-muted-foreground">{item.description || "-"}</p>
                 </div>
-                <div className="text-muted-foreground">v{item.version || 1}</div>
-                <div>{statusBadge(item.status)}</div>
-                <div className="min-w-0 text-muted-foreground">
+                <div className="px-4 py-3 text-muted-foreground">v{item.version || 1}</div>
+                <div className="px-4 py-3">{statusBadge(item.status)}</div>
+                <div className="min-w-0 px-4 py-3 text-muted-foreground">
                   <p className="truncate">{CONTRACT_FORM_SCOPES.find(scope => scope.value === (item.contract_form_scope || "any"))?.label || "Alle contractvormen"}</p>
                   <p className="truncate text-xs">{EMPLOYMENT_MODEL_SCOPES.find(scope => scope.value === (item.employment_model_scope || "any"))?.label || "Alle urenmodellen"}</p>
                 </div>
-                <div className="truncate text-muted-foreground">{getAuditActorLabel(item, auditActors)}</div>
-                <div className="flex justify-end gap-1">
+                <div className="truncate px-4 py-3 text-muted-foreground">{getAuditActorLabel(item, auditActors)}</div>
+                <div className="flex justify-end gap-1 px-4 py-3">
                   <Button type="button" variant="ghost" size="icon" onClick={() => {
                     setEditingTemplateId(item.id);
                     setTemplateForm({
