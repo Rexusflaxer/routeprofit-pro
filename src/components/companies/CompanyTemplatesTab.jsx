@@ -21,8 +21,10 @@ import {
   Copy,
   Edit,
   Eye,
+  EyeOff,
   Image as ImageIcon,
   Layers,
+  Lock,
   Minus,
   Plus,
   Save,
@@ -30,6 +32,7 @@ import {
   Upload,
   Trash2,
   Type,
+  Unlock,
   X,
 } from "lucide-react";
 
@@ -126,6 +129,11 @@ const DEFAULT_LETTERHEAD_MARGINS = {
 };
 const DEFAULT_LETTERHEAD_BACKGROUND_FIT = "contain";
 const DEFAULT_LETTERHEAD_PAGE_BACKGROUND = "#ffffff";
+const DEFAULT_LETTERHEAD_EDITOR_OPTIONS = {
+  showGrid: true,
+  snapToGrid: true,
+  gridSize: 1,
+};
 const DESIGN_LAYER_DEFAULTS = {
   text: {
     type: "text",
@@ -232,6 +240,24 @@ function clampLayerCoordinate(value, size = 1) {
   return roundOne(Math.min(max, Math.max(0, number)));
 }
 
+function snapPercent(value, enabled, gridSize = 1) {
+  if (!enabled) return roundOne(value);
+  const grid = Number(gridSize) > 0 ? Number(gridSize) : 1;
+  return roundOne(Math.round(Number(value) / grid) * grid);
+}
+
+function snapLayerGeometry(geometry, enabled, gridSize = 1) {
+  if (!enabled) return geometry;
+  const width = clampLayerSize(snapPercent(geometry.width, true, gridSize), geometry.width);
+  const height = clampLayerSize(snapPercent(geometry.height, true, gridSize), geometry.height);
+  return {
+    x: clampLayerCoordinate(snapPercent(geometry.x, true, gridSize), width),
+    y: clampLayerCoordinate(snapPercent(geometry.y, true, gridSize), height),
+    width,
+    height,
+  };
+}
+
 function getLayerGeometry(layer = {}) {
   const width = clampLayerSize(layer.width, 10);
   const height = clampLayerSize(layer.height, 10);
@@ -256,6 +282,8 @@ function normalizeDesignLayer(layer = {}) {
     width,
     height,
     opacity: clampPercent(layer.opacity ?? defaults.opacity ?? 100, defaults.opacity ?? 100),
+    visible: layer.visible !== false,
+    locked: layer.locked === true,
   };
 }
 
@@ -417,6 +445,7 @@ function renderDesignLayerContent(layer) {
 }
 
 function renderDesignLayer(layer) {
+  if (layer.visible === false) return null;
   const style = {
     ...getDesignLayerStyle(layer),
     height: layer.type === "line" ? `${Math.max(1, Number(layer.height) || 1)}%` : `${getLayerGeometry(layer).height}%`,
@@ -471,6 +500,9 @@ function LetterheadPreview({
   selectedLayerId = null,
   onSelectLayer,
   onUpdateLayer,
+  showGrid = false,
+  snapToGrid = false,
+  gridSize = 1,
 }) {
   const pageRef = useRef(null);
   const updateLayerRef = useRef(onUpdateLayer);
@@ -486,6 +518,7 @@ function LetterheadPreview({
   const objectFit = backgroundFit === "stretch" ? "fill" : backgroundFit;
   const canEditLayers = interactive && sourceMode === LETTERHEAD_SOURCE_MODES.design;
   const ratioDescription = getAssetRatioDescription(assetInfo);
+  const visualGridSize = Math.max(0.5, Number(gridSize) || 1);
 
   useEffect(() => {
     updateLayerRef.current = onUpdateLayer;
@@ -498,15 +531,20 @@ function LetterheadPreview({
       const deltaX = ((event.clientX - interaction.startClientX) / interaction.pageWidth) * 100;
       const deltaY = ((event.clientY - interaction.startClientY) / interaction.pageHeight) * 100;
       if (interaction.mode === "move") {
+        const nextGeometry = snapLayerGeometry({
+          ...interaction.startGeometry,
+          x: interaction.startGeometry.x + deltaX,
+          y: interaction.startGeometry.y + deltaY,
+        }, snapToGrid, gridSize);
         updateLayerRef.current?.(interaction.layerId, {
-          x: clampLayerCoordinate(interaction.startGeometry.x + deltaX, interaction.startGeometry.width),
-          y: clampLayerCoordinate(interaction.startGeometry.y + deltaY, interaction.startGeometry.height),
+          x: nextGeometry.x,
+          y: nextGeometry.y,
         });
         return;
       }
       updateLayerRef.current?.(
         interaction.layerId,
-        resizeLayerGeometry(interaction.startGeometry, deltaX, deltaY, interaction.handle)
+        snapLayerGeometry(resizeLayerGeometry(interaction.startGeometry, deltaX, deltaY, interaction.handle), snapToGrid, gridSize)
       );
     };
 
@@ -517,15 +555,16 @@ function LetterheadPreview({
       window.removeEventListener("pointermove", handlePointerMove);
       window.removeEventListener("pointerup", stopInteraction);
     };
-  }, [interaction]);
+  }, [interaction, snapToGrid, gridSize]);
 
   const startLayerInteraction = (event, layer, mode, handle = null) => {
-    if (!canEditLayers || !pageRef.current) return;
+    if (!canEditLayers || layer.locked || !pageRef.current) return;
     const rect = pageRef.current.getBoundingClientRect();
     if (!rect.width || !rect.height) return;
     event.preventDefault();
     event.stopPropagation();
     onSelectLayer?.(layer.id);
+    pageRef.current.focus({ preventScroll: true });
     setInteraction({
       layerId: layer.id,
       mode,
@@ -538,7 +577,28 @@ function LetterheadPreview({
     });
   };
 
+  const handleCanvasKeyDown = (event) => {
+    if (!canEditLayers || !selectedLayerId) return;
+    if (!["ArrowLeft", "ArrowRight", "ArrowUp", "ArrowDown"].includes(event.key)) return;
+    const layer = designLayers.find(item => item.id === selectedLayerId);
+    if (!layer || layer.locked || layer.visible === false) return;
+    event.preventDefault();
+    const amount = event.shiftKey ? 5 : (snapToGrid ? gridSize : 1);
+    const geometry = getLayerGeometry(layer);
+    const next = {
+      ...geometry,
+      x: geometry.x + (event.key === "ArrowRight" ? amount : event.key === "ArrowLeft" ? -amount : 0),
+      y: geometry.y + (event.key === "ArrowDown" ? amount : event.key === "ArrowUp" ? -amount : 0),
+    };
+    const snapped = snapLayerGeometry(next, snapToGrid, gridSize);
+    onUpdateLayer?.(layer.id, {
+      x: clampLayerCoordinate(snapped.x, snapped.width),
+      y: clampLayerCoordinate(snapped.y, snapped.height),
+    });
+  };
+
   const renderInteractiveLayer = (layer) => {
+    if (layer.visible === false) return null;
     const selected = selectedLayerId === layer.id;
     const style = {
       ...getDesignLayerStyle(layer),
@@ -547,17 +607,22 @@ function LetterheadPreview({
     return (
       <div
         key={layer.id}
-        className={`absolute overflow-visible ${selected ? "z-20" : "z-10"} cursor-move outline-none`}
+        className={`absolute overflow-visible ${selected ? "z-20" : "z-10"} ${layer.locked ? "cursor-default" : "cursor-move"} outline-none`}
         style={style}
-        onPointerDown={event => startLayerInteraction(event, layer, "move")}
+        onPointerDown={event => {
+          event.stopPropagation();
+          onSelectLayer?.(layer.id);
+          pageRef.current?.focus({ preventScroll: true });
+          if (!layer.locked) startLayerInteraction(event, layer, "move");
+        }}
       >
         <div className="h-full w-full overflow-hidden">
           {renderDesignLayerContent(layer)}
         </div>
         {selected && (
           <>
-            <div className="pointer-events-none absolute inset-0 border border-primary/90 ring-2 ring-primary/20" />
-            {DESIGN_LAYER_RESIZE_HANDLES.map(handle => (
+            <div className={`pointer-events-none absolute inset-0 border ${layer.locked ? "border-amber-500/90 ring-2 ring-amber-500/20" : "border-primary/90 ring-2 ring-primary/20"}`} />
+            {!layer.locked && DESIGN_LAYER_RESIZE_HANDLES.map(handle => (
               <button
                 key={handle.key}
                 type="button"
@@ -583,8 +648,13 @@ function LetterheadPreview({
           ref={pageRef}
           className="relative mx-auto aspect-[210/297] overflow-hidden rounded-[2px] shadow-[0_18px_46px_rgba(15,23,42,0.18)] ring-1 ring-slate-950/15 dark:ring-white/15"
           style={{ backgroundColor: pageBackgroundColor }}
+          tabIndex={canEditLayers ? 0 : undefined}
+          onKeyDown={handleCanvasKeyDown}
           onPointerDown={event => {
-            if (canEditLayers && event.target === event.currentTarget) onSelectLayer?.(null);
+            if (canEditLayers && event.target === event.currentTarget) {
+              onSelectLayer?.(null);
+              pageRef.current?.focus({ preventScroll: true });
+            }
           }}
         >
           {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isImage && (
@@ -609,6 +679,15 @@ function LetterheadPreview({
             <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
               {filename || "Bestand geselecteerd"}
             </div>
+          )}
+          {sourceMode === LETTERHEAD_SOURCE_MODES.design && showGrid && (
+            <div
+              className="pointer-events-none absolute inset-0 z-[6] opacity-35"
+              style={{
+                backgroundImage: "linear-gradient(to right, rgba(59,130,246,0.32) 1px, transparent 1px), linear-gradient(to bottom, rgba(59,130,246,0.24) 1px, transparent 1px)",
+                backgroundSize: `${visualGridSize}% ${visualGridSize}%`,
+              }}
+            />
           )}
           {sourceMode === LETTERHEAD_SOURCE_MODES.design && (canEditLayers ? designLayers.map(renderInteractiveLayer) : designLayers.map(renderDesignLayer))}
           {sourceMode === LETTERHEAD_SOURCE_MODES.upload && !hasSource && (
@@ -784,6 +863,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [letterheadPreviewUrl, setLetterheadPreviewUrl] = useState("");
   const [letterheadAssetInfo, setLetterheadAssetInfo] = useState(null);
   const [selectedLetterheadLayerId, setSelectedLetterheadLayerId] = useState(null);
+  const [letterheadEditorOptions, setLetterheadEditorOptions] = useState(DEFAULT_LETTERHEAD_EDITOR_OPTIONS);
 
   const activeSubTab = subTab || "letterhead";
 
@@ -831,6 +911,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const letterheadPageBackground = normalizePageBackground(letterheadForm);
   const letterheadDesignLayers = normalizeDesignLayers(letterheadForm);
   const letterheadUsesUpload = letterheadSourceMode === LETTERHEAD_SOURCE_MODES.upload;
+  const companyDisplayName = company?.trade_name || company?.name || company?.company_name || company?.legal_name || "Bedrijfsnaam";
 
   useEffect(() => {
     if (!letterheadForm.file) {
@@ -1067,6 +1148,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     setMessage(null);
     setEditingLetterheadId(null);
     setLetterheadForm(initialLetterhead(companyId));
+    setLetterheadEditorOptions(DEFAULT_LETTERHEAD_EDITOR_OPTIONS);
     setLetterheadStep(1);
     setLetterheadWizardOpen(true);
   };
@@ -1101,6 +1183,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const cancelLetterheadWizard = () => {
     setLetterheadForm(initialLetterhead(companyId));
     setEditingLetterheadId(null);
+    setLetterheadEditorOptions(DEFAULT_LETTERHEAD_EDITOR_OPTIONS);
     setLetterheadStep(1);
     setLetterheadWizardOpen(false);
   };
@@ -1247,6 +1330,109 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     reader.readAsDataURL(file);
   };
 
+  const addLetterheadPreset = (preset) => {
+    const companyInitials = companyDisplayName
+      .split(/\s+/)
+      .filter(Boolean)
+      .slice(0, 3)
+      .map(part => part[0]?.toUpperCase())
+      .join("") || "LOQ";
+    let presetLayers = [];
+
+    if (preset === "header") {
+      presetLayers = [
+        normalizeDesignLayer({
+          type: "rectangle",
+          label: "Kopbalk",
+          x: 0,
+          y: 0,
+          width: 100,
+          height: 7,
+          background_color: "#0f172a",
+          border_color: "#0f172a",
+          opacity: 100,
+        }),
+        normalizeDesignLayer({
+          type: "text",
+          label: "Bedrijfsnaam koptekst",
+          text: companyDisplayName,
+          x: 10,
+          y: 2,
+          width: 55,
+          height: 5,
+          color: "#ffffff",
+          font_size: 11,
+          font_weight: 700,
+        }),
+        normalizeDesignLayer({
+          type: "line",
+          label: "Accentlijn",
+          x: 0,
+          y: 7.2,
+          width: 100,
+          height: 0.5,
+          background_color: "#2563eb",
+          opacity: 100,
+        }),
+      ];
+    }
+
+    if (preset === "footer") {
+      presetLayers = [
+        normalizeDesignLayer({
+          type: "line",
+          label: "Voettekst lijn",
+          x: 10,
+          y: 92,
+          width: 80,
+          height: 0.4,
+          background_color: "#94a3b8",
+          opacity: 100,
+        }),
+        normalizeDesignLayer({
+          type: "text",
+          label: "Voettekst",
+          text: `${companyDisplayName} | {{bedrijf.email}} | {{bedrijf.telefoon}}`,
+          x: 10,
+          y: 94,
+          width: 80,
+          height: 4,
+          color: "#475569",
+          font_size: 7,
+          align: "center",
+          opacity: 100,
+        }),
+      ];
+    }
+
+    if (preset === "watermark") {
+      presetLayers = [
+        normalizeDesignLayer({
+          type: "text",
+          label: "Watermerk",
+          text: companyInitials,
+          x: 12,
+          y: 35,
+          width: 76,
+          height: 16,
+          color: "#0f172a",
+          font_size: 42,
+          font_weight: 700,
+          align: "center",
+          opacity: 8,
+        }),
+      ];
+    }
+
+    if (!presetLayers.length) return;
+    setLetterheadForm(prev => ({
+      ...prev,
+      source_mode: LETTERHEAD_SOURCE_MODES.design,
+      design_layers: [...normalizeDesignLayers(prev), ...presetLayers],
+    }));
+    setSelectedLetterheadLayerId(presetLayers[presetLayers.length - 1].id);
+  };
+
   const removeLetterheadLayer = (layerId) => {
     setLetterheadForm(prev => ({
       ...prev,
@@ -1280,6 +1466,22 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       const nextLayers = [...layers];
       const [layer] = nextLayers.splice(index, 1);
       nextLayers.splice(nextIndex, 0, layer);
+      return { ...prev, design_layers: nextLayers };
+    });
+  };
+
+  const moveLetterheadLayerToEdge = (layerId, edge) => {
+    setLetterheadForm(prev => {
+      const layers = normalizeDesignLayers(prev);
+      const index = layers.findIndex(layer => layer.id === layerId);
+      if (index < 0) return prev;
+      const nextLayers = [...layers];
+      const [layer] = nextLayers.splice(index, 1);
+      if (edge === "front") {
+        nextLayers.push(layer);
+      } else {
+        nextLayers.unshift(layer);
+      }
       return { ...prev, design_layers: nextLayers };
     });
   };
@@ -1325,6 +1527,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     const isText = layer.type === "text";
     const isShape = layer.type === "rectangle" || layer.type === "line";
     const isImage = layer.type === "image";
+    const layerVisible = layer.visible !== false;
+    const layerLocked = layer.locked === true;
 
     return (
       <div
@@ -1333,7 +1537,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           selectedLetterheadLayerId === layer.id
             ? "border-primary bg-primary/10"
             : "border-border bg-background/45"
-        }`}
+        } ${layerVisible ? "" : "opacity-65"}`}
         onClick={() => setSelectedLetterheadLayerId(layer.id)}
       >
         <div className="flex items-start justify-between gap-3">
@@ -1342,9 +1546,39 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               <LayerIcon type={layer.type} />
               {layer.label || DESIGN_LAYER_DEFAULTS[layer.type]?.label || "Laag"}
             </p>
-            <p className="mt-0.5 text-xs text-muted-foreground">Laag {index + 1}</p>
+            <p className="mt-0.5 flex flex-wrap items-center gap-1.5 text-xs text-muted-foreground">
+              <span>Laag {index + 1}</span>
+              {layerLocked && <Badge variant="outline" className="h-5 px-1.5 text-[10px]">Vergrendeld</Badge>}
+              {!layerVisible && <Badge variant="outline" className="h-5 px-1.5 text-[10px]">Verborgen</Badge>}
+            </p>
           </div>
           <div className="flex shrink-0 gap-1">
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={event => {
+                event.stopPropagation();
+                updateLetterheadLayer(layer.id, { visible: !layerVisible });
+              }}
+              title={layerVisible ? "Laag verbergen" : "Laag tonen"}
+            >
+              {layerVisible ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+            </Button>
+            <Button
+              type="button"
+              variant="ghost"
+              size="icon"
+              className="h-7 w-7"
+              onClick={event => {
+                event.stopPropagation();
+                updateLetterheadLayer(layer.id, { locked: !layerLocked });
+              }}
+              title={layerLocked ? "Laag ontgrendelen" : "Laag vergrendelen"}
+            >
+              {layerLocked ? <Lock className="h-3.5 w-3.5 text-amber-500" /> : <Unlock className="h-3.5 w-3.5" />}
+            </Button>
             <Button
               type="button"
               variant="ghost"
@@ -1355,6 +1589,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 moveLetterheadLayer(layer.id, -1);
               }}
               disabled={index === 0}
+              title="Een laag naar achter"
             >
               <ArrowUp className="h-3.5 w-3.5" />
             </Button>
@@ -1368,6 +1603,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 moveLetterheadLayer(layer.id, 1);
               }}
               disabled={index === letterheadDesignLayers.length - 1}
+              title="Een laag naar voren"
             >
               <ArrowDown className="h-3.5 w-3.5" />
             </Button>
@@ -1396,6 +1632,35 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               <Trash2 className="h-3.5 w-3.5" />
             </Button>
           </div>
+        </div>
+
+        <div className="mt-3 grid grid-cols-2 gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 px-2 text-xs"
+            onClick={event => {
+              event.stopPropagation();
+              moveLetterheadLayerToEdge(layer.id, "back");
+            }}
+            disabled={index === 0}
+          >
+            Naar achtergrond
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="h-8 px-2 text-xs"
+            onClick={event => {
+              event.stopPropagation();
+              moveLetterheadLayerToEdge(layer.id, "front");
+            }}
+            disabled={index === letterheadDesignLayers.length - 1}
+          >
+            Naar voorgrond
+          </Button>
         </div>
 
         <div className="mt-3 space-y-3">
@@ -1806,6 +2071,57 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                           </div>
                         </div>
                       </div>
+                      <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-3">
+                        <p className="text-xs font-medium text-muted-foreground">Canvas</p>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                          <Button
+                            type="button"
+                            variant={letterheadEditorOptions.showGrid ? "default" : "outline"}
+                            size="sm"
+                            className="h-8 text-xs"
+                            onClick={() => setLetterheadEditorOptions(prev => ({ ...prev, showGrid: !prev.showGrid }))}
+                          >
+                            Raster
+                          </Button>
+                          <Button
+                            type="button"
+                            variant={letterheadEditorOptions.snapToGrid ? "default" : "outline"}
+                            size="sm"
+                            className="h-8 text-xs"
+                            onClick={() => setLetterheadEditorOptions(prev => ({ ...prev, snapToGrid: !prev.snapToGrid }))}
+                          >
+                            Magnetisch
+                          </Button>
+                          <Select
+                            value={String(letterheadEditorOptions.gridSize)}
+                            onValueChange={value => setLetterheadEditorOptions(prev => ({ ...prev, gridSize: Number(value) || 1 }))}
+                          >
+                            <SelectTrigger className="h-8 text-xs"><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="0.5">Fijn raster</SelectItem>
+                              <SelectItem value="1">Normaal raster</SelectItem>
+                              <SelectItem value="2">Grof raster</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <p className="mt-2 text-[11px] text-muted-foreground">
+                          Sleep lagen op de pagina. Gebruik de pijltjestoetsen voor kleine correcties; Shift + pijl verplaatst sneller.
+                        </p>
+                      </div>
+                      <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-3">
+                        <p className="text-xs font-medium text-muted-foreground">Snelle start</p>
+                        <div className="mt-2 grid gap-2 sm:grid-cols-3">
+                          <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => addLetterheadPreset("header")}>
+                            Koptekst
+                          </Button>
+                          <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => addLetterheadPreset("footer")}>
+                            Voettekst
+                          </Button>
+                          <Button type="button" variant="outline" size="sm" className="h-8 text-xs" onClick={() => addLetterheadPreset("watermark")}>
+                            Watermerk
+                          </Button>
+                        </div>
+                      </div>
                       <div className="mt-3 grid grid-cols-2 gap-2">
                         <Button type="button" variant="outline" size="sm" onClick={() => addLetterheadLayer("text")}>
                           <Type className="mr-1 h-4 w-4" />
@@ -1859,6 +2175,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   selectedLayerId={selectedLetterheadLayerId}
                   onSelectLayer={setSelectedLetterheadLayerId}
                   onUpdateLayer={updateLetterheadLayer}
+                  showGrid={letterheadEditorOptions.showGrid}
+                  snapToGrid={letterheadEditorOptions.snapToGrid}
+                  gridSize={letterheadEditorOptions.gridSize}
                 />
               </div>
             )}
