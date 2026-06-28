@@ -411,7 +411,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               <div>Door</div>
               <div />
             </div>
-            {allLetterheads.length === 0 && <div className="p-6 text-center text-sm text-muted-foreground">Nog geen briefpapier ingesteld.</div>}
+            {allLetterheads.length === 0 && <div className="flex min-h-[120px] items-center justify-center border-t border-border px-4 py-6 text-center text-sm text-muted-foreground">Nog geen briefpapier ingesteld.</div>}
             {allLetterheads.map(item => (
               <div key={item.id} className="grid grid-cols-[minmax(180px,1fr)_120px_140px_120px_96px] items-center border-t border-border px-4 py-3 text-sm">
                 <div className="min-w-0">
@@ -510,7 +510,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               <div>Door</div>
               <div />
             </div>
-            {templates.length === 0 && <div className="p-6 text-center text-sm text-muted-foreground">Nog geen contracttemplates aangemaakt.</div>}
+            {templates.length === 0 && <div className="flex min-h-[120px] items-center justify-center border-t border-border px-4 py-6 text-center text-sm text-muted-foreground">Nog geen contracttemplates aangemaakt.</div>}
             {templates.map(item => (
               <div key={item.id} className="grid grid-cols-[minmax(220px,1.3fr)_90px_120px_180px_120px_120px] items-center border-t border-border px-4 py-3 text-sm">
                 <div className="min-w-0">
