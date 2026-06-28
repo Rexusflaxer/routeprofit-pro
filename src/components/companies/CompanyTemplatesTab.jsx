@@ -709,7 +709,7 @@ function LetterheadPreview({
   return (
     <div className="rounded-lg border border-border bg-muted/20 p-4">
       <div className="mb-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span className="font-semibold uppercase tracking-wider">A4-pagina</span>
+        <span className="font-semibold uppercase tracking-wider">A4-preview met tekstmarges</span>
         <span>210 x 297 mm</span>
       </div>
       <div className="mx-auto w-full max-w-[430px] rounded-xl bg-slate-950/5 p-3 dark:bg-black/25">
@@ -2112,7 +2112,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     <div className="rounded-lg border border-border bg-background/40 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
                         <div>
-                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Geselecteerd briefpapier</p>
+                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Upload controleren</p>
                           <p className="mt-1 max-w-[330px] truncate text-sm font-semibold text-foreground">
                             {letterheadForm.file?.name || currentEditingLetterhead?.download_filename || "Geen bestand geselecteerd"}
                           </p>
@@ -2138,6 +2138,39 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                             }}
                           />
                         </label>
+                      </div>
+                      <div className="mt-4 overflow-hidden rounded-lg border border-border bg-slate-950/5 dark:bg-black/25">
+                        <div className="flex min-h-[220px] items-center justify-center p-3">
+                          {letterheadPreviewSource && letterheadPreviewIsImage ? (
+                            <img
+                              src={letterheadPreviewSource}
+                              alt={letterheadPreviewFilename || "Geselecteerd briefpapier"}
+                              className="max-h-[300px] max-w-full rounded-sm bg-white object-contain shadow-sm"
+                            />
+                          ) : letterheadPreviewSource && letterheadPreviewIsPdf ? (
+                            <object
+                              data={withPdfPreviewParameters(letterheadPreviewSource)}
+                              type="application/pdf"
+                              aria-label={letterheadPreviewFilename || "Geselecteerd PDF-briefpapier"}
+                              className="h-[300px] w-full rounded-sm bg-white"
+                            >
+                              <div className="flex h-[220px] flex-col items-center justify-center rounded-sm bg-white p-4 text-center">
+                                <p className="text-sm font-medium text-slate-700">PDF-briefpapier geselecteerd</p>
+                                <p className="mt-1 max-w-[260px] text-xs text-slate-500">
+                                  De PDF kan hier niet inline worden getoond. Rechts zie je wel waar de contracttekst komt.
+                                </p>
+                              </div>
+                            </object>
+                          ) : (
+                            <div className="flex h-[220px] flex-col items-center justify-center text-center text-xs text-muted-foreground">
+                              <Upload className="mb-2 h-6 w-6" />
+                              Geen preview beschikbaar
+                            </div>
+                          )}
+                        </div>
+                        <div className="border-t border-border bg-background/70 px-3 py-2 text-[11px] text-muted-foreground">
+                          Dit is het gekozen briefpapier. Stel rechts het tekstvlak in zodat contracttekst niet over logo, adresblok of voetregel valt.
+                        </div>
                       </div>
                       {showUploadFitOptions && (
                         <div className="mt-4 rounded-md border border-amber-500/25 bg-amber-500/10 p-3">
