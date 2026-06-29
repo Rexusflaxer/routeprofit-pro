@@ -116,6 +116,8 @@ const LETTERHEAD_SOURCE_MODES = {
   upload: "upload",
   design: "design",
 };
+const PDFJS_CDN_URL = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.mjs";
+const PDFJS_WORKER_CDN_URL = "https://cdn.jsdelivr.net/npm/pdfjs-dist@4.10.38/build/pdf.worker.mjs";
 const LETTERHEAD_BACKGROUND_FITS = [
   { value: "contain", label: "Passend", description: "Hele upload blijft zichtbaar. Beste keuze bij afwijkende formaten." },
   { value: "cover", label: "Vullend", description: "Vult A4 volledig en snijdt randen af als het formaat afwijkt." },
@@ -222,6 +224,15 @@ function fileLooksLikePdf(fileUrl = "", filename = "", fileType = "") {
 
 function fileLooksLikeImage(fileUrl = "", filename = "", fileType = "") {
   return String(fileType).toLowerCase().startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|avif)($|\?)/i.test(fileUrl) || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(filename);
+}
+
+async function loadPdfRenderer() {
+  if (typeof window === "undefined") return null;
+  if (window.__loqPdfRenderer) return window.__loqPdfRenderer;
+  const pdfjs = await import(/* @vite-ignore */ PDFJS_CDN_URL);
+  pdfjs.GlobalWorkerOptions.workerSrc = PDFJS_WORKER_CDN_URL;
+  window.__loqPdfRenderer = pdfjs;
+  return pdfjs;
 }
 
 function createLayerId() {
@@ -496,6 +507,89 @@ function resizeLayerGeometry(start, deltaX, deltaY, handle) {
   };
 }
 
+function LetterheadPdfPagePreview({ source, filename }) {
+  const containerRef = useRef(null);
+  const canvasRef = useRef(null);
+  const renderTaskRef = useRef(null);
+  const [status, setStatus] = useState("loading");
+
+  useEffect(() => {
+    let cancelled = false;
+    let pdfDocument = null;
+
+    async function renderPdfPage() {
+      if (!source) return;
+      setStatus("loading");
+      try {
+        const pdfjs = await loadPdfRenderer();
+        if (!pdfjs || cancelled) return;
+
+        const loadingTask = pdfjs.getDocument({ url: source });
+        pdfDocument = await loadingTask.promise;
+        if (cancelled) return;
+
+        const page = await pdfDocument.getPage(1);
+        if (cancelled) return;
+
+        const canvas = canvasRef.current;
+        const container = containerRef.current;
+        const context = canvas?.getContext("2d");
+        if (!canvas || !container || !context) throw new Error("Canvas niet beschikbaar");
+
+        const baseViewport = page.getViewport({ scale: 1 });
+        const rect = container.getBoundingClientRect();
+        const targetWidth = rect.width || 420;
+        const targetHeight = rect.height || 594;
+        const deviceScale = window.devicePixelRatio || 1;
+        const cssScale = Math.min(targetWidth / baseViewport.width, targetHeight / baseViewport.height);
+        const viewport = page.getViewport({ scale: Math.max(cssScale, 0.1) * deviceScale });
+
+        renderTaskRef.current?.cancel?.();
+        canvas.width = Math.max(1, Math.floor(viewport.width));
+        canvas.height = Math.max(1, Math.floor(viewport.height));
+        canvas.style.width = `${Math.max(1, Math.floor(viewport.width / deviceScale))}px`;
+        canvas.style.height = `${Math.max(1, Math.floor(viewport.height / deviceScale))}px`;
+        context.clearRect(0, 0, canvas.width, canvas.height);
+
+        const renderTask = page.render({ canvasContext: context, viewport });
+        renderTaskRef.current = renderTask;
+        await renderTask.promise;
+        if (!cancelled) setStatus("ready");
+      } catch (error) {
+        if (!cancelled && error?.name !== "RenderingCancelledException") setStatus("error");
+      }
+    }
+
+    renderPdfPage();
+
+    return () => {
+      cancelled = true;
+      renderTaskRef.current?.cancel?.();
+      pdfDocument?.destroy?.();
+    };
+  }, [source]);
+
+  return (
+    <div ref={containerRef} className="absolute inset-0 flex items-center justify-center overflow-hidden bg-white">
+      <canvas
+        ref={canvasRef}
+        aria-label={filename || "PDF-briefpapier"}
+        className={status === "ready" ? "block max-h-full max-w-full" : "hidden"}
+      />
+      {status === "loading" && (
+        <div className="px-4 text-center text-[8px] font-medium text-slate-500">
+          PDF-preview laden...
+        </div>
+      )}
+      {status === "error" && (
+        <div className="px-4 text-center text-[8px] font-medium text-slate-500">
+          PDF-preview kan niet worden geladen.
+        </div>
+      )}
+    </div>
+  );
+}
+
 function LetterheadPreview({
   source,
   filename,
@@ -707,17 +801,17 @@ function LetterheadPreview({
         <span className="font-semibold uppercase tracking-wider">A4-preview met tekstmarges</span>
         <span>210 x 297 mm</span>
       </div>
-      <div className="relative mx-auto w-full max-w-[520px] px-10 py-8 sm:px-12">
-        <span className="absolute left-1/2 top-1 -translate-x-1/2 rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
+      <div className="relative mx-auto w-full max-w-[720px] px-24 py-10 sm:px-28">
+        <span className="absolute left-1/2 top-1 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
           Boven {margins.top} mm
         </span>
-        <span className="absolute right-0 top-1/2 -translate-y-1/2 rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
+        <span className="absolute right-2 top-1/2 z-10 -translate-y-1/2 whitespace-nowrap rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
           Rechts {margins.right} mm
         </span>
-        <span className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
+        <span className="absolute bottom-1 left-1/2 z-10 -translate-x-1/2 whitespace-nowrap rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
           Onder {margins.bottom} mm
         </span>
-        <span className="absolute left-0 top-1/2 -translate-y-1/2 rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
+        <span className="absolute left-2 top-1/2 z-10 -translate-y-1/2 whitespace-nowrap rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
           Links {margins.left} mm
         </span>
         <div className="mx-auto w-full max-w-[430px] rounded-xl bg-slate-950/5 p-3 dark:bg-black/25">
@@ -743,27 +837,7 @@ function LetterheadPreview({
               />
             )}
             {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isPdf && (
-              <div className="absolute inset-0 overflow-hidden bg-white text-slate-900" aria-label={filename || "PDF-briefpapier"}>
-                <div className="absolute inset-x-0 top-0 h-[2.6%] bg-sky-800/80" />
-                <div className="absolute left-[7%] top-[7%] h-[2%] w-[24%] rounded-full bg-slate-300/80" />
-                <div className="absolute left-[7%] top-[10.5%] h-[1.1%] w-[17%] rounded-full bg-slate-200" />
-                <div className="absolute bottom-[4%] left-[7%] right-[7%] h-px bg-slate-200" />
-                <div className="absolute right-[7%] bottom-[4.5%] h-[2.2%] w-[18%] rounded-full bg-slate-300/70" />
-                <div
-                  className="absolute inset-0 opacity-25"
-                  style={{ background: "linear-gradient(135deg, rgba(14,165,233,0.18), rgba(255,255,255,0) 45%, rgba(148,163,184,0.16))" }}
-                />
-                {filename && (
-                  <div className="absolute bottom-[6%] left-[7%] right-[7%] truncate text-[5px] text-slate-400">
-                    {filename}
-                  </div>
-                )}
-                <div className="absolute inset-0 flex items-center justify-center p-8 text-center">
-                  <div className="rounded border border-slate-200 bg-white/75 px-3 py-2 text-[7px] font-medium text-slate-500 shadow-sm">
-                    PDF-briefpapier
-                  </div>
-                </div>
-              </div>
+              <LetterheadPdfPagePreview source={source} filename={filename} />
             )}
             {hasSource && !isImage && !isPdf && (
               <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
