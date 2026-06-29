@@ -220,11 +220,6 @@ function fileLooksLikePdf(fileUrl = "", filename = "", fileType = "") {
   return String(fileType).toLowerCase().includes("pdf") || /\.pdf($|\?)/i.test(fileUrl) || /\.pdf$/i.test(filename);
 }
 
-function withPdfPreviewParameters(fileUrl = "") {
-  if (!fileUrl || fileUrl.includes("#")) return fileUrl;
-  return `${fileUrl}#toolbar=0&navpanes=0&scrollbar=0&page=1&view=Fit`;
-}
-
 function fileLooksLikeImage(fileUrl = "", filename = "", fileType = "") {
   return String(fileType).toLowerCase().startsWith("image/") || /\.(png|jpe?g|gif|webp|bmp|avif)($|\?)/i.test(fileUrl) || /\.(png|jpe?g|gif|webp|bmp|avif)$/i.test(filename);
 }
@@ -712,151 +707,158 @@ function LetterheadPreview({
         <span className="font-semibold uppercase tracking-wider">A4-preview met tekstmarges</span>
         <span>210 x 297 mm</span>
       </div>
-      <div className="mx-auto w-full max-w-[430px] rounded-xl bg-slate-950/5 p-3 dark:bg-black/25">
-        <div
-          ref={pageRef}
-          className="relative mx-auto aspect-[210/297] overflow-hidden rounded-[2px] shadow-[0_18px_46px_rgba(15,23,42,0.18)] ring-1 ring-slate-950/15 dark:ring-white/15"
-          style={{ backgroundColor: pageBackgroundColor }}
-          tabIndex={canEditLayers ? 0 : undefined}
-          onKeyDown={handleCanvasKeyDown}
-          onPointerDown={event => {
-            if (canEditLayers && event.target === event.currentTarget) {
-              onSelectLayer?.(null);
-              pageRef.current?.focus({ preventScroll: true });
-            }
-          }}
-        >
-          {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isImage && (
-            <img
-              src={source}
-              alt={filename || "Briefpapier"}
-              className="absolute inset-0 h-full w-full"
-              style={{ objectFit }}
-            />
-          )}
-          {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isPdf && (
-            <object
-              data={withPdfPreviewParameters(source)}
-              type="application/pdf"
-              aria-label={filename || "PDF-briefpapier"}
-              tabIndex={-1}
-              className="pointer-events-none absolute inset-0 h-full w-full select-none bg-white"
-            >
-              <iframe
-                title={filename || "PDF-briefpapier"}
-                src={withPdfPreviewParameters(source)}
-                tabIndex={-1}
-                className="pointer-events-none absolute inset-0 h-full w-full select-none border-0 bg-white"
-              />
-              <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
-                <div className="rounded border border-slate-200 bg-white/90 px-3 py-2 text-xs font-medium text-slate-600 shadow-sm">
-                  PDF-briefpapier geselecteerd
-                </div>
-                <p className="mt-2 max-w-[220px] text-[10px] leading-snug text-slate-500">
-                  Deze browser kan de PDF niet inline tonen. Controleer het bestand via de previewknop.
-                </p>
-              </div>
-            </object>
-          )}
-          {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isPdf && (
-            <div className="absolute inset-0 z-[1]" aria-hidden="true" />
-          )}
-          {hasSource && !isImage && !isPdf && (
-            <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
-              {filename || "Bestand geselecteerd"}
-            </div>
-          )}
-          {sourceMode === LETTERHEAD_SOURCE_MODES.design && showGrid && (
-            <div
-              className="pointer-events-none absolute inset-0 z-[6] opacity-35"
-              style={{
-                backgroundImage: "linear-gradient(to right, rgba(59,130,246,0.32) 1px, transparent 1px), linear-gradient(to bottom, rgba(59,130,246,0.24) 1px, transparent 1px)",
-                backgroundSize: `${visualGridSize}% ${visualGridSize}%`,
-              }}
-            />
-          )}
-          {sourceMode === LETTERHEAD_SOURCE_MODES.design && (canEditLayers ? designLayers.map(renderInteractiveLayer) : designLayers.map(renderDesignLayer))}
-          {sourceMode === LETTERHEAD_SOURCE_MODES.upload && !hasSource && (
-            <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
-              Upload eerst een PDF, JPG of PNG.
-            </div>
-          )}
-          {sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.length === 0 && (
-            <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
-              Voeg links lagen toe om briefpapier te ontwerpen.
-            </div>
-          )}
+      <div className="relative mx-auto w-full max-w-[520px] px-10 py-8 sm:px-12">
+        <span className="absolute left-1/2 top-1 -translate-x-1/2 rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
+          Boven {margins.top} mm
+        </span>
+        <span className="absolute right-0 top-1/2 -translate-y-1/2 rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
+          Rechts {margins.right} mm
+        </span>
+        <span className="absolute bottom-1 left-1/2 -translate-x-1/2 rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
+          Onder {margins.bottom} mm
+        </span>
+        <span className="absolute left-0 top-1/2 -translate-y-1/2 rounded-full border border-sky-500/25 bg-sky-500/10 px-2.5 py-1 text-[10px] font-medium text-sky-700 dark:text-sky-200">
+          Links {margins.left} mm
+        </span>
+        <div className="mx-auto w-full max-w-[430px] rounded-xl bg-slate-950/5 p-3 dark:bg-black/25">
           <div
-            className={`absolute z-[2] rounded-[2px] border ${
-              mode === "sample" || allowMarginDrag
-                ? "border-sky-500/40 bg-white/82 shadow-sm backdrop-blur-[1px] dark:bg-slate-950/78"
-                : "border-dashed border-sky-500/85 bg-sky-500/5"
-            }`}
-            style={{
-              top: `${top}%`,
-              right: `${right}%`,
-              bottom: `${bottom}%`,
-              left: `${left}%`,
+            ref={pageRef}
+            className="relative mx-auto aspect-[210/297] overflow-hidden rounded-[2px] shadow-[0_18px_46px_rgba(15,23,42,0.18)] ring-1 ring-slate-950/15 dark:ring-white/15"
+            style={{ backgroundColor: pageBackgroundColor }}
+            tabIndex={canEditLayers ? 0 : undefined}
+            onKeyDown={handleCanvasKeyDown}
+            onPointerDown={event => {
+              if (canEditLayers && event.target === event.currentTarget) {
+                onSelectLayer?.(null);
+                pageRef.current?.focus({ preventScroll: true });
+              }
             }}
           >
-            {allowMarginDrag && (
-              <>
-                <button
-                  type="button"
-                  aria-label="Bovenmarge slepen"
-                  className="absolute -top-2 left-1/2 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
-                  onPointerDown={event => startMarginInteraction(event, "top")}
-                />
-                <button
-                  type="button"
-                  aria-label="Ondermarge slepen"
-                  className="absolute -bottom-2 left-1/2 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
-                  onPointerDown={event => startMarginInteraction(event, "bottom")}
-                />
-                <button
-                  type="button"
-                  aria-label="Linkermarge slepen"
-                  className="absolute -left-2 top-1/2 h-16 w-4 -translate-y-1/2 cursor-ew-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
-                  onPointerDown={event => startMarginInteraction(event, "left")}
-                />
-                <button
-                  type="button"
-                  aria-label="Rechtermarge slepen"
-                  className="absolute -right-2 top-1/2 h-16 w-4 -translate-y-1/2 cursor-ew-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
-                  onPointerDown={event => startMarginInteraction(event, "right")}
-                />
-              </>
+            {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isImage && (
+              <img
+                src={source}
+                alt={filename || "Briefpapier"}
+                className="absolute inset-0 h-full w-full"
+                style={{ objectFit }}
+              />
             )}
-            {mode === "sample" || allowMarginDrag ? (
-              <div className="h-full overflow-hidden p-[7%] text-[8px] leading-snug text-slate-800 sm:text-[9px]">
-                <p className="mb-3 text-[11px] font-bold text-slate-950">Arbeidsovereenkomst</p>
-                <p className="mb-3">Ondergetekenden verklaren hierbij de arbeidsovereenkomst aan te gaan conform de gekozen contractvorm, CAO en functie-indeling.</p>
-                <div className="space-y-1.5">
-                  <div className="h-1.5 w-full rounded bg-slate-300" />
-                  <div className="h-1.5 w-11/12 rounded bg-slate-300" />
-                  <div className="h-1.5 w-10/12 rounded bg-slate-300" />
-                  <div className="h-1.5 w-8/12 rounded bg-slate-300" />
-                </div>
-                <p className="mt-5 font-semibold">Artikel 1 - Functie en duur</p>
-                <div className="mt-2 space-y-1.5">
-                  <div className="h-1.5 w-full rounded bg-slate-200" />
-                  <div className="h-1.5 w-full rounded bg-slate-200" />
-                  <div className="h-1.5 w-9/12 rounded bg-slate-200" />
+            {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isPdf && (
+              <div className="absolute inset-0 overflow-hidden bg-white text-slate-900" aria-label={filename || "PDF-briefpapier"}>
+                <div className="absolute inset-x-0 top-0 h-[2.6%] bg-sky-800/80" />
+                <div className="absolute left-[7%] top-[7%] h-[2%] w-[24%] rounded-full bg-slate-300/80" />
+                <div className="absolute left-[7%] top-[10.5%] h-[1.1%] w-[17%] rounded-full bg-slate-200" />
+                <div className="absolute bottom-[4%] left-[7%] right-[7%] h-px bg-slate-200" />
+                <div className="absolute right-[7%] bottom-[4.5%] h-[2.2%] w-[18%] rounded-full bg-slate-300/70" />
+                <div
+                  className="absolute inset-0 opacity-25"
+                  style={{ background: "linear-gradient(135deg, rgba(14,165,233,0.18), rgba(255,255,255,0) 45%, rgba(148,163,184,0.16))" }}
+                />
+                {filename && (
+                  <div className="absolute bottom-[6%] left-[7%] right-[7%] truncate text-[5px] text-slate-400">
+                    {filename}
+                  </div>
+                )}
+                <div className="absolute inset-0 flex items-center justify-center p-8 text-center">
+                  <div className="rounded border border-slate-200 bg-white/75 px-3 py-2 text-[7px] font-medium text-slate-500 shadow-sm">
+                    PDF-briefpapier
+                  </div>
                 </div>
               </div>
-            ) : (
-              <div className="flex h-full items-center justify-center px-3 text-center">
-                <span className="rounded bg-background/85 px-2 py-1 text-[10px] font-medium text-sky-700 shadow-sm dark:bg-slate-950/85 dark:text-sky-300">
-                  Tekstgebied
-                </span>
+            )}
+            {hasSource && !isImage && !isPdf && (
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
+                {filename || "Bestand geselecteerd"}
               </div>
             )}
+            {sourceMode === LETTERHEAD_SOURCE_MODES.design && showGrid && (
+              <div
+                className="pointer-events-none absolute inset-0 z-[6] opacity-35"
+                style={{
+                  backgroundImage: "linear-gradient(to right, rgba(59,130,246,0.32) 1px, transparent 1px), linear-gradient(to bottom, rgba(59,130,246,0.24) 1px, transparent 1px)",
+                  backgroundSize: `${visualGridSize}% ${visualGridSize}%`,
+                }}
+              />
+            )}
+            {sourceMode === LETTERHEAD_SOURCE_MODES.design && (canEditLayers ? designLayers.map(renderInteractiveLayer) : designLayers.map(renderDesignLayer))}
+            {sourceMode === LETTERHEAD_SOURCE_MODES.upload && !hasSource && (
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
+                Upload eerst een PDF, JPG of PNG.
+              </div>
+            )}
+            {sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.length === 0 && (
+              <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
+                Voeg links lagen toe om briefpapier te ontwerpen.
+              </div>
+            )}
+            <div
+              className={`absolute z-[2] rounded-[2px] border ${
+                mode === "sample" || allowMarginDrag
+                  ? "border-sky-500/40 bg-white/82 shadow-sm backdrop-blur-[1px] dark:bg-slate-950/78"
+                  : "border-dashed border-sky-500/85 bg-sky-500/5"
+              }`}
+              style={{
+                top: `${top}%`,
+                right: `${right}%`,
+                bottom: `${bottom}%`,
+                left: `${left}%`,
+              }}
+            >
+              {allowMarginDrag && (
+                <>
+                  <button
+                    type="button"
+                    aria-label="Bovenmarge slepen"
+                    className="absolute -top-2 left-1/2 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
+                    onPointerDown={event => startMarginInteraction(event, "top")}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Ondermarge slepen"
+                    className="absolute -bottom-2 left-1/2 h-4 w-16 -translate-x-1/2 cursor-ns-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
+                    onPointerDown={event => startMarginInteraction(event, "bottom")}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Linkermarge slepen"
+                    className="absolute -left-2 top-1/2 h-16 w-4 -translate-y-1/2 cursor-ew-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
+                    onPointerDown={event => startMarginInteraction(event, "left")}
+                  />
+                  <button
+                    type="button"
+                    aria-label="Rechtermarge slepen"
+                    className="absolute -right-2 top-1/2 h-16 w-4 -translate-y-1/2 cursor-ew-resize rounded-full border border-sky-500 bg-sky-500/90 shadow-sm"
+                    onPointerDown={event => startMarginInteraction(event, "right")}
+                  />
+                </>
+              )}
+              {mode === "sample" || allowMarginDrag ? (
+                <div className="h-full overflow-hidden p-[7%] text-[8px] leading-snug text-slate-800 sm:text-[9px]">
+                  <p className="mb-3 text-[11px] font-bold text-slate-950">Arbeidsovereenkomst</p>
+                  <p className="mb-3">Ondergetekenden verklaren hierbij de arbeidsovereenkomst aan te gaan conform de gekozen contractvorm, CAO en functie-indeling.</p>
+                  <div className="space-y-1.5">
+                    <div className="h-1.5 w-full rounded bg-slate-300" />
+                    <div className="h-1.5 w-11/12 rounded bg-slate-300" />
+                    <div className="h-1.5 w-10/12 rounded bg-slate-300" />
+                    <div className="h-1.5 w-8/12 rounded bg-slate-300" />
+                  </div>
+                  <p className="mt-5 font-semibold">Artikel 1 - Functie en duur</p>
+                  <div className="mt-2 space-y-1.5">
+                    <div className="h-1.5 w-full rounded bg-slate-200" />
+                    <div className="h-1.5 w-full rounded bg-slate-200" />
+                    <div className="h-1.5 w-9/12 rounded bg-slate-200" />
+                  </div>
+                </div>
+              ) : (
+                <div className="flex h-full items-center justify-center px-3 text-center">
+                  <span className="rounded bg-background/85 px-2 py-1 text-[10px] font-medium text-sky-700 shadow-sm dark:bg-slate-950/85 dark:text-sky-300">
+                    Tekstgebied
+                  </span>
+                </div>
+              )}
+            </div>
           </div>
         </div>
       </div>
-      <p className="mt-2 text-center text-xs text-muted-foreground">
-        Marges: {margins.top} / {margins.right} / {margins.bottom} / {margins.left} mm
-      </p>
       {sourceMode === LETTERHEAD_SOURCE_MODES.upload && looksA4 === false && (
         <p className="mx-auto mt-2 max-w-[320px] text-center text-xs text-amber-600 dark:text-amber-300">
           De upload is {ratioDescription?.toLowerCase() || "geen A4-verhouding"}. Met Passend blijft alles zichtbaar; Vullend kan randen afsnijden.
