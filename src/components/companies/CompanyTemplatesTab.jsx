@@ -2048,82 +2048,70 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
             )}
 
             {letterheadStep === 2 && (
-              <div className="grid gap-5 xl:grid-cols-[minmax(360px,460px)_minmax(0,1fr)]">
+              letterheadUsesUpload ? (
                 <div className="space-y-4">
-                  {letterheadUsesUpload ? (
-                    <div className="rounded-lg border border-border bg-background/40 p-4">
-                      <div className="flex flex-wrap items-start justify-between gap-3">
+                  <LetterheadPreview
+                    source={letterheadPreviewSource}
+                    filename={letterheadPreviewFilename}
+                    fileType={letterheadPreviewType}
+                    margins={letterheadMargins}
+                    sourceMode={letterheadSourceMode}
+                    backgroundFit={letterheadBackgroundFit}
+                    pageBackgroundColor={letterheadPageBackground}
+                    designLayers={letterheadDesignLayers}
+                    assetInfo={letterheadAssetInfo}
+                    onChangeMargins={nextMargins => setLetterheadForm(prev => ({
+                      ...prev,
+                      margin_top_mm: nextMargins.top,
+                      margin_right_mm: nextMargins.right,
+                      margin_bottom_mm: nextMargins.bottom,
+                      margin_left_mm: nextMargins.left,
+                    }))}
+                    allowMarginDrag
+                  />
+                  <div className="flex flex-wrap items-center justify-between gap-3">
+                    <Button
+                      type="button"
+                      variant="outline"
+                      size="sm"
+                      onClick={() => setLetterheadForm(prev => ({
+                        ...prev,
+                        margin_top_mm: DEFAULT_LETTERHEAD_MARGINS.top,
+                        margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
+                        margin_bottom_mm: DEFAULT_LETTERHEAD_MARGINS.bottom,
+                        margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
+                      }))}
+                    >
+                      Marges resetten
+                    </Button>
+                    {showUploadFitOptions && (
+                      <div className="flex flex-wrap items-center gap-3 rounded-md border border-amber-500/25 bg-amber-500/10 p-3">
                         <div>
-                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Upload controleren</p>
-                          <p className="mt-1 max-w-[330px] truncate text-sm font-semibold text-foreground">
-                            {letterheadForm.file?.name || currentEditingLetterhead?.download_filename || "Geen bestand geselecteerd"}
-                          </p>
-                          <p className="mt-1 text-xs text-muted-foreground">
-                            {letterheadPreviewIsPdf
-                              ? "PDF-briefpapier geselecteerd. Controleer rechts de A4-preview."
-                              : letterheadPreviewIsImage && letterheadAssetInfo
-                                ? `${letterheadAssetInfo.width} x ${letterheadAssetInfo.height}px${letterheadImageLooksA4 === false ? " - geen A4-verhouding" : " - lijkt A4"}`
-                                : "Gebruik bij voorkeur een staande A4-PDF, JPG of PNG."}
+                          <p className="text-sm font-semibold text-amber-800 dark:text-amber-100">Afbeelding wijkt af van A4</p>
+                          <p className="mt-1 text-xs text-amber-700 dark:text-amber-200">
+                            Laat de upload passend staan als alles zichtbaar moet blijven. Kies vullend alleen wanneer randen afgesneden mogen worden.
                           </p>
                         </div>
-                        <div className="flex flex-wrap items-center gap-2">
-                          <Button
-                            type="button"
-                            variant="outline"
-                            size="sm"
-                            onClick={() => setLetterheadForm(prev => ({
-                              ...prev,
-                              margin_top_mm: DEFAULT_LETTERHEAD_MARGINS.top,
-                              margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
-                              margin_bottom_mm: DEFAULT_LETTERHEAD_MARGINS.bottom,
-                              margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
-                            }))}
-                          >
-                            Marges resetten
-                          </Button>
-                          <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
-                            <Upload className="mr-1 h-4 w-4" />
-                            Bestand wijzigen
-                            <input
-                              type="file"
-                              accept=".pdf,image/*"
-                              className="hidden"
-                              onChange={event => {
-                                const file = event.target.files?.[0];
-                                if (file) setLetterheadForm(prev => ({ ...prev, file }));
-                                event.target.value = "";
-                              }}
-                            />
-                          </label>
-                        </div>
+                        <Select
+                          value={letterheadBackgroundFit}
+                          onValueChange={value => setLetterheadForm(prev => ({ ...prev, background_fit: value }))}
+                        >
+                          <SelectTrigger className="h-9 w-[170px] bg-background/80">
+                            <SelectValue />
+                          </SelectTrigger>
+                          <SelectContent>
+                            {LETTERHEAD_BACKGROUND_FITS.map(option => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
-                      {showUploadFitOptions && (
-                        <div className="mt-4 rounded-md border border-amber-500/25 bg-amber-500/10 p-3">
-                          <div className="flex flex-wrap items-start justify-between gap-3">
-                            <div>
-                              <p className="text-sm font-semibold text-amber-800 dark:text-amber-100">Afbeelding wijkt af van A4</p>
-                              <p className="mt-1 text-xs text-amber-700 dark:text-amber-200">
-                                Laat de upload passend staan als alles zichtbaar moet blijven. Kies vullend alleen wanneer randen afgesneden mogen worden.
-                              </p>
-                            </div>
-                            <Select
-                              value={letterheadBackgroundFit}
-                              onValueChange={value => setLetterheadForm(prev => ({ ...prev, background_fit: value }))}
-                            >
-                              <SelectTrigger className="h-9 w-[170px] bg-background/80">
-                                <SelectValue />
-                              </SelectTrigger>
-                              <SelectContent>
-                                {LETTERHEAD_BACKGROUND_FITS.map(option => (
-                                  <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                                ))}
-                              </SelectContent>
-                            </Select>
-                          </div>
-                        </div>
-                      )}
-                    </div>
-                  ) : (
+                    )}
+                  </div>
+                </div>
+              ) : (
+                <div className="grid gap-5 xl:grid-cols-[minmax(360px,460px)_minmax(0,1fr)]">
+                  <div className="space-y-4">
                     <div className="rounded-lg border border-border bg-background/40 p-4">
                       <div className="flex items-center justify-between gap-3">
                         <div>
@@ -2244,35 +2232,35 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         )}
                       </div>
                     </div>
-                  )}
+                  </div>
+                  <LetterheadPreview
+                    source={letterheadPreviewSource}
+                    filename={letterheadPreviewFilename}
+                    fileType={letterheadPreviewType}
+                    margins={letterheadMargins}
+                    sourceMode={letterheadSourceMode}
+                    backgroundFit={letterheadBackgroundFit}
+                    pageBackgroundColor={letterheadPageBackground}
+                    designLayers={letterheadDesignLayers}
+                    assetInfo={letterheadAssetInfo}
+                    interactive={letterheadSourceMode === LETTERHEAD_SOURCE_MODES.design}
+                    selectedLayerId={selectedLetterheadLayerId}
+                    onSelectLayer={setSelectedLetterheadLayerId}
+                    onUpdateLayer={updateLetterheadLayer}
+                    onChangeMargins={nextMargins => setLetterheadForm(prev => ({
+                      ...prev,
+                      margin_top_mm: nextMargins.top,
+                      margin_right_mm: nextMargins.right,
+                      margin_bottom_mm: nextMargins.bottom,
+                      margin_left_mm: nextMargins.left,
+                    }))}
+                    allowMarginDrag
+                    showGrid={letterheadEditorOptions.showGrid}
+                    snapToGrid={letterheadEditorOptions.snapToGrid}
+                    gridSize={letterheadEditorOptions.gridSize}
+                  />
                 </div>
-                <LetterheadPreview
-                  source={letterheadPreviewSource}
-                  filename={letterheadPreviewFilename}
-                  fileType={letterheadPreviewType}
-                  margins={letterheadMargins}
-                  sourceMode={letterheadSourceMode}
-                  backgroundFit={letterheadBackgroundFit}
-                  pageBackgroundColor={letterheadPageBackground}
-                  designLayers={letterheadDesignLayers}
-                  assetInfo={letterheadAssetInfo}
-                  interactive={letterheadSourceMode === LETTERHEAD_SOURCE_MODES.design}
-                  selectedLayerId={selectedLetterheadLayerId}
-                  onSelectLayer={setSelectedLetterheadLayerId}
-                  onUpdateLayer={updateLetterheadLayer}
-                  onChangeMargins={nextMargins => setLetterheadForm(prev => ({
-                    ...prev,
-                    margin_top_mm: nextMargins.top,
-                    margin_right_mm: nextMargins.right,
-                    margin_bottom_mm: nextMargins.bottom,
-                    margin_left_mm: nextMargins.left,
-                  }))}
-                  allowMarginDrag
-                  showGrid={letterheadEditorOptions.showGrid}
-                  snapToGrid={letterheadEditorOptions.snapToGrid}
-                  gridSize={letterheadEditorOptions.gridSize}
-                />
-              </div>
+              )
             )}
 
             {letterheadStep === 3 && (
