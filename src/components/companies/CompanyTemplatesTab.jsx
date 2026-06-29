@@ -739,12 +739,14 @@ function LetterheadPreview({
               data={withPdfPreviewParameters(source)}
               type="application/pdf"
               aria-label={filename || "PDF-briefpapier"}
-              className="absolute inset-0 h-full w-full bg-white"
+              tabIndex={-1}
+              className="pointer-events-none absolute inset-0 h-full w-full select-none bg-white"
             >
               <iframe
                 title={filename || "PDF-briefpapier"}
                 src={withPdfPreviewParameters(source)}
-                className="absolute inset-0 h-full w-full border-0 bg-white"
+                tabIndex={-1}
+                className="pointer-events-none absolute inset-0 h-full w-full select-none border-0 bg-white"
               />
               <div className="absolute inset-0 flex flex-col items-center justify-center p-8 text-center">
                 <div className="rounded border border-slate-200 bg-white/90 px-3 py-2 text-xs font-medium text-slate-600 shadow-sm">
@@ -755,6 +757,9 @@ function LetterheadPreview({
                 </p>
               </div>
             </object>
+          )}
+          {sourceMode === LETTERHEAD_SOURCE_MODES.upload && hasSource && isPdf && (
+            <div className="absolute inset-0 z-[1]" aria-hidden="true" />
           )}
           {hasSource && !isImage && !isPdf && (
             <div className="absolute inset-0 flex items-center justify-center bg-muted/20 p-6 text-center text-xs text-muted-foreground">
@@ -782,7 +787,7 @@ function LetterheadPreview({
             </div>
           )}
           <div
-            className={`absolute rounded-[2px] border ${
+            className={`absolute z-[2] rounded-[2px] border ${
               mode === "sample" || allowMarginDrag
                 ? "border-sky-500/40 bg-white/82 shadow-sm backdrop-blur-[1px] dark:bg-slate-950/78"
                 : "border-dashed border-sky-500/85 bg-sky-500/5"
@@ -857,25 +862,6 @@ function LetterheadPreview({
           De upload is {ratioDescription?.toLowerCase() || "geen A4-verhouding"}. Met Passend blijft alles zichtbaar; Vullend kan randen afsnijden.
         </p>
       )}
-    </div>
-  );
-}
-
-function MarginInput({ label, value, onChange }) {
-  return (
-    <div className="space-y-1.5">
-      <Label className="text-xs">{label}</Label>
-      <div className="flex items-center gap-2">
-        <Input
-          type="number"
-          min="0"
-          max="90"
-          value={value}
-          onChange={event => onChange(clampMargin(event.target.value))}
-          className="h-9"
-        />
-        <span className="text-xs text-muted-foreground">mm</span>
-      </div>
     </div>
   );
 }
@@ -2064,50 +2050,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
             {letterheadStep === 2 && (
               <div className="grid gap-5 xl:grid-cols-[minmax(360px,460px)_minmax(0,1fr)]">
                 <div className="space-y-4">
-                  <div className="rounded-lg border border-border bg-background/40 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Marges</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Stel in waar de contracttekst over het briefpapier heen mag komen. Je kunt ook de blauwe randen in de preview slepen.
-                    </p>
-                    <div className="mt-4 grid grid-cols-2 gap-3">
-                      <MarginInput
-                        label="Boven"
-                        value={letterheadMargins.top}
-                        onChange={value => setLetterheadForm(prev => ({ ...prev, margin_top_mm: value }))}
-                      />
-                      <MarginInput
-                        label="Rechts"
-                        value={letterheadMargins.right}
-                        onChange={value => setLetterheadForm(prev => ({ ...prev, margin_right_mm: value }))}
-                      />
-                      <MarginInput
-                        label="Onder"
-                        value={letterheadMargins.bottom}
-                        onChange={value => setLetterheadForm(prev => ({ ...prev, margin_bottom_mm: value }))}
-                      />
-                      <MarginInput
-                        label="Links"
-                        value={letterheadMargins.left}
-                        onChange={value => setLetterheadForm(prev => ({ ...prev, margin_left_mm: value }))}
-                      />
-                    </div>
-                    <Button
-                      type="button"
-                      variant="outline"
-                      size="sm"
-                      className="mt-4"
-                      onClick={() => setLetterheadForm(prev => ({
-                        ...prev,
-                        margin_top_mm: DEFAULT_LETTERHEAD_MARGINS.top,
-                        margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
-                        margin_bottom_mm: DEFAULT_LETTERHEAD_MARGINS.bottom,
-                        margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
-                      }))}
-                    >
-                      Marges resetten
-                    </Button>
-                  </div>
-
                   {letterheadUsesUpload ? (
                     <div className="rounded-lg border border-border bg-background/40 p-4">
                       <div className="flex flex-wrap items-start justify-between gap-3">
@@ -2118,58 +2060,41 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                           </p>
                           <p className="mt-1 text-xs text-muted-foreground">
                             {letterheadPreviewIsPdf
-                              ? "PDF wordt hieronder direct op een A4-pagina getoond."
+                              ? "PDF-briefpapier geselecteerd. Controleer rechts de A4-preview."
                               : letterheadPreviewIsImage && letterheadAssetInfo
                                 ? `${letterheadAssetInfo.width} x ${letterheadAssetInfo.height}px${letterheadImageLooksA4 === false ? " - geen A4-verhouding" : " - lijkt A4"}`
                                 : "Gebruik bij voorkeur een staande A4-PDF, JPG of PNG."}
                           </p>
                         </div>
-                        <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
-                          <Upload className="mr-1 h-4 w-4" />
-                          Bestand wijzigen
-                          <input
-                            type="file"
-                            accept=".pdf,image/*"
-                            className="hidden"
-                            onChange={event => {
-                              const file = event.target.files?.[0];
-                              if (file) setLetterheadForm(prev => ({ ...prev, file }));
-                              event.target.value = "";
-                            }}
-                          />
-                        </label>
-                      </div>
-                      <div className="mt-4 overflow-hidden rounded-lg border border-border bg-slate-950/5 dark:bg-black/25">
-                        <div className="flex min-h-[220px] items-center justify-center p-3">
-                          {letterheadPreviewSource && letterheadPreviewIsImage ? (
-                            <img
-                              src={letterheadPreviewSource}
-                              alt={letterheadPreviewFilename || "Geselecteerd briefpapier"}
-                              className="max-h-[300px] max-w-full rounded-sm bg-white object-contain shadow-sm"
+                        <div className="flex flex-wrap items-center gap-2">
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            onClick={() => setLetterheadForm(prev => ({
+                              ...prev,
+                              margin_top_mm: DEFAULT_LETTERHEAD_MARGINS.top,
+                              margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
+                              margin_bottom_mm: DEFAULT_LETTERHEAD_MARGINS.bottom,
+                              margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
+                            }))}
+                          >
+                            Marges resetten
+                          </Button>
+                          <label className="inline-flex h-9 cursor-pointer items-center justify-center rounded-md border border-input bg-background px-3 text-sm font-medium hover:bg-accent hover:text-accent-foreground">
+                            <Upload className="mr-1 h-4 w-4" />
+                            Bestand wijzigen
+                            <input
+                              type="file"
+                              accept=".pdf,image/*"
+                              className="hidden"
+                              onChange={event => {
+                                const file = event.target.files?.[0];
+                                if (file) setLetterheadForm(prev => ({ ...prev, file }));
+                                event.target.value = "";
+                              }}
                             />
-                          ) : letterheadPreviewSource && letterheadPreviewIsPdf ? (
-                            <object
-                              data={withPdfPreviewParameters(letterheadPreviewSource)}
-                              type="application/pdf"
-                              aria-label={letterheadPreviewFilename || "Geselecteerd PDF-briefpapier"}
-                              className="h-[300px] w-full rounded-sm bg-white"
-                            >
-                              <div className="flex h-[220px] flex-col items-center justify-center rounded-sm bg-white p-4 text-center">
-                                <p className="text-sm font-medium text-slate-700">PDF-briefpapier geselecteerd</p>
-                                <p className="mt-1 max-w-[260px] text-xs text-slate-500">
-                                  De PDF kan hier niet inline worden getoond. Rechts zie je wel waar de contracttekst komt.
-                                </p>
-                              </div>
-                            </object>
-                          ) : (
-                            <div className="flex h-[220px] flex-col items-center justify-center text-center text-xs text-muted-foreground">
-                              <Upload className="mb-2 h-6 w-6" />
-                              Geen preview beschikbaar
-                            </div>
-                          )}
-                        </div>
-                        <div className="border-t border-border bg-background/70 px-3 py-2 text-[11px] text-muted-foreground">
-                          Dit is het gekozen briefpapier. Stel rechts het tekstvlak in zodat contracttekst niet over logo, adresblok of voetregel valt.
+                          </label>
                         </div>
                       </div>
                       {showUploadFitOptions && (
