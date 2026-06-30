@@ -705,6 +705,14 @@ function replacePlaceholders(templateBody, values) {
   return result;
 }
 
+function expandClauseMarkers(templateBody, clauses = []) {
+  const clauseMap = new Map((clauses || []).map(clause => [clause.id, clause]));
+  return String(templateBody || "").replace(/\{\{\s*clausule:([^}]+)\s*\}\}/g, (_, rawId) => {
+    const id = String(rawId || "").trim();
+    return clauseMap.get(id)?.body || "";
+  });
+}
+
 function contractRenderValues(personnel, form, company) {
   const employeeName = compact(personnel.full_name || personnel.display_name || [personnel.first_name, personnel.middle_name, personnel.last_name].filter(Boolean).join(" "));
   const firstName = compact(personnel.first_name || personnel.given_name || employeeName.split(" ")[0]);
@@ -774,7 +782,7 @@ function contractRenderValues(personnel, form, company) {
   };
 }
 
-function renderContractBody(personnel, form, company, template) {
+function renderContractBody(personnel, form, company, template, clauses = []) {
   const fallbackBody = [
     "Arbeidsovereenkomst",
     "",
@@ -786,14 +794,14 @@ function renderContractBody(personnel, form, company, template) {
     "Op deze overeenkomst is {{contract.cao}} van toepassing.",
     "De overeengekomen contractvorm is {{contract.contractvorm}}.",
   ].join("\n");
-  return replacePlaceholders(template?.body || fallbackBody, contractRenderValues(personnel, form, company));
+  return replacePlaceholders(expandClauseMarkers(template?.body || fallbackBody, clauses), contractRenderValues(personnel, form, company));
 }
 
-function makePdfFile({ personnel, form, company, template, letterhead }) {
+function makePdfFile({ personnel, form, company, template, letterhead, clauses = [] }) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const margin = 54;
   const title = template?.name || "Arbeidsovereenkomst";
-  const body = renderContractBody(personnel, form, company, template);
+  const body = renderContractBody(personnel, form, company, template, clauses);
   const values = contractRenderValues(personnel, form, company);
   doc.setFont("helvetica", "bold");
   doc.setFontSize(16);
@@ -955,6 +963,15 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     enabled: companyIds.length > 0,
   });
 
+  const { data: contractClauses = [] } = useQuery({
+    queryKey: ["company-contract-clauses", companyIds],
+    queryFn: async () => {
+      const lists = await Promise.all(companyIds.map(companyId => safeFilterEntity("CompanyContractClause", { company_id: companyId }, "sort_order")));
+      return lists.flat();
+    },
+    enabled: companyIds.length > 0,
+  });
+
   const selectedCompany = companies.find(company => company.id === form.company_id) || null;
   const publishedTemplates = useMemo(() => (contractTemplates || [])
     .filter(template => template.company_id === form.company_id && template.status === "published" && templateMatchesWizard(template, form))
@@ -962,6 +979,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const letterheadOptions = useMemo(() => getLetterheadOptions(letterheads, companies, form.company_id), [companies, form.company_id, letterheads]);
   const selectedTemplate = contractTemplates.find(template => template.id === form.template_id) || null;
   const selectedLetterhead = letterheadOptions.find(item => item.id === form.letterhead_id) || null;
+  const selectedTemplateClauses = useMemo(() => (contractClauses || [])
+    .filter(clause => clause.company_id === form.company_id && clause.status !== "archived"),
+  [contractClauses, form.company_id]);
   const selectedContractModel = getContractModel(form.contract_model);
   const wageTableYear = getYear(form.contract_start_date || new Date());
   const companyCaoKeyOptions = useMemo(
@@ -979,7 +999,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const wageRows = useMemo(() => extractWageRows(effectiveCaoConfiguration, wageTableYear), [effectiveCaoConfiguration, wageTableYear]);
   const conflicts = validateConflicts(form, contracts, editingId);
   const missingFields = getMissingContractFields(form);
-  const generatedPreview = useMemo(() => renderContractBody(personnel, form, selectedCompany, selectedTemplate), [form, personnel, selectedCompany, selectedTemplate]);
+  const generatedPreview = useMemo(() => renderContractBody(personnel, form, selectedCompany, selectedTemplate, selectedTemplateClauses), [form, personnel, selectedCompany, selectedTemplate, selectedTemplateClauses]);
 
   const set = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
   const setCompanyId = (value) => setForm(prev => {
@@ -1043,6 +1063,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     queryClient.invalidateQueries({ queryKey: ["personnel_contracts", personnel.id] });
     queryClient.invalidateQueries({ queryKey: ["personnel"] });
     queryClient.invalidateQueries({ queryKey: ["company-contract-templates"] });
+    queryClient.invalidateQueries({ queryKey: ["company-contract-clauses"] });
     queryClient.invalidateQueries({ queryKey: ["company-letterheads"] });
     queryClient.invalidateQueries({ queryKey: ["cao-configuration-options"] });
     queryClient.invalidateQueries({ queryKey: ["company-cao-assignments"] });
@@ -1068,7 +1089,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         : await base44.entities.PersonnelContract.create(payload);
 
       if (form.source_type === "generated") {
-        const pdfFile = makePdfFile({ personnel, form, company: selectedCompany, template: selectedTemplate, letterhead: selectedLetterhead });
+        const pdfFile = makePdfFile({
+          personnel,
+          form,
+          company: selectedCompany,
+          template: selectedTemplate,
+          letterhead: selectedLetterhead,
+          clauses: selectedTemplateClauses,
+        });
         const result = await uploadManagedFile({
           file: pdfFile,
           ownerType: "personnel",
@@ -1194,6 +1222,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     const defaultLetterhead = letterheadOptions.find(option => option.is_default) || letterheadOptions[0];
     if (defaultLetterhead) set("letterhead_id", defaultLetterhead.id);
   }, [wizardOpen, form.letterhead_id, letterheadOptions]);
+
+  useEffect(() => {
+    if (!wizardOpen || form.source_type !== "generated" || !selectedTemplate?.default_letterhead_id) return;
+    if (!letterheadOptions.some(option => option.id === selectedTemplate.default_letterhead_id)) return;
+    if (form.letterhead_id !== selectedTemplate.default_letterhead_id) {
+      set("letterhead_id", selectedTemplate.default_letterhead_id);
+    }
+  }, [wizardOpen, form.source_type, form.letterhead_id, selectedTemplate?.default_letterhead_id, letterheadOptions]);
 
   useEffect(() => {
     if (!wizardOpen || form.source_type !== "generated") return;

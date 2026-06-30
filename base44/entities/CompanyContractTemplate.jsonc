@@ -125,6 +125,16 @@
       },
       "description": "Optionele geordende clausules/artikelen voor latere fijnmazige bewerking."
     },
+    "clause_ids": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "string"
+      },
+      "description": "Geordende verwijzingen naar herbruikbare CompanyContractClause-records die in de templatebody zijn ingevoegd."
+    },
     "placeholders": {
       "type": [
         "array",

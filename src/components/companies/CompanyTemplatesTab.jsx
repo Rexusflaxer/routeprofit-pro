@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { AnimatePresence, motion } from "framer-motion";
 import { base44 } from "@/api/base44Client";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
@@ -22,6 +23,8 @@ import {
   Edit,
   Eye,
   EyeOff,
+  FilePlus2,
+  GripVertical,
   Image as ImageIcon,
   Layers,
   Lock,
@@ -77,18 +80,118 @@ const PROBATION_SCOPES = [
   { value: "not_applicable", label: "Niet van toepassing" },
 ];
 
-const DURATION_TYPE_SCOPES = [
-  { value: "any", label: "Bepaalde en onbepaalde tijd" },
-  { value: "fixed", label: "Alleen bepaalde tijd" },
-  { value: "indefinite", label: "Alleen onbepaalde tijd" },
-];
-
 const CAO_OPTIONS = [
   { value: "cao_particuliere_beveiliging", label: "CAO Particuliere Beveiliging" },
   { value: "cao_evenementen_horecabeveiliging", label: "CAO Evenementen- en Horecabeveiliging" },
   { value: "cao_verkeersregelaars", label: "CAO Verkeersregelaars" },
   { value: "cao_veiligheidsdomein", label: "CAO Veiligheidsdomein" },
   { value: "none", label: "Geen vaste CAO" },
+];
+
+const CAO_OPTION_LABELS = Object.fromEntries(CAO_OPTIONS.map(option => [option.value, option.label]));
+
+const CONTRACT_FORM_LABELS = {
+  bepaalde_tijd: "Bepaalde tijd",
+  onbepaalde_tijd: "Onbepaalde tijd",
+  oproep: "Oproep",
+  stage: "Stage",
+  zzp: "ZZP / opdracht",
+};
+
+const EMPLOYMENT_MODEL_LABELS = {
+  fulltime: "Fulltime",
+  parttime_fixed: "Parttime vast",
+  parttime_growth: "Parttime groeimodel",
+  call_agreement: "Oproep / nuluren",
+  min_max: "Min-max",
+  internship: "Stage",
+  zzp: "ZZP / opdracht",
+};
+
+const CONTRACT_MODEL_OPTIONS = [
+  {
+    value: "fulltime_fixed",
+    label: "Fulltime dienstverband - bepaalde tijd",
+    contract_form: "bepaalde_tijd",
+    duration_type: "fixed",
+    employment_model: "fulltime",
+    default_hours: 40,
+  },
+  {
+    value: "fulltime_indefinite",
+    label: "Fulltime dienstverband - onbepaalde tijd",
+    contract_form: "onbepaalde_tijd",
+    duration_type: "indefinite",
+    employment_model: "fulltime",
+    default_hours: 40,
+  },
+  {
+    value: "parttime_fixed",
+    label: "Parttime vast - bepaalde tijd",
+    contract_form: "bepaalde_tijd",
+    duration_type: "fixed",
+    employment_model: "parttime_fixed",
+  },
+  {
+    value: "parttime_indefinite",
+    label: "Parttime vast - onbepaalde tijd",
+    contract_form: "onbepaalde_tijd",
+    duration_type: "indefinite",
+    employment_model: "parttime_fixed",
+  },
+  {
+    value: "min_max_fixed",
+    label: "Min-max - bepaalde tijd",
+    contract_form: "oproep",
+    underlying_contract_form: "bepaalde_tijd",
+    duration_type: "fixed",
+    employment_model: "min_max",
+  },
+  {
+    value: "min_max_indefinite",
+    label: "Min-max - onbepaalde tijd",
+    contract_form: "oproep",
+    underlying_contract_form: "onbepaalde_tijd",
+    duration_type: "indefinite",
+    employment_model: "min_max",
+  },
+  {
+    value: "call_fixed",
+    label: "Oproep / nuluren - bepaalde tijd",
+    contract_form: "oproep",
+    underlying_contract_form: "bepaalde_tijd",
+    duration_type: "fixed",
+    employment_model: "call_agreement",
+  },
+  {
+    value: "call_indefinite",
+    label: "Oproep / nuluren - onbepaalde tijd",
+    contract_form: "oproep",
+    underlying_contract_form: "onbepaalde_tijd",
+    duration_type: "indefinite",
+    employment_model: "call_agreement",
+  },
+  {
+    value: "internship_fixed",
+    label: "Stage - bepaalde tijd",
+    contract_form: "stage",
+    duration_type: "fixed",
+    employment_model: "internship",
+  },
+  {
+    value: "zzp_assignment",
+    label: "Overeenkomst van opdracht (ZZP)",
+    contract_form: "zzp",
+    duration_type: "fixed",
+    employment_model: "zzp",
+  },
+];
+
+const CONTRACT_MODEL_LABELS = Object.fromEntries(CONTRACT_MODEL_OPTIONS.map(option => [option.value, option.label]));
+const PROBATION_CHOICES = [
+  { value: "with_probation", label: "Met proeftijd", description: "Gebruik dit sjabloon alleen wanneer een proeftijd is afgesproken." },
+  { value: "without_probation", label: "Zonder proeftijd", description: "Gebruik dit sjabloon wanneer er geen proeftijd in het contract staat." },
+  { value: "not_applicable", label: "Niet van toepassing", description: "Voor contractvormen waar proeftijd niet logisch of niet relevant is." },
 ];
 
 const DEFAULT_TEMPLATE_BODY = [
@@ -110,8 +213,10 @@ const DEFAULT_TEMPLATE_BODY = [
 
 const LETTERHEAD_TABLE_GRID = "grid grid-cols-[minmax(220px,1.5fr)_minmax(110px,130px)_minmax(100px,120px)_minmax(140px,180px)_minmax(160px,max-content)] gap-3 xl:gap-4";
 const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(240px,1.4fr)_minmax(72px,92px)_minmax(120px,150px)_minmax(220px,1fr)_minmax(140px,180px)_minmax(168px,max-content)] gap-3 xl:gap-4";
+const CLAUSE_TABLE_GRID = "grid grid-cols-[minmax(32px,44px)_minmax(220px,1fr)_minmax(120px,160px)_minmax(140px,180px)_minmax(144px,max-content)] gap-3 xl:gap-4";
 const LETTERHEAD_STEPS = ["Upload", "Marges", "Controle"];
-const TEMPLATE_STEPS = ["Scope", "Inhoud", "Controle"];
+const TEMPLATE_STEPS = ["CAO", "Contract", "Proeftijd", "Briefpapier", "Inhoud", "Controle"];
+const CLAUSE_MARKER_PREFIX = "clausule:";
 const LETTERHEAD_SOURCE_MODES = {
   upload: "upload",
   design: "design",
@@ -359,6 +464,76 @@ function fromArrayText(value) {
 function extractPlaceholders(body) {
   const matches = String(body || "").match(/\{\{\s*[^}]+\s*\}\}/g) || [];
   return [...new Set(matches.map(item => item.replace(/[{}]/g, "").trim()))];
+}
+
+function uniqueStrings(values) {
+  return [...new Set((values || []).map(value => String(value || "").trim()).filter(Boolean))];
+}
+
+function clauseMarker(id) {
+  return `{{${CLAUSE_MARKER_PREFIX}${id}}}`;
+}
+
+function extractClauseIds(body) {
+  const matches = String(body || "").match(/\{\{\s*clausule:[^}]+\s*\}\}/g) || [];
+  return uniqueStrings(matches.map(item => item.replace(/[{}]/g, "").trim().slice(CLAUSE_MARKER_PREFIX.length)));
+}
+
+function expandClauseMarkers(body, clauses = []) {
+  const clauseMap = new Map((clauses || []).map(clause => [clause.id, clause]));
+  return String(body || "").replace(/\{\{\s*clausule:([^}]+)\s*\}\}/g, (_, rawId) => {
+    const id = String(rawId || "").trim();
+    return clauseMap.get(id)?.body || `[[Clausule niet gevonden: ${id}]]`;
+  });
+}
+
+function sortClauseIdsByConfiguredOrder(ids, clauses = []) {
+  const order = new Map((clauses || []).map((clause, index) => [clause.id, Number(clause.sort_order ?? index)]));
+  return uniqueStrings(ids).sort((a, b) => (order.get(a) ?? Number.MAX_SAFE_INTEGER) - (order.get(b) ?? Number.MAX_SAFE_INTEGER));
+}
+
+function getContractModel(value) {
+  return CONTRACT_MODEL_OPTIONS.find(option => option.value === value) || null;
+}
+
+function inferContractModelFromTemplate(record = {}) {
+  if (record.metadata?.contract_model && getContractModel(record.metadata.contract_model)) {
+    return record.metadata.contract_model;
+  }
+  return CONTRACT_MODEL_OPTIONS.find(option => {
+    if (record.contract_form_scope && option.contract_form !== record.contract_form_scope) return false;
+    if (record.employment_model_scope && option.employment_model !== record.employment_model_scope) return false;
+    if (record.duration_type_scope && option.duration_type !== record.duration_type_scope) return false;
+    if (record.metadata?.underlying_contract_form && option.underlying_contract_form !== record.metadata.underlying_contract_form) return false;
+    return true;
+  })?.value || "";
+}
+
+function contractModelMeta(option) {
+  if (!option) return "";
+  const parts = [
+    CONTRACT_FORM_LABELS[option.contract_form] || option.contract_form,
+    EMPLOYMENT_MODEL_LABELS[option.employment_model] || option.employment_model,
+    option.duration_type === "indefinite" ? "Onbepaalde tijd" : "Bepaalde tijd",
+  ];
+  return uniqueStrings(parts).join(" · ");
+}
+
+function probationLabel(value) {
+  return PROBATION_CHOICES.find(option => option.value === value)?.label || PROBATION_SCOPES.find(option => option.value === value)?.label || "-";
+}
+
+function getTemplateScopeLabel(item) {
+  const modelLabel = CONTRACT_MODEL_LABELS[item.metadata?.contract_model];
+  if (modelLabel) return modelLabel;
+  const formLabel = CONTRACT_FORM_SCOPES.find(scope => scope.value === (item.contract_form_scope || "any"))?.label || "Alle contractvormen";
+  const modelScopeLabel = EMPLOYMENT_MODEL_SCOPES.find(scope => scope.value === (item.employment_model_scope || "any"))?.label || "Alle urenmodellen";
+  return `${formLabel} · ${modelScopeLabel}`;
+}
+
+function caoLabel(value) {
+  if (!value) return "Geen CAO";
+  return CAO_OPTION_LABELS[value] || value;
 }
 
 function statusBadge(status) {
@@ -949,24 +1124,110 @@ function LayerIcon({ type }) {
   return <Type className="h-3.5 w-3.5" />;
 }
 
+function TemplateDocumentPreview({ body, templateName, letterhead, clauses }) {
+  const margins = normalizeLetterheadMargins(letterhead || {});
+  const sourceMode = letterhead ? normalizeSourceMode(letterhead) : LETTERHEAD_SOURCE_MODES.design;
+  const backgroundFit = letterhead ? normalizeBackgroundFit(letterhead) : DEFAULT_LETTERHEAD_BACKGROUND_FIT;
+  const pageBackgroundColor = letterhead ? normalizePageBackground(letterhead) : DEFAULT_LETTERHEAD_PAGE_BACKGROUND;
+  const designLayers = letterhead ? normalizeDesignLayers(letterhead) : [];
+  const source = letterhead?.file_url || "";
+  const filename = letterhead?.download_filename || "";
+  const top = (margins.top / 297) * 100;
+  const right = (margins.right / 210) * 100;
+  const bottom = (margins.bottom / 297) * 100;
+  const left = (margins.left / 210) * 100;
+  const objectFit = backgroundFit === "stretch" ? "fill" : backgroundFit;
+  const isPdf = sourceMode === LETTERHEAD_SOURCE_MODES.upload && fileLooksLikePdf(source, filename);
+  const isImage = sourceMode === LETTERHEAD_SOURCE_MODES.upload && fileLooksLikeImage(source, filename);
+  const previewBody = expandClauseMarkers(body, clauses);
+
+  return (
+    <div className="rounded-lg border border-border bg-muted/20 p-4">
+      <div className="mb-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
+        <span className="font-semibold uppercase tracking-wider">PDF-preview</span>
+        <span>{letterhead?.name || "Zonder briefpapier"}</span>
+      </div>
+      <div className="mx-auto w-full max-w-[420px] rounded-xl bg-slate-950/5 p-3 dark:bg-black/25">
+        <div
+          className="relative mx-auto aspect-[210/297] overflow-hidden rounded-[2px] shadow-[0_18px_46px_rgba(15,23,42,0.18)] ring-1 ring-slate-950/15 dark:ring-white/15"
+          style={{ backgroundColor: pageBackgroundColor }}
+        >
+          {sourceMode === LETTERHEAD_SOURCE_MODES.upload && source && isImage && (
+            <img src={source} alt={filename || "Briefpapier"} className="absolute inset-0 h-full w-full" style={{ objectFit }} />
+          )}
+          {sourceMode === LETTERHEAD_SOURCE_MODES.upload && source && isPdf && (
+            <LetterheadPdfPagePreview source={source} filename={filename} />
+          )}
+          {sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.map(renderDesignLayer)}
+          <div
+            className="absolute z-20 overflow-hidden bg-white/78 p-[4.5%] text-[7px] leading-snug text-slate-900 backdrop-blur-[0.5px] sm:text-[8px]"
+            style={{
+              top: `${top}%`,
+              right: `${right}%`,
+              bottom: `${bottom}%`,
+              left: `${left}%`,
+            }}
+          >
+            <p className="mb-2 text-[10px] font-bold leading-tight text-slate-950">{templateName || "Arbeidsovereenkomst"}</p>
+            <div className="whitespace-pre-wrap">{previewBody || "Vul links de template-inhoud in."}</div>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function initialTemplate(companyId) {
   return {
     company_id: companyId,
     name: "",
     description: "",
     template_type: "employment_contract",
-    contract_form_scope: "any",
-    employment_model_scope: "any",
-    probation_scope: "any",
-    duration_type_scope: "any",
+    contract_model: "",
+    contract_form_scope: "",
+    employment_model_scope: "",
+    probation_scope: "",
+    duration_type_scope: "",
     duration_options_text: "",
     visible_in_contract_wizard: true,
-    cao_key: "none",
+    cao_key: "",
     function_type: "",
     default_letterhead_id: "none",
     version: 1,
     status: "draft",
     body: DEFAULT_TEMPLATE_BODY,
+  };
+}
+
+function templateFormFromRecord(companyId, record) {
+  return {
+    company_id: companyId,
+    name: record.name || "",
+    description: record.description || "",
+    template_type: record.template_type || "employment_contract",
+    contract_model: inferContractModelFromTemplate(record),
+    contract_form_scope: record.contract_form_scope || "any",
+    employment_model_scope: record.employment_model_scope || "any",
+    probation_scope: record.probation_scope || "any",
+    duration_type_scope: record.duration_type_scope || "any",
+    duration_options_text: toArrayText(record.duration_options),
+    visible_in_contract_wizard: record.visible_in_contract_wizard !== false,
+    cao_key: record.cao_key || "",
+    function_type: record.function_type || "",
+    default_letterhead_id: record.default_letterhead_id || "none",
+    version: record.version || 1,
+    status: record.status || "draft",
+    body: record.body || DEFAULT_TEMPLATE_BODY,
+  };
+}
+
+function initialClause(companyId, sortOrder = 0) {
+  return {
+    company_id: companyId,
+    title: "",
+    body: "",
+    sort_order: sortOrder,
+    status: "active",
   };
 }
 
@@ -1025,12 +1286,16 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const queryClient = useQueryClient();
   const letterheadWizardRef = useRef(null);
   const templateWizardRef = useRef(null);
+  const templateBodyRef = useRef(null);
   const [letterheadForm, setLetterheadForm] = useState(() => initialLetterhead(companyId));
   const [templateForm, setTemplateForm] = useState(() => initialTemplate(companyId));
+  const [clauseForm, setClauseForm] = useState(() => initialClause(companyId));
   const [editingLetterheadId, setEditingLetterheadId] = useState(null);
   const [editingTemplateId, setEditingTemplateId] = useState(null);
+  const [editingClauseId, setEditingClauseId] = useState(null);
   const [letterheadWizardOpen, setLetterheadWizardOpen] = useState(false);
   const [templateWizardOpen, setTemplateWizardOpen] = useState(false);
+  const [clauseWizardOpen, setClauseWizardOpen] = useState(false);
   const [letterheadStep, setLetterheadStep] = useState(1);
   const [templateStep, setTemplateStep] = useState(1);
   const [previewFile, setPreviewFile] = useState(null);
@@ -1039,6 +1304,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [letterheadAssetInfo, setLetterheadAssetInfo] = useState(null);
   const [selectedLetterheadLayerId, setSelectedLetterheadLayerId] = useState(null);
   const [letterheadEditorOptions, setLetterheadEditorOptions] = useState(DEFAULT_LETTERHEAD_EDITOR_OPTIONS);
+  const [clausesReordering, setClausesReordering] = useState(false);
 
   const activeSubTab = subTab || "letterhead";
 
@@ -1066,13 +1332,36 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     enabled: !!companyId,
   });
 
+  const { data: clauses = [] } = useQuery({
+    queryKey: ["company-contract-clauses", companyId],
+    queryFn: () => base44.entities.CompanyContractClause.filter({ company_id: companyId }, "sort_order"),
+    enabled: !!companyId,
+  });
+
+  const { data: caoAssignments = [] } = useQuery({
+    queryKey: ["cao-assignments", companyId],
+    queryFn: () => base44.entities.CompanyCaoAssignment.filter({ company_id: companyId }, "-created_date"),
+    enabled: !!companyId,
+  });
+
   const allLetterheads = useMemo(() => {
     const legacy = letterheads.length === 0 ? legacyLetterhead(company) : null;
     return [legacy, ...letterheads].filter(Boolean);
   }, [company, letterheads]);
 
   const activeLetterheads = allLetterheads.filter(item => item.status !== "archived");
-  const placeholders = extractPlaceholders(templateForm.body);
+  const activeClauses = useMemo(() => [...clauses]
+    .filter(item => item.status !== "archived")
+    .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0) || String(a.title || "").localeCompare(String(b.title || ""))),
+  [clauses]);
+  const templateClauseIds = useMemo(() => extractClauseIds(templateForm.body), [templateForm.body]);
+  const selectedTemplateLetterhead = activeLetterheads.find(item => item.id === templateForm.default_letterhead_id) || null;
+  const selectedContractModel = getContractModel(templateForm.contract_model);
+  const companyCaoOptions = useMemo(() => uniqueStrings(caoAssignments.map(item => item.cao_key))
+    .map(key => ({ value: key, label: caoLabel(key) })),
+  [caoAssignments]);
+  const placeholders = extractPlaceholders(expandClauseMarkers(templateForm.body, activeClauses))
+    .filter(placeholder => !placeholder.startsWith(CLAUSE_MARKER_PREFIX));
   const currentEditingLetterhead = editingLetterheadId
     ? letterheads.find(item => item.id === editingLetterheadId)
     : null;
@@ -1149,8 +1438,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const refresh = () => {
     queryClient.invalidateQueries({ queryKey: ["company-letterheads", companyId] });
     queryClient.invalidateQueries({ queryKey: ["company-contract-templates", companyId] });
+    queryClient.invalidateQueries({ queryKey: ["company-contract-clauses", companyId] });
     queryClient.invalidateQueries({ queryKey: ["company-letterheads"] });
     queryClient.invalidateQueries({ queryKey: ["company-contract-templates"] });
+    queryClient.invalidateQueries({ queryKey: ["company-contract-clauses"] });
   };
 
   const saveLetterheadMutation = useMutation({
@@ -1258,34 +1549,45 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const saveTemplateMutation = useMutation({
     mutationFn: async (statusOverride) => {
       if (!templateForm.name.trim()) throw new Error("Vul een naam voor de template in.");
+      if (!templateForm.cao_key) throw new Error("Kies eerst de CAO die voor dit bedrijf geldt.");
+      const contractModel = getContractModel(templateForm.contract_model);
+      if (!contractModel) throw new Error("Kies eerst een specifieke contractvorm.");
+      if (!templateForm.probation_scope) throw new Error("Kies eerst of proeftijd van toepassing is.");
       if (!templateForm.body.trim()) throw new Error("Vul de template-inhoud in.");
       const previous = editingTemplateId ? templates.find(item => item.id === editingTemplateId) || {} : {};
       const status = statusOverride || templateForm.status || "draft";
       const createNewVersion = editingTemplateId && previous.status === "published";
+      const clauseIds = sortClauseIdsByConfiguredOrder(extractClauseIds(templateForm.body), clauses);
+      const auditMetadata = buildAuditMetadata(
+        currentUser,
+        createNewVersion ? "nieuwe versie" : (editingTemplateId ? "gewijzigd" : "toegevoegd"),
+        createNewVersion ? {} : (previous.metadata || {}),
+        auditActors
+      );
       const payload = {
         company_id: companyId,
         name: templateForm.name.trim(),
         description: templateForm.description || null,
         template_type: templateForm.template_type || "employment_contract",
-        contract_form_scope: templateForm.contract_form_scope === "any" ? null : templateForm.contract_form_scope,
-        employment_model_scope: templateForm.employment_model_scope === "any" ? null : templateForm.employment_model_scope,
-        probation_scope: templateForm.probation_scope === "any" ? null : templateForm.probation_scope,
-        duration_type_scope: templateForm.duration_type_scope === "any" ? null : templateForm.duration_type_scope,
+        contract_form_scope: contractModel.contract_form,
+        employment_model_scope: contractModel.employment_model,
+        probation_scope: templateForm.probation_scope,
+        duration_type_scope: contractModel.duration_type,
         duration_options: fromArrayText(templateForm.duration_options_text),
         visible_in_contract_wizard: templateForm.visible_in_contract_wizard !== false,
-        cao_key: templateForm.cao_key === "none" ? null : templateForm.cao_key,
+        cao_key: templateForm.cao_key || null,
         function_type: templateForm.function_type || null,
         default_letterhead_id: templateForm.default_letterhead_id === "none" ? null : templateForm.default_letterhead_id,
         version: createNewVersion ? Number(previous.version || 1) + 1 : Number(templateForm.version || 1),
         status,
         body: templateForm.body,
+        clause_ids: clauseIds,
         placeholders,
-        metadata: buildAuditMetadata(
-          currentUser,
-          createNewVersion ? "nieuwe versie" : (editingTemplateId ? "gewijzigd" : "toegevoegd"),
-          createNewVersion ? {} : (previous.metadata || {}),
-          auditActors
-        ),
+        metadata: {
+          ...auditMetadata,
+          contract_model: contractModel.value,
+          underlying_contract_form: contractModel.underlying_contract_form || null,
+        },
       };
       return editingTemplateId && !createNewVersion
         ? base44.entities.CompanyContractTemplate.update(editingTemplateId, payload)
@@ -1300,6 +1602,34 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       refresh();
     },
     onError: error => setMessage({ type: "error", text: error?.message || "Template kon niet worden opgeslagen." }),
+  });
+
+  const saveClauseMutation = useMutation({
+    mutationFn: async () => {
+      if (!clauseForm.title.trim()) throw new Error("Vul een titel voor de clausule in.");
+      if (!clauseForm.body.trim()) throw new Error("Vul de clausuletekst in.");
+      const previous = editingClauseId ? clauses.find(item => item.id === editingClauseId) || {} : {};
+      const payload = {
+        company_id: companyId,
+        title: clauseForm.title.trim(),
+        body: clauseForm.body,
+        sort_order: Number.isFinite(Number(clauseForm.sort_order)) ? Number(clauseForm.sort_order) : activeClauses.length,
+        status: "active",
+        placeholders: extractPlaceholders(clauseForm.body),
+        metadata: buildAuditMetadata(currentUser, editingClauseId ? "gewijzigd" : "toegevoegd", previous.metadata || {}, auditActors),
+      };
+      return editingClauseId
+        ? base44.entities.CompanyContractClause.update(editingClauseId, payload)
+        : base44.entities.CompanyContractClause.create(payload);
+    },
+    onSuccess: () => {
+      setClauseForm(initialClause(companyId));
+      setEditingClauseId(null);
+      setClauseWizardOpen(false);
+      setMessage({ type: "success", text: "Clausule opgeslagen." });
+      refresh();
+    },
+    onError: error => setMessage({ type: "error", text: error?.message || "Clausule kon niet worden opgeslagen." }),
   });
 
   const archiveLetterhead = async (record) => {
@@ -1317,6 +1647,14 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
 
   const archiveTemplate = async (record) => {
     await base44.entities.CompanyContractTemplate.update(record.id, {
+      status: "archived",
+      metadata: buildAuditMetadata(currentUser, "gearchiveerd", record.metadata || {}, auditActors),
+    });
+    refresh();
+  };
+
+  const archiveClause = async (record) => {
+    await base44.entities.CompanyContractClause.update(record.id, {
       status: "archived",
       metadata: buildAuditMetadata(currentUser, "gearchiveerd", record.metadata || {}, auditActors),
     });
@@ -1395,7 +1733,11 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const startNewTemplate = () => {
     setMessage(null);
     setEditingTemplateId(null);
-    setTemplateForm(initialTemplate(companyId));
+    const defaultLetterhead = activeLetterheads.find(item => item.is_default) || activeLetterheads[0];
+    setTemplateForm({
+      ...initialTemplate(companyId),
+      default_letterhead_id: defaultLetterhead?.id || "none",
+    });
     setTemplateStep(1);
     setTemplateWizardOpen(true);
   };
@@ -1403,24 +1745,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const startEditTemplate = (record) => {
     setMessage(null);
     setEditingTemplateId(record.id);
-    setTemplateForm({
-      company_id: companyId,
-      name: record.name || "",
-      description: record.description || "",
-      template_type: record.template_type || "employment_contract",
-      contract_form_scope: record.contract_form_scope || "any",
-      employment_model_scope: record.employment_model_scope || "any",
-      probation_scope: record.probation_scope || "any",
-      duration_type_scope: record.duration_type_scope || "any",
-      duration_options_text: toArrayText(record.duration_options),
-      visible_in_contract_wizard: record.visible_in_contract_wizard !== false,
-      cao_key: record.cao_key || "none",
-      function_type: record.function_type || "",
-      default_letterhead_id: record.default_letterhead_id || "none",
-      version: record.version || 1,
-      status: record.status || "draft",
-      body: record.body || DEFAULT_TEMPLATE_BODY,
-    });
+    setTemplateForm(templateFormFromRecord(companyId, record));
     setTemplateStep(1);
     setTemplateWizardOpen(true);
   };
@@ -1429,22 +1754,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     setMessage(null);
     setEditingTemplateId(null);
     setTemplateForm({
-      company_id: companyId,
-      name: record.name,
-      description: record.description || "",
-      template_type: record.template_type || "employment_contract",
-      contract_form_scope: record.contract_form_scope || "any",
-      employment_model_scope: record.employment_model_scope || "any",
-      probation_scope: record.probation_scope || "any",
-      duration_type_scope: record.duration_type_scope || "any",
-      duration_options_text: toArrayText(record.duration_options),
-      visible_in_contract_wizard: record.visible_in_contract_wizard !== false,
-      cao_key: record.cao_key || "none",
-      function_type: record.function_type || "",
-      default_letterhead_id: record.default_letterhead_id || "none",
+      ...templateFormFromRecord(companyId, record),
       version: Number(record.version || 1) + 1,
       status: "draft",
-      body: record.body || DEFAULT_TEMPLATE_BODY,
     });
     setTemplateStep(1);
     setTemplateWizardOpen(true);
@@ -1458,16 +1770,109 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   };
 
   const nextTemplateStep = () => {
-    if (templateStep === 1 && !templateForm.name.trim()) {
-      setMessage({ type: "error", text: "Vul eerst een naam voor de template in." });
+    if (templateStep === 1) {
+      if (!templateForm.name.trim()) {
+        setMessage({ type: "error", text: "Vul eerst een naam voor de template in." });
+        return;
+      }
+      if (!templateForm.cao_key) {
+        setMessage({ type: "error", text: "Kies eerst de CAO die voor dit bedrijf geldt." });
+        return;
+      }
+    }
+    if (templateStep === 2 && !getContractModel(templateForm.contract_model)) {
+      setMessage({ type: "error", text: "Kies eerst een specifieke contractvorm." });
       return;
     }
-    if (templateStep === 2 && !templateForm.body.trim()) {
+    if (templateStep === 3 && !templateForm.probation_scope) {
+      setMessage({ type: "error", text: "Kies eerst of proeftijd van toepassing is." });
+      return;
+    }
+    if (templateStep === 5 && !templateForm.body.trim()) {
       setMessage({ type: "error", text: "Vul eerst de template-inhoud in." });
       return;
     }
     setMessage(null);
     setTemplateStep(step => Math.min(step + 1, TEMPLATE_STEPS.length));
+  };
+
+  const startNewClause = () => {
+    const lastOrder = activeClauses.reduce((max, item) => Math.max(max, Number(item.sort_order || 0)), 0);
+    setMessage(null);
+    setEditingClauseId(null);
+    setClauseForm(initialClause(companyId, lastOrder + 10));
+    setClauseWizardOpen(true);
+  };
+
+  const startEditClause = (record) => {
+    setMessage(null);
+    setEditingClauseId(record.id);
+    setClauseForm({
+      company_id: companyId,
+      title: record.title || "",
+      body: record.body || "",
+      sort_order: Number(record.sort_order || 0),
+      status: record.status || "active",
+    });
+    setClauseWizardOpen(true);
+  };
+
+  const cancelClauseWizard = () => {
+    setClauseForm(initialClause(companyId));
+    setEditingClauseId(null);
+    setClauseWizardOpen(false);
+  };
+
+  const insertClauseInTemplate = (clause) => {
+    if (!clause?.id) return;
+    if (templateClauseIds.includes(clause.id)) {
+      setMessage({ type: "error", text: "Deze clausule staat al in de template." });
+      return;
+    }
+    const marker = clauseMarker(clause.id);
+    const textarea = templateBodyRef.current;
+    setTemplateForm(prev => {
+      const body = prev.body || "";
+      const start = textarea?.selectionStart ?? body.length;
+      const end = textarea?.selectionEnd ?? start;
+      const prefix = body.slice(0, start);
+      const suffix = body.slice(end);
+      const before = prefix && !prefix.endsWith("\n") ? "\n\n" : "";
+      const after = suffix && !suffix.startsWith("\n") ? "\n\n" : "";
+      return { ...prev, body: `${prefix}${before}${marker}${after}${suffix}` };
+    });
+    if (typeof window !== "undefined") window.setTimeout(() => templateBodyRef.current?.focus(), 0);
+    setMessage(null);
+  };
+
+  const handleClauseDragStart = (event, clause) => {
+    event.dataTransfer.setData("application/x-loq-contract-clause-id", clause.id);
+    event.dataTransfer.setData("text/plain", clauseMarker(clause.id));
+    event.dataTransfer.effectAllowed = "copy";
+  };
+
+  const handleTemplateBodyDrop = (event) => {
+    const clauseId = event.dataTransfer.getData("application/x-loq-contract-clause-id");
+    if (!clauseId) return;
+    event.preventDefault();
+    const clause = activeClauses.find(item => item.id === clauseId);
+    insertClauseInTemplate(clause);
+  };
+
+  const handleClauseOrderDragEnd = async (result) => {
+    if (!result.destination || result.destination.index === result.source.index) return;
+    const ordered = Array.from(activeClauses);
+    const [moved] = ordered.splice(result.source.index, 1);
+    ordered.splice(result.destination.index, 0, moved);
+    setClausesReordering(true);
+    try {
+      await Promise.all(ordered.map((item, index) => (
+        base44.entities.CompanyContractClause.update(item.id, { sort_order: (index + 1) * 10 })
+      )));
+      refresh();
+    } finally {
+      setClausesReordering(false);
+    }
   };
 
   const updateLetterheadLayer = (layerId, updates) => {
@@ -2486,102 +2891,48 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     </div>
   );
 
-  const renderTemplateWizard = () => (
-    <AnimatePresence>
-      {templateWizardOpen && (
-        <motion.div
-          ref={templateWizardRef}
-          initial={{ height: 0, opacity: 0 }}
-          animate={{ height: "auto", opacity: 1 }}
-          exit={{ height: 0, opacity: 0 }}
-          className="overflow-hidden border-b border-primary/30 bg-muted/15"
-        >
-          <div className="p-5">
-            <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-primary">
-              {editingTemplateId ? "Contracttemplate bewerken" : "Contracttemplate toevoegen"}
-            </p>
-            <WizardSteps labels={TEMPLATE_STEPS} step={templateStep} />
+  const renderTemplateWizard = () => {
+    const probationOptions = ["internship", "zzp"].includes(selectedContractModel?.employment_model)
+      ? PROBATION_CHOICES.filter(option => option.value === "not_applicable")
+      : PROBATION_CHOICES.filter(option => option.value !== "not_applicable");
 
-            {templateStep === 1 && (
-              <div className="grid gap-4 lg:grid-cols-2 xl:grid-cols-3">
-                <div className="space-y-2 xl:col-span-2">
-                  <Label>Naam *</Label>
-                  <Input
-                    value={templateForm.name}
-                    onChange={event => setTemplateForm(prev => ({ ...prev, name: event.target.value }))}
-                    placeholder="Arbeidsovereenkomst bepaalde tijd"
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Versie</Label>
-                  <Input
-                    type="number"
-                    min="1"
-                    value={templateForm.version}
-                    onChange={event => setTemplateForm(prev => ({ ...prev, version: event.target.value }))}
-                  />
-                </div>
-                <div className="space-y-2">
-                  <Label>Contractvorm</Label>
-                  <Select value={templateForm.contract_form_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, contract_form_scope: value }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {CONTRACT_FORM_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Urenmodel</Label>
-                  <Select value={templateForm.employment_model_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, employment_model_scope: value }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {EMPLOYMENT_MODEL_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Proeftijd</Label>
-                  <Select value={templateForm.probation_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, probation_scope: value }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {PROBATION_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Duursoort</Label>
-                  <Select value={templateForm.duration_type_scope || "any"} onValueChange={value => setTemplateForm(prev => ({ ...prev, duration_type_scope: value }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {DURATION_TYPE_SCOPES.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>CAO</Label>
-                  <Select value={templateForm.cao_key || "none"} onValueChange={value => setTemplateForm(prev => ({ ...prev, cao_key: value }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      {CAO_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Standaard briefpapier</Label>
-                  <Select value={templateForm.default_letterhead_id || "none"} onValueChange={value => setTemplateForm(prev => ({ ...prev, default_letterhead_id: value }))}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Geen vaste keuze</SelectItem>
-                      {activeLetterheads.map(item => <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>)}
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-            )}
+    return (
+      <AnimatePresence>
+        {templateWizardOpen && (
+          <motion.div
+            ref={templateWizardRef}
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden border-b border-primary/30 bg-muted/15"
+          >
+            <div className="p-5">
+              <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-primary">
+                {editingTemplateId ? "Contracttemplate bewerken" : "Contracttemplate toevoegen"}
+              </p>
+              <WizardSteps labels={TEMPLATE_STEPS} step={templateStep} />
 
-            {templateStep === 2 && (
-              <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_320px]">
-                <div className="space-y-4">
+              {templateStep === 1 && (
+                <div className="space-y-5">
+                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_120px]">
+                    <div className="space-y-2">
+                      <Label>Naam *</Label>
+                      <Input
+                        value={templateForm.name}
+                        onChange={event => setTemplateForm(prev => ({ ...prev, name: event.target.value }))}
+                        placeholder="Arbeidsovereenkomst bepaalde tijd"
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Versie</Label>
+                      <Input
+                        type="number"
+                        min="1"
+                        value={templateForm.version}
+                        onChange={event => setTemplateForm(prev => ({ ...prev, version: event.target.value }))}
+                      />
+                    </div>
+                  </div>
                   <div className="space-y-2">
                     <Label>Omschrijving</Label>
                     <Input
@@ -2590,104 +2941,250 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                       placeholder="Interne toelichting"
                     />
                   </div>
-                  <div className="space-y-2">
-                    <Label>Duurkeuzes</Label>
-                    <Input
-                      value={templateForm.duration_options_text || ""}
-                      onChange={event => setTemplateForm(prev => ({ ...prev, duration_options_text: event.target.value }))}
-                      placeholder="Optioneel, bijv. 6_months, 1_year, free"
-                    />
-                  </div>
-                  <label className="flex items-center gap-2 text-sm">
-                    <input
-                      type="checkbox"
-                      checked={templateForm.visible_in_contract_wizard !== false}
-                      onChange={event => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: event.target.checked }))}
-                    />
-                    Zichtbaar in medewerker-contractwizard
-                  </label>
-                  <div className="space-y-2">
-                    <Label>Template-inhoud *</Label>
-                    <Textarea
-                      rows={16}
-                      value={templateForm.body}
-                      onChange={event => setTemplateForm(prev => ({ ...prev, body: event.target.value }))}
-                    />
+                  <div>
+                    <p className="mb-2 text-sm font-medium text-foreground">Kies de CAO die voor dit bedrijf geldt</p>
+                    {companyCaoOptions.length === 0 ? (
+                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                        Voeg eerst een CAO-koppeling toe in de CAO-tab van dit bedrijfsprofiel.
+                      </div>
+                    ) : (
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        {companyCaoOptions.map(option => (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setTemplateForm(prev => ({ ...prev, cao_key: option.value }))}
+                            className={`rounded-lg border p-4 text-left transition-colors ${templateForm.cao_key === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                          >
+                            <p className="font-semibold text-foreground">{option.label}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">Beschikbaar via CAO-koppeling van dit bedrijf</p>
+                          </button>
+                        ))}
+                      </div>
+                    )}
                   </div>
                 </div>
-                <div className="rounded-lg border border-border bg-background/40 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
-                  <div className="mt-3 flex flex-wrap gap-1">
-                    {placeholders.length === 0 ? (
-                      <span className="text-xs text-muted-foreground">Geen placeholders gevonden.</span>
-                    ) : placeholders.map(placeholder => (
-                      <Badge key={placeholder} variant="outline" className="text-xs">{placeholder}</Badge>
+              )}
+
+              {templateStep === 2 && (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-foreground">Kies één specifiek contractmodel</p>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {CONTRACT_MODEL_OPTIONS.map(option => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setTemplateForm(prev => ({
+                          ...prev,
+                          contract_model: option.value,
+                          contract_form_scope: option.contract_form,
+                          employment_model_scope: option.employment_model,
+                          duration_type_scope: option.duration_type,
+                          probation_scope: ["internship", "zzp"].includes(option.employment_model)
+                            ? "not_applicable"
+                            : (prev.probation_scope === "not_applicable" ? "" : prev.probation_scope),
+                        }))}
+                        className={`rounded-lg border p-4 text-left transition-colors ${templateForm.contract_model === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                      >
+                        <p className="font-semibold text-foreground">{option.label}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{contractModelMeta(option)}</p>
+                      </button>
                     ))}
                   </div>
                 </div>
-              </div>
-            )}
+              )}
 
-            {templateStep === 3 && (
-              <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                <div className="rounded-lg border border-border bg-background/40 p-3">
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Status</p>
-                  <div className="mt-1">{statusBadge(templateForm.status)}</div>
+              {templateStep === 3 && (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-foreground">Proeftijd voor dit sjabloon</p>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {probationOptions.map(option => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setTemplateForm(prev => ({ ...prev, probation_scope: option.value }))}
+                        className={`rounded-lg border p-4 text-left transition-colors ${templateForm.probation_scope === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                      >
+                        <p className="font-semibold text-foreground">{option.label}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="rounded-lg border border-border bg-background/40 p-3">
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Contractvorm</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{CONTRACT_FORM_SCOPES.find(scope => scope.value === (templateForm.contract_form_scope || "any"))?.label || "-"}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-background/40 p-3">
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Urenmodel</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{EMPLOYMENT_MODEL_SCOPES.find(scope => scope.value === (templateForm.employment_model_scope || "any"))?.label || "-"}</p>
-                </div>
-                <div className="rounded-lg border border-border bg-background/40 p-3">
-                  <p className="text-xs uppercase tracking-wider text-muted-foreground">Placeholders</p>
-                  <p className="mt-1 text-sm font-medium text-foreground">{placeholders.length}</p>
-                </div>
-              </div>
-            )}
+              )}
 
-            <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
-              <Button type="button" variant="ghost" onClick={cancelTemplateWizard}>
-                <X className="mr-1 h-4 w-4" />
-                Annuleren
-              </Button>
-              <div className="flex flex-wrap justify-end gap-2">
-                {templateStep > 1 && (
-                  <Button type="button" variant="outline" onClick={() => setTemplateStep(step => step - 1)}>
-                    <ChevronLeft className="mr-1 h-4 w-4" />
-                    Terug
-                  </Button>
-                )}
-                {templateStep < TEMPLATE_STEPS.length ? (
-                  <Button type="button" onClick={nextTemplateStep}>
-                    Volgende
-                    <ChevronRight className="ml-1 h-4 w-4" />
-                  </Button>
-                ) : (
-                  <>
-                    <Button type="button" variant="outline" onClick={() => saveTemplateMutation.mutate("draft")} disabled={saveTemplateMutation.isPending}>
-                      <Save className="mr-1 h-4 w-4" />
-                      Concept
+              {templateStep === 4 && (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-foreground">Kies het briefpapier</p>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <button
+                      type="button"
+                      onClick={() => setTemplateForm(prev => ({ ...prev, default_letterhead_id: "none" }))}
+                      className={`rounded-lg border p-4 text-left transition-colors ${templateForm.default_letterhead_id === "none" ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                    >
+                      <p className="font-semibold text-foreground">Geen briefpapier</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Gebruik alleen de contracttekst.</p>
+                    </button>
+                    {activeLetterheads.map(item => (
+                      <button
+                        key={item.id}
+                        type="button"
+                        onClick={() => setTemplateForm(prev => ({ ...prev, default_letterhead_id: item.id }))}
+                        className={`rounded-lg border p-4 text-left transition-colors ${templateForm.default_letterhead_id === item.id ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                      >
+                        <p className="font-semibold text-foreground">{item.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{item.is_default ? "Standaardbriefpapier" : marginLabel(item)}</p>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+
+              {templateStep === 5 && (
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
+                  <div className="space-y-4">
+                    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                      <div className="space-y-2">
+                        <Label>Duurkeuzes</Label>
+                        <Input
+                          value={templateForm.duration_options_text || ""}
+                          onChange={event => setTemplateForm(prev => ({ ...prev, duration_options_text: event.target.value }))}
+                          placeholder="Optioneel, bijv. 6_months, 1_year, free"
+                        />
+                      </div>
+                      <label className="flex items-end gap-2 pb-2 text-sm">
+                        <input
+                          type="checkbox"
+                          checked={templateForm.visible_in_contract_wizard !== false}
+                          onChange={event => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: event.target.checked }))}
+                        />
+                        Zichtbaar in contractwizard
+                      </label>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Template-inhoud *</Label>
+                      <Textarea
+                        ref={templateBodyRef}
+                        rows={18}
+                        value={templateForm.body}
+                        onChange={event => setTemplateForm(prev => ({ ...prev, body: event.target.value }))}
+                        onDragOver={event => {
+                          if (Array.from(event.dataTransfer.types || []).includes("application/x-loq-contract-clause-id")) event.preventDefault();
+                        }}
+                        onDrop={handleTemplateBodyDrop}
+                      />
+                    </div>
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Clausules</p>
+                        <span className="text-xs text-muted-foreground">{templateClauseIds.length} ingevoegd</span>
+                      </div>
+                      <div className="mt-3 grid gap-2">
+                        {activeClauses.length === 0 ? (
+                          <span className="text-sm text-muted-foreground">Maak eerst clausules aan in de clausuletab.</span>
+                        ) : activeClauses.map(clause => {
+                          const inserted = templateClauseIds.includes(clause.id);
+                          return (
+                            <div
+                              key={clause.id}
+                              draggable={!inserted}
+                              onDragStart={event => handleClauseDragStart(event, clause)}
+                              className={`flex items-center justify-between gap-3 rounded-lg border p-3 text-sm ${inserted ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100" : "border-border bg-card"}`}
+                            >
+                              <div className="min-w-0">
+                                <p className="truncate font-medium">{clause.title}</p>
+                                <p className="mt-0.5 text-xs text-muted-foreground">{inserted ? "Staat al in deze template" : "Sleep naar de tekst of voeg in op cursorpositie"}</p>
+                              </div>
+                              <Button type="button" variant="outline" size="sm" onClick={() => insertClauseInTemplate(clause)} disabled={inserted}>
+                                <FilePlus2 className="mr-1 h-3.5 w-3.5" />
+                                Invoegen
+                              </Button>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
+                      <div className="mt-3 flex flex-wrap gap-1">
+                        {placeholders.length === 0 ? (
+                          <span className="text-xs text-muted-foreground">Geen placeholders gevonden.</span>
+                        ) : placeholders.map(placeholder => (
+                          <Badge key={placeholder} variant="outline" className="text-xs">{placeholder}</Badge>
+                        ))}
+                      </div>
+                    </div>
+                  </div>
+                  <TemplateDocumentPreview
+                    body={templateForm.body}
+                    templateName={templateForm.name}
+                    letterhead={selectedTemplateLetterhead}
+                    clauses={clauses}
+                  />
+                </div>
+              )}
+
+              {templateStep === 6 && (
+                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">CAO</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">{caoLabel(templateForm.cao_key)}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Contractmodel</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">{selectedContractModel?.label || "-"}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Proeftijd</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">{probationLabel(templateForm.probation_scope)}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Clausules</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">{templateClauseIds.length}</p>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
+                <Button type="button" variant="ghost" onClick={cancelTemplateWizard}>
+                  <X className="mr-1 h-4 w-4" />
+                  Annuleren
+                </Button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  {templateStep > 1 && (
+                    <Button type="button" variant="outline" onClick={() => setTemplateStep(step => step - 1)}>
+                      <ChevronLeft className="mr-1 h-4 w-4" />
+                      Terug
                     </Button>
-                    <Button type="button" variant="outline" onClick={() => saveTemplateMutation.mutate("review")} disabled={saveTemplateMutation.isPending}>
-                      Review
+                  )}
+                  {templateStep < TEMPLATE_STEPS.length ? (
+                    <Button type="button" onClick={nextTemplateStep}>
+                      Volgende
+                      <ChevronRight className="ml-1 h-4 w-4" />
                     </Button>
-                    <Button type="button" onClick={() => saveTemplateMutation.mutate("published")} disabled={saveTemplateMutation.isPending}>
-                      <CheckCircle className="mr-1 h-4 w-4" />
-                      Publiceren
-                    </Button>
-                  </>
-                )}
+                  ) : (
+                    <>
+                      <Button type="button" variant="outline" onClick={() => saveTemplateMutation.mutate("draft")} disabled={saveTemplateMutation.isPending}>
+                        <Save className="mr-1 h-4 w-4" />
+                        Concept
+                      </Button>
+                      <Button type="button" variant="outline" onClick={() => saveTemplateMutation.mutate("review")} disabled={saveTemplateMutation.isPending}>
+                        Review
+                      </Button>
+                      <Button type="button" onClick={() => saveTemplateMutation.mutate("published")} disabled={saveTemplateMutation.isPending}>
+                        <CheckCircle className="mr-1 h-4 w-4" />
+                        Publiceren
+                      </Button>
+                    </>
+                  )}
+                </div>
               </div>
             </div>
-          </div>
-        </motion.div>
-      )}
-    </AnimatePresence>
-  );
+          </motion.div>
+        )}
+      </AnimatePresence>
+    );
+  };
 
   const renderTemplateTab = () => (
     <div className="flex h-full min-h-[360px] flex-col">
@@ -2722,8 +3219,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
             <span className="text-sm text-muted-foreground">v{item.version || 1}</span>
             <div>{statusBadge(item.status)}</div>
             <div className="min-w-0 text-sm text-muted-foreground">
-              <p className="truncate">{CONTRACT_FORM_SCOPES.find(scope => scope.value === (item.contract_form_scope || "any"))?.label || "Alle contractvormen"}</p>
-              <p className="mt-0.5 truncate text-xs">{EMPLOYMENT_MODEL_SCOPES.find(scope => scope.value === (item.employment_model_scope || "any"))?.label || "Alle urenmodellen"}</p>
+              <p className="truncate">{getTemplateScopeLabel(item)}</p>
+              <p className="mt-0.5 truncate text-xs">{caoLabel(item.cao_key)}</p>
             </div>
             <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
             <div className="flex justify-end gap-1">
@@ -2745,6 +3242,146 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     </div>
   );
 
+  const renderClauseTab = () => (
+    <div className="flex h-full min-h-[360px] flex-col">
+      <AnimatePresence>
+        {clauseWizardOpen && (
+          <motion.div
+            initial={{ height: 0, opacity: 0 }}
+            animate={{ height: "auto", opacity: 1 }}
+            exit={{ height: 0, opacity: 0 }}
+            className="overflow-hidden border-b border-primary/30 bg-muted/15"
+          >
+            <div className="space-y-4 p-5">
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+                {editingClauseId ? "Clausule bewerken" : "Clausule toevoegen"}
+              </p>
+              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
+                <div className="space-y-2">
+                  <Label>Titel *</Label>
+                  <Input
+                    value={clauseForm.title}
+                    onChange={event => setClauseForm(prev => ({ ...prev, title: event.target.value }))}
+                    placeholder="Bijv. Geheimhouding"
+                  />
+                </div>
+                <div className="space-y-2">
+                  <Label>Volgorde</Label>
+                  <Input
+                    type="number"
+                    value={clauseForm.sort_order}
+                    onChange={event => setClauseForm(prev => ({ ...prev, sort_order: event.target.value }))}
+                  />
+                </div>
+              </div>
+              <div className="space-y-2">
+                <Label>Clausuletekst *</Label>
+                <Textarea
+                  rows={10}
+                  value={clauseForm.body}
+                  onChange={event => setClauseForm(prev => ({ ...prev, body: event.target.value }))}
+                  placeholder="Artikel X - ..."
+                />
+              </div>
+              <div className="rounded-lg border border-border bg-background/40 p-3">
+                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
+                <div className="mt-3 flex flex-wrap gap-1">
+                  {extractPlaceholders(clauseForm.body).length === 0 ? (
+                    <span className="text-xs text-muted-foreground">Geen placeholders gevonden.</span>
+                  ) : extractPlaceholders(clauseForm.body).map(placeholder => (
+                    <Badge key={placeholder} variant="outline" className="text-xs">{placeholder}</Badge>
+                  ))}
+                </div>
+              </div>
+              <div className="flex flex-wrap justify-between gap-2">
+                <Button type="button" variant="ghost" onClick={cancelClauseWizard}>
+                  <X className="mr-1 h-4 w-4" />
+                  Annuleren
+                </Button>
+                <Button type="button" onClick={() => saveClauseMutation.mutate()} disabled={saveClauseMutation.isPending}>
+                  <Save className="mr-1 h-4 w-4" />
+                  {saveClauseMutation.isPending ? "Opslaan..." : "Clausule opslaan"}
+                </Button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <div className={`${CLAUSE_TABLE_GRID} items-center border-b border-border bg-muted/20 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+        <span></span>
+        <span>Clausule</span>
+        <span>Placeholders</span>
+        <span>Door</span>
+        <div className="flex justify-end">
+          <Button type="button" variant="outline" size="sm" onClick={startNewClause} disabled={clauseWizardOpen}>
+            <Plus className="mr-1 h-4 w-4" />
+            Nieuwe clausule
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex-1">
+        {activeClauses.length === 0 ? (
+          <div className="flex min-h-[180px] items-center justify-center px-5 py-8 text-center text-sm text-muted-foreground">
+            Nog geen contractclausules aangemaakt.
+          </div>
+        ) : (
+          <DragDropContext onDragEnd={handleClauseOrderDragEnd}>
+            <Droppable droppableId="company-contract-clauses">
+              {provided => (
+                <div ref={provided.innerRef} {...provided.droppableProps}>
+                  {activeClauses.map((item, index) => (
+                    <Draggable key={item.id} draggableId={item.id} index={index} isDragDisabled={clausesReordering}>
+                      {dragProvided => (
+                        <div
+                          ref={dragProvided.innerRef}
+                          {...dragProvided.draggableProps}
+                          className={`${CLAUSE_TABLE_GRID} items-start border-b border-border px-5 py-4 text-sm transition-colors hover:bg-accent/35`}
+                        >
+                          <button
+                            type="button"
+                            className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
+                            {...(dragProvided.dragHandleProps || {})}
+                            aria-label="Clausulevolgorde wijzigen"
+                          >
+                            <GripVertical className="h-4 w-4" />
+                          </button>
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold text-foreground">{item.title}</p>
+                            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{item.body}</p>
+                          </div>
+                          <div className="flex flex-wrap gap-1">
+                            {(item.placeholders || extractPlaceholders(item.body)).slice(0, 3).map(placeholder => (
+                              <Badge key={placeholder} variant="outline" className="text-xs">{placeholder}</Badge>
+                            ))}
+                            {(item.placeholders || extractPlaceholders(item.body)).length > 3 && (
+                              <Badge variant="outline" className="text-xs">+{(item.placeholders || extractPlaceholders(item.body)).length - 3}</Badge>
+                            )}
+                          </div>
+                          <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
+                          <div className="flex justify-end gap-1">
+                            <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => startEditClause(item)}>
+                              <Edit className="h-3.5 w-3.5" />
+                            </Button>
+                            <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => archiveClause(item)}>
+                              <Archive className="h-3.5 w-3.5" />
+                            </Button>
+                          </div>
+                        </div>
+                      )}
+                    </Draggable>
+                  ))}
+                  {provided.placeholder}
+                </div>
+              )}
+            </Droppable>
+          </DragDropContext>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <div className="flex h-full min-h-[420px] flex-col">
       {message && (
@@ -2753,7 +3390,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         </div>
       )}
 
-      {activeSubTab === "contract_templates" ? renderTemplateTab() : renderLetterheadTab()}
+      {activeSubTab === "contract_templates" && renderTemplateTab()}
+      {activeSubTab === "contract_clauses" && renderClauseTab()}
+      {activeSubTab !== "contract_templates" && activeSubTab !== "contract_clauses" && renderLetterheadTab()}
 
       <ManagedFilePreviewDialog
         open={!!previewFile}

@@ -23,6 +23,7 @@ const MENU_ITEMS = [
   { key: "templates", label: "Sjablonen", icon: FileText, children: [
     { key: "letterhead", label: "Briefpapier" },
     { key: "contract_templates", label: "Contracttemplates" },
+    { key: "contract_clauses", label: "Clausules" },
   ] },
   { key: "branch_memberships", label: "Branchevereniging", icon: Handshake },
   { key: "accreditations", label: "Erkenningen", icon: Award },
