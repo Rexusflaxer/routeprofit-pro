@@ -24,6 +24,34 @@
       ],
       "description": "Type clausule binnen het gekozen onderdeel, bijvoorbeeld confidentiality, liability of payment_terms."
     },
+    "license_scope": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Vergunning- of werkveldcontext waarvoor de clausule bedoeld is, bijvoorbeeld ND, PAC, POB, all_security of not_applicable."
+    },
+    "function_profile": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Functieprofiel dat juridisch en operationeel relevant is voor de clausule."
+    },
+    "risk_level": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Risiconiveau van de clausule: green, orange, red of blocked."
+    },
+    "review_required": {
+      "type": [
+        "boolean",
+        "null"
+      ],
+      "description": "Geeft aan of juridische controle nodig is voordat de clausule definitief wordt gebruikt."
+    },
     "body": {
       "type": "string",
       "description": "Clausuletekst met optionele placeholders zoals {{medewerker.naam}}."

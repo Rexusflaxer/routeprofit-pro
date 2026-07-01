@@ -218,69 +218,402 @@ const CLAUSE_SCOPE_OPTIONS = [
   },
 ];
 
+const CLAUSE_SECURITY_CONTEXT_OPTIONS = [
+  {
+    value: "all_security",
+    label: "Algemene beveiligingsfunctie",
+    description: "Gebruik dit als de clausule voor meerdere vergunningtypen of algemene beveiligingsfuncties geldt.",
+  },
+  {
+    value: "ND",
+    label: "ND - Particuliere beveiligingsorganisatie",
+    description: "Objectbeveiliging, mobiele surveillance, alarmopvolging en beveiliging voor derden.",
+  },
+  {
+    value: "HND",
+    label: "HND - Horecabeveiliging voor derden",
+    description: "Horecabeveiliging, toegangscontrole, bezoekerscontact en incidentafhandeling bij opdrachtgevers.",
+  },
+  {
+    value: "BD",
+    label: "BD - Bedrijfsbeveiligingsdienst",
+    description: "Beveiliging van de eigen onderneming, interne procedures en eigen bedrijfsinformatie.",
+  },
+  {
+    value: "HBD",
+    label: "HBD - Eigen horecaonderneming",
+    description: "Beveiliging van de eigen horecaonderneming, huisregels, gasten en incidenten.",
+  },
+  {
+    value: "PAC",
+    label: "PAC - Particuliere alarmcentrale",
+    description: "Alarmmeldingen, meldkamerprocedures, alarmcodes en klantinstructies.",
+  },
+  {
+    value: "VTC",
+    label: "VTC - Video toezicht centrale",
+    description: "Livebeelden, camerabeelden, opvolgprotocollen, logging en privacy.",
+  },
+  {
+    value: "PGW",
+    label: "PGW - Geld- en waardentransport",
+    description: "Routes, waarde-informatie, overdrachtslocaties, voertuigen en transportprocedures.",
+  },
+  {
+    value: "POB",
+    label: "POB - Particulier recherchebureau",
+    description: "Onderzoeksdossiers, bronnen, observaties, rapportages en onderzoeksmethoden.",
+  },
+  {
+    value: "not_applicable",
+    label: "Niet van toepassing",
+    description: "Gebruik dit voor kantoorfuncties of clausules zonder Wpbr-context.",
+  },
+];
+
+const FUNCTION_PROFILE_OPTIONS = [
+  { value: "security_general", label: "Algemene beveiligingsmedewerker" },
+  { value: "object_security", label: "Objectbeveiliger / mobiel surveillant" },
+  { value: "hospitality_security", label: "Horeca- of evenementenbeveiliger" },
+  { value: "pac_operator", label: "Centralist PAC" },
+  { value: "vtc_operator", label: "Centralist VTC" },
+  { value: "cash_transport", label: "Geld- en waardetransporteur" },
+  { value: "private_investigator", label: "Particulier onderzoeker" },
+  { value: "intern", label: "Stagiair / medewerker in opleiding" },
+  { value: "office", label: "Administratief / kantoorfunctie" },
+];
+
+const CLAUSE_RISK_LABELS = {
+  green: "Standaard",
+  orange: "Extra vragen",
+  red: "Juridische review",
+  blocked: "Blokkeren",
+};
+
+const CLAUSE_RISK_STYLES = {
+  green: "border-emerald-200 bg-emerald-50 text-emerald-800 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-200",
+  orange: "border-amber-200 bg-amber-50 text-amber-800 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-200",
+  red: "border-rose-200 bg-rose-50 text-rose-800 dark:border-rose-900/60 dark:bg-rose-950/30 dark:text-rose-200",
+  blocked: "border-slate-300 bg-slate-100 text-slate-700 dark:border-slate-700 dark:bg-slate-900 dark:text-slate-300",
+};
+
 const CLAUSE_TYPE_CATALOG = {
   employment_contracts: [
     {
-      value: "confidentiality",
-      label: "Geheimhouding",
-      description: "Beschermt bedrijfsinformatie, klantgegevens, roosters, tarieven en werkwijzen.",
+      value: "wpbr_clearance",
+      label: "Wpbr-toestemming en legitimatie",
+      description: "Legt vast dat Wpbr-werk alleen mag met geldige toestemming, legitimatie en vakbekwaamheid.",
+      risk: "green",
+      required: true,
+      appliesToPermits: ["all_security", "ND", "HND", "BD", "HBD", "PAC", "VTC", "PGW", "POB"],
       defaultSections: [
-        "Werknemer houdt alle vertrouwelijke informatie geheim die hij of zij tijdens of door het dienstverband verkrijgt.",
-        "Onder vertrouwelijke informatie vallen in ieder geval klantgegevens, beveiligingsinstructies, tarieven, procedures, planning, objectinformatie en interne documenten.",
-        "Deze verplichting geldt tijdens het dienstverband en blijft ook na het einde daarvan bestaan.",
+        "Werknemer mag beveiligings- en/of recherchewerkzaamheden uitsluitend verrichten indien en zolang werknemer beschikt over de voor de functie vereiste toestemming, legitimatie, diploma's, certificaten en eventuele ontheffingen op grond van de Wpbr en de daarop gebaseerde regelgeving.",
+        "Werknemer informeert werkgever direct over feiten of omstandigheden die van invloed kunnen zijn op de toestemming, legitimatie, betrouwbaarheid, vakbekwaamheid of inzetbaarheid van werknemer.",
+        "Indien de vereiste toestemming, legitimatie of vakbekwaamheid ontbreekt, vervalt of wordt ingetrokken, kan werkgever werknemer niet inzetten voor werkzaamheden waarvoor deze vereisten gelden.",
+        "Werknemer draagt het verstrekte legitimatiebewijs tijdens de werkzaamheden bij zich en levert dit, samen met overige verstrekte middelen, direct in zodra werkgever daarom vraagt of zodra werknemer de werkzaamheden niet langer mag verrichten.",
+        "Partijen beoordelen de gevolgen van het ontbreken of vervallen van toestemming met inachtneming van wet, cao en de omstandigheden van het geval.",
       ],
       snippets: [
         {
-          label: "Definitie vertrouwelijke informatie",
-          text: "Onder vertrouwelijke informatie wordt verstaan: alle informatie waarvan werknemer weet of redelijkerwijs behoort te begrijpen dat deze niet openbaar mag worden gemaakt.",
-          help: "Maakt duidelijk welke informatie onder geheimhouding valt zonder elk document afzonderlijk te hoeven noemen.",
+          label: "Geen automatische beeindiging",
+          text: "Deze bepaling leidt niet automatisch tot beeindiging van de arbeidsovereenkomst. Werkgever volgt bij eventuele beeindiging de daarvoor geldende wettelijke en cao-route.",
+          help: "Voorkomt een te harde ontbindende voorwaarde. Niet kunnen inzetten is iets anders dan automatisch einde contract.",
         },
         {
-          label: "Duur na einde contract",
-          text: "De geheimhoudingsplicht blijft na het einde van de overeenkomst onverminderd van kracht zolang de informatie niet rechtmatig openbaar is geworden.",
-          help: "Legt vast dat geheimhouding niet automatisch stopt bij uitdiensttreding.",
+          label: "Meldplicht werknemer",
+          text: "Werknemer meldt wijzigingen in betrouwbaarheid, strafrechtelijke omstandigheden, diploma's, certificaten of beschikbaarheid voor Wpbr-werkzaamheden direct bij {{meldpunt_wpbr}}.",
+          help: "Handig als de organisatie een vast meldpunt of complianceverantwoordelijke heeft.",
+        },
+      ],
+    },
+    {
+      value: "cao_rank",
+      label: "CAO, functie-indeling en rangorde",
+      description: "Voorkomt strijd tussen contract, cao en dwingend recht.",
+      risk: "green",
+      required: true,
+      defaultSections: [
+        "Op deze arbeidsovereenkomst is {{cao_naam}} van toepassing, voor zover werkgever en werknemer onder de werkingssfeer daarvan vallen.",
+        "Werknemer treedt in dienst in de functie van {{functie_primaire_naam}} en wordt, voor zover van toepassing, ingedeeld in {{functiegroep_of_schaal}}.",
+        "Indien een bepaling uit deze arbeidsovereenkomst strijdig is met dwingend recht of met een toepasselijke cao-bepaling waarvan niet ten nadele van werknemer mag worden afgeweken, geldt de bepaling die rechtens voorgaat.",
+        "Arbeidsvoorwaarden die niet uitdrukkelijk in deze arbeidsovereenkomst zijn geregeld, worden toegepast overeenkomstig de toepasselijke cao, wetgeving en schriftelijk vastgestelde bedrijfsregelingen.",
+      ],
+      snippets: [
+        {
+          label: "CAO onbekend",
+          text: "Indien nog niet zeker is welke cao of arbeidsvoorwaardenregeling van toepassing is, wordt deze arbeidsovereenkomst pas definitief gebruikt nadat de cao-context is gecontroleerd.",
+          help: "Gebruik dit als de gebruiker twijfelt. De vergunning bepaalt niet automatisch welke cao geldt.",
+        },
+      ],
+    },
+    {
+      value: "function_work_scope",
+      label: "Functie, werkzaamheden en inzetgebied",
+      description: "Maakt de hoofdfunctie concreet en voorkomt te brede functielijsten.",
+      risk: "green",
+      required: true,
+      defaultSections: [
+        "Werknemer treedt bij werkgever in dienst in de functie van {{functie_primaire_naam}}.",
+        "De bij de functie behorende werkzaamheden bestaan in hoofdzaak uit {{functie_werkzaamheden_korte_omschrijving}}.",
+        "Werknemer kan daarnaast worden ingezet voor andere redelijke werkzaamheden die passen binnen de functie, opleiding, ervaring, wettelijke bevoegdheden, Wpbr-toestemming, cao en bedrijfsvoering van werkgever.",
+        "Werknemer wordt niet ingezet voor werkzaamheden waarvoor werknemer niet beschikt over de vereiste toestemming, legitimatie, diploma's, certificaten of vakbekwaamheid.",
+        "Indien werknemer structureel andere werkzaamheden gaat verrichten dan in dit artikel genoemd, leggen partijen dit schriftelijk vast in een addendum of gewijzigde arbeidsovereenkomst.",
+      ],
+      snippets: [
+        {
+          label: "Meerdere functies",
+          text: "Indien werknemer voor meerdere functies inzetbaar is, geldt {{functie_primaire_naam}} als hoofdfunctie. Aanvullende inzet is mogelijk voor {{nevenfuncties_lijst}}, voor zover werknemer daarvoor bevoegd, bekwaam en beschikbaar is en deze inzet past binnen wet en cao.",
+          help: "Gebruik dit liever dan een lange algemene lijst met alle mogelijke functies.",
         },
         {
-          label: "Uitzondering wettelijke plicht",
-          text: "Deze bepaling geldt niet voor zover openbaarmaking verplicht is op grond van wet, rechterlijke uitspraak of een bevoegd gegeven overheidsbevel.",
-          help: "Voorkomt dat de clausule botst met een wettelijke verplichting om informatie te geven.",
+          label: "Wisselende objecten",
+          text: "De werkzaamheden kunnen worden verricht op objecten, locaties of terreinen van werkgever, opdrachtgevers of relaties van werkgever binnen {{werkgebied}}, afhankelijk van planning en opdrachtbehoefte.",
+          help: "Past bij objectbeveiliging, mobiele surveillance en wisselende opdrachtlocaties.",
+        },
+        {
+          label: "Evenementen en horeca",
+          text: "Bij evenementen- of horecawerkzaamheden kunnen de werkzaamheden worden verricht op wisselende evenementenlocaties, horecalocaties, verzamelplaatsen, briefinglocaties, opbouwlocaties en afbouwlocaties binnen {{werkgebied}}.",
+          help: "Gebruik dit bij HND/HBD of evenementenbeveiliging.",
+        },
+        {
+          label: "PAC/VTC centralist",
+          text: "Indien werknemer werkzaamheden verricht als centralist, bestaan de werkzaamheden mede uit het ontvangen, beoordelen, registreren, doorzetten en opvolgen van meldingen volgens de geldende meldkamerprocedures, klantinstructies en wettelijke eisen.",
+          help: "Specifiek voor PAC/VTC-functies.",
+        },
+        {
+          label: "POB onderzoek",
+          text: "Indien werknemer werkzaamheden verricht binnen een particulier recherchebureau, bestaan de werkzaamheden uitsluitend uit onderzoekstaken die werkgever rechtmatig heeft opgedragen en die passen binnen wet, gedragscode, privacyregels en instructies.",
+          help: "Specifiek voor particulier recherchewerk.",
+        },
+      ],
+    },
+    {
+      value: "confidentiality",
+      label: "Geheimhouding",
+      description: "Beschermt klantgegevens, objectinformatie, alarmgegevens, camerabeelden, routes en onderzoeksinformatie.",
+      risk: "green",
+      required: true,
+      appliesToPermits: ["all_security", "ND", "HND", "BD", "HBD", "PAC", "VTC", "PGW", "POB", "not_applicable"],
+      defaultSections: [
+        "Werknemer is verplicht tot strikte geheimhouding van alle vertrouwelijke informatie die werknemer tijdens of in verband met het dienstverband verkrijgt.",
+        "Onder vertrouwelijke informatie wordt in ieder geval verstaan: klantgegevens, persoonsgegevens, objectinformatie, beveiligingsplannen, alarmgegevens, camerabeelden, meldkamerinformatie, roosters, tarieven, werkinstructies, sleutelprocedures, toegangscodes, incidentrapportages, onderzoeksgegevens, interne documenten en alle informatie waarvan werknemer weet of redelijkerwijs behoort te begrijpen dat deze vertrouwelijk is.",
+        "Werknemer gebruikt vertrouwelijke informatie uitsluitend voor de uitvoering van de werkzaamheden voor werkgever.",
+        "Werknemer deelt vertrouwelijke informatie niet met derden en ook niet met collega's, opdrachtgevers of anderen die deze informatie niet nodig hebben voor de uitvoering van hun taak.",
+        "Werknemer slaat vertrouwelijke informatie niet op priveapparatuur, priveaccounts of eigen gegevensdragers op, tenzij werkgever daarvoor vooraf toestemming heeft gegeven en dit noodzakelijk is voor de werkzaamheden.",
+        "De geheimhoudingsplicht geldt tijdens het dienstverband en blijft na het einde daarvan bestaan zolang de informatie niet rechtmatig openbaar is geworden.",
+        "Deze bepaling geldt niet voor zover werknemer wettelijk verplicht is informatie te verstrekken aan een rechter, toezichthouder of bevoegde instantie. Werknemer informeert werkgever hierover vooraf, tenzij dit wettelijk niet is toegestaan.",
+        "Bij einde dienstverband of op eerste verzoek van werkgever geeft werknemer alle vertrouwelijke informatie, kopieen, gegevensdragers, documenten en toegangsmiddelen terug of verwijdert deze op instructie van werkgever.",
+      ],
+      snippets: [
+        {
+          label: "ND/BD objectinformatie",
+          text: "Objectinformatie, sleutelprocedures, alarmopvolgingsinstructies, locatiegebonden risico's en beveiligingsafspraken worden altijd als vertrouwelijk beschouwd.",
+          help: "Gebruik dit bij objectbeveiliging, mobiele surveillance of bedrijfsbeveiliging.",
+        },
+        {
+          label: "HND/HBD horeca en evenementen",
+          text: "Informatie over bezoekers, incidenten, toegangsbeleid, ontzeggingen, huisregels, briefingdocumenten, camerabeelden en inzetplannen wordt altijd als vertrouwelijk beschouwd.",
+          help: "Gebruik dit voor horeca- en evenementenbeveiliging.",
+        },
+        {
+          label: "PAC meldkamer",
+          text: "Alarmmeldingen, alarmcodes, aansluitgegevens, verificatieprotocollen, klantinstructies en meldkamerprocedures worden altijd als vertrouwelijk beschouwd.",
+          help: "Gebruik dit voor particuliere alarmcentrales.",
+        },
+        {
+          label: "VTC camerabeelden",
+          text: "Livebeelden, opgenomen camerabeelden, observaties, cameraopstellingen, opvolgprotocollen, toegangsrechten en beeldanalyse worden altijd als vertrouwelijk beschouwd.",
+          help: "Gebruik dit voor video toezicht centrales en functies met cameratoegang.",
+        },
+        {
+          label: "PGW waarde-informatie",
+          text: "Routes, tijdstippen, zendinggegevens, waarde-informatie, overdrachtslocaties, voertuiggegevens en transportprocedures worden altijd als strikt vertrouwelijk beschouwd.",
+          help: "Gebruik dit bij geld- en waardentransport.",
+        },
+        {
+          label: "POB onderzoeksinformatie",
+          text: "Onderzoeksdossiers, observaties, bronnen, onderzoeksopdrachten, persoonsgegevens, rapportages, onderzoeksmethoden en bevindingen worden altijd als strikt vertrouwelijk beschouwd.",
+          help: "Gebruik dit bij particulier recherchewerk.",
+        },
+        {
+          label: "Veilige sanctietekst",
+          text: "Overtreding van deze bepaling kan arbeidsrechtelijke gevolgen hebben, afhankelijk van de ernst van de overtreding en met inachtneming van wet, cao en de omstandigheden van het geval. Werkgever behoudt zich het recht voor schade te verhalen voor zover dit op grond van wet en cao is toegestaan.",
+          help: "Veiliger dan een algemene zin dat werknemer altijd alle directe en indirecte schade moet betalen.",
+        },
+      ],
+    },
+    {
+      value: "privacy_data_security",
+      label: "Privacy, persoonsgegevens en databeveiliging",
+      description: "Regelt zorgvuldig gebruik van persoonsgegevens, camerabeelden, alarmgegevens en dossiers.",
+      risk: "green",
+      required: true,
+      appliesToPermits: ["all_security", "ND", "HND", "BD", "HBD", "PAC", "VTC", "PGW", "POB"],
+      defaultSections: [
+        "Werknemer verwerkt persoonsgegevens en andere vertrouwelijke gegevens uitsluitend voor zover dit noodzakelijk is voor de uitvoering van de opgedragen werkzaamheden en uitsluitend volgens de instructies van werkgever.",
+        "Werknemer gebruikt voor de verwerking van gegevens uitsluitend de door werkgever goedgekeurde systemen, accounts, communicatiemiddelen en opslaglocaties.",
+        "Het is werknemer niet toegestaan persoonsgegevens, camerabeelden, alarmgegevens, onderzoeksgegevens, klantgegevens of objectinformatie zonder toestemming te kopieren, fotograferen, downloaden, door te sturen, extern op te slaan of via priveaccounts of priveapparatuur te verwerken.",
+        "Werknemer houdt wachtwoorden, toegangsmiddelen en authenticatiemiddelen strikt persoonlijk en geheim en deelt deze niet met anderen.",
+        "Werknemer meldt een vermoedelijke inbreuk op de beveiliging, verlies van gegevens, onbevoegde toegang, datalek of verkeerd verzonden informatie direct bij {{meldpunt_privacy_datalekken}}.",
+        "Bij einde dienstverband of einde opdracht geeft werknemer alle gegevensdragers, documenten en toegangsmiddelen terug en verwijdert werknemer vertrouwelijke informatie van priveapparaten of priveomgevingen, voor zover dergelijke informatie daarop met toestemming van werkgever aanwezig was.",
+      ],
+      snippets: [
+        {
+          label: "Camerabeelden niet voor ander doel",
+          text: "Camerabeelden en observatiegegevens worden alleen gebruikt voor het doel waarvoor zij rechtmatig zijn verkregen en niet zonder grondslag voor een ander doel.",
+          help: "Belangrijk bij VTC, objectbeveiliging en controle van werknemers.",
+        },
+        {
+          label: "Geen prive-opslag",
+          text: "Werknemer gebruikt geen prive-e-mail, privecloud, messagingapps of eigen gegevensdragers voor opslag of verzending van vertrouwelijke informatie, tenzij werkgever dit vooraf schriftelijk heeft toegestaan.",
+          help: "Voorkomt dat gevoelige gegevens buiten de beheerste bedrijfsomgeving terechtkomen.",
         },
       ],
     },
     {
       value: "company_property",
-      label: "Bedrijfsmiddelen",
-      description: "Regelt gebruik en teruggave van sleutels, kleding, passen, telefoons en documenten.",
+      label: "Bedrijfsmiddelen, uniform, sleutels en passen",
+      description: "Regelt zorgvuldig gebruik, meldplicht en teruggave zonder te breed schadeverhaal.",
+      risk: "green",
+      required: true,
       defaultSections: [
-        "Werknemer gebruikt bedrijfsmiddelen uitsluitend zorgvuldig en voor het uitvoeren van de overeengekomen werkzaamheden.",
-        "Werknemer geeft bedrijfsmiddelen, sleutels, passen, kleding, apparatuur en documenten uiterlijk op verzoek of bij einde dienstverband terug.",
+        "Werkgever kan aan werknemer bedrijfsmiddelen verstrekken die nodig zijn voor de uitvoering van de werkzaamheden, waaronder uniformen, legitimatiebewijzen, sleutels, toegangspassen, communicatiemiddelen, apparatuur, documenten, voertuigen, software, accounts en digitale toegangsmiddelen.",
+        "De verstrekte bedrijfsmiddelen blijven eigendom van werkgever of van de betreffende opdrachtgever, tenzij schriftelijk anders is overeengekomen.",
+        "Werknemer gebruikt bedrijfsmiddelen zorgvuldig, uitsluitend voor zakelijke doeleinden en overeenkomstig de instructies van werkgever.",
+        "Werknemer meldt verlies, diefstal, beschadiging, onbevoegd gebruik of mogelijke compromittering van bedrijfsmiddelen direct bij {{meldpunt_bedrijfsmiddelen}}.",
+        "Werknemer geeft alle bedrijfsmiddelen direct terug zodra werkgever daarom vraagt, zodra de werkzaamheden waarvoor de middelen zijn verstrekt eindigen of bij einde dienstverband.",
+        "Eventuele schade of kosten worden alleen op werknemer verhaald voor zover dit op grond van wet, cao en de omstandigheden van het geval is toegestaan.",
       ],
       snippets: [
         {
-          label: "Meldplicht verlies",
-          text: "Verlies, diefstal of beschadiging van bedrijfsmiddelen wordt direct gemeld bij werkgever.",
-          help: "Helpt operationeel risico te beperken, vooral bij sleutels, toegangspassen en beveiligingsmiddelen.",
+          label: "Sleutels en toegangscodes",
+          text: "Sleutels, toegangspassen, codes en digitale toegangsrechten zijn strikt persoonlijk en mogen niet aan derden worden verstrekt of onbeheerd worden achtergelaten.",
+          help: "Gebruik dit bij functies met fysieke of digitale toegangsrechten.",
+        },
+        {
+          label: "Geen volledige schadeplicht",
+          text: "Een eventuele inhouding of verrekening met loon vindt alleen plaats indien en voor zover dit wettelijk en cao-rechtelijk is toegestaan.",
+          help: "Gebruik dit als de gebruiker schadeverhaal wil benoemen zonder een te harde bepaling.",
         },
       ],
     },
     {
-      value: "relationship_non_solicit",
-      label: "Relatiebeding",
-      description: "Beperkt benaderen van klanten of relaties na einde contract; juridisch gevoelig.",
+      value: "company_rules",
+      label: "Bedrijfsreglement en instructies",
+      description: "Koppelt bedrijfsreglement, verzuimprotocol, objectinstructies en gedragscode aan het contract.",
+      risk: "green",
+      required: true,
       defaultSections: [
-        "Werknemer zal gedurende de overeenkomst en na afloop daarvan geen klanten of relaties van werkgever actief benaderen met het doel vergelijkbare diensten buiten werkgever om te verrichten.",
-        "De reikwijdte, duur en noodzaak van deze bepaling worden in de overeenkomst concreet vastgelegd.",
+        "Het bedrijfsreglement, de gedragscode, het verzuimprotocol, het privacybeleid en eventuele veiligheids- en objectinstructies vormen onderdeel van de arbeidsovereenkomst, voor zover deze aan werknemer zijn verstrekt of op een voor werknemer toegankelijke wijze beschikbaar zijn gesteld.",
+        "Werknemer is verplicht redelijke instructies, veiligheidsvoorschriften, uniformvoorschriften, legitimatievoorschriften, objectinstructies, meldprocedures en gedragsregels van werkgever en opdrachtgever na te leven.",
+        "Bij strijd tussen deze arbeidsovereenkomst en een bedrijfsregeling geldt de arbeidsovereenkomst, tenzij wet of cao anders bepaalt of de bedrijfsregeling voor werknemer gunstiger is.",
+        "Overtreding van de in dit artikel genoemde regels kan arbeidsrechtelijke gevolgen hebben, afhankelijk van de aard en ernst van de overtreding en met inachtneming van wet en cao.",
       ],
       snippets: [
         {
-          label: "Concrete relaties",
-          text: "Deze bepaling ziet alleen op relaties waarmee werknemer in de laatste twaalf maanden van het dienstverband zakelijk contact heeft gehad.",
-          help: "Een concretere afbakening is doorgaans beter verdedigbaar dan een brede algemene formulering.",
+          label: "Ontvangstbevestiging",
+          text: "Werknemer verklaart dat de in dit artikel genoemde regelingen voorafgaand aan of bij aanvang van het dienstverband aan hem of haar zijn verstrekt of digitaal toegankelijk zijn gemaakt.",
+          help: "Handig om discussie over beschikbaarheid van reglementen te beperken.",
         },
+      ],
+    },
+    {
+      value: "integrity_reliable_work",
+      label: "Integriteit en betrouwbare functievervulling",
+      description: "Regelt betrouwbaarheid, instructies, alcohol/drugs, giften en meldplicht.",
+      risk: "green",
+      required: true,
+      defaultSections: [
+        "Werknemer voert de werkzaamheden zorgvuldig, integer en betrouwbaar uit en houdt zich aan de redelijke instructies, veiligheidsvoorschriften, objectinstructies, huisregels en procedures van werkgever en opdrachtgever.",
+        "Werknemer verricht geen werkzaamheden onder invloed van alcohol, drugs of middelen die het bewustzijn, beoordelingsvermogen of reactievermogen kunnen beinvloeden.",
+        "Werknemer meldt omstandigheden die de veilige, betrouwbare of wettelijk toegestane uitvoering van de werkzaamheden kunnen beinvloeden direct bij {{meldpunt_integriteit}}.",
+        "Werknemer neemt geen giften, beloningen, voordelen of toezeggingen aan van opdrachtgevers, bezoekers, leveranciers of andere derden indien dit de onafhankelijkheid, betrouwbaarheid of belangen van werkgever of opdrachtgever kan schaden.",
+        "Overtreding van deze bepaling kan arbeidsrechtelijke gevolgen hebben overeenkomstig wet, cao, personeelshandboek en de omstandigheden van het geval.",
+      ],
+      snippets: [
         {
-          label: "Juridische toets",
-          text: "Deze bepaling wordt alleen toegepast voor zover zij schriftelijk en rechtsgeldig is overeengekomen en past binnen de geldende wettelijke eisen.",
-          help: "Relatie- en concurrentiebedingen zijn arbeidsrechtelijk gevoelig. Laat dit altijd toetsen bij gebruik.",
+          label: "Incidentmelding",
+          text: "Werknemer meldt incidenten, onveilige situaties, belangenconflicten en integriteitsrisico's zo spoedig mogelijk via {{meldpunt_incidenten}}.",
+          help: "Gebruik dit als de organisatie een formeel incidentkanaal heeft.",
+        },
+      ],
+    },
+    {
+      value: "side_jobs",
+      label: "Nevenwerkzaamheden",
+      description: "Regelt nevenwerk zonder algemeen verbod; alleen beperken met objectieve reden.",
+      risk: "orange",
+      defaultSections: [
+        "Werknemer mag naast het dienstverband betaalde of onbetaalde werkzaamheden verrichten, tenzij sprake is van een objectieve reden op grond waarvan werkgever de nevenwerkzaamheden mag beperken.",
+        "Werknemer meldt voorgenomen nevenwerkzaamheden vooraf schriftelijk aan werkgever indien deze werkzaamheden kunnen leiden tot strijd met wettelijke voorschriften, veiligheidsrisico's, overtreding van arbeids- en rusttijden, belangenconflicten, aantasting van de goede uitvoering van de arbeidsovereenkomst of risico's voor vertrouwelijke informatie.",
+        "Werkgever kan nevenwerkzaamheden alleen weigeren of daaraan voorwaarden verbinden indien daarvoor een objectieve reden bestaat. Werkgever deelt de reden schriftelijk aan werknemer mee.",
+        "Werknemer verricht geen nevenwerkzaamheden waarbij vertrouwelijke informatie van werkgever of opdrachtgever wordt gebruikt of waarbij de betrouwbaarheid, onafhankelijkheid of inzetbaarheid van werknemer in het kader van Wpbr-werkzaamheden in gevaar komt.",
+      ],
+      snippets: [
+        {
+          label: "Objectieve reden kiezen",
+          text: "Objectieve redenen kunnen onder meer zijn: gezondheid en veiligheid, bescherming van vertrouwelijke informatie, naleving van arbeidstijden, wettelijke voorschriften, integriteit of het voorkomen van belangenconflicten.",
+          help: "Gebruik dit als toelichting wanneer werkgever nevenwerkzaamheden wil beperken.",
+        },
+      ],
+    },
+    {
+      value: "business_integrity_protection",
+      label: "Bescherming vertrouwelijke informatie en zakelijke integriteit",
+      description: "Veiliger alternatief voor een breed relatie- of concurrentiebeding.",
+      risk: "orange",
+      defaultSections: [
+        "Werknemer gebruikt klantgegevens, objectinformatie, tarieven, beveiligingsinstructies, roosters, alarmgegevens, camerabeelden en andere vertrouwelijke informatie uitsluitend voor de uitvoering van de werkzaamheden voor werkgever.",
+        "Werknemer verricht tijdens het dienstverband geen werkzaamheden voor opdrachtgevers of relaties van werkgever buiten werkgever om, voor zover dit leidt tot belangenverstrengeling, schending van geheimhouding of strijd met goed werknemerschap.",
+        "Na einde dienstverband blijft werknemer gebonden aan de geheimhoudingsplicht en mag werknemer vertrouwelijke informatie van werkgever of opdrachtgevers niet gebruiken voor eigen doeleinden of voor derden.",
+        "Deze bepaling is niet bedoeld als concurrentiebeding en beperkt werknemer niet in de vrijheid om na einde dienstverband bij een andere werkgever in dienst te treden, tenzij afzonderlijk een rechtsgeldig beding is overeengekomen en dat beding in de betreffende situatie is toegestaan.",
+      ],
+      snippets: [
+        {
+          label: "Review bij relatiebeding",
+          text: "Een afzonderlijk relatiebeding, concurrentiebeding of boetebeding wordt alleen opgenomen nadat is gecontroleerd of dit in de gekozen cao, contractvorm en functiecontext is toegestaan.",
+          help: "Gebruik dit als de gebruiker toch richting een klassiek beding wil.",
+        },
+      ],
+    },
+    {
+      value: "call_min_max_terms",
+      label: "Oproep- en min-maxvoorwaarden",
+      description: "Regelt oproepkanaal, referentiedagen, loon bij intrekking en aanbod vaste arbeidsomvang.",
+      risk: "orange",
+      defaultSections: [
+        "Werkgever roept werknemer schriftelijk of elektronisch op via {{oproepkanaal}}.",
+        "In de oproep vermeldt werkgever ten minste de datum, begin- en eindtijd, locatie en aard van de werkzaamheden.",
+        "Werknemer is alleen verplicht gehoor te geven aan een oproep indien de oproep tijdig is gedaan volgens wet en cao.",
+        "Indien werkgever een oproep binnen de toepasselijke oproeptermijn intrekt of wijzigt, behoudt werknemer recht op loon voor zover wet of cao dat bepaalt.",
+        "De dagen en tijdstippen waarop werknemer verplicht kan worden te werken zijn: {{referentiedagen_en_tijdvakken}}.",
+        "Werkgever doet werknemer na twaalf maanden een aanbod voor een vaste arbeidsomvang, voor zover en op de wijze zoals wet en cao dat voorschrijven.",
+      ],
+      snippets: [
+        {
+          label: "Toekomstige bandbreedte",
+          text: "Controleer bij een contractdatum vanaf 1 januari 2027 of een nulurencontract nog is toegestaan of dat een bandbreedtecontract moet worden gebruikt.",
+          help: "De regels voor oproepcontracten wijzigen. Deze waarschuwing moet zichtbaar blijven bij contractgeneratie.",
+        },
+      ],
+    },
+    {
+      value: "study_costs",
+      label: "Scholing en studiekosten",
+      description: "Voorkomt dat verplichte scholing ten onrechte op werknemer wordt verhaald.",
+      risk: "red",
+      reviewRequired: true,
+      defaultSections: [
+        "Werkgever verstrekt de scholing die op grond van wet, cao of functie noodzakelijk is voor de uitvoering van de werkzaamheden overeenkomstig de daarvoor geldende regels.",
+        "Voor scholing die werkgever op grond van wet of cao verplicht moet aanbieden, worden geen studiekosten of opleidingskosten op werknemer verhaald.",
+        "Indien werknemer een niet-verplichte opleiding volgt op kosten van werkgever, kunnen partijen daarvoor een afzonderlijke schriftelijke studiekostenovereenkomst sluiten, mits deze voldoet aan wet en cao.",
+        "In een eventuele studiekostenovereenkomst worden ten minste vastgelegd: de opleiding, de kosten, het belang van de opleiding, de terugbetalingsperiode, de afbouwregeling en de omstandigheden waarin geen terugbetaling verschuldigd is.",
+      ],
+      snippets: [
+        {
+          label: "Review vereist",
+          text: "Gebruik deze clausule niet als terugbetalingsbeding voor opleidingen die noodzakelijk zijn voor de functie of verplicht zijn op grond van wet of cao.",
+          help: "Studiekostenbedingen zijn gevoelig. Laat een concrete terugbetalingsregeling juridisch controleren.",
         },
       ],
     },
@@ -427,7 +760,7 @@ const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(240px,1.4fr)_minmax(72px,92p
 const CLAUSE_TABLE_GRID = "grid grid-cols-[minmax(32px,44px)_minmax(220px,1fr)_minmax(120px,160px)_minmax(140px,180px)_minmax(144px,max-content)] gap-3 xl:gap-4";
 const LETTERHEAD_STEPS = ["Upload", "Marges", "Controle"];
 const TEMPLATE_STEPS = ["CAO", "Contract", "Proeftijd", "Briefpapier", "Inhoud", "Controle"];
-const CLAUSE_STEPS = ["Onderdeel", "Clausule", "Uitwerken", "Controle"];
+const CLAUSE_STEPS = ["Onderdeel", "Context", "Clausule", "Uitwerken", "Controle"];
 const CLAUSE_MARKER_PREFIX = "clausule:";
 const LETTERHEAD_SOURCE_MODES = {
   upload: "upload",
@@ -833,12 +1166,31 @@ function clauseScopeLabel(value) {
   return CLAUSE_SCOPE_OPTIONS.find(option => option.value === value)?.label || "Nog geen onderdeel";
 }
 
-function clauseOptionsForScope(scope) {
-  return CLAUSE_TYPE_CATALOG[scope] || [];
+function clauseSecurityContextLabel(value) {
+  return CLAUSE_SECURITY_CONTEXT_OPTIONS.find(option => option.value === value)?.label || "Nog geen context";
 }
 
-function clauseDefinition(scope, type) {
-  return clauseOptionsForScope(scope).find(option => option.value === type) || null;
+function functionProfileLabel(value) {
+  return FUNCTION_PROFILE_OPTIONS.find(option => option.value === value)?.label || "Nog geen functieprofiel";
+}
+
+function clauseRiskLabel(value) {
+  return CLAUSE_RISK_LABELS[value] || CLAUSE_RISK_LABELS.green;
+}
+
+function clauseOptionsForScope(scope, licenseScope = "") {
+  const options = CLAUSE_TYPE_CATALOG[scope] || [];
+  if (!licenseScope || licenseScope === "not_applicable") return options;
+  return options.filter(option => {
+    if (!Array.isArray(option.appliesToPermits) || option.appliesToPermits.length === 0) return true;
+    return option.appliesToPermits.includes(licenseScope) || option.appliesToPermits.includes("all_security");
+  });
+}
+
+function clauseDefinition(scope, type, licenseScope = "") {
+  return clauseOptionsForScope(scope, licenseScope).find(option => option.value === type)
+    || (CLAUSE_TYPE_CATALOG[scope] || []).find(option => option.value === type)
+    || null;
 }
 
 function clauseTypeLabel(scope, type) {
@@ -877,9 +1229,60 @@ function editableClauseSections(source = {}) {
   return normalizeClauseSections(source);
 }
 
-function defaultClauseSections(definition) {
-  const defaults = definition?.defaultSections || [""];
+function contextualDefaultSections(definition, licenseScope) {
+  const sections = [...(definition?.defaultSections || [""])];
+  if (definition?.value === "confidentiality") {
+    const contextSections = {
+      ND: "Objectinformatie, sleutelprocedures, alarmopvolgingsinstructies, locatiegebonden risico's en beveiligingsafspraken worden altijd als vertrouwelijk beschouwd.",
+      BD: "Objectinformatie, sleutelprocedures, alarmopvolgingsinstructies, locatiegebonden risico's en beveiligingsafspraken van de eigen onderneming worden altijd als vertrouwelijk beschouwd.",
+      HND: "Informatie over bezoekers, incidenten, toegangsbeleid, ontzeggingen, huisregels, briefingdocumenten, camerabeelden en inzetplannen wordt altijd als vertrouwelijk beschouwd.",
+      HBD: "Informatie over gasten, incidenten, toegangsbeleid, ontzeggingen, huisregels, camerabeelden en interne horeca-instructies wordt altijd als vertrouwelijk beschouwd.",
+      PAC: "Alarmmeldingen, alarmcodes, aansluitgegevens, verificatieprotocollen, klantinstructies en meldkamerprocedures worden altijd als vertrouwelijk beschouwd.",
+      VTC: "Livebeelden, opgenomen camerabeelden, observaties, cameraopstellingen, opvolgprotocollen, toegangsrechten en beeldanalyse worden altijd als vertrouwelijk beschouwd.",
+      PGW: "Routes, tijdstippen, zendinggegevens, waarde-informatie, overdrachtslocaties, voertuiggegevens en transportprocedures worden altijd als strikt vertrouwelijk beschouwd.",
+      POB: "Onderzoeksdossiers, observaties, bronnen, onderzoeksopdrachten, persoonsgegevens, rapportages, onderzoeksmethoden en bevindingen worden altijd als strikt vertrouwelijk beschouwd.",
+    };
+    if (contextSections[licenseScope]) sections.splice(2, 0, contextSections[licenseScope]);
+  }
+  if (definition?.value === "privacy_data_security" && ["PAC", "VTC", "POB"].includes(licenseScope)) {
+    sections.splice(1, 0, "Vanwege de gekozen vergunning gelden verhoogde eisen aan logging, toegangsbeperking, doelbinding en melding van mogelijke datalekken of onbevoegde kennisname.");
+  }
+  return sections;
+}
+
+function defaultClauseSections(definition, licenseScope = "") {
+  const defaults = contextualDefaultSections(definition, licenseScope);
   return defaults.map(text => ({ id: createClauseSectionId(), text }));
+}
+
+function clauseValidationNotes(form = {}, definition = null) {
+  const notes = [];
+  if (form.scope === "employment_contracts" && !form.function_profile) {
+    notes.push("Kies bij voorkeur een functieprofiel. De functie blijft een placeholder in het contract, maar het profiel bepaalt welke juridische hulpteksten passen.");
+  }
+  if (definition?.required) {
+    notes.push("Deze clausule is aanbevolen of verplicht voor veel beveiligingscontracten. Controleer of deze in de template is opgenomen.");
+  }
+  if (definition?.risk === "red" || definition?.reviewRequired) {
+    notes.push("Deze clausule is juridisch gevoelig. Gebruik de tekst pas definitief na juridische controle.");
+  }
+  if (definition?.risk === "orange") {
+    notes.push("Deze clausule vraagt extra controle op cao, contractvorm, functie en ingangsdatum.");
+  }
+  if (definition?.value === "call_min_max_terms") {
+    notes.push("Controleer oproepkanaal, oproeptermijn, referentiedagen, loon bij intrekking en het aanbod vaste arbeidsomvang na twaalf maanden.");
+    notes.push("Bij contracten vanaf 1 januari 2027 moet worden gecontroleerd of nuluren/min-max nog passend is of dat een bandbreedtecontract nodig is.");
+  }
+  if (definition?.value === "business_integrity_protection") {
+    notes.push("Deze clausule is bedoeld als veilige bescherming van vertrouwelijke informatie en zakelijke integriteit, niet als klassiek concurrentiebeding.");
+  }
+  if (definition?.value === "study_costs") {
+    notes.push("Gebruik deze clausule niet om verplichte scholing of noodzakelijke functieopleiding op werknemer te verhalen.");
+  }
+  if (definition?.value === "confidentiality" && ["PAC", "VTC", "PGW", "POB"].includes(form.license_scope)) {
+    notes.push("De gekozen vergunning heeft verhoogde geheimhoudingsrisico's. Controleer of het vergunning-specifieke onderdeel in de clausule staat.");
+  }
+  return uniqueStrings(notes);
 }
 
 function statusBadge(status) {
@@ -1572,6 +1975,10 @@ function initialClause(companyId, sortOrder = 0) {
     company_id: companyId,
     scope: "",
     clause_type: "",
+    license_scope: "",
+    function_profile: "",
+    risk_level: "green",
+    review_required: false,
     title: "",
     sections: [{ id: createClauseSectionId(), text: "" }],
     body: "",
@@ -1706,8 +2113,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0) || String(a.title || "").localeCompare(String(b.title || ""))),
   [clauses]);
   const currentClauseDefinition = useMemo(
-    () => clauseDefinition(clauseForm.scope, clauseForm.clause_type),
-    [clauseForm.scope, clauseForm.clause_type],
+    () => clauseDefinition(clauseForm.scope, clauseForm.clause_type, clauseForm.license_scope),
+    [clauseForm.scope, clauseForm.clause_type, clauseForm.license_scope],
   );
   const clauseSections = useMemo(() => editableClauseSections(clauseForm), [clauseForm]);
   const clausePreviewBody = useMemo(() => buildClauseBodyFromSections(clauseSections), [clauseSections]);
@@ -1974,6 +2381,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         company_id: companyId,
         scope: clauseForm.scope,
         clause_type: clauseForm.clause_type,
+        license_scope: clauseForm.license_scope || null,
+        function_profile: clauseForm.function_profile || null,
+        risk_level: clauseForm.risk_level || currentClauseDefinition?.risk || "green",
+        review_required: Boolean(clauseForm.review_required || currentClauseDefinition?.reviewRequired || currentClauseDefinition?.risk === "red"),
         title: clauseForm.title.trim(),
         sections,
         body,
@@ -1984,6 +2395,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           ...buildAuditMetadata(currentUser, editingClauseId ? "gewijzigd" : "toegevoegd", previous.metadata || {}, auditActors),
           scope_label: clauseScopeLabel(clauseForm.scope),
           clause_type_label: clauseTypeLabel(clauseForm.scope, clauseForm.clause_type),
+          license_scope_label: clauseSecurityContextLabel(clauseForm.license_scope),
+          function_profile_label: functionProfileLabel(clauseForm.function_profile),
         },
       };
       return editingClauseId
@@ -2184,6 +2597,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       ...prev,
       scope,
       clause_type: "",
+      license_scope: scope === "employment_contracts" ? "" : "not_applicable",
+      function_profile: scope === "employment_contracts" ? "" : "office",
+      risk_level: "green",
+      review_required: false,
       title: "",
       sections: [{ id: createClauseSectionId(), text: "" }],
       body: "",
@@ -2194,18 +2611,20 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   };
 
   const selectClauseType = (type) => {
-    const definition = clauseDefinition(clauseForm.scope, type);
-    const sections = defaultClauseSections(definition);
+    const definition = clauseDefinition(clauseForm.scope, type, clauseForm.license_scope);
+    const sections = defaultClauseSections(definition, clauseForm.license_scope);
     setClauseForm(prev => ({
       ...prev,
       clause_type: type,
       title: definition?.label || prev.title || "",
+      risk_level: definition?.risk || "green",
+      review_required: Boolean(definition?.reviewRequired || definition?.risk === "red"),
       sections,
       body: buildClauseBodyFromSections(sections),
     }));
     setSelectedClauseSectionIndex(0);
     setMessage(null);
-    setClauseStep(3);
+    setClauseStep(4);
   };
 
   const nextClauseStep = () => {
@@ -2213,11 +2632,15 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       setMessage({ type: "error", text: "Kies eerst het onderdeel waarvoor deze clausule bedoeld is." });
       return;
     }
-    if (clauseStep === 2 && !clauseForm.clause_type) {
+    if (clauseStep === 2 && clauseForm.scope === "employment_contracts" && !clauseForm.license_scope) {
+      setMessage({ type: "error", text: "Kies eerst de vergunning of werkveldcontext." });
+      return;
+    }
+    if (clauseStep === 3 && !clauseForm.clause_type) {
       setMessage({ type: "error", text: "Kies eerst het type clausule." });
       return;
     }
-    if (clauseStep === 3) {
+    if (clauseStep === 4) {
       if (!clauseForm.title.trim()) {
         setMessage({ type: "error", text: "Geef de clausule een duidelijke titel." });
         return;
@@ -2313,13 +2736,17 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       company_id: companyId,
       scope: inferred.scope,
       clause_type: inferred.type,
+      license_scope: record.license_scope || "",
+      function_profile: record.function_profile || "",
+      risk_level: record.risk_level || "green",
+      review_required: Boolean(record.review_required),
       title: record.title || "",
       sections: editableClauseSections(record),
       body: record.body || "",
       sort_order: Number(record.sort_order || 0),
       status: record.status || "active",
     });
-    setClauseStep(inferred.scope && inferred.type ? 3 : 1);
+    setClauseStep(inferred.scope && inferred.type ? 4 : 1);
     setSelectedClauseSectionIndex(0);
     setClauseWizardOpen(true);
   };
@@ -3603,8 +4030,14 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                               <div className="min-w-0">
                                 <p className="truncate font-medium">{clause.title}</p>
                                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                                  {clauseScopeLabel(clause.scope)} · {clauseTypeLabel(clause.scope, clause.clause_type)}
+                                  {clauseScopeLabel(clause.scope)} · {clauseTypeLabel(clause.scope, clause.clause_type)} · {clauseSecurityContextLabel(clause.license_scope)}
                                 </p>
+                                <div className="mt-1 flex flex-wrap gap-1">
+                                  <Badge variant="outline" className={`text-[10px] ${CLAUSE_RISK_STYLES[clause.risk_level || "green"] || ""}`}>
+                                    {clauseRiskLabel(clause.risk_level || "green")}
+                                  </Badge>
+                                  {clause.review_required && <Badge variant="outline" className="text-[10px]">Review nodig</Badge>}
+                                </div>
                                 <p className="mt-0.5 text-xs text-muted-foreground">{inserted ? "Staat al in deze template" : "Sleep naar de tekst of voeg in op cursorpositie"}</p>
                               </div>
                               <Button type="button" variant="outline" size="sm" onClick={() => insertClauseInTemplate(clause)} disabled={inserted}>
@@ -3755,9 +4188,11 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   );
 
   const renderClauseWizard = () => {
-    const availableClauseTypes = clauseOptionsForScope(clauseForm.scope);
+    const availableClauseTypes = clauseOptionsForScope(clauseForm.scope, clauseForm.license_scope);
     const snippets = currentClauseDefinition?.snippets || [];
     const clausePlaceholders = extractPlaceholders(clausePreviewBody);
+    const riskLevel = clauseForm.risk_level || currentClauseDefinition?.risk || "green";
+    const validationNotes = clauseValidationNotes(clauseForm, currentClauseDefinition);
 
     return (
       <AnimatePresence>
@@ -3794,37 +4229,119 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               )}
 
               {clauseStep === 2 && (
-                <div className="space-y-3">
+                <div className="space-y-4">
                   <div>
-                    <p className="text-sm font-medium text-foreground">Kies de clausule voor {clauseScopeLabel(clauseForm.scope).toLowerCase()}</p>
-                    <p className="mt-1 text-xs text-muted-foreground">De lijst is afgestemd op het gekozen onderdeel.</p>
+                    <p className="text-sm font-medium text-foreground">Welke vergunning of werkveldcontext hoort hierbij?</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Deze keuze bepaalt welke Wpbr-, geheimhoudings-, privacy- en risicoteksten worden aangeboden.
+                    </p>
                   </div>
                   <div className="grid grid-cols-1 gap-2">
-                    {availableClauseTypes.map(option => (
+                    {(clauseForm.scope === "employment_contracts"
+                      ? CLAUSE_SECURITY_CONTEXT_OPTIONS
+                      : CLAUSE_SECURITY_CONTEXT_OPTIONS.filter(option => option.value === "not_applicable")
+                    ).map(option => (
                       <button
                         key={option.value}
                         type="button"
-                        onClick={() => selectClauseType(option.value)}
-                        className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${clauseForm.clause_type === option.value ? "border-primary bg-accent" : "border-border bg-card"}`}
+                        onClick={() => setClauseForm(prev => ({
+                          ...prev,
+                          license_scope: option.value,
+                          clause_type: "",
+                          title: "",
+                          sections: [{ id: createClauseSectionId(), text: "" }],
+                          body: "",
+                        }))}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${clauseForm.license_scope === option.value ? "border-primary bg-accent" : "border-border bg-card"}`}
                       >
-                        <div><span className="text-sm font-semibold text-foreground">{option.label}</span><span className="text-xs text-muted-foreground ml-2">{option.description}</span></div>
-                        <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground" />
+                        <div>
+                          <span className="text-sm font-semibold text-foreground">{option.label}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">{option.description}</span>
+                        </div>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                       </button>
                     ))}
                   </div>
+
+                  {clauseForm.scope === "employment_contracts" && (
+                    <div className="space-y-2 rounded-lg border border-border bg-background/40 p-3">
+                      <Label>Functieprofiel</Label>
+                      <Select
+                        value={clauseForm.function_profile || ""}
+                        onValueChange={value => setClauseForm(prev => ({ ...prev, function_profile: value }))}
+                      >
+                        <SelectTrigger>
+                          <SelectValue placeholder="Kies een functieprofiel voor betere hulpteksten" />
+                        </SelectTrigger>
+                        <SelectContent>
+                          {FUNCTION_PROFILE_OPTIONS.map(option => (
+                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">
+                        De functie blijft later een placeholder in het contract, maar dit profiel helpt de wizard juridisch relevante blokken te tonen.
+                      </p>
+                    </div>
+                  )}
                 </div>
               )}
 
               {clauseStep === 3 && (
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Kies de clausule voor {clauseScopeLabel(clauseForm.scope).toLowerCase()}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Context: {clauseSecurityContextLabel(clauseForm.license_scope)}
+                      {clauseForm.function_profile ? ` · ${functionProfileLabel(clauseForm.function_profile)}` : ""}
+                    </p>
+                  </div>
+                  <div className="grid grid-cols-1 gap-2">
+                    {availableClauseTypes.map(option => {
+                      const optionRisk = option.risk || "green";
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => selectClauseType(option.value)}
+                          className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${clauseForm.clause_type === option.value ? "border-primary bg-accent" : "border-border bg-card"}`}
+                        >
+                          <div className="min-w-0">
+                            <span className="text-sm font-semibold text-foreground">{option.label}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">{option.description}</span>
+                            <div className="mt-1 flex flex-wrap gap-1">
+                              {option.required && <Badge variant="outline" className="text-[10px]">Aanbevolen/verplicht</Badge>}
+                              <Badge variant="outline" className={`text-[10px] ${CLAUSE_RISK_STYLES[optionRisk] || ""}`}>{clauseRiskLabel(optionRisk)}</Badge>
+                            </div>
+                          </div>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {clauseStep === 4 && (
                 <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
                   <div className="space-y-4">
-                    <div className="w-32 space-y-2">
-                      <Label>Volgorde</Label>
-                      <Input
-                        type="number"
-                        value={clauseForm.sort_order}
-                        onChange={event => setClauseForm(prev => ({ ...prev, sort_order: event.target.value }))}
-                      />
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
+                      <div className="space-y-2">
+                        <Label>Titel *</Label>
+                        <Input
+                          value={clauseForm.title}
+                          onChange={event => setClauseForm(prev => ({ ...prev, title: event.target.value }))}
+                          placeholder={currentClauseDefinition?.label || "Bijv. Geheimhouding"}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Volgorde</Label>
+                        <Input
+                          type="number"
+                          value={clauseForm.sort_order}
+                          onChange={event => setClauseForm(prev => ({ ...prev, sort_order: event.target.value }))}
+                        />
+                      </div>
                     </div>
 
                     <div className="space-y-3">
@@ -3882,6 +4399,32 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   </div>
 
                   <div className="space-y-4">
+                    <div className={`rounded-lg border p-3 text-sm ${CLAUSE_RISK_STYLES[riskLevel] || CLAUSE_RISK_STYLES.green}`}>
+                      <div className="flex items-center justify-between gap-2">
+                        <span className="font-semibold">{clauseRiskLabel(riskLevel)}</span>
+                        {currentClauseDefinition?.required && <Badge variant="outline" className="text-[10px]">Aanbevolen/verplicht</Badge>}
+                      </div>
+                      <p className="mt-1 text-xs">
+                        {riskLevel === "red"
+                          ? "Deze clausule is juridisch gevoelig. Gebruik deze pas definitief na controle."
+                          : riskLevel === "orange"
+                            ? "Deze clausule vraagt extra context. Controleer of de gekozen functie, cao en contractvorm kloppen."
+                            : "Deze clausule is bedoeld als standaardclausule voor de gekozen context."}
+                      </p>
+                    </div>
+                    {validationNotes.length > 0 && (
+                      <div className="rounded-lg border border-border bg-background/40 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Controlepunten</p>
+                        <ul className="mt-2 space-y-1 text-xs text-muted-foreground">
+                          {validationNotes.map(note => (
+                            <li key={note} className="flex gap-2">
+                              <span className="mt-1 h-1.5 w-1.5 shrink-0 rounded-full bg-primary" />
+                              <span>{note}</span>
+                            </li>
+                          ))}
+                        </ul>
+                      </div>
+                    )}
                     <div className="rounded-lg border border-border bg-background/40 p-3">
                       <div className="mb-3 flex items-center justify-between gap-2">
                         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bouwblokken</p>
@@ -3923,9 +4466,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 </div>
               )}
 
-              {clauseStep === 4 && (
+              {clauseStep === 5 && (
                 <div className="space-y-4">
-                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                     <div className="rounded-lg border border-border bg-background/40 p-3">
                       <p className="text-xs uppercase tracking-wider text-muted-foreground">Onderdeel</p>
                       <p className="mt-1 text-sm font-medium text-foreground">{clauseScopeLabel(clauseForm.scope)}</p>
@@ -3933,6 +4476,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     <div className="rounded-lg border border-border bg-background/40 p-3">
                       <p className="text-xs uppercase tracking-wider text-muted-foreground">Clausule</p>
                       <p className="mt-1 text-sm font-medium text-foreground">{clauseTypeLabel(clauseForm.scope, clauseForm.clause_type)}</p>
+                    </div>
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Context</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">{clauseSecurityContextLabel(clauseForm.license_scope)}</p>
                     </div>
                     <div className="rounded-lg border border-border bg-background/40 p-3">
                       <p className="text-xs uppercase tracking-wider text-muted-foreground">Onderdelen</p>
@@ -3959,6 +4506,16 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                       ))}
                     </div>
                   </div>
+                  {validationNotes.length > 0 && (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                      <p className="text-xs font-semibold uppercase tracking-wider">Controlepunten voordat deze clausule definitief wordt gebruikt</p>
+                      <ul className="mt-2 space-y-1 text-sm">
+                        {validationNotes.map(note => (
+                          <li key={note}>- {note}</li>
+                        ))}
+                      </ul>
+                    </div>
+                  )}
                 </div>
               )}
 
@@ -4040,8 +4597,16 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                           <div className="min-w-0">
                             <p className="truncate font-semibold text-foreground">{item.title}</p>
                             <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                              {clauseScopeLabel(item.scope)} · {clauseTypeLabel(item.scope, item.clause_type)}
+                              {clauseScopeLabel(item.scope)} · {clauseTypeLabel(item.scope, item.clause_type)} · {clauseSecurityContextLabel(item.license_scope)}
                             </p>
+                            {(item.risk_level || item.review_required) && (
+                              <div className="mt-1 flex flex-wrap gap-1">
+                                <Badge variant="outline" className={`text-[10px] ${CLAUSE_RISK_STYLES[item.risk_level || "green"] || ""}`}>
+                                  {clauseRiskLabel(item.risk_level || "green")}
+                                </Badge>
+                                {item.review_required && <Badge variant="outline" className="text-[10px]">Review nodig</Badge>}
+                              </div>
+                            )}
                             <p className="mt-0.5 line-clamp-2 font-mono text-xs text-muted-foreground">
                               {buildClauseBodyFromSections(normalizeClauseSections(item))}
                             </p>
