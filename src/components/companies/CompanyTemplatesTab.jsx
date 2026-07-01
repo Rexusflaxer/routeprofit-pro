@@ -3818,23 +3818,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               {clauseStep === 3 && (
                 <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
                   <div className="space-y-4">
-                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
-                      <div className="space-y-2">
-                        <Label>Titel *</Label>
-                        <Input
-                          value={clauseForm.title}
-                          onChange={event => setClauseForm(prev => ({ ...prev, title: event.target.value }))}
-                          placeholder={currentClauseDefinition?.label || "Bijv. Geheimhouding"}
-                        />
-                      </div>
-                      <div className="space-y-2">
-                        <Label>Volgorde</Label>
-                        <Input
-                          type="number"
-                          value={clauseForm.sort_order}
-                          onChange={event => setClauseForm(prev => ({ ...prev, sort_order: event.target.value }))}
-                        />
-                      </div>
+                    <div className="w-32 space-y-2">
+                      <Label>Volgorde</Label>
+                      <Input
+                        type="number"
+                        value={clauseForm.sort_order}
+                        onChange={event => setClauseForm(prev => ({ ...prev, sort_order: event.target.value }))}
+                      />
                     </div>
 
                     <div className="space-y-3">
