@@ -3799,16 +3799,16 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     <p className="text-sm font-medium text-foreground">Kies de clausule voor {clauseScopeLabel(clauseForm.scope).toLowerCase()}</p>
                     <p className="mt-1 text-xs text-muted-foreground">De lijst is afgestemd op het gekozen onderdeel.</p>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-2">
                     {availableClauseTypes.map(option => (
                       <button
                         key={option.value}
                         type="button"
                         onClick={() => selectClauseType(option.value)}
-                        className={`rounded-lg border p-4 text-left transition-colors ${clauseForm.clause_type === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                        className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${clauseForm.clause_type === option.value ? "border-primary bg-accent" : "border-border bg-card"}`}
                       >
-                        <p className="font-semibold text-foreground">{option.label}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+                        <div><span className="text-sm font-semibold text-foreground">{option.label}</span><span className="text-xs text-muted-foreground ml-2">{option.description}</span></div>
+                        <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground" />
                       </button>
                     ))}
                   </div>
