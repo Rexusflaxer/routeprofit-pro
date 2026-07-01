@@ -3777,16 +3777,16 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               {clauseStep === 1 && (
                 <div className="space-y-3">
                   <p className="text-sm font-medium text-foreground">Voor welk onderdeel is deze clausule bedoeld?</p>
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                  <div className="grid grid-cols-1 gap-2">
                     {CLAUSE_SCOPE_OPTIONS.map(option => (
                       <button
                         key={option.value}
                         type="button"
                         onClick={() => selectClauseScope(option.value)}
-                        className={`rounded-lg border p-4 text-left transition-colors ${clauseForm.scope === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                        className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${clauseForm.scope === option.value ? "border-primary bg-accent" : "border-border bg-card"}`}
                       >
-                        <p className="font-semibold text-foreground">{option.label}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+                        <div><span className="text-sm font-semibold text-foreground">{option.label}</span><span className="text-xs text-muted-foreground ml-2">{option.description}</span></div>
+                        <ChevronRight className="w-4 h-4 shrink-0 text-muted-foreground" />
                       </button>
                     ))}
                   </div>
