@@ -25,6 +25,7 @@ import {
   EyeOff,
   FilePlus2,
   GripVertical,
+  HelpCircle,
   Image as ImageIcon,
   Layers,
   Lock,
@@ -194,6 +195,216 @@ const PROBATION_CHOICES = [
   { value: "not_applicable", label: "Niet van toepassing", description: "Voor contractvormen waar proeftijd niet logisch of niet relevant is." },
 ];
 
+const CLAUSE_SCOPE_OPTIONS = [
+  {
+    value: "employment_contracts",
+    label: "Arbeidscontracten",
+    description: "Clausules voor arbeidsovereenkomsten met medewerkers.",
+  },
+  {
+    value: "customer_contracts",
+    label: "Klantcontracten",
+    description: "Afspraken met opdrachtgevers over dienstverlening, aansprakelijkheid en betaling.",
+  },
+  {
+    value: "zzp_framework_agreements",
+    label: "Raamovereenkomsten met zzp'ers",
+    description: "Afspraken met zelfstandigen over opdracht, geheimhouding en zelfstandigheid.",
+  },
+  {
+    value: "supplier_or_partner_agreements",
+    label: "Leveranciers en partners",
+    description: "Algemene zakelijke clausules voor leveranciers, onderaannemers en partners.",
+  },
+];
+
+const CLAUSE_TYPE_CATALOG = {
+  employment_contracts: [
+    {
+      value: "confidentiality",
+      label: "Geheimhouding",
+      description: "Beschermt bedrijfsinformatie, klantgegevens, roosters, tarieven en werkwijzen.",
+      defaultSections: [
+        "Werknemer houdt alle vertrouwelijke informatie geheim die hij of zij tijdens of door het dienstverband verkrijgt.",
+        "Onder vertrouwelijke informatie vallen in ieder geval klantgegevens, beveiligingsinstructies, tarieven, procedures, planning, objectinformatie en interne documenten.",
+        "Deze verplichting geldt tijdens het dienstverband en blijft ook na het einde daarvan bestaan.",
+      ],
+      snippets: [
+        {
+          label: "Definitie vertrouwelijke informatie",
+          text: "Onder vertrouwelijke informatie wordt verstaan: alle informatie waarvan werknemer weet of redelijkerwijs behoort te begrijpen dat deze niet openbaar mag worden gemaakt.",
+          help: "Maakt duidelijk welke informatie onder geheimhouding valt zonder elk document afzonderlijk te hoeven noemen.",
+        },
+        {
+          label: "Duur na einde contract",
+          text: "De geheimhoudingsplicht blijft na het einde van de overeenkomst onverminderd van kracht zolang de informatie niet rechtmatig openbaar is geworden.",
+          help: "Legt vast dat geheimhouding niet automatisch stopt bij uitdiensttreding.",
+        },
+        {
+          label: "Uitzondering wettelijke plicht",
+          text: "Deze bepaling geldt niet voor zover openbaarmaking verplicht is op grond van wet, rechterlijke uitspraak of een bevoegd gegeven overheidsbevel.",
+          help: "Voorkomt dat de clausule botst met een wettelijke verplichting om informatie te geven.",
+        },
+      ],
+    },
+    {
+      value: "company_property",
+      label: "Bedrijfsmiddelen",
+      description: "Regelt gebruik en teruggave van sleutels, kleding, passen, telefoons en documenten.",
+      defaultSections: [
+        "Werknemer gebruikt bedrijfsmiddelen uitsluitend zorgvuldig en voor het uitvoeren van de overeengekomen werkzaamheden.",
+        "Werknemer geeft bedrijfsmiddelen, sleutels, passen, kleding, apparatuur en documenten uiterlijk op verzoek of bij einde dienstverband terug.",
+      ],
+      snippets: [
+        {
+          label: "Meldplicht verlies",
+          text: "Verlies, diefstal of beschadiging van bedrijfsmiddelen wordt direct gemeld bij werkgever.",
+          help: "Helpt operationeel risico te beperken, vooral bij sleutels, toegangspassen en beveiligingsmiddelen.",
+        },
+      ],
+    },
+    {
+      value: "relationship_non_solicit",
+      label: "Relatiebeding",
+      description: "Beperkt benaderen van klanten of relaties na einde contract; juridisch gevoelig.",
+      defaultSections: [
+        "Werknemer zal gedurende de overeenkomst en na afloop daarvan geen klanten of relaties van werkgever actief benaderen met het doel vergelijkbare diensten buiten werkgever om te verrichten.",
+        "De reikwijdte, duur en noodzaak van deze bepaling worden in de overeenkomst concreet vastgelegd.",
+      ],
+      snippets: [
+        {
+          label: "Concrete relaties",
+          text: "Deze bepaling ziet alleen op relaties waarmee werknemer in de laatste twaalf maanden van het dienstverband zakelijk contact heeft gehad.",
+          help: "Een concretere afbakening is doorgaans beter verdedigbaar dan een brede algemene formulering.",
+        },
+        {
+          label: "Juridische toets",
+          text: "Deze bepaling wordt alleen toegepast voor zover zij schriftelijk en rechtsgeldig is overeengekomen en past binnen de geldende wettelijke eisen.",
+          help: "Relatie- en concurrentiebedingen zijn arbeidsrechtelijk gevoelig. Laat dit altijd toetsen bij gebruik.",
+        },
+      ],
+    },
+  ],
+  customer_contracts: [
+    {
+      value: "confidentiality",
+      label: "Geheimhouding",
+      description: "Beschermt bedrijfsinformatie, tarieven, beveiligingsplannen en klantinformatie.",
+      defaultSections: [
+        "Partijen houden alle vertrouwelijke informatie geheim die zij in het kader van de overeenkomst ontvangen.",
+        "Vertrouwelijke informatie wordt uitsluitend gebruikt voor de uitvoering van de overeenkomst.",
+        "De geheimhoudingsplicht blijft na beëindiging van de overeenkomst bestaan zolang de informatie vertrouwelijk is.",
+      ],
+      snippets: [
+        {
+          label: "Beperkte toegang",
+          text: "Toegang tot vertrouwelijke informatie wordt beperkt tot personen die deze informatie nodig hebben voor de uitvoering van de overeenkomst.",
+          help: "Past bij beveiligingswerk, waar objectinformatie en instructies beperkt gedeeld moeten worden.",
+        },
+      ],
+    },
+    {
+      value: "liability",
+      label: "Aansprakelijkheid",
+      description: "Legt grenzen en uitzonderingen rond aansprakelijkheid vast.",
+      defaultSections: [
+        "Aansprakelijkheid is beperkt tot directe schade die het rechtstreekse gevolg is van een toerekenbare tekortkoming.",
+        "Indirecte schade, gevolgschade en gederfde winst zijn uitgesloten, tenzij dwingend recht anders bepaalt.",
+      ],
+      snippets: [
+        {
+          label: "Verzekerde som",
+          text: "Voor zover toegestaan is aansprakelijkheid beperkt tot het bedrag dat in het betreffende geval door de aansprakelijkheidsverzekering wordt uitgekeerd.",
+          help: "Sluit de contractuele limiet aan op verzekeringsdekking. Controleer of de polis dit ondersteunt.",
+        },
+      ],
+    },
+    {
+      value: "payment_terms",
+      label: "Betaling en facturatie",
+      description: "Regelt factuurtermijnen, bezwaar en incasso.",
+      defaultSections: [
+        "Facturen worden betaald binnen de overeengekomen betalingstermijn.",
+        "Bezwaren tegen een factuur worden binnen redelijke termijn schriftelijk en gemotiveerd gemeld.",
+      ],
+      snippets: [
+        {
+          label: "Opschorting bij achterstand",
+          text: "Bij betalingsachterstand mag opdrachtnemer de dienstverlening opschorten nadat opdrachtgever schriftelijk is aangemaand en een redelijke hersteltermijn heeft gekregen.",
+          help: "Geeft een route voordat dienstverlening wordt gepauzeerd; belangrijk bij operationele beveiligingsdiensten.",
+        },
+      ],
+    },
+  ],
+  zzp_framework_agreements: [
+    {
+      value: "assignment_scope",
+      label: "Opdracht en zelfstandigheid",
+      description: "Beschrijft de opdracht zonder gezagsverhouding te suggereren.",
+      defaultSections: [
+        "Opdrachtnemer voert de overeengekomen werkzaamheden zelfstandig uit binnen de kaders van de opdracht.",
+        "Partijen beogen geen arbeidsovereenkomst aan te gaan.",
+      ],
+      snippets: [
+        {
+          label: "Eigen verantwoordelijkheid",
+          text: "Opdrachtnemer is verantwoordelijk voor de wijze waarop de opdracht professioneel wordt uitgevoerd, met inachtneming van geldende wet- en regelgeving.",
+          help: "Ondersteunt het onderscheid tussen opdracht en dienstverband, zonder operationele eisen te negeren.",
+        },
+      ],
+    },
+    {
+      value: "confidentiality",
+      label: "Geheimhouding",
+      description: "Beschermt klant- en objectinformatie die een zzp'er tijdens opdrachten ontvangt.",
+      defaultSections: [
+        "Opdrachtnemer houdt vertrouwelijke informatie geheim en gebruikt deze uitsluitend voor de opdracht.",
+        "De geheimhoudingsplicht blijft na beëindiging van de opdracht bestaan.",
+      ],
+      snippets: [
+        {
+          label: "Objectinformatie",
+          text: "Objectinformatie, toegangsinstructies, sleutelprocedures en beveiligingsafspraken worden altijd als vertrouwelijk beschouwd.",
+          help: "Maakt de beveiligingscontext concreet zonder alle objecten apart te benoemen.",
+        },
+      ],
+    },
+    {
+      value: "replacement",
+      label: "Vervanging",
+      description: "Regelt of en hoe een zzp'er zich kan laten vervangen.",
+      defaultSections: [
+        "Vervanging is alleen mogelijk na voorafgaande afstemming, waarbij de vervanger moet voldoen aan de voor de opdracht geldende kwalificaties en wettelijke eisen.",
+      ],
+      snippets: [
+        {
+          label: "Kwalificaties vervanger",
+          text: "Een vervanger beschikt over de vereiste diploma's, vergunningen, screening en ervaring die voor de opdracht noodzakelijk zijn.",
+          help: "Belangrijk bij beveiligingswerk waar bevoegdheden en screening niet vrijblijvend zijn.",
+        },
+      ],
+    },
+  ],
+  supplier_or_partner_agreements: [
+    {
+      value: "confidentiality",
+      label: "Geheimhouding",
+      description: "Algemene geheimhouding voor samenwerking met leveranciers of partners.",
+      defaultSections: [
+        "Partijen behandelen vertrouwelijke informatie strikt vertrouwelijk en delen deze niet met derden zonder voorafgaande toestemming.",
+        "De informatie wordt uitsluitend gebruikt voor het doel waarvoor zij is verstrekt.",
+      ],
+      snippets: [
+        {
+          label: "Teruggave of vernietiging",
+          text: "Na beëindiging van de samenwerking worden vertrouwelijke documenten op verzoek teruggegeven of vernietigd, voor zover bewaren niet wettelijk verplicht is.",
+          help: "Regelt wat er met informatie gebeurt nadat de samenwerking stopt.",
+        },
+      ],
+    },
+  ],
+};
+
 const DEFAULT_TEMPLATE_BODY = [
   "Arbeidsovereenkomst",
   "",
@@ -216,6 +427,7 @@ const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(240px,1.4fr)_minmax(72px,92p
 const CLAUSE_TABLE_GRID = "grid grid-cols-[minmax(32px,44px)_minmax(220px,1fr)_minmax(120px,160px)_minmax(140px,180px)_minmax(144px,max-content)] gap-3 xl:gap-4";
 const LETTERHEAD_STEPS = ["Upload", "Marges", "Controle"];
 const TEMPLATE_STEPS = ["CAO", "Contract", "Proeftijd", "Briefpapier", "Inhoud", "Controle"];
+const CLAUSE_STEPS = ["Onderdeel", "Clausule", "Uitwerken", "Controle"];
 const CLAUSE_MARKER_PREFIX = "clausule:";
 const LETTERHEAD_SOURCE_MODES = {
   upload: "upload",
@@ -479,12 +691,93 @@ function extractClauseIds(body) {
   return uniqueStrings(matches.map(item => item.replace(/[{}]/g, "").trim().slice(CLAUSE_MARKER_PREFIX.length)));
 }
 
+function createClauseSectionId() {
+  return `section_${Date.now()}_${Math.random().toString(16).slice(2, 8)}`;
+}
+
+function normalizeClauseSections(source = {}) {
+  const rawSections = Array.isArray(source.sections) ? source.sections : [];
+  const sections = rawSections
+    .map(section => ({
+      id: section.id || createClauseSectionId(),
+      text: String(section.text || "").trim(),
+    }))
+    .filter(section => section.text);
+
+  if (sections.length > 0) return sections;
+  const fallbackBody = String(source.body || "").trim();
+  const fallbackSource = fallbackBody.replace(/^Artikel\s+\d+\s*[-–—].*?\n+/i, "").trim();
+  const fallbackSections = fallbackSource
+    .split(/\n+\s*(?=(?:x|\d+)\.\d+\s+)/i)
+    .map(text => text.replace(/^(?:x|\d+)\.\d+\s*/i, "").trim())
+    .filter(Boolean);
+  if (fallbackSections.length > 0 && /^(?:x|\d+)\.\d+\s+/i.test(fallbackSource)) {
+    return fallbackSections.map(text => ({ id: createClauseSectionId(), text }));
+  }
+  return fallbackBody ? [{ id: createClauseSectionId(), text: fallbackSource || fallbackBody }] : [{ id: createClauseSectionId(), text: "" }];
+}
+
+function buildClauseBodyFromSections(sections = [], articleLabel = "x") {
+  return normalizeClauseSections({ sections })
+    .filter(section => section.text)
+    .map((section, index) => `${articleLabel}.${index + 1} ${section.text}`)
+    .join("\n\n");
+}
+
+function renumberArticleChunk(chunk = "", state) {
+  return String(chunk || "").split(/(\r?\n)/).map(part => {
+    if (/^\r?\n$/.test(part)) return part;
+    let line = part;
+    const headingMatch = line.match(/^(\s*)Artikel\s+(\d+)\b/i);
+    if (headingMatch) {
+      state.articleNumber += 1;
+      state.currentOriginalArticle = headingMatch[2];
+      state.currentRenderedArticle = state.articleNumber;
+      line = line.replace(/^(\s*)Artikel\s+\d+\b/i, `$1Artikel ${state.currentRenderedArticle}`);
+    }
+    if (state.currentOriginalArticle && state.currentRenderedArticle) {
+      line = line.replace(
+        new RegExp(`^(\\s*)${state.currentOriginalArticle}\\.(\\d+)\\b`),
+        `$1${state.currentRenderedArticle}.$2`,
+      );
+    }
+    return line;
+  }).join("");
+}
+
+function renderClauseWithArticleNumber(clause, articleNumber) {
+  if (!clause) return "";
+  const sections = normalizeClauseSections(clause).filter(section => section.text);
+  const heading = `Artikel ${articleNumber} - ${clause.title || "Clausule"}`;
+  if (sections.length === 0) return heading;
+  return [heading, ...sections.map((section, index) => `${articleNumber}.${index + 1} ${section.text}`)].join("\n\n");
+}
+
 function expandClauseMarkers(body, clauses = []) {
   const clauseMap = new Map((clauses || []).map(clause => [clause.id, clause]));
-  return String(body || "").replace(/\{\{\s*clausule:([^}]+)\s*\}\}/g, (_, rawId) => {
-    const id = String(rawId || "").trim();
-    return clauseMap.get(id)?.body || `[[Clausule niet gevonden: ${id}]]`;
-  });
+  const source = String(body || "");
+  const markerPattern = /\{\{\s*clausule:([^}]+)\s*\}\}/g;
+  const state = { articleNumber: 0, currentOriginalArticle: null, currentRenderedArticle: null };
+  let result = "";
+  let cursor = 0;
+  let match;
+
+  while ((match = markerPattern.exec(source)) !== null) {
+    result += renumberArticleChunk(source.slice(cursor, match.index), state);
+    const id = String(match[1] || "").trim();
+    const clause = clauseMap.get(id);
+    if (clause) {
+      state.articleNumber += 1;
+      state.currentOriginalArticle = null;
+      state.currentRenderedArticle = null;
+      result += renderClauseWithArticleNumber(clause, state.articleNumber);
+    } else {
+      result += `[[Clausule niet gevonden: ${id}]]`;
+    }
+    cursor = markerPattern.lastIndex;
+  }
+
+  return result + renumberArticleChunk(source.slice(cursor), state);
 }
 
 function sortClauseIdsByConfiguredOrder(ids, clauses = []) {
@@ -534,6 +827,59 @@ function getTemplateScopeLabel(item) {
 function caoLabel(value) {
   if (!value) return "Geen CAO";
   return CAO_OPTION_LABELS[value] || value;
+}
+
+function clauseScopeLabel(value) {
+  return CLAUSE_SCOPE_OPTIONS.find(option => option.value === value)?.label || "Nog geen onderdeel";
+}
+
+function clauseOptionsForScope(scope) {
+  return CLAUSE_TYPE_CATALOG[scope] || [];
+}
+
+function clauseDefinition(scope, type) {
+  return clauseOptionsForScope(scope).find(option => option.value === type) || null;
+}
+
+function clauseTypeLabel(scope, type) {
+  return clauseDefinition(scope, type)?.label || "Nog geen clausule";
+}
+
+function inferClauseCatalog(record = {}) {
+  if (record.scope && record.clause_type && clauseDefinition(record.scope, record.clause_type)) {
+    return { scope: record.scope, type: record.clause_type };
+  }
+
+  const title = String(record.title || "").trim().toLowerCase();
+  if (title) {
+    for (const scopeOption of CLAUSE_SCOPE_OPTIONS) {
+      const match = clauseOptionsForScope(scopeOption.value).find(option => {
+        const label = option.label.toLowerCase();
+        return title === label || title.includes(label) || label.includes(title);
+      });
+      if (match) return { scope: scopeOption.value, type: match.value };
+    }
+  }
+
+  return {
+    scope: record.scope || "",
+    type: record.clause_type || "",
+  };
+}
+
+function editableClauseSections(source = {}) {
+  const rawSections = Array.isArray(source.sections) ? source.sections : [];
+  const sections = rawSections.map(section => ({
+    id: section.id || createClauseSectionId(),
+    text: String(section.text || ""),
+  }));
+  if (sections.length > 0) return sections;
+  return normalizeClauseSections(source);
+}
+
+function defaultClauseSections(definition) {
+  const defaults = definition?.defaultSections || [""];
+  return defaults.map(text => ({ id: createClauseSectionId(), text }));
 }
 
 function statusBadge(status) {
@@ -1224,7 +1570,10 @@ function templateFormFromRecord(companyId, record) {
 function initialClause(companyId, sortOrder = 0) {
   return {
     company_id: companyId,
+    scope: "",
+    clause_type: "",
     title: "",
+    sections: [{ id: createClauseSectionId(), text: "" }],
     body: "",
     sort_order: sortOrder,
     status: "active",
@@ -1298,11 +1647,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [clauseWizardOpen, setClauseWizardOpen] = useState(false);
   const [letterheadStep, setLetterheadStep] = useState(1);
   const [templateStep, setTemplateStep] = useState(1);
+  const [clauseStep, setClauseStep] = useState(1);
   const [previewFile, setPreviewFile] = useState(null);
   const [message, setMessage] = useState(null);
   const [letterheadPreviewUrl, setLetterheadPreviewUrl] = useState("");
   const [letterheadAssetInfo, setLetterheadAssetInfo] = useState(null);
   const [selectedLetterheadLayerId, setSelectedLetterheadLayerId] = useState(null);
+  const [selectedClauseSectionIndex, setSelectedClauseSectionIndex] = useState(0);
   const [letterheadEditorOptions, setLetterheadEditorOptions] = useState(DEFAULT_LETTERHEAD_EDITOR_OPTIONS);
   const [clausesReordering, setClausesReordering] = useState(false);
 
@@ -1354,6 +1705,12 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     .filter(item => item.status !== "archived")
     .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0) || String(a.title || "").localeCompare(String(b.title || ""))),
   [clauses]);
+  const currentClauseDefinition = useMemo(
+    () => clauseDefinition(clauseForm.scope, clauseForm.clause_type),
+    [clauseForm.scope, clauseForm.clause_type],
+  );
+  const clauseSections = useMemo(() => editableClauseSections(clauseForm), [clauseForm]);
+  const clausePreviewBody = useMemo(() => buildClauseBodyFromSections(clauseSections), [clauseSections]);
   const templateClauseIds = useMemo(() => extractClauseIds(templateForm.body), [templateForm.body]);
   const selectedTemplateLetterhead = activeLetterheads.find(item => item.id === templateForm.default_letterhead_id) || null;
   const selectedContractModel = getContractModel(templateForm.contract_model);
@@ -1606,17 +1963,28 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
 
   const saveClauseMutation = useMutation({
     mutationFn: async () => {
+      if (!clauseForm.scope) throw new Error("Kies eerst voor welk onderdeel deze clausule bedoeld is.");
+      if (!clauseForm.clause_type) throw new Error("Kies eerst welk type clausule je wilt maken.");
       if (!clauseForm.title.trim()) throw new Error("Vul een titel voor de clausule in.");
-      if (!clauseForm.body.trim()) throw new Error("Vul de clausuletekst in.");
+      const sections = normalizeClauseSections(clauseForm).filter(section => section.text);
+      if (sections.length === 0) throw new Error("Voeg minimaal één clausule-onderdeel toe.");
+      const body = buildClauseBodyFromSections(sections);
       const previous = editingClauseId ? clauses.find(item => item.id === editingClauseId) || {} : {};
       const payload = {
         company_id: companyId,
+        scope: clauseForm.scope,
+        clause_type: clauseForm.clause_type,
         title: clauseForm.title.trim(),
-        body: clauseForm.body,
+        sections,
+        body,
         sort_order: Number.isFinite(Number(clauseForm.sort_order)) ? Number(clauseForm.sort_order) : activeClauses.length,
         status: "active",
-        placeholders: extractPlaceholders(clauseForm.body),
-        metadata: buildAuditMetadata(currentUser, editingClauseId ? "gewijzigd" : "toegevoegd", previous.metadata || {}, auditActors),
+        placeholders: extractPlaceholders(body),
+        metadata: {
+          ...buildAuditMetadata(currentUser, editingClauseId ? "gewijzigd" : "toegevoegd", previous.metadata || {}, auditActors),
+          scope_label: clauseScopeLabel(clauseForm.scope),
+          clause_type_label: clauseTypeLabel(clauseForm.scope, clauseForm.clause_type),
+        },
       };
       return editingClauseId
         ? base44.entities.CompanyContractClause.update(editingClauseId, payload)
@@ -1626,6 +1994,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       setClauseForm(initialClause(companyId));
       setEditingClauseId(null);
       setClauseWizardOpen(false);
+      setClauseStep(1);
+      setSelectedClauseSectionIndex(0);
       setMessage({ type: "success", text: "Clausule opgeslagen." });
       refresh();
     },
@@ -1796,30 +2166,169 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     setTemplateStep(step => Math.min(step + 1, TEMPLATE_STEPS.length));
   };
 
+  const syncClauseSections = (updater) => {
+    setClauseForm(prev => {
+      const currentSections = editableClauseSections(prev);
+      const nextSections = typeof updater === "function" ? updater(currentSections) : updater;
+      const normalized = nextSections.length > 0 ? nextSections : [{ id: createClauseSectionId(), text: "" }];
+      return {
+        ...prev,
+        sections: normalized,
+        body: buildClauseBodyFromSections(normalized),
+      };
+    });
+  };
+
+  const selectClauseScope = (scope) => {
+    setClauseForm(prev => ({
+      ...prev,
+      scope,
+      clause_type: "",
+      title: "",
+      sections: [{ id: createClauseSectionId(), text: "" }],
+      body: "",
+    }));
+    setSelectedClauseSectionIndex(0);
+    setMessage(null);
+    setClauseStep(2);
+  };
+
+  const selectClauseType = (type) => {
+    const definition = clauseDefinition(clauseForm.scope, type);
+    const sections = defaultClauseSections(definition);
+    setClauseForm(prev => ({
+      ...prev,
+      clause_type: type,
+      title: definition?.label || prev.title || "",
+      sections,
+      body: buildClauseBodyFromSections(sections),
+    }));
+    setSelectedClauseSectionIndex(0);
+    setMessage(null);
+    setClauseStep(3);
+  };
+
+  const nextClauseStep = () => {
+    if (clauseStep === 1 && !clauseForm.scope) {
+      setMessage({ type: "error", text: "Kies eerst het onderdeel waarvoor deze clausule bedoeld is." });
+      return;
+    }
+    if (clauseStep === 2 && !clauseForm.clause_type) {
+      setMessage({ type: "error", text: "Kies eerst het type clausule." });
+      return;
+    }
+    if (clauseStep === 3) {
+      if (!clauseForm.title.trim()) {
+        setMessage({ type: "error", text: "Geef de clausule een duidelijke titel." });
+        return;
+      }
+      if (normalizeClauseSections(clauseForm).filter(section => section.text).length === 0) {
+        setMessage({ type: "error", text: "Voeg minimaal één onderdeel toe, bijvoorbeeld x.1." });
+        return;
+      }
+    }
+    setMessage(null);
+    setClauseStep(step => Math.min(step + 1, CLAUSE_STEPS.length));
+  };
+
+  const updateClauseSection = (sectionId, text) => {
+    syncClauseSections(sections => sections.map(section => (
+      section.id === sectionId ? { ...section, text } : section
+    )));
+  };
+
+  const addClauseSection = () => {
+    syncClauseSections(sections => [...sections, { id: createClauseSectionId(), text: "" }]);
+    setSelectedClauseSectionIndex(clauseSections.length);
+  };
+
+  const removeClauseSection = (sectionId) => {
+    syncClauseSections(sections => {
+      const nextSections = sections.filter(section => section.id !== sectionId);
+      return nextSections.length > 0 ? nextSections : [{ id: createClauseSectionId(), text: "" }];
+    });
+    setSelectedClauseSectionIndex(index => Math.max(0, Math.min(index, clauseSections.length - 2)));
+  };
+
+  const moveClauseSection = (index, direction) => {
+    const targetIndex = index + direction;
+    if (targetIndex < 0 || targetIndex >= clauseSections.length) return;
+    syncClauseSections(sections => {
+      const nextSections = Array.from(sections);
+      const [moved] = nextSections.splice(index, 1);
+      nextSections.splice(targetIndex, 0, moved);
+      return nextSections;
+    });
+    setSelectedClauseSectionIndex(targetIndex);
+  };
+
+  const appendSnippetToSection = (snippet, targetIndex = selectedClauseSectionIndex) => {
+    if (!snippet?.text) return;
+    syncClauseSections(sections => {
+      const safeIndex = Math.max(0, Math.min(targetIndex, sections.length - 1));
+      return sections.map((section, index) => {
+        if (index !== safeIndex) return section;
+        const existing = String(section.text || "").trim();
+        return {
+          ...section,
+          text: existing ? `${existing}\n\n${snippet.text}` : snippet.text,
+        };
+      });
+    });
+    setSelectedClauseSectionIndex(Math.max(0, Math.min(targetIndex, clauseSections.length - 1)));
+  };
+
+  const handleSnippetDragStart = (event, snippet) => {
+    event.dataTransfer.setData("application/x-loq-clause-snippet", JSON.stringify(snippet));
+    event.dataTransfer.setData("text/plain", snippet.text);
+    event.dataTransfer.effectAllowed = "copy";
+  };
+
+  const handleClauseSectionDrop = (event, sectionIndex) => {
+    const rawSnippet = event.dataTransfer.getData("application/x-loq-clause-snippet");
+    if (!rawSnippet) return;
+    event.preventDefault();
+    try {
+      appendSnippetToSection(JSON.parse(rawSnippet), sectionIndex);
+    } catch {
+      appendSnippetToSection({ text: rawSnippet }, sectionIndex);
+    }
+  };
+
   const startNewClause = () => {
     const lastOrder = activeClauses.reduce((max, item) => Math.max(max, Number(item.sort_order || 0)), 0);
     setMessage(null);
     setEditingClauseId(null);
     setClauseForm(initialClause(companyId, lastOrder + 10));
+    setClauseStep(1);
+    setSelectedClauseSectionIndex(0);
     setClauseWizardOpen(true);
   };
 
   const startEditClause = (record) => {
     setMessage(null);
     setEditingClauseId(record.id);
+    const inferred = inferClauseCatalog(record);
     setClauseForm({
       company_id: companyId,
+      scope: inferred.scope,
+      clause_type: inferred.type,
       title: record.title || "",
+      sections: editableClauseSections(record),
       body: record.body || "",
       sort_order: Number(record.sort_order || 0),
       status: record.status || "active",
     });
+    setClauseStep(inferred.scope && inferred.type ? 3 : 1);
+    setSelectedClauseSectionIndex(0);
     setClauseWizardOpen(true);
   };
 
   const cancelClauseWizard = () => {
     setClauseForm(initialClause(companyId));
     setEditingClauseId(null);
+    setClauseStep(1);
+    setSelectedClauseSectionIndex(0);
     setClauseWizardOpen(false);
   };
 
@@ -3093,6 +3602,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                             >
                               <div className="min-w-0">
                                 <p className="truncate font-medium">{clause.title}</p>
+                                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                                  {clauseScopeLabel(clause.scope)} · {clauseTypeLabel(clause.scope, clause.clause_type)}
+                                </p>
                                 <p className="mt-0.5 text-xs text-muted-foreground">{inserted ? "Staat al in deze template" : "Sleep naar de tekst of voeg in op cursorpositie"}</p>
                               </div>
                               <Button type="button" variant="outline" size="sm" onClick={() => insertClauseInTemplate(clause)} disabled={inserted}>
@@ -3242,8 +3754,12 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     </div>
   );
 
-  const renderClauseTab = () => (
-    <div className="flex h-full min-h-[360px] flex-col">
+  const renderClauseWizard = () => {
+    const availableClauseTypes = clauseOptionsForScope(clauseForm.scope);
+    const snippets = currentClauseDefinition?.snippets || [];
+    const clausePlaceholders = extractPlaceholders(clausePreviewBody);
+
+    return (
       <AnimatePresence>
         {clauseWizardOpen && (
           <motion.div
@@ -3252,61 +3768,245 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
             exit={{ height: 0, opacity: 0 }}
             className="overflow-hidden border-b border-primary/30 bg-muted/15"
           >
-            <div className="space-y-4 p-5">
-              <p className="text-xs font-semibold uppercase tracking-wider text-primary">
+            <div className="p-5">
+              <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-primary">
                 {editingClauseId ? "Clausule bewerken" : "Clausule toevoegen"}
               </p>
-              <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
-                <div className="space-y-2">
-                  <Label>Titel *</Label>
-                  <Input
-                    value={clauseForm.title}
-                    onChange={event => setClauseForm(prev => ({ ...prev, title: event.target.value }))}
-                    placeholder="Bijv. Geheimhouding"
-                  />
+              <WizardSteps labels={CLAUSE_STEPS} step={clauseStep} />
+
+              {clauseStep === 1 && (
+                <div className="space-y-3">
+                  <p className="text-sm font-medium text-foreground">Voor welk onderdeel is deze clausule bedoeld?</p>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-4">
+                    {CLAUSE_SCOPE_OPTIONS.map(option => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => selectClauseScope(option.value)}
+                        className={`rounded-lg border p-4 text-left transition-colors ${clauseForm.scope === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                      >
+                        <p className="font-semibold text-foreground">{option.label}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-                <div className="space-y-2">
-                  <Label>Volgorde</Label>
-                  <Input
-                    type="number"
-                    value={clauseForm.sort_order}
-                    onChange={event => setClauseForm(prev => ({ ...prev, sort_order: event.target.value }))}
-                  />
+              )}
+
+              {clauseStep === 2 && (
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Kies de clausule voor {clauseScopeLabel(clauseForm.scope).toLowerCase()}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">De lijst is afgestemd op het gekozen onderdeel.</p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    {availableClauseTypes.map(option => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => selectClauseType(option.value)}
+                        className={`rounded-lg border p-4 text-left transition-colors ${clauseForm.clause_type === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                      >
+                        <p className="font-semibold text-foreground">{option.label}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+                      </button>
+                    ))}
+                  </div>
                 </div>
-              </div>
-              <div className="space-y-2">
-                <Label>Clausuletekst *</Label>
-                <Textarea
-                  rows={10}
-                  value={clauseForm.body}
-                  onChange={event => setClauseForm(prev => ({ ...prev, body: event.target.value }))}
-                  placeholder="Artikel X - ..."
-                />
-              </div>
-              <div className="rounded-lg border border-border bg-background/40 p-3">
-                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
-                <div className="mt-3 flex flex-wrap gap-1">
-                  {extractPlaceholders(clauseForm.body).length === 0 ? (
-                    <span className="text-xs text-muted-foreground">Geen placeholders gevonden.</span>
-                  ) : extractPlaceholders(clauseForm.body).map(placeholder => (
-                    <Badge key={placeholder} variant="outline" className="text-xs">{placeholder}</Badge>
-                  ))}
+              )}
+
+              {clauseStep === 3 && (
+                <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+                  <div className="space-y-4">
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
+                      <div className="space-y-2">
+                        <Label>Titel *</Label>
+                        <Input
+                          value={clauseForm.title}
+                          onChange={event => setClauseForm(prev => ({ ...prev, title: event.target.value }))}
+                          placeholder={currentClauseDefinition?.label || "Bijv. Geheimhouding"}
+                        />
+                      </div>
+                      <div className="space-y-2">
+                        <Label>Volgorde</Label>
+                        <Input
+                          type="number"
+                          value={clauseForm.sort_order}
+                          onChange={event => setClauseForm(prev => ({ ...prev, sort_order: event.target.value }))}
+                        />
+                      </div>
+                    </div>
+
+                    <div className="space-y-3">
+                      <div className="flex items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-foreground">Onderdelen</p>
+                          <p className="text-xs text-muted-foreground">Artikelnummer blijft tijdelijk x; de template maakt hier later automatisch 6.1, 6.2, enzovoort van.</p>
+                        </div>
+                        <Button type="button" variant="outline" size="sm" onClick={addClauseSection}>
+                          <Plus className="mr-1 h-4 w-4" />
+                          Onderdeel
+                        </Button>
+                      </div>
+
+                      {clauseSections.map((section, index) => (
+                        <div
+                          key={section.id}
+                          className={`rounded-lg border p-3 transition-colors ${selectedClauseSectionIndex === index ? "border-primary bg-primary/5" : "border-border bg-background/40"}`}
+                          onDragOver={event => {
+                            if (Array.from(event.dataTransfer.types || []).includes("application/x-loq-clause-snippet")) event.preventDefault();
+                          }}
+                          onDrop={event => handleClauseSectionDrop(event, index)}
+                        >
+                          <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+                            <button
+                              type="button"
+                              className="flex items-center gap-2 text-left"
+                              onClick={() => setSelectedClauseSectionIndex(index)}
+                            >
+                              <Badge variant="outline" className="font-mono text-xs">x.{index + 1}</Badge>
+                              <span className="text-xs text-muted-foreground">{index === 0 ? "Hoofdbepaling" : "Aanvullend onderdeel"}</span>
+                            </button>
+                            <div className="flex gap-1">
+                              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => moveClauseSection(index, -1)} disabled={index === 0}>
+                                <ArrowUp className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button type="button" variant="ghost" size="icon" className="h-7 w-7" onClick={() => moveClauseSection(index, 1)} disabled={index === clauseSections.length - 1}>
+                                <ArrowDown className="h-3.5 w-3.5" />
+                              </Button>
+                              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-destructive" onClick={() => removeClauseSection(section.id)}>
+                                <Trash2 className="h-3.5 w-3.5" />
+                              </Button>
+                            </div>
+                          </div>
+                          <Textarea
+                            rows={4}
+                            value={section.text}
+                            onFocus={() => setSelectedClauseSectionIndex(index)}
+                            onChange={event => updateClauseSection(section.id, event.target.value)}
+                            placeholder="Beschrijf dit onderdeel van de clausule."
+                          />
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
+                  <div className="space-y-4">
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <div className="mb-3 flex items-center justify-between gap-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Bouwblokken</p>
+                        <Badge variant="outline" className="font-mono text-xs">x.{selectedClauseSectionIndex + 1}</Badge>
+                      </div>
+                      <div className="space-y-2">
+                        {snippets.length === 0 ? (
+                          <p className="text-sm text-muted-foreground">Geen bouwblokken beschikbaar voor deze clausule.</p>
+                        ) : snippets.map(snippet => (
+                          <div
+                            key={snippet.label}
+                            draggable
+                            onDragStart={event => handleSnippetDragStart(event, snippet)}
+                            className="rounded-lg border border-border bg-card p-3 text-sm"
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0">
+                                <p className="font-medium text-foreground">{snippet.label}</p>
+                                <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{snippet.text}</p>
+                              </div>
+                              <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" title={snippet.help} />
+                            </div>
+                            <Button type="button" variant="outline" size="sm" className="mt-3" onClick={() => appendSnippetToSection(snippet)}>
+                              <Plus className="mr-1 h-3.5 w-3.5" />
+                              Toevoegen
+                            </Button>
+                          </div>
+                        ))}
+                      </div>
+                    </div>
+
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Preview</p>
+                      <pre className="mt-3 max-h-[340px] overflow-auto whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-xs leading-relaxed text-foreground">
+                        {clausePreviewBody || "Nog geen clausuletekst."}
+                      </pre>
+                    </div>
+                  </div>
                 </div>
-              </div>
-              <div className="flex flex-wrap justify-between gap-2">
+              )}
+
+              {clauseStep === 4 && (
+                <div className="space-y-4">
+                  <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Onderdeel</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">{clauseScopeLabel(clauseForm.scope)}</p>
+                    </div>
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Clausule</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">{clauseTypeLabel(clauseForm.scope, clauseForm.clause_type)}</p>
+                    </div>
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Onderdelen</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">{normalizeClauseSections(clauseForm).filter(section => section.text).length}</p>
+                    </div>
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <p className="text-xs uppercase tracking-wider text-muted-foreground">Placeholders</p>
+                      <p className="mt-1 text-sm font-medium text-foreground">{clausePlaceholders.length}</p>
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Clausuletekst</p>
+                    <pre className="mt-3 whitespace-pre-wrap rounded-md bg-muted/40 p-3 text-sm leading-relaxed text-foreground">
+                      {clausePreviewBody || "Nog geen clausuletekst."}
+                    </pre>
+                  </div>
+                  <div className="rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
+                    <div className="mt-3 flex flex-wrap gap-1">
+                      {clausePlaceholders.length === 0 ? (
+                        <span className="text-xs text-muted-foreground">Geen placeholders gevonden.</span>
+                      ) : clausePlaceholders.map(placeholder => (
+                        <Badge key={placeholder} variant="outline" className="text-xs">{placeholder}</Badge>
+                      ))}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
                 <Button type="button" variant="ghost" onClick={cancelClauseWizard}>
                   <X className="mr-1 h-4 w-4" />
                   Annuleren
                 </Button>
-                <Button type="button" onClick={() => saveClauseMutation.mutate()} disabled={saveClauseMutation.isPending}>
-                  <Save className="mr-1 h-4 w-4" />
-                  {saveClauseMutation.isPending ? "Opslaan..." : "Clausule opslaan"}
-                </Button>
+                <div className="flex flex-wrap justify-end gap-2">
+                  {clauseStep > 1 && (
+                    <Button type="button" variant="outline" onClick={() => setClauseStep(step => step - 1)}>
+                      <ChevronLeft className="mr-1 h-4 w-4" />
+                      Terug
+                    </Button>
+                  )}
+                  {clauseStep < CLAUSE_STEPS.length ? (
+                    <Button type="button" onClick={nextClauseStep}>
+                      Volgende
+                      <ChevronRight className="ml-1 h-4 w-4" />
+                    </Button>
+                  ) : (
+                    <Button type="button" onClick={() => saveClauseMutation.mutate()} disabled={saveClauseMutation.isPending}>
+                      <Save className="mr-1 h-4 w-4" />
+                      {saveClauseMutation.isPending ? "Opslaan..." : "Clausule opslaan"}
+                    </Button>
+                  )}
+                </div>
               </div>
             </div>
           </motion.div>
         )}
       </AnimatePresence>
+    );
+  };
+
+  const renderClauseTab = () => (
+    <div className="flex h-full min-h-[360px] flex-col">
+      {renderClauseWizard()}
 
       <div className={`${CLAUSE_TABLE_GRID} items-center border-b border-border bg-muted/20 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
         <span></span>
@@ -3349,7 +4049,12 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                           </button>
                           <div className="min-w-0">
                             <p className="truncate font-semibold text-foreground">{item.title}</p>
-                            <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{item.body}</p>
+                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                              {clauseScopeLabel(item.scope)} · {clauseTypeLabel(item.scope, item.clause_type)}
+                            </p>
+                            <p className="mt-0.5 line-clamp-2 font-mono text-xs text-muted-foreground">
+                              {buildClauseBodyFromSections(normalizeClauseSections(item))}
+                            </p>
                           </div>
                           <div className="flex flex-wrap gap-1">
                             {(item.placeholders || extractPlaceholders(item.body)).slice(0, 3).map(placeholder => (

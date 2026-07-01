@@ -10,9 +10,41 @@
       "type": "string",
       "description": "Interne titel van de clausule."
     },
+    "scope": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Onderdeel waarvoor de clausule bedoeld is, bijvoorbeeld employment_contracts, customer_contracts of zzp_framework_agreements."
+    },
+    "clause_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Type clausule binnen het gekozen onderdeel, bijvoorbeeld confidentiality, liability of payment_terms."
+    },
     "body": {
       "type": "string",
       "description": "Clausuletekst met optionele placeholders zoals {{medewerker.naam}}."
+    },
+    "sections": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "text": {
+            "type": "string"
+          }
+        }
+      },
+      "description": "Geordende onderdelen van de clausule. In de editor worden deze als x.1, x.2 enzovoort getoond."
     },
     "sort_order": {
       "type": "number",

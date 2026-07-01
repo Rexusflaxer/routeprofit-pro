@@ -705,12 +705,75 @@ function replacePlaceholders(templateBody, values) {
   return result;
 }
 
+function normalizeContractClauseSections(source = {}) {
+  const rawSections = Array.isArray(source.sections) ? source.sections : [];
+  const sections = rawSections
+    .map(section => String(section.text || "").trim())
+    .filter(Boolean);
+  if (sections.length > 0) return sections;
+
+  const fallbackBody = String(source.body || "").trim();
+  const fallbackSource = fallbackBody.replace(/^Artikel\s+\d+\s*[-–—].*?\n+/i, "").trim();
+  const fallbackSections = fallbackSource
+    .split(/\n+\s*(?=(?:x|\d+)\.\d+\s+)/i)
+    .map(text => text.replace(/^(?:x|\d+)\.\d+\s*/i, "").trim())
+    .filter(Boolean);
+  if (fallbackSections.length > 0 && /^(?:x|\d+)\.\d+\s+/i.test(fallbackSource)) return fallbackSections;
+  return fallbackSource ? [fallbackSource] : [];
+}
+
+function renumberArticleChunk(chunk = "", state) {
+  return String(chunk || "").split(/(\r?\n)/).map(part => {
+    if (/^\r?\n$/.test(part)) return part;
+    let line = part;
+    const headingMatch = line.match(/^(\s*)Artikel\s+(\d+)\b/i);
+    if (headingMatch) {
+      state.articleNumber += 1;
+      state.currentOriginalArticle = headingMatch[2];
+      state.currentRenderedArticle = state.articleNumber;
+      line = line.replace(/^(\s*)Artikel\s+\d+\b/i, `$1Artikel ${state.currentRenderedArticle}`);
+    }
+    if (state.currentOriginalArticle && state.currentRenderedArticle) {
+      line = line.replace(
+        new RegExp(`^(\\s*)${state.currentOriginalArticle}\\.(\\d+)\\b`),
+        `$1${state.currentRenderedArticle}.$2`,
+      );
+    }
+    return line;
+  }).join("");
+}
+
+function renderContractClauseArticle(clause, articleNumber) {
+  if (!clause) return "";
+  const sections = normalizeContractClauseSections(clause);
+  const heading = `Artikel ${articleNumber} - ${clause.title || "Clausule"}`;
+  if (sections.length === 0) return heading;
+  return [heading, ...sections.map((text, index) => `${articleNumber}.${index + 1} ${text}`)].join("\n\n");
+}
+
 function expandClauseMarkers(templateBody, clauses = []) {
   const clauseMap = new Map((clauses || []).map(clause => [clause.id, clause]));
-  return String(templateBody || "").replace(/\{\{\s*clausule:([^}]+)\s*\}\}/g, (_, rawId) => {
-    const id = String(rawId || "").trim();
-    return clauseMap.get(id)?.body || "";
-  });
+  const source = String(templateBody || "");
+  const markerPattern = /\{\{\s*clausule:([^}]+)\s*\}\}/g;
+  const state = { articleNumber: 0, currentOriginalArticle: null, currentRenderedArticle: null };
+  let result = "";
+  let cursor = 0;
+  let match;
+
+  while ((match = markerPattern.exec(source)) !== null) {
+    result += renumberArticleChunk(source.slice(cursor, match.index), state);
+    const id = String(match[1] || "").trim();
+    const clause = clauseMap.get(id);
+    if (clause) {
+      state.articleNumber += 1;
+      state.currentOriginalArticle = null;
+      state.currentRenderedArticle = null;
+      result += renderContractClauseArticle(clause, state.articleNumber);
+    }
+    cursor = markerPattern.lastIndex;
+  }
+
+  return result + renumberArticleChunk(source.slice(cursor), state);
 }
 
 function contractRenderValues(personnel, form, company) {
