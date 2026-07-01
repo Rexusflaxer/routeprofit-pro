@@ -471,20 +471,29 @@ export default function WpbrTab({ companyId, company }) {
                     <div className="space-y-3">
                       <p className="text-sm font-medium text-foreground">Kies het vergunningstype</p>
                       <div className="grid grid-cols-1 gap-2">
-                        {WPBR_TYPES.map((t) => (
-                          <button
-                            key={t.key}
-                            onClick={() => { set("license_type", t.key); setStep(2); }}
-                            className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${
-                              form.license_type === t.key ? "border-primary bg-accent" : "border-border bg-card"}`}
-                          >
-                            <div>
-                              <span className="text-sm font-semibold text-foreground">{t.label}</span>
-                              <span className="text-xs text-muted-foreground ml-2">{t.desc}</span>
-                            </div>
-                            <ChevronRight className="w-4 h-4 text-muted-foreground" />
-                          </button>
-                        ))}
+                        {WPBR_TYPES.map((t) => {
+                          const exists = !isArchiveEntry && activeLicenses.some((l) => l.license_type === t.key);
+                          return (
+                            <button
+                              key={t.key}
+                              disabled={exists}
+                              onClick={() => { set("license_type", t.key); setStep(2); }}
+                              className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all ${
+                                exists
+                                  ? "border-border bg-muted/40 opacity-60 cursor-not-allowed"
+                                  : "hover:border-primary hover:bg-accent active:scale-[0.99] border-border bg-card"
+                              } ${form.license_type === t.key ? "border-primary bg-accent" : ""}`}
+                            >
+                              <div>
+                                <span className="text-sm font-semibold text-foreground">{t.label}</span>
+                                <span className="text-xs text-muted-foreground ml-2">{t.desc}</span>
+                              </div>
+                              {exists
+                                ? <Badge className="text-xs bg-muted text-muted-foreground border-0 shrink-0">Al toegevoegd</Badge>
+                                : <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />}
+                            </button>
+                          );
+                        })}
                       </div>
                       <div className="flex justify-end pt-1">
                         <Button variant="ghost" size="sm" onClick={cancelWizard}><X className="w-4 h-4 mr-1" /> Annuleren</Button>
