@@ -3841,7 +3841,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                       <div className="flex items-center justify-between gap-3">
                         <div>
                           <p className="text-sm font-medium text-foreground">Onderdelen</p>
-                          <p className="text-xs text-muted-foreground">Artikelnummer blijft tijdelijk x; de template maakt hier later automatisch 6.1, 6.2, enzovoort van.</p>
+                          <p className="text-xs text-muted-foreground"></p>
                         </div>
                         <Button type="button" variant="outline" size="sm" onClick={addClauseSection}>
                           <Plus className="mr-1 h-4 w-4" />
