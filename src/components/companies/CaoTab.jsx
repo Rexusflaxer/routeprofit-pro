@@ -7,64 +7,15 @@ import { Badge } from "@/components/ui/badge";
 import { Plus, Check, ChevronRight, ChevronLeft, Edit, Trash2, AlertTriangle } from "lucide-react";
 import CaoCustomFunctionsManager from "./CaoCustomFunctionsManager";
 import { motion, AnimatePresence } from "framer-motion";
-
-const CAO_KEY_LABELS = {
-  cao_particuliere_beveiliging: "CAO Particuliere Beveiliging",
-  cao_evenementen_horecabeveiliging: "CAO Evenementen- en Horecabeveiliging",
-  cao_verkeersregelaars: "CAO Verkeersregelaars",
-  cao_veiligheidsdomein: "CAO Veiligheidsdomein",
-};
-
-const FUNCTION_LABELS = {
-  objectbeveiliger: "Objectbeveiliger",
-  receptionist: "Receptionist",
-  mobiel_surveillant: "Mobiel Surveillant",
-  alarmopvolging: "Alarmopvolging",
-  winkelsurveillant: "Winkelsurveillant",
-  centralist: "Centralist",
-  brandwacht: "Brandwacht",
-  geld_waardetransporteur: "Geld- en waardetransporteur",
-  planner: "Planner",
-  binnendienst: "Algemeen binnendienst",
-  hr_manager: "HR-Manager",
-  sales_manager: "Sales Manager",
-  evenementenbeveiliger: "Evenementenbeveiliger",
-  horecabeveiliger: "Horecabeveiliger",
-  verkeersregelaar: "Verkeersregelaar",
-  toezichthouder: "Toezichthouder",
-  handhaver: "Handhaver",
-  boa: "BOA",
-};
-
-// Per CAO: welke functies zijn operationeel vs. binnendienst
-const CAO_FUNCTION_GROUPS = {
-  cao_particuliere_beveiliging: {
-    operationeel: ["objectbeveiliger", "receptionist", "mobiel_surveillant", "alarmopvolging", "winkelsurveillant", "centralist", "brandwacht", "geld_waardetransporteur", "evenementenbeveiliger"],
-    binnendienst: ["binnendienst", "planner", "hr_manager", "sales_manager"],
-  },
-  cao_evenementen_horecabeveiliging: {
-    operationeel: ["evenementenbeveiliger", "horecabeveiliger"],
-    binnendienst: [],
-  },
-  cao_verkeersregelaars: {
-    operationeel: ["verkeersregelaar"],
-    binnendienst: [],
-  },
-  cao_veiligheidsdomein: {
-    operationeel: ["toezichthouder", "handhaver", "boa"],
-    binnendienst: [],
-  },
-};
-
-const CAO_FUNCTION_CATALOG = {
-  cao_particuliere_beveiliging: [
-    "objectbeveiliger", "receptionist", "mobiel_surveillant", "alarmopvolging", "winkelsurveillant",
-    "centralist", "brandwacht", "geld_waardetransporteur", "evenementenbeveiliger", "binnendienst", "planner", "hr_manager", "sales_manager",
-  ],
-  cao_evenementen_horecabeveiliging: ["evenementenbeveiliger", "horecabeveiliger"],
-  cao_verkeersregelaars: ["verkeersregelaar"],
-  cao_veiligheidsdomein: ["toezichthouder", "handhaver", "boa"],
-};
+import {
+  CAO_OPTION_LABELS,
+  WPBR_TYPE_LABELS,
+  allowedCaoKeysForWpbrLicenses,
+  buildFunctionGroupsForWpbrLicenses,
+  functionLabel,
+  getActiveWpbrLicenses,
+  uniqueStrings,
+} from "@/lib/securityCaoCatalog";
 
 const DELETE_PASSWORD = "verwijder";
 
@@ -76,25 +27,13 @@ const EMPTY_FORM = {
   notes: "",
 };
 
-function uniqueStrings(values) {
-  return [...new Set((values || []).map(value => String(value || "").trim()).filter(Boolean))];
-}
-
-function functionLabel(value) {
-  return FUNCTION_LABELS[value] || String(value || "").replace(/[_-]+/g, " ");
-}
-
-function defaultFunctionsForCao(caoKey) {
-  return CAO_FUNCTION_CATALOG[caoKey] || [];
-}
-
 function normalizeFunctionSelection(values, caoKey) {
   return uniqueStrings(values).filter(value => value !== "all");
 }
 
 function caoOptionLabel(option) {
   if (!option) return "—";
-  return option.label || option.display_name || CAO_KEY_LABELS[option.cao_key] || option.name || option.cao_key || "CAO";
+  return option.label || option.display_name || CAO_OPTION_LABELS[option.cao_key] || option.name || option.cao_key || "CAO";
 }
 
 function findCaoOption(options, value) {
@@ -201,6 +140,12 @@ export default function CaoTab({ companyId }) {
     enabled: !!companyId,
   });
 
+  const { data: wpbrLicenses = [], isLoading: wpbrLicensesLoading } = useQuery({
+    queryKey: ["wpbr-licenses", companyId],
+    queryFn: () => base44.entities.CompanyWpbrLicense.filter({ company_id: companyId }, "-created_date"),
+    enabled: !!companyId,
+  });
+
   const selectedCaoConfigurationIds = uniqueStrings(assignments.map(a => a.cao_configuration_id));
   const { data: caoOptions = [] } = useQuery({
     queryKey: ["company-cao-key-options", selectedCaoConfigurationIds],
@@ -271,18 +216,20 @@ export default function CaoTab({ companyId }) {
   const assignmentToDelete = assignments.find(a => a.id === deleteId);
   const deleteLabel = assignmentToDelete ? caoOptionLabel(findCaoOption(caoOptions, assignmentToDelete) || assignmentToDelete) : "";
   const selectedFunctions = normalizeFunctionSelection(form.applies_to_activities, form.cao_key);
-  const knownFunctions = defaultFunctionsForCao(form.cao_key);
-
+  const activeWpbrLicenses = getActiveWpbrLicenses(wpbrLicenses);
+  const allowedCaoKeys = allowedCaoKeysForWpbrLicenses(wpbrLicenses);
+  const allowedCaoOptions = caoOptions.filter(option => allowedCaoKeys.includes(option.cao_key));
+  const selectedCaoIsAllowed = !form.cao_key || allowedCaoKeys.includes(form.cao_key);
+  const functionGroups = buildFunctionGroupsForWpbrLicenses(wpbrLicenses, form.cao_key);
+  const availableFunctionValues = uniqueStrings(functionGroups.flatMap(group => group.functions));
   // Custom function defs: active + archived
   const customFunctionDefs = Array.isArray(form.custom_function_defs) ? form.custom_function_defs : [];
   const activeCustomValues = customFunctionDefs.filter(f => !f.archived).map(f => f.value);
+  const unavailableSelectedFunctions = selectedFunctions.filter(value =>
+    !availableFunctionValues.includes(value) && !activeCustomValues.includes(value)
+  );
   const existingCustomCategories = [...new Set(customFunctionDefs.map(f => f.category).filter(Boolean))];
-
-  const currentGroups = CAO_FUNCTION_GROUPS[form.cao_key];
-  const predefinedCategories = currentGroups ? [
-    ...(currentGroups.operationeel.length > 0 ? ["Operationele functies"] : []),
-    ...(currentGroups.binnendienst.length > 0 ? ["Binnendienst functies"] : []),
-  ] : [];
+  const predefinedCategories = functionGroups.map(group => group.label);
 
   const handleAddCustomFunction = (value, label, category) => {
     if (!value) return;
@@ -345,9 +292,28 @@ export default function CaoTab({ companyId }) {
                 {step === 1 && (
                    <div className="space-y-3">
                      <p className="text-sm font-medium text-foreground">Kies de CAO</p>
+                     <p className="text-xs text-muted-foreground">
+                       De lijst is afgeleid uit de actieve WPBR-vergunningen van dit bedrijf. Voeg eerst een vergunning toe als hier niets beschikbaar is.
+                     </p>
+                     {activeWpbrLicenses.length > 0 && (
+                       <div className="flex flex-wrap gap-1.5">
+                         {activeWpbrLicenses.map(license => (
+                           <Badge key={license.id || `${license.license_type}-${license.license_number}`} variant="outline" className="text-xs">
+                             {WPBR_TYPE_LABELS[license.license_type] || license.license_type}
+                           </Badge>
+                         ))}
+                       </div>
+                     )}
                      <div className="grid grid-cols-1 gap-2">
-                       {caoOptions.length === 0 && <p className="text-sm text-muted-foreground">Geen actieve CAO's beschikbaar.</p>}
-                       {caoOptions.map((c) => {
+                       {!wpbrLicensesLoading && activeWpbrLicenses.length === 0 && (
+                         <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                           Er is nog geen actieve WPBR-vergunning geregistreerd. Daardoor kan de applicatie niet veilig bepalen welke CAO's mogen worden gekoppeld.
+                         </p>
+                       )}
+                       {activeWpbrLicenses.length > 0 && allowedCaoOptions.length === 0 && (
+                         <p className="text-sm text-muted-foreground">Geen CAO's beschikbaar voor de actieve vergunningen.</p>
+                       )}
+                       {allowedCaoOptions.map((c) => {
                          const alreadyUsed = assignments.some(a => a.cao_key === c.cao_key && a.id !== editingId);
                          return (
                            <button key={c.id} disabled={alreadyUsed} onClick={() => {
@@ -385,8 +351,12 @@ export default function CaoTab({ companyId }) {
                 {step === 2 && (
                   <div className="space-y-3">
                     <p className="text-sm font-medium text-foreground">Functies voor deze CAO — <span className="text-muted-foreground font-normal">{caoOptionLabel(selectedCaoOption)}</span></p>
+                    {!selectedCaoIsAllowed && (
+                      <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                        Deze CAO past niet meer bij de huidige actieve WPBR-vergunningen. Controleer de vergunningen of kies een andere CAO-koppeling.
+                      </p>
+                    )}
                     {(() => {
-                      const groups = CAO_FUNCTION_GROUPS[form.cao_key];
                       const renderFunctionPills = (fns) => (
                         <div className="flex flex-wrap gap-2">
                           {fns.map(value => (
@@ -400,26 +370,41 @@ export default function CaoTab({ companyId }) {
                           ))}
                         </div>
                       );
-                      if (groups && (groups.operationeel.length > 0 || groups.binnendienst.length > 0)) {
+                      if (functionGroups.length > 0) {
                         return (
                           <div className="space-y-3">
-                            {groups.operationeel.length > 0 && (
-                              <div>
-                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Operationele functies</p>
-                                {renderFunctionPills(groups.operationeel)}
+                            {functionGroups.map(group => (
+                              <div key={group.key}>
+                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">{group.label}</p>
+                                {renderFunctionPills(group.functions)}
                               </div>
-                            )}
-                            {groups.binnendienst.length > 0 && (
-                              <div>
-                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">Binnendienst functies</p>
-                                {renderFunctionPills(groups.binnendienst)}
-                              </div>
-                            )}
+                            ))}
                           </div>
                         );
                       }
-                      return renderFunctionPills(knownFunctions);
+                      return (
+                        <p className="rounded-lg border border-border bg-card p-3 text-sm text-muted-foreground">
+                          Geen functielijst gevonden voor deze CAO en de actieve vergunningen.
+                        </p>
+                      );
                     })()}
+                    {unavailableSelectedFunctions.length > 0 && (
+                      <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 dark:border-amber-900 dark:bg-amber-950/30">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-amber-800 dark:text-amber-200 mb-2">Bestaande of afwijkende selectie</p>
+                        <div className="flex flex-wrap gap-2">
+                          {unavailableSelectedFunctions.map(value => (
+                            <button
+                              key={value}
+                              onClick={() => toggleFunction(value)}
+                              className="inline-flex items-center rounded-full border border-amber-400 bg-amber-100 px-3 py-1.5 text-xs font-medium text-amber-900 transition-colors hover:bg-amber-200 dark:border-amber-800 dark:bg-amber-950 dark:text-amber-100"
+                            >
+                              {functionLabel(value)}
+                            </button>
+                          ))}
+                        </div>
+                        <p className="mt-2 text-xs text-amber-800 dark:text-amber-200">Deze functies blijven zichtbaar omdat ze al geselecteerd zijn, maar ze zijn niet afgeleid uit de huidige actieve vergunningen.</p>
+                      </div>
+                    )}
                     <CaoCustomFunctionsManager
                       customFunctions={customFunctionDefs}
                       onAdd={handleAddCustomFunction}

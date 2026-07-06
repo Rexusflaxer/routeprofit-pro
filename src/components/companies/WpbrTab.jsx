@@ -9,17 +9,7 @@ import { motion, AnimatePresence } from "framer-motion";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { buildManagedFileDescriptor, syncManagedFileDescriptor, uploadManagedFile } from "@/lib/managedFiles";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
-
-const WPBR_TYPES = [
-  { key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
-  { key: "HND", label: "HND", desc: "Particulier beveiligingsbedrijf alleen voor horecabeveiliging" },
-  { key: "BD", label: "BD", desc: "Particuliere bedrijfsbeveiligingsdienst" },
-  { key: "HBD", label: "HBD", desc: "Particuliere bedrijfsbeveiligingsdienst voor eigen horecaonderneming" },
-  { key: "PAC", label: "PAC", desc: "Particuliere Alarmcentrale" },
-  { key: "VTC", label: "VTC", desc: "Particuliere Video Toezicht Centrale" },
-  { key: "PGW", label: "PGW", desc: "Particulier Geld- en Waardentransportbedrijf" },
-  { key: "POB", label: "POB", desc: "Particulier Recherchebureau" },
-];
+import { WPBR_TYPES } from "@/lib/securityCaoCatalog";
 
 const DELETE_PASSWORD = "verwijder";
 const WPBR_TABLE_GRID = "grid grid-cols-[minmax(34px,48px)_minmax(72px,96px)_minmax(96px,112px)_minmax(170px,1fr)_minmax(120px,150px)_minmax(250px,max-content)] gap-3 xl:gap-4";

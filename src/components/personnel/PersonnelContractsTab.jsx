@@ -12,6 +12,11 @@ import { Textarea } from "@/components/ui/textarea";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { uploadManagedFile } from "@/lib/managedFiles";
 import {
+  CAO_OPTIONS,
+  FUNCTION_CATALOG_OPTIONS,
+  functionLabel,
+} from "@/lib/securityCaoCatalog";
+import {
   CheckCircle,
   ChevronLeft,
   ChevronRight,
@@ -22,13 +27,6 @@ import {
   Upload,
   X,
 } from "lucide-react";
-
-const CAO_OPTIONS = [
-  { value: "cao_particuliere_beveiliging", label: "CAO Particuliere Beveiliging" },
-  { value: "cao_evenementen_horecabeveiliging", label: "CAO Evenementen- en Horecabeveiliging" },
-  { value: "cao_verkeersregelaars", label: "CAO Verkeersregelaars" },
-  { value: "cao_veiligheidsdomein", label: "CAO Veiligheidsdomein" },
-];
 
 const CAO_OPTION_LABELS = Object.fromEntries(CAO_OPTIONS.map(option => [option.value, option.label]));
 
@@ -54,22 +52,7 @@ const EMPLOYMENT_MODEL_OPTIONS = [
   { value: "unknown", label: "Onbekend" },
 ];
 
-const FUNCTION_TYPES = [
-  { value: "objectbeveiliger", label: "Objectbeveiliger" },
-  { value: "receptie", label: "Receptie" },
-  { value: "surveillant", label: "Surveillant" },
-  { value: "alarmopvolging", label: "Alarmopvolging" },
-  { value: "binnendienst", label: "Binnendienst" },
-  { value: "klantrelatie", label: "Klantrelatie" },
-  { value: "planner", label: "Planner" },
-  { value: "centralist", label: "Centralist" },
-  { value: "verkeersregelaar", label: "Verkeersregelaar" },
-  { value: "brandwacht", label: "Brandwacht" },
-  { value: "installateur", label: "Installateur" },
-  { value: "rechercheur", label: "Rechercheur" },
-  { value: "host", label: "Host / Hostess" },
-  { value: "other", label: "Overig" },
-];
+const FUNCTION_TYPES = FUNCTION_CATALOG_OPTIONS;
 
 const FUNCTION_TYPE_LABELS = Object.fromEntries(FUNCTION_TYPES.map(option => [option.value, option.label]));
 const CONTRACT_FORM_LABELS = Object.fromEntries(CONTRACT_FORM_OPTIONS.map(option => [option.value, option.label]));
@@ -313,7 +296,7 @@ function buildCompanyCaoKeyOptions(assignments, referenceDate, caoOptions = []) 
 }
 
 function readableFunctionLabel(value) {
-  return FUNCTION_TYPE_LABELS[value] || String(value || "").replace(/[_-]+/g, " ");
+  return FUNCTION_TYPE_LABELS[value] || functionLabel(value);
 }
 
 function buildCompanyFunctionOptions(assignments, referenceDate, caoKey, caoOptions = [], selectedValue = null) {
