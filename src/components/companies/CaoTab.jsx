@@ -14,6 +14,7 @@ import {
   buildFunctionGroupsForWpbrLicenses,
   functionLabel,
   getActiveWpbrLicenses,
+  isSecurityEmploymentCao,
   uniqueStrings,
 } from "@/lib/securityCaoCatalog";
 
@@ -44,6 +45,10 @@ function findCaoOption(options, value) {
     (caoKey && option.cao_key === caoKey) ||
     (configId && Array.isArray(option.configuration_ids) && option.configuration_ids.includes(configId))
   ) || null;
+}
+
+function assignmentCaoKey(options, assignment) {
+  return assignment?.cao_key || findCaoOption(options, assignment)?.cao_key || null;
 }
 
 function WizardSteps({ step }) {
@@ -160,6 +165,14 @@ export default function CaoTab({ companyId }) {
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
+      const nextCaoKey = data.cao_key || null;
+      if (!editingId && isSecurityEmploymentCao(nextCaoKey)) {
+        const existingSecurityAssignment = assignments.find(a => isSecurityEmploymentCao(assignmentCaoKey(caoOptions, a)));
+        const existingSecurityCaoKey = assignmentCaoKey(caoOptions, existingSecurityAssignment);
+        if (existingSecurityCaoKey && existingSecurityCaoKey !== nextCaoKey) {
+          throw new Error("Dit bedrijf heeft al een beveiligings-CAO-koppeling. Verwijder of wijzig eerst de bestaande koppeling.");
+        }
+      }
       const payload = {
         ...data,
         company_id: companyId,
@@ -174,6 +187,7 @@ export default function CaoTab({ companyId }) {
       return editingId ? base44.entities.CompanyCaoAssignment.update(editingId, payload) : base44.entities.CompanyCaoAssignment.create(payload);
     },
     onSuccess: () => { queryClient.invalidateQueries({ queryKey: ["cao-assignments", companyId] }); cancelWizard(); },
+    onError: (error) => setErrors(e => ({ ...e, submit: error?.message || "Opslaan mislukt." })),
   });
 
   const deleteMutation = useMutation({
@@ -216,6 +230,11 @@ export default function CaoTab({ companyId }) {
   const assignmentToDelete = assignments.find(a => a.id === deleteId);
   const deleteLabel = assignmentToDelete ? caoOptionLabel(findCaoOption(caoOptions, assignmentToDelete) || assignmentToDelete) : "";
   const selectedFunctions = normalizeFunctionSelection(form.applies_to_activities, form.cao_key);
+  const existingSecurityCaoAssignment = assignments.find(a => a.id !== editingId && isSecurityEmploymentCao(assignmentCaoKey(caoOptions, a)));
+  const existingSecurityCaoKey = assignmentCaoKey(caoOptions, existingSecurityCaoAssignment);
+  const existingSecurityCaoLabel = existingSecurityCaoAssignment
+    ? caoOptionLabel(findCaoOption(caoOptions, existingSecurityCaoAssignment) || existingSecurityCaoAssignment)
+    : "";
   const activeWpbrLicenses = getActiveWpbrLicenses(wpbrLicenses);
   const allowedCaoKeys = allowedCaoKeysForWpbrLicenses(wpbrLicenses);
   const allowedCaoOptions = caoOptions.filter(option => allowedCaoKeys.includes(option.cao_key));
@@ -304,6 +323,11 @@ export default function CaoTab({ companyId }) {
                          ))}
                        </div>
                      )}
+                     {existingSecurityCaoAssignment && (
+                       <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                         Er is al een beveiligings-CAO gekoppeld: <strong>{existingSecurityCaoLabel}</strong>. Gebruik binnen één bedrijfsprofiel één beveiligings-CAO, zodat functies, clausules en contracttemplates vanuit één consistente regeling worden opgebouwd.
+                       </p>
+                     )}
                      <div className="grid grid-cols-1 gap-2">
                        {!wpbrLicensesLoading && activeWpbrLicenses.length === 0 && (
                          <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
@@ -314,10 +338,12 @@ export default function CaoTab({ companyId }) {
                          <p className="text-sm text-muted-foreground">Geen CAO's beschikbaar voor de actieve vergunningen.</p>
                        )}
                        {allowedCaoOptions.map((c) => {
-                         const alreadyUsed = assignments.some(a => a.cao_key === c.cao_key && a.id !== editingId);
+                         const alreadyUsed = assignments.some(a => assignmentCaoKey(caoOptions, a) === c.cao_key && a.id !== editingId);
+                         const blockedBySecurityCao = !alreadyUsed && !!existingSecurityCaoKey && isSecurityEmploymentCao(c.cao_key) && existingSecurityCaoKey !== c.cao_key;
+                         const disabled = alreadyUsed || blockedBySecurityCao;
                          return (
-                           <button key={c.id} disabled={alreadyUsed} onClick={() => {
-                             if (alreadyUsed) return;
+                           <button key={c.id} disabled={disabled} onClick={() => {
+                             if (disabled) return;
                              setForm((f) => ({
                                ...f,
                                cao_configuration_id: null,
@@ -328,13 +354,14 @@ export default function CaoTab({ companyId }) {
                              setStep(2);
                            }}
                              className={`flex items-center justify-between px-4 py-3 rounded-lg border text-left transition-all ${
-                               alreadyUsed
+                               disabled
                                  ? "border-border bg-muted/40 opacity-50 cursor-not-allowed"
                                  : `hover:border-primary hover:bg-accent active:scale-[0.99] ${form.cao_key === c.cao_key ? "border-primary bg-accent" : "border-border bg-card"}`
                              }`}>
                              <div>
                                <span className="text-sm font-semibold text-foreground">{caoOptionLabel(c)}</span>
                                {alreadyUsed && <span className="block text-xs text-muted-foreground mt-0.5">Al gekoppeld aan dit bedrijf</span>}
+                               {blockedBySecurityCao && <span className="block text-xs text-muted-foreground mt-0.5">Niet tegelijk met {existingSecurityCaoLabel}</span>}
                              </div>
                              <ChevronRight className="w-4 h-4 text-muted-foreground shrink-0" />
                            </button>
@@ -474,6 +501,7 @@ export default function CaoTab({ companyId }) {
                         </Button>
                       </div>
                     </div>
+                    {errors.submit && <p className="text-xs text-destructive">{errors.submit}</p>}
                   </div>
                 )}
               </motion.div>

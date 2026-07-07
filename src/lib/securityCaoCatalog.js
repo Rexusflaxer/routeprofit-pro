@@ -7,6 +7,12 @@ export const CAO_OPTIONS = [
 
 export const CAO_OPTION_LABELS = Object.fromEntries(CAO_OPTIONS.map(option => [option.value, option.label]));
 
+export const SECURITY_EMPLOYMENT_CAO_KEYS = [
+  "cao_particuliere_beveiliging",
+  "cao_evenementen_horecabeveiliging",
+  "cao_veiligheidsdomein",
+];
+
 export const WPBR_TYPES = [
   { key: "ND", label: "ND", desc: "Particuliere beveiligingsorganisatie" },
   { key: "HND", label: "HND", desc: "Particulier beveiligingsbedrijf alleen voor horecabeveiliging" },
@@ -91,10 +97,10 @@ export const SHARED_BACKOFFICE_FUNCTIONS = [
 const OFFICE_FUNCTIONS = SHARED_BACKOFFICE_FUNCTIONS;
 
 export const WPBR_ALLOWED_CAO_KEYS = {
-  ND: ["cao_particuliere_beveiliging"],
-  HND: ["cao_evenementen_horecabeveiliging", "cao_particuliere_beveiliging"],
+  ND: ["cao_particuliere_beveiliging", "cao_evenementen_horecabeveiliging", "cao_veiligheidsdomein"],
+  HND: ["cao_evenementen_horecabeveiliging", "cao_veiligheidsdomein", "cao_particuliere_beveiliging"],
   BD: ["cao_particuliere_beveiliging"],
-  HBD: ["cao_evenementen_horecabeveiliging", "cao_particuliere_beveiliging"],
+  HBD: ["cao_evenementen_horecabeveiliging", "cao_veiligheidsdomein", "cao_particuliere_beveiliging"],
   PAC: ["cao_particuliere_beveiliging"],
   VTC: ["cao_particuliere_beveiliging"],
   PGW: ["cao_particuliere_beveiliging"],
@@ -106,13 +112,21 @@ export const WPBR_FUNCTION_GROUPS = {
     {
       key: "objectbeveiliging",
       label: "Objectbeveiliging",
-      functions: ["objectbeveiliger", "receptie", "surveillant", "mobiel_surveillant", "centralist", "alarmopvolging", "winkelsurveillant", "brandwacht", "evenementenbeveiliger"],
+      caoKeys: ["cao_particuliere_beveiliging", "cao_veiligheidsdomein"],
+      functions: ["objectbeveiliger", "receptie", "surveillant", "mobiel_surveillant", "centralist", "alarmopvolging", "winkelsurveillant", "brandwacht"],
+    },
+    {
+      key: "evenementen_horeca",
+      label: "Evenementen- en horecabeveiliging",
+      caoKeys: ["cao_particuliere_beveiliging", "cao_evenementen_horecabeveiliging", "cao_veiligheidsdomein"],
+      functions: ["evenementenbeveiliger", "horecabeveiliger", "host"],
     },
   ],
   HND: [
     {
       key: "horecabeveiliging",
       label: "Horecabeveiliging",
+      caoKeys: ["cao_evenementen_horecabeveiliging", "cao_veiligheidsdomein", "cao_particuliere_beveiliging"],
       functions: ["horecabeveiliger"],
     },
   ],
@@ -127,6 +141,7 @@ export const WPBR_FUNCTION_GROUPS = {
     {
       key: "eigen_horeca",
       label: "Eigen horecaonderneming",
+      caoKeys: ["cao_evenementen_horecabeveiliging", "cao_veiligheidsdomein", "cao_particuliere_beveiliging"],
       functions: ["horecabeveiliger"],
     },
   ],
@@ -170,6 +185,14 @@ export function functionLabel(value) {
   return FUNCTION_LABELS[value] || String(value || "").replace(/[_-]+/g, " ");
 }
 
+export function isSecurityEmploymentCao(caoKey) {
+  return SECURITY_EMPLOYMENT_CAO_KEYS.includes(caoKey);
+}
+
+export function functionGroupAllowsCao(group, caoKey) {
+  return !caoKey || !Array.isArray(group?.caoKeys) || group.caoKeys.includes(caoKey);
+}
+
 export function isExpiredWpbrLicense(license) {
   const today = new Date().toISOString().split("T")[0];
   return !!license?.valid_until && String(license.valid_until).slice(0, 10) < today;
@@ -208,7 +231,9 @@ export function resolveFunctionWpbrLicenseTypes(functionValue, licenses = [], ca
   if (!functionValue) return [];
   if (isSharedBackofficeFunction(functionValue)) return licenseTypes;
   return licenseTypes.filter(licenseType =>
-    (WPBR_FUNCTION_GROUPS[licenseType] || []).some(group => group.functions.includes(functionValue))
+    (WPBR_FUNCTION_GROUPS[licenseType] || []).some(group =>
+      functionGroupAllowsCao(group, caoKey) && group.functions.includes(functionValue)
+    )
   );
 }
 
@@ -218,7 +243,7 @@ export function buildFunctionGroupsForWpbrLicenses(licenses = [], caoKey = null)
   const operationGroups = getActiveWpbrLicenses(licenses).flatMap(license => {
     const licenseType = license.license_type;
     if (!licenseTypes.includes(licenseType)) return [];
-    return (WPBR_FUNCTION_GROUPS[licenseType] || []).map(group => {
+    return (WPBR_FUNCTION_GROUPS[licenseType] || []).filter(group => functionGroupAllowsCao(group, caoKey)).map(group => {
       const functions = group.functions.filter(value => {
         if (seen.has(value)) return false;
         seen.add(value);
