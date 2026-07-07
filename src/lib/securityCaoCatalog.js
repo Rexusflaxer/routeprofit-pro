@@ -77,15 +77,15 @@ export const WPBR_FUNCTION_GROUPS = {
     {
       key: "objectbeveiliging",
       label: "Objectbeveiliging",
-      functions: ["objectbeveiliger", "receptionist", "mobiel_surveillant", "alarmopvolging", "winkelsurveillant", "brandwacht"],
+      functions: ["objectbeveiliger", "receptie", "surveillant", "mobiel_surveillant", "centralist", "alarmopvolging", "winkelsurveillant", "brandwacht", "evenementenbeveiliger"],
     },
     { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
   HND: [
     {
-      key: "horeca_evenementen",
-      label: "Horeca en evenementen",
-      functions: ["horecabeveiliger", "evenementenbeveiliger", "host"],
+      key: "horecabeveiliging",
+      label: "Horecabeveiliging",
+      functions: ["horecabeveiliger"],
     },
     { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
@@ -93,7 +93,7 @@ export const WPBR_FUNCTION_GROUPS = {
     {
       key: "bedrijfsbeveiliging",
       label: "Bedrijfsbeveiliging",
-      functions: ["objectbeveiliger", "receptionist", "mobiel_surveillant", "alarmopvolging", "brandwacht"],
+      functions: ["objectbeveiliger", "receptie", "surveillant", "mobiel_surveillant", "brandwacht"],
     },
     { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
@@ -101,7 +101,7 @@ export const WPBR_FUNCTION_GROUPS = {
     {
       key: "eigen_horeca",
       label: "Eigen horecaonderneming",
-      functions: ["horecabeveiliger", "host", "brandwacht"],
+      functions: ["horecabeveiliger"],
     },
     { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
@@ -109,7 +109,7 @@ export const WPBR_FUNCTION_GROUPS = {
     {
       key: "alarmcentrale",
       label: "Alarmcentrale",
-      functions: ["centralist", "centralist_pac", "alarmopvolging"],
+      functions: ["centralist_pac"],
     },
     { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
@@ -117,7 +117,7 @@ export const WPBR_FUNCTION_GROUPS = {
     {
       key: "videotoezicht",
       label: "Videotoezichtcentrale",
-      functions: ["centralist", "centralist_vtc", "videosurveillant", "toezichthouder"],
+      functions: ["centralist_vtc", "videosurveillant", "toezichthouder"],
     },
     { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],

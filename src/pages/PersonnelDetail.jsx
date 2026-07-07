@@ -45,6 +45,7 @@ import IdentityDocumentWizard from "@/components/personnel/IdentityDocumentWizar
 import PayrollTab from "@/components/personnel/PayrollTab";
 import PersonnelBankTab from "@/components/personnel/PersonnelBankTab";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
+import { FUNCTION_LABELS } from "@/lib/securityCaoCatalog";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -68,12 +69,6 @@ const RELATIONSHIP_LABELS = { employee: "Loondienst", self_employed: "ZZP'er" };
 const TEAMHUB_LINK_LABELS = {
   not_invited: "Lokaal profiel", invited: "Uitgenodigd", pending_acceptance: "Wacht op acceptatie",
   linked: "Gekoppeld", conflict_review: "Review nodig", revoked: "Koppeling ingetrokken", local_only: "Lokaal profiel",
-};
-const FUNCTION_LABELS = {
-  unknown: "Onbekend", objectbeveiliger: "Objectbeveiliger", receptie: "Receptie", surveillant: "Surveillant",
-  alarmopvolging: "Alarmopvolging", binnendienst: "Binnendienst", klantrelatie: "Klantrelatie",
-  planner: "Planner", centralist: "Centralist", verkeersregelaar: "Verkeersregelaar",
-  brandwacht: "Brandwacht", installateur: "Installateur", rechercheur: "Rechercheur", host: "Host", other: "Overig",
 };
 const VERIFICATION_LABELS = {
   uploaded: "Geüpload", pending_review: "In beoordeling", verified: "Geverifieerd", rejected: "Afgekeurd", expired: "Verlopen",

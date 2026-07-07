@@ -47,6 +47,7 @@ import EmptyState from "../components/ui-custom/EmptyState";
 import PersonnelAccessTab from "../components/personnel/PersonnelAccessTab";
 import PersonnelContractsTab from "../components/personnel/PersonnelContractsTab";
 import { uploadManagedFile } from "@/lib/managedFiles";
+import { FUNCTION_LABELS } from "@/lib/securityCaoCatalog";
 
 const STATUS_COLORS = {
   draft: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
@@ -89,24 +90,6 @@ const TEAMHUB_LINK_LABELS = {
   conflict_review: "Review nodig",
   revoked: "Koppeling ingetrokken",
   local_only: "Lokaal profiel",
-};
-
-const FUNCTION_LABELS = {
-  unknown: "Onbekend",
-  objectbeveiliger: "Objectbeveiliger",
-  receptie: "Receptie",
-  surveillant: "Surveillant",
-  alarmopvolging: "Alarmopvolging",
-  binnendienst: "Binnendienst",
-  klantrelatie: "Klantrelatie",
-  planner: "Planner",
-  centralist: "Centralist",
-  verkeersregelaar: "Verkeersregelaar",
-  brandwacht: "Brandwacht",
-  installateur: "Installateur",
-  rechercheur: "Rechercheur",
-  host: "Host",
-  other: "Overig",
 };
 
 const VERIFICATION_LABELS = {
