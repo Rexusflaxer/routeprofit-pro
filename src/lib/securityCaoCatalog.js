@@ -27,6 +27,7 @@ export const FUNCTION_LABELS = {
   receptie: "Receptie",
   mobiel_surveillant: "Mobiel surveillant",
   surveillant: "Surveillant",
+  bedrijfssurveillant: "Bedrijfssurveillant",
   alarmopvolging: "Alarmopvolging",
   winkelsurveillant: "Winkelsurveillant",
   centralist: "Centralist",
@@ -93,7 +94,7 @@ export const WPBR_FUNCTION_GROUPS = {
     {
       key: "bedrijfsbeveiliging",
       label: "Bedrijfsbeveiliging",
-      functions: ["objectbeveiliger", "receptie", "surveillant", "mobiel_surveillant", "brandwacht"],
+      functions: ["objectbeveiliger", "receptie", "bedrijfssurveillant", "brandwacht"],
     },
     { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
