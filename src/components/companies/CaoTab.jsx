@@ -375,7 +375,14 @@ export default function CaoTab({ companyId }) {
                           <div className="space-y-3">
                             {functionGroups.map(group => (
                               <div key={group.key}>
-                                <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-2">{group.label}</p>
+                                <div className="mb-2 flex flex-wrap items-center gap-2">
+                                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group.label}</p>
+                                  {group.shared && group.licenseTypes?.length > 0 && (
+                                    <span className="text-[11px] text-muted-foreground">
+                                      Geldt voor {group.licenseTypes.join(" + ")}
+                                    </span>
+                                  )}
+                                </div>
                                 {renderFunctionPills(group.functions)}
                               </div>
                             ))}

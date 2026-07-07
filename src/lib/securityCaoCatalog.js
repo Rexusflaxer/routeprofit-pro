@@ -43,8 +43,19 @@ export const FUNCTION_LABELS = {
   observant: "Observant",
   planner: "Planner",
   binnendienst: "Algemeen binnendienst",
+  roostermaker: "Roostermaker",
+  operationeel_coordinator: "Operationeel coördinator",
+  operationeel_manager: "Operationeel manager",
+  administratief_medewerker: "Administratief medewerker",
+  financieel_administratief: "Financieel administratief medewerker",
+  salarisadministrateur: "Salarisadministrateur",
+  hr_medewerker: "HR-medewerker",
   hr_manager: "HR-manager",
+  accountmanager: "Accountmanager",
   sales_manager: "Sales manager",
+  kwaliteitsmanager: "Kwaliteitsmanager",
+  compliance_manager: "Compliance manager",
+  directie: "Directie / management",
   evenementenbeveiliger: "Evenementenbeveiliger",
   horecabeveiliger: "Horecabeveiliger",
   host: "Host / Hostess",
@@ -59,8 +70,25 @@ export const FUNCTION_LABELS = {
 
 export const FUNCTION_CATALOG_OPTIONS = Object.entries(FUNCTION_LABELS).map(([value, label]) => ({ value, label }));
 
-const SUPPORT_FUNCTIONS = ["planner", "binnendienst"];
-const OFFICE_FUNCTIONS = ["planner", "binnendienst", "hr_manager", "sales_manager"];
+export const SHARED_BACKOFFICE_FUNCTIONS = [
+  "binnendienst",
+  "planner",
+  "roostermaker",
+  "operationeel_coordinator",
+  "operationeel_manager",
+  "administratief_medewerker",
+  "financieel_administratief",
+  "salarisadministrateur",
+  "hr_medewerker",
+  "hr_manager",
+  "accountmanager",
+  "sales_manager",
+  "kwaliteitsmanager",
+  "compliance_manager",
+  "directie",
+];
+
+const OFFICE_FUNCTIONS = SHARED_BACKOFFICE_FUNCTIONS;
 
 export const WPBR_ALLOWED_CAO_KEYS = {
   ND: ["cao_particuliere_beveiliging"],
@@ -80,7 +108,6 @@ export const WPBR_FUNCTION_GROUPS = {
       label: "Objectbeveiliging",
       functions: ["objectbeveiliger", "receptie", "surveillant", "mobiel_surveillant", "centralist", "alarmopvolging", "winkelsurveillant", "brandwacht", "evenementenbeveiliger"],
     },
-    { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
   HND: [
     {
@@ -88,7 +115,6 @@ export const WPBR_FUNCTION_GROUPS = {
       label: "Horecabeveiliging",
       functions: ["horecabeveiliger"],
     },
-    { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
   BD: [
     {
@@ -96,7 +122,6 @@ export const WPBR_FUNCTION_GROUPS = {
       label: "Bedrijfsbeveiliging",
       functions: ["objectbeveiliger", "receptie", "bedrijfssurveillant", "brandwacht"],
     },
-    { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
   HBD: [
     {
@@ -104,7 +129,6 @@ export const WPBR_FUNCTION_GROUPS = {
       label: "Eigen horecaonderneming",
       functions: ["horecabeveiliger"],
     },
-    { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
   PAC: [
     {
@@ -112,7 +136,6 @@ export const WPBR_FUNCTION_GROUPS = {
       label: "Alarmcentrale",
       functions: ["centralist_pac"],
     },
-    { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
   VTC: [
     {
@@ -120,7 +143,6 @@ export const WPBR_FUNCTION_GROUPS = {
       label: "Videotoezichtcentrale",
       functions: ["centralist_vtc", "videosurveillant", "toezichthouder"],
     },
-    { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
   PGW: [
     {
@@ -128,7 +150,6 @@ export const WPBR_FUNCTION_GROUPS = {
       label: "Geld- en waardetransport",
       functions: ["geld_waardetransporteur", "waardetransport_chauffeur", "waardetransport_bijrijder"],
     },
-    { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
   POB: [
     {
@@ -136,7 +157,6 @@ export const WPBR_FUNCTION_GROUPS = {
       label: "Particuliere recherche",
       functions: ["particulier_onderzoeker", "rechercheur", "observant"],
     },
-    { key: "ondersteuning", label: "Ondersteuning", functions: SUPPORT_FUNCTIONS },
   ],
 };
 
@@ -173,11 +193,31 @@ export function wpbrLicenseAllowsCao(licenseType, caoKey) {
   return (WPBR_ALLOWED_CAO_KEYS[licenseType] || []).includes(caoKey);
 }
 
+export function activeWpbrLicenseTypesForCao(licenses = [], caoKey = null) {
+  return uniqueStrings(getActiveWpbrLicenses(licenses)
+    .map(license => license.license_type)
+    .filter(licenseType => !caoKey || wpbrLicenseAllowsCao(licenseType, caoKey)));
+}
+
+export function isSharedBackofficeFunction(value) {
+  return SHARED_BACKOFFICE_FUNCTIONS.includes(value);
+}
+
+export function resolveFunctionWpbrLicenseTypes(functionValue, licenses = [], caoKey = null) {
+  const licenseTypes = activeWpbrLicenseTypesForCao(licenses, caoKey);
+  if (!functionValue) return [];
+  if (isSharedBackofficeFunction(functionValue)) return licenseTypes;
+  return licenseTypes.filter(licenseType =>
+    (WPBR_FUNCTION_GROUPS[licenseType] || []).some(group => group.functions.includes(functionValue))
+  );
+}
+
 export function buildFunctionGroupsForWpbrLicenses(licenses = [], caoKey = null) {
   const seen = new Set();
-  return getActiveWpbrLicenses(licenses).flatMap(license => {
+  const licenseTypes = activeWpbrLicenseTypesForCao(licenses, caoKey);
+  const operationGroups = getActiveWpbrLicenses(licenses).flatMap(license => {
     const licenseType = license.license_type;
-    if (caoKey && !wpbrLicenseAllowsCao(licenseType, caoKey)) return [];
+    if (!licenseTypes.includes(licenseType)) return [];
     return (WPBR_FUNCTION_GROUPS[licenseType] || []).map(group => {
       const functions = group.functions.filter(value => {
         if (seen.has(value)) return false;
@@ -192,4 +232,15 @@ export function buildFunctionGroupsForWpbrLicenses(licenses = [], caoKey = null)
       };
     }).filter(group => group.functions.length > 0);
   });
+  const sharedGroup = licenseTypes.length > 0
+    ? [{
+        key: "shared_binnendienst",
+        licenseType: null,
+        licenseTypes,
+        label: "Binnendienst functies",
+        functions: SHARED_BACKOFFICE_FUNCTIONS,
+        shared: true,
+      }]
+    : [];
+  return [...operationGroups, ...sharedGroup];
 }
