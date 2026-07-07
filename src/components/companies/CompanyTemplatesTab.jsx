@@ -13,6 +13,12 @@ import { Textarea } from "@/components/ui/textarea";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { uploadManagedFile } from "@/lib/managedFiles";
 import {
+  WPBR_TYPE_LABELS,
+  buildFunctionGroupsForWpbrLicenses,
+  functionLabel,
+  getActiveWpbrLicenses,
+} from "@/lib/securityCaoCatalog";
+import {
   Archive,
   ArrowDown,
   ArrowUp,
@@ -389,56 +395,73 @@ const CLAUSE_TYPE_CATALOG = {
     },
     {
       value: "confidentiality",
-      label: "Geheimhouding",
-      description: "Beschermt klantgegevens, objectinformatie, alarmgegevens, camerabeelden, routes en onderzoeksinformatie.",
+      label: "Geheimhouding, vertrouwelijke informatie en bedrijfsgeheimen",
+      description: "Basisclausule met contextblokken voor objectbeveiliging, horeca/evenementen, PAC, VTC, PGW, POB, binnendienst en stage.",
       risk: "green",
       required: true,
       appliesToPermits: ["all_security", "ND", "HND", "BD", "HBD", "PAC", "VTC", "PGW", "POB", "not_applicable"],
       defaultSections: [
-        "Werknemer is verplicht tot strikte geheimhouding van alle vertrouwelijke informatie die werknemer tijdens of in verband met het dienstverband verkrijgt.",
-        "Onder vertrouwelijke informatie wordt in ieder geval verstaan: klantgegevens, persoonsgegevens, objectinformatie, beveiligingsplannen, alarmgegevens, camerabeelden, meldkamerinformatie, roosters, tarieven, werkinstructies, sleutelprocedures, toegangscodes, incidentrapportages, onderzoeksgegevens, interne documenten en alle informatie waarvan werknemer weet of redelijkerwijs behoort te begrijpen dat deze vertrouwelijk is.",
-        "Werknemer gebruikt vertrouwelijke informatie uitsluitend voor de uitvoering van de werkzaamheden voor werkgever.",
-        "Werknemer deelt vertrouwelijke informatie niet met derden en ook niet met collega's, opdrachtgevers of anderen die deze informatie niet nodig hebben voor de uitvoering van hun taak.",
-        "Werknemer slaat vertrouwelijke informatie niet op priveapparatuur, priveaccounts of eigen gegevensdragers op, tenzij werkgever daarvoor vooraf toestemming heeft gegeven en dit noodzakelijk is voor de werkzaamheden.",
-        "De geheimhoudingsplicht geldt tijdens het dienstverband en blijft na het einde daarvan bestaan zolang de informatie niet rechtmatig openbaar is geworden.",
-        "Deze bepaling geldt niet voor zover werknemer wettelijk verplicht is informatie te verstrekken aan een rechter, toezichthouder of bevoegde instantie. Werknemer informeert werkgever hierover vooraf, tenzij dit wettelijk niet is toegestaan.",
-        "Bij einde dienstverband of op eerste verzoek van werkgever geeft werknemer alle vertrouwelijke informatie, kopieen, gegevensdragers, documenten en toegangsmiddelen terug of verwijdert deze op instructie van werkgever.",
+        `Onder Vertrouwelijke Informatie wordt in deze arbeidsovereenkomst verstaan: alle informatie, in welke vorm dan ook, die werknemer tijdens of in verband met het dienstverband bij of voor {$bedrijf_naam} verkrijgt, ontvangt, raadpleegt, verwerkt, gebruikt, vastlegt of waarvan werknemer kennisneemt, en waarvan werknemer weet of redelijkerwijs behoort te begrijpen dat deze vertrouwelijk, gevoelig, niet-openbaar of bedrijfsgevoelig is.`,
+        `Onder Vertrouwelijke Informatie valt in ieder geval, maar niet uitsluitend: informatie over {$bedrijf_naam}, klanten, opdrachtgevers, relaties, leveranciers, onderaannemers, beveiligingsplannen, risicoanalyses, procedures, objectinstructies, incidentmeldingen, sleutelprocedures, toegangsinstructies, toegangscodes, persoonsgegevens, systemen, accounts, autorisaties, loggegevens, interne documenten en informatie die door {$bedrijf_naam}, een opdrachtgever, {$leidinggevende} of een daartoe bevoegde persoon als vertrouwelijk is aangeduid.`,
+        `Onder Vertrouwelijke Informatie valt ook informatie waarvan werknemer, gelet op de aard van de functie {$hoofdfunctie}, de functie(s) {$functie_lijst}, de toepasselijke vergunningcontext {$functie_vergunning_context}, de toepasselijke cao-context {$functie_cao_context}, de {$cao_naam}, het {$personeelshandboek}, het {$bedrijfsreglement}, het {$privacybeleid} of de {$objectinstructies}, redelijkerwijs behoort te begrijpen dat deze niet zonder toestemming mag worden gedeeld.`,
+        `Werknemer is verplicht alle Vertrouwelijke Informatie strikt geheim te houden. Werknemer mag Vertrouwelijke Informatie niet zonder voorafgaande schriftelijke toestemming van {$bedrijf_naam} of {$leidinggevende} direct of indirect verstrekken, tonen, bespreken, openbaar maken, kopieren, verspreiden, doorsturen, publiceren of anderszins toegankelijk maken voor derden.`,
+        `Ook binnen {$bedrijf_naam} of binnen de organisatie van een opdrachtgever deelt werknemer Vertrouwelijke Informatie uitsluitend met personen die deze informatie noodzakelijkerwijs nodig hebben voor de uitvoering van hun taak. Werknemer past daarbij het need-to-know-principe toe.`,
+        `Werknemer gebruikt Vertrouwelijke Informatie uitsluitend voor de behoorlijke uitvoering van de werkzaamheden voor {$bedrijf_naam}. Het is werknemer verboden Vertrouwelijke Informatie te gebruiken voor prive-doeleinden, eigen voordeel, werkzaamheden voor derden, benadering van klanten of relaties buiten {$bedrijf_naam} om, of enig ander doel dan de uitvoering van de arbeidsovereenkomst.`,
+        `Werknemer verwerkt, bewaart, raadpleegt en verzendt Vertrouwelijke Informatie uitsluitend via de door {$bedrijf_naam} goedgekeurde systemen, accounts, communicatiemiddelen en opslaglocaties. Zonder voorafgaande schriftelijke toestemming is het werknemer niet toegestaan Vertrouwelijke Informatie op te slaan op prive-apparatuur, prive-accounts, prive-cloudopslag, externe gegevensdragers of niet-goedgekeurde systemen, of deze te verwerken via niet-goedgekeurde externe digitale diensten, waaronder generatieve AI-systemen.`,
+        `Werknemer houdt wachtwoorden, toegangscodes, sleutels, passen, accounts, authenticatiemiddelen en andere toegangs- of beveiligingsmiddelen strikt persoonlijk en geheim. Werknemer deelt deze niet met anderen en neemt passende maatregelen om onbevoegde toegang, kennisname, verlies, diefstal of misbruik te voorkomen.`,
+        `Werknemer meldt ieder vermoeden van verlies, diefstal, onbevoegde toegang, onbevoegde kennisname, onjuiste verzending, onbedoelde openbaarmaking, datalek, beveiligingsincident of andere mogelijke schending van Vertrouwelijke Informatie direct bij {$meldpunt_geheimhouding}. Indien persoonsgegevens betrokken kunnen zijn, meldt werknemer dit ook direct bij {$meldpunt_privacy_datalekken}.`,
+        `De geheimhoudingsplicht geldt niet voor zover werknemer wettelijk verplicht is Vertrouwelijke Informatie te verstrekken aan een rechter, toezichthouder, opsporingsinstantie of andere bevoegde instantie. Werknemer informeert {$bedrijf_naam} hierover vooraf, tenzij dit wettelijk niet is toegestaan.`,
+        `Deze geheimhoudingsplicht verhindert werknemer niet om juridisch advies in te winnen, zich te wenden tot een vakbond, een bevoegde autoriteit of een aangewezen meldpunt, of een melding te doen van een vermoeden van een misstand, voor zover dit gebeurt binnen de grenzen van de wet en niet verder gaat dan noodzakelijk voor dat doel.`,
+        `Bij beeindiging van het dienstverband, of eerder indien {$bedrijf_naam} daarom verzoekt, geeft werknemer alle Vertrouwelijke Informatie en alle dragers waarop deze informatie is vastgelegd direct aan {$bedrijf_naam} terug. Voor zover Vertrouwelijke Informatie zich met toestemming van {$bedrijf_naam} op prive-apparatuur, prive-accounts of externe omgevingen bevindt, verwijdert werknemer deze informatie op eerste verzoek van {$bedrijf_naam} en bevestigt werknemer schriftelijk dat dit is gebeurd.`,
+        `Werknemer mag kopieen bewaren van documenten die betrekking hebben op de eigen arbeidsovereenkomst, loon, pensioen, fiscale positie, correspondentie over de eigen rechtspositie of andere persoonlijke arbeidsrechtelijke aanspraken, voor zover daarin geen Vertrouwelijke Informatie van {$bedrijf_naam}, opdrachtgevers, klanten, collega's of derden is opgenomen die niet noodzakelijk is voor het bewaren van die eigen rechtspositie.`,
+        `De verplichtingen uit dit artikel gelden gedurende het dienstverband en blijven ook na het einde van het dienstverband volledig van kracht, zolang de betreffende informatie niet rechtmatig openbaar is geworden of zolang {$bedrijf_naam}, een opdrachtgever, klant, relatie of derde een redelijk belang heeft bij geheimhouding daarvan. Voor bedrijfsgeheimen geldt deze verplichting zolang de informatie als bedrijfsgeheim of anderszins als vertrouwelijke bedrijfsinformatie kan worden beschermd.`,
+        `Overtreding van dit artikel kan worden aangemerkt als een ernstige schending van de arbeidsovereenkomst en kan arbeidsrechtelijke gevolgen hebben. Afhankelijk van de aard en ernst van de overtreding kan {$bedrijf_naam}, met inachtneming van wet, {$cao_naam} en de omstandigheden van het geval, passende maatregelen nemen, waaronder een waarschuwing, tijdelijke ontzegging van toegang tot systemen of locaties, schorsing, beeindiging van de arbeidsovereenkomst, ontslag op staande voet indien sprake is van een dringende reden, een rechterlijk verbod of bevel en/of het verhalen van schade voor zover dit rechtens is toegestaan.`,
       ],
       snippets: [
         {
-          label: "ND/BD objectinformatie",
-          text: "Objectinformatie, sleutelprocedures, alarmopvolgingsinstructies, locatiegebonden risico's en beveiligingsafspraken worden altijd als vertrouwelijk beschouwd.",
-          help: "Gebruik dit bij objectbeveiliging, mobiele surveillance of bedrijfsbeveiliging.",
+          label: "Objectbeveiliging / ND / BD",
+          text: "Voor zover werknemer werkzaamheden verricht binnen objectbeveiliging, mobiele surveillance, receptiediensten, alarmopvolging, winkelsurveillance, brandwachtwerkzaamheden of bedrijfsbeveiliging, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: klantgegevens, opdrachtgevergegevens, objectinformatie, beveiligingsplannen, objectinstructies, sleutelprocedures, toegangspassen, alarmopvolgingsinstructies, toegangscodes, roosters, inzetplanning, tarieven, risico-informatie, contactpersonen, incidentrapportages, surveillancegegevens en informatie over beveiligingsmaatregelen van locaties, objecten of terreinen.",
+          help: "Gebruik dit bij objectbeveiliging, mobiele surveillance, alarmopvolging, receptie met objecttoegang, winkelsurveillance, brandwacht of bedrijfsbeveiliging.",
         },
         {
-          label: "HND/HBD horeca en evenementen",
-          text: "Informatie over bezoekers, incidenten, toegangsbeleid, ontzeggingen, huisregels, briefingdocumenten, camerabeelden en inzetplannen wordt altijd als vertrouwelijk beschouwd.",
-          help: "Gebruik dit voor horeca- en evenementenbeveiliging.",
+          label: "Evenementen- en horecabeveiliging",
+          text: "Voor zover werknemer werkzaamheden verricht binnen evenementenbeveiliging, horecabeveiliging, crowdmanagement, toegangscontrole of hostwerkzaamheden, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: bezoekersinformatie, gasteninformatie, huisregels, deurbeleid, toegangsbeleid, fouilleringsafspraken, ontzeggingen, incidentgegevens, briefingdocumenten, inzetplannen, draaiboeken, informatie over artiesten, VIP's of crew, camerabeelden, communicatie met opdrachtgever, politie, gemeente of hulpdiensten, veiligheidsprocedures en informatie over risico's, dreigingen of ordeverstoringen.",
+          help: "Gebruik dit bij ND/HND/HBD met horeca- of evenementenbeveiliging, CAO EHB of Veiligheidsdomein met evenement-/horecacontext.",
         },
         {
-          label: "PAC meldkamer",
-          text: "Alarmmeldingen, alarmcodes, aansluitgegevens, verificatieprotocollen, klantinstructies en meldkamerprocedures worden altijd als vertrouwelijk beschouwd.",
-          help: "Gebruik dit voor particuliere alarmcentrales.",
+          label: "PAC / meldkamer",
+          text: "Voor zover werknemer werkzaamheden verricht binnen of ten behoeve van een particuliere alarmcentrale of meldkamer, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: alarmmeldingen, alarmcodes, aansluitgegevens, klantinstructies, verificatieprotocollen, meldkamerprocedures, sleutelhoudergegevens, escalatieschema's, communicatie met politie, brandweer, ambulance of andere hulpdiensten, loggegevens, technische alarmgegevens, opvolgingsafspraken, storingsinformatie, alarmhistorie en informatie over de bereikbaarheid, beschikbaarheid of beveiligingsmaatregelen van aangesloten klanten.",
+          help: "Verplicht bij centralist PAC of binnendienstfuncties met toegang tot alarmcentrale-informatie.",
         },
         {
-          label: "VTC camerabeelden",
-          text: "Livebeelden, opgenomen camerabeelden, observaties, cameraopstellingen, opvolgprotocollen, toegangsrechten en beeldanalyse worden altijd als vertrouwelijk beschouwd.",
-          help: "Gebruik dit voor video toezicht centrales en functies met cameratoegang.",
+          label: "VTC / camerabeelden",
+          text: "Voor zover werknemer werkzaamheden verricht binnen of ten behoeve van een particuliere videotoezichtcentrale, cameratoezichtomgeving of videosurveillance, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: livebeelden, opgenomen camerabeelden, observaties, cameraopstellingen, kijkrichtingen, cameraposities, toegangsrechten tot videosystemen, opvolgprotocollen, incidentbeelden, loggegevens, beeldanalyse, meldingen, technische informatie over camerasystemen en informatie over beveiligingsmaatregelen, kwetsbaarheden of risico's van locaties waarop toezicht wordt gehouden.",
+          help: "Verplicht bij centralist VTC, videosurveillant, toezichthouder of functies met toegang tot camerabeelden.",
         },
         {
-          label: "PGW waarde-informatie",
-          text: "Routes, tijdstippen, zendinggegevens, waarde-informatie, overdrachtslocaties, voertuiggegevens en transportprocedures worden altijd als strikt vertrouwelijk beschouwd.",
-          help: "Gebruik dit bij geld- en waardentransport.",
+          label: "PGW / geld- en waardentransport",
+          text: "Voor zover werknemer werkzaamheden verricht binnen of ten behoeve van geld- en waardentransport, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: routes, tijdstippen, transportgegevens, zendinggegevens, waarde-informatie, overdrachtslocaties, laad- en losprocedures, voertuiggegevens, bemanning, klantgegevens, transportplanning, beveiligingsmaatregelen, incidentprocedures, noodprocedures, communicatiemiddelen en informatie over de aard, omvang, bestemming of planning van te vervoeren waarden.",
+          help: "Verplicht bij geld- en waardentransporteur, chauffeur of bijrijder, en bij binnendienst met toegang tot route- of waarde-informatie.",
         },
         {
-          label: "POB onderzoeksinformatie",
-          text: "Onderzoeksdossiers, observaties, bronnen, onderzoeksopdrachten, persoonsgegevens, rapportages, onderzoeksmethoden en bevindingen worden altijd als strikt vertrouwelijk beschouwd.",
-          help: "Gebruik dit bij particulier recherchewerk.",
+          label: "POB / recherche",
+          text: "Voor zover werknemer werkzaamheden verricht binnen of ten behoeve van een particulier recherchebureau, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: onderzoeksdossiers, onderzoeksopdrachten, observaties, bronnen, persoonsgegevens, rapportages, onderzoeksmethoden, bevindingen, bewijsstukken, interviewverslagen, communicatie met opdrachtgevers, informatie over betrokken personen, locatiegegevens, onderzoeksstrategieen, interne beoordelingen en alle informatie waarvan openbaarmaking de privacy van betrokkenen, de betrouwbaarheid van het onderzoek, de positie van de opdrachtgever of de rechtmatigheid van het onderzoek kan raken.",
+          help: "Verplicht bij particulier onderzoeker, rechercheur, observant of binnendienst met toegang tot onderzoeksinformatie.",
         },
         {
-          label: "Veilige sanctietekst",
-          text: "Overtreding van deze bepaling kan arbeidsrechtelijke gevolgen hebben, afhankelijk van de ernst van de overtreding en met inachtneming van wet, cao en de omstandigheden van het geval. Werkgever behoudt zich het recht voor schade te verhalen voor zover dit op grond van wet en cao is toegestaan.",
-          help: "Veiliger dan een algemene zin dat werknemer altijd alle directe en indirecte schade moet betalen.",
+          label: "Binnendienst",
+          text: "Voor zover werknemer een binnendienstfunctie, administratieve functie, coordinerende functie, commerciele functie, HR-functie, financiele functie, kwaliteitsfunctie, compliancefunctie, managementfunctie of directiefunctie verricht, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: planning, roosters, klantinformatie, opdrachtgevergegevens, tarieven, offertes, contractinformatie, facturen, personeelsgegevens, salarisgegevens, verzuimgegevens, sollicitatiegegevens, beoordelingsinformatie, interne documenten, operationele instructies, beleidsdocumenten, managementinformatie, commerciele informatie, kwaliteitsdocumentatie, compliance-informatie en informatie over bedrijfsvoering, strategie of besluitvorming.",
+          help: "Gebruik dit bij planner, roostermaker, administratie, HR, salarisadministratie, accountmanagement, compliance, management en directie.",
+        },
+        {
+          label: "Stagevariant",
+          text: "Voor zover deze clausule wordt gebruikt in een stageovereenkomst, moet in dit artikel 'werknemer' worden gelezen als 'stagiair', 'dienstverband' als 'stage' en 'arbeidsovereenkomst' als 'stageovereenkomst', tenzij uit de context anders volgt.",
+          help: "Gebruik dit wanneer de contractvorm stage is. Zo blijft de basisclausule bruikbaar zonder alles dubbel te schrijven.",
+        },
+        {
+          label: "Samenvoegregel meerdere functies",
+          text: "Bij meerdere functies wordt deze clausule niet dubbel opgenomen. De relevante contextblokken worden samengevoegd in een onderdeel, zodat een artikel Geheimhouding ontstaat met een basisclausule en de passende functie- en vergunningcontexten.",
+          help: "Gebruik dit als toelichting bij medewerkers met meerdere functies, bijvoorbeeld objectbeveiliger en centralist PAC.",
         },
       ],
     },
@@ -760,7 +783,7 @@ const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(240px,1.4fr)_minmax(72px,92p
 const CLAUSE_TABLE_GRID = "grid grid-cols-[minmax(32px,44px)_minmax(220px,1fr)_minmax(120px,160px)_minmax(140px,180px)_minmax(144px,max-content)] gap-3 xl:gap-4";
 const LETTERHEAD_STEPS = ["Upload", "Marges", "Controle"];
 const TEMPLATE_STEPS = ["CAO", "Contract", "Proeftijd", "Briefpapier", "Inhoud", "Controle"];
-const CLAUSE_STEPS = ["Onderdeel", "Context", "Clausule", "Uitwerken", "Controle"];
+const CLAUSE_STEPS = ["Onderdeel", "Clausule", "Uitwerken", "Controle"];
 const CLAUSE_MARKER_PREFIX = "clausule:";
 const LETTERHEAD_SOURCE_MODES = {
   upload: "upload",
@@ -1007,8 +1030,8 @@ function fromArrayText(value) {
 }
 
 function extractPlaceholders(body) {
-  const matches = String(body || "").match(/\{\{\s*[^}]+\s*\}\}/g) || [];
-  return [...new Set(matches.map(item => item.replace(/[{}]/g, "").trim()))];
+  const matches = [...String(body || "").matchAll(/\{\{\s*([^}]+?)\s*\}\}|\{\$\s*([^}]+?)\s*\}/g)];
+  return uniqueStrings(matches.map(match => match[1] || match[2]));
 }
 
 function uniqueStrings(values) {
@@ -1257,9 +1280,6 @@ function defaultClauseSections(definition, licenseScope = "") {
 
 function clauseValidationNotes(form = {}, definition = null) {
   const notes = [];
-  if (form.scope === "employment_contracts" && !form.function_profile) {
-    notes.push("Kies bij voorkeur een functieprofiel. De functie blijft een placeholder in het contract, maar het profiel bepaalt welke juridische hulpteksten passen.");
-  }
   if (definition?.required) {
     notes.push("Deze clausule is aanbevolen of verplicht voor veel beveiligingscontracten. Controleer of deze in de template is opgenomen.");
   }
@@ -1279,8 +1299,12 @@ function clauseValidationNotes(form = {}, definition = null) {
   if (definition?.value === "study_costs") {
     notes.push("Gebruik deze clausule niet om verplichte scholing of noodzakelijke functieopleiding op werknemer te verhalen.");
   }
-  if (definition?.value === "confidentiality" && ["PAC", "VTC", "PGW", "POB"].includes(form.license_scope)) {
-    notes.push("De gekozen vergunning heeft verhoogde geheimhoudingsrisico's. Controleer of het vergunning-specifieke onderdeel in de clausule staat.");
+  if (definition?.value === "confidentiality") {
+    notes.push("Gebruik de basisclausule één keer en voeg alleen de contextblokken toe die passen bij de functies in het contract.");
+    notes.push("Bij meerdere functies worden contextblokken samengevoegd in één geheimhoudingsartikel; maak geen dubbele geheimhoudingsclausules.");
+    notes.push("PAC, VTC, PGW en POB vragen altijd een eigen contextblok wanneer de medewerker toegang heeft tot meldkamer-, video-, waarde- of onderzoeksinformatie.");
+    notes.push("Laat de wettelijke uitzondering, juridisch advies/vakbond/bevoegde autoriteit en meldingsmogelijkheid voor misstanden in de tekst staan.");
+    notes.push("Vermijd teksten zoals 'werknemer is altijd aansprakelijk voor alle schade'. Gebruik de standaard sanctietekst met verwijzing naar wet, cao en omstandigheden.");
   }
   return uniqueStrings(notes);
 }
@@ -2096,6 +2120,12 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     enabled: !!companyId,
   });
 
+  const { data: wpbrLicenses = [] } = useQuery({
+    queryKey: ["wpbr-licenses", companyId],
+    queryFn: () => base44.entities.CompanyWpbrLicense.filter({ company_id: companyId }, "-created_date"),
+    enabled: !!companyId,
+  });
+
   const { data: caoAssignments = [] } = useQuery({
     queryKey: ["cao-assignments", companyId],
     queryFn: () => base44.entities.CompanyCaoAssignment.filter({ company_id: companyId }, "-created_date"),
@@ -2124,6 +2154,12 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const companyCaoOptions = useMemo(() => uniqueStrings(caoAssignments.map(item => item.cao_key))
     .map(key => ({ value: key, label: caoLabel(key) })),
   [caoAssignments]);
+  const activeWpbrLicenses = useMemo(() => getActiveWpbrLicenses(wpbrLicenses), [wpbrLicenses]);
+  const primaryCompanyCaoKey = companyCaoOptions.length === 1 ? companyCaoOptions[0].value : (companyCaoOptions[0]?.value || null);
+  const derivedClauseFunctionGroups = useMemo(
+    () => buildFunctionGroupsForWpbrLicenses(wpbrLicenses, primaryCompanyCaoKey),
+    [wpbrLicenses, primaryCompanyCaoKey],
+  );
   const placeholders = extractPlaceholders(expandClauseMarkers(templateForm.body, activeClauses))
     .filter(placeholder => !placeholder.startsWith(CLAUSE_MARKER_PREFIX));
   const currentEditingLetterhead = editingLetterheadId
@@ -2597,8 +2633,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       ...prev,
       scope,
       clause_type: "",
-      license_scope: scope === "employment_contracts" ? "" : "not_applicable",
-      function_profile: scope === "employment_contracts" ? "" : "office",
+      license_scope: scope === "employment_contracts" ? "all_security" : "not_applicable",
+      function_profile: "",
       risk_level: "green",
       review_required: false,
       title: "",
@@ -2624,7 +2660,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     }));
     setSelectedClauseSectionIndex(0);
     setMessage(null);
-    setClauseStep(4);
+    setClauseStep(3);
   };
 
   const nextClauseStep = () => {
@@ -2632,15 +2668,11 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       setMessage({ type: "error", text: "Kies eerst het onderdeel waarvoor deze clausule bedoeld is." });
       return;
     }
-    if (clauseStep === 2 && clauseForm.scope === "employment_contracts" && !clauseForm.license_scope) {
-      setMessage({ type: "error", text: "Kies eerst de vergunning of werkveldcontext." });
-      return;
-    }
-    if (clauseStep === 3 && !clauseForm.clause_type) {
+    if (clauseStep === 2 && !clauseForm.clause_type) {
       setMessage({ type: "error", text: "Kies eerst het type clausule." });
       return;
     }
-    if (clauseStep === 4) {
+    if (clauseStep === 3) {
       if (!clauseForm.title.trim()) {
         setMessage({ type: "error", text: "Geef de clausule een duidelijke titel." });
         return;
@@ -2746,7 +2778,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       sort_order: Number(record.sort_order || 0),
       status: record.status || "active",
     });
-    setClauseStep(inferred.scope && inferred.type ? 4 : 1);
+    setClauseStep(inferred.scope && inferred.type ? 3 : 1);
     setSelectedClauseSectionIndex(0);
     setClauseWizardOpen(true);
   };
@@ -4229,73 +4261,45 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               )}
 
               {clauseStep === 2 && (
-                <div className="space-y-4">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Welke vergunning of werkveldcontext hoort hierbij?</p>
-                    <p className="mt-1 text-xs text-muted-foreground">
-                      Deze keuze bepaalt welke Wpbr-, geheimhoudings-, privacy- en risicoteksten worden aangeboden.
-                    </p>
-                  </div>
-                  <div className="grid grid-cols-1 gap-2">
-                    {(clauseForm.scope === "employment_contracts"
-                      ? CLAUSE_SECURITY_CONTEXT_OPTIONS
-                      : CLAUSE_SECURITY_CONTEXT_OPTIONS.filter(option => option.value === "not_applicable")
-                    ).map(option => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => setClauseForm(prev => ({
-                          ...prev,
-                          license_scope: option.value,
-                          clause_type: "",
-                          title: "",
-                          sections: [{ id: createClauseSectionId(), text: "" }],
-                          body: "",
-                        }))}
-                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${clauseForm.license_scope === option.value ? "border-primary bg-accent" : "border-border bg-card"}`}
-                      >
-                        <div>
-                          <span className="text-sm font-semibold text-foreground">{option.label}</span>
-                          <span className="ml-2 text-xs text-muted-foreground">{option.description}</span>
-                        </div>
-                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
-                      </button>
-                    ))}
-                  </div>
-
-                  {clauseForm.scope === "employment_contracts" && (
-                    <div className="space-y-2 rounded-lg border border-border bg-background/40 p-3">
-                      <Label>Functieprofiel</Label>
-                      <Select
-                        value={clauseForm.function_profile || ""}
-                        onValueChange={value => setClauseForm(prev => ({ ...prev, function_profile: value }))}
-                      >
-                        <SelectTrigger>
-                          <SelectValue placeholder="Kies een functieprofiel voor betere hulpteksten" />
-                        </SelectTrigger>
-                        <SelectContent>
-                          {FUNCTION_PROFILE_OPTIONS.map(option => (
-                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      <p className="text-xs text-muted-foreground">
-                        De functie blijft later een placeholder in het contract, maar dit profiel helpt de wizard juridisch relevante blokken te tonen.
-                      </p>
-                    </div>
-                  )}
-                </div>
-              )}
-
-              {clauseStep === 3 && (
                 <div className="space-y-3">
                   <div>
                     <p className="text-sm font-medium text-foreground">Kies de clausule voor {clauseScopeLabel(clauseForm.scope).toLowerCase()}</p>
                     <p className="mt-1 text-xs text-muted-foreground">
-                      Context: {clauseSecurityContextLabel(clauseForm.license_scope)}
-                      {clauseForm.function_profile ? ` · ${functionProfileLabel(clauseForm.function_profile)}` : ""}
+                      De wizard gebruikt de bedrijfscontext automatisch. Bij arbeidscontracten hoeft de gebruiker alleen de clausule te kiezen; functie- en vergunningvariaties komen als bouwblokken terug bij het uitwerken.
                     </p>
                   </div>
+
+                  {clauseForm.scope === "employment_contracts" && (
+                    <div className="rounded-lg border border-border bg-background/40 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Afgeleid uit bedrijfsprofiel</p>
+                      <div className="mt-2 flex flex-wrap gap-1.5">
+                        {activeWpbrLicenses.length === 0 ? (
+                          <Badge variant="outline" className="text-xs">Geen actieve WPBR-vergunning</Badge>
+                        ) : activeWpbrLicenses.map(license => (
+                          <Badge key={license.id || license.license_type} variant="outline" className="text-xs">
+                            {WPBR_TYPE_LABELS[license.license_type] || license.license_type}
+                          </Badge>
+                        ))}
+                        {companyCaoOptions.length === 0 ? (
+                          <Badge variant="outline" className="text-xs">Geen CAO gekoppeld</Badge>
+                        ) : companyCaoOptions.map(option => (
+                          <Badge key={option.value} variant="outline" className="text-xs">{option.label}</Badge>
+                        ))}
+                      </div>
+                      {derivedClauseFunctionGroups.length > 0 && (
+                        <div className="mt-3 space-y-2">
+                          {derivedClauseFunctionGroups.slice(0, 4).map(group => (
+                            <div key={group.key} className="text-xs text-muted-foreground">
+                              <span className="font-semibold text-foreground">{group.label}: </span>
+                              {group.functions.slice(0, 6).map(functionLabel).join(", ")}
+                              {group.functions.length > 6 ? ` +${group.functions.length - 6}` : ""}
+                            </div>
+                          ))}
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   <div className="grid grid-cols-1 gap-2">
                     {availableClauseTypes.map(option => {
                       const optionRisk = option.risk || "green";
@@ -4322,7 +4326,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 </div>
               )}
 
-              {clauseStep === 4 && (
+              {clauseStep === 3 && (
                 <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
                   <div className="space-y-4">
                     <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_140px]">
@@ -4466,7 +4470,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 </div>
               )}
 
-              {clauseStep === 5 && (
+              {clauseStep === 4 && (
                 <div className="space-y-4">
                   <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-5">
                     <div className="rounded-lg border border-border bg-background/40 p-3">

@@ -771,18 +771,23 @@ function contractRenderValues(personnel, form, company) {
   const hours = form.employment_contract_model === "min_max"
     ? `${form.min_hours_per_week || "-"}-${form.max_hours_per_week || "-"}`
     : (form.contract_hours_per_week || form.contract_hours_per_pay_period || "-");
+  const functionName = readableFunctionLabel(form.function_type) || form.cao_function_group || "-";
+  const caoName = CAO_OPTION_LABELS[form.cao_key] || form.cao_key || "-";
+  const contractFormLabel = CONTRACT_MODEL_LABELS[form.contract_model] || CONTRACT_FORM_LABELS[form.contract_form] || form.contract_form || "-";
+  const companyContact = company?.email || company?.contact_email || company?.phone || "-";
+  const supervisorName = form.supervisor_name || company?.contact_person || company?.representative_name || "-";
   const values = {
     "medewerker.naam": employeeName || "Medewerker",
     "medewerker.email": personnel.email || "-",
     "bedrijf.naam": company?.display_name || company?.legal_name || "Bedrijf",
     "contract.startdatum": formatDate(form.contract_start_date),
     "contract.einddatum": form.contract_end_date ? formatDate(form.contract_end_date) : "onbepaalde tijd",
-    "contract.functie": readableFunctionLabel(form.function_type) || form.cao_function_group || "-",
-    "contract.cao": CAO_OPTION_LABELS[form.cao_key] || form.cao_key || "-",
+    "contract.functie": functionName,
+    "contract.cao": caoName,
     "contract.schaal": form.cao_scale || "-",
     "contract.periodiek": form.cao_period || "-",
     "contract.uren_per_week": hours,
-    "contract.contractvorm": CONTRACT_MODEL_LABELS[form.contract_model] || CONTRACT_FORM_LABELS[form.contract_form] || form.contract_form || "-",
+    "contract.contractvorm": contractFormLabel,
     medewerker_volledige_naam: employeeName || "Medewerker",
     medewerker_voornaam: firstName || "-",
     medewerker_achternaam: lastName || "-",
@@ -803,14 +808,34 @@ function contractRenderValues(personnel, form, company) {
     bedrijf_land: company?.country || "Nederland",
     bedrijf_adres: compact([company?.street || company?.street_name, company?.house_number].filter(Boolean).join(" ")) || "-",
     bedrijf_postcode: company?.postal_code || "-",
+    bedrijf_actieve_cao: caoName,
+    bedrijf_wpbr_vergunning_types: form.wpbr_license_type || form.license_scope || "-",
     startdatum: formatDate(form.contract_start_date),
     einddatum: form.contract_end_date ? formatDate(form.contract_end_date) : "onbepaalde tijd",
-    functie: readableFunctionLabel(form.function_type) || form.cao_function_group || "-",
-    cao: CAO_OPTION_LABELS[form.cao_key] || form.cao_key || "-",
+    contract_startdatum: formatDate(form.contract_start_date),
+    contract_einddatum: form.contract_end_date ? formatDate(form.contract_end_date) : "onbepaalde tijd",
+    functie: functionName,
+    hoofdfunctie: functionName,
+    functie_lijst: functionName,
+    nevenfuncties_lijst: "-",
+    functie_vergunning_context: form.wpbr_license_type || form.license_scope || "-",
+    functie_cao_context: caoName,
+    functie_risico_tags: "-",
+    cao: caoName,
+    cao_naam: caoName,
     schaal: form.cao_scale || "-",
     trede: form.cao_period || "-",
     uren_per_week: hours,
-    contractvorm: CONTRACT_MODEL_LABELS[form.contract_model] || CONTRACT_FORM_LABELS[form.contract_form] || form.contract_form || "-",
+    contractvorm: contractFormLabel,
+    leidinggevende: supervisorName,
+    meldpunt_geheimhouding: companyContact,
+    meldpunt_privacy_datalekken: company?.privacy_email || companyContact,
+    meldpunt_bedrijfsmiddelen: companyContact,
+    meldpunt_integriteit: companyContact,
+    personeelshandboek: "personeelshandboek",
+    privacybeleid: "privacybeleid",
+    bedrijfsreglement: "bedrijfsreglement",
+    objectinstructies: "objectinstructies",
   };
   return {
     ...values,

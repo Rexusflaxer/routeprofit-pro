@@ -54,7 +54,7 @@
     },
     "body": {
       "type": "string",
-      "description": "Clausuletekst met optionele placeholders zoals {{medewerker.naam}}."
+      "description": "Clausuletekst met optionele placeholders zoals {{medewerker.naam}} of {$medewerker_volledige_naam}."
     },
     "sections": {
       "type": [
