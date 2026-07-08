@@ -2102,6 +2102,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [templateWizardOpen, setTemplateWizardOpen] = useState(false);
   const [clauseWizardOpen, setClauseWizardOpen] = useState(false);
   const [clauseDirectEditMode, setClauseDirectEditMode] = useState(false);
+  const [clauseLibraryStep, setClauseLibraryStep] = useState(1);
   const [clauseLibraryScope, setClauseLibraryScope] = useState("employment_contracts");
   const [selectedClauseKey, setSelectedClauseKey] = useState(() => (
     catalogClauseKey("employment_contracts", CLAUSE_TYPE_CATALOG.employment_contracts?.[0]?.value)
@@ -4652,55 +4653,133 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const renderClauseTab = () => {
     const scopeMeta = CLAUSE_SCOPE_OPTIONS.find(option => option.value === clauseLibraryScope);
     const selectedItem = selectedClauseLibraryItem;
+    const selectedSections = selectedItem
+      ? (selectedItem.variant
+          ? normalizeClauseSections(selectedItem.variant)
+          : defaultClauseSections(selectedItem.definition, clauseDefaultLicenseScope(selectedItem.scope)))
+      : [];
+    const variationInsertIndex = Math.min(2, selectedSections.length);
+    const variationPositionLabel = variationInsertIndex > 0 && variationInsertIndex < selectedSections.length
+      ? `Tussen x.${variationInsertIndex} en x.${variationInsertIndex + 1}`
+      : `Na x.${Math.max(variationInsertIndex, 1)}`;
+    const scopedCustomClauseItems = customClauseItems.filter(item => (inferClauseCatalog(item).scope || item.scope) === clauseLibraryScope);
+    const selectedRiskLevel = selectedItem?.variant?.risk_level || selectedItem?.definition?.risk || "green";
+
+    const chooseScope = (scope) => {
+      const firstDefinition = CLAUSE_TYPE_CATALOG[scope]?.[0];
+      setClauseLibraryScope(scope);
+      if (firstDefinition) setSelectedClauseKey(catalogClauseKey(scope, firstDefinition.value));
+      setClauseLibraryStep(2);
+      setMessage(null);
+    };
+
+    const chooseClause = (item) => {
+      setSelectedClauseKey(item.key);
+      setClauseLibraryStep(3);
+      setMessage(null);
+    };
+
+    const renderClauseBlock = (section, index) => (
+      <div key={section.id || index} className="rounded-lg border border-border bg-card p-4">
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2">
+            <Badge variant="outline" className="font-mono text-xs">x.{index + 1}</Badge>
+            <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+              {index === 0 ? "Hoofdregel" : "Clausuleblok"}
+            </span>
+          </div>
+          <Badge variant="outline" className="text-[10px]">Vast blok</Badge>
+        </div>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{section.text}</p>
+      </div>
+    );
+
+    const renderVariationBlock = (snippet, index) => (
+      <div key={`${snippet.label}-${index}`} className="rounded-lg border border-dashed border-primary/40 bg-primary/5 p-4">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div className="min-w-0">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge className="bg-primary text-primary-foreground text-xs">Variatie</Badge>
+              <Badge variant="outline" className="text-xs">{variationPositionLabel}</Badge>
+            </div>
+            <p className="mt-2 text-sm font-semibold text-foreground">{snippet.label}</p>
+          </div>
+          <HelpCircle className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" title={snippet.help} />
+        </div>
+        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{snippet.text}</p>
+        <p className="mt-3 text-xs text-muted-foreground">
+          Als deze variatie wordt toegepast, schuift de nummering van de volgende vaste blokken automatisch door.
+        </p>
+      </div>
+    );
 
     return (
       <div className="flex h-full min-h-[360px] flex-col">
         {renderClauseWizard()}
 
         <div className="border-b border-border bg-muted/15 p-5">
-          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-center xl:justify-between">
             <div>
               <p className="text-xs font-semibold uppercase tracking-wider text-primary">Clausulebibliotheek</p>
-              <h3 className="mt-1 text-lg font-semibold text-foreground">Standaardclausules en bedrijfsvarianten</h3>
+              <h3 className="mt-1 text-lg font-semibold text-foreground">Clausules stap voor stap</h3>
               <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
-                Kies een documentsoort en bekijk direct de vaste clausules. Alleen wanneer een tekst voor dit bedrijf moet afwijken, maak je een bedrijfsvariant.
+                Kies eerst een documentsoort, daarna een clausule en bekijk vervolgens ieder x.1, x.2 en x.3 blok apart.
               </p>
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="min-w-0 xl:w-[420px]">
+              <WizardSteps labels={["Documentsoort", "Clausule", "Blokken"]} step={clauseLibraryStep} />
+            </div>
+          </div>
+        </div>
+
+        {clauseLibraryStep === 1 && (
+          <div className="flex-1 p-5">
+            <div className="mb-4">
+              <p className="text-sm font-semibold text-foreground">Waarvoor wil je clausules bekijken?</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">De applicatie toont daarna alleen de clausules die bij dat documenttype horen.</p>
+            </div>
+            <div className="grid gap-3 lg:grid-cols-2">
               {CLAUSE_SCOPE_OPTIONS.map(option => {
-                const active = option.value === clauseLibraryScope;
+                const standardCount = (CLAUSE_TYPE_CATALOG[option.value] || []).length;
                 const variantCount = activeClauses.filter(item => inferClauseCatalog(item).scope === option.value).length;
                 return (
                   <button
                     key={option.value}
                     type="button"
-                    onClick={() => {
-                      const firstDefinition = CLAUSE_TYPE_CATALOG[option.value]?.[0];
-                      setClauseLibraryScope(option.value);
-                      if (firstDefinition) setSelectedClauseKey(catalogClauseKey(option.value, firstDefinition.value));
-                    }}
-                    className={`rounded-lg border px-3 py-2 text-left transition-colors hover:border-primary hover:bg-accent ${active ? "border-primary bg-primary/10" : "border-border bg-card"}`}
+                    onClick={() => chooseScope(option.value)}
+                    className="rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-primary hover:bg-accent active:scale-[0.99]"
                   >
-                    <span className="block text-sm font-semibold text-foreground">{option.label}</span>
-                    <span className="block text-xs text-muted-foreground">
-                      {(CLAUSE_TYPE_CATALOG[option.value] || []).length} standaard · {variantCount} variant{variantCount === 1 ? "" : "en"}
-                    </span>
+                    <div className="flex items-start justify-between gap-3">
+                      <div className="min-w-0">
+                        <p className="text-base font-semibold text-foreground">{option.label}</p>
+                        <p className="mt-1 text-sm text-muted-foreground">{option.description}</p>
+                      </div>
+                      <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                    </div>
+                    <div className="mt-4 flex flex-wrap gap-2">
+                      <Badge variant="outline" className="text-xs">{standardCount} standaardclausule{standardCount === 1 ? "" : "s"}</Badge>
+                      <Badge variant="outline" className="text-xs">{variantCount} bedrijfsvariant{variantCount === 1 ? "" : "en"}</Badge>
+                    </div>
                   </button>
                 );
               })}
             </div>
           </div>
-        </div>
+        )}
 
-        <div className="grid flex-1 min-h-0 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.85fr)]">
-          <div className="min-w-0 border-r border-border">
+        {clauseLibraryStep === 2 && (
+          <div className="flex-1 min-h-0">
             <div className="border-b border-border px-5 py-4">
-              <div className="flex flex-wrap items-center justify-between gap-3">
-                <div>
+              <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+                <div className="min-w-0">
+                  <Button type="button" variant="ghost" size="sm" className="-ml-2 mb-2" onClick={() => setClauseLibraryStep(1)}>
+                    <ChevronLeft className="mr-1 h-4 w-4" />
+                    Documentsoorten
+                  </Button>
                   <p className="text-sm font-semibold text-foreground">{scopeMeta?.label || "Clausules"}</p>
                   <p className="mt-0.5 text-xs text-muted-foreground">{scopeMeta?.description}</p>
                 </div>
-                <Badge variant="outline" className="text-xs">
+                <Badge variant="outline" className="w-fit text-xs">
                   {clauseLibraryItems.length} standaardclausule{clauseLibraryItems.length === 1 ? "" : "s"}
                 </Badge>
               </div>
@@ -4716,14 +4795,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               </div>
               <div className="min-w-[900px]">
                 {clauseLibraryItems.map((item, index) => {
-                  const selected = selectedItem?.key === item.key;
                   const riskLevel = item.variant?.risk_level || item.definition.risk || "green";
                   return (
                     <button
                       key={item.key}
                       type="button"
-                      onClick={() => setSelectedClauseKey(item.key)}
-                      className={`${CLAUSE_LIBRARY_GRID} w-full items-start border-b border-border px-5 py-4 text-left text-sm transition-colors hover:bg-accent/35 ${selected ? "bg-primary/5" : "bg-background"}`}
+                      onClick={() => chooseClause(item)}
+                      className={`${CLAUSE_LIBRARY_GRID} w-full items-start border-b border-border bg-background px-5 py-4 text-left text-sm transition-colors hover:bg-accent/35`}
                     >
                       <span className="font-mono text-xs text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
                       <span className="min-w-0">
@@ -4758,12 +4836,48 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 })}
               </div>
             </div>
-          </div>
 
-          <aside className="min-w-0 overflow-y-auto bg-background">
-            {selectedItem ? (
-              <div className="space-y-5 p-5">
-                <div className="space-y-2">
+            {scopedCustomClauseItems.length > 0 && (
+              <div className="border-t border-border bg-muted/10 p-5">
+                <div className="mb-3">
+                  <p className="text-sm font-semibold text-foreground">Eigen clausules buiten de standaardbibliotheek</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Deze bestaande clausules blijven beschikbaar, maar horen nog niet bij een standaardclausulefamilie.</p>
+                </div>
+                <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+                  {scopedCustomClauseItems.map(item => (
+                    <div key={item.id} className="rounded-lg border border-border bg-card p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div className="min-w-0">
+                          <p className="truncate text-sm font-semibold text-foreground">{item.title}</p>
+                          <p className="mt-0.5 truncate text-xs text-muted-foreground">{clauseScopeLabel(item.scope)} · {clauseTypeLabel(item.scope, item.clause_type)}</p>
+                        </div>
+                        <div className="flex shrink-0 gap-1">
+                          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => startEditClause(item)}>
+                            <Edit className="h-3.5 w-3.5" />
+                          </Button>
+                          <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => archiveClause(item)}>
+                            <Archive className="h-3.5 w-3.5" />
+                          </Button>
+                        </div>
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{buildClauseBodyFromSections(normalizeClauseSections(item))}</p>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {clauseLibraryStep === 3 && selectedItem && (
+          <div className="flex-1 min-h-0 overflow-y-auto">
+            <div className="border-b border-border px-5 py-4">
+              <div className="flex flex-col gap-3 xl:flex-row xl:items-start xl:justify-between">
+                <div className="min-w-0">
+                  <Button type="button" variant="ghost" size="sm" className="-ml-2 mb-2" onClick={() => setClauseLibraryStep(2)}>
+                    <ChevronLeft className="mr-1 h-4 w-4" />
+                    Clausules
+                  </Button>
                   <div className="flex flex-wrap items-center gap-2">
                     <Badge variant="outline" className="text-xs">{scopeMeta?.label}</Badge>
                     {selectedItem.variant ? (
@@ -4771,11 +4885,11 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     ) : (
                       <Badge variant="outline" className="text-xs">Standaardtekst</Badge>
                     )}
+                    <Badge variant="outline" className={`text-xs ${CLAUSE_RISK_STYLES[selectedRiskLevel] || ""}`}>{clauseRiskLabel(selectedRiskLevel)}</Badge>
                   </div>
-                  <h4 className="text-lg font-semibold text-foreground">{selectedItem.definition.label}</h4>
-                  <p className="text-sm text-muted-foreground">{selectedItem.definition.description}</p>
+                  <h4 className="mt-2 text-lg font-semibold text-foreground">{selectedItem.definition.label}</h4>
+                  <p className="mt-1 max-w-3xl text-sm text-muted-foreground">{selectedItem.definition.description}</p>
                 </div>
-
                 <div className="flex flex-wrap gap-2">
                   <Button type="button" onClick={() => startEditCatalogClause(selectedItem.scope, selectedItem.definition)} disabled={clauseWizardOpen}>
                     {selectedItem.variant ? <Edit className="mr-1 h-4 w-4" /> : <FilePlus2 className="mr-1 h-4 w-4" />}
@@ -4795,7 +4909,34 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     </Button>
                   )}
                 </div>
+              </div>
+            </div>
 
+            <div className="grid gap-5 p-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+              <div className="space-y-3">
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <p className="text-sm font-semibold text-foreground">Clausuleblokken</p>
+                  <p className="mt-1 text-xs text-muted-foreground">
+                    Ieder onderdeel wordt als blok getoond. Variaties staan op de plek waar ze logisch tussen de vaste blokken kunnen worden ingevoegd.
+                  </p>
+                </div>
+
+                {selectedSections.slice(0, variationInsertIndex).map(renderClauseBlock)}
+
+                {selectedItem.snippets.length > 0 && (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2 px-1">
+                      <Badge variant="outline" className="text-xs">Optionele/voorwaardelijke variaties</Badge>
+                      <span className="text-xs text-muted-foreground">{variationPositionLabel}</span>
+                    </div>
+                    {selectedItem.snippets.map(renderVariationBlock)}
+                  </div>
+                )}
+
+                {selectedSections.slice(variationInsertIndex).map((section, index) => renderClauseBlock(section, index + variationInsertIndex))}
+              </div>
+
+              <aside className="space-y-4">
                 {selectedItem.scope === "employment_contracts" && (
                   <div className="rounded-lg border border-border bg-muted/20 p-3">
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Afgeleid uit bedrijfsprofiel</p>
@@ -4828,37 +4969,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 )}
 
                 <div className="rounded-lg border border-border bg-muted/20 p-3">
-                  <div className="mb-3 flex items-center justify-between gap-2">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tekstpreview</p>
-                    <Badge variant="outline" className="text-xs">
-                      {selectedItem.variant ? "Bedrijfsvariant" : "Standaard"}
-                    </Badge>
-                  </div>
-                  <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded-md bg-background p-3 text-xs leading-relaxed text-foreground">
-                    {selectedItem.body || "Geen standaardtekst beschikbaar."}
-                  </pre>
-                </div>
-
-                <div className="rounded-lg border border-border bg-muted/20 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Variaties en bouwblokken</p>
-                  <div className="mt-3 space-y-2">
-                    {selectedItem.snippets.length === 0 ? (
-                      <p className="text-sm text-muted-foreground">Deze clausule heeft geen aparte variaties. De standaardtekst is bedoeld als basis.</p>
-                    ) : selectedItem.snippets.map(snippet => (
-                      <div key={snippet.label} className="rounded-md border border-border bg-background p-3">
-                        <div className="flex items-start justify-between gap-2">
-                          <div className="min-w-0">
-                            <p className="text-sm font-medium text-foreground">{snippet.label}</p>
-                            <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{snippet.text}</p>
-                          </div>
-                          <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" title={snippet.help} />
-                        </div>
-                      </div>
-                    ))}
-                  </div>
-                </div>
-
-                <div className="rounded-lg border border-border bg-muted/20 p-3">
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
                   <div className="mt-3 flex flex-wrap gap-1">
                     {selectedItem.placeholders.length === 0 ? (
@@ -4885,41 +4995,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     </ul>
                   </div>
                 )}
-              </div>
-            ) : (
-              <div className="flex min-h-[260px] items-center justify-center p-8 text-center text-sm text-muted-foreground">
-                Geen standaardclausules beschikbaar voor deze categorie.
-              </div>
-            )}
-          </aside>
-        </div>
-
-        {customClauseItems.length > 0 && (
-          <div className="border-t border-border bg-muted/10 p-5">
-            <div className="mb-3">
-              <p className="text-sm font-semibold text-foreground">Eigen clausules buiten de standaardbibliotheek</p>
-              <p className="mt-0.5 text-xs text-muted-foreground">Deze bestaande clausules blijven beschikbaar, maar horen nog niet bij een standaardclausulefamilie.</p>
-            </div>
-            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
-              {customClauseItems.map(item => (
-                <div key={item.id} className="rounded-lg border border-border bg-card p-3">
-                  <div className="flex items-start justify-between gap-3">
-                    <div className="min-w-0">
-                      <p className="truncate text-sm font-semibold text-foreground">{item.title}</p>
-                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{clauseScopeLabel(item.scope)} · {clauseTypeLabel(item.scope, item.clause_type)}</p>
-                    </div>
-                    <div className="flex shrink-0 gap-1">
-                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => startEditClause(item)}>
-                        <Edit className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => archiveClause(item)}>
-                        <Archive className="h-3.5 w-3.5" />
-                      </Button>
-                    </div>
-                  </div>
-                  <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{buildClauseBodyFromSections(normalizeClauseSections(item))}</p>
-                </div>
-              ))}
+              </aside>
             </div>
           </div>
         )}
