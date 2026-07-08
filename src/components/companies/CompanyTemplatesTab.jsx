@@ -2103,6 +2103,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [clauseWizardOpen, setClauseWizardOpen] = useState(false);
   const [clauseDirectEditMode, setClauseDirectEditMode] = useState(false);
   const [clauseLibraryStep, setClauseLibraryStep] = useState(1);
+  const [clauseDetailView, setClauseDetailView] = useState("structure");
   const [clauseLibraryScope, setClauseLibraryScope] = useState("employment_contracts");
   const [selectedClauseKey, setSelectedClauseKey] = useState(() => (
     catalogClauseKey("employment_contracts", CLAUSE_TYPE_CATALOG.employment_contracts?.[0]?.value)
@@ -4662,20 +4663,28 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     const variationPositionLabel = variationInsertIndex > 0 && variationInsertIndex < selectedSections.length
       ? `Tussen x.${variationInsertIndex} en x.${variationInsertIndex + 1}`
       : `Na x.${Math.max(variationInsertIndex, 1)}`;
+    const variationLabels = selectedItem?.snippets?.map(snippet => snippet.label).filter(Boolean) || [];
     const scopedCustomClauseItems = customClauseItems.filter(item => (inferClauseCatalog(item).scope || item.scope) === clauseLibraryScope);
     const selectedRiskLevel = selectedItem?.variant?.risk_level || selectedItem?.definition?.risk || "green";
+    const clauseDetailTabs = [
+      { value: "structure", label: "Opbouw" },
+      { value: "variations", label: `Variaties${variationLabels.length ? ` (${variationLabels.length})` : ""}` },
+      { value: "preview", label: "Preview" },
+    ];
 
     const chooseScope = (scope) => {
       const firstDefinition = CLAUSE_TYPE_CATALOG[scope]?.[0];
       setClauseLibraryScope(scope);
       if (firstDefinition) setSelectedClauseKey(catalogClauseKey(scope, firstDefinition.value));
       setClauseLibraryStep(2);
+      setClauseDetailView("structure");
       setMessage(null);
     };
 
     const chooseClause = (item) => {
       setSelectedClauseKey(item.key);
       setClauseLibraryStep(3);
+      setClauseDetailView("structure");
       setMessage(null);
     };
 
@@ -4694,24 +4703,43 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       </div>
     );
 
-    const renderVariationBlock = (snippet, index) => (
-      <div key={`${snippet.label}-${index}`} className="rounded-lg border border-dashed border-primary/40 bg-primary/5 p-4">
-        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
-          <div className="min-w-0">
-            <div className="flex flex-wrap items-center gap-2">
-              <Badge className="bg-primary text-primary-foreground text-xs">Variatie</Badge>
-              <Badge variant="outline" className="text-xs">{variationPositionLabel}</Badge>
+    const renderVariationSlot = () => {
+      if (!selectedItem?.snippets?.length) return null;
+      return (
+        <button
+          type="button"
+          onClick={() => setClauseDetailView("variations")}
+          className="w-full rounded-lg border border-dashed border-primary/40 bg-primary/5 p-4 text-left transition-colors hover:border-primary hover:bg-primary/10"
+        >
+          <div className="flex flex-col gap-3 lg:flex-row lg:items-center lg:justify-between">
+            <div className="min-w-0">
+              <div className="flex flex-wrap items-center gap-2">
+                <Badge className="bg-primary text-primary-foreground text-xs">Variatieslot</Badge>
+                <Badge variant="outline" className="text-xs">{variationPositionLabel}</Badge>
+              </div>
+              <p className="mt-2 text-sm font-semibold text-foreground">
+                {variationLabels.length} optionele of automatische variatie{variationLabels.length === 1 ? "" : "s"} beschikbaar
+              </p>
+              <p className="mt-1 text-xs text-muted-foreground">
+                De volledige teksten staan apart, zodat de clausule-opbouw overzichtelijk blijft.
+              </p>
             </div>
-            <p className="mt-2 text-sm font-semibold text-foreground">{snippet.label}</p>
+            <div className="flex shrink-0 items-center gap-2 text-xs font-medium text-primary">
+              Variaties bekijken
+              <ChevronRight className="h-4 w-4" />
+            </div>
           </div>
-          <HelpCircle className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" title={snippet.help} />
-        </div>
-        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{snippet.text}</p>
-        <p className="mt-3 text-xs text-muted-foreground">
-          Als deze variatie wordt toegepast, schuift de nummering van de volgende vaste blokken automatisch door.
-        </p>
-      </div>
-    );
+          <div className="mt-3 flex flex-wrap gap-1">
+            {variationLabels.slice(0, 8).map(label => (
+              <Badge key={label} variant="outline" className="bg-background/70 text-xs">{label}</Badge>
+            ))}
+            {variationLabels.length > 8 && (
+              <Badge variant="outline" className="bg-background/70 text-xs">+{variationLabels.length - 8}</Badge>
+            )}
+          </div>
+        </button>
+      );
+    };
 
     return (
       <div className="flex h-full min-h-[360px] flex-col">
@@ -4912,29 +4940,106 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               </div>
             </div>
 
-            <div className="grid gap-5 p-5 xl:grid-cols-[minmax(0,1fr)_340px]">
-              <div className="space-y-3">
-                <div className="rounded-lg border border-border bg-muted/20 p-3">
-                  <p className="text-sm font-semibold text-foreground">Clausuleblokken</p>
-                  <p className="mt-1 text-xs text-muted-foreground">
-                    Ieder onderdeel wordt als blok getoond. Variaties staan op de plek waar ze logisch tussen de vaste blokken kunnen worden ingevoegd.
-                  </p>
-                </div>
-
-                {selectedSections.slice(0, variationInsertIndex).map(renderClauseBlock)}
-
-                {selectedItem.snippets.length > 0 && (
-                  <div className="space-y-3">
-                    <div className="flex flex-wrap items-center gap-2 px-1">
-                      <Badge variant="outline" className="text-xs">Optionele/voorwaardelijke variaties</Badge>
-                      <span className="text-xs text-muted-foreground">{variationPositionLabel}</span>
-                    </div>
-                    {selectedItem.snippets.map(renderVariationBlock)}
-                  </div>
-                )}
-
-                {selectedSections.slice(variationInsertIndex).map((section, index) => renderClauseBlock(section, index + variationInsertIndex))}
+            <div className="border-b border-border bg-background px-5 py-3">
+              <div className="flex flex-wrap gap-2">
+                {clauseDetailTabs.map(tab => {
+                  const active = clauseDetailView === tab.value;
+                  const disabled = tab.value === "variations" && variationLabels.length === 0;
+                  return (
+                    <button
+                      key={tab.value}
+                      type="button"
+                      disabled={disabled}
+                      onClick={() => setClauseDetailView(tab.value)}
+                      className={`rounded-md border px-3 py-2 text-sm font-medium transition-colors ${
+                        active
+                          ? "border-primary bg-primary text-primary-foreground"
+                          : "border-border bg-card text-muted-foreground hover:border-primary hover:bg-accent hover:text-foreground"
+                      } ${disabled ? "cursor-not-allowed opacity-50" : ""}`}
+                    >
+                      {tab.label}
+                    </button>
+                  );
+                })}
               </div>
+            </div>
+
+            <div className="grid gap-5 p-5 xl:grid-cols-[minmax(0,1fr)_340px]">
+              {clauseDetailView === "structure" && (
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-border bg-muted/20 p-3">
+                    <p className="text-sm font-semibold text-foreground">Clausule-opbouw</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      De vaste x-blokken blijven leesbaar. Variaties staan als compact slot op de plek waar ze later automatisch worden ingevoegd.
+                    </p>
+                  </div>
+
+                  {selectedSections.slice(0, variationInsertIndex).map(renderClauseBlock)}
+                  {renderVariationSlot()}
+                  {selectedSections.slice(variationInsertIndex).map((section, index) => renderClauseBlock(section, index + variationInsertIndex))}
+                </div>
+              )}
+
+              {clauseDetailView === "variations" && (
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-border bg-muted/20 p-3">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Variaties</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          De variaties zijn standaard ingeklapt. Bij contractgeneratie kiest de applicatie de passende variaties op basis van functies, contractvorm en bedrijfscontext.
+                        </p>
+                      </div>
+                      <Badge variant="outline" className="text-xs">{variationPositionLabel}</Badge>
+                    </div>
+                  </div>
+
+                  {selectedItem.snippets.length === 0 ? (
+                    <div className="rounded-lg border border-border bg-card p-4 text-sm text-muted-foreground">
+                      Deze clausule heeft geen aparte variaties.
+                    </div>
+                  ) : selectedItem.snippets.map((snippet, index) => (
+                    <details key={`${snippet.label}-${index}`} className="group rounded-lg border border-border bg-card">
+                      <summary className="flex cursor-pointer list-none items-start justify-between gap-3 p-4">
+                        <div className="min-w-0">
+                          <div className="flex flex-wrap items-center gap-2">
+                            <Badge variant="outline" className="text-xs">Variatie</Badge>
+                            <Badge variant="outline" className="text-xs">{variationPositionLabel}</Badge>
+                          </div>
+                          <p className="mt-2 text-sm font-semibold text-foreground">{snippet.label}</p>
+                          <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{snippet.help || snippet.text}</p>
+                        </div>
+                        <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground transition-transform group-open:rotate-90" />
+                      </summary>
+                      <div className="border-t border-border px-4 pb-4 pt-3">
+                        {snippet.help && (
+                          <div className="mb-3 rounded-md border border-border bg-muted/20 p-3 text-xs text-muted-foreground">
+                            {snippet.help}
+                          </div>
+                        )}
+                        <p className="whitespace-pre-wrap text-sm leading-relaxed text-foreground">{snippet.text}</p>
+                        <p className="mt-3 text-xs text-muted-foreground">
+                          Als deze variatie wordt toegepast, schuift de nummering van de volgende vaste blokken automatisch door.
+                        </p>
+                      </div>
+                    </details>
+                  ))}
+                </div>
+              )}
+
+              {clauseDetailView === "preview" && (
+                <div className="space-y-3">
+                  <div className="rounded-lg border border-border bg-muted/20 p-3">
+                    <p className="text-sm font-semibold text-foreground">Preview</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      Dit is de basisclausule zoals die nu is opgeslagen. Functie- en contractvariaties worden bij een concrete contracttemplate automatisch toegevoegd wanneer de context bekend is.
+                    </p>
+                  </div>
+                  <pre className="max-h-[560px] overflow-auto whitespace-pre-wrap rounded-lg border border-border bg-card p-4 text-sm leading-relaxed text-foreground">
+                    {selectedItem.body || "Geen standaardtekst beschikbaar."}
+                  </pre>
+                </div>
+              )}
 
               <aside className="space-y-4">
                 {selectedItem.scope === "employment_contracts" && (
