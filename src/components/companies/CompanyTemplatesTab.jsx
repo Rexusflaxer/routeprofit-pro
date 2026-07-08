@@ -394,72 +394,35 @@ const CLAUSE_TYPE_CATALOG = {
     {
       value: "confidentiality",
       label: "Geheimhouding, vertrouwelijke informatie en bedrijfsgeheimen",
-      description: "Basisclausule met contextblokken voor objectbeveiliging, horeca/evenementen, PAC, VTC, PGW, POB, binnendienst en stage.",
+      description: "Compacte basisclausule met verzameltermen, zodat meerdere functies geen lange waslijst veroorzaken.",
       risk: "green",
       required: true,
       appliesToPermits: ["all_security", "ND", "HND", "BD", "HBD", "PAC", "VTC", "PGW", "POB", "not_applicable"],
       defaultSections: [
-        `Onder Vertrouwelijke Informatie wordt in deze arbeidsovereenkomst verstaan: alle informatie, in welke vorm dan ook, die werknemer tijdens of in verband met het dienstverband bij of voor {$bedrijf_naam} verkrijgt, ontvangt, raadpleegt, verwerkt, gebruikt, vastlegt of waarvan werknemer kennisneemt, en waarvan werknemer weet of redelijkerwijs behoort te begrijpen dat deze vertrouwelijk, gevoelig, niet-openbaar of bedrijfsgevoelig is.`,
-        `Onder Vertrouwelijke Informatie valt in ieder geval, maar niet uitsluitend: informatie over {$bedrijf_naam}, klanten, opdrachtgevers, relaties, leveranciers, onderaannemers, beveiligingsplannen, risicoanalyses, procedures, objectinstructies, incidentmeldingen, sleutelprocedures, toegangsinstructies, toegangscodes, persoonsgegevens, systemen, accounts, autorisaties, loggegevens, interne documenten en informatie die door {$bedrijf_naam}, een opdrachtgever, {$leidinggevende} of een daartoe bevoegde persoon als vertrouwelijk is aangeduid.`,
-        `Onder Vertrouwelijke Informatie valt ook informatie waarvan werknemer, gelet op de aard van de functie {$hoofdfunctie}, de functie(s) {$functie_lijst}, de toepasselijke vergunningcontext {$functie_vergunning_context}, de toepasselijke cao-context {$functie_cao_context}, de {$cao_naam}, het {$personeelshandboek}, het {$bedrijfsreglement}, het {$privacybeleid} of de {$objectinstructies}, redelijkerwijs behoort te begrijpen dat deze niet zonder toestemming mag worden gedeeld.`,
+        `Onder Vertrouwelijke Informatie wordt verstaan: alle informatie die werknemer tijdens of in verband met het dienstverband bij of voor {$bedrijf_naam} verkrijgt en waarvan werknemer weet of redelijkerwijs behoort te begrijpen dat deze vertrouwelijk, gevoelig, niet-openbaar of bedrijfsgevoelig is.`,
+        `Onder Vertrouwelijke Informatie valt in ieder geval bedrijfsinformatie, klant- en opdrachtgeverinformatie, persoonsgegevens, beveiligingsinformatie, operationele instructies, systeem- en toegangsgegevens, financiele en commerciele informatie, interne documenten en alle overige informatie die door {$bedrijf_naam}, een opdrachtgever, {$leidinggevende} of een daartoe bevoegde persoon als vertrouwelijk is aangeduid.`,
+        `Bij beveiligings-, meldkamer-, videotoezicht-, geld- en waardetransport-, horeca-/evenementenbeveiligings-, bedrijfsbeveiligings-, binnendienst- of recherchewerkzaamheden omvat Vertrouwelijke Informatie ook de daarbij behorende object-, melding-, beeld-, route-, waarde-, onderzoeks-, incident-, toegangs-, rooster-, plannings- en dossierinformatie.`,
         `Werknemer is verplicht alle Vertrouwelijke Informatie strikt geheim te houden. Werknemer mag Vertrouwelijke Informatie niet zonder voorafgaande schriftelijke toestemming van {$bedrijf_naam} of {$leidinggevende} direct of indirect verstrekken, tonen, bespreken, openbaar maken, kopieren, verspreiden, doorsturen, publiceren of anderszins toegankelijk maken voor derden.`,
         `Ook binnen {$bedrijf_naam} of binnen de organisatie van een opdrachtgever deelt werknemer Vertrouwelijke Informatie uitsluitend met personen die deze informatie noodzakelijkerwijs nodig hebben voor de uitvoering van hun taak. Werknemer past daarbij het need-to-know-principe toe.`,
         `Werknemer gebruikt Vertrouwelijke Informatie uitsluitend voor de behoorlijke uitvoering van de werkzaamheden voor {$bedrijf_naam}. Het is werknemer verboden Vertrouwelijke Informatie te gebruiken voor prive-doeleinden, eigen voordeel, werkzaamheden voor derden, benadering van klanten of relaties buiten {$bedrijf_naam} om, of enig ander doel dan de uitvoering van de arbeidsovereenkomst.`,
-        `Werknemer verwerkt, bewaart, raadpleegt en verzendt Vertrouwelijke Informatie uitsluitend via de door {$bedrijf_naam} goedgekeurde systemen, accounts, communicatiemiddelen en opslaglocaties. Zonder voorafgaande schriftelijke toestemming is het werknemer niet toegestaan Vertrouwelijke Informatie op te slaan op prive-apparatuur, prive-accounts, prive-cloudopslag, externe gegevensdragers of niet-goedgekeurde systemen, of deze te verwerken via niet-goedgekeurde externe digitale diensten, waaronder generatieve AI-systemen.`,
-        `Werknemer houdt wachtwoorden, toegangscodes, sleutels, passen, accounts, authenticatiemiddelen en andere toegangs- of beveiligingsmiddelen strikt persoonlijk en geheim. Werknemer deelt deze niet met anderen en neemt passende maatregelen om onbevoegde toegang, kennisname, verlies, diefstal of misbruik te voorkomen.`,
-        `Werknemer meldt ieder vermoeden van verlies, diefstal, onbevoegde toegang, onbevoegde kennisname, onjuiste verzending, onbedoelde openbaarmaking, datalek, beveiligingsincident of andere mogelijke schending van Vertrouwelijke Informatie direct bij {$meldpunt_geheimhouding}. Indien persoonsgegevens betrokken kunnen zijn, meldt werknemer dit ook direct bij {$meldpunt_privacy_datalekken}.`,
+        `Werknemer verwerkt, bewaart, raadpleegt en verzendt Vertrouwelijke Informatie uitsluitend via de door {$bedrijf_naam} goedgekeurde systemen, accounts, communicatiemiddelen en opslaglocaties. Wachtwoorden, toegangscodes, sleutels, passen, accounts en andere toegangs- of beveiligingsmiddelen zijn strikt persoonlijk en geheim.`,
+        `Werknemer meldt ieder vermoeden van verlies, diefstal, onbevoegde toegang, verkeerde verzending, datalek, beveiligingsincident of andere mogelijke schending van Vertrouwelijke Informatie direct bij {$meldpunt_geheimhouding}. Indien persoonsgegevens betrokken kunnen zijn, meldt werknemer dit ook direct bij {$meldpunt_privacy_datalekken}.`,
         `De geheimhoudingsplicht geldt niet voor zover werknemer wettelijk verplicht is Vertrouwelijke Informatie te verstrekken aan een rechter, toezichthouder, opsporingsinstantie of andere bevoegde instantie. Werknemer informeert {$bedrijf_naam} hierover vooraf, tenzij dit wettelijk niet is toegestaan.`,
         `Deze geheimhoudingsplicht verhindert werknemer niet om juridisch advies in te winnen, zich te wenden tot een vakbond, een bevoegde autoriteit of een aangewezen meldpunt, of een melding te doen van een vermoeden van een misstand, voor zover dit gebeurt binnen de grenzen van de wet en niet verder gaat dan noodzakelijk voor dat doel.`,
-        `Bij beeindiging van het dienstverband, of eerder indien {$bedrijf_naam} daarom verzoekt, geeft werknemer alle Vertrouwelijke Informatie en alle dragers waarop deze informatie is vastgelegd direct aan {$bedrijf_naam} terug. Voor zover Vertrouwelijke Informatie zich met toestemming van {$bedrijf_naam} op prive-apparatuur, prive-accounts of externe omgevingen bevindt, verwijdert werknemer deze informatie op eerste verzoek van {$bedrijf_naam} en bevestigt werknemer schriftelijk dat dit is gebeurd.`,
-        `Werknemer mag kopieen bewaren van documenten die betrekking hebben op de eigen arbeidsovereenkomst, loon, pensioen, fiscale positie, correspondentie over de eigen rechtspositie of andere persoonlijke arbeidsrechtelijke aanspraken, voor zover daarin geen Vertrouwelijke Informatie van {$bedrijf_naam}, opdrachtgevers, klanten, collega's of derden is opgenomen die niet noodzakelijk is voor het bewaren van die eigen rechtspositie.`,
+        `Bij beeindiging van het dienstverband, of eerder indien {$bedrijf_naam} daarom verzoekt, geeft werknemer alle Vertrouwelijke Informatie en alle dragers waarop deze informatie is vastgelegd direct aan {$bedrijf_naam} terug of verwijdert deze op instructie van {$bedrijf_naam}, voor zover dit rechtmatig en praktisch mogelijk is.`,
         `De verplichtingen uit dit artikel gelden gedurende het dienstverband en blijven ook na het einde van het dienstverband volledig van kracht, zolang de betreffende informatie niet rechtmatig openbaar is geworden of zolang {$bedrijf_naam}, een opdrachtgever, klant, relatie of derde een redelijk belang heeft bij geheimhouding daarvan. Voor bedrijfsgeheimen geldt deze verplichting zolang de informatie als bedrijfsgeheim of anderszins als vertrouwelijke bedrijfsinformatie kan worden beschermd.`,
         `Overtreding van dit artikel kan worden aangemerkt als een ernstige schending van de arbeidsovereenkomst en kan arbeidsrechtelijke gevolgen hebben. Afhankelijk van de aard en ernst van de overtreding kan {$bedrijf_naam}, met inachtneming van wet, {$cao_naam} en de omstandigheden van het geval, passende maatregelen nemen, waaronder een waarschuwing, tijdelijke ontzegging van toegang tot systemen of locaties, schorsing, beeindiging van de arbeidsovereenkomst, ontslag op staande voet indien sprake is van een dringende reden, een rechterlijk verbod of bevel en/of het verhalen van schade voor zover dit rechtens is toegestaan.`,
       ],
       snippets: [
         {
-          label: "Objectbeveiliging / ND / BD",
-          text: "Voor zover werknemer werkzaamheden verricht binnen objectbeveiliging, mobiele surveillance, receptiediensten, alarmopvolging, winkelsurveillance, brandwachtwerkzaamheden of bedrijfsbeveiliging, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: klantgegevens, opdrachtgevergegevens, objectinformatie, beveiligingsplannen, objectinstructies, sleutelprocedures, toegangspassen, alarmopvolgingsinstructies, toegangscodes, roosters, inzetplanning, tarieven, risico-informatie, contactpersonen, incidentrapportages, surveillancegegevens en informatie over beveiligingsmaatregelen van locaties, objecten of terreinen.",
-          help: "Gebruik dit bij objectbeveiliging, mobiele surveillance, alarmopvolging, receptie met objecttoegang, winkelsurveillance, brandwacht of bedrijfsbeveiliging.",
-        },
-        {
-          label: "Evenementen- en horecabeveiliging",
-          text: "Voor zover werknemer werkzaamheden verricht binnen evenementenbeveiliging, horecabeveiliging, crowdmanagement, toegangscontrole of hostwerkzaamheden, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: bezoekersinformatie, gasteninformatie, huisregels, deurbeleid, toegangsbeleid, fouilleringsafspraken, ontzeggingen, incidentgegevens, briefingdocumenten, inzetplannen, draaiboeken, informatie over artiesten, VIP's of crew, camerabeelden, communicatie met opdrachtgever, politie, gemeente of hulpdiensten, veiligheidsprocedures en informatie over risico's, dreigingen of ordeverstoringen.",
-          help: "Gebruik dit bij ND/HND/HBD met horeca- of evenementenbeveiliging, CAO EHB of Veiligheidsdomein met evenement-/horecacontext.",
-        },
-        {
-          label: "PAC / meldkamer",
-          text: "Voor zover werknemer werkzaamheden verricht binnen of ten behoeve van een particuliere alarmcentrale of meldkamer, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: alarmmeldingen, alarmcodes, aansluitgegevens, klantinstructies, verificatieprotocollen, meldkamerprocedures, sleutelhoudergegevens, escalatieschema's, communicatie met politie, brandweer, ambulance of andere hulpdiensten, loggegevens, technische alarmgegevens, opvolgingsafspraken, storingsinformatie, alarmhistorie en informatie over de bereikbaarheid, beschikbaarheid of beveiligingsmaatregelen van aangesloten klanten.",
-          help: "Verplicht bij centralist PAC of binnendienstfuncties met toegang tot alarmcentrale-informatie.",
-        },
-        {
-          label: "VTC / camerabeelden",
-          text: "Voor zover werknemer werkzaamheden verricht binnen of ten behoeve van een particuliere videotoezichtcentrale, cameratoezichtomgeving of videosurveillance, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: livebeelden, opgenomen camerabeelden, observaties, cameraopstellingen, kijkrichtingen, cameraposities, toegangsrechten tot videosystemen, opvolgprotocollen, incidentbeelden, loggegevens, beeldanalyse, meldingen, technische informatie over camerasystemen en informatie over beveiligingsmaatregelen, kwetsbaarheden of risico's van locaties waarop toezicht wordt gehouden.",
-          help: "Verplicht bij centralist VTC, videosurveillant, toezichthouder of functies met toegang tot camerabeelden.",
-        },
-        {
-          label: "PGW / geld- en waardentransport",
-          text: "Voor zover werknemer werkzaamheden verricht binnen of ten behoeve van geld- en waardentransport, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: routes, tijdstippen, transportgegevens, zendinggegevens, waarde-informatie, overdrachtslocaties, laad- en losprocedures, voertuiggegevens, bemanning, klantgegevens, transportplanning, beveiligingsmaatregelen, incidentprocedures, noodprocedures, communicatiemiddelen en informatie over de aard, omvang, bestemming of planning van te vervoeren waarden.",
-          help: "Verplicht bij geld- en waardentransporteur, chauffeur of bijrijder, en bij binnendienst met toegang tot route- of waarde-informatie.",
-        },
-        {
-          label: "POB / recherche",
-          text: "Voor zover werknemer werkzaamheden verricht binnen of ten behoeve van een particulier recherchebureau, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: onderzoeksdossiers, onderzoeksopdrachten, observaties, bronnen, persoonsgegevens, rapportages, onderzoeksmethoden, bevindingen, bewijsstukken, interviewverslagen, communicatie met opdrachtgevers, informatie over betrokken personen, locatiegegevens, onderzoeksstrategieen, interne beoordelingen en alle informatie waarvan openbaarmaking de privacy van betrokkenen, de betrouwbaarheid van het onderzoek, de positie van de opdrachtgever of de rechtmatigheid van het onderzoek kan raken.",
-          help: "Verplicht bij particulier onderzoeker, rechercheur, observant of binnendienst met toegang tot onderzoeksinformatie.",
-        },
-        {
-          label: "Binnendienst",
-          text: "Voor zover werknemer een binnendienstfunctie, administratieve functie, coordinerende functie, commerciele functie, HR-functie, financiele functie, kwaliteitsfunctie, compliancefunctie, managementfunctie of directiefunctie verricht, wordt onder Vertrouwelijke Informatie in ieder geval mede verstaan: planning, roosters, klantinformatie, opdrachtgevergegevens, tarieven, offertes, contractinformatie, facturen, personeelsgegevens, salarisgegevens, verzuimgegevens, sollicitatiegegevens, beoordelingsinformatie, interne documenten, operationele instructies, beleidsdocumenten, managementinformatie, commerciele informatie, kwaliteitsdocumentatie, compliance-informatie en informatie over bedrijfsvoering, strategie of besluitvorming.",
-          help: "Gebruik dit bij planner, roostermaker, administratie, HR, salarisadministratie, accountmanagement, compliance, management en directie.",
+          label: "Extra gevoelige context",
+          text: "Voor zover de functie toegang geeft tot bijzonder gevoelige meldkamer-, beeld-, waarde-, route-, onderzoeks- of dossierinformatie, wordt deze informatie steeds als strikt vertrouwelijk beschouwd.",
+          help: "Alleen nodig als de gebruiker extra nadruk wil leggen bij PAC, VTC, PGW of POB. De standaardtekst dekt deze context al compact.",
         },
         {
           label: "Stagevariant",
           text: "Voor zover deze clausule wordt gebruikt in een stageovereenkomst, moet in dit artikel 'werknemer' worden gelezen als 'stagiair', 'dienstverband' als 'stage' en 'arbeidsovereenkomst' als 'stageovereenkomst', tenzij uit de context anders volgt.",
           help: "Gebruik dit wanneer de contractvorm stage is. Zo blijft de basisclausule bruikbaar zonder alles dubbel te schrijven.",
-        },
-        {
-          label: "Samenvoegregel meerdere functies",
-          text: "Bij meerdere functies wordt deze clausule niet dubbel opgenomen. De relevante contextblokken worden samengevoegd in een onderdeel, zodat een artikel Geheimhouding ontstaat met een basisclausule en de passende functie- en vergunningcontexten.",
-          help: "Gebruik dit als toelichting bij medewerkers met meerdere functies, bijvoorbeeld objectbeveiliger en centralist PAC.",
         },
       ],
     },
@@ -1279,19 +1242,6 @@ function editableClauseSections(source = {}) {
 
 function contextualDefaultSections(definition, licenseScope) {
   const sections = [...(definition?.defaultSections || [""])];
-  if (definition?.value === "confidentiality") {
-    const contextSections = {
-      ND: "Objectinformatie, sleutelprocedures, alarmopvolgingsinstructies, locatiegebonden risico's en beveiligingsafspraken worden altijd als vertrouwelijk beschouwd.",
-      BD: "Objectinformatie, sleutelprocedures, alarmopvolgingsinstructies, locatiegebonden risico's en beveiligingsafspraken van de eigen onderneming worden altijd als vertrouwelijk beschouwd.",
-      HND: "Informatie over bezoekers, incidenten, toegangsbeleid, ontzeggingen, huisregels, briefingdocumenten, camerabeelden en inzetplannen wordt altijd als vertrouwelijk beschouwd.",
-      HBD: "Informatie over gasten, incidenten, toegangsbeleid, ontzeggingen, huisregels, camerabeelden en interne horeca-instructies wordt altijd als vertrouwelijk beschouwd.",
-      PAC: "Alarmmeldingen, alarmcodes, aansluitgegevens, verificatieprotocollen, klantinstructies en meldkamerprocedures worden altijd als vertrouwelijk beschouwd.",
-      VTC: "Livebeelden, opgenomen camerabeelden, observaties, cameraopstellingen, opvolgprotocollen, toegangsrechten en beeldanalyse worden altijd als vertrouwelijk beschouwd.",
-      PGW: "Routes, tijdstippen, zendinggegevens, waarde-informatie, overdrachtslocaties, voertuiggegevens en transportprocedures worden altijd als strikt vertrouwelijk beschouwd.",
-      POB: "Onderzoeksdossiers, observaties, bronnen, onderzoeksopdrachten, persoonsgegevens, rapportages, onderzoeksmethoden en bevindingen worden altijd als strikt vertrouwelijk beschouwd.",
-    };
-    if (contextSections[licenseScope]) sections.splice(2, 0, contextSections[licenseScope]);
-  }
   if (definition?.value === "privacy_data_security" && ["PAC", "VTC", "POB"].includes(licenseScope)) {
     sections.splice(1, 0, "Vanwege de gekozen vergunning gelden verhoogde eisen aan logging, toegangsbeperking, doelbinding en melding van mogelijke datalekken of onbevoegde kennisname.");
   }
@@ -1325,9 +1275,8 @@ function clauseValidationNotes(form = {}, definition = null) {
     notes.push("Gebruik deze clausule niet om verplichte scholing of noodzakelijke functieopleiding op werknemer te verhalen.");
   }
   if (definition?.value === "confidentiality") {
-    notes.push("Gebruik de basisclausule één keer en voeg alleen de contextblokken toe die passen bij de functies in het contract.");
-    notes.push("Bij meerdere functies worden contextblokken samengevoegd in één geheimhoudingsartikel; maak geen dubbele geheimhoudingsclausules.");
-    notes.push("PAC, VTC, PGW en POB vragen altijd een eigen contextblok wanneer de medewerker toegang heeft tot meldkamer-, video-, waarde- of onderzoeksinformatie.");
+    notes.push("Gebruik de basisclausule één keer. De compacte verzamelterm dekt meerdere functies zonder lange opsomming per functie.");
+    notes.push("Voeg alleen een extra gevoelige contextregel toe wanneer extra nadruk nodig is, bijvoorbeeld bij meldkamer-, beeld-, waarde-, route-, onderzoeks- of dossierinformatie.");
     notes.push("Laat de wettelijke uitzondering, juridisch advies/vakbond/bevoegde autoriteit en meldingsmogelijkheid voor misstanden in de tekst staan.");
     notes.push("Vermijd teksten zoals 'werknemer is altijd aansprakelijk voor alle schade'. Gebruik de standaard sanctietekst met verwijzing naar wet, cao en omstandigheden.");
   }
