@@ -58,33 +58,6 @@ const TEMPLATE_STATUS_STYLES = {
   archived: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
 };
 
-const CONTRACT_FORM_SCOPES = [
-  { value: "any", label: "Alle contractvormen" },
-  { value: "bepaalde_tijd", label: "Bepaalde tijd" },
-  { value: "onbepaalde_tijd", label: "Onbepaalde tijd" },
-  { value: "oproep", label: "Oproep / min-max" },
-  { value: "stage", label: "Stage" },
-  { value: "zzp", label: "ZZP / opdracht" },
-];
-
-const EMPLOYMENT_MODEL_SCOPES = [
-  { value: "any", label: "Alle urenmodellen" },
-  { value: "fulltime", label: "Fulltime" },
-  { value: "parttime_fixed", label: "Parttime vast" },
-  { value: "parttime_growth", label: "Parttime groeimodel" },
-  { value: "call_agreement", label: "Oproep / nuluren" },
-  { value: "min_max", label: "Min-max" },
-  { value: "internship", label: "Stage" },
-  { value: "zzp", label: "ZZP / opdracht" },
-];
-
-const PROBATION_SCOPES = [
-  { value: "any", label: "Met en zonder proeftijd" },
-  { value: "with_probation", label: "Alleen met proeftijd" },
-  { value: "without_probation", label: "Alleen zonder proeftijd" },
-  { value: "not_applicable", label: "Niet van toepassing" },
-];
-
 const CAO_OPTIONS = [
   { value: "cao_particuliere_beveiliging", label: "CAO Particuliere Beveiliging" },
   { value: "cao_evenementen_horecabeveiliging", label: "CAO Evenementen- en Horecabeveiliging" },
@@ -115,28 +88,72 @@ const TEMPLATE_DOCUMENT_TYPES = [
 
 const TEMPLATE_DOCUMENT_TYPE_LABELS = Object.fromEntries(TEMPLATE_DOCUMENT_TYPES.map(option => [option.value, option.label]));
 
-const CONTRACT_FORM_LABELS = {
-  bepaalde_tijd: "Bepaalde tijd",
-  onbepaalde_tijd: "Onbepaalde tijd",
-  oproep: "Oproep",
-  stage: "Stage",
-  zzp: "ZZP / opdracht",
-};
-
 const EMPLOYMENT_MODEL_LABELS = {
-  fulltime: "Fulltime",
-  parttime_fixed: "Parttime vast",
+  fulltime: "Fulltime dienstverband",
+  parttime_fixed: "Parttime dienstverband",
   parttime_growth: "Parttime groeimodel",
-  call_agreement: "Oproep / nuluren",
+  call_agreement: "Oproepkracht",
   min_max: "Min-max",
   internship: "Stage",
   zzp: "ZZP / opdracht",
 };
 
-const CONTRACT_MODEL_OPTIONS = [
+const TEMPLATE_CONTRACT_MODEL_OPTIONS = [
+  {
+    value: "fulltime_employment",
+    label: "Fulltime dienstverband",
+    description: "Voor medewerkers met een volledige arbeidsomvang.",
+    contract_form: "any",
+    duration_type: "any",
+    employment_model: "fulltime",
+    default_hours: 40,
+  },
+  {
+    value: "parttime_employment",
+    label: "Parttime dienstverband",
+    description: "Voor medewerkers met een vaste parttime arbeidsomvang.",
+    contract_form: "any",
+    duration_type: "any",
+    employment_model: "parttime_fixed",
+  },
+  {
+    value: "parttime_growth",
+    label: "Parttime groeimodel",
+    description: "Voor parttime contracten waarbij groei in uren via de template wordt uitgewerkt.",
+    contract_form: "any",
+    duration_type: "any",
+    employment_model: "parttime_growth",
+  },
+  {
+    value: "min_max_employment",
+    label: "Min-max",
+    description: "Voor contracten met een minimum- en maximumomvang.",
+    contract_form: "oproep",
+    duration_type: "any",
+    employment_model: "min_max",
+  },
+  {
+    value: "call_employment",
+    label: "Oproepkracht",
+    description: "Voor oproepcontracten.",
+    contract_form: "oproep",
+    duration_type: "any",
+    employment_model: "call_agreement",
+  },
+  {
+    value: "internship",
+    label: "Stage",
+    description: "Voor stageovereenkomsten en leer-/praktijktrajecten.",
+    contract_form: "stage",
+    duration_type: "any",
+    employment_model: "internship",
+  },
+];
+
+const LEGACY_CONTRACT_MODEL_OPTIONS = [
   {
     value: "fulltime_fixed",
-    label: "Fulltime dienstverband - bepaalde tijd",
+    label: "Fulltime dienstverband",
     contract_form: "bepaalde_tijd",
     duration_type: "fixed",
     employment_model: "fulltime",
@@ -144,7 +161,7 @@ const CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "fulltime_indefinite",
-    label: "Fulltime dienstverband - onbepaalde tijd",
+    label: "Fulltime dienstverband",
     contract_form: "onbepaalde_tijd",
     duration_type: "indefinite",
     employment_model: "fulltime",
@@ -152,21 +169,21 @@ const CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "parttime_fixed",
-    label: "Parttime vast - bepaalde tijd",
+    label: "Parttime dienstverband",
     contract_form: "bepaalde_tijd",
     duration_type: "fixed",
     employment_model: "parttime_fixed",
   },
   {
     value: "parttime_indefinite",
-    label: "Parttime vast - onbepaalde tijd",
+    label: "Parttime dienstverband",
     contract_form: "onbepaalde_tijd",
     duration_type: "indefinite",
     employment_model: "parttime_fixed",
   },
   {
     value: "min_max_fixed",
-    label: "Min-max - bepaalde tijd",
+    label: "Min-max",
     contract_form: "oproep",
     underlying_contract_form: "bepaalde_tijd",
     duration_type: "fixed",
@@ -174,7 +191,7 @@ const CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "min_max_indefinite",
-    label: "Min-max - onbepaalde tijd",
+    label: "Min-max",
     contract_form: "oproep",
     underlying_contract_form: "onbepaalde_tijd",
     duration_type: "indefinite",
@@ -182,7 +199,7 @@ const CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "call_fixed",
-    label: "Oproep / nuluren - bepaalde tijd",
+    label: "Oproepkracht",
     contract_form: "oproep",
     underlying_contract_form: "bepaalde_tijd",
     duration_type: "fixed",
@@ -190,7 +207,7 @@ const CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "call_indefinite",
-    label: "Oproep / nuluren - onbepaalde tijd",
+    label: "Oproepkracht",
     contract_form: "oproep",
     underlying_contract_form: "onbepaalde_tijd",
     duration_type: "indefinite",
@@ -198,7 +215,7 @@ const CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "internship_fixed",
-    label: "Stage - bepaalde tijd",
+    label: "Stage",
     contract_form: "stage",
     duration_type: "fixed",
     employment_model: "internship",
@@ -212,14 +229,9 @@ const CONTRACT_MODEL_OPTIONS = [
   },
 ];
 
-const EMPLOYMENT_TEMPLATE_CONTRACT_MODELS = CONTRACT_MODEL_OPTIONS.filter(option => option.employment_model !== "zzp");
+const CONTRACT_MODEL_OPTIONS = [...TEMPLATE_CONTRACT_MODEL_OPTIONS, ...LEGACY_CONTRACT_MODEL_OPTIONS];
+const EMPLOYMENT_TEMPLATE_CONTRACT_MODELS = TEMPLATE_CONTRACT_MODEL_OPTIONS;
 const CONTRACT_MODEL_LABELS = Object.fromEntries(CONTRACT_MODEL_OPTIONS.map(option => [option.value, option.label]));
-const PROBATION_CHOICES = [
-  { value: "with_probation", label: "Met proeftijd", description: "Gebruik dit sjabloon alleen wanneer een proeftijd is afgesproken." },
-  { value: "without_probation", label: "Zonder proeftijd", description: "Gebruik dit sjabloon wanneer er geen proeftijd in het contract staat." },
-  { value: "not_applicable", label: "Niet van toepassing", description: "Voor contractvormen waar proeftijd niet logisch of niet relevant is." },
-];
-
 const CLAUSE_SCOPE_OPTIONS = [
   {
     value: "employment_contracts",
@@ -1191,47 +1203,45 @@ function getContractModel(value) {
   return CONTRACT_MODEL_OPTIONS.find(option => option.value === value) || null;
 }
 
+function normalizeTemplateContractModelValue(value) {
+  const option = getContractModel(value);
+  if (!option) return "";
+  if (EMPLOYMENT_TEMPLATE_CONTRACT_MODELS.some(item => item.value === option.value)) return option.value;
+  return EMPLOYMENT_TEMPLATE_CONTRACT_MODELS.find(item => item.employment_model === option.employment_model)?.value || option.value;
+}
+
 function contractModelOptionsForCao(caoKey) {
   if (!caoKey) return EMPLOYMENT_TEMPLATE_CONTRACT_MODELS;
   return EMPLOYMENT_TEMPLATE_CONTRACT_MODELS;
 }
 
 function inferContractModelFromTemplate(record = {}) {
-  if (record.metadata?.contract_model && getContractModel(record.metadata.contract_model)) {
-    return record.metadata.contract_model;
+  const metadataModel = normalizeTemplateContractModelValue(record.metadata?.contract_model);
+  if (metadataModel) {
+    return metadataModel;
   }
-  return CONTRACT_MODEL_OPTIONS.find(option => {
+  const scopedModel = CONTRACT_MODEL_OPTIONS.find(option => {
     if (record.contract_form_scope && option.contract_form !== record.contract_form_scope) return false;
     if (record.employment_model_scope && option.employment_model !== record.employment_model_scope) return false;
     if (record.duration_type_scope && option.duration_type !== record.duration_type_scope) return false;
     if (record.metadata?.underlying_contract_form && option.underlying_contract_form !== record.metadata.underlying_contract_form) return false;
     return true;
   })?.value || "";
+  return normalizeTemplateContractModelValue(scopedModel);
 }
 
 function contractModelMeta(option) {
-  if (!option) return "";
-  const parts = [
-    CONTRACT_FORM_LABELS[option.contract_form] || option.contract_form,
-    EMPLOYMENT_MODEL_LABELS[option.employment_model] || option.employment_model,
-    option.duration_type === "indefinite" ? "Onbepaalde tijd" : "Bepaalde tijd",
-  ];
-  return uniqueStrings(parts).join(" · ");
-}
-
-function probationLabel(value) {
-  return PROBATION_CHOICES.find(option => option.value === value)?.label || PROBATION_SCOPES.find(option => option.value === value)?.label || "-";
+  return option?.description || EMPLOYMENT_MODEL_LABELS[option?.employment_model] || "";
 }
 
 function getTemplateScopeLabel(item) {
   if (!isEmploymentTemplateType(item.template_type)) {
     return templateDocumentTypeLabel(item.template_type);
   }
-  const modelLabel = CONTRACT_MODEL_LABELS[item.metadata?.contract_model];
+  const modelLabel = CONTRACT_MODEL_LABELS[normalizeTemplateContractModelValue(item.metadata?.contract_model)]
+    || EMPLOYMENT_MODEL_LABELS[item.employment_model_scope];
   if (modelLabel) return modelLabel;
-  const formLabel = CONTRACT_FORM_SCOPES.find(scope => scope.value === (item.contract_form_scope || "any"))?.label || "Alle contractvormen";
-  const modelScopeLabel = EMPLOYMENT_MODEL_SCOPES.find(scope => scope.value === (item.employment_model_scope || "any"))?.label || "Alle urenmodellen";
-  return `${formLabel} · ${modelScopeLabel}`;
+  return "Arbeidscontract";
 }
 
 function defaultTemplateName(form = {}) {
@@ -2075,14 +2085,15 @@ function initialTemplate(companyId) {
 }
 
 function templateFormFromRecord(companyId, record) {
+  const templateType = normalizeTemplateType(record.template_type);
   return {
     company_id: companyId,
     name: record.name || "",
     description: record.description || "",
-    template_type: normalizeTemplateType(record.template_type),
+    template_type: templateType,
     template_choice: "existing",
     template_source_mode: "existing",
-    contract_model: inferContractModelFromTemplate(record),
+    contract_model: isEmploymentTemplateType(templateType) ? inferContractModelFromTemplate(record) : "",
     contract_form_scope: record.contract_form_scope || "any",
     employment_model_scope: record.employment_model_scope || "any",
     probation_scope: record.probation_scope || "any",
@@ -3811,7 +3822,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     </Button>
                     {showUploadFitOptions && (
                       <div className="flex flex-wrap items-center gap-3 rounded-md border border-amber-500/25 bg-amber-500/10 p-3">
-                        <div>
+                        <div className="min-w-0">
                           <p className="text-sm font-semibold text-amber-800 dark:text-amber-100">Afbeelding wijkt af van A4</p>
                           <p className="mt-1 text-xs text-amber-700 dark:text-amber-200">
                             Laat de upload passend staan als alles zichtbaar moet blijven. Kies vullend alleen wanneer randen afgesneden mogen worden.
@@ -3846,7 +3857,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                       </div>
                       <div className="mt-3 rounded-md border border-border/70 bg-muted/20 p-3">
                         <div className="flex flex-wrap items-center justify-between gap-3">
-                          <div>
+                          <div className="min-w-0">
                             <p className="text-xs font-medium text-muted-foreground">Paginakleur</p>
                             <p className="mt-0.5 text-[11px] text-muted-foreground">Achtergrond van het A4-briefpapier.</p>
                           </div>
@@ -4148,12 +4159,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         {templateWizardOpen && (
           <motion.div
             ref={templateWizardRef}
-            initial={{ height: 0, opacity: 0 }}
-            animate={{ height: "auto", opacity: 1 }}
-            exit={{ height: 0, opacity: 0 }}
-            className="overflow-hidden border-b border-primary/30 bg-muted/15"
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+            className="rounded-none border-0 border-b border-primary/30 bg-muted/20 p-5 overflow-hidden"
           >
-            <div className="p-5">
+            <div>
               <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-primary">
                 {editingTemplateId ? "Contracttemplate bewerken" : "Contracttemplate maken"}
               </p>
@@ -4165,16 +4177,19 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     <p className="text-sm font-medium text-foreground">Wat voor soort template wil je maken?</p>
                     <p className="mt-1 text-xs text-muted-foreground">Kies eerst de documentsoort. Daarna toont de wizard alleen de keuzes die daarbij horen.</p>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-2">
                     {TEMPLATE_DOCUMENT_TYPES.map(option => (
                       <button
                         key={option.value}
                         type="button"
                         onClick={() => selectTemplateDocumentType(option.value)}
-                        className={`rounded-lg border p-4 text-left transition-colors ${templateForm.template_type === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${templateForm.template_type === option.value ? "border-primary bg-accent" : "border-border bg-card"}`}
                       >
-                        <p className="font-semibold text-foreground">{option.label}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold text-foreground">{option.label}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">{option.description}</span>
+                        </div>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                       </button>
                     ))}
                   </div>
@@ -4192,16 +4207,19 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                       Voeg eerst een CAO-koppeling toe in de CAO-tab van dit bedrijfsprofiel.
                     </div>
                   ) : (
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                    <div className="grid grid-cols-1 gap-2">
                       {companyCaoOptions.map(option => (
                         <button
                           key={option.value}
                           type="button"
                           onClick={() => selectTemplateCao(option.value)}
-                          className={`rounded-lg border p-4 text-left transition-colors ${templateForm.cao_key === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                          className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${templateForm.cao_key === option.value ? "border-primary bg-accent" : "border-border bg-card"}`}
                         >
-                          <p className="font-semibold text-foreground">{option.label}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">Actief gekoppeld aan dit bedrijf</p>
+                          <div>
+                            <span className="text-sm font-semibold text-foreground">{option.label}</span>
+                            <span className="ml-2 text-xs text-muted-foreground">Actief gekoppeld aan dit bedrijf</span>
+                          </div>
+                          <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                         </button>
                       ))}
                     </div>
@@ -4215,16 +4233,19 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     <p className="text-sm font-medium text-foreground">Kies de contractvorm</p>
                     <p className="mt-1 text-xs text-muted-foreground">De lijst is specifiek voor arbeidscontracten. Er is geen algemene optie meer.</p>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-2">
                     {contractModelOptions.map(option => (
                       <button
                         key={option.value}
                         type="button"
                         onClick={() => selectTemplateContractModel(option.value)}
-                        className={`rounded-lg border p-4 text-left transition-colors ${templateForm.contract_model === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${templateForm.contract_model === option.value ? "border-primary bg-accent" : "border-border bg-card"}`}
                       >
-                        <p className="font-semibold text-foreground">{option.label}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{contractModelMeta(option)}</p>
+                        <div>
+                          <span className="text-sm font-semibold text-foreground">{option.label}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">{contractModelMeta(option)}</span>
+                        </div>
+                        <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                       </button>
                     ))}
                   </div>
@@ -4284,22 +4305,28 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     <p className="text-sm font-medium text-foreground">Waarmee wil je starten?</p>
                     <p className="mt-1 text-xs text-muted-foreground">Kies een voorgevulde basis of begin met een lege editor.</p>
                   </div>
-                  <div className="grid gap-3 md:grid-cols-2">
+                  <div className="grid grid-cols-1 gap-2">
                     <button
                       type="button"
                       onClick={() => applyTemplateSourceMode("standard")}
-                      className="rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-primary hover:bg-accent/35"
+                      className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]"
                     >
-                      <p className="font-semibold text-foreground">Standaardtemplate invoegen</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Start met een basisstructuur die past bij de gekozen documentsoort.</p>
+                      <div className="min-w-0">
+                        <span className="text-sm font-semibold text-foreground">Standaardtemplate invoegen</span>
+                        <span className="ml-2 text-xs text-muted-foreground">Start met een basisstructuur die past bij de gekozen documentsoort.</span>
+                      </div>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                     </button>
                     <button
                       type="button"
                       onClick={() => applyTemplateSourceMode("empty")}
-                      className="rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-primary hover:bg-accent/35"
+                      className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]"
                     >
-                      <p className="font-semibold text-foreground">Lege template</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Begin met een leeg tekstveld en bouw de template volledig zelf op.</p>
+                      <div className="min-w-0">
+                        <span className="text-sm font-semibold text-foreground">Lege template</span>
+                        <span className="ml-2 text-xs text-muted-foreground">Begin met een leeg tekstveld en bouw de template volledig zelf op.</span>
+                      </div>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                     </button>
                   </div>
                 </div>
