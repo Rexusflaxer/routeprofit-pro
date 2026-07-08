@@ -23,7 +23,6 @@ const MENU_ITEMS = [
   { key: "templates", label: "Sjablonen", icon: FileText, children: [
     { key: "letterhead", label: "Briefpapier" },
     { key: "contract_templates", label: "Contracttemplates" },
-    { key: "contract_clauses", label: "Clausules" },
   ] },
   { key: "branch_memberships", label: "Branchevereniging", icon: Handshake },
   { key: "accreditations", label: "Erkenningen", icon: Award },
@@ -345,7 +344,7 @@ export default function CompanySidebarPanel({
                 onClick={() => {
                   if (item.children) {
                     setActive(item.key);
-                    setTemplateSubtab(prev => prev || item.children[0].key);
+                    setTemplateSubtab(prev => item.children.some(child => child.key === prev) ? prev : item.children[0].key);
                     setTemplatesExpanded(prev => !prev);
                     return;
                   }

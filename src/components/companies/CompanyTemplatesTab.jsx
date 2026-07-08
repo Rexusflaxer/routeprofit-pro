@@ -95,6 +95,26 @@ const CAO_OPTIONS = [
 
 const CAO_OPTION_LABELS = Object.fromEntries(CAO_OPTIONS.map(option => [option.value, option.label]));
 
+const TEMPLATE_DOCUMENT_TYPES = [
+  {
+    value: "employment_contract",
+    label: "Arbeidscontracten",
+    description: "Arbeidsovereenkomsten voor medewerkers, gekoppeld aan de actieve CAO's van dit bedrijf.",
+  },
+  {
+    value: "sales_contract",
+    label: "Verkoopcontracten",
+    description: "Contracttemplates voor klanten, opdrachtgevers en dienstverlening.",
+  },
+  {
+    value: "subcontractor_framework_agreement",
+    label: "Raamovereenkomsten onderaannemers",
+    description: "Raamafspraken met onderaannemers of zelfstandige uitvoerende partijen.",
+  },
+];
+
+const TEMPLATE_DOCUMENT_TYPE_LABELS = Object.fromEntries(TEMPLATE_DOCUMENT_TYPES.map(option => [option.value, option.label]));
+
 const CONTRACT_FORM_LABELS = {
   bepaalde_tijd: "Bepaalde tijd",
   onbepaalde_tijd: "Onbepaalde tijd",
@@ -192,6 +212,7 @@ const CONTRACT_MODEL_OPTIONS = [
   },
 ];
 
+const EMPLOYMENT_TEMPLATE_CONTRACT_MODELS = CONTRACT_MODEL_OPTIONS.filter(option => option.employment_model !== "zzp");
 const CONTRACT_MODEL_LABELS = Object.fromEntries(CONTRACT_MODEL_OPTIONS.map(option => [option.value, option.label]));
 const PROBATION_CHOICES = [
   { value: "with_probation", label: "Met proeftijd", description: "Gebruik dit sjabloon alleen wanneer een proeftijd is afgesproken." },
@@ -739,11 +760,46 @@ const DEFAULT_TEMPLATE_BODY = [
   "De contractvorm is {{contract.contractvorm}} met {{contract.uren_per_week}} uur per week, tenzij schriftelijk anders overeengekomen.",
 ].join("\n");
 
+const SALES_TEMPLATE_BODY = [
+  "Dienstverleningsovereenkomst",
+  "",
+  "Ondergetekenden:",
+  "{{bedrijf.naam}}, hierna te noemen opdrachtnemer;",
+  "en {{klant.naam}}, hierna te noemen opdrachtgever;",
+  "",
+  "Artikel 1 - Opdracht",
+  "Opdrachtnemer verricht de overeengekomen diensten zoals beschreven in {{opdracht.omschrijving}}.",
+  "",
+  "Artikel 2 - Tarieven en betaling",
+  "Opdrachtgever betaalt de overeengekomen vergoeding volgens de afspraken in deze overeenkomst of de bijbehorende offerte.",
+  "",
+  "Artikel 3 - Uitvoering",
+  "Partijen werken samen op basis van duidelijke instructies, planning en bereikbaarheid.",
+].join("\n");
+
+const SUBCONTRACTOR_TEMPLATE_BODY = [
+  "Raamovereenkomst onderaanneming",
+  "",
+  "Ondergetekenden:",
+  "{{bedrijf.naam}}, hierna te noemen opdrachtgever;",
+  "en {{onderaannemer.naam}}, hierna te noemen opdrachtnemer;",
+  "",
+  "Artikel 1 - Raamafspraken",
+  "Deze raamovereenkomst bevat de algemene afspraken waaronder opdrachtgever opdrachten aan opdrachtnemer kan verstrekken.",
+  "",
+  "Artikel 2 - Zelfstandige uitvoering",
+  "Opdrachtnemer voert opdrachten zelfstandig uit binnen de overeengekomen kaders en met inachtneming van wet- en regelgeving.",
+  "",
+  "Artikel 3 - Kwalificaties en naleving",
+  "Opdrachtnemer zorgt ervoor dat ingezette personen beschikken over de vereiste kwalificaties, vergunningen, toestemmingen en ervaring.",
+].join("\n");
+
 const LETTERHEAD_TABLE_GRID = "grid grid-cols-[minmax(220px,1.5fr)_minmax(110px,130px)_minmax(100px,120px)_minmax(140px,180px)_minmax(160px,max-content)] gap-3 xl:gap-4";
 const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(240px,1.4fr)_minmax(72px,92px)_minmax(120px,150px)_minmax(220px,1fr)_minmax(140px,180px)_minmax(168px,max-content)] gap-3 xl:gap-4";
 const CLAUSE_LIBRARY_GRID = "grid grid-cols-[minmax(44px,56px)_minmax(260px,1fr)_minmax(130px,160px)_minmax(150px,190px)_minmax(120px,150px)] gap-3 xl:gap-4";
 const LETTERHEAD_STEPS = ["Upload", "Marges", "Controle"];
-const TEMPLATE_STEPS = ["CAO", "Contract", "Proeftijd", "Briefpapier", "Inhoud", "Controle"];
+const EMPLOYMENT_TEMPLATE_STEPS = ["Documentsoort", "CAO", "Contractvorm", "Template", "Start", "Editor"];
+const BUSINESS_TEMPLATE_STEPS = ["Documentsoort", "Template", "Start", "Editor"];
 const CLAUSE_STEPS = ["Onderdeel", "Clausule", "Uitwerken", "Controle"];
 const CLAUSE_MARKER_PREFIX = "clausule:";
 const LETTERHEAD_SOURCE_MODES = {
@@ -1102,8 +1158,42 @@ function sortClauseIdsByConfiguredOrder(ids, clauses = []) {
   return uniqueStrings(ids).sort((a, b) => (order.get(a) ?? Number.MAX_SAFE_INTEGER) - (order.get(b) ?? Number.MAX_SAFE_INTEGER));
 }
 
+function normalizeTemplateType(value) {
+  return value || "employment_contract";
+}
+
+function isEmploymentTemplateType(value) {
+  return normalizeTemplateType(value) === "employment_contract";
+}
+
+function templateDocumentTypeLabel(value) {
+  return TEMPLATE_DOCUMENT_TYPE_LABELS[normalizeTemplateType(value)] || "Contracttemplate";
+}
+
+function templateWizardSteps(form = {}) {
+  if (!form.template_type) return ["Documentsoort", "Vervolg", "Editor"];
+  return isEmploymentTemplateType(form.template_type) ? EMPLOYMENT_TEMPLATE_STEPS : BUSINESS_TEMPLATE_STEPS;
+}
+
+function templateSelectionStep(templateType) {
+  return isEmploymentTemplateType(templateType) ? 4 : 2;
+}
+
+function templateSourceStep(templateType) {
+  return isEmploymentTemplateType(templateType) ? 5 : 3;
+}
+
+function templateEditorStep(templateType) {
+  return isEmploymentTemplateType(templateType) ? 6 : 4;
+}
+
 function getContractModel(value) {
   return CONTRACT_MODEL_OPTIONS.find(option => option.value === value) || null;
+}
+
+function contractModelOptionsForCao(caoKey) {
+  if (!caoKey) return EMPLOYMENT_TEMPLATE_CONTRACT_MODELS;
+  return EMPLOYMENT_TEMPLATE_CONTRACT_MODELS;
 }
 
 function inferContractModelFromTemplate(record = {}) {
@@ -1134,11 +1224,47 @@ function probationLabel(value) {
 }
 
 function getTemplateScopeLabel(item) {
+  if (!isEmploymentTemplateType(item.template_type)) {
+    return templateDocumentTypeLabel(item.template_type);
+  }
   const modelLabel = CONTRACT_MODEL_LABELS[item.metadata?.contract_model];
   if (modelLabel) return modelLabel;
   const formLabel = CONTRACT_FORM_SCOPES.find(scope => scope.value === (item.contract_form_scope || "any"))?.label || "Alle contractvormen";
   const modelScopeLabel = EMPLOYMENT_MODEL_SCOPES.find(scope => scope.value === (item.employment_model_scope || "any"))?.label || "Alle urenmodellen";
   return `${formLabel} · ${modelScopeLabel}`;
+}
+
+function defaultTemplateName(form = {}) {
+  if (isEmploymentTemplateType(form.template_type)) {
+    const modelLabel = CONTRACT_MODEL_LABELS[form.contract_model] || "arbeidsovereenkomst";
+    return `${modelLabel} - ${caoLabel(form.cao_key)}`;
+  }
+  if (form.template_type === "sales_contract") return "Verkoopcontract";
+  if (form.template_type === "subcontractor_framework_agreement") return "Raamovereenkomst onderaannemers";
+  return "Contracttemplate";
+}
+
+function standardTemplateBody(form = {}) {
+  if (form.template_type === "sales_contract") return SALES_TEMPLATE_BODY;
+  if (form.template_type === "subcontractor_framework_agreement") return SUBCONTRACTOR_TEMPLATE_BODY;
+  return DEFAULT_TEMPLATE_BODY;
+}
+
+function templateMatchesBuilder(template = {}, form = {}) {
+  if (!template || template.status === "archived") return false;
+  const templateType = normalizeTemplateType(template.template_type);
+  if (templateType !== normalizeTemplateType(form.template_type)) return false;
+  if (!isEmploymentTemplateType(form.template_type)) return true;
+  if (form.cao_key && template.cao_key && template.cao_key !== form.cao_key) return false;
+  const model = getContractModel(form.contract_model);
+  if (!model) return true;
+  const formScope = template.contract_form_scope || "any";
+  if (formScope !== "any" && formScope !== model.contract_form && formScope !== model.underlying_contract_form) return false;
+  const modelScope = template.employment_model_scope || "any";
+  if (modelScope !== "any" && modelScope !== model.employment_model) return false;
+  const durationScope = template.duration_type_scope || "any";
+  if (durationScope !== "any" && durationScope !== model.duration_type) return false;
+  return true;
 }
 
 function caoLabel(value) {
@@ -1929,11 +2055,13 @@ function initialTemplate(companyId) {
     company_id: companyId,
     name: "",
     description: "",
-    template_type: "employment_contract",
+    template_type: "",
+    template_choice: "",
+    template_source_mode: "",
     contract_model: "",
     contract_form_scope: "",
     employment_model_scope: "",
-    probation_scope: "",
+    probation_scope: "any",
     duration_type_scope: "",
     duration_options_text: "",
     visible_in_contract_wizard: true,
@@ -1951,7 +2079,9 @@ function templateFormFromRecord(companyId, record) {
     company_id: companyId,
     name: record.name || "",
     description: record.description || "",
-    template_type: record.template_type || "employment_contract",
+    template_type: normalizeTemplateType(record.template_type),
+    template_choice: "existing",
+    template_source_mode: "existing",
     contract_model: inferContractModelFromTemplate(record),
     contract_form_scope: record.contract_form_scope || "any",
     employment_model_scope: record.employment_model_scope || "any",
@@ -2069,7 +2199,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [selectedClauseSectionIndex, setSelectedClauseSectionIndex] = useState(0);
   const [letterheadEditorOptions, setLetterheadEditorOptions] = useState(DEFAULT_LETTERHEAD_EDITOR_OPTIONS);
 
-  const activeSubTab = subTab || "letterhead";
+  const activeSubTab = subTab === "contract_clauses" ? "contract_templates" : (subTab || "letterhead");
 
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
@@ -2160,7 +2290,17 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const templateClauseIds = useMemo(() => extractClauseIds(templateForm.body), [templateForm.body]);
   const selectedTemplateLetterhead = activeLetterheads.find(item => item.id === templateForm.default_letterhead_id) || null;
   const selectedContractModel = getContractModel(templateForm.contract_model);
-  const companyCaoOptions = useMemo(() => uniqueStrings(caoAssignments.map(item => item.cao_key))
+  const activeTemplates = useMemo(() => [...templates]
+    .filter(item => item.status !== "archived")
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""))),
+  [templates]);
+  const matchingTemplateChoices = useMemo(
+    () => activeTemplates.filter(item => templateMatchesBuilder(item, templateForm)),
+    [activeTemplates, templateForm],
+  );
+  const companyCaoOptions = useMemo(() => uniqueStrings(caoAssignments
+    .filter(item => item.status !== "archived" && item.status !== "inactive")
+    .map(item => item.cao_key))
     .map(key => ({ value: key, label: caoLabel(key) })),
   [caoAssignments]);
   const activeWpbrLicenses = useMemo(() => getActiveWpbrLicenses(wpbrLicenses), [wpbrLicenses]);
@@ -2365,10 +2505,11 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const saveTemplateMutation = useMutation({
     mutationFn: async (statusOverride) => {
       if (!templateForm.name.trim()) throw new Error("Vul een naam voor de template in.");
-      if (!templateForm.cao_key) throw new Error("Kies eerst de CAO die voor dit bedrijf geldt.");
-      const contractModel = getContractModel(templateForm.contract_model);
-      if (!contractModel) throw new Error("Kies eerst een specifieke contractvorm.");
-      if (!templateForm.probation_scope) throw new Error("Kies eerst of proeftijd van toepassing is.");
+      if (!templateForm.template_type) throw new Error("Kies eerst het soort contracttemplate.");
+      const isEmploymentTemplate = isEmploymentTemplateType(templateForm.template_type);
+      if (isEmploymentTemplate && !templateForm.cao_key) throw new Error("Kies eerst de CAO die voor dit bedrijf geldt.");
+      const contractModel = isEmploymentTemplate ? getContractModel(templateForm.contract_model) : null;
+      if (isEmploymentTemplate && !contractModel) throw new Error("Kies eerst een specifieke contractvorm.");
       if (!templateForm.body.trim()) throw new Error("Vul de template-inhoud in.");
       const previous = editingTemplateId ? templates.find(item => item.id === editingTemplateId) || {} : {};
       const status = statusOverride || templateForm.status || "draft";
@@ -2384,14 +2525,14 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         company_id: companyId,
         name: templateForm.name.trim(),
         description: templateForm.description || null,
-        template_type: templateForm.template_type || "employment_contract",
-        contract_form_scope: contractModel.contract_form,
-        employment_model_scope: contractModel.employment_model,
-        probation_scope: templateForm.probation_scope,
-        duration_type_scope: contractModel.duration_type,
+        template_type: normalizeTemplateType(templateForm.template_type),
+        contract_form_scope: contractModel?.contract_form || "any",
+        employment_model_scope: contractModel?.employment_model || "any",
+        probation_scope: templateForm.probation_scope || "any",
+        duration_type_scope: contractModel?.duration_type || "any",
         duration_options: fromArrayText(templateForm.duration_options_text),
-        visible_in_contract_wizard: templateForm.visible_in_contract_wizard !== false,
-        cao_key: templateForm.cao_key || null,
+        visible_in_contract_wizard: isEmploymentTemplate ? templateForm.visible_in_contract_wizard !== false : false,
+        cao_key: isEmploymentTemplate ? (templateForm.cao_key || null) : null,
         function_type: templateForm.function_type || null,
         default_letterhead_id: templateForm.default_letterhead_id === "none" ? null : templateForm.default_letterhead_id,
         version: createNewVersion ? Number(previous.version || 1) + 1 : Number(templateForm.version || 1),
@@ -2401,8 +2542,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         placeholders,
         metadata: {
           ...auditMetadata,
-          contract_model: contractModel.value,
-          underlying_contract_form: contractModel.underlying_contract_form || null,
+          contract_model: contractModel?.value || null,
+          underlying_contract_form: contractModel?.underlying_contract_form || null,
+          template_document_type_label: templateDocumentTypeLabel(templateForm.template_type),
         },
       };
       return editingTemplateId && !createNewVersion
@@ -2581,20 +2723,24 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const startEditTemplate = (record) => {
     setMessage(null);
     setEditingTemplateId(record.id);
-    setTemplateForm(templateFormFromRecord(companyId, record));
-    setTemplateStep(1);
+    const nextForm = templateFormFromRecord(companyId, record);
+    setTemplateForm(nextForm);
+    setTemplateStep(templateEditorStep(nextForm.template_type));
     setTemplateWizardOpen(true);
   };
 
   const createNewTemplateVersion = (record) => {
     setMessage(null);
     setEditingTemplateId(null);
-    setTemplateForm({
+    const nextForm = {
       ...templateFormFromRecord(companyId, record),
+      template_choice: "new",
+      template_source_mode: "existing",
       version: Number(record.version || 1) + 1,
       status: "draft",
-    });
-    setTemplateStep(1);
+    };
+    setTemplateForm(nextForm);
+    setTemplateStep(templateEditorStep(nextForm.template_type));
     setTemplateWizardOpen(true);
   };
 
@@ -2605,31 +2751,137 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     setTemplateWizardOpen(false);
   };
 
+  const selectTemplateDocumentType = (templateType) => {
+    const defaultLetterhead = activeLetterheads.find(item => item.is_default) || activeLetterheads[0];
+    setMessage(null);
+    setEditingTemplateId(null);
+    setTemplateForm(prev => ({
+      ...initialTemplate(companyId),
+      default_letterhead_id: prev.default_letterhead_id || defaultLetterhead?.id || "none",
+      template_type: templateType,
+      visible_in_contract_wizard: isEmploymentTemplateType(templateType),
+      body: "",
+    }));
+    setTemplateStep(isEmploymentTemplateType(templateType) ? 2 : 2);
+  };
+
+  const selectTemplateCao = (caoKey) => {
+    setTemplateForm(prev => ({
+      ...prev,
+      cao_key: caoKey,
+      contract_model: "",
+      contract_form_scope: "",
+      employment_model_scope: "",
+      duration_type_scope: "",
+      template_choice: "",
+      template_source_mode: "",
+      body: "",
+      name: "",
+    }));
+    setMessage(null);
+  };
+
+  const selectTemplateContractModel = (modelValue) => {
+    const option = getContractModel(modelValue);
+    setTemplateForm(prev => ({
+      ...prev,
+      contract_model: modelValue,
+      contract_form_scope: option?.contract_form || "",
+      employment_model_scope: option?.employment_model || "",
+      duration_type_scope: option?.duration_type || "",
+      probation_scope: "any",
+      template_choice: "",
+      template_source_mode: "",
+      body: "",
+      name: "",
+    }));
+    setMessage(null);
+  };
+
+  const chooseExistingTemplateForEditing = (record) => {
+    setMessage(null);
+    setEditingTemplateId(record.id);
+    const nextForm = templateFormFromRecord(companyId, record);
+    setTemplateForm(nextForm);
+    setTemplateStep(templateEditorStep(nextForm.template_type));
+  };
+
+  const chooseNewTemplateForWizard = () => {
+    const defaultLetterhead = activeLetterheads.find(item => item.is_default) || activeLetterheads[0];
+    setMessage(null);
+    setEditingTemplateId(null);
+    setTemplateForm(prev => ({
+      ...prev,
+      template_choice: "new",
+      template_source_mode: "",
+      name: prev.name || defaultTemplateName(prev),
+      version: 1,
+      status: "draft",
+      body: "",
+      default_letterhead_id: prev.default_letterhead_id || defaultLetterhead?.id || "none",
+    }));
+    setTemplateStep(templateSourceStep(templateForm.template_type));
+  };
+
+  const applyTemplateSourceMode = (sourceMode) => {
+    setTemplateForm(prev => ({
+      ...prev,
+      template_source_mode: sourceMode,
+      name: prev.name || defaultTemplateName(prev),
+      body: sourceMode === "standard" ? standardTemplateBody(prev) : "",
+    }));
+    setMessage(null);
+    setTemplateStep(templateEditorStep(templateForm.template_type));
+  };
+
   const nextTemplateStep = () => {
     if (templateStep === 1) {
-      if (!templateForm.name.trim()) {
-        setMessage({ type: "error", text: "Vul eerst een naam voor de template in." });
+      if (!templateForm.template_type) {
+        setMessage({ type: "error", text: "Kies eerst het soort contracttemplate." });
         return;
       }
+      setMessage(null);
+      setTemplateStep(isEmploymentTemplateType(templateForm.template_type) ? 2 : 2);
+      return;
+    }
+    if (isEmploymentTemplateType(templateForm.template_type) && templateStep === 2) {
       if (!templateForm.cao_key) {
         setMessage({ type: "error", text: "Kies eerst de CAO die voor dit bedrijf geldt." });
         return;
       }
+      setMessage(null);
+      setTemplateStep(3);
+      return;
     }
-    if (templateStep === 2 && !getContractModel(templateForm.contract_model)) {
+    if (isEmploymentTemplateType(templateForm.template_type) && templateStep === 3 && !getContractModel(templateForm.contract_model)) {
       setMessage({ type: "error", text: "Kies eerst een specifieke contractvorm." });
       return;
     }
-    if (templateStep === 3 && !templateForm.probation_scope) {
-      setMessage({ type: "error", text: "Kies eerst of proeftijd van toepassing is." });
+    if (templateStep === templateSelectionStep(templateForm.template_type) && templateForm.template_choice !== "new") {
+      setMessage({ type: "error", text: "Kies een bestaande template of maak een nieuwe template." });
       return;
     }
-    if (templateStep === 5 && !templateForm.body.trim()) {
-      setMessage({ type: "error", text: "Vul eerst de template-inhoud in." });
+    if (templateStep === templateSourceStep(templateForm.template_type) && !templateForm.template_source_mode) {
+      setMessage({ type: "error", text: "Kies of je met een standaardtemplate of lege template wilt starten." });
       return;
     }
     setMessage(null);
-    setTemplateStep(step => Math.min(step + 1, TEMPLATE_STEPS.length));
+    setTemplateStep(step => Math.min(step + 1, templateWizardSteps(templateForm).length));
+  };
+
+  const previousTemplateStep = () => {
+    const selectionStep = templateSelectionStep(templateForm.template_type);
+    const sourceStep = templateSourceStep(templateForm.template_type);
+    const editorStep = templateEditorStep(templateForm.template_type);
+    if (templateStep === editorStep) {
+      setTemplateStep(templateForm.template_source_mode === "existing" ? selectionStep : sourceStep);
+      return;
+    }
+    if (templateStep === sourceStep) {
+      setTemplateStep(selectionStep);
+      return;
+    }
+    setTemplateStep(step => Math.max(1, step - 1));
   };
 
   const syncClauseSections = (updater) => {
@@ -3884,9 +4136,12 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   );
 
   const renderTemplateWizard = () => {
-    const probationOptions = ["internship", "zzp"].includes(selectedContractModel?.employment_model)
-      ? PROBATION_CHOICES.filter(option => option.value === "not_applicable")
-      : PROBATION_CHOICES.filter(option => option.value !== "not_applicable");
+    const wizardSteps = templateWizardSteps(templateForm);
+    const isEmploymentTemplate = isEmploymentTemplateType(templateForm.template_type);
+    const selectionStep = templateSelectionStep(templateForm.template_type);
+    const sourceStep = templateSourceStep(templateForm.template_type);
+    const editorStep = templateEditorStep(templateForm.template_type);
+    const contractModelOptions = contractModelOptionsForCao(templateForm.cao_key);
 
     return (
       <AnimatePresence>
@@ -3900,82 +4155,72 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           >
             <div className="p-5">
               <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-primary">
-                {editingTemplateId ? "Contracttemplate bewerken" : "Contracttemplate toevoegen"}
+                {editingTemplateId ? "Contracttemplate bewerken" : "Contracttemplate maken"}
               </p>
-              <WizardSteps labels={TEMPLATE_STEPS} step={templateStep} />
+              <WizardSteps labels={wizardSteps} step={Math.min(templateStep, wizardSteps.length)} />
 
               {templateStep === 1 && (
-                <div className="space-y-5">
-                  <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_120px]">
-                    <div className="space-y-2">
-                      <Label>Naam *</Label>
-                      <Input
-                        value={templateForm.name}
-                        onChange={event => setTemplateForm(prev => ({ ...prev, name: event.target.value }))}
-                        placeholder="Arbeidsovereenkomst bepaalde tijd"
-                      />
-                    </div>
-                    <div className="space-y-2">
-                      <Label>Versie</Label>
-                      <Input
-                        type="number"
-                        min="1"
-                        value={templateForm.version}
-                        onChange={event => setTemplateForm(prev => ({ ...prev, version: event.target.value }))}
-                      />
-                    </div>
-                  </div>
-                  <div className="space-y-2">
-                    <Label>Omschrijving</Label>
-                    <Input
-                      value={templateForm.description}
-                      onChange={event => setTemplateForm(prev => ({ ...prev, description: event.target.value }))}
-                      placeholder="Interne toelichting"
-                    />
-                  </div>
+                <div className="space-y-3">
                   <div>
-                    <p className="mb-2 text-sm font-medium text-foreground">Kies de CAO die voor dit bedrijf geldt</p>
-                    {companyCaoOptions.length === 0 ? (
-                      <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
-                        Voeg eerst een CAO-koppeling toe in de CAO-tab van dit bedrijfsprofiel.
-                      </div>
-                    ) : (
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        {companyCaoOptions.map(option => (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() => setTemplateForm(prev => ({ ...prev, cao_key: option.value }))}
-                            className={`rounded-lg border p-4 text-left transition-colors ${templateForm.cao_key === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
-                          >
-                            <p className="font-semibold text-foreground">{option.label}</p>
-                            <p className="mt-1 text-xs text-muted-foreground">Beschikbaar via CAO-koppeling van dit bedrijf</p>
-                          </button>
-                        ))}
-                      </div>
-                    )}
+                    <p className="text-sm font-medium text-foreground">Wat voor soort template wil je maken?</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Kies eerst de documentsoort. Daarna toont de wizard alleen de keuzes die daarbij horen.</p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-3">
+                    {TEMPLATE_DOCUMENT_TYPES.map(option => (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => selectTemplateDocumentType(option.value)}
+                        className={`rounded-lg border p-4 text-left transition-colors ${templateForm.template_type === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                      >
+                        <p className="font-semibold text-foreground">{option.label}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+                      </button>
+                    ))}
                   </div>
                 </div>
               )}
 
-              {templateStep === 2 && (
+              {isEmploymentTemplate && templateStep === 2 && (
                 <div className="space-y-3">
-                  <p className="text-sm font-medium text-foreground">Kies één specifiek contractmodel</p>
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Kies de actieve CAO</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Alleen CAO's die bij dit bedrijfsprofiel zijn gekoppeld worden getoond.</p>
+                  </div>
+                  {companyCaoOptions.length === 0 ? (
+                    <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                      Voeg eerst een CAO-koppeling toe in de CAO-tab van dit bedrijfsprofiel.
+                    </div>
+                  ) : (
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      {companyCaoOptions.map(option => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => selectTemplateCao(option.value)}
+                          className={`rounded-lg border p-4 text-left transition-colors ${templateForm.cao_key === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                        >
+                          <p className="font-semibold text-foreground">{option.label}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Actief gekoppeld aan dit bedrijf</p>
+                        </button>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {isEmploymentTemplate && templateStep === 3 && (
+                <div className="space-y-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Kies de contractvorm</p>
+                    <p className="mt-1 text-xs text-muted-foreground">De lijst is specifiek voor arbeidscontracten. Er is geen algemene optie meer.</p>
+                  </div>
                   <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {CONTRACT_MODEL_OPTIONS.map(option => (
+                    {contractModelOptions.map(option => (
                       <button
                         key={option.value}
                         type="button"
-                        onClick={() => setTemplateForm(prev => ({
-                          ...prev,
-                          contract_model: option.value,
-                          contract_form_scope: option.contract_form,
-                          employment_model_scope: option.employment_model,
-                          duration_type_scope: option.duration_type,
-                          probation_scope: ["internship", "zzp"].includes(option.employment_model)
-                            ? "not_applicable"
-                            : (prev.probation_scope === "not_applicable" ? "" : prev.probation_scope),
-                        }))}
+                        onClick={() => selectTemplateContractModel(option.value)}
                         className={`rounded-lg border p-4 text-left transition-colors ${templateForm.contract_model === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
                       >
                         <p className="font-semibold text-foreground">{option.label}</p>
@@ -3986,124 +4231,153 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 </div>
               )}
 
-              {templateStep === 3 && (
-                <div className="space-y-3">
-                  <p className="text-sm font-medium text-foreground">Proeftijd voor dit sjabloon</p>
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                    {probationOptions.map(option => (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => setTemplateForm(prev => ({ ...prev, probation_scope: option.value }))}
-                        className={`rounded-lg border p-4 text-left transition-colors ${templateForm.probation_scope === option.value ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
-                      >
-                        <p className="font-semibold text-foreground">{option.label}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
-                      </button>
-                    ))}
+              {templateStep === selectionStep && templateForm.template_type && (
+                <div className="space-y-4">
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Kies een bestaande template of maak een nieuwe</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {isEmploymentTemplate
+                          ? `${caoLabel(templateForm.cao_key)} · ${selectedContractModel?.label || "Contractvorm"}`
+                          : templateDocumentTypeLabel(templateForm.template_type)}
+                      </p>
+                    </div>
+                    <Button type="button" onClick={chooseNewTemplateForWizard}>
+                      <Plus className="mr-1 h-4 w-4" />
+                      Nieuwe template
+                    </Button>
                   </div>
+                  {matchingTemplateChoices.length === 0 ? (
+                    <div className="rounded-lg border border-border bg-background/40 p-5 text-sm text-muted-foreground">
+                      Er is nog geen passende template. Maak een nieuwe template om te starten.
+                    </div>
+                  ) : (
+                    <div className="grid gap-3">
+                      {matchingTemplateChoices.map(item => (
+                        <button
+                          key={item.id}
+                          type="button"
+                          onClick={() => chooseExistingTemplateForEditing(item)}
+                          className="flex items-start justify-between gap-4 rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-primary hover:bg-accent/35"
+                        >
+                          <div className="min-w-0">
+                            <p className="truncate font-semibold text-foreground">{item.name}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{item.description || getTemplateScopeLabel(item)}</p>
+                            <div className="mt-2 flex flex-wrap gap-1.5">
+                              <Badge variant="outline" className="text-xs">{templateDocumentTypeLabel(item.template_type)}</Badge>
+                              {item.cao_key && <Badge variant="outline" className="text-xs">{caoLabel(item.cao_key)}</Badge>}
+                              <Badge variant="outline" className="text-xs">v{item.version || 1}</Badge>
+                              {statusBadge(item.status)}
+                            </div>
+                          </div>
+                          <ChevronRight className="mt-1 h-4 w-4 shrink-0 text-muted-foreground" />
+                        </button>
+                      ))}
+                    </div>
+                  )}
                 </div>
               )}
 
-              {templateStep === 4 && (
+              {templateStep === sourceStep && templateForm.template_choice === "new" && (
                 <div className="space-y-3">
-                  <p className="text-sm font-medium text-foreground">Kies het briefpapier</p>
-                  <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Waarmee wil je starten?</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Kies een voorgevulde basis of begin met een lege editor.</p>
+                  </div>
+                  <div className="grid gap-3 md:grid-cols-2">
                     <button
                       type="button"
-                      onClick={() => setTemplateForm(prev => ({ ...prev, default_letterhead_id: "none" }))}
-                      className={`rounded-lg border p-4 text-left transition-colors ${templateForm.default_letterhead_id === "none" ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
+                      onClick={() => applyTemplateSourceMode("standard")}
+                      className="rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-primary hover:bg-accent/35"
                     >
-                      <p className="font-semibold text-foreground">Geen briefpapier</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Gebruik alleen de contracttekst.</p>
+                      <p className="font-semibold text-foreground">Standaardtemplate invoegen</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Start met een basisstructuur die past bij de gekozen documentsoort.</p>
                     </button>
-                    {activeLetterheads.map(item => (
-                      <button
-                        key={item.id}
-                        type="button"
-                        onClick={() => setTemplateForm(prev => ({ ...prev, default_letterhead_id: item.id }))}
-                        className={`rounded-lg border p-4 text-left transition-colors ${templateForm.default_letterhead_id === item.id ? "border-primary bg-primary/5" : "border-border bg-background/40 hover:bg-muted/40"}`}
-                      >
-                        <p className="font-semibold text-foreground">{item.name}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{item.is_default ? "Standaardbriefpapier" : marginLabel(item)}</p>
-                      </button>
-                    ))}
+                    <button
+                      type="button"
+                      onClick={() => applyTemplateSourceMode("empty")}
+                      className="rounded-lg border border-border bg-card p-4 text-left transition-colors hover:border-primary hover:bg-accent/35"
+                    >
+                      <p className="font-semibold text-foreground">Lege template</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Begin met een leeg tekstveld en bouw de template volledig zelf op.</p>
+                    </button>
                   </div>
                 </div>
               )}
 
-              {templateStep === 5 && (
+              {templateStep === editorStep && (
                 <div className="grid gap-5 xl:grid-cols-[minmax(0,1fr)_420px]">
                   <div className="space-y-4">
-                    <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_220px]">
+                    <div className="grid gap-4 lg:grid-cols-[minmax(0,1fr)_120px]">
                       <div className="space-y-2">
-                        <Label>Duurkeuzes</Label>
+                        <Label>Naam *</Label>
                         <Input
-                          value={templateForm.duration_options_text || ""}
-                          onChange={event => setTemplateForm(prev => ({ ...prev, duration_options_text: event.target.value }))}
-                          placeholder="Optioneel, bijv. 6_months, 1_year, free"
+                          value={templateForm.name}
+                          onChange={event => setTemplateForm(prev => ({ ...prev, name: event.target.value }))}
+                          placeholder={defaultTemplateName(templateForm)}
                         />
                       </div>
-                      <label className="flex items-end gap-2 pb-2 text-sm">
+                      <div className="space-y-2">
+                        <Label>Versie</Label>
+                        <Input
+                          type="number"
+                          min="1"
+                          value={templateForm.version}
+                          onChange={event => setTemplateForm(prev => ({ ...prev, version: event.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="space-y-2">
+                      <Label>Omschrijving</Label>
+                      <Input
+                        value={templateForm.description}
+                        onChange={event => setTemplateForm(prev => ({ ...prev, description: event.target.value }))}
+                        placeholder="Interne toelichting"
+                      />
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-2">
+                        <Label>Briefpapier</Label>
+                        <Select value={templateForm.default_letterhead_id || "none"} onValueChange={value => setTemplateForm(prev => ({ ...prev, default_letterhead_id: value }))}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Geen briefpapier</SelectItem>
+                            {activeLetterheads.map(item => (
+                              <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      {isEmploymentTemplate && (
+                        <div className="space-y-2">
+                          <Label>Duurkeuzes</Label>
+                          <Input
+                            value={templateForm.duration_options_text || ""}
+                            onChange={event => setTemplateForm(prev => ({ ...prev, duration_options_text: event.target.value }))}
+                            placeholder="Optioneel, bijv. 6_months, 1_year, free"
+                          />
+                        </div>
+                      )}
+                    </div>
+                    {isEmploymentTemplate && (
+                      <label className="flex items-center gap-2 text-sm">
                         <input
                           type="checkbox"
                           checked={templateForm.visible_in_contract_wizard !== false}
                           onChange={event => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: event.target.checked }))}
                         />
-                        Zichtbaar in contractwizard
+                        Zichtbaar in personeelscontractwizard
                       </label>
-                    </div>
+                    )}
                     <div className="space-y-2">
                       <Label>Template-inhoud *</Label>
                       <Textarea
                         ref={templateBodyRef}
-                        rows={18}
+                        rows={22}
                         value={templateForm.body}
                         onChange={event => setTemplateForm(prev => ({ ...prev, body: event.target.value }))}
-                        onDragOver={event => {
-                          if (Array.from(event.dataTransfer.types || []).includes("application/x-loq-contract-clause-id")) event.preventDefault();
-                        }}
-                        onDrop={handleTemplateBodyDrop}
+                        placeholder="Typ hier de template-inhoud met placeholders."
                       />
-                    </div>
-                    <div className="rounded-lg border border-border bg-background/40 p-3">
-                      <div className="flex items-center justify-between gap-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Clausules</p>
-                        <span className="text-xs text-muted-foreground">{templateClauseIds.length} ingevoegd</span>
-                      </div>
-                      <div className="mt-3 grid gap-2">
-                        {activeClauses.length === 0 ? (
-                          <span className="text-sm text-muted-foreground">Maak eerst clausules aan in de clausuletab.</span>
-                        ) : activeClauses.map(clause => {
-                          const inserted = templateClauseIds.includes(clause.id);
-                          return (
-                            <div
-                              key={clause.id}
-                              draggable={!inserted}
-                              onDragStart={event => handleClauseDragStart(event, clause)}
-                              className={`flex items-center justify-between gap-3 rounded-lg border p-3 text-sm ${inserted ? "border-emerald-200 bg-emerald-50 text-emerald-900 dark:border-emerald-900/60 dark:bg-emerald-950/30 dark:text-emerald-100" : "border-border bg-card"}`}
-                            >
-                              <div className="min-w-0">
-                                <p className="truncate font-medium">{clause.title}</p>
-                                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                                  {clauseScopeLabel(clause.scope)} · {clauseTypeLabel(clause.scope, clause.clause_type)} · {clauseSecurityContextLabel(clause.license_scope)}
-                                </p>
-                                <div className="mt-1 flex flex-wrap gap-1">
-                                  <Badge variant="outline" className={`text-[10px] ${CLAUSE_RISK_STYLES[clause.risk_level || "green"] || ""}`}>
-                                    {clauseRiskLabel(clause.risk_level || "green")}
-                                  </Badge>
-                                  {clause.review_required && <Badge variant="outline" className="text-[10px]">Review nodig</Badge>}
-                                </div>
-                                <p className="mt-0.5 text-xs text-muted-foreground">{inserted ? "Staat al in deze template" : "Sleep naar de tekst of voeg in op cursorpositie"}</p>
-                              </div>
-                              <Button type="button" variant="outline" size="sm" onClick={() => insertClauseInTemplate(clause)} disabled={inserted}>
-                                <FilePlus2 className="mr-1 h-3.5 w-3.5" />
-                                Invoegen
-                              </Button>
-                            </div>
-                          );
-                        })}
-                      </div>
                     </div>
                     <div className="rounded-lg border border-border bg-background/40 p-3">
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
@@ -4118,31 +4392,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   </div>
                   <TemplateDocumentPreview
                     body={templateForm.body}
-                    templateName={templateForm.name}
+                    templateName={templateForm.name || defaultTemplateName(templateForm)}
                     letterhead={selectedTemplateLetterhead}
                     clauses={clauses}
                   />
-                </div>
-              )}
-
-              {templateStep === 6 && (
-                <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-                  <div className="rounded-lg border border-border bg-background/40 p-3">
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground">CAO</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">{caoLabel(templateForm.cao_key)}</p>
-                  </div>
-                  <div className="rounded-lg border border-border bg-background/40 p-3">
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Contractmodel</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">{selectedContractModel?.label || "-"}</p>
-                  </div>
-                  <div className="rounded-lg border border-border bg-background/40 p-3">
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Proeftijd</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">{probationLabel(templateForm.probation_scope)}</p>
-                  </div>
-                  <div className="rounded-lg border border-border bg-background/40 p-3">
-                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Clausules</p>
-                    <p className="mt-1 text-sm font-medium text-foreground">{templateClauseIds.length}</p>
-                  </div>
                 </div>
               )}
 
@@ -4153,12 +4406,16 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 </Button>
                 <div className="flex flex-wrap justify-end gap-2">
                   {templateStep > 1 && (
-                    <Button type="button" variant="outline" onClick={() => setTemplateStep(step => step - 1)}>
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={previousTemplateStep}
+                    >
                       <ChevronLeft className="mr-1 h-4 w-4" />
                       Terug
                     </Button>
                   )}
-                  {templateStep < TEMPLATE_STEPS.length ? (
+                  {templateStep < editorStep ? (
                     <Button type="button" onClick={nextTemplateStep}>
                       Volgende
                       <ChevronRight className="ml-1 h-4 w-4" />
@@ -4221,7 +4478,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
             <div>{statusBadge(item.status)}</div>
             <div className="min-w-0 text-sm text-muted-foreground">
               <p className="truncate">{getTemplateScopeLabel(item)}</p>
-              <p className="mt-0.5 truncate text-xs">{caoLabel(item.cao_key)}</p>
+              <p className="mt-0.5 truncate text-xs">
+                {isEmploymentTemplateType(item.template_type) ? caoLabel(item.cao_key) : "Niet gekoppeld aan CAO"}
+              </p>
             </div>
             <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
             <div className="flex justify-end gap-1">
@@ -5106,9 +5365,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         </div>
       )}
 
-      {activeSubTab === "contract_templates" && renderTemplateTab()}
-      {activeSubTab === "contract_clauses" && renderClauseTab()}
-      {activeSubTab !== "contract_templates" && activeSubTab !== "contract_clauses" && renderLetterheadTab()}
+      {activeSubTab === "contract_templates" ? renderTemplateTab() : renderLetterheadTab()}
 
       <ManagedFilePreviewDialog
         open={!!previewFile}

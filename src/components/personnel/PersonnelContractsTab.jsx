@@ -389,6 +389,7 @@ function extractWageRows(option, targetYear) {
 
 function templateMatchesWizard(template, form) {
   if (!template || template.visible_in_contract_wizard === false) return false;
+  if (template.template_type && template.template_type !== "employment_contract") return false;
   const model = getContractModel(form.contract_model);
   const formScope = template.contract_form_scope || "any";
   if (formScope !== "any" && formScope !== form.contract_form && formScope !== form.underlying_contract_form) return false;
