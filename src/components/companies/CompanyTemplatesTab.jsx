@@ -1,6 +1,5 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
 import { AnimatePresence, motion } from "framer-motion";
 import { base44 } from "@/api/base44Client";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
@@ -30,7 +29,6 @@ import {
   Eye,
   EyeOff,
   FilePlus2,
-  GripVertical,
   HelpCircle,
   Image as ImageIcon,
   Layers,
@@ -209,8 +207,8 @@ const CLAUSE_SCOPE_OPTIONS = [
   },
   {
     value: "customer_contracts",
-    label: "Klantcontracten",
-    description: "Afspraken met opdrachtgevers over dienstverlening, aansprakelijkheid en betaling.",
+    label: "Verkoopcontracten",
+    description: "Klant- en verkoopafspraken over dienstverlening, aansprakelijkheid en betaling.",
   },
   {
     value: "zzp_framework_agreements",
@@ -780,7 +778,7 @@ const DEFAULT_TEMPLATE_BODY = [
 
 const LETTERHEAD_TABLE_GRID = "grid grid-cols-[minmax(220px,1.5fr)_minmax(110px,130px)_minmax(100px,120px)_minmax(140px,180px)_minmax(160px,max-content)] gap-3 xl:gap-4";
 const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(240px,1.4fr)_minmax(72px,92px)_minmax(120px,150px)_minmax(220px,1fr)_minmax(140px,180px)_minmax(168px,max-content)] gap-3 xl:gap-4";
-const CLAUSE_TABLE_GRID = "grid grid-cols-[minmax(32px,44px)_minmax(220px,1fr)_minmax(120px,160px)_minmax(140px,180px)_minmax(144px,max-content)] gap-3 xl:gap-4";
+const CLAUSE_LIBRARY_GRID = "grid grid-cols-[minmax(44px,56px)_minmax(260px,1fr)_minmax(130px,160px)_minmax(150px,190px)_minmax(120px,150px)] gap-3 xl:gap-4";
 const LETTERHEAD_STEPS = ["Upload", "Marges", "Controle"];
 const TEMPLATE_STEPS = ["CAO", "Contract", "Proeftijd", "Briefpapier", "Inhoud", "Controle"];
 const CLAUSE_STEPS = ["Onderdeel", "Clausule", "Uitwerken", "Controle"];
@@ -1240,6 +1238,33 @@ function inferClauseCatalog(record = {}) {
     scope: record.scope || "",
     type: record.clause_type || "",
   };
+}
+
+function clauseDefaultLicenseScope(scope) {
+  return scope === "employment_contracts" ? "all_security" : "not_applicable";
+}
+
+function catalogClauseKey(scope, type) {
+  return `${scope || "unknown"}:${type || "unknown"}`;
+}
+
+function findCatalogClauseVariant(clauses = [], scope, type) {
+  return (clauses || []).find(item => {
+    const inferred = inferClauseCatalog(item);
+    return inferred.scope === scope && inferred.type === type;
+  }) || null;
+}
+
+function clauseTemplateUsageCount(clause, templates = []) {
+  if (!clause?.id) return 0;
+  return (templates || []).filter(template => extractClauseIds(template.body).includes(clause.id)).length;
+}
+
+function clauseLibraryBody(definition, scope, variant = null) {
+  const sections = variant
+    ? normalizeClauseSections(variant)
+    : defaultClauseSections(definition, clauseDefaultLicenseScope(scope));
+  return buildClauseBodyFromSections(sections);
 }
 
 function editableClauseSections(source = {}) {
@@ -2076,6 +2101,11 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [letterheadWizardOpen, setLetterheadWizardOpen] = useState(false);
   const [templateWizardOpen, setTemplateWizardOpen] = useState(false);
   const [clauseWizardOpen, setClauseWizardOpen] = useState(false);
+  const [clauseDirectEditMode, setClauseDirectEditMode] = useState(false);
+  const [clauseLibraryScope, setClauseLibraryScope] = useState("employment_contracts");
+  const [selectedClauseKey, setSelectedClauseKey] = useState(() => (
+    catalogClauseKey("employment_contracts", CLAUSE_TYPE_CATALOG.employment_contracts?.[0]?.value)
+  ));
   const [letterheadStep, setLetterheadStep] = useState(1);
   const [templateStep, setTemplateStep] = useState(1);
   const [clauseStep, setClauseStep] = useState(1);
@@ -2086,7 +2116,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [selectedLetterheadLayerId, setSelectedLetterheadLayerId] = useState(null);
   const [selectedClauseSectionIndex, setSelectedClauseSectionIndex] = useState(0);
   const [letterheadEditorOptions, setLetterheadEditorOptions] = useState(DEFAULT_LETTERHEAD_EDITOR_OPTIONS);
-  const [clausesReordering, setClausesReordering] = useState(false);
 
   const activeSubTab = subTab || "letterhead";
 
@@ -2142,6 +2171,34 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     .filter(item => item.status !== "archived")
     .sort((a, b) => Number(a.sort_order || 0) - Number(b.sort_order || 0) || String(a.title || "").localeCompare(String(b.title || ""))),
   [clauses]);
+  const clauseLibraryDefinitions = useMemo(
+    () => CLAUSE_TYPE_CATALOG[clauseLibraryScope] || [],
+    [clauseLibraryScope],
+  );
+  const clauseLibraryItems = useMemo(() => clauseLibraryDefinitions.map((definition, index) => {
+    const variant = findCatalogClauseVariant(activeClauses, clauseLibraryScope, definition.value);
+    const body = clauseLibraryBody(definition, clauseLibraryScope, variant);
+    const placeholdersForClause = variant?.placeholders?.length ? variant.placeholders : extractPlaceholders(body);
+    const licenseScope = variant?.license_scope || clauseDefaultLicenseScope(clauseLibraryScope);
+
+    return {
+      key: catalogClauseKey(clauseLibraryScope, definition.value),
+      scope: clauseLibraryScope,
+      definition,
+      variant,
+      body,
+      placeholders: placeholdersForClause,
+      snippets: definition.snippets || [],
+      validationNotes: clauseValidationNotes({ scope: clauseLibraryScope, clause_type: definition.value, license_scope: licenseScope }, definition),
+      usageCount: clauseTemplateUsageCount(variant, templates),
+      sortOrder: Number(variant?.sort_order || ((index + 1) * 10)),
+    };
+  }), [activeClauses, clauseLibraryDefinitions, clauseLibraryScope, templates]);
+  const selectedClauseLibraryItem = clauseLibraryItems.find(item => item.key === selectedClauseKey) || clauseLibraryItems[0] || null;
+  const customClauseItems = useMemo(() => activeClauses.filter(item => {
+    const inferred = inferClauseCatalog(item);
+    return !clauseDefinition(inferred.scope, inferred.type);
+  }), [activeClauses]);
   const currentClauseDefinition = useMemo(
     () => clauseDefinition(clauseForm.scope, clauseForm.clause_type, clauseForm.license_scope),
     [clauseForm.scope, clauseForm.clause_type, clauseForm.license_scope],
@@ -2180,6 +2237,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const letterheadPreviewIsImage = letterheadUsesUpload && fileLooksLikeImage(letterheadPreviewSource, letterheadPreviewFilename, letterheadPreviewType);
   const letterheadImageLooksA4 = letterheadPreviewIsImage && letterheadAssetInfo ? imageLooksA4(letterheadAssetInfo) : null;
   const showUploadFitOptions = letterheadPreviewIsImage && letterheadImageLooksA4 === false;
+
+  useEffect(() => {
+    if (clauseLibraryItems.length === 0) return;
+    if (!clauseLibraryItems.some(item => item.key === selectedClauseKey)) {
+      setSelectedClauseKey(clauseLibraryItems[0].key);
+    }
+  }, [clauseLibraryItems, selectedClauseKey]);
 
   useEffect(() => {
     if (!letterheadForm.file) {
@@ -2443,6 +2507,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       setClauseForm(initialClause(companyId));
       setEditingClauseId(null);
       setClauseWizardOpen(false);
+      setClauseDirectEditMode(false);
       setClauseStep(1);
       setSelectedClauseSectionIndex(0);
       setMessage({ type: "success", text: "Clausule opgeslagen." });
@@ -2750,20 +2815,11 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     }
   };
 
-  const startNewClause = () => {
-    const lastOrder = activeClauses.reduce((max, item) => Math.max(max, Number(item.sort_order || 0)), 0);
-    setMessage(null);
-    setEditingClauseId(null);
-    setClauseForm(initialClause(companyId, lastOrder + 10));
-    setClauseStep(1);
-    setSelectedClauseSectionIndex(0);
-    setClauseWizardOpen(true);
-  };
-
   const startEditClause = (record) => {
     setMessage(null);
     setEditingClauseId(record.id);
     const inferred = inferClauseCatalog(record);
+    const canDirectEdit = Boolean(inferred.scope && inferred.type);
     setClauseForm({
       company_id: companyId,
       scope: inferred.scope,
@@ -2778,7 +2834,38 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       sort_order: Number(record.sort_order || 0),
       status: record.status || "active",
     });
-    setClauseStep(inferred.scope && inferred.type ? 3 : 1);
+    setClauseDirectEditMode(canDirectEdit);
+    setClauseStep(canDirectEdit ? 3 : 1);
+    setSelectedClauseSectionIndex(0);
+    setClauseWizardOpen(true);
+  };
+
+  const startEditCatalogClause = (scope, definition) => {
+    if (!definition) return;
+    const variant = findCatalogClauseVariant(activeClauses, scope, definition.value);
+    if (variant) {
+      startEditClause(variant);
+      return;
+    }
+
+    const licenseScope = clauseDefaultLicenseScope(scope);
+    const sections = defaultClauseSections(definition, licenseScope);
+    const lastOrder = activeClauses.reduce((max, item) => Math.max(max, Number(item.sort_order || 0)), 0);
+    setMessage(null);
+    setEditingClauseId(null);
+    setClauseDirectEditMode(true);
+    setClauseForm({
+      ...initialClause(companyId, lastOrder + 10),
+      scope,
+      clause_type: definition.value,
+      license_scope: licenseScope,
+      title: definition.label || "",
+      risk_level: definition.risk || "green",
+      review_required: Boolean(definition.reviewRequired || definition.risk === "red"),
+      sections,
+      body: buildClauseBodyFromSections(sections),
+    });
+    setClauseStep(3);
     setSelectedClauseSectionIndex(0);
     setClauseWizardOpen(true);
   };
@@ -2786,6 +2873,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const cancelClauseWizard = () => {
     setClauseForm(initialClause(companyId));
     setEditingClauseId(null);
+    setClauseDirectEditMode(false);
     setClauseStep(1);
     setSelectedClauseSectionIndex(0);
     setClauseWizardOpen(false);
@@ -2825,22 +2913,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     event.preventDefault();
     const clause = activeClauses.find(item => item.id === clauseId);
     insertClauseInTemplate(clause);
-  };
-
-  const handleClauseOrderDragEnd = async (result) => {
-    if (!result.destination || result.destination.index === result.source.index) return;
-    const ordered = Array.from(activeClauses);
-    const [moved] = ordered.splice(result.source.index, 1);
-    ordered.splice(result.destination.index, 0, moved);
-    setClausesReordering(true);
-    try {
-      await Promise.all(ordered.map((item, index) => (
-        base44.entities.CompanyContractClause.update(item.id, { sort_order: (index + 1) * 10 })
-      )));
-      refresh();
-    } finally {
-      setClausesReordering(false);
-    }
   };
 
   const updateLetterheadLayer = (layerId, updates) => {
@@ -4225,6 +4297,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     const clausePlaceholders = extractPlaceholders(clausePreviewBody);
     const riskLevel = clauseForm.risk_level || currentClauseDefinition?.risk || "green";
     const validationNotes = clauseValidationNotes(clauseForm, currentClauseDefinition);
+    const editorTitle = clauseDirectEditMode
+      ? (editingClauseId ? "Bedrijfsvariant bewerken" : "Bedrijfsvariant maken")
+      : (editingClauseId ? "Clausule bewerken" : "Clausule toevoegen");
 
     return (
       <AnimatePresence>
@@ -4237,9 +4312,22 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           >
             <div className="p-5">
               <p className="mb-4 text-xs font-semibold uppercase tracking-wider text-primary">
-                {editingClauseId ? "Clausule bewerken" : "Clausule toevoegen"}
+                {editorTitle}
               </p>
-              <WizardSteps labels={CLAUSE_STEPS} step={clauseStep} />
+              {clauseDirectEditMode ? (
+                <div className="mb-4 rounded-lg border border-primary/20 bg-primary/5 p-3 text-sm">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="text-xs">{clauseScopeLabel(clauseForm.scope)}</Badge>
+                    <Badge variant="outline" className="text-xs">{clauseTypeLabel(clauseForm.scope, clauseForm.clause_type)}</Badge>
+                    <Badge variant="outline" className={`text-xs ${CLAUSE_RISK_STYLES[riskLevel] || ""}`}>{clauseRiskLabel(riskLevel)}</Badge>
+                  </div>
+                  <p className="mt-2 text-xs text-muted-foreground">
+                    Je past alleen de bedrijfsvariant aan. De standaardclausule blijft in de bibliotheek beschikbaar.
+                  </p>
+                </div>
+              ) : (
+                <WizardSteps labels={CLAUSE_STEPS} step={clauseStep} />
+              )}
 
               {clauseStep === 1 && (
                 <div className="space-y-3">
@@ -4529,10 +4617,16 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   Annuleren
                 </Button>
                 <div className="flex flex-wrap justify-end gap-2">
-                  {clauseStep > 1 && (
+                  {!clauseDirectEditMode && clauseStep > 1 && (
                     <Button type="button" variant="outline" onClick={() => setClauseStep(step => step - 1)}>
                       <ChevronLeft className="mr-1 h-4 w-4" />
                       Terug
+                    </Button>
+                  )}
+                  {clauseDirectEditMode && clauseStep === CLAUSE_STEPS.length && (
+                    <Button type="button" variant="outline" onClick={() => setClauseStep(3)}>
+                      <ChevronLeft className="mr-1 h-4 w-4" />
+                      Terug naar tekst
                     </Button>
                   )}
                   {clauseStep < CLAUSE_STEPS.length ? (
@@ -4555,96 +4649,283 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     );
   };
 
-  const renderClauseTab = () => (
-    <div className="flex h-full min-h-[360px] flex-col">
-      {renderClauseWizard()}
+  const renderClauseTab = () => {
+    const scopeMeta = CLAUSE_SCOPE_OPTIONS.find(option => option.value === clauseLibraryScope);
+    const selectedItem = selectedClauseLibraryItem;
 
-      <div className={`${CLAUSE_TABLE_GRID} items-center border-b border-border bg-muted/20 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
-        <span></span>
-        <span>Clausule</span>
-        <span>Placeholders</span>
-        <span>Door</span>
-        <div className="flex justify-end">
-          <Button type="button" variant="outline" size="sm" onClick={startNewClause} disabled={clauseWizardOpen}>
-            <Plus className="mr-1 h-4 w-4" />
-            Nieuwe clausule
-          </Button>
-        </div>
-      </div>
+    return (
+      <div className="flex h-full min-h-[360px] flex-col">
+        {renderClauseWizard()}
 
-      <div className="flex-1">
-        {activeClauses.length === 0 ? (
-          <div className="flex min-h-[180px] items-center justify-center px-5 py-8 text-center text-sm text-muted-foreground">
-            Nog geen contractclausules aangemaakt.
+        <div className="border-b border-border bg-muted/15 p-5">
+          <div className="flex flex-col gap-4 xl:flex-row xl:items-end xl:justify-between">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-wider text-primary">Clausulebibliotheek</p>
+              <h3 className="mt-1 text-lg font-semibold text-foreground">Standaardclausules en bedrijfsvarianten</h3>
+              <p className="mt-1 max-w-3xl text-sm text-muted-foreground">
+                Kies een documentsoort en bekijk direct de vaste clausules. Alleen wanneer een tekst voor dit bedrijf moet afwijken, maak je een bedrijfsvariant.
+              </p>
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {CLAUSE_SCOPE_OPTIONS.map(option => {
+                const active = option.value === clauseLibraryScope;
+                const variantCount = activeClauses.filter(item => inferClauseCatalog(item).scope === option.value).length;
+                return (
+                  <button
+                    key={option.value}
+                    type="button"
+                    onClick={() => {
+                      const firstDefinition = CLAUSE_TYPE_CATALOG[option.value]?.[0];
+                      setClauseLibraryScope(option.value);
+                      if (firstDefinition) setSelectedClauseKey(catalogClauseKey(option.value, firstDefinition.value));
+                    }}
+                    className={`rounded-lg border px-3 py-2 text-left transition-colors hover:border-primary hover:bg-accent ${active ? "border-primary bg-primary/10" : "border-border bg-card"}`}
+                  >
+                    <span className="block text-sm font-semibold text-foreground">{option.label}</span>
+                    <span className="block text-xs text-muted-foreground">
+                      {(CLAUSE_TYPE_CATALOG[option.value] || []).length} standaard · {variantCount} variant{variantCount === 1 ? "" : "en"}
+                    </span>
+                  </button>
+                );
+              })}
+            </div>
           </div>
-        ) : (
-          <DragDropContext onDragEnd={handleClauseOrderDragEnd}>
-            <Droppable droppableId="company-contract-clauses">
-              {provided => (
-                <div ref={provided.innerRef} {...provided.droppableProps}>
-                  {activeClauses.map((item, index) => (
-                    <Draggable key={item.id} draggableId={item.id} index={index} isDragDisabled={clausesReordering}>
-                      {dragProvided => (
-                        <div
-                          ref={dragProvided.innerRef}
-                          {...dragProvided.draggableProps}
-                          className={`${CLAUSE_TABLE_GRID} items-start border-b border-border px-5 py-4 text-sm transition-colors hover:bg-accent/35`}
-                        >
-                          <button
-                            type="button"
-                            className="mt-0.5 flex h-7 w-7 items-center justify-center rounded-md text-muted-foreground hover:bg-muted"
-                            {...(dragProvided.dragHandleProps || {})}
-                            aria-label="Clausulevolgorde wijzigen"
-                          >
-                            <GripVertical className="h-4 w-4" />
-                          </button>
-                          <div className="min-w-0">
-                            <p className="truncate font-semibold text-foreground">{item.title}</p>
-                            <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                              {clauseScopeLabel(item.scope)} · {clauseTypeLabel(item.scope, item.clause_type)} · {clauseSecurityContextLabel(item.license_scope)}
-                            </p>
-                            {(item.risk_level || item.review_required) && (
-                              <div className="mt-1 flex flex-wrap gap-1">
-                                <Badge variant="outline" className={`text-[10px] ${CLAUSE_RISK_STYLES[item.risk_level || "green"] || ""}`}>
-                                  {clauseRiskLabel(item.risk_level || "green")}
-                                </Badge>
-                                {item.review_required && <Badge variant="outline" className="text-[10px]">Review nodig</Badge>}
-                              </div>
-                            )}
-                            <p className="mt-0.5 line-clamp-2 font-mono text-xs text-muted-foreground">
-                              {buildClauseBodyFromSections(normalizeClauseSections(item))}
-                            </p>
-                          </div>
-                          <div className="flex flex-wrap gap-1">
-                            {(item.placeholders || extractPlaceholders(item.body)).slice(0, 3).map(placeholder => (
-                              <Badge key={placeholder} variant="outline" className="text-xs">{placeholder}</Badge>
-                            ))}
-                            {(item.placeholders || extractPlaceholders(item.body)).length > 3 && (
-                              <Badge variant="outline" className="text-xs">+{(item.placeholders || extractPlaceholders(item.body)).length - 3}</Badge>
-                            )}
-                          </div>
-                          <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
-                          <div className="flex justify-end gap-1">
-                            <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => startEditClause(item)}>
-                              <Edit className="h-3.5 w-3.5" />
-                            </Button>
-                            <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => archiveClause(item)}>
-                              <Archive className="h-3.5 w-3.5" />
-                            </Button>
-                          </div>
-                        </div>
-                      )}
-                    </Draggable>
-                  ))}
-                  {provided.placeholder}
+        </div>
+
+        <div className="grid flex-1 min-h-0 xl:grid-cols-[minmax(0,1.35fr)_minmax(360px,0.85fr)]">
+          <div className="min-w-0 border-r border-border">
+            <div className="border-b border-border px-5 py-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <p className="text-sm font-semibold text-foreground">{scopeMeta?.label || "Clausules"}</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{scopeMeta?.description}</p>
                 </div>
-              )}
-            </Droppable>
-          </DragDropContext>
+                <Badge variant="outline" className="text-xs">
+                  {clauseLibraryItems.length} standaardclausule{clauseLibraryItems.length === 1 ? "" : "s"}
+                </Badge>
+              </div>
+            </div>
+
+            <div className="overflow-x-auto">
+              <div className={`${CLAUSE_LIBRARY_GRID} min-w-[900px] items-center border-b border-border bg-muted/20 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+                <span>Nr.</span>
+                <span>Clausule</span>
+                <span>Status</span>
+                <span>Variaties</span>
+                <span>Velden</span>
+              </div>
+              <div className="min-w-[900px]">
+                {clauseLibraryItems.map((item, index) => {
+                  const selected = selectedItem?.key === item.key;
+                  const riskLevel = item.variant?.risk_level || item.definition.risk || "green";
+                  return (
+                    <button
+                      key={item.key}
+                      type="button"
+                      onClick={() => setSelectedClauseKey(item.key)}
+                      className={`${CLAUSE_LIBRARY_GRID} w-full items-start border-b border-border px-5 py-4 text-left text-sm transition-colors hover:bg-accent/35 ${selected ? "bg-primary/5" : "bg-background"}`}
+                    >
+                      <span className="font-mono text-xs text-muted-foreground">{String(index + 1).padStart(2, "0")}</span>
+                      <span className="min-w-0">
+                        <span className="block truncate font-semibold text-foreground">{item.definition.label}</span>
+                        <span className="mt-0.5 line-clamp-2 block text-xs text-muted-foreground">{item.definition.description}</span>
+                        <span className="mt-2 flex flex-wrap gap-1">
+                          {item.definition.required && <Badge variant="outline" className="text-[10px]">Basisclausule</Badge>}
+                          <Badge variant="outline" className={`text-[10px] ${CLAUSE_RISK_STYLES[riskLevel] || ""}`}>{clauseRiskLabel(riskLevel)}</Badge>
+                        </span>
+                      </span>
+                      <span className="flex flex-wrap gap-1">
+                        {item.variant ? (
+                          <Badge className="bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-200">Bedrijfsvariant</Badge>
+                        ) : (
+                          <Badge variant="outline">Standaard</Badge>
+                        )}
+                        {(item.variant?.review_required || item.definition.reviewRequired) && <Badge variant="outline">Review</Badge>}
+                      </span>
+                      <span className="min-w-0 text-xs text-muted-foreground">
+                        <span className="block font-medium text-foreground">{item.snippets.length} bouwblok{item.snippets.length === 1 ? "" : "ken"}</span>
+                        <span className="mt-0.5 line-clamp-2 block">
+                          {item.snippets.length === 0 ? "Geen variaties" : item.snippets.slice(0, 3).map(snippet => snippet.label).join(", ")}
+                          {item.snippets.length > 3 ? ` +${item.snippets.length - 3}` : ""}
+                        </span>
+                      </span>
+                      <span className="text-xs text-muted-foreground">
+                        <span className="block font-medium text-foreground">{item.placeholders.length} placeholder{item.placeholders.length === 1 ? "" : "s"}</span>
+                        <span className="mt-0.5 block">{item.usageCount} template{item.usageCount === 1 ? "" : "s"}</span>
+                      </span>
+                    </button>
+                  );
+                })}
+              </div>
+            </div>
+          </div>
+
+          <aside className="min-w-0 overflow-y-auto bg-background">
+            {selectedItem ? (
+              <div className="space-y-5 p-5">
+                <div className="space-y-2">
+                  <div className="flex flex-wrap items-center gap-2">
+                    <Badge variant="outline" className="text-xs">{scopeMeta?.label}</Badge>
+                    {selectedItem.variant ? (
+                      <Badge className="bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-200">Bedrijfsvariant actief</Badge>
+                    ) : (
+                      <Badge variant="outline" className="text-xs">Standaardtekst</Badge>
+                    )}
+                  </div>
+                  <h4 className="text-lg font-semibold text-foreground">{selectedItem.definition.label}</h4>
+                  <p className="text-sm text-muted-foreground">{selectedItem.definition.description}</p>
+                </div>
+
+                <div className="flex flex-wrap gap-2">
+                  <Button type="button" onClick={() => startEditCatalogClause(selectedItem.scope, selectedItem.definition)} disabled={clauseWizardOpen}>
+                    {selectedItem.variant ? <Edit className="mr-1 h-4 w-4" /> : <FilePlus2 className="mr-1 h-4 w-4" />}
+                    {selectedItem.variant ? "Bedrijfsvariant bewerken" : "Bedrijfsvariant maken"}
+                  </Button>
+                  {selectedItem.variant && (
+                    <Button
+                      type="button"
+                      variant="outline"
+                      onClick={async () => {
+                        await archiveClause(selectedItem.variant);
+                        setMessage({ type: "success", text: "Bedrijfsvariant gearchiveerd. De standaardclausule blijft beschikbaar." });
+                      }}
+                    >
+                      <Archive className="mr-1 h-4 w-4" />
+                      Terug naar standaard
+                    </Button>
+                  )}
+                </div>
+
+                {selectedItem.scope === "employment_contracts" && (
+                  <div className="rounded-lg border border-border bg-muted/20 p-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Afgeleid uit bedrijfsprofiel</p>
+                    <div className="mt-2 flex flex-wrap gap-1.5">
+                      {activeWpbrLicenses.length === 0 ? (
+                        <Badge variant="outline" className="text-xs">Geen actieve WPBR-vergunning</Badge>
+                      ) : activeWpbrLicenses.map(license => (
+                        <Badge key={license.id || license.license_type} variant="outline" className="text-xs">
+                          {WPBR_TYPE_LABELS[license.license_type] || license.license_type}
+                        </Badge>
+                      ))}
+                      {companyCaoOptions.length === 0 ? (
+                        <Badge variant="outline" className="text-xs">Geen CAO gekoppeld</Badge>
+                      ) : companyCaoOptions.map(option => (
+                        <Badge key={option.value} variant="outline" className="text-xs">{option.label}</Badge>
+                      ))}
+                    </div>
+                    {derivedClauseFunctionGroups.length > 0 && (
+                      <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                        {derivedClauseFunctionGroups.slice(0, 3).map(group => (
+                          <p key={group.key}>
+                            <span className="font-semibold text-foreground">{group.label}: </span>
+                            {group.functions.slice(0, 5).map(functionLabel).join(", ")}
+                            {group.functions.length > 5 ? ` +${group.functions.length - 5}` : ""}
+                          </p>
+                        ))}
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <div className="mb-3 flex items-center justify-between gap-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Tekstpreview</p>
+                    <Badge variant="outline" className="text-xs">
+                      {selectedItem.variant ? "Bedrijfsvariant" : "Standaard"}
+                    </Badge>
+                  </div>
+                  <pre className="max-h-[360px] overflow-auto whitespace-pre-wrap rounded-md bg-background p-3 text-xs leading-relaxed text-foreground">
+                    {selectedItem.body || "Geen standaardtekst beschikbaar."}
+                  </pre>
+                </div>
+
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Variaties en bouwblokken</p>
+                  <div className="mt-3 space-y-2">
+                    {selectedItem.snippets.length === 0 ? (
+                      <p className="text-sm text-muted-foreground">Deze clausule heeft geen aparte variaties. De standaardtekst is bedoeld als basis.</p>
+                    ) : selectedItem.snippets.map(snippet => (
+                      <div key={snippet.label} className="rounded-md border border-border bg-background p-3">
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium text-foreground">{snippet.label}</p>
+                            <p className="mt-1 line-clamp-3 text-xs text-muted-foreground">{snippet.text}</p>
+                          </div>
+                          <HelpCircle className="mt-0.5 h-4 w-4 shrink-0 text-muted-foreground" title={snippet.help} />
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+
+                <div className="rounded-lg border border-border bg-muted/20 p-3">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
+                  <div className="mt-3 flex flex-wrap gap-1">
+                    {selectedItem.placeholders.length === 0 ? (
+                      <span className="text-xs text-muted-foreground">Geen placeholders gevonden.</span>
+                    ) : selectedItem.placeholders.slice(0, 24).map(placeholder => (
+                      <Badge key={placeholder} variant="outline" className="text-xs">{placeholder}</Badge>
+                    ))}
+                    {selectedItem.placeholders.length > 24 && (
+                      <Badge variant="outline" className="text-xs">+{selectedItem.placeholders.length - 24}</Badge>
+                    )}
+                  </div>
+                </div>
+
+                {selectedItem.validationNotes.length > 0 && (
+                  <div className="rounded-lg border border-amber-200 bg-amber-50 p-3 text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                    <p className="text-xs font-semibold uppercase tracking-wider">Controlepunten</p>
+                    <ul className="mt-2 space-y-1 text-sm">
+                      {selectedItem.validationNotes.map(note => (
+                        <li key={note} className="flex gap-2">
+                          <span className="mt-2 h-1.5 w-1.5 shrink-0 rounded-full bg-amber-500" />
+                          <span>{note}</span>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
+                )}
+              </div>
+            ) : (
+              <div className="flex min-h-[260px] items-center justify-center p-8 text-center text-sm text-muted-foreground">
+                Geen standaardclausules beschikbaar voor deze categorie.
+              </div>
+            )}
+          </aside>
+        </div>
+
+        {customClauseItems.length > 0 && (
+          <div className="border-t border-border bg-muted/10 p-5">
+            <div className="mb-3">
+              <p className="text-sm font-semibold text-foreground">Eigen clausules buiten de standaardbibliotheek</p>
+              <p className="mt-0.5 text-xs text-muted-foreground">Deze bestaande clausules blijven beschikbaar, maar horen nog niet bij een standaardclausulefamilie.</p>
+            </div>
+            <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+              {customClauseItems.map(item => (
+                <div key={item.id} className="rounded-lg border border-border bg-card p-3">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-foreground">{item.title}</p>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">{clauseScopeLabel(item.scope)} · {clauseTypeLabel(item.scope, item.clause_type)}</p>
+                    </div>
+                    <div className="flex shrink-0 gap-1">
+                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => startEditClause(item)}>
+                        <Edit className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => archiveClause(item)}>
+                        <Archive className="h-3.5 w-3.5" />
+                      </Button>
+                    </div>
+                  </div>
+                  <p className="mt-2 line-clamp-2 text-xs text-muted-foreground">{buildClauseBodyFromSections(normalizeClauseSections(item))}</p>
+                </div>
+              ))}
+            </div>
+          </div>
         )}
       </div>
-    </div>
-  );
+    );
+  };
 
   return (
     <div className="flex h-full min-h-[420px] flex-col">
