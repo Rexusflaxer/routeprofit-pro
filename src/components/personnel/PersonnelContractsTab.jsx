@@ -30,6 +30,7 @@ import {
   renderContractTemplateBody,
   validateStandardContractTemplateContext,
 } from "@/lib/contractTemplateRenderer";
+import { groupContractTemplateVersions } from "@/lib/contractTemplateEditor";
 import {
   CheckCircle,
   ChevronLeft,
@@ -413,7 +414,8 @@ function templateMatchesWizard(template, form) {
   const durationScope = template.duration_type_scope || "any";
   if (durationScope !== "any" && durationScope !== form.duration_type) return false;
   const durationOptions = Array.isArray(template.duration_options) ? template.duration_options : [];
-  if (durationOptions.length > 0 && form.duration_option && !durationOptions.includes(form.duration_option)) return false;
+  const selectedDurationOption = form.duration_type === "indefinite" ? "indefinite" : form.duration_option;
+  if (durationOptions.length > 0 && selectedDurationOption && !durationOptions.includes(selectedDurationOption)) return false;
   const probationScope = template.probation_scope || "any";
   if (probationScope === "with_probation" && form.probation_agreed !== "true") return false;
   if (probationScope === "without_probation" && form.probation_agreed !== "false") return false;
@@ -814,6 +816,10 @@ function renderContractBody(personnel, form, company, template, clauses = []) {
 function makePdfFile({ personnel, form, company, template, letterhead, clauses = [] }) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
   const margin = 54;
+  const pageBottom = 760;
+  const continuationTop = 64;
+  const lineHeight = 16;
+  const paragraphGap = 7;
   const title = template?.name || "Arbeidsovereenkomst";
   const body = renderContractBody(personnel, form, company, template, clauses);
   const values = contractRenderValues(personnel, form, company);
@@ -825,18 +831,45 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
   doc.text(values.companyName, margin, 84);
   if (letterhead?.name) doc.text(`Briefpapier: ${letterhead.name}`, margin, 98);
   doc.setFontSize(10);
-  const lines = doc.splitTextToSize(body, 486);
   let y = 132;
-  lines.forEach(line => {
-    if (y > 760) {
+  const paragraphs = body.split(/\n{2,}/).map(paragraph => paragraph.trim()).filter(Boolean);
+  const paragraphLines = paragraphs.map(paragraph => doc.splitTextToSize(paragraph, 486));
+
+  paragraphLines.forEach((lines, index) => {
+    const isArticleHeading = /^Artikel\s+\d+\b/i.test(paragraphs[index]);
+    const ownHeight = lines.length * lineHeight + paragraphGap;
+    const nextHeight = isArticleHeading && paragraphLines[index + 1]
+      ? paragraphLines[index + 1].length * lineHeight + paragraphGap
+      : 0;
+    if (y > continuationTop && y + ownHeight + nextHeight > pageBottom) {
       doc.addPage();
-      y = 64;
+      y = continuationTop;
     }
-    doc.text(line, margin, y);
-    y += 16;
+
+    if (ownHeight <= pageBottom - continuationTop) {
+      doc.text(lines, margin, y);
+      y += ownHeight;
+      return;
+    }
+
+    lines.forEach(line => {
+      if (y + lineHeight > pageBottom) {
+        doc.addPage();
+        y = continuationTop;
+      }
+      doc.text(line, margin, y);
+      y += lineHeight;
+    });
+    y += paragraphGap;
   });
-  doc.setFontSize(8);
-  doc.text("PDF-snapshot gegenereerd door LOQ. Latere sjabloonwijzigingen wijzigen dit document niet.", margin, 806);
+
+  const pageCount = doc.getNumberOfPages();
+  for (let page = 1; page <= pageCount; page += 1) {
+    doc.setPage(page);
+    doc.setFontSize(8);
+    doc.text("PDF-snapshot gegenereerd door LOQ. Latere sjabloonwijzigingen wijzigen dit document niet.", margin, 806);
+    doc.text(`${page} / ${pageCount}`, 541, 806, { align: "right" });
+  }
   const blob = doc.output("blob");
   const safeName = `${values.employeeName.replace(/[^\w.-]+/g, "_")}_arbeidsovereenkomst_${form.contract_start_date || "concept"}.pdf`;
   return new File([blob], safeName, { type: "application/pdf" });
@@ -987,11 +1020,18 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   });
 
   const selectedCompany = companies.find(company => company.id === form.company_id) || null;
-  const publishedTemplates = useMemo(() => (contractTemplates || [])
-    .filter(template => template.company_id === form.company_id && template.status === "published" && templateMatchesWizard(template, form))
+  const publishedTemplates = useMemo(() => groupContractTemplateVersions((contractTemplates || [])
+    .filter(template => template.company_id === form.company_id && template.status === "published" && templateMatchesWizard(template, form)))
+    .map(group => group.versions[0])
+    .filter(Boolean)
     .sort((a, b) => a.name.localeCompare(b.name)), [contractTemplates, form]);
   const letterheadOptions = useMemo(() => getLetterheadOptions(letterheads, companies, form.company_id), [companies, form.company_id, letterheads]);
   const selectedTemplate = contractTemplates.find(template => template.id === form.template_id) || null;
+  const selectableDurationOptions = useMemo(() => {
+    const allowed = Array.isArray(selectedTemplate?.duration_options) ? selectedTemplate.duration_options : [];
+    if (allowed.length === 0) return DURATION_OPTIONS;
+    return DURATION_OPTIONS.filter(option => allowed.includes(option.value));
+  }, [selectedTemplate]);
   const selectedLetterhead = letterheadOptions.find(item => item.id === form.letterhead_id) || null;
   const selectedTemplateClauses = useMemo(() => (contractClauses || [])
     .filter(clause => clause.company_id === form.company_id && clause.status !== "archived"),
@@ -1594,7 +1634,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       <Select value={form.duration_option || "free"} onValueChange={setDurationOption}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
-                          {DURATION_OPTIONS.map(option => (
+                          {selectableDurationOptions.map(option => (
                             <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                           ))}
                         </SelectContent>

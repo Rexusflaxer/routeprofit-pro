@@ -2,6 +2,13 @@ export const CAO_PARTICULIERE_BEVEILIGING_KEY = "cao_particuliere_beveiliging";
 
 export const PB_FULLTIME_STANDARD_TEMPLATE_ID = "pb_fulltime_standard_v1";
 
+const PB_FULLTIME_CONTRACT_MODEL_ALIASES = new Set([
+  "fulltime",
+  "fulltime_employment",
+  "fulltime_fixed",
+  "fulltime_indefinite",
+]);
+
 export const PB_CAO_FUNCTION_GROUP_OPTIONS = [
   { value: "objectbeveiliger_receptionist", label: "Objectbeveiliger / receptionist" },
   { value: "mobiel_surveillant", label: "Mobiel surveillant" },
@@ -317,9 +324,20 @@ export const PB_FULLTIME_STANDARD_TEMPLATE = {
   },
 };
 
+export function isPbFulltimeStandardTemplateContext(form = {}) {
+  if (form.template_type !== PB_FULLTIME_STANDARD_TEMPLATE.template_type) return false;
+  if (form.cao_key !== PB_FULLTIME_STANDARD_TEMPLATE.cao_key) return false;
+
+  const modelValues = [
+    form.contract_model,
+    form.employment_contract_model,
+    form.employment_model_scope,
+  ].map(value => String(value || "").trim().toLowerCase()).filter(Boolean);
+
+  return modelValues.some(value => PB_FULLTIME_CONTRACT_MODEL_ALIASES.has(value));
+}
+
 export function getStandardContractTemplatePreset(form = {}) {
-  if (form.template_type !== PB_FULLTIME_STANDARD_TEMPLATE.template_type) return null;
-  if (form.cao_key !== PB_FULLTIME_STANDARD_TEMPLATE.cao_key) return null;
-  if (form.contract_model !== PB_FULLTIME_STANDARD_TEMPLATE.contract_model) return null;
+  if (!isPbFulltimeStandardTemplateContext(form)) return null;
   return PB_FULLTIME_STANDARD_TEMPLATE;
 }

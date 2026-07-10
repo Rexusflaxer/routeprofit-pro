@@ -7,7 +7,29 @@
       "description": "Bedrijf waar dit contractsjabloon bij hoort."
     },
     "name": {
-      "type": "string"
+      "type": "string",
+      "description": "Verplichte referentie van de template. Uniek binnen bedrijf, documentsoort, CAO en contractmodel; opvolgende versies delen dezelfde referentie."
+    },
+    "reference_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Genormaliseerde referentie voor hoofdletterongevoelige uniciteitscontrole."
+    },
+    "template_family_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Stabiele sleutel waarmee alle versies binnen dezelfde documentsoort, CAO, contractvorm en referentie worden gegroepeerd."
+    },
+    "version_source_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ID van de templateversie waarop deze opvolgende versie is gebaseerd."
     },
     "description": {
       "type": [
@@ -19,7 +41,9 @@
       "type": "string",
       "enum": [
         "employment_contract",
-        "assignment_agreement"
+        "assignment_agreement",
+        "sales_contract",
+        "subcontractor_framework_agreement"
       ],
       "default": "employment_contract"
     },
@@ -99,7 +123,8 @@
     },
     "version": {
       "type": "number",
-      "default": 1
+      "default": 1,
+      "description": "Automatisch oplopend versienummer binnen dezelfde templatereferentie."
     },
     "status": {
       "type": "string",
@@ -113,7 +138,17 @@
     },
     "body": {
       "type": "string",
-      "description": "Template-inhoud met placeholders zoals {{medewerker.naam}}, {{bedrijf.naam}} en {{contract.startdatum}}."
+      "description": "Genormaliseerde platte template-inhoud met {$...}-placeholders. Rijke artikelblokken en opmaak staan versiegebonden in editor_blocks."
+    },
+    "editor_blocks": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object"
+      },
+      "description": "Geordende artikelblokken met titel, veilige rich-textinhoud en stabiele blok-ID's."
     },
     "clauses": {
       "type": [
@@ -148,7 +183,8 @@
       "type": [
         "object",
         "null"
-      ]
+      ],
+      "description": "Bevat onder meer template_family_key, version_source_id, editor_blocks en auditmetadata."
     }
   },
   "required": [

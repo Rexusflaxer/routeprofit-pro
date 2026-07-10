@@ -137,12 +137,6 @@ function isLongerThanSixMonths(form = {}) {
   return !!end && !!threshold && end > threshold;
 }
 
-function isAtLeastTwoYears(form = {}) {
-  const end = dateValue(form.contract_end_date);
-  const threshold = addMonthsMinusOneDay(form.contract_start_date, 24);
-  return !!end && !!threshold && end >= threshold;
-}
-
 function durationDescription(form = {}) {
   if (durationType(form) === "indefinite") return "onbepaalde tijd";
   const labels = {
@@ -217,7 +211,7 @@ function contractProbationClause(form = {}) {
     return "Partijen komen geen proeftijd overeen, omdat de tijdelijke arbeidsovereenkomst zes maanden of korter duurt.";
   }
   const aspirant = form.security_role_status === "aspirant_beveiliger" || form.cao_function_level === "aspirant";
-  const months = durationType(form) === "indefinite" || aspirant || isAtLeastTwoYears(form) ? 2 : 1;
+  const months = durationType(form) === "indefinite" || aspirant ? 2 : 1;
   return `Partijen komen een proeftijd van ${months === 1 ? "één maand" : "twee maanden"} overeen. Tijdens de proeftijd kunnen beide partijen de arbeidsovereenkomst per direct beëindigen. Bij opzegging tijdens de proeftijd geldt tevens de cao-regel dat dit minimaal twaalf uur voor het begin van de eerstvolgende dienst gebeurt.`;
 }
 

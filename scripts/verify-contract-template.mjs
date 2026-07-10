@@ -1,5 +1,8 @@
 import assert from "node:assert/strict";
-import { PB_FULLTIME_STANDARD_TEMPLATE as preset } from "../src/lib/contractTemplateCatalog.js";
+import {
+  PB_FULLTIME_STANDARD_TEMPLATE as preset,
+  getStandardContractTemplatePreset,
+} from "../src/lib/contractTemplateCatalog.js";
 import {
   getMissingStandardTemplatePlaceholders,
   getUnknownContractTemplatePlaceholders,
@@ -7,6 +10,15 @@ import {
   renderContractTemplateBody,
   validateStandardContractTemplateContext,
 } from "../src/lib/contractTemplateRenderer.js";
+import {
+  contractTemplateBodyFromBlocks,
+  contractTemplateBlocksFromBody,
+  contractTemplateFamilyKey,
+  durationOptionsForContractTemplate,
+  groupContractTemplateVersions,
+  nextContractTemplateVersion,
+  paginateContractTemplateBlocks,
+} from "../src/lib/contractTemplateEditor.js";
 
 const company = {
   legal_name: "Voorbeeld Beveiliging B.V.",
@@ -62,6 +74,66 @@ const template = {
   metadata: { standard_template_id: preset.id },
   employment_model_scope: "fulltime",
 };
+
+for (const contractModel of ["fulltime_employment", "fulltime", "fulltime_fixed", "fulltime_indefinite"]) {
+  assert.equal(getStandardContractTemplatePreset({
+    template_type: "employment_contract",
+    cao_key: "cao_particuliere_beveiliging",
+    contract_model: contractModel,
+  })?.id, preset.id);
+}
+assert.equal(getStandardContractTemplatePreset({
+  template_type: "employment_contract",
+  cao_key: "cao_particuliere_beveiliging",
+  contract_model: "parttime_employment",
+}), null);
+
+const editorBlocks = contractTemplateBlocksFromBody(preset.body);
+assert.equal(editorBlocks.filter(block => block.kind === "article").length, 17);
+assert.equal(editorBlocks[0].kind, "preamble");
+assert.equal(editorBlocks.at(-1).kind, "closing");
+assert.equal((editorBlocks.find(block => block.title === "Indiensttreding en duur")?.content_html.match(/<p>/g) || []).length, 3);
+const roundTripBody = contractTemplateBodyFromBlocks(editorBlocks);
+assert.deepEqual(getUnknownContractTemplatePlaceholders(roundTripBody), []);
+assert.deepEqual(getMissingStandardTemplatePlaceholders(roundTripBody), []);
+const firstArticleIndex = editorBlocks.findIndex(block => block.kind === "article");
+const reorderedBlocks = [...editorBlocks];
+[reorderedBlocks[firstArticleIndex], reorderedBlocks[firstArticleIndex + 1]] = [reorderedBlocks[firstArticleIndex + 1], reorderedBlocks[firstArticleIndex]];
+const reorderedBody = contractTemplateBodyFromBlocks(reorderedBlocks);
+assert.match(reorderedBody, /Artikel 1 - Toepasselijke cao\n\n1\.1/);
+const previewPages = paginateContractTemplateBlocks(editorBlocks);
+assert.ok(previewPages.length > 1);
+assert.equal(new Set(previewPages.flat().map(item => item.id)).size, previewPages.flat().length);
+
+const pbFulltimeDurations = durationOptionsForContractTemplate({
+  template_type: "employment_contract",
+  cao_key: "cao_particuliere_beveiliging",
+  contract_model: "fulltime_employment",
+});
+assert.ok(pbFulltimeDurations.some(option => option.value === "indefinite"));
+assert.ok(pbFulltimeDurations.some(option => option.value === "free"));
+const internshipDurations = durationOptionsForContractTemplate({
+  template_type: "employment_contract",
+  cao_key: "cao_particuliere_beveiliging",
+  contract_model: "internship",
+});
+assert.ok(!internshipDurations.some(option => option.value === "indefinite"));
+assert.ok(!internshipDurations.some(option => option.value === "2_years"));
+
+const templateFamily = {
+  template_type: "employment_contract",
+  cao_key: "cao_particuliere_beveiliging",
+  employment_model_scope: "fulltime",
+  name: "Standaard fulltime",
+};
+const familyKey = contractTemplateFamilyKey(templateFamily);
+const familyVersions = [
+  { ...templateFamily, id: "v1", version: 1 },
+  { ...templateFamily, id: "v2", version: 2 },
+];
+assert.equal(groupContractTemplateVersions(familyVersions).length, 1);
+assert.equal(groupContractTemplateVersions(familyVersions)[0].versions[0].id, "v2");
+assert.equal(nextContractTemplateVersion(familyVersions, familyKey), 3);
 
 function evaluate(form) {
   const body = renderContractTemplateBody(preset.body, { personnel, form, company });
@@ -134,7 +206,16 @@ assert.match(sixMonths.body, /geen proeftijd overeen/);
 
 const twoYears = evaluate(operationalForm({ contract_end_date: "2027-12-31" }));
 assert.deepEqual(twoYears.issues, []);
-assert.match(twoYears.body, /proeftijd van twee maanden/);
+assert.match(twoYears.body, /proeftijd van één maand/);
+
+const aspirant = evaluate(operationalForm({
+  contract_end_date: "2027-12-31",
+  cao_function_level: "aspirant",
+  cao_scale: "2",
+  security_role_status: "aspirant_beveiliger",
+}));
+assert.deepEqual(aspirant.issues, []);
+assert.match(aspirant.body, /proeftijd van twee maanden/);
 
 const successive = evaluate(operationalForm({ probation_context: "successive_same_work" }));
 assert.ok(successive.issues.some(issue => issue.includes("opvolgend contract")));
@@ -149,4 +230,4 @@ const expiredVersion = evaluate(operationalForm({
 }));
 assert.ok(expiredVersion.issues.some(issue => issue.includes("bijgewerkte CAO-versie")));
 
-console.log("Contracttemplate verificatie geslaagd (10 scenario's).\n");
+console.log("Contracttemplate verificatie geslaagd (11 contractsituaties, 5 presetselecties en editor-/versietests).\n");
