@@ -17,6 +17,20 @@ import {
   functionLabel,
 } from "@/lib/securityCaoCatalog";
 import {
+  CAO_PARTICULIERE_BEVEILIGING_KEY,
+  PB_CAO_FUNCTION_GROUP_OPTIONS,
+  PB_CAO_FUNCTION_LEVEL_OPTIONS,
+  pbFunctionGroupsForFunctions,
+  pbSalaryScaleForFunctionLevel,
+  suggestPbCaoFunctionGroup,
+} from "@/lib/contractTemplateCatalog";
+import {
+  buildContractTemplateValues,
+  getUnresolvedContractTemplatePlaceholders,
+  renderContractTemplateBody,
+  validateStandardContractTemplateContext,
+} from "@/lib/contractTemplateRenderer";
+import {
   CheckCircle,
   ChevronLeft,
   ChevronRight,
@@ -390,6 +404,7 @@ function extractWageRows(option, targetYear) {
 function templateMatchesWizard(template, form) {
   if (!template || template.visible_in_contract_wizard === false) return false;
   if (template.template_type && template.template_type !== "employment_contract") return false;
+  if (form.cao_key && template.cao_key && template.cao_key !== form.cao_key) return false;
   const model = getContractModel(form.contract_model);
   const formScope = template.contract_form_scope || "any";
   if (formScope !== "any" && formScope !== form.contract_form && formScope !== form.underlying_contract_form) return false;
@@ -424,15 +439,23 @@ function initialForm(personnel) {
     underlying_contract_form: model?.underlying_contract_form || personnel.underlying_contract_form || null,
     employment_contract_model: model?.employment_model || (personnel.contract_form === "oproep" ? "call_agreement" : "unknown"),
     probation_agreed: "unknown",
+    probation_context: "unknown",
     duration_type: model?.duration_type || (personnel.contract_form === "onbepaalde_tijd" ? "indefinite" : "fixed"),
     duration_option: "",
     contract_start_date: personnel.contract_start_date || "",
     contract_end_date: personnel.contract_end_date || "",
+    work_location: "",
+    work_area: "Nederland",
+    employer_representative_name: "",
+    employer_representative_function: "",
+    signing_place: "",
+    signing_date: new Date().toISOString().slice(0, 10),
     cao_scale: personnel.cao_scale ?? "",
     cao_period: personnel.cao_period ?? "",
     custom_hourly_rate: personnel.custom_hourly_rate ?? "",
     wage_table_year: getYear(personnel.contract_start_date || new Date()),
     hourly_rate_snapshot: personnel.custom_hourly_rate ?? "",
+    salary_payment_frequency: personnel.salary_payment_frequency || (personnel.cao === CAO_PARTICULIERE_BEVEILIGING_KEY ? "four_weeks" : ""),
     written_scale_period_notice_confirmed: boolToSelect(personnel.written_scale_period_notice_confirmed),
     periodic_increase_due_confirmed: boolToSelect(personnel.periodic_increase_due_confirmed),
     function_type: personnel.function_type || null,
@@ -486,15 +509,23 @@ function formFromContract(contract) {
     underlying_contract_form: contract.underlying_contract_form || null,
     employment_contract_model: employmentModel,
     probation_agreed: contract.probation_agreed === true ? "true" : contract.probation_agreed === false ? "false" : (contract.probation_agreed === "not_applicable" ? "not_applicable" : "unknown"),
+    probation_context: contract.probation_context || (contract.probation_agreed === false ? "not_applicable" : "unknown"),
     duration_type: contract.duration_type || (contract.contract_form === "onbepaalde_tijd" ? "indefinite" : "fixed"),
     duration_option: contract.duration_option || "",
     contract_start_date: contract.contract_start_date || "",
     contract_end_date: contract.contract_end_date || "",
+    work_location: contract.work_location || "",
+    work_area: contract.work_area || "",
+    employer_representative_name: contract.employer_representative_name || "",
+    employer_representative_function: contract.employer_representative_function || "",
+    signing_place: contract.signing_place || "",
+    signing_date: contract.signing_date || "",
     cao_scale: contract.cao_scale ?? "",
     cao_period: contract.cao_period ?? "",
     custom_hourly_rate: contract.custom_hourly_rate ?? "",
     wage_table_year: contract.wage_table_year || getYear(contract.contract_start_date || new Date()),
     hourly_rate_snapshot: contract.hourly_rate_snapshot ?? contract.custom_hourly_rate ?? "",
+    salary_payment_frequency: contract.salary_payment_frequency || "",
     written_scale_period_notice_confirmed: boolToSelect(contract.written_scale_period_notice_confirmed),
     periodic_increase_due_confirmed: boolToSelect(contract.periodic_increase_due_confirmed),
     function_type: contract.function_type || null,
@@ -535,6 +566,7 @@ function getMissingContractFields(form) {
   if (!form.company_id) missing.push("bedrijf");
   if (!form.contract_model) missing.push("contractvorm");
   if (!form.probation_agreed || form.probation_agreed === "unknown") missing.push("proeftijdkeuze");
+  if (form.probation_agreed === "true" && (!form.probation_context || form.probation_context === "unknown")) missing.push("context proeftijd");
   if (form.source_type === "generated" && !form.template_id) missing.push("contracttemplate");
   if (form.source_type === "uploaded_existing" && !form.existing_contract_file && !form.signed_file_id) missing.push("contractdocument");
   if (!form.cao_key && form.contract_form !== "zzp") missing.push("CAO");
@@ -545,6 +577,9 @@ function getMissingContractFields(form) {
   }
   if (form.contract_form !== "zzp" && form.contract_form !== "stage" && !form.cao_scale && !form.cao_period && !form.custom_hourly_rate) {
     missing.push("loonschaal/trede");
+  }
+  if (form.contract_form !== "zzp" && form.contract_form !== "stage" && form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY && !form.salary_payment_frequency) {
+    missing.push("betaalperiode loon");
   }
   if (["fulltime", "parttime_fixed", "parttime_growth"].includes(form.employment_contract_model) && !form.contract_hours_per_week && !form.contract_hours_per_pay_period) {
     missing.push("uren per week");
@@ -628,16 +663,24 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     employment_contract_model: normalizedEmploymentModel(form),
     parttime_contract_model: parttimeModel(form),
     probation_agreed: form.probation_agreed === "not_applicable" ? null : boolOrNull(form.probation_agreed),
+    probation_context: form.probation_agreed === "true" ? (form.probation_context || "unknown") : "not_applicable",
     duration_type: form.duration_type || null,
     duration_option: form.duration_option || null,
     duration_label: durationLabel(form.duration_option),
     contract_start_date: form.contract_start_date || null,
     contract_end_date: form.contract_end_date || null,
+    work_location: form.work_location || null,
+    work_area: form.work_area || null,
+    employer_representative_name: form.employer_representative_name || null,
+    employer_representative_function: form.employer_representative_function || null,
+    signing_place: form.signing_place || null,
+    signing_date: form.signing_date || null,
     cao_scale: numberOrNull(form.cao_scale),
     cao_period: numberOrNull(form.cao_period),
     custom_hourly_rate: numberOrNull(form.custom_hourly_rate),
     wage_table_year: numberOrNull(form.wage_table_year),
     hourly_rate_snapshot: numberOrNull(form.hourly_rate_snapshot || form.custom_hourly_rate),
+    salary_payment_frequency: form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? "four_weeks" : (form.salary_payment_frequency || null),
     template_name_snapshot: generated ? (form.template_name_snapshot || null) : null,
     letterhead_name_snapshot: generated ? (form.letterhead_name_snapshot || null) : null,
     written_scale_period_notice_confirmed: boolOrNull(form.written_scale_period_notice_confirmed),
@@ -676,17 +719,6 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     notes: form.notes || null,
     metadata: buildAuditMetadata(currentUser, previous?.id ? "gewijzigd" : "toegevoegd", previous?.metadata || {}, auditActors),
   };
-}
-
-function replacePlaceholders(templateBody, values) {
-  let result = String(templateBody || "");
-  Object.entries(values).forEach(([key, value]) => {
-    const escapedKey = key.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-    result = result
-      .replace(new RegExp(`\\{\\{\\s*${escapedKey}\\s*\\}\\}`, "gi"), value ?? "")
-      .replace(new RegExp(`\\{\\$\\s*${escapedKey}\\s*\\}`, "gi"), value ?? "");
-  });
-  return result;
 }
 
 function normalizeContractClauseSections(source = {}) {
@@ -761,97 +793,7 @@ function expandClauseMarkers(templateBody, clauses = []) {
 }
 
 function contractRenderValues(personnel, form, company) {
-  const employeeName = compact(personnel.full_name || personnel.display_name || [personnel.first_name, personnel.middle_name, personnel.last_name].filter(Boolean).join(" "));
-  const firstName = compact(personnel.first_name || personnel.given_name || employeeName.split(" ")[0]);
-  const lastName = compact(personnel.last_name || personnel.surname || employeeName.split(" ").slice(-1)[0]);
-  const street = compact(personnel.street || personnel.street_name || "");
-  const houseNumber = compact([personnel.house_number, personnel.house_number_addition].filter(Boolean).join(" "));
-  const postalCode = compact(personnel.postal_code || "");
-  const city = compact(personnel.city || personnel.place || "");
-  const address = compact([street, houseNumber].filter(Boolean).join(" "));
-  const hours = form.employment_contract_model === "min_max"
-    ? `${form.min_hours_per_week || "-"}-${form.max_hours_per_week || "-"}`
-    : (form.contract_hours_per_week || form.contract_hours_per_pay_period || "-");
-  const functionName = readableFunctionLabel(form.function_type) || form.cao_function_group || "-";
-  const caoName = CAO_OPTION_LABELS[form.cao_key] || form.cao_key || "-";
-  const contractFormLabel = CONTRACT_MODEL_LABELS[form.contract_model] || CONTRACT_FORM_LABELS[form.contract_form] || form.contract_form || "-";
-  const companyContact = company?.email || company?.contact_email || company?.phone || "-";
-  const supervisorName = form.supervisor_name || company?.contact_person || company?.representative_name || "-";
-  const values = {
-    "medewerker.naam": employeeName || "Medewerker",
-    "medewerker.email": personnel.email || "-",
-    "bedrijf.naam": company?.display_name || company?.legal_name || "Bedrijf",
-    "contract.startdatum": formatDate(form.contract_start_date),
-    "contract.einddatum": form.contract_end_date ? formatDate(form.contract_end_date) : "onbepaalde tijd",
-    "contract.functie": functionName,
-    "contract.cao": caoName,
-    "contract.schaal": form.cao_scale || "-",
-    "contract.periodiek": form.cao_period || "-",
-    "contract.uren_per_week": hours,
-    "contract.contractvorm": contractFormLabel,
-    medewerker_volledige_naam: employeeName || "Medewerker",
-    medewerker_voornaam: firstName || "-",
-    medewerker_achternaam: lastName || "-",
-    medewerker_email: personnel.email || "-",
-    medewerker_geboortedatum: formatDate(personnel.birth_date || personnel.date_of_birth),
-    medewerker_geboorteplaats: personnel.birth_place || "-",
-    medewerker_straatnaam: street || "-",
-    medewerker_huisnummer: houseNumber || "-",
-    medewerker_postcode: postalCode || "-",
-    medewerker_woonplaats: city || "-",
-    medewerker_plaats: city || "-",
-    medewerker_land: personnel.country || personnel.address_country || "Nederland",
-    medewerker_adres: address || "-",
-    medewerker_geslacht: personnel.gender || "-",
-    bedrijf_naam: company?.display_name || company?.legal_name || "Bedrijf",
-    bedrijf_kvk: company?.kvk_number || company?.chamber_of_commerce_number || "-",
-    bedrijf_plaats: company?.city || company?.place || "-",
-    bedrijf_land: company?.country || "Nederland",
-    bedrijf_adres: compact([company?.street || company?.street_name, company?.house_number].filter(Boolean).join(" ")) || "-",
-    bedrijf_postcode: company?.postal_code || "-",
-    bedrijf_actieve_cao: caoName,
-    bedrijf_wpbr_vergunning_types: form.wpbr_license_type || form.license_scope || "-",
-    startdatum: formatDate(form.contract_start_date),
-    einddatum: form.contract_end_date ? formatDate(form.contract_end_date) : "onbepaalde tijd",
-    contract_startdatum: formatDate(form.contract_start_date),
-    contract_einddatum: form.contract_end_date ? formatDate(form.contract_end_date) : "onbepaalde tijd",
-    functie: functionName,
-    hoofdfunctie: functionName,
-    functie_lijst: functionName,
-    nevenfuncties_lijst: "-",
-    functie_vergunning_context: form.wpbr_license_type || form.license_scope || "-",
-    functie_cao_context: caoName,
-    functie_risico_tags: "-",
-    cao: caoName,
-    cao_naam: caoName,
-    schaal: form.cao_scale || "-",
-    trede: form.cao_period || "-",
-    uren_per_week: hours,
-    contractvorm: contractFormLabel,
-    leidinggevende: supervisorName,
-    meldpunt_geheimhouding: companyContact,
-    meldpunt_privacy_datalekken: company?.privacy_email || companyContact,
-    meldpunt_bedrijfsmiddelen: companyContact,
-    meldpunt_integriteit: companyContact,
-    personeelshandboek: "personeelshandboek",
-    privacybeleid: "privacybeleid",
-    bedrijfsreglement: "bedrijfsreglement",
-    objectinstructies: "objectinstructies",
-  };
-  return {
-    ...values,
-    employeeName: values["medewerker.naam"],
-    employeeEmail: values["medewerker.email"],
-    companyName: values["bedrijf.naam"],
-    startDate: values["contract.startdatum"],
-    endDate: values["contract.einddatum"],
-    functionName: values["contract.functie"],
-    cao: values["contract.cao"],
-    scale: values["contract.schaal"],
-    period: values["contract.periodiek"],
-    hoursPerWeek: values["contract.uren_per_week"],
-    contractForm: values["contract.contractvorm"],
-  };
+  return buildContractTemplateValues({ personnel, form, company });
 }
 
 function renderContractBody(personnel, form, company, template, clauses = []) {
@@ -866,7 +808,7 @@ function renderContractBody(personnel, form, company, template, clauses = []) {
     "Op deze overeenkomst is {{contract.cao}} van toepassing.",
     "De overeengekomen contractvorm is {{contract.contractvorm}}.",
   ].join("\n");
-  return replacePlaceholders(expandClauseMarkers(template?.body || fallbackBody, clauses), contractRenderValues(personnel, form, company));
+  return renderContractTemplateBody(expandClauseMarkers(template?.body || fallbackBody, clauses), { personnel, form, company });
 }
 
 function makePdfFile({ personnel, form, company, template, letterhead, clauses = [] }) {
@@ -1064,19 +1006,51 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     () => buildCompanyFunctionOptions(companyCaoAssignments, form.contract_start_date, form.cao_key, caoConfigurationOptions, form.function_type),
     [caoConfigurationOptions, companyCaoAssignments, form.cao_key, form.contract_start_date, form.function_type]
   );
+  const selectedFunctionValues = useMemo(
+    () => uniqueValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]),
+    [form.allowed_function_types_text, form.function_type]
+  );
+  const selectedPbFunctionGroups = useMemo(
+    () => pbFunctionGroupsForFunctions(selectedFunctionValues),
+    [selectedFunctionValues]
+  );
+  const expectedPbSalaryScale = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    ? pbSalaryScaleForFunctionLevel(form.cao_function_level)
+    : null;
   const visibleCaoConfigurationOptions = filterCaoConfigurationOptions(caoConfigurationOptions, form);
   const selectedCaoConfiguration = caoConfigurationOptions.find(option => option.id === form.cao_configuration_id) || null;
   const effectiveCaoConfiguration = selectedCaoConfiguration || visibleCaoConfigurationOptions[0] || null;
   const caoConfigurationSelectionWarning = selectedCaoConfigurationWarning(selectedCaoConfiguration, form);
-  const wageRows = useMemo(() => extractWageRows(effectiveCaoConfiguration, wageTableYear), [effectiveCaoConfiguration, wageTableYear]);
+  const wageRows = useMemo(() => {
+    const rows = extractWageRows(effectiveCaoConfiguration, wageTableYear);
+    if (form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY) return rows;
+    if (form.cao_function_group === "non_security_staff") return [];
+    if (!expectedPbSalaryScale) return rows;
+    return rows.filter(row => Number(row.scale) === expectedPbSalaryScale);
+  }, [effectiveCaoConfiguration, expectedPbSalaryScale, form.cao_function_group, form.cao_key, wageTableYear]);
   const conflicts = validateConflicts(form, contracts, editingId);
   const missingFields = getMissingContractFields(form);
   const generatedPreview = useMemo(() => renderContractBody(personnel, form, selectedCompany, selectedTemplate, selectedTemplateClauses), [form, personnel, selectedCompany, selectedTemplate, selectedTemplateClauses]);
+  const unresolvedTemplatePlaceholders = useMemo(
+    () => form.source_type === "generated" ? getUnresolvedContractTemplatePlaceholders(generatedPreview) : [],
+    [form.source_type, generatedPreview]
+  );
+  const standardTemplateValidation = useMemo(
+    () => validateStandardContractTemplateContext({ personnel, form, company: selectedCompany || {}, template: selectedTemplate || {} }),
+    [form, personnel, selectedCompany, selectedTemplate]
+  );
 
   const set = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
   const setCompanyId = (value) => setForm(prev => {
     const companyId = value === "none" ? null : value;
     if (prev.company_id === companyId) return prev;
+    const nextCompany = companies.find(item => item.id === companyId);
+    const defaultWorkLocation = compact([
+      nextCompany?.street_name || nextCompany?.street,
+      nextCompany?.house_number,
+      nextCompany?.house_number_addition,
+      nextCompany?.city,
+    ].filter(Boolean).join(" "));
     return {
       ...prev,
       company_id: companyId,
@@ -1084,6 +1058,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       cao_configuration_id: null,
       template_id: null,
       letterhead_id: null,
+      work_location: defaultWorkLocation,
+      work_area: nextCompany?.country || "Nederland",
+      signing_place: nextCompany?.city || "",
     };
   });
 
@@ -1099,7 +1076,13 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         employment_contract_model: model?.employment_model || prev.employment_contract_model,
         template_id: null,
       };
-      if (model?.default_hours && !next.contract_hours_per_week) next.contract_hours_per_week = String(model.default_hours);
+      if (model?.employment_model === "fulltime" && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
+        next.contract_hours_per_week = "36";
+        next.contract_hours_per_pay_period = "144";
+        next.salary_payment_frequency = "four_weeks";
+      } else if (model?.default_hours && !next.contract_hours_per_week) {
+        next.contract_hours_per_week = String(model.default_hours);
+      }
       if (model?.duration_type === "indefinite") {
         next.contract_end_date = "";
         next.duration_option = "";
@@ -1120,6 +1103,16 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     });
   };
 
+  const setProbationChoice = (value) => {
+    setForm(prev => ({
+      ...prev,
+      probation_agreed: value,
+      probation_context: value === "true"
+        ? (prev.probation_context === "not_applicable" ? "unknown" : prev.probation_context)
+        : "not_applicable",
+    }));
+  };
+
   const selectWageRow = (row) => {
     setForm(prev => ({
       ...prev,
@@ -1129,6 +1122,54 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       hourly_rate_snapshot: row.hourlyRate ?? "",
       wage_table_year: row.year || wageTableYear,
     }));
+  };
+
+  const selectPrimaryFunction = (value) => {
+    const nextValue = value === "none" ? null : value;
+    setForm(prev => {
+      const functions = uniqueValues([nextValue, ...fromArrayText(prev.allowed_function_types_text)]);
+      const suggestedGroup = prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+        ? suggestPbCaoFunctionGroup(nextValue)
+        : "";
+      return {
+        ...prev,
+        function_type: nextValue,
+        allowed_function_types_text: functions.join(", "),
+        cao_function_group: suggestedGroup || prev.cao_function_group,
+        performs_security_work: suggestedGroup
+          ? (suggestedGroup === "non_security_staff" ? "false" : "true")
+          : prev.performs_security_work,
+        salary_payment_frequency: suggestedGroup && suggestedGroup !== "non_security_staff"
+          ? "four_weeks"
+          : prev.salary_payment_frequency,
+        cao_function_level: suggestedGroup === "non_security_staff" ? "not_applicable" : prev.cao_function_level,
+        cao_scale: suggestedGroup === "non_security_staff" ? "" : prev.cao_scale,
+        cao_period: suggestedGroup === "non_security_staff" ? "" : prev.cao_period,
+      };
+    });
+  };
+
+  const selectPbFunctionLevel = (value) => {
+    const nextValue = value === "none" ? null : value;
+    const expectedScale = pbSalaryScaleForFunctionLevel(nextValue);
+    setForm(prev => ({
+      ...prev,
+      cao_function_level: nextValue,
+      cao_scale: expectedScale ?? "",
+      cao_period: expectedScale === Number(prev.cao_scale) ? prev.cao_period : "",
+      hourly_rate_snapshot: expectedScale === Number(prev.cao_scale) ? prev.hourly_rate_snapshot : "",
+      custom_hourly_rate: expectedScale === Number(prev.cao_scale) ? prev.custom_hourly_rate : "",
+    }));
+  };
+
+  const toggleAllowedFunction = (value) => {
+    setForm(prev => {
+      const selected = new Set(fromArrayText(prev.allowed_function_types_text));
+      if (selected.has(value)) selected.delete(value);
+      else selected.add(value);
+      if (prev.function_type) selected.add(prev.function_type);
+      return { ...prev, allowed_function_types_text: [...selected].join(", ") };
+    });
   };
 
   const refresh = () => {
@@ -1145,6 +1186,12 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     mutationFn: async () => {
       if (conflicts.issues.length > 0) {
         throw new Error(conflicts.issues[0]);
+      }
+      if (form.source_type === "generated" && unresolvedTemplatePlaceholders.length > 0) {
+        throw new Error(`Het contract bevat nog niet gekoppelde placeholders: ${unresolvedTemplatePlaceholders.join(", ")}.`);
+      }
+      if (form.source_type === "generated" && standardTemplateValidation.issues.length > 0) {
+        throw new Error(standardTemplateValidation.issues[0]);
       }
 
       const previous = editingId ? contracts.find(contract => contract.id === editingId) || {} : {};
@@ -1455,13 +1502,28 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                         <button
                           key={value}
                           type="button"
-                          onClick={() => set("probation_agreed", value)}
+                          onClick={() => setProbationChoice(value)}
                           className={`rounded-lg border px-3 py-2 text-sm ${form.probation_agreed === value ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
                         >
                           {label}
                         </button>
                       ))}
                     </div>
+                    {form.probation_agreed === "true" && (
+                      <div className="space-y-1 pt-2">
+                        <Label>Is eerder vergelijkbaar werk verricht?</Label>
+                        <Select value={form.probation_context || "unknown"} onValueChange={value => set("probation_context", value)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="unknown">Kies de situatie</SelectItem>
+                            <SelectItem value="first_contract">Nee, dit is het eerste contract</SelectItem>
+                            <SelectItem value="successive_same_work">Ja, hetzelfde of vergelijkbaar werk</SelectItem>
+                            <SelectItem value="successive_new_skills">Ja, maar de functie vraagt wezenlijk andere vaardigheden</SelectItem>
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">Ook eerder werk via een uitzend-, payroll- of andere opvolgende werkgever kan hierbij meetellen.</p>
+                      </div>
+                    )}
                   </div>
                   <div className="space-y-2">
                     <Label>Documentbron</Label>
@@ -1551,11 +1613,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 )}
                 <div className="space-y-1">
                   <Label>Functietype</Label>
-                  <Select value={form.function_type || "none"} onValueChange={value => {
-                    const nextValue = value === "none" ? null : value;
-                    set("function_type", nextValue);
-                    if (nextValue && !form.allowed_function_types_text) set("allowed_function_types_text", nextValue);
-                  }}>
+                  <Select value={form.function_type || "none"} onValueChange={selectPrimaryFunction}>
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Kies functie</SelectItem>
@@ -1567,11 +1625,72 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 </div>
                 <div className="space-y-1">
                   <Label>CAO-functiegroep</Label>
-                  <Input value={form.cao_function_group || ""} onChange={event => set("cao_function_group", event.target.value || null)} placeholder="Bijv. Objectbeveiliging" />
+                  {form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? (
+                    <Select value={form.cao_function_group || "none"} onValueChange={value => set("cao_function_group", value === "none" ? null : value)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Kies functiegroep</SelectItem>
+                        {PB_CAO_FUNCTION_GROUP_OPTIONS.map(option => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input value={form.cao_function_group || ""} onChange={event => set("cao_function_group", event.target.value || null)} placeholder="CAO-functiegroep" />
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>CAO-functieniveau</Label>
-                  <Input value={form.cao_function_level || ""} onChange={event => set("cao_function_level", event.target.value || null)} placeholder="Bijv. niveau 2" />
+                  {form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? (
+                    <Select value={form.cao_function_level || "none"} onValueChange={selectPbFunctionLevel}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Kies functieniveau</SelectItem>
+                        {PB_CAO_FUNCTION_LEVEL_OPTIONS.map(option => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                  ) : (
+                    <Input value={form.cao_function_level || ""} onChange={event => set("cao_function_level", event.target.value || null)} placeholder="CAO-functieniveau" />
+                  )}
+                </div>
+                <div className="space-y-1">
+                  <Label>Standplaats</Label>
+                  <Input value={form.work_location || ""} onChange={event => set("work_location", event.target.value)} placeholder="Vestiging of primaire werkplek" />
+                </div>
+                <div className="space-y-1">
+                  <Label>Werkgebied</Label>
+                  <Input value={form.work_area || ""} onChange={event => set("work_area", event.target.value)} placeholder="Bijv. Nederland of regio Midden" />
+                </div>
+                <div className="space-y-2 md:col-span-2 xl:col-span-3">
+                  <Label>Functies binnen deze arbeidsovereenkomst</Label>
+                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                    {companyFunctionOptions.map(option => {
+                      const selected = selectedFunctionValues.includes(option.value);
+                      const primary = form.function_type === option.value;
+                      return (
+                        <label
+                          key={option.value}
+                          className={`flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-sm ${selected ? "border-primary bg-primary/5 text-foreground" : "border-border text-muted-foreground"} ${primary ? "cursor-default" : "cursor-pointer hover:bg-muted/40"}`}
+                        >
+                          <input
+                            type="checkbox"
+                            checked={selected}
+                            disabled={primary}
+                            onChange={() => toggleAllowedFunction(option.value)}
+                          />
+                          <span className="min-w-0 flex-1 truncate">{option.label}</span>
+                          {primary && <Badge variant="outline" className="text-[10px]">Hoofd</Badge>}
+                        </label>
+                      );
+                    })}
+                  </div>
+                  {form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY && selectedPbFunctionGroups.length > 1 && (
+                    <p className="text-xs text-amber-700">
+                      Meerdere CAO-functiegroepen geselecteerd. De gekozen hoofdfunctiegroep moet aansluiten op de werkzaamheden die ten minste 50% van de arbeidsduur beslaan.
+                    </p>
+                  )}
                 </div>
               </div>
             )}
@@ -1607,6 +1726,15 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       );
                     })}
                   </div>
+                ) : form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY && form.cao_function_group === "non_security_staff" ? (
+                  <div className="max-w-sm space-y-1">
+                    <Label>Bruto uurloon</Label>
+                    <Input type="number" min="0" step="0.01" value={form.hourly_rate_snapshot ?? form.custom_hourly_rate ?? ""} onChange={event => {
+                      set("hourly_rate_snapshot", event.target.value);
+                      set("custom_hourly_rate", event.target.value);
+                    }} />
+                    <p className="text-xs text-muted-foreground">Voor deze niet-operationele functie geldt de CAO-functie- en salarisschaalindeling niet automatisch.</p>
+                  </div>
                 ) : (
                   <div className="grid gap-4 md:grid-cols-3">
                     <div className="space-y-1">
@@ -1634,6 +1762,12 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       <Input type="number" min="0" value={form.contract_hours_per_week ?? ""} onChange={event => set("contract_hours_per_week", event.target.value)} />
                     </div>
                   )}
+                  {["fulltime", "parttime_fixed", "parttime_growth"].includes(form.employment_contract_model) && (
+                    <div className="space-y-1">
+                      <Label>Uren per loonperiode</Label>
+                      <Input type="number" min="0" value={form.contract_hours_per_pay_period ?? ""} onChange={event => set("contract_hours_per_pay_period", event.target.value)} />
+                    </div>
+                  )}
                   {form.employment_contract_model === "min_max" && (
                     <>
                       <div className="space-y-1">
@@ -1645,6 +1779,25 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                         <Input type="number" min="0" value={form.max_hours_per_week ?? ""} onChange={event => set("max_hours_per_week", event.target.value)} />
                       </div>
                     </>
+                  )}
+                  {form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? (
+                    <div className="rounded-lg border border-border bg-muted/20 p-3">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Uitbetaling loon</p>
+                      <p className="mt-1 text-sm text-foreground">Per loonperiode van vier weken</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Automatisch bepaald uit de CAO Particuliere Beveiliging.</p>
+                    </div>
+                  ) : (
+                    <div className="space-y-1">
+                      <Label>Uitbetaling loon</Label>
+                      <Select value={form.salary_payment_frequency || "none"} onValueChange={value => set("salary_payment_frequency", value === "none" ? "" : value)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Kies betaalperiode</SelectItem>
+                          <SelectItem value="four_weeks">Per vier weken</SelectItem>
+                          <SelectItem value="month">Per maand</SelectItem>
+                        </SelectContent>
+                      </Select>
+                    </div>
                   )}
                   <div className="space-y-1">
                     <Label>Schaal schriftelijk bevestigd</Label>
@@ -1666,7 +1819,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 <div className="space-y-3">
                   <div className="rounded-lg border border-border p-3">
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Controle</p>
-                    {missingFields.length === 0 && conflicts.issues.length === 0 ? (
+                    {missingFields.length === 0
+                      && conflicts.issues.length === 0
+                      && standardTemplateValidation.issues.length === 0
+                      && unresolvedTemplatePlaceholders.length === 0 ? (
                       <p className="mt-2 flex items-center gap-2 text-sm text-emerald-700">
                         <CheckCircle className="h-4 w-4" /> Contractbasis compleet.
                       </p>
@@ -1676,10 +1832,41 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                         {conflicts.issues.map((issue, index) => <p key={index} className="text-destructive">{issue}</p>)}
                       </div>
                     )}
+                    {standardTemplateValidation.issues.map((issue, index) => (
+                      <p key={`template-issue-${index}`} className="mt-2 text-sm text-destructive">{issue}</p>
+                    ))}
+                    {unresolvedTemplatePlaceholders.length > 0 && (
+                      <p className="mt-2 text-sm text-destructive">
+                        Niet gekoppelde placeholders: {unresolvedTemplatePlaceholders.join(", ")}.
+                      </p>
+                    )}
                     {conflicts.warnings.map((warning, index) => (
                       <p key={index} className="mt-2 text-sm text-amber-700">{warning}</p>
                     ))}
+                    {standardTemplateValidation.warnings.map((warning, index) => (
+                      <p key={`template-warning-${index}`} className="mt-2 text-sm text-amber-700">{warning}</p>
+                    ))}
                   </div>
+                  {form.source_type === "generated" && (
+                    <div className="grid gap-3 md:grid-cols-2">
+                      <div className="space-y-1">
+                        <Label>Vertegenwoordiger werkgever</Label>
+                        <Input value={form.employer_representative_name || ""} onChange={event => set("employer_representative_name", event.target.value)} placeholder="Volledige naam" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Functie vertegenwoordiger</Label>
+                        <Input value={form.employer_representative_function || ""} onChange={event => set("employer_representative_function", event.target.value)} placeholder="Bijv. directeur" />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Plaats ondertekening</Label>
+                        <Input value={form.signing_place || ""} onChange={event => set("signing_place", event.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Datum ondertekening</Label>
+                        <Input type="date" value={form.signing_date || ""} onChange={event => set("signing_date", event.target.value)} />
+                      </div>
+                    </div>
+                  )}
                   <div className="space-y-1">
                     <Label>Interne notities</Label>
                     <Textarea rows={4} value={form.notes || ""} onChange={event => set("notes", event.target.value)} />
@@ -1721,7 +1908,13 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   Volgende <ChevronRight className="ml-1 h-4 w-4" />
                 </Button>
               ) : (
-                <Button type="button" onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending || conflicts.issues.length > 0}>
+                <Button
+                  type="button"
+                  onClick={() => saveMutation.mutate()}
+                  disabled={saveMutation.isPending
+                    || conflicts.issues.length > 0
+                    || (form.source_type === "generated" && (standardTemplateValidation.issues.length > 0 || unresolvedTemplatePlaceholders.length > 0))}
+                >
                   <Save className="mr-1 h-4 w-4" /> {saveMutation.isPending ? "Opslaan..." : "Contract opslaan"}
                 </Button>
               )}

@@ -13,6 +13,7 @@
     "verify:cao-foundation": "node scripts/verify-cao-foundation.mjs",
     "audit:cao-coverage": "node scripts/audit-cao-coverage.mjs",
     "audit:cao-runtime": "node scripts/audit-cao-runtime-readiness.mjs",
+    "verify:contract-template": "node scripts/verify-contract-template.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

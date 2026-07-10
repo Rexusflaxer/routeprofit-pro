@@ -18,6 +18,16 @@ import {
   getActiveWpbrLicenses,
 } from "@/lib/securityCaoCatalog";
 import {
+  PB_FULLTIME_STANDARD_TEMPLATE_ID,
+  getStandardContractTemplatePreset,
+} from "@/lib/contractTemplateCatalog";
+import {
+  extractContractTemplatePlaceholders,
+  getMissingStandardTemplatePlaceholders,
+  getTemplatePlaceholderDetails,
+  getUnknownContractTemplatePlaceholders,
+} from "@/lib/contractTemplateRenderer";
+import {
   Archive,
   ArrowDown,
   ArrowUp,
@@ -106,7 +116,7 @@ const TEMPLATE_CONTRACT_MODEL_OPTIONS = [
     contract_form: "any",
     duration_type: "any",
     employment_model: "fulltime",
-    default_hours: 40,
+    default_hours: 36,
   },
   {
     value: "parttime_employment",
@@ -1059,8 +1069,7 @@ function fromArrayText(value) {
 }
 
 function extractPlaceholders(body) {
-  const matches = [...String(body || "").matchAll(/\{\{\s*([^}]+?)\s*\}\}|\{\$\s*([^}]+?)\s*\}/g)];
-  return uniqueStrings(matches.map(match => match[1] || match[2]));
+  return extractContractTemplatePlaceholders(body);
 }
 
 function uniqueStrings(values) {
@@ -1257,6 +1266,8 @@ function defaultTemplateName(form = {}) {
 function standardTemplateBody(form = {}) {
   if (form.template_type === "sales_contract") return SALES_TEMPLATE_BODY;
   if (form.template_type === "subcontractor_framework_agreement") return SUBCONTRACTOR_TEMPLATE_BODY;
+  const preset = getStandardContractTemplatePreset(form);
+  if (preset) return preset.body;
   return DEFAULT_TEMPLATE_BODY;
 }
 
@@ -2098,6 +2109,8 @@ function initialTemplate(companyId) {
     version: 1,
     status: "draft",
     body: DEFAULT_TEMPLATE_BODY,
+    standard_template_id: null,
+    standard_template_version: null,
   };
 }
 
@@ -2123,6 +2136,8 @@ function templateFormFromRecord(companyId, record) {
     version: record.version || 1,
     status: record.status || "draft",
     body: record.body || DEFAULT_TEMPLATE_BODY,
+    standard_template_id: record.metadata?.standard_template_id || null,
+    standard_template_version: record.metadata?.standard_template_version || null,
   };
 }
 
@@ -2370,6 +2385,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   );
   const placeholders = extractPlaceholders(expandClauseMarkers(templateForm.body, activeClauses))
     .filter(placeholder => !placeholder.startsWith(CLAUSE_MARKER_PREFIX));
+  const placeholderDetails = getTemplatePlaceholderDetails(templateForm.body)
+    .filter(item => !item.key.startsWith(CLAUSE_MARKER_PREFIX));
+  const unknownTemplatePlaceholders = getUnknownContractTemplatePlaceholders(templateForm.body);
+  const selectedStandardTemplatePreset = getStandardContractTemplatePreset(templateForm);
+  const missingStandardTemplatePlaceholders = templateForm.standard_template_id === PB_FULLTIME_STANDARD_TEMPLATE_ID
+    ? getMissingStandardTemplatePlaceholders(templateForm.body)
+    : [];
   const currentEditingLetterhead = editingLetterheadId
     ? letterheads.find(item => item.id === editingLetterheadId)
     : null;
@@ -2572,8 +2594,21 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       if (!templateForm.body.trim()) throw new Error("Vul de template-inhoud in.");
       const previous = editingTemplateId ? templates.find(item => item.id === editingTemplateId) || {} : {};
       const status = statusOverride || templateForm.status || "draft";
+      const unknownPlaceholders = getUnknownContractTemplatePlaceholders(templateForm.body);
+      if (status === "published" && templateForm.standard_template_id && unknownPlaceholders.length > 0) {
+        throw new Error(`Publiceren is geblokkeerd: ${unknownPlaceholders.length} placeholder${unknownPlaceholders.length === 1 ? " is" : "s zijn"} niet gekoppeld aan de applicatie.`);
+      }
+      const missingRequiredPlaceholders = templateForm.standard_template_id === PB_FULLTIME_STANDARD_TEMPLATE_ID
+        ? getMissingStandardTemplatePlaceholders(templateForm.body)
+        : [];
+      if (status === "published" && missingRequiredPlaceholders.length > 0) {
+        throw new Error(`Publiceren is geblokkeerd: essentiële placeholders ontbreken (${missingRequiredPlaceholders.join(", ")}).`);
+      }
       const createNewVersion = editingTemplateId && previous.status === "published";
       const clauseIds = sortClauseIdsByConfiguredOrder(extractClauseIds(templateForm.body), clauses);
+      const appliedPreset = templateForm.standard_template_id
+        ? getStandardContractTemplatePreset(templateForm)
+        : null;
       const auditMetadata = buildAuditMetadata(
         currentUser,
         createNewVersion ? "nieuwe versie" : (editingTemplateId ? "gewijzigd" : "toegevoegd"),
@@ -2604,6 +2639,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           contract_model: contractModel?.value || null,
           underlying_contract_form: contractModel?.underlying_contract_form || null,
           template_document_type_label: templateDocumentTypeLabel(templateForm.template_type),
+          standard_template_id: templateForm.standard_template_id || null,
+          standard_template_version: templateForm.standard_template_version || null,
+          standard_template_legal_basis: appliedPreset?.legal_basis || null,
         },
       };
       return editingTemplateId && !createNewVersion
@@ -2912,6 +2950,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       template_source_mode: "",
       body: "",
       name: "",
+      standard_template_id: null,
+      standard_template_version: null,
     }));
     setMessage(null);
     if (continueNewTemplateFlow) {
@@ -2932,6 +2972,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       template_source_mode: "",
       body: "",
       name: "",
+      standard_template_id: null,
+      standard_template_version: null,
     }));
     setMessage(null);
   };
@@ -2962,12 +3004,18 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   };
 
   const applyTemplateSourceMode = (sourceMode) => {
-    setTemplateForm(prev => ({
-      ...prev,
-      template_source_mode: sourceMode,
-      name: prev.name || defaultTemplateName(prev),
-      body: sourceMode === "standard" ? standardTemplateBody(prev) : "",
-    }));
+    setTemplateForm(prev => {
+      const preset = sourceMode === "standard" ? getStandardContractTemplatePreset(prev) : null;
+      return {
+        ...prev,
+        template_source_mode: sourceMode,
+        name: prev.name || preset?.name || defaultTemplateName(prev),
+        description: preset?.description || prev.description,
+        body: sourceMode === "standard" ? standardTemplateBody(prev) : "",
+        standard_template_id: preset?.id || null,
+        standard_template_version: preset?.version || null,
+      };
+    });
     setMessage(null);
     setTemplateStep(templateEditorStep(templateForm.template_type));
   };
@@ -4440,7 +4488,11 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     >
                       <div className="min-w-0">
                         <span className="text-sm font-semibold text-foreground">Standaardtemplate invoegen</span>
-                        <span className="ml-2 text-xs text-muted-foreground">Start met een basisstructuur die past bij de gekozen documentsoort.</span>
+                        <span className="ml-2 text-xs text-muted-foreground">
+                          {selectedStandardTemplatePreset
+                            ? `${selectedStandardTemplatePreset.legal_basis.cao_version} · juridisch en technisch gekoppelde placeholders`
+                            : "Start met een basisstructuur die past bij de gekozen documentsoort."}
+                        </span>
                       </div>
                       <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                     </button>
@@ -4489,6 +4541,14 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         placeholder="Interne toelichting"
                       />
                     </div>
+                    {templateForm.standard_template_id === PB_FULLTIME_STANDARD_TEMPLATE_ID && (
+                      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-900/70 dark:bg-emerald-950/25 dark:text-emerald-100">
+                        <span>CAO Particuliere Beveiliging · versie 3, juli 2026 · fulltime 144 uur per vier weken</span>
+                        <Badge variant="outline" className="border-emerald-300 text-emerald-800 dark:border-emerald-800 dark:text-emerald-200">
+                          Standaard v{templateForm.standard_template_version || 1}
+                        </Badge>
+                      </div>
+                    )}
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="space-y-2">
                         <Label>Briefpapier</Label>
@@ -4534,12 +4594,30 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                       />
                     </div>
                     <div className="rounded-lg border border-border bg-background/40 p-3">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
+                      <div className="flex items-center justify-between gap-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Placeholders</p>
+                        {placeholderDetails.length > 0 && (
+                          <span className={`text-xs ${unknownTemplatePlaceholders.length > 0 || missingStandardTemplatePlaceholders.length > 0 ? "text-amber-700" : "text-emerald-700"}`}>
+                            {unknownTemplatePlaceholders.length > 0
+                              ? `${unknownTemplatePlaceholders.length} niet gekoppeld`
+                              : missingStandardTemplatePlaceholders.length > 0
+                                ? `${missingStandardTemplatePlaceholders.length} essentieel verwijderd`
+                              : "Alle placeholders gekoppeld"}
+                          </span>
+                        )}
+                      </div>
                       <div className="mt-3 flex flex-wrap gap-1">
-                        {placeholders.length === 0 ? (
+                        {placeholderDetails.length === 0 ? (
                           <span className="text-xs text-muted-foreground">Geen placeholders gevonden.</span>
-                        ) : placeholders.map(placeholder => (
-                          <Badge key={placeholder} variant="outline" className="text-xs">{placeholder}</Badge>
+                        ) : placeholderDetails.map(item => (
+                          <Badge
+                            key={item.key}
+                            variant="outline"
+                            title={item.definition ? `${item.definition.label} · ${item.definition.source}` : "Nog niet gekoppeld aan een gegevensbron"}
+                            className={`text-xs ${item.known ? "" : "border-amber-400 text-amber-700"}`}
+                          >
+                            {item.key}
+                          </Badge>
                         ))}
                       </div>
                     </div>

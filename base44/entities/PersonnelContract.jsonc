@@ -102,6 +102,21 @@
       ],
       "description": "Of in dit contract een proeftijd is afgesproken."
     },
+    "probation_context": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "first_contract",
+        "successive_new_skills",
+        "successive_same_work",
+        "unknown",
+        "not_applicable",
+        null
+      ],
+      "description": "Context voor de geldigheid van een proeftijd: eerste contract of een opvolgend contract met dezelfde dan wel wezenlijk andere vaardigheden/verantwoordelijkheden."
+    },
     "duration_type": {
       "type": [
         "string",
@@ -141,6 +156,18 @@
         "null"
       ],
       "description": "Uurloon uit de gekozen salaristabel/trede op het moment van contractaanmaak."
+    },
+    "salary_payment_frequency": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "four_weeks",
+        "month",
+        null
+      ],
+      "description": "Betaalperiode van het loon. Voor contracten onder de CAO Particuliere Beveiliging wordt automatisch vier weken vastgelegd."
     },
     "template_name_snapshot": {
       "type": [
@@ -536,6 +563,49 @@
         "null"
       ],
       "format": "date"
+    },
+    "work_location": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Contractuele standplaats of primaire werkplek."
+    },
+    "work_area": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Werkgebied waarbinnen inzet op wisselende locaties kan plaatsvinden."
+    },
+    "employer_representative_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Naam van de persoon die de arbeidsovereenkomst namens werkgever ondertekent."
+    },
+    "employer_representative_function": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Functie van de persoon die namens werkgever ondertekent."
+    },
+    "signing_place": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Plaats waar de arbeidsovereenkomst wordt ondertekend."
+    },
+    "signing_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum waarop de arbeidsovereenkomst wordt ondertekend."
     },
     "fixed_term_end_notice_sent_at": {
       "type": [
