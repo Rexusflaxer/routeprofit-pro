@@ -1461,6 +1461,23 @@ function WizardSteps({ labels, step }) {
   );
 }
 
+function TemplateBrowserChoice({ label, description, meta, selected = false, onClick }) {
+  return (
+    <button
+      type="button"
+      onClick={onClick}
+      className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99] ${selected ? "border-primary bg-accent" : "border-border bg-card"}`}
+    >
+      <div className="min-w-0">
+        <span className="text-sm font-semibold text-foreground">{label}</span>
+        {description && <span className="ml-2 text-xs text-muted-foreground">{description}</span>}
+        {meta && <span className="mt-1 block text-xs text-muted-foreground">{meta}</span>}
+      </div>
+      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+    </button>
+  );
+}
+
 function getDesignLayerStyle(layer) {
   const geometry = getLayerGeometry(layer);
   return {
@@ -2196,6 +2213,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [clauseDetailView, setClauseDetailView] = useState("structure");
   const [selectedVariationIndex, setSelectedVariationIndex] = useState(0);
   const [clauseLibraryScope, setClauseLibraryScope] = useState("employment_contracts");
+  const [templateBrowserType, setTemplateBrowserType] = useState("");
+  const [templateBrowserCaoKey, setTemplateBrowserCaoKey] = useState("");
+  const [templateBrowserContractModel, setTemplateBrowserContractModel] = useState("");
   const [selectedClauseKey, setSelectedClauseKey] = useState(() => (
     catalogClauseKey("employment_contracts", CLAUSE_TYPE_CATALOG.employment_contracts?.[0]?.value)
   ));
@@ -2305,15 +2325,43 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     .filter(item => item.status !== "archived")
     .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""))),
   [templates]);
+  const sortedTemplates = useMemo(() => [...templates]
+    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || ""))),
+  [templates]);
   const matchingTemplateChoices = useMemo(
     () => activeTemplates.filter(item => templateMatchesBuilder(item, templateForm)),
     [activeTemplates, templateForm],
   );
+  const templateBrowserCategoryCounts = useMemo(() => TEMPLATE_DOCUMENT_TYPES.reduce((acc, option) => {
+    acc[option.value] = sortedTemplates.filter(item => normalizeTemplateType(item.template_type) === option.value).length;
+    return acc;
+  }, {}), [sortedTemplates]);
+  const templateBrowserContractModelCounts = useMemo(() => EMPLOYMENT_TEMPLATE_CONTRACT_MODELS.reduce((acc, option) => {
+    acc[option.value] = sortedTemplates.filter(item => (
+      isEmploymentTemplateType(item.template_type)
+      && (!templateBrowserCaoKey || item.cao_key === templateBrowserCaoKey)
+      && inferContractModelFromTemplate(item) === option.value
+    )).length;
+    return acc;
+  }, {}), [sortedTemplates, templateBrowserCaoKey]);
+  const selectedTemplateBrowserType = TEMPLATE_DOCUMENT_TYPES.find(option => option.value === templateBrowserType) || null;
+  const selectedTemplateBrowserContractModel = getContractModel(templateBrowserContractModel);
+  const templateBrowserTableItems = useMemo(() => sortedTemplates.filter(item => {
+    const templateType = normalizeTemplateType(item.template_type);
+    if (!templateBrowserType || templateType !== templateBrowserType) return false;
+    if (isEmploymentTemplateType(templateBrowserType)) {
+      if (!templateBrowserCaoKey || !templateBrowserContractModel) return false;
+      if (item.cao_key !== templateBrowserCaoKey) return false;
+      return inferContractModelFromTemplate(item) === templateBrowserContractModel;
+    }
+    return true;
+  }), [sortedTemplates, templateBrowserType, templateBrowserCaoKey, templateBrowserContractModel]);
   const companyCaoOptions = useMemo(() => uniqueStrings(caoAssignments
     .filter(item => item.status !== "archived" && item.status !== "inactive")
     .map(item => item.cao_key))
     .map(key => ({ value: key, label: caoLabel(key) })),
   [caoAssignments]);
+  const selectedTemplateBrowserCao = companyCaoOptions.find(option => option.value === templateBrowserCaoKey) || null;
   const activeWpbrLicenses = useMemo(() => getActiveWpbrLicenses(wpbrLicenses), [wpbrLicenses]);
   const primaryCompanyCaoKey = companyCaoOptions.length === 1 ? companyCaoOptions[0].value : (companyCaoOptions[0]?.value || null);
   const derivedClauseFunctionGroups = useMemo(
@@ -2719,15 +2767,90 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     setLetterheadStep(step => Math.min(step + 1, LETTERHEAD_STEPS.length));
   };
 
-  const startNewTemplate = () => {
-    setMessage(null);
+  const closeTemplateWizardForBrowserNavigation = () => {
     setEditingTemplateId(null);
+    setTemplateWizardOpen(false);
+    setTemplateStep(1);
+    setTemplateForm(initialTemplate(companyId));
+  };
+
+  const selectTemplateBrowserType = (templateType) => {
+    setMessage(null);
+    setTemplateBrowserType(templateType);
+    setTemplateBrowserCaoKey("");
+    setTemplateBrowserContractModel("");
+    closeTemplateWizardForBrowserNavigation();
+  };
+
+  const selectTemplateBrowserCao = (caoKey) => {
+    setMessage(null);
+    setTemplateBrowserCaoKey(caoKey);
+    setTemplateBrowserContractModel("");
+    closeTemplateWizardForBrowserNavigation();
+  };
+
+  const selectTemplateBrowserContractModel = (modelValue) => {
+    setMessage(null);
+    setTemplateBrowserContractModel(modelValue);
+    closeTemplateWizardForBrowserNavigation();
+  };
+
+  const backToTemplateBrowserCategories = () => {
+    setMessage(null);
+    setTemplateBrowserType("");
+    setTemplateBrowserCaoKey("");
+    setTemplateBrowserContractModel("");
+    closeTemplateWizardForBrowserNavigation();
+  };
+
+  const backToTemplateBrowserCaos = () => {
+    setMessage(null);
+    setTemplateBrowserCaoKey("");
+    setTemplateBrowserContractModel("");
+    closeTemplateWizardForBrowserNavigation();
+  };
+
+  const backToTemplateBrowserContractModels = () => {
+    setMessage(null);
+    setTemplateBrowserContractModel("");
+    closeTemplateWizardForBrowserNavigation();
+  };
+
+  const startNewTemplateFromBrowser = () => {
+    if (!templateBrowserType) return;
+    const isEmploymentTemplate = isEmploymentTemplateType(templateBrowserType);
+    const contractModel = isEmploymentTemplate ? getContractModel(templateBrowserContractModel) : null;
+    if (isEmploymentTemplate && !templateBrowserCaoKey) {
+      setMessage({ type: "error", text: "Kies eerst de CAO voor dit arbeidscontract." });
+      return;
+    }
+    if (isEmploymentTemplate && !contractModel) {
+      setMessage({ type: "error", text: "Kies eerst het soort arbeidscontract." });
+      return;
+    }
+
     const defaultLetterhead = activeLetterheads.find(item => item.is_default) || activeLetterheads[0];
-    setTemplateForm({
+    const nextForm = {
       ...initialTemplate(companyId),
       default_letterhead_id: defaultLetterhead?.id || "none",
-    });
-    setTemplateStep(1);
+      template_type: templateBrowserType,
+      template_choice: "new",
+      visible_in_contract_wizard: isEmploymentTemplate,
+    };
+
+    let nextStep = templateSourceStep(templateBrowserType);
+    if (isEmploymentTemplate) {
+      nextForm.cao_key = templateBrowserCaoKey;
+      nextForm.contract_model = contractModel.value;
+      nextForm.contract_form_scope = contractModel.contract_form || "";
+      nextForm.employment_model_scope = contractModel.employment_model || "";
+      nextForm.duration_type_scope = contractModel.duration_type || "";
+    }
+
+    setMessage(null);
+    setEditingTemplateId(null);
+    setTemplateForm(nextForm);
+    setTemplateStep(nextStep);
     setTemplateWizardOpen(true);
   };
 
@@ -2777,19 +2900,23 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   };
 
   const selectTemplateCao = (caoKey) => {
+    const continueNewTemplateFlow = templateForm.template_choice === "new" && templateForm.contract_model;
     setTemplateForm(prev => ({
       ...prev,
       cao_key: caoKey,
-      contract_model: "",
-      contract_form_scope: "",
-      employment_model_scope: "",
-      duration_type_scope: "",
-      template_choice: "",
+      contract_model: prev.contract_model || "",
+      contract_form_scope: prev.contract_form_scope || "",
+      employment_model_scope: prev.employment_model_scope || "",
+      duration_type_scope: prev.duration_type_scope || "",
+      template_choice: continueNewTemplateFlow ? "new" : "",
       template_source_mode: "",
       body: "",
       name: "",
     }));
     setMessage(null);
+    if (continueNewTemplateFlow) {
+      setTemplateStep(templateSourceStep(templateForm.template_type));
+    }
   };
 
   const selectTemplateContractModel = (modelValue) => {
@@ -4471,63 +4598,203 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     );
   };
 
-  const renderTemplateTab = () => (
-    <div className="flex h-full min-h-[360px] flex-col">
-      {renderTemplateWizard()}
-      <div className={`${TEMPLATE_TABLE_GRID} items-center border-b border-border bg-muted/20 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
-        <span>Template</span>
-        <span>Versie</span>
-        <span>Status</span>
-        <span>Scope</span>
-        <span>Door</span>
-        <div className="flex justify-end">
-          <Button type="button" variant="outline" size="sm" onClick={startNewTemplate} disabled={templateWizardOpen}>
+  const renderTemplateTable = () => {
+    const isEmploymentBrowser = isEmploymentTemplateType(templateBrowserType);
+    const title = isEmploymentBrowser
+      ? selectedTemplateBrowserContractModel?.label || "Arbeidscontracten"
+      : selectedTemplateBrowserType?.label || "Contracttemplates";
+    const subtitle = isEmploymentBrowser
+      ? `${selectedTemplateBrowserCao?.label || "CAO"} · ${contractModelMeta(selectedTemplateBrowserContractModel) || "Gekozen contractvorm"}`
+      : selectedTemplateBrowserType?.description || "";
+
+    return (
+      <>
+        <div className="flex flex-wrap items-center justify-between gap-3 border-b border-border bg-muted/15 px-5 py-3">
+          <div className="flex min-w-0 items-center gap-2">
+            <Button
+              type="button"
+              variant="ghost"
+              size="sm"
+              className="h-8 px-2 text-muted-foreground hover:text-foreground"
+              onClick={isEmploymentBrowser ? backToTemplateBrowserContractModels : backToTemplateBrowserCategories}
+            >
+              <ChevronLeft className="mr-1 h-4 w-4" />
+              Terug
+            </Button>
+            <div className="min-w-0">
+              <p className="truncate text-sm font-semibold text-foreground">{title}</p>
+              {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
+            </div>
+          </div>
+          <Button type="button" variant="outline" size="sm" onClick={startNewTemplateFromBrowser} disabled={templateWizardOpen}>
             <Plus className="mr-1 h-4 w-4" />
             Nieuwe template
           </Button>
         </div>
-      </div>
-      <div className="flex-1">
-        {templates.length === 0 ? (
-          <div className="flex min-h-[180px] items-center justify-center px-5 py-8 text-center text-sm text-muted-foreground">
-            Nog geen contracttemplates aangemaakt.
-          </div>
-        ) : templates.map(item => (
-          <div
-            key={item.id}
-            className={`${TEMPLATE_TABLE_GRID} items-start border-b border-border px-5 py-4 text-sm transition-colors hover:bg-accent/35`}
-          >
-            <div className="min-w-0">
-              <p className="truncate font-semibold text-foreground">{item.name}</p>
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.description || "-"}</p>
+
+        <div className={`${TEMPLATE_TABLE_GRID} items-center border-b border-border bg-muted/20 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+          <span>Template</span>
+          <span>Versie</span>
+          <span>Status</span>
+          <span>Scope</span>
+          <span>Door</span>
+          <span className="text-right">Acties</span>
+        </div>
+        <div className="flex-1">
+          {templateBrowserTableItems.length === 0 ? (
+            <div className="flex min-h-[180px] items-center justify-center px-5 py-8 text-center text-sm text-muted-foreground">
+              Nog geen templates voor {title.toLowerCase()} aangemaakt.
             </div>
-            <span className="text-sm text-muted-foreground">v{item.version || 1}</span>
-            <div>{statusBadge(item.status)}</div>
-            <div className="min-w-0 text-sm text-muted-foreground">
-              <p className="truncate">{getTemplateScopeLabel(item)}</p>
-              <p className="mt-0.5 truncate text-xs">
-                {isEmploymentTemplateType(item.template_type) ? caoLabel(item.cao_key) : "Niet gekoppeld aan CAO"}
-              </p>
-            </div>
-            <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
-            <div className="flex justify-end gap-1">
-              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => startEditTemplate(item)}>
-                <Edit className="h-3.5 w-3.5" />
-              </Button>
-              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => createNewTemplateVersion(item)}>
-                <Copy className="h-3.5 w-3.5" />
-              </Button>
-              {item.status !== "archived" && (
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => archiveTemplate(item)}>
-                  <Archive className="h-3.5 w-3.5" />
+          ) : templateBrowserTableItems.map(item => (
+            <div
+              key={item.id}
+              className={`${TEMPLATE_TABLE_GRID} items-start border-b border-border px-5 py-4 text-sm transition-colors hover:bg-accent/35`}
+            >
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-foreground">{item.name}</p>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.description || "-"}</p>
+              </div>
+              <span className="text-sm text-muted-foreground">v{item.version || 1}</span>
+              <div>{statusBadge(item.status)}</div>
+              <div className="min-w-0 text-sm text-muted-foreground">
+                <p className="truncate">{getTemplateScopeLabel(item)}</p>
+                <p className="mt-0.5 truncate text-xs">
+                  {isEmploymentTemplateType(item.template_type) ? caoLabel(item.cao_key) : "Niet gekoppeld aan CAO"}
+                </p>
+              </div>
+              <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
+              <div className="flex justify-end gap-1">
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => startEditTemplate(item)}>
+                  <Edit className="h-3.5 w-3.5" />
                 </Button>
-              )}
+                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => createNewTemplateVersion(item)}>
+                  <Copy className="h-3.5 w-3.5" />
+                </Button>
+                {item.status !== "archived" && (
+                  <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => archiveTemplate(item)}>
+                    <Archive className="h-3.5 w-3.5" />
+                  </Button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </>
+    );
+  };
+
+  const renderTemplateTab = () => {
+    const isEmploymentBrowser = isEmploymentTemplateType(templateBrowserType);
+    const showTable = templateBrowserType && (!isEmploymentBrowser || (templateBrowserCaoKey && templateBrowserContractModel));
+
+    return (
+      <div className="flex h-full min-h-[360px] flex-col">
+        {renderTemplateWizard()}
+
+        {!templateBrowserType && (
+          <div className="space-y-3 p-5">
+            <div>
+              <p className="text-sm font-medium text-foreground">Kies het soort contracttemplate</p>
+              <p className="mt-1 text-xs text-muted-foreground">Selecteer eerst een categorie. Daarna tonen we alleen de templates die daarbij horen.</p>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              {TEMPLATE_DOCUMENT_TYPES.map(option => (
+                <TemplateBrowserChoice
+                  key={option.value}
+                  label={option.label}
+                  description={option.description}
+                  meta={`${templateBrowserCategoryCounts[option.value] || 0} template${templateBrowserCategoryCounts[option.value] === 1 ? "" : "s"}`}
+                  onClick={() => selectTemplateBrowserType(option.value)}
+                />
+              ))}
             </div>
           </div>
-        ))}
+        )}
+
+        {isEmploymentBrowser && !templateBrowserCaoKey && (
+          <div className="space-y-3 p-5">
+            <div className="flex min-w-0 items-start gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-muted-foreground hover:text-foreground"
+                onClick={backToTemplateBrowserCategories}
+              >
+                <ChevronLeft className="mr-1 h-4 w-4" />
+                Terug
+              </Button>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">Kies de CAO</p>
+                <p className="mt-1 text-xs text-muted-foreground">Alleen CAO's die actief gekoppeld zijn aan dit bedrijf worden getoond.</p>
+              </div>
+            </div>
+            {companyCaoOptions.length === 0 ? (
+              <div className="rounded-lg border border-amber-200 bg-amber-50 p-4 text-sm text-amber-900 dark:border-amber-900/60 dark:bg-amber-950/30 dark:text-amber-100">
+                Voeg eerst een CAO-koppeling toe in de CAO-tab van dit bedrijfsprofiel.
+              </div>
+            ) : (
+              <div className="grid grid-cols-1 gap-2">
+                {companyCaoOptions.map(option => {
+                  const count = sortedTemplates.filter(item => (
+                    isEmploymentTemplateType(item.template_type)
+                    && item.cao_key === option.value
+                  )).length;
+                  return (
+                    <TemplateBrowserChoice
+                      key={option.value}
+                      label={option.label}
+                      description="Actief gekoppeld aan dit bedrijf"
+                      meta={`${count} template${count === 1 ? "" : "s"}`}
+                      selected={templateBrowserCaoKey === option.value}
+                      onClick={() => selectTemplateBrowserCao(option.value)}
+                    />
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        )}
+
+        {isEmploymentBrowser && templateBrowserCaoKey && !templateBrowserContractModel && (
+          <div className="space-y-3 p-5">
+            <div className="flex min-w-0 items-start gap-2">
+              <Button
+                type="button"
+                variant="ghost"
+                size="sm"
+                className="h-8 px-2 text-muted-foreground hover:text-foreground"
+                onClick={backToTemplateBrowserCaos}
+              >
+                <ChevronLeft className="mr-1 h-4 w-4" />
+                Terug
+              </Button>
+              <div className="min-w-0">
+                <p className="text-sm font-medium text-foreground">Kies het soort arbeidscontract</p>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  {selectedTemplateBrowserCao?.label || "Gekozen CAO"} · De looptijd, zoals bepaalde of onbepaalde tijd, wordt later met placeholders ingevuld.
+                </p>
+              </div>
+            </div>
+            <div className="grid grid-cols-1 gap-2">
+              {EMPLOYMENT_TEMPLATE_CONTRACT_MODELS.map(option => (
+                <TemplateBrowserChoice
+                  key={option.value}
+                  label={option.label}
+                  description={contractModelMeta(option)}
+                  meta={`${templateBrowserContractModelCounts[option.value] || 0} template${templateBrowserContractModelCounts[option.value] === 1 ? "" : "s"}`}
+                  selected={templateBrowserContractModel === option.value}
+                  onClick={() => selectTemplateBrowserContractModel(option.value)}
+                />
+              ))}
+            </div>
+          </div>
+        )}
+
+        {showTable && renderTemplateTable()}
       </div>
-    </div>
-  );
+    );
+  };
 
   const renderClauseWizard = () => {
     const availableClauseTypes = clauseOptionsForScope(clauseForm.scope, clauseForm.license_scope);
