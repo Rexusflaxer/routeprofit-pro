@@ -4711,7 +4711,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           </div>
         )}
 
-        {isEmploymentBrowser && !templateBrowserCaoKey && (
+        {templateBrowserType && isEmploymentBrowser && !templateBrowserCaoKey && (
           <div className="space-y-3 p-5">
             <div className="flex min-w-0 items-start gap-2">
               <Button
