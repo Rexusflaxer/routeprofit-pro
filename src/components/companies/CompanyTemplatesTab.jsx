@@ -858,8 +858,8 @@ const LETTERHEAD_TABLE_GRID = "grid grid-cols-[minmax(220px,1.5fr)_minmax(110px,
 const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(240px,1.4fr)_minmax(72px,92px)_minmax(120px,150px)_minmax(220px,1fr)_minmax(140px,180px)_minmax(168px,max-content)] gap-3 xl:gap-4";
 const CLAUSE_LIBRARY_GRID = "grid grid-cols-[minmax(44px,56px)_minmax(260px,1fr)_minmax(130px,160px)_minmax(150px,190px)_minmax(120px,150px)] gap-3 xl:gap-4";
 const LETTERHEAD_STEPS = ["Upload", "Marges", "Controle"];
-const EMPLOYMENT_TEMPLATE_STEPS = ["Documentsoort", "CAO", "Contractvorm", "Template", "Start", "Editor"];
-const BUSINESS_TEMPLATE_STEPS = ["Documentsoort", "Template", "Start", "Editor"];
+const EMPLOYMENT_TEMPLATE_STEPS = ["Documentsoort", "CAO", "Contractvorm", "Template", "Start", "Briefpapier", "Editor", "Duurkeuzes", "Referentie"];
+const BUSINESS_TEMPLATE_STEPS = ["Documentsoort", "Template", "Start", "Briefpapier", "Editor", "Referentie"];
 const CLAUSE_STEPS = ["Onderdeel", "Clausule", "Uitwerken", "Controle"];
 const CLAUSE_MARKER_PREFIX = "clausule:";
 const LETTERHEAD_SOURCE_MODES = {
@@ -1232,7 +1232,7 @@ function templateSourceStep(templateType) {
 }
 
 function templateEditorStep(templateType) {
-  return isEmploymentTemplateType(templateType) ? 6 : 4;
+  return isEmploymentTemplateType(templateType) ? 7 : 5;
 }
 
 function getContractModel(value) {
@@ -3381,8 +3381,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const previousTemplateStep = () => {
     const selectionStep = templateSelectionStep(templateForm.template_type);
     const sourceStep = templateSourceStep(templateForm.template_type);
-    const editorStep = templateEditorStep(templateForm.template_type);
-    if (templateStep === editorStep) {
+    const briefpapierStep = templateEditorStep(templateForm.template_type) - 1;
+    if (templateStep === briefpapierStep) {
       setTemplateStep(templateForm.template_source_mode === "existing" ? selectionStep : sourceStep);
       return;
     }
@@ -4649,7 +4649,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     const selectionStep = templateSelectionStep(templateForm.template_type);
     const sourceStep = templateSourceStep(templateForm.template_type);
     const editorStep = templateEditorStep(templateForm.template_type);
-    const wizardPrefilled = templateForm.template_choice === "new" && templateStep >= sourceStep, wizardSteps = wizardPrefilled ? templateWizardSteps(templateForm).slice(sourceStep - 1) : templateWizardSteps(templateForm), displayStep = wizardPrefilled ? templateStep - sourceStep + 1 : templateStep;
+    const wizardPrefilled = templateForm.template_choice === "new" && templateStep >= sourceStep, wizardSteps = wizardPrefilled ? templateWizardSteps(templateForm).slice(sourceStep - 1) : templateWizardSteps(templateForm), displayStep = wizardPrefilled ? templateStep - sourceStep + 1 : templateStep, briefpapierStep = editorStep - 1, duurkeuzesStep = editorStep + 1, referentieStep = templateWizardSteps(templateForm).length;
     const contractModelOptions = contractModelOptionsForCao(templateForm.cao_key);
     const templateBlocks = normalizeContractTemplateBlocks(templateForm.editor_blocks, templateForm.body);
     const editingTemplateBlock = templateBlocks.find(block => block.id === editingTemplateBlockId) || null;
@@ -4851,29 +4851,27 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 </div>
               )}
 
+              {templateStep === briefpapierStep && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Briefpapier</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Kies het briefpapier dat bovenaan het contract wordt weergegeven.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Briefpapier</Label>
+                    <Select value={templateForm.default_letterhead_id || "none"} onValueChange={value => setTemplateForm(prev => ({ ...prev, default_letterhead_id: value }))}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Geen briefpapier</SelectItem>
+                        {activeLetterheads.map(item => (<SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>))}
+                      </SelectContent>
+                    </Select>
+                  </div>
+                </div>
+              )}
+
               {templateStep === editorStep && (
                 <div className="space-y-5">
-                  <div className="flex flex-wrap items-end justify-between gap-3">
-                    <div className="min-w-[260px] flex-1 space-y-2">
-                      <Label>Referentie *</Label>
-                      <Input
-                        value={templateForm.name}
-                        onChange={event => setTemplateForm(prev => ({ ...prev, name: event.target.value }))}
-                        placeholder={defaultTemplateName(templateForm)}
-                        readOnly={templateReferenceLocked}
-                        aria-describedby={templateReferenceLocked ? "template-reference-lock-note" : undefined}
-                      />
-                      {templateReferenceLocked && (
-                        <p id="template-reference-lock-note" className="text-xs text-muted-foreground">
-                          De referentie blijft gelijk binnen een versiereeks.
-                        </p>
-                      )}
-                    </div>
-                    <Badge variant="outline" className="h-9 px-3 text-xs">
-                      Versie {templateForm.version || 1}
-                    </Badge>
-                  </div>
-
                   {templateForm.standard_template_id === PB_FULLTIME_STANDARD_TEMPLATE_ID && (
                     <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-900/70 dark:bg-emerald-950/25 dark:text-emerald-100">
                       <span>CAO Particuliere Beveiliging · versie 3, juli 2026 · fulltime 144 uur per vier weken</span>
@@ -4881,98 +4879,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         Standaard v{templateForm.standard_template_version || 1}
                       </Badge>
                     </div>
-                  )}
-
-                  <div className="grid gap-3 md:grid-cols-2">
-                    <div className="space-y-2">
-                      <Label>Briefpapier</Label>
-                      <Select value={templateForm.default_letterhead_id || "none"} onValueChange={value => setTemplateForm(prev => ({ ...prev, default_letterhead_id: value }))}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Geen briefpapier</SelectItem>
-                          {activeLetterheads.map(item => (
-                            <SelectItem key={item.id} value={item.id}>{item.name}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    {isEmploymentTemplate && (
-                      <div className="space-y-2">
-                        <Label>Duurkeuzes *</Label>
-                        <Popover>
-                          <PopoverTrigger asChild>
-                            <Button type="button" variant="outline" className="h-10 w-full justify-between px-3 font-normal">
-                              <span className="min-w-0 flex-1 truncate text-left">
-                                <span className="hidden sm:inline">
-                                  {selectedTemplateDurationLabels.length > 0
-                                    ? `${selectedTemplateDurationLabels.length} geselecteerd: ${selectedTemplateDurationLabels.join(", ")}`
-                                    : "Selecteer één of meerdere duurkeuzes"}
-                                </span>
-                                <span className="sm:hidden">
-                                  {selectedTemplateDurationLabels.length > 0
-                                    ? `${selectedTemplateDurationLabels.length} duurkeuzes geselecteerd`
-                                    : "Selecteer duurkeuzes"}
-                                </span>
-                              </span>
-                              <ChevronDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
-                            </Button>
-                          </PopoverTrigger>
-                          <PopoverContent align="start" className="w-[420px] max-w-[calc(100vw-2rem)] p-2">
-                            <div className="mb-2 flex items-center justify-between border-b border-border px-2 pb-2">
-                              <span className="text-xs font-medium text-muted-foreground">Toepasbaar op deze contractvorm</span>
-                              <div className="flex gap-1">
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2 text-xs"
-                                  onClick={() => setTemplateForm(prev => ({ ...prev, duration_options: availableTemplateDurationOptions.map(option => option.value) }))}
-                                >
-                                  Alles
-                                </Button>
-                                <Button
-                                  type="button"
-                                  variant="ghost"
-                                  size="sm"
-                                  className="h-7 px-2 text-xs"
-                                  onClick={() => setTemplateForm(prev => ({ ...prev, duration_options: [] }))}
-                                >
-                                  Wissen
-                                </Button>
-                              </div>
-                            </div>
-                            <div className="max-h-[330px] space-y-1 overflow-y-auto">
-                              {availableTemplateDurationOptions.map(option => {
-                                const checked = (templateForm.duration_options || []).includes(option.value);
-                                return (
-                                  <label key={option.value} className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-accent">
-                                    <Checkbox
-                                      checked={checked}
-                                      onCheckedChange={() => toggleTemplateDurationOption(option.value)}
-                                      className="mt-0.5"
-                                    />
-                                    <span className="min-w-0">
-                                      <span className="block text-sm font-medium text-foreground">{option.label}</span>
-                                      <span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{option.description}</span>
-                                    </span>
-                                  </label>
-                                );
-                              })}
-                            </div>
-                          </PopoverContent>
-                        </Popover>
-                      </div>
-                    )}
-                  </div>
-
-                  {isEmploymentTemplate && (
-                    <label className="flex items-center gap-2 text-sm">
-                      <Checkbox
-                        checked={templateForm.visible_in_contract_wizard !== false}
-                        onCheckedChange={checked => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: checked === true }))}
-                      />
-                      Zichtbaar in personeelscontractwizard
-                    </label>
                   )}
 
                   {editingTemplateBlock && templateBlockDraft ? (
@@ -5202,6 +5108,62 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 </div>
               )}
 
+              {isEmploymentTemplate && templateStep === duurkeuzesStep && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Duurkeuzes</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Selecteer voor welke contractduren deze template gebruikt mag worden.</p>
+                  </div>
+                  <div className="space-y-2">
+                    <Label>Duurkeuzes *</Label>
+                    <Popover>
+                      <PopoverTrigger asChild>
+                        <Button type="button" variant="outline" className="h-10 w-full justify-between px-3 font-normal">
+                          <span className="min-w-0 flex-1 truncate text-left">
+                            <span className="hidden sm:inline">{selectedTemplateDurationLabels.length > 0 ? `${selectedTemplateDurationLabels.length} geselecteerd: ${selectedTemplateDurationLabels.join(", ")}` : "Selecteer één of meerdere duurkeuzes"}</span>
+                            <span className="sm:hidden">{selectedTemplateDurationLabels.length > 0 ? `${selectedTemplateDurationLabels.length} duurkeuzes geselecteerd` : "Selecteer duurkeuzes"}</span>
+                          </span>
+                          <ChevronDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
+                        </Button>
+                      </PopoverTrigger>
+                      <PopoverContent align="start" className="w-[420px] max-w-[calc(100vw-2rem)] p-2">
+                        <div className="mb-2 flex items-center justify-between border-b border-border px-2 pb-2">
+                          <span className="text-xs font-medium text-muted-foreground">Toepasbaar op deze contractvorm</span>
+                          <div className="flex gap-1">
+                            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setTemplateForm(prev => ({ ...prev, duration_options: availableTemplateDurationOptions.map(option => option.value) }))}>Alles</Button>
+                            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setTemplateForm(prev => ({ ...prev, duration_options: [] }))}>Wissen</Button>
+                          </div>
+                        </div>
+                        <div className="max-h-[330px] space-y-1 overflow-y-auto">
+                          {availableTemplateDurationOptions.map(option => {
+                            const checked = (templateForm.duration_options || []).includes(option.value);
+                            return (<label key={option.value} className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-accent"><Checkbox checked={checked} onCheckedChange={() => toggleTemplateDurationOption(option.value)} className="mt-0.5" /><span className="min-w-0"><span className="block text-sm font-medium text-foreground">{option.label}</span><span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{option.description}</span></span></label>);
+                          })}
+                        </div>
+                      </PopoverContent>
+                    </Popover>
+                  </div>
+                </div>
+              )}
+
+              {templateStep === referentieStep && (
+                <div className="space-y-4">
+                  <div>
+                    <p className="text-sm font-medium text-foreground">Referentie</p>
+                    <p className="mt-1 text-xs text-muted-foreground">Geef deze template een herkenbare naam.</p>
+                  </div>
+                  <div className="flex flex-wrap items-end justify-between gap-3">
+                    <div className="min-w-[260px] flex-1 space-y-2">
+                      <Label>Referentie *</Label>
+                      <Input value={templateForm.name} onChange={event => setTemplateForm(prev => ({ ...prev, name: event.target.value }))} placeholder={defaultTemplateName(templateForm)} readOnly={templateReferenceLocked} aria-describedby={templateReferenceLocked ? "template-reference-lock-note" : undefined} />
+                      {templateReferenceLocked && (<p id="template-reference-lock-note" className="text-xs text-muted-foreground">De referentie blijft gelijk binnen een versiereeks.</p>)}
+                    </div>
+                    <Badge variant="outline" className="h-9 px-3 text-xs">Versie {templateForm.version || 1}</Badge>
+                  </div>
+                  {isEmploymentTemplate && (<label className="flex items-center gap-2 text-sm"><Checkbox checked={templateForm.visible_in_contract_wizard !== false} onCheckedChange={checked => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: checked === true }))} />Zichtbaar in personeelscontractwizard</label>)}
+                </div>
+              )}
+
               {!(templateStep === editorStep && editingTemplateBlock) && (
               <div className="mt-5 flex flex-wrap items-center justify-between gap-2">
                 <Button type="button" variant="ghost" onClick={cancelTemplateWizard}>
@@ -5219,7 +5181,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                       Terug
                     </Button>
                   )}
-                  {templateStep < editorStep ? (
+                  {templateStep < templateWizardSteps(templateForm).length ? (
                     <Button type="button" onClick={nextTemplateStep}>
                       Volgende
                       <ChevronRight className="ml-1 h-4 w-4" />
