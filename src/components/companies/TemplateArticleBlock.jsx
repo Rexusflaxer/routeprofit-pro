@@ -32,12 +32,7 @@ export default function TemplateArticleBlock({ block, index, onOpen }) {
               <Edit className="h-3.5 w-3.5" />
             </button>
           </div>
-          <button type="button" className="block w-full text-left" onClick={() => onOpen(block)}>
-            <div
-              className="max-h-32 overflow-y-auto px-3 py-2 text-xs leading-relaxed text-muted-foreground [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-border [&_blockquote]:pl-2 [&_h2]:font-semibold [&_h2]:text-foreground [&_h3]:font-medium [&_h3]:text-foreground [&_li]:mb-0.5 [&_ol]:ml-4 [&_ol]:list-decimal [&_p]:mb-1 [&_ul]:ml-4 [&_ul]:list-disc"
-              dangerouslySetInnerHTML={{ __html: sanitizeContractBlockHtml(block.content_html) }}
-            />
-          </button>
+
         </div>
       )}
     </Draggable>
