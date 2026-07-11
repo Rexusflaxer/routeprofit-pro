@@ -5029,19 +5029,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                           </Droppable>
                         </DragDropContext>
 
-                        <div className="mt-3 rounded-lg border border-border bg-background/40 p-3">
-                          <div className="flex items-center justify-between gap-3">
-                            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Controle</p>
-                            <span className={`text-xs ${unknownTemplatePlaceholders.length > 0 || missingStandardTemplatePlaceholders.length > 0 ? "text-amber-700" : "text-emerald-700"}`}>
-                              {unknownTemplatePlaceholders.length > 0
-                                ? `${unknownTemplatePlaceholders.length} niet gekoppeld`
-                                : missingStandardTemplatePlaceholders.length > 0
-                                  ? `${missingStandardTemplatePlaceholders.length} essentiële placeholders ontbreken`
-                                  : "Alle placeholders gekoppeld"}
-                            </span>
-                          </div>
-                          <p className="mt-1 text-xs text-muted-foreground">{templateBlocks.length} blokken · {placeholderDetails.length} gebruikte placeholders</p>
-                        </div>
+
                       </div>
 
                       <TemplateDocumentPreview
