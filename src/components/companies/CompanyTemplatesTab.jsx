@@ -4645,11 +4645,11 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   );
 
   const renderTemplateWizard = () => {
-    const wizardSteps = templateWizardSteps(templateForm);
     const isEmploymentTemplate = isEmploymentTemplateType(templateForm.template_type);
     const selectionStep = templateSelectionStep(templateForm.template_type);
     const sourceStep = templateSourceStep(templateForm.template_type);
     const editorStep = templateEditorStep(templateForm.template_type);
+    const wizardPrefilled = templateForm.template_choice === "new" && templateStep >= sourceStep, wizardSteps = wizardPrefilled ? templateWizardSteps(templateForm).slice(sourceStep - 1) : templateWizardSteps(templateForm), displayStep = wizardPrefilled ? templateStep - sourceStep + 1 : templateStep;
     const contractModelOptions = contractModelOptionsForCao(templateForm.cao_key);
     const templateBlocks = normalizeContractTemplateBlocks(templateForm.editor_blocks, templateForm.body);
     const editingTemplateBlock = templateBlocks.find(block => block.id === editingTemplateBlockId) || null;
@@ -4681,7 +4681,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   ? "Nieuwe contracttemplateversie"
                   : (editingTemplateId ? "Contracttemplate bewerken" : "Contracttemplate maken")}
               </p>
-              <WizardSteps labels={wizardSteps} step={Math.min(templateStep, wizardSteps.length)} />
+              <WizardSteps labels={wizardSteps} step={Math.min(displayStep, wizardSteps.length)} />
 
               {templateStep === 1 && (
                 <div className="space-y-3">
@@ -5210,7 +5210,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   Annuleren
                 </Button>
                 <div className="flex flex-wrap justify-end gap-2">
-                  {templateStep > 1 && (
+                  {templateStep > (wizardPrefilled ? sourceStep : 1) && (
                     <Button
                       type="button"
                       variant="outline"
