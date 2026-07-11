@@ -4885,13 +4885,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                             <p className="text-xs text-muted-foreground">Wijzigingen verschijnen na opslaan direct in de preview.</p>
                           </div>
                         </div>
-                        <div className="flex gap-2">
-                          <Button type="button" variant="outline" size="sm" onClick={cancelTemplateBlockEditor}>Annuleren</Button>
-                          <Button type="button" size="sm" onClick={saveTemplateBlock}>
-                            <Save className="mr-1 h-4 w-4" />
-                            Blok opslaan
-                          </Button>
-                        </div>
                       </div>
 
                       <div className="space-y-2">
@@ -5001,10 +4994,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                           <Trash2 className="mr-1 h-4 w-4" />
                           Blok verwijderen
                         </Button>
-                        <Button type="button" onClick={saveTemplateBlock}>
-                          <Save className="mr-1 h-4 w-4" />
-                          Blok opslaan
-                        </Button>
+                        <div className="flex gap-2">
+                          <Button type="button" variant="outline" onClick={cancelTemplateBlockEditor}>Annuleren</Button>
+                          <Button type="button" onClick={saveTemplateBlock}>
+                            <Save className="mr-1 h-4 w-4" />
+                            Blok opslaan
+                          </Button>
+                        </div>
                       </div>
                     </div>
                   ) : (
