@@ -5111,7 +5111,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                       </div>
                     </div>
                   ) : (
-                    <div className="grid gap-5 border-t border-border pt-4 xl:grid-cols-[minmax(320px,0.85fr)_minmax(420px,1.15fr)]">
+                    <div className="grid gap-5 border-t border-border pt-4 xl:grid-cols-[minmax(280px,0.7fr)_minmax(420px,1.3fr)]">
                       <div className="min-w-0">
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <div>
@@ -5126,33 +5126,32 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         <DragDropContext onDragEnd={handleTemplateBlockDragEnd}>
                           <Droppable droppableId="template-article-blocks">
                             {provided => (
-                              <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-2">
+                              <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-1">
                                 {templateBlockRows.map((block, index) => (
                                   <Draggable key={block.id} draggableId={block.id} index={index}>
                                     {dragProvided => (
                                       <div
                                         ref={dragProvided.innerRef}
                                         {...dragProvided.draggableProps}
-                                        className="flex min-h-[76px] items-stretch overflow-hidden rounded-lg border border-border bg-card transition-colors hover:border-primary/60 hover:bg-accent/25"
+                                        className="flex items-center overflow-hidden rounded-md border border-border bg-card transition-colors hover:border-primary/60 hover:bg-accent/25"
                                       >
                                         <button
                                           type="button"
                                           {...dragProvided.dragHandleProps}
-                                          className="flex w-10 shrink-0 items-center justify-center border-r border-border text-muted-foreground hover:bg-accent hover:text-foreground"
+                                          className="flex w-8 shrink-0 items-center justify-center border-r border-border text-muted-foreground hover:bg-accent hover:text-foreground"
                                           aria-label={`${block.display_label} verslepen`}
                                           title="Verslepen"
                                         >
-                                          <GripVertical className="h-4 w-4" />
+                                          <GripVertical className="h-3.5 w-3.5" />
                                         </button>
-                                        <button type="button" className="min-w-0 flex-1 px-3 py-2.5 text-left" onClick={() => openTemplateBlockEditor(block)}>
+                                        <button type="button" className="min-w-0 flex-1 px-2.5 py-1.5 text-left" onClick={() => openTemplateBlockEditor(block)}>
                                           <span className="flex items-center gap-2">
                                             <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-primary">{block.display_label}</span>
                                             <span className="truncate text-sm font-semibold text-foreground">{block.title}</span>
                                           </span>
-                                          <span className="mt-1 block truncate text-xs text-muted-foreground">{contractBlockHtmlToPlainText(block.content_html) || "Nog geen tekst"}</span>
                                         </button>
-                                        <button type="button" className="flex w-9 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground" onClick={() => openTemplateBlockEditor(block)} aria-label={`${block.display_label} bewerken`}>
-                                          <Edit className="h-4 w-4" />
+                                        <button type="button" className="flex w-8 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground" onClick={() => openTemplateBlockEditor(block)} aria-label={`${block.display_label} bewerken`}>
+                                          <Edit className="h-3.5 w-3.5" />
                                         </button>
                                       </div>
                                     )}
