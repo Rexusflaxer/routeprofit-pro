@@ -85,7 +85,7 @@ import {
   Trash2,
   Type,
   Unlock,
-  X,
+  X, Check,
 } from "lucide-react";
 
 const TEMPLATE_STATUS = {
@@ -5063,36 +5063,20 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     <p className="text-sm font-medium text-foreground">Duurkeuzes</p>
                     <p className="mt-1 text-xs text-muted-foreground">Selecteer voor welke contractduren deze template gebruikt mag worden.</p>
                   </div>
-                  <div className="space-y-2">
-                    <Label>Duurkeuzes *</Label>
-                    <Popover>
-                      <PopoverTrigger asChild>
-                        <Button type="button" variant="outline" className="h-10 w-full justify-between px-3 font-normal">
-                          <span className="min-w-0 flex-1 truncate text-left">
-                            <span className="hidden sm:inline">{selectedTemplateDurationLabels.length > 0 ? `${selectedTemplateDurationLabels.length} geselecteerd: ${selectedTemplateDurationLabels.join(", ")}` : "Selecteer één of meerdere duurkeuzes"}</span>
-                            <span className="sm:hidden">{selectedTemplateDurationLabels.length > 0 ? `${selectedTemplateDurationLabels.length} duurkeuzes geselecteerd` : "Selecteer duurkeuzes"}</span>
-                          </span>
-                          <ChevronDown className="ml-2 h-4 w-4 shrink-0 text-muted-foreground" />
-                        </Button>
-                      </PopoverTrigger>
-                      <PopoverContent align="start" className="w-[420px] max-w-[calc(100vw-2rem)] p-2">
-                        <div className="mb-2 flex items-center justify-between border-b border-border px-2 pb-2">
-                          <span className="text-xs font-medium text-muted-foreground">Toepasbaar op deze contractvorm</span>
-                          <div className="flex gap-1">
-                            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setTemplateForm(prev => ({ ...prev, duration_options: availableTemplateDurationOptions.map(option => option.value) }))}>Alles</Button>
-                            <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setTemplateForm(prev => ({ ...prev, duration_options: [] }))}>Wissen</Button>
-                          </div>
-                        </div>
-                        <div className="max-h-[330px] space-y-1 overflow-y-auto">
-                          {availableTemplateDurationOptions.map(option => {
-                            const checked = (templateForm.duration_options || []).includes(option.value);
-                            return (<label key={option.value} className="flex cursor-pointer items-start gap-3 rounded-md px-2 py-2 hover:bg-accent"><Checkbox checked={checked} onCheckedChange={() => toggleTemplateDurationOption(option.value)} className="mt-0.5" /><span className="min-w-0"><span className="block text-sm font-medium text-foreground">{option.label}</span><span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{option.description}</span></span></label>);
-                          })}
-                        </div>
-                      </PopoverContent>
-                    </Popover>
+                  <div className="flex items-center justify-between">
+                    <span className="text-xs font-medium text-muted-foreground">Toepasbaar op deze contractvorm</span>
+                    <div className="flex gap-1">
+                      <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setTemplateForm(prev => ({ ...prev, duration_options: availableTemplateDurationOptions.map(o => o.value) }))}>Alles</Button>
+                      <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setTemplateForm(prev => ({ ...prev, duration_options: [] }))}>Wissen</Button>
+                    </div>
                   </div>
-                </div>
+                  <div className="grid grid-cols-1 gap-2">
+                    {availableTemplateDurationOptions.map(option => {
+                      const checked = (templateForm.duration_options || []).includes(option.value);
+                      return (<button key={option.value} type="button" onClick={() => toggleTemplateDurationOption(option.value)} className={`flex items-start justify-between px-4 py-3 rounded-lg border text-left transition-all ${checked ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent active:scale-[0.99]"}`}><div className="min-w-0"><span className="block text-sm font-semibold text-foreground">{option.label}</span><span className="mt-0.5 block text-xs leading-relaxed text-muted-foreground">{option.description}</span></div>{checked ? <Check className="w-4 h-4 text-primary shrink-0 mt-0.5" /> : <Plus className="w-4 h-4 text-muted-foreground shrink-0 mt-0.5" />}</button>);
+                    })}
+                  </div>
+</div>
               )}
 
               {templateStep === referentieStep && (
