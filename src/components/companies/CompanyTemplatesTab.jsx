@@ -1,6 +1,6 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { DragDropContext, Draggable, Droppable } from "@hello-pangea/dnd";
+import { DragDropContext, Droppable } from "@hello-pangea/dnd"; import TemplateArticleBlock from "@/components/companies/TemplateArticleBlock";
 import { AnimatePresence, motion } from "framer-motion";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
@@ -5023,36 +5023,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         <DragDropContext onDragEnd={handleTemplateBlockDragEnd}>
                           <Droppable droppableId="template-article-blocks">
                             {provided => (
-                              <div ref={provided.innerRef} {...provided.droppableProps} className="space-y-1">
+                              <div ref={provided.innerRef} {...provided.droppableProps} className="max-h-[760px] space-y-2 overflow-y-auto pr-1">
                                 {templateBlockRows.map((block, index) => (
-                                  <Draggable key={block.id} draggableId={block.id} index={index}>
-                                    {dragProvided => (
-                                      <div
-                                        ref={dragProvided.innerRef}
-                                        {...dragProvided.draggableProps}
-                                        className="flex items-center overflow-hidden rounded-md border border-border bg-card transition-colors hover:border-primary/60 hover:bg-accent/25"
-                                      >
-                                        <button
-                                          type="button"
-                                          {...dragProvided.dragHandleProps}
-                                          className="flex w-8 shrink-0 items-center justify-center border-r border-border text-muted-foreground hover:bg-accent hover:text-foreground"
-                                          aria-label={`${block.display_label} verslepen`}
-                                          title="Verslepen"
-                                        >
-                                          <GripVertical className="h-3.5 w-3.5" />
-                                        </button>
-                                        <button type="button" className="min-w-0 flex-1 px-2.5 py-1.5 text-left" onClick={() => openTemplateBlockEditor(block)}>
-                                          <span className="flex items-center gap-2">
-                                            <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wider text-primary">{block.display_label}</span>
-                                            <span className="truncate text-sm font-semibold text-foreground">{block.title}</span>
-                                          </span>
-                                        </button>
-                                        <button type="button" className="flex w-8 shrink-0 items-center justify-center text-muted-foreground hover:text-foreground" onClick={() => openTemplateBlockEditor(block)} aria-label={`${block.display_label} bewerken`}>
-                                          <Edit className="h-3.5 w-3.5" />
-                                        </button>
-                                      </div>
-                                    )}
-                                  </Draggable>
+                                  <TemplateArticleBlock key={block.id} block={block} index={index} onOpen={openTemplateBlockEditor} />
                                 ))}
                                 {provided.placeholder}
                               </div>
