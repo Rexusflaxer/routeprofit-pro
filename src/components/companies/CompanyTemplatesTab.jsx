@@ -5054,18 +5054,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     </div>
                   )}
 
-                  {!editingTemplateBlock && (
-                    <div className="space-y-2">
-                      <Label>Notitie</Label>
-                      <Textarea
-                        rows={3}
-                        value={templateForm.description}
-                        onChange={event => setTemplateForm(prev => ({ ...prev, description: event.target.value }))}
-                        placeholder="Interne notitie voor beheerders; deze tekst komt niet in het contract."
-                      />
-                    </div>
-                  )}
-                </div>
+</div>
               )}
 
               {isEmploymentTemplate && templateStep === duurkeuzesStep && (
@@ -5121,6 +5110,15 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                     <Badge variant="outline" className="h-9 px-3 text-xs">Versie {templateForm.version || 1}</Badge>
                   </div>
                   {isEmploymentTemplate && (<label className="flex items-center gap-2 text-sm"><Checkbox checked={templateForm.visible_in_contract_wizard !== false} onCheckedChange={checked => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: checked === true }))} />Zichtbaar in personeelscontractwizard</label>)}
+                  <div className="space-y-2">
+                    <Label>Notitie</Label>
+                    <Textarea
+                      rows={3}
+                      value={templateForm.description}
+                      onChange={event => setTemplateForm(prev => ({ ...prev, description: event.target.value }))}
+                      placeholder="Interne notitie voor beheerders; deze tekst komt niet in het contract."
+                    />
+                  </div>
                 </div>
               )}
 
