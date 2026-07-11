@@ -3222,7 +3222,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       standard_template_version: preset?.version || null,
     });
     setMessage(null);
-    setTemplateStep(templateEditorStep(templateForm.template_type));
+    setTemplateStep(templateEditorStep(templateForm.template_type) - 1);
   };
 
   const updateTemplateBlocks = (updater) => {
