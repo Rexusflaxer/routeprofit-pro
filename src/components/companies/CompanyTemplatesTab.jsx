@@ -4872,15 +4872,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
 
               {templateStep === editorStep && (
                 <div className="space-y-5">
-                  {templateForm.standard_template_id === PB_FULLTIME_STANDARD_TEMPLATE_ID && (
-                    <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg border border-emerald-200 bg-emerald-50/70 px-3 py-2 text-xs text-emerald-900 dark:border-emerald-900/70 dark:bg-emerald-950/25 dark:text-emerald-100">
-                      <span>CAO Particuliere Beveiliging · versie 3, juli 2026 · fulltime 144 uur per vier weken</span>
-                      <Badge variant="outline" className="border-emerald-300 text-emerald-800 dark:border-emerald-800 dark:text-emerald-200">
-                        Standaard v{templateForm.standard_template_version || 1}
-                      </Badge>
-                    </div>
-                  )}
-
                   {editingTemplateBlock && templateBlockDraft ? (
                     <div className="space-y-4 border-t border-border pt-4">
                       <div className="flex flex-wrap items-center justify-between gap-3">
