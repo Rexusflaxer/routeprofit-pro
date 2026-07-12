@@ -16,7 +16,9 @@ import {
   contractTemplateFamilyKey,
   durationOptionsForContractTemplate,
   groupContractTemplateVersions,
+  nextContractArticleSectionNumber,
   nextContractTemplateVersion,
+  normalizeContractTemplateBlocks,
   paginateContractTemplateBlocks,
 } from "../src/lib/contractTemplateEditor.js";
 
@@ -92,15 +94,46 @@ const editorBlocks = contractTemplateBlocksFromBody(preset.body);
 assert.equal(editorBlocks.filter(block => block.kind === "article").length, 17);
 assert.equal(editorBlocks[0].kind, "preamble");
 assert.equal(editorBlocks.at(-1).kind, "closing");
-assert.equal((editorBlocks.find(block => block.title === "Indiensttreding en duur")?.content_html.match(/<p>/g) || []).length, 3);
+const firstArticleBlock = editorBlocks.find(block => block.title === "Indiensttreding en duur");
+assert.equal((firstArticleBlock?.content_html.match(/<p>/g) || []).length, 3);
+assert.match(firstArticleBlock?.content_html || "", />x\.1\s/);
+assert.doesNotMatch(firstArticleBlock?.content_html || "", />1\.1\s/);
+assert.equal(nextContractArticleSectionNumber(firstArticleBlock?.content_html), 4);
 const roundTripBody = contractTemplateBodyFromBlocks(editorBlocks);
 assert.deepEqual(getUnknownContractTemplatePlaceholders(roundTripBody), []);
 assert.deepEqual(getMissingStandardTemplatePlaceholders(roundTripBody), []);
+assert.match(roundTripBody, /Artikel 1 - Indiensttreding en duur\n\n1\.1/);
 const firstArticleIndex = editorBlocks.findIndex(block => block.kind === "article");
 const reorderedBlocks = [...editorBlocks];
 [reorderedBlocks[firstArticleIndex], reorderedBlocks[firstArticleIndex + 1]] = [reorderedBlocks[firstArticleIndex + 1], reorderedBlocks[firstArticleIndex]];
 const reorderedBody = contractTemplateBodyFromBlocks(reorderedBlocks);
 assert.match(reorderedBody, /Artikel 1 - Toepasselijke cao\n\n1\.1/);
+assert.doesNotMatch(reorderedBody, /Artikel 1 - Toepasselijke cao\n\n2\.1/);
+const migratedLegacyBlock = normalizeContractTemplateBlocks([{
+  id: "legacy-article-six",
+  kind: "article",
+  title: "Oud genummerd artikel",
+  article_number: 6,
+  content_html: "<p>6.1 Eerste lid</p><p>6.2 Tweede lid</p>",
+}]);
+assert.equal(migratedLegacyBlock[0].article_number, 1);
+assert.match(migratedLegacyBlock[0].content_html, /x\.1 Eerste lid/);
+assert.match(migratedLegacyBlock[0].content_html, /x\.2 Tweede lid/);
+assert.match(contractTemplateBodyFromBlocks(migratedLegacyBlock), /Artikel 1 - Oud genummerd artikel\n\n1\.1 Eerste lid\n\n1\.2 Tweede lid/);
+assert.doesNotMatch(contractTemplateBodyFromBlocks(migratedLegacyBlock), /6\.[12]/);
+const legacyMovedToArticleFive = normalizeContractTemplateBlocks([
+  ...editorBlocks.filter(block => block.kind === "article").slice(0, 4),
+  {
+    id: "legacy-article-six-moved-to-five",
+    kind: "article",
+    title: "Verplaatst artikel",
+    article_number: 6,
+    content_html: "<p>6.1 Eerste lid</p><p>6.2 Tweede lid</p>",
+  },
+]);
+const legacyMovedBody = contractTemplateBodyFromBlocks(legacyMovedToArticleFive);
+assert.match(legacyMovedBody, /Artikel 5 - Verplaatst artikel\n\n5\.1 Eerste lid\n\n5\.2 Tweede lid/);
+assert.doesNotMatch(legacyMovedBody, /6\.[12]/);
 const previewPages = paginateContractTemplateBlocks(editorBlocks);
 assert.ok(previewPages.length > 1);
 assert.equal(new Set(previewPages.flat().map(item => item.id)).size, previewPages.flat().length);

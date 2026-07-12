@@ -1,6 +1,7 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-import { DragDropContext, Droppable } from "@hello-pangea/dnd"; import TemplateArticleBlock from "@/components/companies/TemplateArticleBlock";
+import { DragDropContext, Droppable } from "@hello-pangea/dnd";
+import TemplateArticleBlock from "@/components/companies/TemplateArticleBlock";
 import { AnimatePresence, motion } from "framer-motion";
 import ReactQuill from "react-quill";
 import "react-quill/dist/quill.snow.css";
@@ -39,6 +40,8 @@ import {
   durationOptionsForContractTemplate,
   groupContractTemplateVersions,
   nextContractTemplateVersion,
+  nextContractArticleSectionNumber,
+  normalizeContractArticleSectionHtml,
   normalizeContractTemplateBlocks,
   normalizeTemplateReference,
   paginateContractTemplateBlocks,
@@ -65,12 +68,12 @@ import {
   Eye,
   EyeOff,
   FilePlus2,
-  GripVertical,
   HelpCircle,
   Image as ImageIcon,
   Italic,
   Layers,
   List,
+  ListPlus,
   ListOrdered,
   Lock,
   Minus,
@@ -86,6 +89,8 @@ import {
   Type,
   Unlock,
   X, Check,
+  ZoomIn,
+  ZoomOut,
 } from "lucide-react";
 
 const TEMPLATE_STATUS = {
@@ -2061,7 +2066,13 @@ function LayerIcon({ type }) {
   return <Type className="h-3.5 w-3.5" />;
 }
 
-function TemplateDocumentPreview({ body, blocks, templateName, letterhead, clauses }) {
+const TEMPLATE_PREVIEW_ZOOM_MIN = 60;
+const TEMPLATE_PREVIEW_ZOOM_MAX = 180;
+const TEMPLATE_PREVIEW_ZOOM_STEP = 10;
+
+function TemplateDocumentPreview({ body, blocks, templateName, letterhead, clauses, highlightedBlockId }) {
+  const previewScrollRef = useRef(null);
+  const [previewZoom, setPreviewZoom] = useState(100);
   const margins = normalizeLetterheadMargins(letterhead || {});
   const sourceMode = letterhead ? normalizeSourceMode(letterhead) : LETTERHEAD_SOURCE_MODES.design;
   const backgroundFit = letterhead ? normalizeBackgroundFit(letterhead) : DEFAULT_LETTERHEAD_BACKGROUND_FIT;
@@ -2080,53 +2091,142 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
   const previewBlocks = normalizeContractTemplateBlocks(blocks, previewBody);
   const pages = paginateContractTemplateBlocks(previewBlocks);
 
+  useEffect(() => {
+    const scrollContainer = previewScrollRef.current;
+    if (!scrollContainer || !highlightedBlockId) return;
+    const target = [...scrollContainer.querySelectorAll("[data-template-block-id]")]
+      .find(element => element.getAttribute("data-template-block-id") === highlightedBlockId);
+    if (!target) return;
+    const containerRect = scrollContainer.getBoundingClientRect();
+    const targetRect = target.getBoundingClientRect();
+    const targetTop = scrollContainer.scrollTop
+      + targetRect.top
+      - containerRect.top
+      - Math.max(24, scrollContainer.clientHeight * 0.2);
+    scrollContainer.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
+  }, [highlightedBlockId, previewZoom, pages.length]);
+
+  const changeZoom = (direction) => {
+    setPreviewZoom(current => Math.min(
+      TEMPLATE_PREVIEW_ZOOM_MAX,
+      Math.max(TEMPLATE_PREVIEW_ZOOM_MIN, current + (direction * TEMPLATE_PREVIEW_ZOOM_STEP)),
+    ));
+  };
+
   return (
     <div className="rounded-lg border border-border bg-muted/20 p-4 xl:sticky xl:top-3 xl:self-start">
-      <div className="mb-3 flex items-center justify-between gap-3 text-xs text-muted-foreground">
-        <span className="font-semibold uppercase tracking-wider">PDF-preview</span>
-        <span>{letterhead?.name || "Zonder briefpapier"} · {pages.length} pagina{pages.length === 1 ? "" : "'s"}</span>
-      </div>
-      <div className="max-h-[760px] space-y-4 overflow-y-auto rounded-lg bg-slate-950/5 p-3 dark:bg-black/25">
-        {pages.map((page, pageIndex) => (
-          <div
-            key={`preview-page-${pageIndex + 1}`}
-            className="relative mx-auto aspect-[210/297] w-full max-w-[420px] overflow-hidden rounded-[2px] shadow-[0_18px_46px_rgba(15,23,42,0.18)] ring-1 ring-slate-950/15 dark:ring-white/15"
-            style={{ backgroundColor: pageBackgroundColor }}
-          >
-            {sourceMode === LETTERHEAD_SOURCE_MODES.upload && source && isImage && (
-              <img src={source} alt={filename || "Briefpapier"} className="absolute inset-0 h-full w-full" style={{ objectFit }} />
-            )}
-            {sourceMode === LETTERHEAD_SOURCE_MODES.upload && source && isPdf && (
-              <LetterheadPdfPagePreview source={source} filename={filename} />
-            )}
-            {sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.map(renderDesignLayer)}
-            <div
-              className="absolute z-20 overflow-hidden bg-white/78 p-[4.5%] text-[7px] leading-[1.35] text-slate-900 backdrop-blur-[0.5px] sm:text-[8px]"
-              style={{
-                top: `${top}%`,
-                right: `${right}%`,
-                bottom: `${bottom}%`,
-                left: `${left}%`,
-              }}
-            >
-              {pageIndex === 0 && (
-                <p className="mb-2 text-[10px] font-bold leading-tight text-slate-950">{templateName || "Arbeidsovereenkomst"}</p>
-              )}
-              {page.length === 0 ? (
-                <p>Voeg links een artikelblok toe.</p>
-              ) : page.map(item => (
-                <div key={item.id} className="mb-2 break-inside-avoid [page-break-inside:avoid]">
-                  {item.heading && <p className="mb-1 font-bold text-slate-950">{item.heading}</p>}
-                  <div
-                    className="[&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 [&_blockquote]:pl-2 [&_h2]:font-bold [&_h3]:font-semibold [&_li]:mb-0.5 [&_ol]:ml-4 [&_ol]:list-decimal [&_p]:mb-1 [&_ul]:ml-4 [&_ul]:list-disc"
-                    dangerouslySetInnerHTML={{ __html: sanitizeContractBlockHtml(item.html) }}
-                  />
-                </div>
-              ))}
-            </div>
-            <span className="absolute bottom-2 right-3 z-30 text-[7px] font-medium text-slate-500">{pageIndex + 1}</span>
+      <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
+        <div className="min-w-0">
+          <span className="font-semibold uppercase tracking-wider">PDF-preview</span>
+          <span className="ml-2">{letterhead?.name || "Zonder briefpapier"} · {pages.length} pagina{pages.length === 1 ? "" : "'s"}</span>
+        </div>
+        <TooltipProvider delayDuration={250}>
+          <div className="flex shrink-0 items-center rounded-md border border-border bg-background p-0.5 shadow-sm">
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => changeZoom(-1)}
+                  disabled={previewZoom <= TEMPLATE_PREVIEW_ZOOM_MIN}
+                  aria-label="PDF-preview uitzoomen"
+                >
+                  <ZoomOut className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Uitzoomen</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  className="h-7 min-w-[54px] px-2 font-mono text-[11px]"
+                  onClick={() => setPreviewZoom(100)}
+                  aria-label={`Zoom herstellen naar 100 procent, huidige zoom ${previewZoom} procent`}
+                >
+                  {previewZoom}%
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Herstel naar 100%</TooltipContent>
+            </Tooltip>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-7 w-7"
+                  onClick={() => changeZoom(1)}
+                  disabled={previewZoom >= TEMPLATE_PREVIEW_ZOOM_MAX}
+                  aria-label="PDF-preview inzoomen"
+                >
+                  <ZoomIn className="h-3.5 w-3.5" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Inzoomen</TooltipContent>
+            </Tooltip>
           </div>
-        ))}
+        </TooltipProvider>
+      </div>
+      <div ref={previewScrollRef} className="max-h-[760px] overflow-auto rounded-lg bg-slate-950/5 p-3 dark:bg-black/25">
+        <div
+          className="mx-auto w-[420px] max-w-full space-y-4 origin-top transition-[zoom] duration-150"
+          style={{ zoom: previewZoom / 100 }}
+        >
+          {pages.map((page, pageIndex) => (
+            <div
+              key={`preview-page-${pageIndex + 1}`}
+              className="relative aspect-[210/297] w-full overflow-hidden rounded-[2px] shadow-[0_18px_46px_rgba(15,23,42,0.18)] ring-1 ring-slate-950/15 dark:ring-white/15"
+              style={{ backgroundColor: pageBackgroundColor }}
+            >
+              {sourceMode === LETTERHEAD_SOURCE_MODES.upload && source && isImage && (
+                <img src={source} alt={filename || "Briefpapier"} className="absolute inset-0 h-full w-full" style={{ objectFit }} />
+              )}
+              {sourceMode === LETTERHEAD_SOURCE_MODES.upload && source && isPdf && (
+                <LetterheadPdfPagePreview source={source} filename={filename} />
+              )}
+              {sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.map(renderDesignLayer)}
+              <div
+                className="absolute z-20 overflow-hidden bg-white/78 p-[4.5%] text-[7px] leading-[1.35] text-slate-900 backdrop-blur-[0.5px] sm:text-[8px]"
+                style={{
+                  top: `${top}%`,
+                  right: `${right}%`,
+                  bottom: `${bottom}%`,
+                  left: `${left}%`,
+                }}
+              >
+                {pageIndex === 0 && (
+                  <p className="mb-2 text-[10px] font-bold leading-tight text-slate-950">{templateName || "Arbeidsovereenkomst"}</p>
+                )}
+                {page.length === 0 ? (
+                  <p>Voeg links een artikelblok toe.</p>
+                ) : page.map(item => {
+                  const isHighlighted = item.block_id === highlightedBlockId;
+                  return (
+                    <div
+                      key={item.id}
+                      data-template-block-id={item.block_id}
+                      className={`relative -mx-1 mb-2 break-inside-avoid rounded-[2px] px-1 py-0.5 transition-colors duration-150 [page-break-inside:avoid] ${
+                        isHighlighted ? "bg-sky-400/25 ring-1 ring-inset ring-sky-500/55" : ""
+                      }`}
+                    >
+                      {item.heading && <p className="mb-1 font-bold text-slate-950">{item.heading}</p>}
+                      <div
+                        className="[&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 [&_blockquote]:pl-2 [&_h2]:font-bold [&_h3]:font-semibold [&_li]:mb-0.5 [&_ol]:ml-4 [&_ol]:list-decimal [&_p]:mb-1 [&_ul]:ml-4 [&_ul]:list-disc"
+                        dangerouslySetInnerHTML={{ __html: sanitizeContractBlockHtml(item.html) }}
+                      />
+                    </div>
+                  );
+                })}
+              </div>
+              <span className="absolute bottom-2 right-3 z-30 text-[7px] font-medium text-slate-500">{pageIndex + 1}</span>
+            </div>
+          ))}
+        </div>
       </div>
     </div>
   );
@@ -2308,6 +2408,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [expandedTemplateFamilies, setExpandedTemplateFamilies] = useState([]);
   const [editingTemplateBlockId, setEditingTemplateBlockId] = useState(null);
   const [templateBlockDraft, setTemplateBlockDraft] = useState(null);
+  const [hoveredTemplateBlockId, setHoveredTemplateBlockId] = useState(null);
   const [placeholderSearch, setPlaceholderSearch] = useState("");
   const [selectedClauseKey, setSelectedClauseKey] = useState(() => (
     catalogClauseKey("employment_contracts", CLAUSE_TYPE_CATALOG.employment_contracts?.[0]?.value)
@@ -3240,10 +3341,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
 
   const openTemplateBlockEditor = (block) => {
     setMessage(null);
+    setHoveredTemplateBlockId(null);
     setEditingTemplateBlockId(block.id);
     setTemplateBlockDraft({
       title: block.title || "",
-      content_html: block.content_html || "<p><br></p>",
+      content_html: block.kind === "article"
+        ? normalizeContractArticleSectionHtml(block.content_html)
+        : (block.content_html || "<p><br></p>"),
     });
     setPlaceholderSearch("");
   };
@@ -3251,6 +3355,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const cancelTemplateBlockEditor = () => {
     setEditingTemplateBlockId(null);
     setTemplateBlockDraft(null);
+    setHoveredTemplateBlockId(null);
     setPlaceholderSearch("");
   };
 
@@ -3259,7 +3364,12 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       setMessage({ type: "error", text: "Vul een titel voor dit artikelblok in." });
       return;
     }
-    const contentHtml = sanitizeContractBlockHtml(templateBlockDraft.content_html);
+    const currentBlock = normalizeContractTemplateBlocks(templateForm.editor_blocks, templateForm.body)
+      .find(block => block.id === editingTemplateBlockId);
+    const sanitizedContentHtml = sanitizeContractBlockHtml(templateBlockDraft.content_html);
+    const contentHtml = currentBlock?.kind === "article"
+      ? normalizeContractArticleSectionHtml(sanitizedContentHtml)
+      : sanitizedContentHtml;
     if (!contractBlockHtmlToPlainText(contentHtml)) {
       setMessage({ type: "error", text: "Vul tekst voor dit artikelblok in." });
       return;
@@ -3282,7 +3392,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       ...createEmptyContractTemplateBlock(blocks.length),
       article_number: articleNumber,
       title: "Nieuw artikel",
-      content_html: `<p>${articleNumber}.1 Nieuwe bepaling</p>`,
+      content_html: "<p>x.1 Nieuwe bepaling</p>",
     };
     updateTemplateBlocks([...blocks, block]);
     openTemplateBlockEditor(block);
@@ -3301,6 +3411,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
 
   const handleTemplateBlockDragEnd = ({ source, destination }) => {
     if (!destination || source.index === destination.index) return;
+    setHoveredTemplateBlockId(null);
     updateTemplateBlocks(blocks => {
       const reordered = [...blocks];
       const [moved] = reordered.splice(source.index, 1);
@@ -3325,6 +3436,29 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     const placeholder = `{$${key}}`;
     editor.insertText(range.index, placeholder, "user");
     editor.setSelection(range.index + placeholder.length, 0, "silent");
+    editor.focus();
+  };
+
+  const insertTemplateArticleSection = () => {
+    const editor = templateRichEditorRef.current?.getEditor?.();
+    if (!editor || !templateBlockDraft) return;
+    const sectionNumber = nextContractArticleSectionNumber(editor.root?.innerHTML || templateBlockDraft.content_html);
+    const sectionLabel = `x.${sectionNumber} `;
+    const documentEnd = Math.max(0, editor.getLength() - 1);
+    const textBeforeEnd = editor.getText(0, documentEnd);
+    let insertAt = documentEnd;
+    if (documentEnd > 0 && !textBeforeEnd.endsWith("\n")) {
+      editor.insertText(documentEnd, "\n", "user");
+      insertAt += 1;
+    }
+    editor.insertText(insertAt, sectionLabel, "user");
+    editor.formatLine(insertAt, sectionLabel.length, {
+      blockquote: false,
+      header: false,
+      indent: false,
+      list: false,
+    }, "silent");
+    editor.setSelection(insertAt + sectionLabel.length, 0, "silent");
     editor.focus();
   };
 
@@ -4653,6 +4787,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     const contractModelOptions = contractModelOptionsForCao(templateForm.cao_key);
     const templateBlocks = normalizeContractTemplateBlocks(templateForm.editor_blocks, templateForm.body);
     const editingTemplateBlock = templateBlocks.find(block => block.id === editingTemplateBlockId) || null;
+    const nextTemplateArticleSection = editingTemplateBlock?.kind === "article" && templateBlockDraft
+      ? nextContractArticleSectionNumber(templateBlockDraft.content_html)
+      : null;
     let articleOrdinal = 0;
     const templateBlockRows = templateBlocks.map(block => {
       if (block.kind === "article") articleOrdinal += 1;
@@ -4882,7 +5019,11 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                           </Button>
                           <div className="min-w-0">
                             <p className="truncate text-sm font-semibold text-foreground">{editingTemplateBlock.kind === "article" ? "Artikel bewerken" : "Blok bewerken"}</p>
-                            <p className="text-xs text-muted-foreground">Wijzigingen verschijnen na opslaan direct in de preview.</p>
+                            <p className="text-xs text-muted-foreground">
+                              {editingTemplateBlock.kind === "article"
+                                ? "Voeg leden toe als x.n; de preview vult automatisch het actuele artikelnummer in."
+                                : "Wijzigingen verschijnen na opslaan direct in de preview."}
+                            </p>
                           </div>
                         </div>
                       </div>
@@ -4922,6 +5063,21 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                             <button type="button" className="ql-link" aria-label="Link" />
                             <button type="button" className="ql-clean" aria-label="Opmaak wissen" />
                           </span>
+                          {editingTemplateBlock.kind === "article" && (
+                            <span className="ql-formats">
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                className="h-8 !w-auto shrink-0 px-2"
+                                onClick={insertTemplateArticleSection}
+                                title={`Nieuw artikellid x.${nextTemplateArticleSection || 1} invoegen`}
+                              >
+                                <ListPlus className="mr-1 h-4 w-4" />
+                                Lid x.{nextTemplateArticleSection || 1}
+                              </Button>
+                            </span>
+                          )}
                           <span className="ml-auto flex items-center gap-1">
                             <Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="Ongedaan maken" onClick={() => runTemplateEditorHistory("undo")}>
                               <Undo2 className="h-4 w-4" />
@@ -5021,7 +5177,14 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                             {provided => (
                               <div ref={provided.innerRef} {...provided.droppableProps} className="max-h-[760px] space-y-2 overflow-y-auto pr-1">
                                 {templateBlockRows.map((block, index) => (
-                                  <TemplateArticleBlock key={block.id} block={block} index={index} onOpen={openTemplateBlockEditor} />
+                                  <TemplateArticleBlock
+                                    key={block.id}
+                                    block={block}
+                                    index={index}
+                                    onOpen={openTemplateBlockEditor}
+                                    onHover={setHoveredTemplateBlockId}
+                                    isPreviewHighlighted={hoveredTemplateBlockId === block.id}
+                                  />
                                 ))}
                                 {provided.placeholder}
                               </div>
@@ -5038,6 +5201,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         templateName={templateForm.name || defaultTemplateName(templateForm)}
                         letterhead={selectedTemplateLetterhead}
                         clauses={clauses}
+                        highlightedBlockId={hoveredTemplateBlockId}
                       />
                     </div>
                   )}

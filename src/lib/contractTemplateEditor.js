@@ -129,7 +129,7 @@ function paragraphsFromText(value) {
       flush();
       return;
     }
-    if (/^\d+\.\d+\s+/.test(compact(line)) && current.length > 0) flush();
+    if (/^(?:x|\d+)\.\d+\s+/i.test(compact(line)) && current.length > 0) flush();
     current.push(line);
   });
   flush();
@@ -184,6 +184,49 @@ export function sanitizeContractBlockHtml(value) {
   return parsed.body.innerHTML || "<p><br></p>";
 }
 
+const ARTICLE_SECTION_BLOCK_SELECTOR = "p, li, h2, h3, blockquote";
+const ARTICLE_SECTION_TEXT_PATTERN = /^(\s*)(?:x|\d{1,3})\.\d+(?=\s|$)/i;
+
+function firstMeaningfulTextNode(element) {
+  for (const child of element.childNodes || []) {
+    if (child.nodeType === 3 && String(child.nodeValue || "").trim()) return child;
+    if (child.nodeType === 1) {
+      const nested = firstMeaningfulTextNode(child);
+      if (nested) return nested;
+    }
+  }
+  return null;
+}
+
+export function normalizeContractArticleSectionHtml(value) {
+  const html = sanitizeContractBlockHtml(value);
+  let sectionNumber = 0;
+
+  if (typeof DOMParser !== "undefined") {
+    const parsed = new DOMParser().parseFromString(html, "text/html");
+    const sectionBlocks = [...parsed.body.querySelectorAll(ARTICLE_SECTION_BLOCK_SELECTOR)]
+      .filter(element => !element.parentElement?.closest(ARTICLE_SECTION_BLOCK_SELECTOR));
+    sectionBlocks.forEach(element => {
+      const textNode = firstMeaningfulTextNode(element);
+      if (!textNode || !ARTICLE_SECTION_TEXT_PATTERN.test(String(textNode.nodeValue || ""))) return;
+      sectionNumber += 1;
+      textNode.nodeValue = String(textNode.nodeValue || "").replace(
+        ARTICLE_SECTION_TEXT_PATTERN,
+        (_, whitespace) => `${whitespace}x.${sectionNumber}`,
+      );
+    });
+    return parsed.body.innerHTML || "<p><br></p>";
+  }
+
+  return html.replace(
+    /(^|>)(\s*)(?:x|\d{1,3})\.\d+(?=\s|<|$)/gi,
+    (_, boundary, whitespace) => {
+      sectionNumber += 1;
+      return `${boundary}${whitespace}x.${sectionNumber}`;
+    },
+  );
+}
+
 export function contractBlockHtmlToPlainText(value) {
   const normalized = String(value || "")
     .replace(/<br\s*\/?>/gi, "\n")
@@ -197,6 +240,14 @@ export function contractBlockHtmlToPlainText(value) {
     .trim();
 }
 
+export function nextContractArticleSectionNumber(value) {
+  const content = contractBlockHtmlToPlainText(normalizeContractArticleSectionHtml(value));
+  const sectionNumbers = [...content.matchAll(/(?:^|\n)\s*x\.(\d+)(?=\s|$)/gim)]
+    .map(match => Number(match[1]))
+    .filter(Number.isFinite);
+  return Math.max(0, ...sectionNumbers) + 1;
+}
+
 function createBlockId(index, kind, title) {
   const slug = normalizeKeyPart(title)
     .replace(/[^a-z0-9]+/g, "-")
@@ -206,11 +257,12 @@ function createBlockId(index, kind, title) {
 }
 
 function createBlock({ index, kind, title, content, articleNumber = null }) {
+  const contentHtml = textToBlockHtml(content);
   return {
     id: createBlockId(index, kind, title),
     kind,
     title: compact(title),
-    content_html: textToBlockHtml(content),
+    content_html: kind === "article" ? normalizeContractArticleSectionHtml(contentHtml) : contentHtml,
     article_number: articleNumber,
   };
 }
@@ -220,7 +272,7 @@ export function createEmptyContractTemplateBlock(index = 0) {
     id: `template-block-new-${Date.now()}-${index}`,
     kind: "article",
     title: "Nieuw artikel",
-    content_html: "<p><br></p>",
+    content_html: "<p>x.1 Nieuwe bepaling</p>",
     article_number: null,
   };
 }
@@ -277,25 +329,35 @@ export function contractTemplateBlocksFromBody(body) {
 
 export function normalizeContractTemplateBlocks(blocks, fallbackBody = "") {
   if (!Array.isArray(blocks) || blocks.length === 0) return contractTemplateBlocksFromBody(fallbackBody);
-  return blocks.map((block, index) => ({
-    id: compact(block.id) || createBlockId(index, block.kind || "article", block.title),
-    kind: ["preamble", "article", "closing"].includes(block.kind) ? block.kind : "article",
-    title: compact(block.title) || (block.kind === "closing" ? "Ondertekening" : "Naamloos artikel"),
-    content_html: sanitizeContractBlockHtml(block.content_html || textToBlockHtml(block.content || "")),
-    article_number: Number(block.article_number) || null,
-  }));
+  let articleNumber = 0;
+  return blocks.map((block, index) => {
+    const kind = ["preamble", "article", "closing"].includes(block.kind) ? block.kind : "article";
+    if (kind === "article") articleNumber += 1;
+    const contentHtml = sanitizeContractBlockHtml(block.content_html || textToBlockHtml(block.content || ""));
+    return {
+      id: compact(block.id) || createBlockId(index, kind, block.title),
+      kind,
+      title: compact(block.title) || (kind === "closing" ? "Ondertekening" : "Naamloos artikel"),
+      content_html: kind === "article"
+        ? normalizeContractArticleSectionHtml(contentHtml)
+        : contentHtml,
+      article_number: kind === "article" ? articleNumber : null,
+    };
+  });
 }
 
-function renumberArticleText(value, oldNumber, newNumber) {
-  if (!oldNumber || oldNumber === newNumber) return value;
-  const pattern = new RegExp(`(^|\\n|\\s)${oldNumber}\\.(\\d+)\\b`, "g");
-  return String(value || "").replace(pattern, `$1${newNumber}.$2`);
+function renderArticleSectionText(value, articleNumber) {
+  return String(value || "").replace(
+    /(^|\n)(\s*)x\.(\d+)(?=\s|$)/gim,
+    `$1$2${articleNumber}.$3`,
+  );
 }
 
-function renumberArticleHtml(value, oldNumber, newNumber) {
-  if (!oldNumber || oldNumber === newNumber) return value;
-  const pattern = new RegExp(`(^|>|\\s)${oldNumber}\\.(\\d+)\\b`, "g");
-  return String(value || "").replace(pattern, `$1${newNumber}.$2`);
+function renderArticleSectionHtml(value, articleNumber) {
+  return normalizeContractArticleSectionHtml(value).replace(
+    /(^|>)(\s*)x\.(\d+)(?=\s|<|$)/gi,
+    `$1$2${articleNumber}.$3`,
+  );
 }
 
 export function renderedContractTemplateBlocks(blocks) {
@@ -313,7 +375,7 @@ export function renderedContractTemplateBlocks(blocks) {
     return {
       ...block,
       rendered_title: `Artikel ${articleNumber} - ${block.title}`,
-      rendered_content_html: renumberArticleHtml(block.content_html, block.article_number, articleNumber),
+      rendered_content_html: renderArticleSectionHtml(block.content_html, articleNumber),
       rendered_article_number: articleNumber,
     };
   });
@@ -326,7 +388,7 @@ export function contractTemplateBodyFromBlocks(blocks) {
     if (block.kind === "preamble") return [block.title, content].filter(Boolean).join("\n\n");
     if (block.kind === "closing") return [block.title || "Ondertekening", content].filter(Boolean).join("\n\n");
     articleNumber += 1;
-    content = renumberArticleText(content, block.article_number, articleNumber);
+    content = renderArticleSectionText(content, articleNumber);
     return [`Artikel ${articleNumber} - ${block.title}`, content].filter(Boolean).join("\n\n");
   }).filter(Boolean).join("\n\n");
 }

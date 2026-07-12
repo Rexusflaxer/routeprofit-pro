@@ -1,16 +1,25 @@
 import React from "react";
 import { Draggable } from "@hello-pangea/dnd";
 import { GripVertical, Edit } from "lucide-react";
-import { sanitizeContractBlockHtml } from "@/lib/contractTemplateEditor";
 
-export default function TemplateArticleBlock({ block, index, onOpen }) {
+export default function TemplateArticleBlock({ block, index, onOpen, onHover, isPreviewHighlighted = false }) {
   return (
     <Draggable draggableId={block.id} index={index}>
       {dragProvided => (
         <div
           ref={dragProvided.innerRef}
           {...dragProvided.draggableProps}
-          className="overflow-hidden rounded-md border border-border bg-card transition-colors hover:border-primary/60 hover:bg-accent/25"
+          className={`overflow-hidden rounded-md border bg-card transition-all hover:border-primary/60 hover:bg-accent/25 ${
+            isPreviewHighlighted
+              ? "border-sky-500/80 bg-sky-500/10 ring-1 ring-sky-500/30"
+              : "border-border"
+          }`}
+          onMouseEnter={() => onHover?.(block.id)}
+          onMouseLeave={() => onHover?.(null)}
+          onFocusCapture={() => onHover?.(block.id)}
+          onBlurCapture={event => {
+            if (!event.currentTarget.contains(event.relatedTarget)) onHover?.(null);
+          }}
         >
           <div className="flex items-center gap-2 border-b border-border bg-muted/20 px-2.5 py-2">
             <button
