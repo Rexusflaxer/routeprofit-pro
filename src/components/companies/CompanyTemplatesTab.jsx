@@ -2147,6 +2147,7 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
   const pages = measuredPagination?.signature === paginationSignature
     ? measuredPagination.pages
     : fallbackPages;
+  const previewPageStructure = pages.map(page => page.map(item => item.id).join(",")).join("|");
 
   useLayoutEffect(() => {
     const measurementRoot = previewMeasurementRef.current;
@@ -2201,18 +2202,26 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
 
   useEffect(() => {
     const scrollContainer = previewScrollRef.current;
-    if (!scrollContainer || !highlightedBlockId) return;
-    const target = [...scrollContainer.querySelectorAll("[data-template-block-id]")]
-      .find(element => element.getAttribute("data-template-block-id") === highlightedBlockId);
-    if (!target) return;
-    const containerRect = scrollContainer.getBoundingClientRect();
-    const targetRect = target.getBoundingClientRect();
-    const targetTop = scrollContainer.scrollTop
-      + targetRect.top
-      - containerRect.top
-      - Math.max(24, scrollContainer.clientHeight * 0.2);
-    scrollContainer.scrollTo({ top: Math.max(0, targetTop), behavior: "smooth" });
-  }, [highlightedBlockId, previewZoom, pages.length]);
+    if (!scrollContainer || !highlightedBlockId) return undefined;
+
+    const centerHighlightedBlock = () => {
+      const target = [...scrollContainer.querySelectorAll("[data-template-block-id]")]
+        .find(element => element.getAttribute("data-template-block-id") === highlightedBlockId);
+      if (!target) return;
+      target.scrollIntoView({
+        behavior: "smooth",
+        block: "center",
+        inline: "center",
+      });
+    };
+
+    const animationFrame = window.requestAnimationFrame(centerHighlightedBlock);
+    const zoomSettledTimer = window.setTimeout(centerHighlightedBlock, 180);
+    return () => {
+      window.cancelAnimationFrame(animationFrame);
+      window.clearTimeout(zoomSettledTimer);
+    };
+  }, [highlightedBlockId, previewPageStructure, previewZoom]);
 
   const changeZoom = (direction) => {
     setPreviewZoom(current => Math.min(
