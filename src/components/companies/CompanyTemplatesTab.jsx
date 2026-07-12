@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef, useState } from "react";
+import React, { useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DragDropContext, Droppable } from "@hello-pangea/dnd";
 import TemplateArticleBlock from "@/components/companies/TemplateArticleBlock";
@@ -45,6 +45,7 @@ import {
   normalizeContractTemplateBlocks,
   normalizeTemplateReference,
   paginateContractTemplateBlocks,
+  paginateContractTemplateUnitsByHeight,
   sanitizeContractBlockHtml,
 } from "@/lib/contractTemplateEditor";
 import {
@@ -2069,10 +2070,39 @@ function LayerIcon({ type }) {
 const TEMPLATE_PREVIEW_ZOOM_MIN = 60;
 const TEMPLATE_PREVIEW_ZOOM_MAX = 180;
 const TEMPLATE_PREVIEW_ZOOM_STEP = 10;
+const TEMPLATE_PREVIEW_PAGE_WIDTH = 420;
+const TEMPLATE_PREVIEW_PAGE_HEIGHT = TEMPLATE_PREVIEW_PAGE_WIDTH * (297 / 210);
+const TEMPLATE_PREVIEW_CONTENT_PADDING_RATIO = 0.045;
+const TEMPLATE_PREVIEW_HEIGHT_SAFETY_PX = 6;
+const TEMPLATE_PREVIEW_UNIT_CLASS = "relative -mx-1 mb-2 break-inside-avoid rounded-[2px] px-1 py-0.5 [page-break-inside:avoid]";
+const TEMPLATE_PREVIEW_RICH_TEXT_CLASS = "[overflow-wrap:anywhere] [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 [&_blockquote]:pl-2 [&_h2]:font-bold [&_h3]:font-semibold [&_li]:mb-0.5 [&_ol]:ml-4 [&_ol]:list-decimal [&_p]:mb-1 [&_ul]:ml-4 [&_ul]:list-disc";
+
+function TemplatePreviewUnit({ item, highlightedBlockId, measurement = false }) {
+  const isHighlighted = !measurement && item.block_id === highlightedBlockId;
+  return (
+    <div
+      data-template-block-id={measurement ? undefined : item.block_id}
+      data-preview-measure-id={measurement ? item.id : undefined}
+      className={`${TEMPLATE_PREVIEW_UNIT_CLASS} ${
+        isHighlighted
+          ? "bg-sky-400/25 ring-1 ring-inset ring-sky-500/55 transition-colors duration-150"
+          : ""
+      }`}
+    >
+      {item.heading && <p className="mb-1 font-bold text-slate-950">{item.heading}</p>}
+      <div
+        className={TEMPLATE_PREVIEW_RICH_TEXT_CLASS}
+        dangerouslySetInnerHTML={{ __html: sanitizeContractBlockHtml(item.html) }}
+      />
+    </div>
+  );
+}
 
 function TemplateDocumentPreview({ body, blocks, templateName, letterhead, clauses, highlightedBlockId }) {
   const previewScrollRef = useRef(null);
+  const previewMeasurementRef = useRef(null);
   const [previewZoom, setPreviewZoom] = useState(100);
+  const [measuredPagination, setMeasuredPagination] = useState(null);
   const margins = normalizeLetterheadMargins(letterhead || {});
   const sourceMode = letterhead ? normalizeSourceMode(letterhead) : LETTERHEAD_SOURCE_MODES.design;
   const backgroundFit = letterhead ? normalizeBackgroundFit(letterhead) : DEFAULT_LETTERHEAD_BACKGROUND_FIT;
@@ -2087,9 +2117,87 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
   const objectFit = backgroundFit === "stretch" ? "fill" : backgroundFit;
   const isPdf = sourceMode === LETTERHEAD_SOURCE_MODES.upload && fileLooksLikePdf(source, filename);
   const isImage = sourceMode === LETTERHEAD_SOURCE_MODES.upload && fileLooksLikeImage(source, filename);
-  const previewBody = expandClauseMarkers(body, clauses);
-  const previewBlocks = normalizeContractTemplateBlocks(blocks, previewBody);
-  const pages = paginateContractTemplateBlocks(previewBlocks);
+  const previewBody = useMemo(() => expandClauseMarkers(body, clauses), [body, clauses]);
+  const previewBlocks = useMemo(
+    () => normalizeContractTemplateBlocks(blocks, previewBody),
+    [blocks, previewBody],
+  );
+  const previewUnits = useMemo(
+    () => paginateContractTemplateBlocks(previewBlocks, Number.MAX_SAFE_INTEGER).flat(),
+    [previewBlocks],
+  );
+  const textAreaWidth = TEMPLATE_PREVIEW_PAGE_WIDTH * (1 - ((left + right) / 100));
+  const textAreaHeight = TEMPLATE_PREVIEW_PAGE_HEIGHT * (1 - ((top + bottom) / 100));
+  const previewPaddingPx = textAreaWidth * TEMPLATE_PREVIEW_CONTENT_PADDING_RATIO;
+  const measurementContentWidth = Math.max(40, textAreaWidth - (previewPaddingPx * 2));
+  const availableContentHeight = Math.max(48, textAreaHeight - (previewPaddingPx * 2));
+  const paginationSignature = useMemo(() => JSON.stringify({
+    templateName: templateName || "Arbeidsovereenkomst",
+    measurementContentWidth,
+    availableContentHeight,
+    units: previewUnits.map(item => [item.id, item.heading, item.html]),
+  }), [availableContentHeight, measurementContentWidth, previewUnits, templateName]);
+  const fallbackPages = useMemo(
+    () => paginateContractTemplateBlocks(
+      previewBlocks,
+      Math.max(8, Math.floor((availableContentHeight - 28) / 11)),
+    ),
+    [availableContentHeight, previewBlocks],
+  );
+  const pages = measuredPagination?.signature === paginationSignature
+    ? measuredPagination.pages
+    : fallbackPages;
+
+  useLayoutEffect(() => {
+    const measurementRoot = previewMeasurementRef.current;
+    if (!measurementRoot) return undefined;
+
+    let cancelled = false;
+    const measurePages = () => {
+      if (cancelled) return;
+      const heights = {};
+      measurementRoot.querySelectorAll("[data-preview-measure-id]").forEach(element => {
+        const style = window.getComputedStyle(element);
+        heights[element.getAttribute("data-preview-measure-id")] = Math.ceil(
+          element.getBoundingClientRect().height
+          + (Number.parseFloat(style.marginTop) || 0)
+          + (Number.parseFloat(style.marginBottom) || 0),
+        );
+      });
+      const title = measurementRoot.querySelector("[data-preview-measure-title]");
+      const titleStyle = title ? window.getComputedStyle(title) : null;
+      const titleHeight = title
+        ? Math.ceil(
+          title.getBoundingClientRect().height
+          + (Number.parseFloat(titleStyle?.marginTop) || 0)
+          + (Number.parseFloat(titleStyle?.marginBottom) || 0),
+        )
+        : 0;
+      const measuredPages = paginateContractTemplateUnitsByHeight(previewUnits, {
+        heights,
+        pageHeight: availableContentHeight,
+        firstPageReservedHeight: titleHeight,
+        safetyGap: TEMPLATE_PREVIEW_HEIGHT_SAFETY_PX,
+      });
+      const structure = measuredPages.map(page => page.map(item => item.id).join(",")).join("|");
+      setMeasuredPagination(current => {
+        if (current?.signature === paginationSignature && current.structure === structure) return current;
+        return { signature: paginationSignature, structure, pages: measuredPages };
+      });
+    };
+
+    measurePages();
+    const resizeObserver = typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(measurePages);
+    resizeObserver?.observe(measurementRoot);
+    document.fonts?.ready?.then(measurePages);
+
+    return () => {
+      cancelled = true;
+      resizeObserver?.disconnect();
+    };
+  }, [availableContentHeight, paginationSignature, previewUnits]);
 
   useEffect(() => {
     const scrollContainer = previewScrollRef.current;
@@ -2115,6 +2223,19 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
 
   return (
     <div className="rounded-lg border border-border bg-muted/20 p-4 xl:sticky xl:top-3 xl:self-start">
+      <div
+        ref={previewMeasurementRef}
+        aria-hidden="true"
+        className="pointer-events-none fixed left-[-10000px] top-0 invisible z-[-1] text-[8px] leading-[1.35] text-slate-900"
+        style={{ width: `${measurementContentWidth}px` }}
+      >
+        <p data-preview-measure-title className="mb-2 text-[10px] font-bold leading-tight text-slate-950">
+          {templateName || "Arbeidsovereenkomst"}
+        </p>
+        {previewUnits.map(item => (
+          <TemplatePreviewUnit key={`measurement-${item.id}`} item={item} measurement />
+        ))}
+      </div>
       <div className="mb-3 flex flex-wrap items-center justify-between gap-2 text-xs text-muted-foreground">
         <div className="min-w-0">
           <span className="font-semibold uppercase tracking-wider">PDF-preview</span>
@@ -2174,7 +2295,7 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
       </div>
       <div ref={previewScrollRef} className="max-h-[760px] overflow-auto rounded-lg bg-slate-950/5 p-3 dark:bg-black/25">
         <div
-          className="mx-auto w-[420px] max-w-full space-y-4 origin-top transition-[zoom] duration-150"
+          className="mx-auto w-[420px] space-y-4 origin-top transition-[zoom] duration-150"
           style={{ zoom: previewZoom / 100 }}
         >
           {pages.map((page, pageIndex) => (
@@ -2191,7 +2312,7 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
               )}
               {sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.map(renderDesignLayer)}
               <div
-                className="absolute z-20 overflow-hidden bg-white/78 p-[4.5%] text-[7px] leading-[1.35] text-slate-900 backdrop-blur-[0.5px] sm:text-[8px]"
+                className="absolute z-20 overflow-hidden bg-white/78 p-[4.5%] text-[8px] leading-[1.35] text-slate-900 backdrop-blur-[0.5px]"
                 style={{
                   top: `${top}%`,
                   right: `${right}%`,
@@ -2204,24 +2325,13 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
                 )}
                 {page.length === 0 ? (
                   <p>Voeg links een artikelblok toe.</p>
-                ) : page.map(item => {
-                  const isHighlighted = item.block_id === highlightedBlockId;
-                  return (
-                    <div
-                      key={item.id}
-                      data-template-block-id={item.block_id}
-                      className={`relative -mx-1 mb-2 break-inside-avoid rounded-[2px] px-1 py-0.5 transition-colors duration-150 [page-break-inside:avoid] ${
-                        isHighlighted ? "bg-sky-400/25 ring-1 ring-inset ring-sky-500/55" : ""
-                      }`}
-                    >
-                      {item.heading && <p className="mb-1 font-bold text-slate-950">{item.heading}</p>}
-                      <div
-                        className="[&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 [&_blockquote]:pl-2 [&_h2]:font-bold [&_h3]:font-semibold [&_li]:mb-0.5 [&_ol]:ml-4 [&_ol]:list-decimal [&_p]:mb-1 [&_ul]:ml-4 [&_ul]:list-disc"
-                        dangerouslySetInnerHTML={{ __html: sanitizeContractBlockHtml(item.html) }}
-                      />
-                    </div>
-                  );
-                })}
+                ) : page.map(item => (
+                  <TemplatePreviewUnit
+                    key={item.id}
+                    item={item}
+                    highlightedBlockId={highlightedBlockId}
+                  />
+                ))}
               </div>
               <span className="absolute bottom-2 right-3 z-30 text-[7px] font-medium text-slate-500">{pageIndex + 1}</span>
             </div>
@@ -5067,9 +5177,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                             <span className="ql-formats">
                               <Button
                                 type="button"
-                                variant="outline"
+                                variant="default"
                                 size="sm"
-                                className="h-8 !w-auto shrink-0 px-2"
+                                className="template-toolbar-primary !h-8 !w-auto shrink-0 !rounded-md !border !border-primary !bg-primary !px-2 !py-1.5 !text-primary-foreground hover:!bg-primary/90 hover:!text-primary-foreground"
                                 onClick={insertTemplateArticleSection}
                                 title={`Nieuw artikellid x.${nextTemplateArticleSection || 1} invoegen`}
                               >
@@ -5079,15 +5189,15 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                             </span>
                           )}
                           <span className="ml-auto flex items-center gap-1">
-                            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="Ongedaan maken" onClick={() => runTemplateEditorHistory("undo")}>
+                            <Button type="button" variant="ghost" size="icon" className="!h-7 !w-7 !text-foreground hover:!bg-accent hover:!text-foreground" title="Ongedaan maken" onClick={() => runTemplateEditorHistory("undo")}>
                               <Undo2 className="h-4 w-4" />
                             </Button>
-                            <Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="Opnieuw" onClick={() => runTemplateEditorHistory("redo")}>
+                            <Button type="button" variant="ghost" size="icon" className="!h-7 !w-7 !text-foreground hover:!bg-accent hover:!text-foreground" title="Opnieuw" onClick={() => runTemplateEditorHistory("redo")}>
                               <Redo2 className="h-4 w-4" />
                             </Button>
                             <Popover>
                               <PopoverTrigger asChild>
-                                <Button type="button" variant="outline" size="sm" className="h-8 !w-auto shrink-0 px-2">
+                                <Button type="button" variant="default" size="sm" className="template-toolbar-primary !h-8 !w-auto shrink-0 !rounded-md !border !border-primary !bg-primary !px-2 !py-1.5 !text-primary-foreground hover:!bg-primary/90 hover:!text-primary-foreground">
                                   <Braces className="mr-1 h-4 w-4" />
                                   Placeholders
                                 </Button>

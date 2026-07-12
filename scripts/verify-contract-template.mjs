@@ -20,6 +20,7 @@ import {
   nextContractTemplateVersion,
   normalizeContractTemplateBlocks,
   paginateContractTemplateBlocks,
+  paginateContractTemplateUnitsByHeight,
 } from "../src/lib/contractTemplateEditor.js";
 
 const company = {
@@ -137,6 +138,22 @@ assert.doesNotMatch(legacyMovedBody, /6\.[12]/);
 const previewPages = paginateContractTemplateBlocks(editorBlocks);
 assert.ok(previewPages.length > 1);
 assert.equal(new Set(previewPages.flat().map(item => item.id)).size, previewPages.flat().length);
+const measuredPreviewUnits = [
+  { id: "article-1", estimated_units: 1 },
+  { id: "article-2", estimated_units: 1 },
+  { id: "article-3", estimated_units: 1 },
+];
+const measuredPreviewPages = paginateContractTemplateUnitsByHeight(measuredPreviewUnits, {
+  heights: { "article-1": 35, "article-2": 35, "article-3": 35 },
+  pageHeight: 80,
+  firstPageReservedHeight: 10,
+  safetyGap: 5,
+});
+assert.deepEqual(
+  measuredPreviewPages.map(page => page.map(item => item.id)),
+  [["article-1"], ["article-2", "article-3"]],
+);
+assert.deepEqual(measuredPreviewPages.flat().map(item => item.id), measuredPreviewUnits.map(item => item.id));
 
 const pbFulltimeDurations = durationOptionsForContractTemplate({
   template_type: "employment_contract",

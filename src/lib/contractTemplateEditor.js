@@ -436,6 +436,35 @@ export function paginateContractTemplateBlocks(blocks, maxUnits = 57) {
   return pages;
 }
 
+export function paginateContractTemplateUnitsByHeight(units = [], {
+  heights = {},
+  pageHeight = 1,
+  firstPageReservedHeight = 0,
+  safetyGap = 0,
+} = {}) {
+  const availableHeight = Math.max(1, Number(pageHeight) - Math.max(0, Number(safetyGap) || 0));
+  const pages = [[]];
+  let usedHeight = Math.max(0, Number(firstPageReservedHeight) || 0);
+
+  (units || []).forEach(unit => {
+    const measuredHeight = Number(heights[unit.id]);
+    const unitHeight = Number.isFinite(measuredHeight) && measuredHeight > 0
+      ? measuredHeight
+      : Math.max(1, Number(unit.estimated_units || 1) * 11);
+    const currentPage = pages[pages.length - 1];
+    const shouldStartNewPage = usedHeight + unitHeight > availableHeight
+      && (currentPage.length > 0 || (pages.length === 1 && usedHeight > 0));
+    if (shouldStartNewPage) {
+      pages.push([]);
+      usedHeight = 0;
+    }
+    pages[pages.length - 1].push(unit);
+    usedHeight += unitHeight;
+  });
+
+  return pages;
+}
+
 function contractDurationType(form = {}) {
   if (form.contract_model === "internship") return "internship";
   if (["min_max_employment", "call_employment"].includes(form.contract_model)) return "call";

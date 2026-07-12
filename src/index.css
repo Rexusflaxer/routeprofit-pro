@@ -84,6 +84,52 @@
   }
 }
 
+@layer components {
+  #template-block-toolbar button,
+  #template-block-toolbar .ql-picker,
+  #template-block-toolbar .ql-picker-label {
+    color: hsl(var(--foreground));
+  }
+
+  .dark #template-block-toolbar button,
+  .dark #template-block-toolbar .ql-picker,
+  .dark #template-block-toolbar .ql-picker-label {
+    color: #fff;
+  }
+
+  #template-block-toolbar .ql-stroke,
+  #template-block-toolbar .ql-stroke-miter {
+    stroke: currentColor !important;
+  }
+
+  #template-block-toolbar .ql-fill,
+  #template-block-toolbar .ql-stroke.ql-fill {
+    fill: currentColor !important;
+  }
+
+  #template-block-toolbar button:hover,
+  #template-block-toolbar button:focus,
+  #template-block-toolbar button.ql-active,
+  #template-block-toolbar .ql-picker-label:hover,
+  #template-block-toolbar .ql-picker-label.ql-active,
+  #template-block-toolbar .ql-picker-item:hover,
+  #template-block-toolbar .ql-picker-item.ql-selected {
+    color: hsl(var(--primary));
+  }
+
+  #template-block-toolbar .ql-picker-options {
+    border-color: hsl(var(--border));
+    background: hsl(var(--popover));
+    color: hsl(var(--popover-foreground));
+  }
+
+  #template-block-toolbar button.template-toolbar-primary,
+  #template-block-toolbar button.template-toolbar-primary:hover,
+  #template-block-toolbar button.template-toolbar-primary:focus {
+    color: hsl(var(--primary-foreground)) !important;
+  }
+}
+
 @layer base {
   html,
   body,
