@@ -21,6 +21,7 @@ import {
   normalizeContractTemplateBlocks,
   paginateContractTemplateBlocks,
   paginateContractTemplateUnitsByHeight,
+  resequenceContractTemplateVersions,
 } from "../src/lib/contractTemplateEditor.js";
 
 const company = {
@@ -179,11 +180,22 @@ const templateFamily = {
 const familyKey = contractTemplateFamilyKey(templateFamily);
 const familyVersions = [
   { ...templateFamily, id: "v1", version: 1 },
-  { ...templateFamily, id: "v2", version: 2 },
+  { ...templateFamily, id: "v2", name: "Oude afwijkende referentie", version: 2 },
 ];
 assert.equal(groupContractTemplateVersions(familyVersions).length, 1);
 assert.equal(groupContractTemplateVersions(familyVersions)[0].versions[0].id, "v2");
 assert.equal(nextContractTemplateVersion(familyVersions, familyKey), 3);
+assert.equal(contractTemplateFamilyKey(familyVersions[0]), contractTemplateFamilyKey(familyVersions[1]));
+assert.deepEqual(
+  resequenceContractTemplateVersions([
+    { ...templateFamily, id: "v3", version: 3 },
+    { ...templateFamily, id: "v1", version: 1 },
+  ]).map(item => ({ id: item.id, version: item.version, source: item.version_source_id })),
+  [
+    { id: "v1", version: 1, source: null },
+    { id: "v3", version: 2, source: "v1" },
+  ],
+);
 
 function evaluate(form) {
   const body = renderContractTemplateBody(preset.body, { personnel, form, company });

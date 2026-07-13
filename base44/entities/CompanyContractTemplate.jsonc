@@ -8,21 +8,21 @@
     },
     "name": {
       "type": "string",
-      "description": "Verplichte referentie van de template. Uniek binnen bedrijf, documentsoort, CAO en contractmodel; opvolgende versies delen dezelfde referentie."
+      "description": "Automatisch gegenereerde weergavetitel op basis van documentsoort, CAO en contractmodel. De gebruiker voert deze niet handmatig in."
     },
     "reference_key": {
       "type": [
         "string",
         "null"
       ],
-      "description": "Genormaliseerde referentie voor hoofdletterongevoelige uniciteitscontrole."
+      "description": "Legacyveld voor oudere templates. Nieuwe templates gebruiken geen handmatige referentie."
     },
     "template_family_key": {
       "type": [
         "string",
         "null"
       ],
-      "description": "Stabiele sleutel waarmee alle versies binnen dezelfde documentsoort, CAO, contractvorm en referentie worden gegroepeerd."
+      "description": "Stabiele sleutel waarmee alle versies binnen dezelfde documentsoort, CAO en contractvorm worden gegroepeerd."
     },
     "version_source_id": {
       "type": [
@@ -124,7 +124,7 @@
     "version": {
       "type": "number",
       "default": 1,
-      "description": "Automatisch oplopend versienummer binnen dezelfde templatereferentie."
+      "description": "Automatisch oplopend versienummer binnen dezelfde documentsoort, CAO en contractvorm."
     },
     "status": {
       "type": "string",

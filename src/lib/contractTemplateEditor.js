@@ -512,9 +512,7 @@ export function contractTemplateScopeKey({ template_type, cao_key, contract_mode
 }
 
 export function contractTemplateFamilyKey(template = {}) {
-  const stored = compact(template.template_family_key || template.metadata?.template_family_key);
-  if (stored) return stored;
-  return `${contractTemplateScopeKey(template)}::${normalizeTemplateReference(template.name)}`;
+  return contractTemplateScopeKey(template);
 }
 
 export function groupContractTemplateVersions(templates = []) {
@@ -526,11 +524,28 @@ export function groupContractTemplateVersions(templates = []) {
   });
   return [...groups.entries()].map(([key, versions]) => ({
     key,
-    versions: [...versions].sort((a, b) => Number(b.version || 1) - Number(a.version || 1)),
+    versions: [...versions].sort((a, b) => (
+      Number(b.version || 1) - Number(a.version || 1)
+      || String(b.created_date || b.created_at || "").localeCompare(String(a.created_date || a.created_at || ""))
+      || String(b.id || "").localeCompare(String(a.id || ""))
+    )),
   })).sort((a, b) => String(a.versions[0]?.name || "").localeCompare(String(b.versions[0]?.name || ""), "nl"));
 }
 
 export function nextContractTemplateVersion(templates = [], familyKey) {
   const versions = (templates || []).filter(template => contractTemplateFamilyKey(template) === familyKey);
   return Math.max(0, ...versions.map(template => Number(template.version || 1))) + 1;
+}
+
+export function resequenceContractTemplateVersions(templates = []) {
+  const ordered = [...(templates || [])].sort((a, b) => (
+    Number(a.version || 1) - Number(b.version || 1)
+    || String(a.created_date || a.created_at || "").localeCompare(String(b.created_date || b.created_at || ""))
+    || String(a.id || "").localeCompare(String(b.id || ""))
+  ));
+  return ordered.map((template, index) => ({
+    ...template,
+    version: index + 1,
+    version_source_id: index > 0 ? ordered[index - 1].id : null,
+  }));
 }

@@ -13,8 +13,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
-import { Checkbox } from "@/components/ui/checkbox";
-import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
+import { Switch } from "@/components/ui/switch";
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from "@/components/ui/alert-dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { Tooltip, TooltipContent, TooltipProvider, TooltipTrigger } from "@/components/ui/tooltip";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
@@ -43,9 +52,9 @@ import {
   nextContractArticleSectionNumber,
   normalizeContractArticleSectionHtml,
   normalizeContractTemplateBlocks,
-  normalizeTemplateReference,
   paginateContractTemplateBlocks,
   paginateContractTemplateUnitsByHeight,
+  resequenceContractTemplateVersions,
   sanitizeContractBlockHtml,
 } from "@/lib/contractTemplateEditor";
 import {
@@ -61,7 +70,6 @@ import {
   Bold,
   Braces,
   CheckCircle,
-  ChevronDown,
   ChevronLeft,
   ChevronRight,
   Copy,
@@ -80,6 +88,7 @@ import {
   Minus,
   Plus,
   Redo2,
+  RotateCcw,
   Save,
   Square,
   Strikethrough,
@@ -861,11 +870,11 @@ const SUBCONTRACTOR_TEMPLATE_BODY = [
 ].join("\n");
 
 const LETTERHEAD_TABLE_GRID = "grid grid-cols-[minmax(220px,1.5fr)_minmax(110px,130px)_minmax(100px,120px)_minmax(140px,180px)_minmax(160px,max-content)] gap-3 xl:gap-4";
-const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(240px,1.4fr)_minmax(72px,92px)_minmax(120px,150px)_minmax(220px,1fr)_minmax(140px,180px)_minmax(168px,max-content)] gap-3 xl:gap-4";
+const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(76px,94px)_minmax(240px,1.6fr)_minmax(120px,148px)_minmax(172px,210px)_minmax(130px,170px)_minmax(154px,max-content)] gap-3 xl:gap-4";
 const CLAUSE_LIBRARY_GRID = "grid grid-cols-[minmax(44px,56px)_minmax(260px,1fr)_minmax(130px,160px)_minmax(150px,190px)_minmax(120px,150px)] gap-3 xl:gap-4";
 const LETTERHEAD_STEPS = ["Upload", "Marges", "Controle"];
-const EMPLOYMENT_TEMPLATE_STEPS = ["Documentsoort", "CAO", "Contractvorm", "Template", "Start", "Briefpapier", "Editor", "Duurkeuzes", "Referentie"];
-const BUSINESS_TEMPLATE_STEPS = ["Documentsoort", "Template", "Start", "Briefpapier", "Editor", "Referentie"];
+const EMPLOYMENT_TEMPLATE_STEPS = ["Documentsoort", "CAO", "Contractvorm", "Template", "Start", "Briefpapier", "Editor", "Duurkeuzes", "Afronden"];
+const BUSINESS_TEMPLATE_STEPS = ["Documentsoort", "Template", "Start", "Briefpapier", "Editor", "Afronden"];
 const CLAUSE_STEPS = ["Onderdeel", "Clausule", "Uitwerken", "Controle"];
 const CLAUSE_MARKER_PREFIX = "clausule:";
 const LETTERHEAD_SOURCE_MODES = {
@@ -1294,6 +1303,11 @@ function defaultTemplateName(form = {}) {
   if (form.template_type === "sales_contract") return "Verkoopcontract";
   if (form.template_type === "subcontractor_framework_agreement") return "Raamovereenkomst onderaannemers";
   return "Contracttemplate";
+}
+
+function statusBeforeTemplateArchive(record = {}) {
+  const previousStatus = record.metadata?.status_before_archive;
+  return ["draft", "review", "published"].includes(previousStatus) ? previousStatus : "draft";
 }
 
 function standardTemplateBody(form = {}) {
@@ -2376,7 +2390,6 @@ function initialTemplate(companyId) {
     editor_blocks: contractTemplateBlocksFromBody(body),
     is_new_version: false,
     version_source_id: null,
-    version_family_key: "",
     standard_template_id: null,
     standard_template_version: null,
   };
@@ -2424,10 +2437,6 @@ function templateFormFromRecord(companyId, record) {
     editor_blocks: editorBlocks,
     is_new_version: false,
     version_source_id: null,
-    version_family_key: contractTemplateFamilyKey({
-      ...record,
-      contract_model: contractModel,
-    }),
     standard_template_id: upgradeLegacyBody ? standardPreset.id : (record.metadata?.standard_template_id || null),
     standard_template_version: upgradeLegacyBody ? standardPreset.version : (record.metadata?.standard_template_version || null),
   };
@@ -2524,7 +2533,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const [templateBrowserType, setTemplateBrowserType] = useState("");
   const [templateBrowserCaoKey, setTemplateBrowserCaoKey] = useState("");
   const [templateBrowserContractModel, setTemplateBrowserContractModel] = useState("");
-  const [expandedTemplateFamilies, setExpandedTemplateFamilies] = useState([]);
+  const [showTemplateArchive, setShowTemplateArchive] = useState(false);
+  const [templateDeleteCandidate, setTemplateDeleteCandidate] = useState(null);
+  const [templateActionId, setTemplateActionId] = useState(null);
   const [editingTemplateBlockId, setEditingTemplateBlockId] = useState(null);
   const [templateBlockDraft, setTemplateBlockDraft] = useState(null);
   const [hoveredTemplateBlockId, setHoveredTemplateBlockId] = useState(null);
@@ -2636,10 +2647,16 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const selectedContractModel = getContractModel(templateForm.contract_model);
   const activeTemplates = useMemo(() => [...templates]
     .filter(item => item.status !== "archived")
-    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")) || Number(b.version || 1) - Number(a.version || 1)),
+    .sort((a, b) => (
+      Number(b.version || 1) - Number(a.version || 1)
+      || String(b.created_date || b.created_at || "").localeCompare(String(a.created_date || a.created_at || ""))
+    )),
   [templates]);
   const sortedTemplates = useMemo(() => [...templates]
-    .sort((a, b) => String(a.name || "").localeCompare(String(b.name || "")) || Number(b.version || 1) - Number(a.version || 1)),
+    .sort((a, b) => (
+      Number(b.version || 1) - Number(a.version || 1)
+      || String(b.created_date || b.created_at || "").localeCompare(String(a.created_date || a.created_at || ""))
+    )),
   [templates]);
   const matchingTemplateChoices = useMemo(
     () => groupContractTemplateVersions(activeTemplates.filter(item => templateMatchesBuilder(item, templateForm)))
@@ -2674,10 +2691,15 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     }
     return true;
   }), [sortedTemplates, templateBrowserType, templateBrowserCaoKey, templateBrowserContractModel]);
-  const templateBrowserVersionGroups = useMemo(
-    () => groupContractTemplateVersions(templateBrowserTableItems),
+  const activeTemplateBrowserItems = useMemo(
+    () => templateBrowserTableItems.filter(item => item.status !== "archived"),
     [templateBrowserTableItems],
   );
+  const archivedTemplateBrowserItems = useMemo(
+    () => templateBrowserTableItems.filter(item => item.status === "archived"),
+    [templateBrowserTableItems],
+  );
+  const visibleTemplateBrowserItems = showTemplateArchive ? archivedTemplateBrowserItems : activeTemplateBrowserItems;
   const companyCaoOptions = useMemo(() => uniqueStrings(caoAssignments
     .filter(item => item.status !== "archived" && item.status !== "inactive")
     .map(item => item.cao_key))
@@ -2711,10 +2733,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const selectedTemplateDurationLabels = (templateForm.duration_options || [])
     .map(value => availableTemplateDurationOptions.find(option => option.value === value)?.label)
     .filter(Boolean);
-  const currentTemplateFamilyVersions = templateForm.version_family_key
-    ? templates.filter(item => contractTemplateFamilyKey(item) === templateForm.version_family_key)
-    : [];
-  const templateReferenceLocked = Boolean(templateForm.is_new_version || currentTemplateFamilyVersions.length > 1);
   const templateEditorModules = useMemo(() => ({
     toolbar: { container: "#template-block-toolbar" },
     history: { delay: 700, maxStack: 100, userOnly: true },
@@ -2915,7 +2933,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
 
   const saveTemplateMutation = useMutation({
     mutationFn: async (statusOverride) => {
-      if (!templateForm.name.trim()) throw new Error("Vul een referentie voor de template in.");
       if (!templateForm.template_type) throw new Error("Kies eerst het soort contracttemplate.");
       const isEmploymentTemplate = isEmploymentTemplateType(templateForm.template_type);
       if (isEmploymentTemplate && !templateForm.cao_key) throw new Error("Kies eerst de CAO die voor dit bedrijf geldt.");
@@ -2930,21 +2947,14 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       const persistedTemplates = await base44.entities.CompanyContractTemplate.filter({ company_id: companyId }, "-created_date");
       const currentTemplates = Array.isArray(persistedTemplates) ? persistedTemplates : templates;
       const previous = editingTemplateId ? currentTemplates.find(item => item.id === editingTemplateId) || {} : {};
-      const templateFamilyKey = `${contractTemplateScopeKey({
+      const templateFamilyKey = contractTemplateScopeKey({
         template_type: normalizeTemplateType(templateForm.template_type),
         cao_key: isEmploymentTemplate ? templateForm.cao_key : "",
         contract_model: contractModel?.value || "",
-      })}::${normalizeTemplateReference(templateForm.name)}`;
-      const originalFamilyKey = previous.id ? contractTemplateFamilyKey(previous) : templateForm.version_family_key;
-      const duplicateReference = currentTemplates.find(item => (
-        item.id !== editingTemplateId
-        && contractTemplateFamilyKey(item) === templateFamilyKey
-      ));
-      const duplicateAllowed = Boolean(templateForm.is_new_version && originalFamilyKey === templateFamilyKey);
-      const existingFamilyRename = Boolean(previous.id && originalFamilyKey === templateFamilyKey);
-      if (duplicateReference && !duplicateAllowed && !existingFamilyRename) {
-        throw new Error("Deze referentie bestaat al binnen dezelfde contractcategorie, CAO en contractvorm. Open de bestaande regel en maak daar een nieuwe versie aan.");
-      }
+      });
+      const familyVersions = currentTemplates
+        .filter(item => item.id !== editingTemplateId && contractTemplateFamilyKey(item) === templateFamilyKey)
+        .sort((a, b) => Number(b.version || 1) - Number(a.version || 1));
       const status = statusOverride || templateForm.status || "draft";
       const unknownPlaceholders = getUnknownContractTemplatePlaceholders(body);
       if (status === "published" && templateForm.standard_template_id && unknownPlaceholders.length > 0) {
@@ -2956,10 +2966,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       if (status === "published" && missingRequiredPlaceholders.length > 0) {
         throw new Error(`Publiceren is geblokkeerd: essentiële placeholders ontbreken (${missingRequiredPlaceholders.join(", ")}).`);
       }
-      const createNewVersion = Boolean(templateForm.is_new_version);
-      const version = createNewVersion
-        ? nextContractTemplateVersion(currentTemplates, templateFamilyKey)
-        : Number(previous.version || templateForm.version || 1);
+      const createNewVersion = Boolean(templateForm.is_new_version || (!editingTemplateId && familyVersions.length > 0));
+      const version = editingTemplateId && !createNewVersion
+        ? Number(previous.version || templateForm.version || 1)
+        : nextContractTemplateVersion(currentTemplates, templateFamilyKey);
+      const versionSourceId = createNewVersion
+        ? (templateForm.version_source_id || familyVersions[0]?.id || null)
+        : (previous.version_source_id || previous.metadata?.version_source_id || null);
       const clauseIds = sortClauseIdsByConfiguredOrder(extractClauseIds(body), clauses);
       const appliedPreset = templateForm.standard_template_id
         ? getStandardContractTemplatePreset(templateForm)
@@ -2970,12 +2983,16 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         createNewVersion ? {} : (previous.metadata || {}),
         auditActors
       );
+      const generatedTemplateName = defaultTemplateName({
+        ...templateForm,
+        contract_model: contractModel?.value || templateForm.contract_model,
+      });
       const payload = {
         company_id: companyId,
-        name: templateForm.name.trim(),
-        reference_key: normalizeTemplateReference(templateForm.name),
+        name: generatedTemplateName,
+        reference_key: null,
         template_family_key: templateFamilyKey,
-        version_source_id: createNewVersion ? (templateForm.version_source_id || null) : (previous.version_source_id || previous.metadata?.version_source_id || null),
+        version_source_id: versionSourceId,
         description: templateForm.description || null,
         template_type: normalizeTemplateType(templateForm.template_type),
         contract_form_scope: contractModel?.contract_form || "any",
@@ -3003,7 +3020,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           standard_template_version: templateForm.standard_template_version || null,
           standard_template_legal_basis: appliedPreset?.legal_basis || null,
           template_family_key: templateFamilyKey,
-          version_source_id: createNewVersion ? (templateForm.version_source_id || null) : (previous.metadata?.version_source_id || null),
+          version_source_id: versionSourceId,
+          version,
           editor_blocks: editorBlocks,
           template_editor_version: 1,
         },
@@ -3087,11 +3105,113 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   };
 
   const archiveTemplate = async (record) => {
-    await base44.entities.CompanyContractTemplate.update(record.id, {
-      status: "archived",
-      metadata: buildAuditMetadata(currentUser, "gearchiveerd", record.metadata || {}, auditActors),
-    });
-    refresh();
+    try {
+      setTemplateActionId(record.id);
+      await base44.entities.CompanyContractTemplate.update(record.id, {
+        status: "archived",
+        visible_in_contract_wizard: false,
+        metadata: {
+          ...buildAuditMetadata(currentUser, "gearchiveerd", record.metadata || {}, auditActors),
+          status_before_archive: record.status || "draft",
+          visible_before_archive: record.visible_in_contract_wizard !== false,
+        },
+      });
+      setMessage({ type: "success", text: `Versie ${record.version || 1} is naar het archief verplaatst.` });
+      refresh();
+    } catch (error) {
+      setMessage({ type: "error", text: error?.message || "De versie kon niet worden gearchiveerd." });
+    } finally {
+      setTemplateActionId(null);
+    }
+  };
+
+  const restoreTemplate = async (record) => {
+    try {
+      setTemplateActionId(record.id);
+      const restoredStatus = statusBeforeTemplateArchive(record);
+      const restoredVisibility = isEmploymentTemplateType(record.template_type)
+        ? record.metadata?.visible_before_archive !== false
+        : false;
+      await base44.entities.CompanyContractTemplate.update(record.id, {
+        status: restoredStatus,
+        visible_in_contract_wizard: restoredVisibility,
+        metadata: buildAuditMetadata(currentUser, "hersteld uit archief", record.metadata || {}, auditActors),
+      });
+      setMessage({ type: "success", text: `Versie ${record.version || 1} is hersteld.` });
+      refresh();
+    } catch (error) {
+      setMessage({ type: "error", text: error?.message || "De versie kon niet worden hersteld." });
+    } finally {
+      setTemplateActionId(null);
+    }
+  };
+
+  const toggleTemplateVisibility = async (record, visible) => {
+    if (!isEmploymentTemplateType(record.template_type) || record.status === "archived") return;
+    try {
+      setTemplateActionId(record.id);
+      await base44.entities.CompanyContractTemplate.update(record.id, {
+        visible_in_contract_wizard: visible,
+        metadata: buildAuditMetadata(
+          currentUser,
+          visible ? "zichtbaar gemaakt in personeelscontractwizard" : "verborgen in personeelscontractwizard",
+          record.metadata || {},
+          auditActors,
+        ),
+      });
+      setMessage({
+        type: "success",
+        text: `Versie ${record.version || 1} is ${visible ? "zichtbaar" : "verborgen"} bij het aanmaken van personeelscontracten.`,
+      });
+      refresh();
+    } catch (error) {
+      setMessage({ type: "error", text: error?.message || "De zichtbaarheid kon niet worden gewijzigd." });
+    } finally {
+      setTemplateActionId(null);
+    }
+  };
+
+  const deleteArchivedTemplate = async (record) => {
+    if (!record || record.status !== "archived") return;
+    try {
+      setTemplateActionId(record.id);
+      const familyKey = contractTemplateFamilyKey(record);
+      await base44.entities.CompanyContractTemplate.delete(record.id);
+      const persistedTemplates = await base44.entities.CompanyContractTemplate.filter({ company_id: companyId }, "-created_date");
+      const remainingFamilyVersions = resequenceContractTemplateVersions(
+        (persistedTemplates || []).filter(item => item.id !== record.id && contractTemplateFamilyKey(item) === familyKey),
+      );
+
+      await Promise.all(remainingFamilyVersions.map(item => {
+        const version = item.version;
+        const versionSourceId = item.version_source_id;
+        const contractModel = inferContractModelFromTemplate(item);
+        return base44.entities.CompanyContractTemplate.update(item.id, {
+          name: defaultTemplateName({ ...item, contract_model: contractModel }),
+          reference_key: null,
+          template_family_key: familyKey,
+          version,
+          version_source_id: versionSourceId,
+          metadata: {
+            ...buildAuditMetadata(currentUser, "versies hernummerd", item.metadata || {}, auditActors),
+            template_family_key: familyKey,
+            version_source_id: versionSourceId,
+            version,
+          },
+        });
+      }));
+
+      setTemplateDeleteCandidate(null);
+      setMessage({
+        type: "success",
+        text: `Versie ${record.version || 1} is definitief verwijderd. De resterende versies zijn opnieuw aansluitend genummerd.`,
+      });
+      refresh();
+    } catch (error) {
+      setMessage({ type: "error", text: error?.message || "De gearchiveerde versie kon niet worden verwijderd." });
+    } finally {
+      setTemplateActionId(null);
+    }
   };
 
   const archiveClause = async (record) => {
@@ -3176,6 +3296,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     setTemplateWizardOpen(false);
     setTemplateStep(1);
     setTemplateForm(initialTemplate(companyId));
+    setShowTemplateArchive(false);
+    setTemplateDeleteCandidate(null);
   };
 
   const selectTemplateBrowserType = (templateType) => {
@@ -3233,6 +3355,12 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       return;
     }
 
+    const latestVersion = templateBrowserTableItems[0];
+    if (latestVersion) {
+      createNewTemplateVersion(latestVersion);
+      return;
+    }
+
     const defaultLetterhead = activeLetterheads.find(item => item.is_default) || activeLetterheads[0];
     const nextForm = {
       ...initialTemplate(companyId),
@@ -3284,7 +3412,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       .filter(item => ["draft", "review"].includes(item.status))
       .sort((a, b) => Number(b.version || 1) - Number(a.version || 1))[0];
     if (existingDraft) {
-      setMessage({ type: "error", text: `Voor deze referentie bestaat al een open versie ${existingDraft.version || 1}. Die versie is geopend.` });
+      setMessage({ type: "error", text: `Voor deze contractcategorie bestaat al een open versie ${existingDraft.version || 1}. Die versie is geopend.` });
       setEditingTemplateId(existingDraft.id);
       const draftForm = templateFormFromRecord(companyId, existingDraft);
       setTemplateForm(draftForm);
@@ -3304,7 +3432,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       status: "draft",
       is_new_version: true,
       version_source_id: record.id,
-      version_family_key: familyKey,
     };
     setTemplateForm(nextForm);
     setEditingTemplateBlockId(null);
@@ -3586,14 +3713,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     if (!editor?.history?.[action]) return;
     editor.history[action]();
     editor.focus();
-  };
-
-  const toggleTemplateFamily = (familyKey) => {
-    setExpandedTemplateFamilies(current => (
-      current.includes(familyKey)
-        ? current.filter(key => key !== familyKey)
-        : [...current, familyKey]
-    ));
   };
 
   const nextTemplateStep = () => {
@@ -4902,7 +5021,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     const selectionStep = templateSelectionStep(templateForm.template_type);
     const sourceStep = templateSourceStep(templateForm.template_type);
     const editorStep = templateEditorStep(templateForm.template_type);
-    const wizardPrefilled = templateForm.template_choice === "new" && templateStep >= sourceStep, wizardSteps = wizardPrefilled ? templateWizardSteps(templateForm).slice(sourceStep - 1) : templateWizardSteps(templateForm), displayStep = wizardPrefilled ? templateStep - sourceStep + 1 : templateStep, briefpapierStep = editorStep - 1, duurkeuzesStep = editorStep + 1, referentieStep = templateWizardSteps(templateForm).length;
+    const wizardPrefilled = templateForm.template_choice === "new" && templateStep >= sourceStep, wizardSteps = wizardPrefilled ? templateWizardSteps(templateForm).slice(sourceStep - 1) : templateWizardSteps(templateForm), displayStep = wizardPrefilled ? templateStep - sourceStep + 1 : templateStep, briefpapierStep = editorStep - 1, duurkeuzesStep = editorStep + 1, finalizeStep = templateWizardSteps(templateForm).length;
     const contractModelOptions = contractModelOptionsForCao(templateForm.cao_key);
     const templateBlocks = normalizeContractTemplateBlocks(templateForm.editor_blocks, templateForm.body);
     const editingTemplateBlock = templateBlocks.find(block => block.id === editingTemplateBlockId) || null;
@@ -5350,23 +5469,30 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
 </div>
               )}
 
-              {templateStep === referentieStep && (
+              {templateStep === finalizeStep && (
                 <div className="space-y-4">
-                  <div>
-                    <p className="text-sm font-medium text-foreground">Referentie</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Geef deze template een herkenbare naam.</p>
-                  </div>
-                  <div className="flex flex-wrap items-end justify-between gap-3">
-                    <div className="min-w-[260px] flex-1 space-y-2">
-                      <Label>Referentie *</Label>
-                      <Input value={templateForm.name} onChange={event => setTemplateForm(prev => ({ ...prev, name: event.target.value }))} placeholder={defaultTemplateName(templateForm)} readOnly={templateReferenceLocked} aria-describedby={templateReferenceLocked ? "template-reference-lock-note" : undefined} />
-                      {templateReferenceLocked && (<p id="template-reference-lock-note" className="text-xs text-muted-foreground">De referentie blijft gelijk binnen een versiereeks.</p>)}
+                  <div className="flex flex-wrap items-start justify-between gap-3">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Afronden</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Bepaal de weergave en voeg eventueel een interne notitie aan deze versie toe.</p>
                     </div>
-                    <Badge variant="outline" className="h-9 px-3 text-xs">Versie {templateForm.version || 1}</Badge>
+                    <Badge variant="outline" className="h-7 px-2.5 text-xs">Versie {templateForm.version || 1}</Badge>
                   </div>
-                  {isEmploymentTemplate && (<label className="flex items-center gap-2 text-sm"><Checkbox checked={templateForm.visible_in_contract_wizard !== false} onCheckedChange={checked => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: checked === true }))} />Zichtbaar in personeelscontractwizard</label>)}
+                  {isEmploymentTemplate && (
+                    <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-background/50 px-4 py-3">
+                      <div>
+                        <p className="text-sm font-medium text-foreground">Zichtbaar bij personeelscontracten</p>
+                        <p className="mt-0.5 text-xs text-muted-foreground">Na publicatie kan deze versie worden gekozen bij het aanmaken van een contract voor een personeelslid.</p>
+                      </div>
+                      <Switch
+                        checked={templateForm.visible_in_contract_wizard !== false}
+                        onCheckedChange={checked => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: checked }))}
+                        aria-label="Zichtbaar bij personeelscontracten"
+                      />
+                    </div>
+                  )}
                   <div className="space-y-2">
-                    <Label>Notitie</Label>
+                    <Label>Notitie voor deze versie</Label>
                     <Textarea
                       rows={3}
                       value={templateForm.description}
@@ -5432,6 +5558,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     const subtitle = isEmploymentBrowser
       ? `${selectedTemplateBrowserCao?.label || "CAO"} · ${contractModelMeta(selectedTemplateBrowserContractModel) || "Gekozen contractvorm"}`
       : selectedTemplateBrowserType?.description || "";
+    const hasTemplateVersions = templateBrowserTableItems.length > 0;
 
     return (
       <>
@@ -5452,95 +5579,159 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               {subtitle && <p className="truncate text-xs text-muted-foreground">{subtitle}</p>}
             </div>
           </div>
-          <Button type="button" variant="outline" size="sm" onClick={startNewTemplateFromBrowser} disabled={templateWizardOpen}>
-            <Plus className="mr-1 h-4 w-4" />
-            Nieuwe template
-          </Button>
+          <div className="flex flex-wrap items-center justify-end gap-2">
+            {showTemplateArchive ? (
+              <>
+                <Badge variant="outline" className="h-7 border-primary/30 bg-primary/5 px-2.5 text-xs text-primary">Archief</Badge>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={() => {
+                    setShowTemplateArchive(false);
+                    setTemplateDeleteCandidate(null);
+                  }}
+                >
+                  <ChevronLeft className="mr-1 h-4 w-4" />
+                  Actieve versies
+                </Button>
+              </>
+            ) : (
+              <>
+                <Button type="button" variant="outline" size="sm" onClick={() => setShowTemplateArchive(true)}>
+                  <Archive className="mr-1 h-4 w-4" />
+                  Archief{archivedTemplateBrowserItems.length > 0 ? ` (${archivedTemplateBrowserItems.length})` : ""}
+                </Button>
+                <Button type="button" variant="outline" size="sm" onClick={startNewTemplateFromBrowser} disabled={templateWizardOpen}>
+                  <Plus className="mr-1 h-4 w-4" />
+                  {hasTemplateVersions ? "Nieuwe versie" : "Nieuwe template"}
+                </Button>
+              </>
+            )}
+          </div>
         </div>
 
         <div className={`${TEMPLATE_TABLE_GRID} items-center border-b border-border bg-muted/20 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
-          <span>Referentie</span>
-          <span>Laatste versie</span>
+          <span>Versie</span>
+          <span>Notitie</span>
           <span>Status</span>
-          <span>Scope</span>
+          <span>Bij personeelscontract</span>
           <span>Door</span>
           <span className="text-right">Acties</span>
         </div>
         <div className="flex-1">
-          {templateBrowserVersionGroups.length === 0 ? (
+          {visibleTemplateBrowserItems.length === 0 ? (
             <div className="flex min-h-[180px] items-center justify-center px-5 py-8 text-center text-sm text-muted-foreground">
-              Nog geen templates voor {title.toLowerCase()} aangemaakt.
+              {showTemplateArchive
+                ? "Er staan geen versies in het archief."
+                : `Nog geen templates voor ${title.toLowerCase()} aangemaakt.`}
             </div>
-          ) : templateBrowserVersionGroups.map(group => {
-            const item = group.versions.find(version => version.status !== "archived") || group.versions[0];
-            const expanded = expandedTemplateFamilies.includes(group.key);
+          ) : visibleTemplateBrowserItems.map((item, index) => {
+            const actionPending = templateActionId === item.id;
+            const canEdit = !["published", "archived"].includes(item.status);
+            const isNewestActiveVersion = !showTemplateArchive && index === 0;
             return (
-              <Collapsible key={group.key} open={expanded} onOpenChange={() => toggleTemplateFamily(group.key)}>
-                <div className={`${TEMPLATE_TABLE_GRID} items-start border-b border-border px-5 py-4 text-sm transition-colors hover:bg-accent/35`}>
-                  <div className="min-w-0">
-                    <p className="truncate font-semibold text-foreground">{item.name}</p>
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.description || "Geen interne notitie"}</p>
-                  </div>
-                  <div className="text-sm text-muted-foreground">
-                    <p>v{item.version || 1}</p>
-                    <p className="mt-0.5 text-xs">{group.versions.length} versie{group.versions.length === 1 ? "" : "s"}</p>
-                  </div>
-                  <div>{statusBadge(item.status)}</div>
-                  <div className="min-w-0 text-sm text-muted-foreground">
-                    <p className="truncate">{getTemplateScopeLabel(item)}</p>
-                    <p className="mt-0.5 truncate text-xs">
-                      {isEmploymentTemplateType(item.template_type) ? caoLabel(item.cao_key) : "Niet gekoppeld aan CAO"}
-                    </p>
-                  </div>
-                  <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
-                  <div className="flex justify-end gap-1">
-                    <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => startEditTemplate(item)} title="Laatste versie bewerken" aria-label="Laatste versie bewerken">
-                      <Edit className="h-3.5 w-3.5" />
-                    </Button>
-                    <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => createNewTemplateVersion(item)} title="Nieuwe versie maken" aria-label="Nieuwe versie maken">
-                      <Copy className="h-3.5 w-3.5" />
-                    </Button>
-                    <CollapsibleTrigger asChild>
-                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" title="Versies tonen" aria-label="Versies tonen">
-                        <ChevronDown className={`h-3.5 w-3.5 transition-transform ${expanded ? "rotate-180" : ""}`} />
-                      </Button>
-                    </CollapsibleTrigger>
-                  </div>
+              <div key={item.id} className={`${TEMPLATE_TABLE_GRID} items-start border-b border-border px-5 py-4 text-sm transition-colors hover:bg-accent/35`}>
+                <div className="flex min-w-0 flex-wrap items-center gap-1.5">
+                  <span className="font-semibold text-foreground">v{item.version || 1}</span>
+                  {isNewestActiveVersion && <Badge variant="outline" className="px-1.5 py-0 text-[10px]">Nieuwste actief</Badge>}
                 </div>
-                <CollapsibleContent>
-                  <div className="border-b border-border bg-muted/15 px-5 py-3">
-                    <div className="rounded-lg border border-border bg-background">
-                      {group.versions.map((version, index) => (
-                        <div key={version.id} className={`grid grid-cols-1 items-center gap-2 px-3 py-2.5 text-sm md:grid-cols-[80px_minmax(0,1fr)_130px_150px_max-content] md:gap-3 ${index > 0 ? "border-t border-border" : ""}`}>
-                          <span className="font-semibold text-foreground">v{version.version || 1}</span>
-                          <span className="min-w-0 truncate text-muted-foreground">{version.description || "Geen interne notitie"}</span>
-                          <span>{statusBadge(version.status)}</span>
-                          <span className="truncate text-xs text-muted-foreground">{getAuditActorLabel(version, auditActors)}</span>
-                          <div className="flex justify-end gap-1">
-                            <Button
-                              type="button"
-                              variant="ghost"
-                              size="icon"
-                              className="h-7 w-7 text-muted-foreground hover:text-foreground disabled:opacity-35"
-                              onClick={() => startEditTemplate(version)}
-                              disabled={["published", "archived"].includes(version.status)}
-                              title={["published", "archived"].includes(version.status) ? "Definitieve versie; maak een nieuwe versie" : "Versie bewerken"}
-                              aria-label={`Versie ${version.version || 1} bewerken`}
-                            >
-                              <Edit className="h-3.5 w-3.5" />
-                            </Button>
-                            {version.status !== "archived" && (
-                              <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => archiveTemplate(version)} title="Versie archiveren" aria-label={`Versie ${version.version || 1} archiveren`}>
-                                <Archive className="h-3.5 w-3.5" />
-                              </Button>
-                            )}
-                          </div>
-                        </div>
-                      ))}
+                <p className="min-w-0 line-clamp-2 text-sm leading-5 text-muted-foreground" title={item.description || "Geen notitie ingevuld"}>
+                  {item.description || "Geen notitie ingevuld"}
+                </p>
+                <div>{statusBadge(item.status)}</div>
+                <div className="min-w-0">
+                  {isEmploymentTemplateType(item.template_type) && item.status !== "archived" ? (
+                    <div className="flex items-center gap-2">
+                      <Switch
+                        checked={item.visible_in_contract_wizard !== false}
+                        onCheckedChange={checked => toggleTemplateVisibility(item, checked)}
+                        disabled={actionPending}
+                        aria-label={`Versie ${item.version || 1} ${item.visible_in_contract_wizard === false ? "zichtbaar" : "onzichtbaar"} maken bij personeelscontracten`}
+                      />
+                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                        {item.visible_in_contract_wizard !== false ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
+                        {item.visible_in_contract_wizard !== false ? "Zichtbaar" : "Verborgen"}
+                      </span>
                     </div>
-                  </div>
-                </CollapsibleContent>
-              </Collapsible>
+                  ) : (
+                    <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <EyeOff className="h-3.5 w-3.5" />
+                      {item.status === "archived" ? "Verborgen" : "Niet van toepassing"}
+                    </span>
+                  )}
+                </div>
+                <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
+                <div className="flex justify-end gap-1">
+                  {showTemplateArchive ? (
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        onClick={() => restoreTemplate(item)}
+                        disabled={actionPending}
+                        title="Versie herstellen"
+                        aria-label={`Versie ${item.version || 1} herstellen`}
+                      >
+                        <RotateCcw className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                        onClick={() => setTemplateDeleteCandidate(item)}
+                        disabled={actionPending}
+                        title="Versie definitief verwijderen"
+                        aria-label={`Versie ${item.version || 1} definitief verwijderen`}
+                      >
+                        <Trash2 className="h-3.5 w-3.5" />
+                      </Button>
+                    </>
+                  ) : (
+                    <>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground disabled:opacity-35"
+                        onClick={() => startEditTemplate(item)}
+                        disabled={!canEdit || actionPending}
+                        title={canEdit ? "Versie bewerken" : "Gepubliceerde versie; maak een nieuwe versie om te wijzigen"}
+                        aria-label={`Versie ${item.version || 1} bewerken`}
+                      >
+                        <Edit className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        onClick={() => createNewTemplateVersion(item)}
+                        disabled={actionPending}
+                        title="Nieuwe versie maken op basis van deze versie"
+                        aria-label={`Nieuwe versie maken op basis van versie ${item.version || 1}`}
+                      >
+                        <Copy className="h-3.5 w-3.5" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-7 w-7 text-muted-foreground hover:text-foreground"
+                        onClick={() => archiveTemplate(item)}
+                        disabled={actionPending}
+                        title="Versie archiveren"
+                        aria-label={`Versie ${item.version || 1} archiveren`}
+                      >
+                        <Archive className="h-3.5 w-3.5" />
+                      </Button>
+                    </>
+                  )}
+                </div>
+              </div>
             );
           })}
         </div>
@@ -6525,6 +6716,33 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       )}
 
       {activeSubTab === "contract_templates" ? renderTemplateTab() : renderLetterheadTab()}
+
+      <AlertDialog
+        open={!!templateDeleteCandidate}
+        onOpenChange={open => {
+          if (!open && !templateActionId) setTemplateDeleteCandidate(null);
+        }}
+      >
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Versie definitief verwijderen?</AlertDialogTitle>
+            <AlertDialogDescription>
+              Versie {templateDeleteCandidate?.version || 1} wordt permanent verwijderd. De overgebleven versies worden daarna automatisch opnieuw genummerd, zodat de reeks zonder gaten doorloopt. Dit kan niet ongedaan worden gemaakt.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={!!templateActionId}>Annuleren</AlertDialogCancel>
+            <AlertDialogAction
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={!!templateActionId}
+              onClick={() => deleteArchivedTemplate(templateDeleteCandidate)}
+            >
+              <Trash2 className="mr-1 h-4 w-4" />
+              Definitief verwijderen
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
 
       <ManagedFilePreviewDialog
         open={!!previewFile}
