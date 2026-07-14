@@ -5615,7 +5615,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           <span>Versie</span>
           <span>Notitie</span>
           <span>Status</span>
-          <span>Bij personeelscontract</span>
+          <span>Zichtbaar</span>
           <span>Door</span>
           <span className="text-right">Acties</span>
         </div>
@@ -5647,9 +5647,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         disabled={actionPending}
                         aria-label={`Versie ${item.version || 1} ${item.visible_in_contract_wizard === false ? "zichtbaar" : "onzichtbaar"} maken bij personeelscontracten`}
                       />
-                      <span className="flex items-center gap-1 text-xs text-muted-foreground">
+                      <span className="flex items-center text-xs text-muted-foreground">
                         {item.visible_in_contract_wizard !== false ? <Eye className="h-3.5 w-3.5" /> : <EyeOff className="h-3.5 w-3.5" />}
-                        {item.visible_in_contract_wizard !== false ? "Zichtbaar" : "Verborgen"}
                       </span>
                     </div>
                   ) : (
