@@ -5629,12 +5629,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           ) : visibleTemplateBrowserItems.map((item, index) => {
             const actionPending = templateActionId === item.id;
             const canEdit = !["published", "archived"].includes(item.status);
-            const isNewestActiveVersion = !showTemplateArchive && index === 0;
             return (
               <div key={item.id} className={`${TEMPLATE_TABLE_GRID} items-start border-b border-border px-5 py-4 text-sm transition-colors hover:bg-accent/35`}>
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
                   <span className="font-semibold text-foreground">v{item.version || 1}</span>
-                  {isNewestActiveVersion && <Badge variant="outline" className="px-1.5 py-0 text-[10px]">Nieuwste actief</Badge>}
                 </div>
                 <p className="min-w-0 line-clamp-2 text-sm leading-5 text-muted-foreground" title={item.description || "Geen notitie ingevuld"}>
                   {item.description || "Geen notitie ingevuld"}
