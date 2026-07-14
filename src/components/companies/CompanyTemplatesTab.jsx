@@ -3436,7 +3436,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     setTemplateForm(nextForm);
     setEditingTemplateBlockId(null);
     setTemplateBlockDraft(null);
-    setTemplateStep(templateEditorStep(nextForm.template_type));
+    setTemplateStep(templateSourceStep(nextForm.template_type));
     setTemplateWizardOpen(true);
   };
 
@@ -3754,15 +3754,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     const selectionStep = templateSelectionStep(templateForm.template_type);
     const sourceStep = templateSourceStep(templateForm.template_type);
     const briefpapierStep = templateEditorStep(templateForm.template_type) - 1;
+    const minStep = templateForm.is_new_version ? sourceStep : 1;
     if (templateStep === briefpapierStep) {
-      setTemplateStep(templateForm.template_source_mode === "existing" ? selectionStep : sourceStep);
+      setTemplateStep(templateForm.is_new_version ? sourceStep : (templateForm.template_source_mode === "existing" ? selectionStep : sourceStep));
       return;
     }
-    if (templateStep === sourceStep) {
-      setTemplateStep(selectionStep);
-      return;
-    }
-    setTemplateStep(step => Math.max(1, step - 1));
+    if (templateStep <= minStep) return;
+    setTemplateStep(step => Math.max(minStep, step - 1));
   };
 
   const syncClauseSections = (updater) => {
