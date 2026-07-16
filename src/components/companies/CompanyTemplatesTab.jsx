@@ -5536,7 +5536,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           <div className="flex flex-wrap items-center justify-end gap-2">
             {showTemplateArchive ? (
               <>
-                <Badge variant="outline" className="h-7 border-primary/30 bg-primary/5 px-2.5 text-xs text-primary">Archief</Badge>
+                <Badge className="h-7 shrink-0 bg-purple-200 px-2.5 text-xs text-purple-800 animate-pulse dark:bg-purple-900/50 dark:text-purple-300">Archief</Badge>
                 <Button
                   type="button"
                   variant="outline"
