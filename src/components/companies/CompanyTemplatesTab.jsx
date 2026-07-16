@@ -969,6 +969,15 @@ function normalizeLetterheadMargins(source = {}) {
   };
 }
 
+function letterheadMarginPercentages(margins) {
+  return {
+    top: (margins.top / 297) * 100,
+    right: (margins.right / 210) * 100,
+    bottom: (margins.bottom / 297) * 100,
+    left: (margins.left / 210) * 100,
+  };
+}
+
 function clampDraggedLetterheadMargin(edge, value, margins) {
   const rounded = clampMargin(value);
   if (edge === "left") return Math.min(rounded, Math.max(0, 210 - margins.right - LETTERHEAD_MIN_TEXT_WIDTH_MM));
@@ -1748,10 +1757,7 @@ function LetterheadPreview({
   const changeMarginsRef = useRef(onChangeMargins);
   const [interaction, setInteraction] = useState(null);
   const [marginInteraction, setMarginInteraction] = useState(null);
-  const top = (margins.top / 297) * 100;
-  const right = (margins.right / 210) * 100;
-  const bottom = (margins.bottom / 297) * 100;
-  const left = (margins.left / 210) * 100;
+  const { top, right, bottom, left } = letterheadMarginPercentages(margins);
   const isPdf = fileLooksLikePdf(source, filename, fileType);
   const isImage = fileLooksLikeImage(source, filename, fileType);
   const hasSource = Boolean(source);
@@ -1997,10 +2003,10 @@ function LetterheadPreview({
               </div>
             )}
             <div
-              className={`absolute z-[2] rounded-[2px] border ${
+              className={`absolute z-[2] rounded-[2px] ${
                 mode === "sample" || allowMarginDrag
-                  ? "border-sky-500/40 bg-white/82 shadow-sm backdrop-blur-[1px] dark:bg-slate-950/78"
-                  : "border-dashed border-sky-500/85 bg-sky-500/5"
+                  ? "bg-white/82 shadow-sm backdrop-blur-[1px] dark:bg-slate-950/78"
+                  : "bg-sky-500/5"
               }`}
               style={{
                 top: `${top}%`,
@@ -2009,6 +2015,14 @@ function LetterheadPreview({
                 left: `${left}%`,
               }}
             >
+              <div
+                aria-hidden="true"
+                className={`pointer-events-none absolute inset-0 rounded-[2px] border ${
+                  mode === "sample" || allowMarginDrag
+                    ? "border-sky-500/40"
+                    : "border-dashed border-sky-500/85"
+                }`}
+              />
               {allowMarginDrag && (
                 <>
                   <button
@@ -2038,7 +2052,7 @@ function LetterheadPreview({
                 </>
               )}
               {mode === "sample" || allowMarginDrag ? (
-                <div className="h-full overflow-hidden p-[7%] text-[8px] leading-snug text-slate-800 sm:text-[9px]">
+                <div className="h-full overflow-hidden text-[8px] leading-snug text-slate-800 sm:text-[9px]">
                   <p className="mb-3 text-[11px] font-bold text-slate-950">Arbeidsovereenkomst</p>
                   <p className="mb-3">Ondergetekenden verklaren hierbij de arbeidsovereenkomst aan te gaan conform de gekozen contractvorm, CAO en functie-indeling.</p>
                   <div className="space-y-1.5">
@@ -2086,7 +2100,6 @@ const TEMPLATE_PREVIEW_ZOOM_MAX = 180;
 const TEMPLATE_PREVIEW_ZOOM_STEP = 10;
 const TEMPLATE_PREVIEW_PAGE_WIDTH = 420;
 const TEMPLATE_PREVIEW_PAGE_HEIGHT = TEMPLATE_PREVIEW_PAGE_WIDTH * (297 / 210);
-const TEMPLATE_PREVIEW_CONTENT_PADDING_RATIO = 0.045;
 const TEMPLATE_PREVIEW_HEIGHT_SAFETY_PX = 6;
 const TEMPLATE_PREVIEW_UNIT_CLASS = "relative -mx-1 mb-2 break-inside-avoid rounded-[2px] px-1 py-0.5 [page-break-inside:avoid]";
 const TEMPLATE_PREVIEW_RICH_TEXT_CLASS = "[overflow-wrap:anywhere] [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 [&_blockquote]:pl-2 [&_h2]:font-bold [&_h3]:font-semibold [&_li]:mb-0.5 [&_ol]:ml-4 [&_ol]:list-decimal [&_p]:mb-1 [&_ul]:ml-4 [&_ul]:list-disc";
@@ -2124,10 +2137,7 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
   const designLayers = letterhead ? normalizeDesignLayers(letterhead) : [];
   const source = letterhead?.file_url || "";
   const filename = letterhead?.download_filename || "";
-  const top = (margins.top / 297) * 100;
-  const right = (margins.right / 210) * 100;
-  const bottom = (margins.bottom / 297) * 100;
-  const left = (margins.left / 210) * 100;
+  const { top, right, bottom, left } = letterheadMarginPercentages(margins);
   const objectFit = backgroundFit === "stretch" ? "fill" : backgroundFit;
   const isPdf = sourceMode === LETTERHEAD_SOURCE_MODES.upload && fileLooksLikePdf(source, filename);
   const isImage = sourceMode === LETTERHEAD_SOURCE_MODES.upload && fileLooksLikeImage(source, filename);
@@ -2142,9 +2152,8 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
   );
   const textAreaWidth = TEMPLATE_PREVIEW_PAGE_WIDTH * (1 - ((left + right) / 100));
   const textAreaHeight = TEMPLATE_PREVIEW_PAGE_HEIGHT * (1 - ((top + bottom) / 100));
-  const previewPaddingPx = textAreaWidth * TEMPLATE_PREVIEW_CONTENT_PADDING_RATIO;
-  const measurementContentWidth = Math.max(40, textAreaWidth - (previewPaddingPx * 2));
-  const availableContentHeight = Math.max(48, textAreaHeight - (previewPaddingPx * 2));
+  const measurementContentWidth = Math.max(40, textAreaWidth);
+  const availableContentHeight = Math.max(48, textAreaHeight);
   const paginationSignature = useMemo(() => JSON.stringify({
     templateName: templateName || "Arbeidsovereenkomst",
     measurementContentWidth,
@@ -2335,7 +2344,7 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
               )}
               {sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.map(renderDesignLayer)}
               <div
-                className="absolute z-20 overflow-hidden bg-white/78 p-[4.5%] text-[8px] leading-[1.35] text-slate-900 backdrop-blur-[0.5px]"
+                className="absolute z-20 overflow-hidden bg-white/78 text-[8px] leading-[1.35] text-slate-900 backdrop-blur-[0.5px]"
                 style={{
                   top: `${top}%`,
                   right: `${right}%`,
