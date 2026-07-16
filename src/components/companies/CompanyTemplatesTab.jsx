@@ -3,8 +3,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { DragDropContext, Droppable } from "@hello-pangea/dnd";
 import TemplateArticleBlock from "@/components/companies/TemplateArticleBlock";
 import { AnimatePresence, motion } from "framer-motion";
-import ReactQuill from "react-quill";
-import "react-quill/dist/quill.snow.css";
+import ReactQuill from "react-quill"; import "react-quill/dist/quill.snow.css";
+import LetterheadTabPanel from "@/components/companies/LetterheadTabPanel";
 import { base44 } from "@/api/base44Client";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { Button } from "@/components/ui/button";
@@ -3092,16 +3092,14 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   });
 
   const archiveLetterhead = async (record) => {
-    if (record.legacy) {
-      setMessage({ type: "error", text: "Legacy-briefpapier kan hier niet worden gearchiveerd. Vervang het door nieuw briefpapier." });
-      return;
-    }
-    await base44.entities.CompanyLetterhead.update(record.id, {
-      status: "archived",
-      is_default: false,
-      metadata: buildAuditMetadata(currentUser, "gearchiveerd", record.metadata || {}, auditActors),
-    });
+    if (record.legacy) { setMessage({ type: "error", text: "Legacy-briefpapier kan hier niet worden gearchiveerd." }); return; }
+    await base44.entities.CompanyLetterhead.update(record.id, { status: "archived", is_default: false, metadata: buildAuditMetadata(currentUser, "gearchiveerd", record.metadata || {}, auditActors) });
     refresh();
+  };
+
+  const deleteLetterhead = async (id) => {
+    try { await base44.entities.CompanyLetterhead.delete(id); setMessage({ type: "success", text: "Briefpapier is definitief verwijderd." }); refresh(); }
+    catch (error) { setMessage({ type: "error", text: error?.message || "Briefpapier kon niet worden verwijderd." }); }
   };
 
   const archiveTemplate = async (record) => {
@@ -4955,63 +4953,21 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   );
 
   const renderLetterheadTab = () => (
-    <div className="flex h-full min-h-[360px] flex-col">
-      {renderLetterheadWizard()}
-      <div className={`${LETTERHEAD_TABLE_GRID} items-center border-b border-border bg-muted/20 px-5 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
-        <span>Naam</span>
-        <span>Marges</span>
-        <span>Status</span>
-        <span>Door</span>
-        <div className="flex justify-end">
-          <Button type="button" variant="outline" size="sm" onClick={startNewLetterhead} disabled={letterheadWizardOpen}>
-            <Plus className="mr-1 h-4 w-4" />
-            Nieuw briefpapier
-          </Button>
-        </div>
-      </div>
-      <div className="flex-1">
-        {allLetterheads.length === 0 ? (
-          <div className="flex min-h-[180px] items-center justify-center px-5 py-8 text-center text-sm text-muted-foreground">
-            Nog geen briefpapier ingesteld.
-          </div>
-        ) : allLetterheads.map(item => (
-          <div
-            key={item.id}
-            className={`${LETTERHEAD_TABLE_GRID} items-start border-b border-border px-5 py-4 text-sm transition-colors hover:bg-accent/35`}
-          >
-            <div className="min-w-0">
-              <p className="truncate font-semibold text-foreground">{item.name}</p>
-              <p className="mt-0.5 truncate text-xs text-muted-foreground">{item.download_filename || "Briefpapier"}</p>
-            </div>
-            <span className="text-sm text-muted-foreground">{marginLabel(item)}</span>
-            <div>{item.status === "archived" ? statusBadge("archived") : <Badge className="border-0 bg-green-100 text-xs text-green-800 dark:bg-green-900/45 dark:text-green-200">Actief</Badge>}</div>
-            <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
-            <div className="flex justify-end gap-1">
-              {(item.file_id || item.file_url) && (
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => setPreviewFile({
-                  managedFileId: item.file_id,
-                  fileUrl: item.file_url,
-                  filename: item.download_filename,
-                  title: item.name,
-                })}>
-                  <Eye className="h-3.5 w-3.5" />
-                </Button>
-              )}
-              {!item.legacy && (
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => startEditLetterhead(item)}>
-                  <Edit className="h-3.5 w-3.5" />
-                </Button>
-              )}
-              {!item.legacy && item.status !== "archived" && (
-                <Button type="button" variant="ghost" size="icon" className="h-7 w-7 text-muted-foreground hover:text-foreground" onClick={() => archiveLetterhead(item)}>
-                  <Archive className="h-3.5 w-3.5" />
-                </Button>
-              )}
-            </div>
-          </div>
-        ))}
-      </div>
-    </div>
+    <LetterheadTabPanel
+      wizard={renderLetterheadWizard()}
+      tableGrid={LETTERHEAD_TABLE_GRID}
+      letterheads={allLetterheads}
+      activeLetterheads={activeLetterheads}
+      onNew={startNewLetterhead}
+      wizardOpen={letterheadWizardOpen}
+      onEdit={startEditLetterhead}
+      onArchive={archiveLetterhead}
+      onDelete={deleteLetterhead}
+      onPreview={setPreviewFile}
+      auditActors={auditActors}
+      marginLabel={marginLabel}
+      statusBadge={statusBadge}
+    />
   );
 
   const renderTemplateWizard = () => {
