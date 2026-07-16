@@ -71,6 +71,7 @@ import {
   PAGE_NUMBER_FORMAT_OPTIONS,
   PAGE_NUMBER_POSITION_PRESETS,
   formatPageNumber,
+  normalizeLetterheadPreviewRenderScale,
   normalizePageNumberSettings,
   pageNumberFontSizeMm,
   pageNumberHorizontalAlignment,
@@ -1661,26 +1662,52 @@ function resizeLayerGeometry(start, deltaX, deltaY, handle) {
   };
 }
 
-function LetterheadPdfPagePreview({ source, filename }) {
+function LetterheadPdfPagePreview({ source, filename, renderScale = 1 }) {
   const containerRef = useRef(null);
   const canvasRef = useRef(null);
   const renderTaskRef = useRef(null);
   const [status, setStatus] = useState("loading");
+  const [pdfDocument, setPdfDocument] = useState(null);
+  const normalizedRenderScale = normalizeLetterheadPreviewRenderScale(renderScale);
 
   useEffect(() => {
     let cancelled = false;
-    let pdfDocument = null;
 
-    async function renderPdfPage() {
+    async function loadPdfDocument() {
       if (!source) return;
       setStatus("loading");
+      setPdfDocument(null);
       try {
         const pdfjs = await loadPdfRenderer();
         if (!pdfjs || cancelled) return;
 
         const loadingTask = pdfjs.getDocument({ url: source });
-        pdfDocument = await loadingTask.promise;
-        if (cancelled) return;
+        const nextPdfDocument = await loadingTask.promise;
+        if (cancelled) {
+          nextPdfDocument.destroy?.();
+          return;
+        }
+        setPdfDocument(nextPdfDocument);
+      } catch (error) {
+        if (!cancelled && error?.name !== "RenderingCancelledException") setStatus("error");
+      }
+    }
+
+    loadPdfDocument();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [source]);
+
+  useEffect(() => {
+    if (!pdfDocument) return undefined;
+    let cancelled = false;
+    let resizeObserver = null;
+
+    async function renderPdfPage() {
+      try {
+        setStatus(current => current === "ready" ? current : "loading");
 
         const page = await pdfDocument.getPage(1);
         if (cancelled) return;
@@ -1691,18 +1718,23 @@ function LetterheadPdfPagePreview({ source, filename }) {
         if (!canvas || !container || !context) throw new Error("Canvas niet beschikbaar");
 
         const baseViewport = page.getViewport({ scale: 1 });
-        const rect = container.getBoundingClientRect();
-        const targetWidth = rect.width || 420;
-        const targetHeight = rect.height || 594;
+        const targetWidth = container.clientWidth || 420;
+        const targetHeight = container.clientHeight || 594;
         const deviceScale = window.devicePixelRatio || 1;
         const cssScale = Math.min(targetWidth / baseViewport.width, targetHeight / baseViewport.height);
-        const viewport = page.getViewport({ scale: Math.max(cssScale, 0.1) * deviceScale });
+        const cssWidth = Math.max(1, baseViewport.width * cssScale);
+        const cssHeight = Math.max(1, baseViewport.height * cssScale);
+        const viewport = page.getViewport({
+          scale: Math.max(cssScale, 0.1) * deviceScale * normalizedRenderScale,
+        });
 
         renderTaskRef.current?.cancel?.();
         canvas.width = Math.max(1, Math.floor(viewport.width));
         canvas.height = Math.max(1, Math.floor(viewport.height));
-        canvas.style.width = `${Math.max(1, Math.floor(viewport.width / deviceScale))}px`;
-        canvas.style.height = `${Math.max(1, Math.floor(viewport.height / deviceScale))}px`;
+        canvas.style.width = `${cssWidth}px`;
+        canvas.style.height = `${cssHeight}px`;
+        context.imageSmoothingEnabled = true;
+        context.imageSmoothingQuality = "high";
         context.clearRect(0, 0, canvas.width, canvas.height);
 
         const renderTask = page.render({ canvasContext: context, viewport });
@@ -1715,13 +1747,22 @@ function LetterheadPdfPagePreview({ source, filename }) {
     }
 
     renderPdfPage();
+    if (typeof ResizeObserver !== "undefined") {
+      resizeObserver = new ResizeObserver(renderPdfPage);
+      if (containerRef.current) resizeObserver.observe(containerRef.current);
+    }
 
     return () => {
       cancelled = true;
+      resizeObserver?.disconnect();
       renderTaskRef.current?.cancel?.();
-      pdfDocument?.destroy?.();
     };
-  }, [source]);
+  }, [normalizedRenderScale, pdfDocument]);
+
+  useEffect(() => () => {
+    renderTaskRef.current?.cancel?.();
+    pdfDocument?.destroy?.();
+  }, [pdfDocument]);
 
   return (
     <div ref={containerRef} className="absolute inset-0 flex items-center justify-center overflow-hidden bg-white">
@@ -2471,7 +2512,11 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
                 <img src={source} alt={filename || "Briefpapier"} className="absolute inset-0 h-full w-full" style={{ objectFit }} />
               )}
               {sourceMode === LETTERHEAD_SOURCE_MODES.upload && source && isPdf && (
-                <LetterheadPdfPagePreview source={source} filename={filename} />
+                <LetterheadPdfPagePreview
+                  source={source}
+                  filename={filename}
+                  renderScale={previewZoom / 100}
+                />
               )}
               {sourceMode === LETTERHEAD_SOURCE_MODES.design && designLayers.map(renderDesignLayer)}
               <div
@@ -5320,6 +5365,19 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           : (block.kind === "closing" ? "Slot" : "Aanhef"),
       };
     });
+    const editingTemplateBlockRow = templateBlockRows.find(block => block.id === editingTemplateBlockId) || null;
+    const previewTemplateBlocks = editingTemplateBlock && templateBlockDraft
+      ? templateBlocks.map(block => (
+        block.id === editingTemplateBlockId
+          ? {
+            ...block,
+            title: templateBlockDraft.title,
+            content_html: templateBlockDraft.content_html,
+          }
+          : block
+      ))
+      : templateBlocks;
+    const previewHighlightedBlockId = editingTemplateBlockId || hoveredTemplateBlockId;
 
     return (
       <AnimatePresence>
@@ -5528,33 +5586,58 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               )}
 
               {templateStep === editorStep && (
-                <div className="space-y-5">
-                  {editingTemplateBlock && templateBlockDraft ? (
-                    <div className="space-y-4 border-t border-border pt-4">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div className="flex min-w-0 items-center gap-2">
-                          <Button type="button" variant="ghost" size="sm" onClick={cancelTemplateBlockEditor}>
+                <div className="grid gap-5 border-t border-border pt-4 xl:grid-cols-[minmax(340px,0.78fr)_minmax(420px,1.22fr)]">
+                  <div className="min-w-0 overflow-hidden">
+                    <AnimatePresence initial={false} mode="wait">
+                      {editingTemplateBlock && templateBlockDraft ? (
+                        <motion.div
+                          key={`template-block-editor-${editingTemplateBlock.id}`}
+                          initial={{ opacity: 0, x: 18, scale: 0.99 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          exit={{ opacity: 0, x: 18, scale: 0.99 }}
+                          transition={{ duration: 0.22, ease: [0.22, 1, 0.36, 1] }}
+                          className="space-y-4"
+                        >
+                      <div className="overflow-hidden rounded-md border border-primary/45 bg-card shadow-sm ring-1 ring-primary/10">
+                        <div className="flex min-h-12 items-center gap-2 border-b border-border bg-primary/5 px-2.5 py-2">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            className="h-8 shrink-0 px-2"
+                            onClick={cancelTemplateBlockEditor}
+                            title="Terug naar alle artikelblokken"
+                          >
                             <ChevronLeft className="mr-1 h-4 w-4" />
-                            Terug naar blokken
+                            Blokken
                           </Button>
-                          <div className="min-w-0">
-                            <p className="truncate text-sm font-semibold text-foreground">{editingTemplateBlock.kind === "article" ? "Artikel bewerken" : "Blok bewerken"}</p>
-                            <p className="text-xs text-muted-foreground">
-                              {editingTemplateBlock.kind === "article"
-                                ? "Voeg leden toe als x.n; de preview vult automatisch het actuele artikelnummer in."
-                                : "Wijzigingen verschijnen na opslaan direct in de preview."}
-                            </p>
+                          <div className="min-w-0 flex-1">
+                            <span className="block text-[11px] font-semibold uppercase tracking-wider text-primary">
+                              {editingTemplateBlockRow?.display_label || "Artikel"}
+                            </span>
+                            <span className="block truncate text-sm font-semibold text-foreground">
+                              {templateBlockDraft.title.trim() || "Zonder titel"}
+                            </span>
                           </div>
+                          <span className="flex shrink-0 items-center gap-1 text-[11px] font-medium text-sky-600 dark:text-sky-300">
+                            <Eye className="h-3.5 w-3.5" />
+                            Live
+                          </span>
                         </div>
-                      </div>
-
-                      <div className="space-y-2">
-                        <Label>Titel *</Label>
-                        <Input
-                          value={templateBlockDraft.title}
-                          onChange={event => setTemplateBlockDraft(prev => ({ ...prev, title: event.target.value }))}
-                          placeholder="Bijvoorbeeld Functie, werkzaamheden en werkplek"
-                        />
+                        <div className="space-y-2 p-3">
+                          <Label htmlFor="template-block-title">Titel *</Label>
+                          <Input
+                            id="template-block-title"
+                            value={templateBlockDraft.title}
+                            onChange={event => setTemplateBlockDraft(prev => ({ ...prev, title: event.target.value }))}
+                            placeholder="Bijvoorbeeld Functie, werkzaamheden en werkplek"
+                          />
+                          <p className="text-[11px] leading-relaxed text-muted-foreground">
+                            {editingTemplateBlock.kind === "article"
+                              ? "Gebruik x.n voor leden; de actuele artikelnummering wordt automatisch toegepast."
+                              : "De wijzigingen worden direct in het voorbeeld rechts weergegeven."}
+                          </p>
+                        </div>
                       </div>
 
                       <div className="overflow-hidden rounded-lg border border-border bg-background">
@@ -5661,7 +5744,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                           value={templateBlockDraft.content_html}
                           onChange={value => setTemplateBlockDraft(prev => ({ ...prev, content_html: value }))}
                           modules={templateEditorModules}
-                          className="[&_.ql-container]:min-h-[420px] [&_.ql-container]:border-0 [&_.ql-editor]:min-h-[420px] [&_.ql-editor]:text-sm [&_.ql-editor]:leading-7"
+                          className="[&_.ql-container]:h-[clamp(340px,52vh,560px)] [&_.ql-container]:border-0 [&_.ql-editor]:h-full [&_.ql-editor]:overflow-y-auto [&_.ql-editor]:text-sm [&_.ql-editor]:leading-7"
                         />
                       </div>
 
@@ -5678,9 +5761,15 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                           </Button>
                         </div>
                       </div>
-                    </div>
-                  ) : (
-                    <div className="grid gap-5 border-t border-border pt-4 xl:grid-cols-[minmax(280px,0.7fr)_minmax(420px,1.3fr)]">
+                        </motion.div>
+                      ) : (
+                        <motion.div
+                          key="template-block-list"
+                          initial={{ opacity: 0, x: -18, scale: 0.99 }}
+                          animate={{ opacity: 1, x: 0, scale: 1 }}
+                          exit={{ opacity: 0, x: -18, scale: 0.99 }}
+                          transition={{ duration: 0.2, ease: [0.22, 1, 0.36, 1] }}
+                        >
                       <div className="min-w-0">
                         <div className="mb-3 flex items-center justify-between gap-3">
                           <div>
@@ -5711,22 +5800,21 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                             )}
                           </Droppable>
                         </DragDropContext>
-
-
                       </div>
+                        </motion.div>
+                      )}
+                    </AnimatePresence>
+                  </div>
 
-                      <TemplateDocumentPreview
-                        body={templateForm.body}
-                        blocks={templateBlocks}
-                        templateName={templateForm.name || defaultTemplateName(templateForm)}
-                        letterhead={selectedTemplateLetterhead}
-                        clauses={clauses}
-                        highlightedBlockId={hoveredTemplateBlockId}
-                      />
-                    </div>
-                  )}
-
-</div>
+                  <TemplateDocumentPreview
+                    body={templateForm.body}
+                    blocks={previewTemplateBlocks}
+                    templateName={templateForm.name || defaultTemplateName(templateForm)}
+                    letterhead={selectedTemplateLetterhead}
+                    clauses={clauses}
+                    highlightedBlockId={previewHighlightedBlockId}
+                  />
+                </div>
               )}
 
               {isEmploymentTemplate && templateStep === duurkeuzesStep && (

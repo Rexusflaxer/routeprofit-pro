@@ -84,3 +84,9 @@ export function pageNumberPositionLabel(settings = {}) {
   ));
   return preset?.label || `Aangepast (${normalized.x_mm} / ${normalized.y_mm} mm)`;
 }
+
+export function normalizeLetterheadPreviewRenderScale(value = 1) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 1;
+  return Math.min(3, Math.max(1, parsed));
+}

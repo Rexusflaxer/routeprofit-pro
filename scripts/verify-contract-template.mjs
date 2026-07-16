@@ -26,6 +26,7 @@ import {
 import {
   DEFAULT_PAGE_NUMBER_SETTINGS,
   formatPageNumber,
+  normalizeLetterheadPreviewRenderScale,
   normalizePageNumberSettings,
   pageNumberFontSizeMm,
   pageNumberHorizontalAlignment,
@@ -194,6 +195,9 @@ assert.equal(pageNumberFontSizeMm(customPageNumber), 4.2333);
 assert.equal(pageNumberHorizontalAlignment({ ...customPageNumber, x_mm: 15 }), "left");
 assert.equal(pageNumberHorizontalAlignment(customPageNumber), "center");
 assert.equal(pageNumberHorizontalAlignment({ ...customPageNumber, x_mm: 195 }), "right");
+assert.equal(normalizeLetterheadPreviewRenderScale(0.8), 1);
+assert.equal(normalizeLetterheadPreviewRenderScale(1.8), 1.8);
+assert.equal(normalizeLetterheadPreviewRenderScale(8), 3);
 assert.deepEqual(normalizePageNumberSettings({
   page_number: { x_mm: -10, y_mm: 400, font_size_pt: 40 },
 }), {
