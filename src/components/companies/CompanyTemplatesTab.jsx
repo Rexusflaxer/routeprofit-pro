@@ -72,10 +72,9 @@ import {
   PAGE_NUMBER_POSITION_PRESETS,
   formatPageNumber,
   normalizePageNumberSettings,
-  pageNumberCssFontSize,
+  pageNumberFontSizeMm,
   pageNumberHorizontalAlignment,
   pageNumberPositionLabel,
-  pageNumberPositionPercentages,
 } from "@/lib/letterheadDocumentSettings";
 import {
   Archive,
@@ -1754,40 +1753,49 @@ function LetterheadPageNumberMarker({
 }) {
   const normalized = normalizePageNumberSettings({ page_number: settings });
   if (!normalized.enabled) return null;
-  const position = pageNumberPositionPercentages(normalized);
   const horizontalAlignment = pageNumberHorizontalAlignment(normalized);
-  const horizontalTransform = horizontalAlignment === "left"
-    ? "translate-x-0"
+  const textAnchor = horizontalAlignment === "left"
+    ? "start"
     : horizontalAlignment === "right"
-      ? "-translate-x-full"
-      : "-translate-x-1/2";
-  const className = `absolute z-30 ${horizontalTransform} -translate-y-1/2 whitespace-nowrap font-medium leading-none ${
-    interactive
-      ? "cursor-move rounded-[2px] bg-primary/10 px-1 py-0.5 text-primary ring-1 ring-primary/70 shadow-sm"
-      : "pointer-events-none text-slate-500"
-  }`;
-  const style = {
-    left: `${position.left}%`,
-    top: `${position.top}%`,
-    fontSize: pageNumberCssFontSize(normalized),
-  };
+      ? "end"
+      : "middle";
   const label = formatPageNumber(normalized, page, totalPages);
+  const marker = (
+    <text
+      x={normalized.x_mm}
+      y={normalized.y_mm}
+      textAnchor={textAnchor}
+      dominantBaseline="middle"
+      fontSize={pageNumberFontSizeMm(normalized)}
+      className={interactive ? "fill-primary" : "fill-slate-500"}
+      style={{
+        cursor: interactive ? "move" : undefined,
+        fontFamily: "inherit",
+        fontWeight: 500,
+        paintOrder: interactive ? "stroke" : undefined,
+        stroke: interactive ? "hsl(var(--background))" : undefined,
+        strokeWidth: interactive ? 0.8 : undefined,
+        userSelect: "none",
+      }}
+      onPointerDown={interactive ? onPointerDown : undefined}
+    >
+      {label}
+    </text>
+  );
 
-  if (interactive) {
-    return (
-      <button
-        type="button"
-        className={className}
-        style={style}
-        onPointerDown={onPointerDown}
-        aria-label={`Paginanummer verplaatsen, huidige positie ${normalized.x_mm} bij ${normalized.y_mm} millimeter`}
-      >
-        {label}
-      </button>
-    );
-  }
-
-  return <span className={className} style={style}>{label}</span>;
+  return (
+    <svg
+      viewBox={`0 0 ${A4_WIDTH_MM} ${A4_HEIGHT_MM}`}
+      preserveAspectRatio="none"
+      className={`absolute inset-0 z-30 h-full w-full overflow-visible ${interactive ? "" : "pointer-events-none"}`}
+      aria-label={interactive
+        ? `Paginanummer verplaatsen, huidige positie ${normalized.x_mm} bij ${normalized.y_mm} millimeter`
+        : undefined}
+      aria-hidden={interactive ? undefined : true}
+    >
+      {marker}
+    </svg>
+  );
 }
 
 function LetterheadPreview({

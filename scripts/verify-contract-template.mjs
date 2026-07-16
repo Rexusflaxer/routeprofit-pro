@@ -27,6 +27,7 @@ import {
   DEFAULT_PAGE_NUMBER_SETTINGS,
   formatPageNumber,
   normalizePageNumberSettings,
+  pageNumberFontSizeMm,
   pageNumberHorizontalAlignment,
   pageNumberPositionPercentages,
 } from "../src/lib/letterheadDocumentSettings.js";
@@ -189,6 +190,7 @@ assert.deepEqual(pageNumberPositionPercentages(customPageNumber), {
 });
 assert.equal(formatPageNumber(customPageNumber, 2, 5), "2 / 5");
 assert.equal(formatPageNumber({ ...customPageNumber, format: "page_word_of_total" }, 2, 5), "Pagina 2 van 5");
+assert.equal(pageNumberFontSizeMm(customPageNumber), 4.2333);
 assert.equal(pageNumberHorizontalAlignment({ ...customPageNumber, x_mm: 15 }), "left");
 assert.equal(pageNumberHorizontalAlignment(customPageNumber), "center");
 assert.equal(pageNumberHorizontalAlignment({ ...customPageNumber, x_mm: 195 }), "right");

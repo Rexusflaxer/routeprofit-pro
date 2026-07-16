@@ -56,10 +56,9 @@ export function pageNumberPositionPercentages(settings = {}) {
   };
 }
 
-export function pageNumberCssFontSize(settings = {}) {
+export function pageNumberFontSizeMm(settings = {}) {
   const normalized = normalizePageNumberSettings({ page_number: settings });
-  const cqwPerPoint = (100 * 25.4) / (72 * A4_WIDTH_MM);
-  return `${Math.round(normalized.font_size_pt * cqwPerPoint * 1000) / 1000}cqw`;
+  return Math.round(((normalized.font_size_pt * 25.4) / 72) * 10000) / 10000;
 }
 
 export function pageNumberHorizontalAlignment(settings = {}) {
