@@ -12,6 +12,7 @@ import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Slider } from "@/components/ui/slider";
 import { Textarea } from "@/components/ui/textarea";
 import { Switch } from "@/components/ui/switch";
 import {
@@ -63,6 +64,19 @@ import {
   getTemplatePlaceholderDetails,
   getUnknownContractTemplatePlaceholders,
 } from "@/lib/contractTemplateRenderer";
+import {
+  A4_HEIGHT_MM,
+  A4_WIDTH_MM,
+  DEFAULT_PAGE_NUMBER_SETTINGS,
+  PAGE_NUMBER_FORMAT_OPTIONS,
+  PAGE_NUMBER_POSITION_PRESETS,
+  formatPageNumber,
+  normalizePageNumberSettings,
+  pageNumberCssFontSize,
+  pageNumberHorizontalAlignment,
+  pageNumberPositionLabel,
+  pageNumberPositionPercentages,
+} from "@/lib/letterheadDocumentSettings";
 import {
   Archive,
   ArrowDown,
@@ -872,7 +886,7 @@ const SUBCONTRACTOR_TEMPLATE_BODY = [
 const LETTERHEAD_TABLE_GRID = "grid grid-cols-[minmax(220px,1.5fr)_minmax(110px,130px)_minmax(100px,120px)_minmax(140px,180px)_minmax(160px,max-content)] gap-3 xl:gap-4";
 const TEMPLATE_TABLE_GRID = "grid grid-cols-[minmax(76px,94px)_minmax(240px,1.6fr)_minmax(120px,148px)_minmax(172px,210px)_minmax(130px,170px)_minmax(154px,max-content)] gap-3 xl:gap-4";
 const CLAUSE_LIBRARY_GRID = "grid grid-cols-[minmax(44px,56px)_minmax(260px,1fr)_minmax(130px,160px)_minmax(150px,190px)_minmax(120px,150px)] gap-3 xl:gap-4";
-const LETTERHEAD_STEPS = ["Upload", "Marges", "Controle"];
+const LETTERHEAD_STEPS = ["Upload", "Marges", "Paginanummer", "Controle"];
 const EMPLOYMENT_TEMPLATE_STEPS = ["Documentsoort", "CAO", "Contractvorm", "Template", "Start", "Briefpapier", "Editor", "Duurkeuzes", "Afronden"];
 const BUSINESS_TEMPLATE_STEPS = ["Documentsoort", "Template", "Start", "Briefpapier", "Editor", "Afronden"];
 const CLAUSE_STEPS = ["Onderdeel", "Clausule", "Uitwerken", "Controle"];
@@ -1731,6 +1745,51 @@ function LetterheadPdfPagePreview({ source, filename }) {
   );
 }
 
+function LetterheadPageNumberMarker({
+  settings,
+  page = 1,
+  totalPages = 1,
+  interactive = false,
+  onPointerDown,
+}) {
+  const normalized = normalizePageNumberSettings({ page_number: settings });
+  if (!normalized.enabled) return null;
+  const position = pageNumberPositionPercentages(normalized);
+  const horizontalAlignment = pageNumberHorizontalAlignment(normalized);
+  const horizontalTransform = horizontalAlignment === "left"
+    ? "translate-x-0"
+    : horizontalAlignment === "right"
+      ? "-translate-x-full"
+      : "-translate-x-1/2";
+  const className = `absolute z-30 ${horizontalTransform} -translate-y-1/2 whitespace-nowrap font-medium leading-none ${
+    interactive
+      ? "cursor-move rounded-[2px] bg-primary/10 px-1 py-0.5 text-primary ring-1 ring-primary/70 shadow-sm"
+      : "pointer-events-none text-slate-500"
+  }`;
+  const style = {
+    left: `${position.left}%`,
+    top: `${position.top}%`,
+    fontSize: pageNumberCssFontSize(normalized),
+  };
+  const label = formatPageNumber(normalized, page, totalPages);
+
+  if (interactive) {
+    return (
+      <button
+        type="button"
+        className={className}
+        style={style}
+        onPointerDown={onPointerDown}
+        aria-label={`Paginanummer verplaatsen, huidige positie ${normalized.x_mm} bij ${normalized.y_mm} millimeter`}
+      >
+        {label}
+      </button>
+    );
+  }
+
+  return <span className={className} style={style}>{label}</span>;
+}
+
 function LetterheadPreview({
   source,
   filename,
@@ -1748,6 +1807,10 @@ function LetterheadPreview({
   onUpdateLayer,
   onChangeMargins,
   allowMarginDrag = false,
+  pageNumberSettings = null,
+  showPageNumber = false,
+  onChangePageNumber,
+  allowPageNumberDrag = false,
   showGrid = false,
   snapToGrid = false,
   gridSize = 1,
@@ -1755,8 +1818,11 @@ function LetterheadPreview({
   const pageRef = useRef(null);
   const updateLayerRef = useRef(onUpdateLayer);
   const changeMarginsRef = useRef(onChangeMargins);
+  const changePageNumberRef = useRef(onChangePageNumber);
+  const pageNumberSettingsRef = useRef(normalizePageNumberSettings({ page_number: pageNumberSettings || {} }));
   const [interaction, setInteraction] = useState(null);
   const [marginInteraction, setMarginInteraction] = useState(null);
+  const [pageNumberInteraction, setPageNumberInteraction] = useState(null);
   const { top, right, bottom, left } = letterheadMarginPercentages(margins);
   const isPdf = fileLooksLikePdf(source, filename, fileType);
   const isImage = fileLooksLikeImage(source, filename, fileType);
@@ -1774,6 +1840,11 @@ function LetterheadPreview({
   useEffect(() => {
     changeMarginsRef.current = onChangeMargins;
   }, [onChangeMargins]);
+
+  useEffect(() => {
+    changePageNumberRef.current = onChangePageNumber;
+    pageNumberSettingsRef.current = normalizePageNumberSettings({ page_number: pageNumberSettings || {} });
+  }, [onChangePageNumber, pageNumberSettings]);
 
   useEffect(() => {
     if (!marginInteraction) return undefined;
@@ -1803,6 +1874,34 @@ function LetterheadPreview({
       window.removeEventListener("pointerup", stopInteraction);
     };
   }, [marginInteraction]);
+
+  useEffect(() => {
+    if (!pageNumberInteraction) return undefined;
+
+    const handlePointerMove = (event) => {
+      if (!pageNumberInteraction.pageWidth || !pageNumberInteraction.pageHeight) return;
+      const localX = Math.min(Math.max(event.clientX - pageNumberInteraction.pageLeft, 0), pageNumberInteraction.pageWidth);
+      const localY = Math.min(Math.max(event.clientY - pageNumberInteraction.pageTop, 0), pageNumberInteraction.pageHeight);
+      const current = pageNumberSettingsRef.current;
+      const next = normalizePageNumberSettings({
+        page_number: {
+          ...current,
+          x_mm: (localX / pageNumberInteraction.pageWidth) * A4_WIDTH_MM,
+          y_mm: (localY / pageNumberInteraction.pageHeight) * A4_HEIGHT_MM,
+        },
+      });
+      pageNumberSettingsRef.current = next;
+      changePageNumberRef.current?.(next);
+    };
+
+    const stopInteraction = () => setPageNumberInteraction(null);
+    window.addEventListener("pointermove", handlePointerMove);
+    window.addEventListener("pointerup", stopInteraction, { once: true });
+    return () => {
+      window.removeEventListener("pointermove", handlePointerMove);
+      window.removeEventListener("pointerup", stopInteraction);
+    };
+  }, [pageNumberInteraction]);
 
   useEffect(() => {
     if (!interaction) return undefined;
@@ -1870,6 +1969,20 @@ function LetterheadPreview({
       pageWidth: rect.width,
       pageHeight: rect.height,
       startMargins: { ...margins },
+    });
+  };
+
+  const startPageNumberInteraction = (event) => {
+    if (!allowPageNumberDrag || !pageRef.current) return;
+    const rect = pageRef.current.getBoundingClientRect();
+    if (!rect.width || !rect.height) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setPageNumberInteraction({
+      pageLeft: rect.left,
+      pageTop: rect.top,
+      pageWidth: rect.width,
+      pageHeight: rect.height,
     });
   };
 
@@ -1956,7 +2069,7 @@ function LetterheadPreview({
           <div
             ref={pageRef}
             className="relative mx-auto aspect-[210/297] overflow-hidden rounded-[2px] shadow-[0_18px_46px_rgba(15,23,42,0.18)] ring-1 ring-slate-950/15 dark:ring-white/15"
-            style={{ backgroundColor: pageBackgroundColor }}
+            style={{ backgroundColor: pageBackgroundColor, containerType: "inline-size" }}
             tabIndex={canEditLayers ? 0 : undefined}
             onKeyDown={handleCanvasKeyDown}
             onPointerDown={event => {
@@ -2076,6 +2189,15 @@ function LetterheadPreview({
                 </div>
               )}
             </div>
+            {showPageNumber && (
+              <LetterheadPageNumberMarker
+                settings={pageNumberSettings}
+                page={1}
+                totalPages={5}
+                interactive={allowPageNumberDrag}
+                onPointerDown={startPageNumberInteraction}
+              />
+            )}
           </div>
         </div>
       </div>
@@ -2135,6 +2257,7 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
   const backgroundFit = letterhead ? normalizeBackgroundFit(letterhead) : DEFAULT_LETTERHEAD_BACKGROUND_FIT;
   const pageBackgroundColor = letterhead ? normalizePageBackground(letterhead) : DEFAULT_LETTERHEAD_PAGE_BACKGROUND;
   const designLayers = letterhead ? normalizeDesignLayers(letterhead) : [];
+  const pageNumberSettings = normalizePageNumberSettings(letterhead || {});
   const source = letterhead?.file_url || "";
   const filename = letterhead?.download_filename || "";
   const { top, right, bottom, left } = letterheadMarginPercentages(margins);
@@ -2334,7 +2457,7 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
             <div
               key={`preview-page-${pageIndex + 1}`}
               className="relative aspect-[210/297] w-full overflow-hidden rounded-[2px] shadow-[0_18px_46px_rgba(15,23,42,0.18)] ring-1 ring-slate-950/15 dark:ring-white/15"
-              style={{ backgroundColor: pageBackgroundColor }}
+              style={{ backgroundColor: pageBackgroundColor, containerType: "inline-size" }}
             >
               {sourceMode === LETTERHEAD_SOURCE_MODES.upload && source && isImage && (
                 <img src={source} alt={filename || "Briefpapier"} className="absolute inset-0 h-full w-full" style={{ objectFit }} />
@@ -2365,7 +2488,11 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
                   />
                 ))}
               </div>
-              <span className="absolute bottom-2 right-3 z-30 text-[7px] font-medium text-slate-500">{pageIndex + 1}</span>
+              <LetterheadPageNumberMarker
+                settings={pageNumberSettings}
+                page={pageIndex + 1}
+                totalPages={pages.length}
+              />
             </div>
           ))}
         </div>
@@ -2483,6 +2610,7 @@ function initialLetterhead(companyId) {
     margin_right_mm: DEFAULT_LETTERHEAD_MARGINS.right,
     margin_bottom_mm: DEFAULT_LETTERHEAD_MARGINS.bottom,
     margin_left_mm: DEFAULT_LETTERHEAD_MARGINS.left,
+    page_number: { ...DEFAULT_PAGE_NUMBER_SETTINGS },
   };
 }
 
@@ -2507,15 +2635,20 @@ function legacyLetterhead(company) {
     background_fit: DEFAULT_LETTERHEAD_BACKGROUND_FIT,
     page_background_color: DEFAULT_LETTERHEAD_PAGE_BACKGROUND,
     design_layers: [],
+    page_number: { ...DEFAULT_PAGE_NUMBER_SETTINGS },
     document_settings: {
       source_mode: LETTERHEAD_SOURCE_MODES.upload,
       background_fit: DEFAULT_LETTERHEAD_BACKGROUND_FIT,
       page_background_color: DEFAULT_LETTERHEAD_PAGE_BACKGROUND,
       margins_mm: DEFAULT_LETTERHEAD_MARGINS,
       design_layers: [],
+      page_number: { ...DEFAULT_PAGE_NUMBER_SETTINGS },
     },
     legacy: true,
-    metadata: { created_by_display: "Legacy" },
+    metadata: {
+      created_by_display: "Legacy",
+      page_number: { ...DEFAULT_PAGE_NUMBER_SETTINGS },
+    },
   };
 }
 
@@ -2761,12 +2894,25 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const letterheadBackgroundFit = normalizeBackgroundFit(letterheadForm);
   const letterheadPageBackground = normalizePageBackground(letterheadForm);
   const letterheadDesignLayers = normalizeDesignLayers(letterheadForm);
+  const letterheadPageNumber = normalizePageNumberSettings(letterheadForm);
   const letterheadUsesUpload = letterheadSourceMode === LETTERHEAD_SOURCE_MODES.upload;
   const companyDisplayName = company?.trade_name || company?.name || company?.company_name || company?.legal_name || "Bedrijfsnaam";
   const letterheadPreviewIsPdf = letterheadUsesUpload && fileLooksLikePdf(letterheadPreviewSource, letterheadPreviewFilename, letterheadPreviewType);
   const letterheadPreviewIsImage = letterheadUsesUpload && fileLooksLikeImage(letterheadPreviewSource, letterheadPreviewFilename, letterheadPreviewType);
   const letterheadImageLooksA4 = letterheadPreviewIsImage && letterheadAssetInfo ? imageLooksA4(letterheadAssetInfo) : null;
   const showUploadFitOptions = letterheadPreviewIsImage && letterheadImageLooksA4 === false;
+
+  const updateLetterheadPageNumber = (changes) => {
+    setLetterheadForm(prev => ({
+      ...prev,
+      page_number: normalizePageNumberSettings({
+        page_number: {
+          ...normalizePageNumberSettings(prev),
+          ...changes,
+        },
+      }),
+    }));
+  };
 
   useEffect(() => {
     if (clauseLibraryItems.length === 0) return;
@@ -2848,6 +2994,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
 
       const previous = editingLetterheadId ? letterheads.find(item => item.id === editingLetterheadId) || {} : {};
       const margins = normalizeLetterheadMargins(letterheadForm);
+      const pageNumber = normalizePageNumberSettings(letterheadForm);
       const backgroundFit = normalizeBackgroundFit(letterheadForm);
       const pageBackgroundColor = normalizePageBackground(letterheadForm);
       const storedDesignLayers = sourceMode === LETTERHEAD_SOURCE_MODES.design ? designLayers : [];
@@ -2870,6 +3017,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           page_background_color: pageBackgroundColor,
           margins_mm: margins,
           design_layers: storedDesignLayers,
+          page_number: pageNumber,
         },
         metadata: {
           ...auditMetadata,
@@ -2878,6 +3026,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           page_background_color: pageBackgroundColor,
           margins_mm: margins,
           design_layers: storedDesignLayers,
+          page_number: pageNumber,
         },
         ...(sourceMode === LETTERHEAD_SOURCE_MODES.design
           ? {
@@ -3246,6 +3395,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     setMessage(null);
     setEditingLetterheadId(record.id);
     const margins = normalizeLetterheadMargins(record);
+    const pageNumber = normalizePageNumberSettings(record);
     setLetterheadForm({
       company_id: companyId,
       name: record.name || "",
@@ -3260,6 +3410,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       margin_right_mm: margins.right,
       margin_bottom_mm: margins.bottom,
       margin_left_mm: margins.left,
+      page_number: pageNumber,
     });
     setLetterheadStep(1);
     setLetterheadWizardOpen(true);
@@ -4875,6 +5026,151 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
             )}
 
             {letterheadStep === 3 && (
+              <div className="grid gap-5 xl:grid-cols-[340px_minmax(0,1fr)]">
+                <div className="space-y-4">
+                  <div className="rounded-lg border border-border bg-background/40 p-4">
+                    <div className="flex items-start justify-between gap-4">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Paginanummer tonen</p>
+                        <p className="mt-1 text-xs leading-5 text-muted-foreground">
+                          De gekozen positie en grootte gelden op iedere pagina van documenten met dit briefpapier.
+                        </p>
+                      </div>
+                      <Switch
+                        checked={letterheadPageNumber.enabled}
+                        onCheckedChange={enabled => updateLetterheadPageNumber({ enabled })}
+                        aria-label="Paginanummer tonen"
+                      />
+                    </div>
+                  </div>
+
+                  {letterheadPageNumber.enabled ? (
+                    <>
+                      <div className="space-y-2">
+                        <Label>Weergave</Label>
+                        <Select
+                          value={letterheadPageNumber.format}
+                          onValueChange={format => updateLetterheadPageNumber({ format })}
+                        >
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {PAGE_NUMBER_FORMAT_OPTIONS.map(option => (
+                              <SelectItem key={option.value} value={option.value}>
+                                {option.label} ({option.example})
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+
+                      <div className="space-y-2">
+                        <Label>Snelle positie</Label>
+                        <div className="grid grid-cols-3 gap-2">
+                          {PAGE_NUMBER_POSITION_PRESETS.map(option => {
+                            const selected = letterheadPageNumber.x_mm === option.x_mm
+                              && letterheadPageNumber.y_mm === option.y_mm;
+                            return (
+                              <Button
+                                key={option.value}
+                                type="button"
+                                variant={selected ? "default" : "outline"}
+                                size="sm"
+                                className="h-8 px-2 text-xs"
+                                onClick={() => updateLetterheadPageNumber({ x_mm: option.x_mm, y_mm: option.y_mm })}
+                              >
+                                {option.label}
+                              </Button>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      <div className="grid grid-cols-2 gap-3">
+                        <div className="space-y-2">
+                          <Label htmlFor="page-number-x">Vanaf links</Label>
+                          <div className="relative">
+                            <Input
+                              id="page-number-x"
+                              type="number"
+                              min="3"
+                              max="207"
+                              step="1"
+                              className="pr-10"
+                              value={letterheadPageNumber.x_mm}
+                              onChange={event => updateLetterheadPageNumber({ x_mm: event.target.value })}
+                            />
+                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">mm</span>
+                          </div>
+                        </div>
+                        <div className="space-y-2">
+                          <Label htmlFor="page-number-y">Vanaf boven</Label>
+                          <div className="relative">
+                            <Input
+                              id="page-number-y"
+                              type="number"
+                              min="3"
+                              max="294"
+                              step="1"
+                              className="pr-10"
+                              value={letterheadPageNumber.y_mm}
+                              onChange={event => updateLetterheadPageNumber({ y_mm: event.target.value })}
+                            />
+                            <span className="pointer-events-none absolute right-3 top-1/2 -translate-y-1/2 text-xs text-muted-foreground">mm</span>
+                          </div>
+                        </div>
+                      </div>
+
+                      <div className="space-y-3 rounded-lg border border-border bg-background/40 p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <div>
+                            <p className="text-sm font-medium text-foreground">Tekstgrootte</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">Kies een leesbare grootte die niet door het briefpapier loopt.</p>
+                          </div>
+                          <span className="shrink-0 rounded border border-border bg-background px-2 py-1 font-mono text-xs text-foreground">
+                            {letterheadPageNumber.font_size_pt} pt
+                          </span>
+                        </div>
+                        <Slider
+                          value={[letterheadPageNumber.font_size_pt]}
+                          min={6}
+                          max={18}
+                          step={1}
+                          onValueChange={values => updateLetterheadPageNumber({ font_size_pt: values[0] })}
+                          aria-label="Tekstgrootte paginanummer"
+                        />
+                      </div>
+
+                      <p className="rounded-md border border-primary/20 bg-primary/5 p-3 text-xs leading-5 text-muted-foreground">
+                        Sleep het blauwe paginanummer in de preview voor een fijne positionering. De millimeterwaarden worden automatisch bijgewerkt.
+                      </p>
+                    </>
+                  ) : (
+                    <div className="rounded-lg border border-dashed border-border p-4 text-sm text-muted-foreground">
+                      Documenten met dit briefpapier krijgen geen automatisch paginanummer.
+                    </div>
+                  )}
+                </div>
+
+                <LetterheadPreview
+                  source={letterheadPreviewSource}
+                  filename={letterheadPreviewFilename}
+                  fileType={letterheadPreviewType}
+                  margins={letterheadMargins}
+                  mode="sample"
+                  sourceMode={letterheadSourceMode}
+                  backgroundFit={letterheadBackgroundFit}
+                  pageBackgroundColor={letterheadPageBackground}
+                  designLayers={letterheadDesignLayers}
+                  assetInfo={letterheadAssetInfo}
+                  pageNumberSettings={letterheadPageNumber}
+                  showPageNumber
+                  onChangePageNumber={pageNumber => updateLetterheadPageNumber(pageNumber)}
+                  allowPageNumberDrag={letterheadPageNumber.enabled}
+                />
+              </div>
+            )}
+
+            {letterheadStep === 4 && (
               <div className="grid gap-5 lg:grid-cols-[300px_minmax(0,1fr)]">
                 <div className="space-y-3">
                   <div className="rounded-lg border border-border bg-background/40 p-3">
@@ -4893,6 +5189,19 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   <div className="rounded-lg border border-border bg-background/40 p-3">
                     <p className="text-xs uppercase tracking-wider text-muted-foreground">Marges</p>
                     <p className="mt-1 text-sm font-medium text-foreground">{marginLabel(letterheadForm)}</p>
+                  </div>
+                  <div className="rounded-lg border border-border bg-background/40 p-3">
+                    <p className="text-xs uppercase tracking-wider text-muted-foreground">Paginanummer</p>
+                    <p className="mt-1 text-sm font-medium text-foreground">
+                      {letterheadPageNumber.enabled
+                        ? `${pageNumberPositionLabel(letterheadPageNumber)} · ${letterheadPageNumber.font_size_pt} pt`
+                        : "Niet tonen"}
+                    </p>
+                    {letterheadPageNumber.enabled && (
+                      <p className="mt-0.5 text-xs text-muted-foreground">
+                        {PAGE_NUMBER_FORMAT_OPTIONS.find(option => option.value === letterheadPageNumber.format)?.example || "1"}
+                      </p>
+                    )}
                   </div>
                   {!letterheadUsesUpload && (
                     <div className="rounded-lg border border-border bg-background/40 p-3">
@@ -4926,6 +5235,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   pageBackgroundColor={letterheadPageBackground}
                   designLayers={letterheadDesignLayers}
                   assetInfo={letterheadAssetInfo}
+                  pageNumberSettings={letterheadPageNumber}
+                  showPageNumber
                 />
               </div>
             )}

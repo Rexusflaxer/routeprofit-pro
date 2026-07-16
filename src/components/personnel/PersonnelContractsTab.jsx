@@ -30,6 +30,11 @@ import {
   renderContractTemplateBody,
   validateStandardContractTemplateContext,
 } from "@/lib/contractTemplateRenderer";
+import {
+  formatPageNumber,
+  normalizePageNumberSettings,
+  pageNumberHorizontalAlignment,
+} from "@/lib/letterheadDocumentSettings";
 import { groupContractTemplateVersions } from "@/lib/contractTemplateEditor";
 import {
   CheckCircle,
@@ -815,6 +820,9 @@ function renderContractBody(personnel, form, company, template, clauses = []) {
 
 function makePdfFile({ personnel, form, company, template, letterhead, clauses = [] }) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const pageNumberSettings = normalizePageNumberSettings(letterhead || {});
+  const pageNumberAlignment = pageNumberHorizontalAlignment(pageNumberSettings);
+  const millimeterToPoint = 72 / 25.4;
   const margin = 54;
   const pageBottom = 760;
   const continuationTop = 64;
@@ -868,7 +876,17 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
     doc.setPage(page);
     doc.setFontSize(8);
     doc.text("PDF-snapshot gegenereerd door LOQ. Latere sjabloonwijzigingen wijzigen dit document niet.", margin, 806);
-    doc.text(`${page} / ${pageCount}`, 541, 806, { align: "right" });
+    if (pageNumberSettings.enabled) {
+      doc.setFontSize(pageNumberSettings.font_size_pt);
+      doc.setTextColor(100, 116, 139);
+      doc.text(
+        formatPageNumber(pageNumberSettings, page, pageCount),
+        pageNumberSettings.x_mm * millimeterToPoint,
+        pageNumberSettings.y_mm * millimeterToPoint,
+        { align: pageNumberAlignment, baseline: "middle" },
+      );
+      doc.setTextColor(0, 0, 0);
+    }
   }
   const blob = doc.output("blob");
   const safeName = `${values.employeeName.replace(/[^\w.-]+/g, "_")}_arbeidsovereenkomst_${form.contract_start_date || "concept"}.pdf`;

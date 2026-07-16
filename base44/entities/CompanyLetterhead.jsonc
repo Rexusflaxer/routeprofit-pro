@@ -57,7 +57,7 @@
         "object",
         "null"
       ],
-      "description": "Instellingen voor marges, positie en schaal bij documentgeneratie."
+      "description": "Instellingen voor marges, achtergrond, ontwerplagen en paginanummering bij documentgeneratie."
     },
     "metadata": {
       "type": [

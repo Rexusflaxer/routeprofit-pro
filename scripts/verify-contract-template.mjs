@@ -23,6 +23,13 @@ import {
   paginateContractTemplateUnitsByHeight,
   resequenceContractTemplateVersions,
 } from "../src/lib/contractTemplateEditor.js";
+import {
+  DEFAULT_PAGE_NUMBER_SETTINGS,
+  formatPageNumber,
+  normalizePageNumberSettings,
+  pageNumberHorizontalAlignment,
+  pageNumberPositionPercentages,
+} from "../src/lib/letterheadDocumentSettings.js";
 
 const company = {
   legal_name: "Voorbeeld Beveiliging B.V.",
@@ -155,6 +162,45 @@ assert.deepEqual(
   [["article-1"], ["article-2", "article-3"]],
 );
 assert.deepEqual(measuredPreviewPages.flat().map(item => item.id), measuredPreviewUnits.map(item => item.id));
+
+const legacyPageNumber = normalizePageNumberSettings({});
+assert.deepEqual(legacyPageNumber, DEFAULT_PAGE_NUMBER_SETTINGS);
+const customPageNumber = normalizePageNumberSettings({
+  document_settings: {
+    page_number: {
+      enabled: true,
+      x_mm: 105,
+      y_mm: 287,
+      font_size_pt: 12,
+      format: "page_of_total",
+    },
+  },
+});
+assert.deepEqual(customPageNumber, {
+  enabled: true,
+  x_mm: 105,
+  y_mm: 287,
+  font_size_pt: 12,
+  format: "page_of_total",
+});
+assert.deepEqual(pageNumberPositionPercentages(customPageNumber), {
+  left: 50,
+  top: (287 / 297) * 100,
+});
+assert.equal(formatPageNumber(customPageNumber, 2, 5), "2 / 5");
+assert.equal(formatPageNumber({ ...customPageNumber, format: "page_word_of_total" }, 2, 5), "Pagina 2 van 5");
+assert.equal(pageNumberHorizontalAlignment({ ...customPageNumber, x_mm: 15 }), "left");
+assert.equal(pageNumberHorizontalAlignment(customPageNumber), "center");
+assert.equal(pageNumberHorizontalAlignment({ ...customPageNumber, x_mm: 195 }), "right");
+assert.deepEqual(normalizePageNumberSettings({
+  page_number: { x_mm: -10, y_mm: 400, font_size_pt: 40 },
+}), {
+  enabled: true,
+  x_mm: 3,
+  y_mm: 294,
+  font_size_pt: 18,
+  format: "page",
+});
 
 const pbFulltimeDurations = durationOptionsForContractTemplate({
   template_type: "employment_contract",
