@@ -46,6 +46,7 @@ import {
   contractTemplateBlocksFromBody,
   contractTemplateFamilyKey,
   contractTemplateScopeKey,
+  centeredScrollOffset,
   createEmptyContractTemplateBlock,
   durationOptionsForContractTemplate,
   groupContractTemplateVersions,
@@ -2275,6 +2276,31 @@ const TEMPLATE_PREVIEW_HEIGHT_SAFETY_PX = 6;
 const TEMPLATE_PREVIEW_UNIT_CLASS = "relative -mx-1 mb-2 break-inside-avoid rounded-[2px] px-1 py-0.5 [page-break-inside:avoid]";
 const TEMPLATE_PREVIEW_RICH_TEXT_CLASS = "[overflow-wrap:anywhere] [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 [&_blockquote]:pl-2 [&_h2]:font-bold [&_h3]:font-semibold [&_li]:mb-0.5 [&_ol]:ml-4 [&_ol]:list-decimal [&_p]:mb-1 [&_ul]:ml-4 [&_ul]:list-disc";
 
+function centerElementInScrollContainer(scrollContainer, target, behavior = "smooth") {
+  const containerRect = scrollContainer.getBoundingClientRect();
+  const targetRect = target.getBoundingClientRect();
+
+  scrollContainer.scrollTo({
+    top: centeredScrollOffset({
+      currentOffset: scrollContainer.scrollTop,
+      targetStart: targetRect.top,
+      containerStart: containerRect.top,
+      targetSize: targetRect.height,
+      viewportSize: scrollContainer.clientHeight,
+      scrollSize: scrollContainer.scrollHeight,
+    }),
+    left: centeredScrollOffset({
+      currentOffset: scrollContainer.scrollLeft,
+      targetStart: targetRect.left,
+      containerStart: containerRect.left,
+      targetSize: targetRect.width,
+      viewportSize: scrollContainer.clientWidth,
+      scrollSize: scrollContainer.scrollWidth,
+    }),
+    behavior,
+  });
+}
+
 function TemplatePreviewUnit({ item, highlightedBlockId, measurement = false }) {
   const isHighlighted = !measurement && item.block_id === highlightedBlockId;
   return (
@@ -2403,11 +2429,7 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
       const target = [...scrollContainer.querySelectorAll("[data-template-block-id]")]
         .find(element => element.getAttribute("data-template-block-id") === highlightedBlockId);
       if (!target) return;
-      target.scrollIntoView({
-        behavior: "smooth",
-        block: "center",
-        inline: "center",
-      });
+      centerElementInScrollContainer(scrollContainer, target);
     };
 
     const animationFrame = window.requestAnimationFrame(centerHighlightedBlock);
@@ -2497,7 +2519,7 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
           </div>
         </TooltipProvider>
       </div>
-      <div ref={previewScrollRef} className="max-h-[760px] overflow-auto rounded-lg bg-slate-950/5 p-3 dark:bg-black/25">
+      <div ref={previewScrollRef} className="max-h-[760px] overflow-auto overscroll-contain rounded-lg bg-slate-950/5 p-3 dark:bg-black/25">
         <div
           className="mx-auto w-[420px] space-y-4 origin-top transition-[zoom] duration-150"
           style={{ zoom: previewZoom / 100 }}

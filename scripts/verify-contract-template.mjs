@@ -14,6 +14,7 @@ import {
   contractTemplateBodyFromBlocks,
   contractTemplateBlocksFromBody,
   contractTemplateFamilyKey,
+  centeredScrollOffset,
   durationOptionsForContractTemplate,
   groupContractTemplateVersions,
   nextContractArticleSectionNumber,
@@ -164,6 +165,30 @@ assert.deepEqual(
   [["article-1"], ["article-2", "article-3"]],
 );
 assert.deepEqual(measuredPreviewPages.flat().map(item => item.id), measuredPreviewUnits.map(item => item.id));
+assert.equal(centeredScrollOffset({
+  currentOffset: 100,
+  targetStart: 700,
+  containerStart: 200,
+  targetSize: 100,
+  viewportSize: 400,
+  scrollSize: 2000,
+}), 450);
+assert.equal(centeredScrollOffset({
+  currentOffset: 0,
+  targetStart: 20,
+  containerStart: 100,
+  targetSize: 40,
+  viewportSize: 400,
+  scrollSize: 2000,
+}), 0);
+assert.equal(centeredScrollOffset({
+  currentOffset: 1500,
+  targetStart: 900,
+  containerStart: 100,
+  targetSize: 100,
+  viewportSize: 400,
+  scrollSize: 1800,
+}), 1400);
 
 const legacyPageNumber = normalizePageNumberSettings({});
 assert.deepEqual(legacyPageNumber, DEFAULT_PAGE_NUMBER_SETTINGS);

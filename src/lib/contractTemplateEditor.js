@@ -465,6 +465,23 @@ export function paginateContractTemplateUnitsByHeight(units = [], {
   return pages;
 }
 
+export function centeredScrollOffset({
+  currentOffset = 0,
+  targetStart = 0,
+  containerStart = 0,
+  targetSize = 0,
+  viewportSize = 0,
+  scrollSize = 0,
+} = {}) {
+  const finite = value => (Number.isFinite(Number(value)) ? Number(value) : 0);
+  const viewport = Math.max(0, finite(viewportSize));
+  const maxOffset = Math.max(0, finite(scrollSize) - viewport);
+  const centeredOffset = finite(currentOffset)
+    + (finite(targetStart) - finite(containerStart))
+    - ((viewport - Math.max(0, finite(targetSize))) / 2);
+  return Math.min(maxOffset, Math.max(0, centeredOffset));
+}
+
 function contractDurationType(form = {}) {
   if (form.contract_model === "internship") return "internship";
   if (["min_max_employment", "call_employment"].includes(form.contract_model)) return "call";
