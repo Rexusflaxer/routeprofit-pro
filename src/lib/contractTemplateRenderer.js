@@ -3,10 +3,11 @@ import {
   CAO_PARTICULIERE_BEVEILIGING_KEY,
   PB_CAO_FUNCTION_GROUP_OPTIONS,
   PB_CAO_FUNCTION_LEVEL_OPTIONS,
-  PB_FULLTIME_STANDARD_TEMPLATE,
   PB_FULLTIME_STANDARD_TEMPLATE_ID,
   PB_FULLTIME_REQUIRED_PLACEHOLDERS,
+  PB_PARTTIME_STANDARD_TEMPLATE_ID,
   getContractTemplatePlaceholderDefinition,
+  getStandardContractTemplatePresetById,
   isKnownContractTemplatePlaceholder,
   pbFunctionGroupsForFunctions,
   pbSalaryScaleForFunctionLevel,
@@ -42,6 +43,20 @@ const PB_OFFICE_FUNCTIONS = new Set([
   "directie",
 ]);
 
+const PB_FULLTIME_MODEL_ALIASES = new Set([
+  "fulltime",
+  "fulltime_employment",
+  "fulltime_fixed",
+  "fulltime_indefinite",
+]);
+
+const PB_FIXED_PARTTIME_MODEL_ALIASES = new Set([
+  "parttime",
+  "parttime_employment",
+  "parttime_fixed",
+  "parttime_indefinite",
+]);
+
 /** @typedef {Record<string, any>} LooseRecord */
 
 function compact(value) {
@@ -62,6 +77,56 @@ function toNumber(value) {
   if (value === "" || value === null || value === undefined) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function formatHours(value) {
+  const number = toNumber(value);
+  if (number === null) return "";
+  return new Intl.NumberFormat("nl-NL", { maximumFractionDigits: 2 }).format(number);
+}
+
+function resolvedEmploymentModel(form = {}) {
+  const explicitModel = String(form.employment_contract_model || "").trim().toLowerCase();
+  if (explicitModel) {
+    if (PB_FIXED_PARTTIME_MODEL_ALIASES.has(explicitModel)) return "parttime_fixed";
+    if (PB_FULLTIME_MODEL_ALIASES.has(explicitModel)) return "fulltime";
+    return explicitModel;
+  }
+  const candidates = [form.contract_model, form.employment_model_scope]
+    .map(value => String(value || "").trim().toLowerCase())
+    .filter(Boolean);
+  if (candidates.some(value => PB_FIXED_PARTTIME_MODEL_ALIASES.has(value))) return "parttime_fixed";
+  if (candidates.some(value => PB_FULLTIME_MODEL_ALIASES.has(value))) return "fulltime";
+  return candidates[0] || "";
+}
+
+function isPbFixedParttime(form = {}) {
+  return form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    && resolvedEmploymentModel(form) === "parttime_fixed";
+}
+
+function resolvedContractHours(form = {}, { allowPbFulltimeDefault = true } = {}) {
+  const securityWork = resolveSecurityWork(form);
+  const model = resolvedEmploymentModel(form);
+  let hoursPerWeek = toNumber(form.contract_hours_per_week);
+  let hoursPerPeriod = toNumber(form.contract_hours_per_pay_period);
+
+  if (hoursPerPeriod === null && hoursPerWeek !== null) hoursPerPeriod = hoursPerWeek * 4;
+  if (hoursPerWeek === null && hoursPerPeriod !== null) hoursPerWeek = hoursPerPeriod / 4;
+  if (allowPbFulltimeDefault && securityWork === true && model === "fulltime") {
+    if (hoursPerWeek === null) hoursPerWeek = 36;
+    if (hoursPerPeriod === null) hoursPerPeriod = 144;
+  }
+
+  return { hoursPerWeek, hoursPerPeriod };
+}
+
+function resolvedFulltimeReferenceHours(form = {}) {
+  let hoursPerWeek = toNumber(form.fulltime_reference_hours_per_week);
+  let hoursPerPeriod = toNumber(form.fulltime_reference_hours_per_pay_period);
+  if (hoursPerPeriod === null && hoursPerWeek !== null) hoursPerPeriod = hoursPerWeek * 4;
+  if (hoursPerWeek === null && hoursPerPeriod !== null) hoursPerWeek = hoursPerPeriod / 4;
+  return { hoursPerWeek, hoursPerPeriod };
 }
 
 function dateValue(value) {
@@ -224,9 +289,20 @@ function contractTerminationClause(form = {}) {
 
 function contractHoursClause(form = {}) {
   const securityWork = resolveSecurityWork(form);
-  const hoursPerWeek = toNumber(form.contract_hours_per_week);
-  const hoursPerPeriod = toNumber(form.contract_hours_per_pay_period)
-    ?? (hoursPerWeek !== null ? hoursPerWeek * 4 : null);
+  const { hoursPerWeek, hoursPerPeriod } = resolvedContractHours(form);
+  if (isPbFixedParttime(form) && hoursPerPeriod !== null) {
+    const weekText = hoursPerWeek !== null ? `, gemiddeld ${formatHours(hoursPerWeek)} uur per week` : "";
+    if (securityWork === true) {
+      const availabilityHours = Math.floor((((hoursPerPeriod / 144) * 200) + Number.EPSILON) * 100) / 100;
+      return `Partijen kiezen het vaste parttimemodel. Werknemer werkt ${formatHours(hoursPerPeriod)} uur per loonperiode van vier weken${weekText} en is geen oproepkracht. Werkgever betaalt ten minste deze overeengekomen arbeidsduur. De maximale beschikbaarheid volgens de cao-formule (parttimepercentage maal 200 uur) bedraagt, naar beneden afgerond op twee decimalen, ${formatHours(availabilityHours)} uur per loonperiode, verdeeld over maximaal twintig tijdvakken en/of arbeidstijd. Een extra dienst buiten de vastgelegde tijdvakken of arbeidstijd wordt alleen in gezamenlijk overleg overeengekomen; meeruren, verschoven uren, min-uren en overwerk worden volgens de cao verwerkt en wijzigen de structurele arbeidsduur niet automatisch.`;
+    }
+
+    const reference = resolvedFulltimeReferenceHours(form);
+    const referenceText = reference.hoursPerPeriod !== null
+      ? ` De overeengekomen fulltime referentienorm voor deze functie bedraagt ${formatHours(reference.hoursPerPeriod)} uur per loonperiode van vier weken${reference.hoursPerWeek !== null ? `, gemiddeld ${formatHours(reference.hoursPerWeek)} uur per week` : ""}.`
+      : "";
+    return `Werknemer werkt parttime voor ${formatHours(hoursPerPeriod)} uur per loonperiode van vier weken${weekText}.${referenceText} De cao-definitie van 144 uur en de operationele regels van het vaste parttimemodel zijn door de uitzonderingen voor niet-operationele functies niet automatisch van toepassing. Extra uren worden alleen in onderling overleg gewerkt en wijzigen de structurele arbeidsduur niet automatisch.`;
+  }
   if (securityWork === true) {
     return "Werknemer werkt fulltime voor 144 uur per loonperiode van vier weken, gemiddeld 36 uur per week. Een regulier jaar telt dertien loonperioden; een kalenderjaar met een drieënvijftigste week wordt verwerkt volgens de cao.";
   }
@@ -251,8 +327,8 @@ function contractWorkplaceClause(form = {}, company = {}) {
 function contractSalaryClause(form = {}) {
   const hourlyRate = toNumber(form.hourly_rate_snapshot ?? form.custom_hourly_rate);
   const securityWork = resolveSecurityWork(form);
-  const periodHours = toNumber(form.contract_hours_per_pay_period) ?? (securityWork === true ? 144 : null);
-  const periodSalary = securityWork === true && hourlyRate !== null && periodHours !== null ? hourlyRate * periodHours : null;
+  const { hoursPerPeriod: periodHours } = resolvedContractHours(form);
+  const periodSalary = hourlyRate !== null && periodHours !== null ? hourlyRate * periodHours : null;
   const classification = securityWork === true && form.cao_scale !== "" && form.cao_scale !== null && form.cao_scale !== undefined
     ? ` De beloning is bij aanvang ingedeeld in salarisschaal ${form.cao_scale}, periodiek ${form.cao_period ?? ""}.`
     : "";
@@ -284,6 +360,15 @@ function contractFunctionClassificationClause(form = {}) {
 }
 
 function contractVacationClause(form = {}) {
+  if (isPbFixedParttime(form)) {
+    if (isCashValueLogistics(form)) {
+      return "Werknemer bouwt vakantie op naar rato van de betaalde arbeidstijd per loonperiode. Voor geld- en waardelogistiek geldt daarbij de fulltime referentie van 180 vakantie-uren, overeenkomend met 25 vakantiedagen per kalenderjaar, volgens hoofdstuk 15 van de cao.";
+    }
+    if (resolveSecurityWork(form) === false) {
+      return "Werknemer bouwt vakantie op naar rato van de overeengekomen parttime arbeidsduur ten opzichte van de voor deze niet-operationele functie vastgelegde fulltime referentienorm. Bij een volledig kalenderjaar geldt de cao-referentie van 20 wettelijke en 4 bovenwettelijke vakantiedagen.";
+    }
+    return "Werknemer bouwt vakantie op naar rato van de betaalde arbeidstijd per loonperiode, tot maximaal 144 betaalde uren per loonperiode. De fulltime referentie bedraagt 172,8 vakantie-uren, overeenkomend met 24 vakantiedagen per kalenderjaar, volgens de cao.";
+  }
   if (isCashValueLogistics(form)) {
     return "Bij een fulltime dienstverband in de geld- en waardelogistiek bouwt werknemer per kalenderjaar 180 vakantie-uren, overeenkomend met 25 vakantiedagen, op volgens hoofdstuk 15 van de cao.";
   }
@@ -358,10 +443,7 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
   const functions = readableFunctionValues(form);
   const primaryFunction = functionLabel(form.function_type) || functions[0] || "";
   const additionalFunctions = functions.filter(value => value !== primaryFunction);
-  const securityWork = resolveSecurityWork(form);
-  const hoursPerWeek = toNumber(form.contract_hours_per_week);
-  const hoursPerPeriod = toNumber(form.contract_hours_per_pay_period)
-    ?? (securityWork === true ? 144 : (hoursPerWeek !== null ? hoursPerWeek * 4 : null));
+  const { hoursPerWeek, hoursPerPeriod } = resolvedContractHours(form);
   const hourlyRate = toNumber(form.hourly_rate_snapshot ?? form.custom_hourly_rate);
   const periodSalary = hourlyRate !== null && hoursPerPeriod !== null ? hourlyRate * hoursPerPeriod : null;
   const caoName = CAO_LABELS[form.cao_key] || compact(form.cao_key);
@@ -477,8 +559,10 @@ export function renderContractTemplateBody(templateBody, context = {}) {
 }
 
 /** @param {LooseRecord} template */
-function isPbFulltimeTemplate(template = {}) {
-  return template.metadata?.standard_template_id === PB_FULLTIME_STANDARD_TEMPLATE_ID;
+function standardTemplatePreset(template = {}) {
+  return getStandardContractTemplatePresetById(
+    template.metadata?.standard_template_id || template.standard_template_id,
+  );
 }
 
 export function getMissingStandardTemplatePlaceholders(body, requiredPlaceholders = PB_FULLTIME_REQUIRED_PLACEHOLDERS) {
@@ -492,11 +576,15 @@ export function getMissingStandardTemplatePlaceholders(body, requiredPlaceholder
 export function validateStandardContractTemplateContext({ personnel = {}, form = {}, company = {}, template = {} } = {}) {
   const issues = [];
   const warnings = [];
-  if (!isPbFulltimeTemplate(template)) return { issues, warnings };
+  const preset = standardTemplatePreset(template);
+  if (!preset) return { issues, warnings };
+  const isFulltimePreset = preset.id === PB_FULLTIME_STANDARD_TEMPLATE_ID;
+  const isParttimePreset = preset.id === PB_PARTTIME_STANDARD_TEMPLATE_ID;
 
   if (form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY) issues.push("Deze standaardtemplate mag alleen met de CAO Particuliere Beveiliging worden gebruikt.");
-  if (form.employment_contract_model !== "fulltime") issues.push("Deze standaardtemplate is alleen geschikt voor een fulltime dienstverband.");
-  const missingRequiredPlaceholders = getMissingStandardTemplatePlaceholders(template.body);
+  if (isFulltimePreset && resolvedEmploymentModel(form) !== "fulltime") issues.push("Deze standaardtemplate is alleen geschikt voor een fulltime dienstverband.");
+  if (isParttimePreset && resolvedEmploymentModel(form) !== "parttime_fixed") issues.push("Deze standaardtemplate is alleen geschikt voor een parttime dienstverband volgens het vaste model; gebruik voor een groei-, oproep- of min-maxmodel een andere template.");
+  const missingRequiredPlaceholders = getMissingStandardTemplatePlaceholders(template.body, preset.required_placeholders);
   if (missingRequiredPlaceholders.length > 0) issues.push(`In de standaardtemplate ontbreken verplichte placeholders: ${missingRequiredPlaceholders.join(", ")}.`);
   if (!compact(company.legal_name || company.display_name)) issues.push("De juridische bedrijfsnaam ontbreekt.");
   if (!compact(company.kvk_number)) issues.push("Het KvK-nummer van de werkgever ontbreekt.");
@@ -507,13 +595,13 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (!compact(personnel.street_name || personnel.street) || !compact(personnel.postal_code) || !compact(personnel.city)) issues.push("Het volledige adres van de medewerker ontbreekt.");
   if (!form.contract_start_date) issues.push("De startdatum ontbreekt.");
   const contractStart = dateValue(form.contract_start_date);
-  const presetValidFrom = dateValue(PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.valid_from);
-  const presetValidUntil = dateValue(PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.valid_until);
+  const presetValidFrom = dateValue(preset.legal_basis.valid_from);
+  const presetValidUntil = dateValue(preset.legal_basis.valid_until);
   if (contractStart && presetValidFrom && contractStart < presetValidFrom) {
-    issues.push(`Deze standaardtemplate is beoordeeld vanaf ${formatDate(PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.valid_from)}; kies voor deze eerdere ingangsdatum een passende CAO-versie.`);
+    issues.push(`Deze standaardtemplate is beoordeeld vanaf ${formatDate(preset.legal_basis.valid_from)}; kies voor deze eerdere ingangsdatum een passende CAO-versie.`);
   }
   if (contractStart && presetValidUntil && contractStart > presetValidUntil) {
-    issues.push(`Deze standaardtemplate is beoordeeld tot en met ${formatDate(PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.valid_until)}; publiceer eerst een bijgewerkte CAO-versie voor deze ingangsdatum.`);
+    issues.push(`Deze standaardtemplate is beoordeeld tot en met ${formatDate(preset.legal_basis.valid_until)}; publiceer eerst een bijgewerkte CAO-versie voor deze ingangsdatum.`);
   }
   if (!durationType(form)) issues.push("Kies of de arbeidsovereenkomst voor bepaalde of onbepaalde tijd geldt.");
   if (durationType(form) === "fixed" && !form.contract_end_date) issues.push("De einddatum ontbreekt bij een arbeidsovereenkomst voor bepaalde tijd.");
@@ -543,11 +631,24 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   const securityWork = resolveSecurityWork(form);
   const hoursPerWeek = toNumber(form.contract_hours_per_week);
   const hoursPerPeriod = toNumber(form.contract_hours_per_pay_period);
+  const resolvedHours = resolvedContractHours(form, { allowPbFulltimeDefault: false });
   if (securityWork === null) issues.push("Leg vast of de medewerker normaal operationeel beveiligingswerk verricht.");
   if (securityWork === true) {
     if (!PB_SECURITY_FUNCTION_GROUPS.has(form.cao_function_group)) issues.push("Kies de bij de hoofdfunctie passende CAO-functiegroep.");
     if (!form.cao_function_level || form.cao_function_level === "not_applicable") issues.push("Kies het CAO-functieniveau voor de operationele functie.");
-    if (hoursPerWeek !== 36 || hoursPerPeriod !== 144) issues.push("Een operationele fulltimer onder de CAO Particuliere Beveiliging moet zijn vastgelegd als 36 uur per week en 144 uur per loonperiode.");
+    if (isFulltimePreset && (hoursPerWeek !== 36 || hoursPerPeriod !== 144)) {
+      issues.push("Een operationele fulltimer onder de CAO Particuliere Beveiliging moet zijn vastgelegd als 36 uur per week en 144 uur per loonperiode.");
+    }
+    if (isParttimePreset) {
+      if (hoursPerPeriod === null) {
+        issues.push("Vul voor het vaste parttimemodel een vast aantal contracturen per loonperiode van vier weken in.");
+      } else if (hoursPerPeriod <= 0 || hoursPerPeriod >= 144) {
+        issues.push("Een operationele parttimer in het vaste model moet meer dan 0 en minder dan 144 contracturen per loonperiode hebben.");
+      }
+      if (hoursPerWeek !== null && hoursPerPeriod !== null && Math.abs((hoursPerWeek * 4) - hoursPerPeriod) > 0.01) {
+        issues.push("De weekuren en uren per loonperiode spreken elkaar tegen. De gemiddelde weekuren moeten gelijk zijn aan de periode-uren gedeeld door vier.");
+      }
+    }
     if (form.cao_scale === "" || form.cao_scale === null || form.cao_scale === undefined) issues.push("De salarisschaal ontbreekt.");
     if (form.cao_period === "" || form.cao_period === null || form.cao_period === undefined) issues.push("De periodiek ontbreekt.");
     const expectedSalaryScale = pbSalaryScaleForFunctionLevel(form.cao_function_level);
@@ -556,8 +657,29 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     } else if (toNumber(form.cao_scale) !== expectedSalaryScale) {
       issues.push(`CAO-functieniveau ${pbFunctionLevelLabel(form.cao_function_level)} hoort bij salarisschaal ${expectedSalaryScale}.`);
     }
-  } else if (securityWork === false && hoursPerWeek === null && hoursPerPeriod === null) {
-    issues.push("Vul voor de niet-operationele fulltime functie de overeengekomen arbeidsduur in.");
+  } else if (securityWork === false) {
+    if (isFulltimePreset && hoursPerWeek === null && hoursPerPeriod === null) {
+      issues.push("Vul voor de niet-operationele fulltime functie de overeengekomen arbeidsduur in.");
+    }
+    if (isParttimePreset) {
+      if (hoursPerPeriod === null || hoursPerPeriod <= 0) {
+        issues.push("Vul voor de niet-operationele parttime functie een vast aantal contracturen per loonperiode in.");
+      }
+      if (hoursPerWeek !== null && hoursPerPeriod !== null && Math.abs((hoursPerWeek * 4) - hoursPerPeriod) > 0.01) {
+        issues.push("De weekuren en uren per loonperiode spreken elkaar tegen. De gemiddelde weekuren moeten gelijk zijn aan de periode-uren gedeeld door vier.");
+      }
+      const reference = resolvedFulltimeReferenceHours(form);
+      const rawReferenceWeek = toNumber(form.fulltime_reference_hours_per_week);
+      const rawReferencePeriod = toNumber(form.fulltime_reference_hours_per_pay_period);
+      if (reference.hoursPerPeriod === null || reference.hoursPerPeriod <= 0) {
+        issues.push("Vul voor de niet-operationele functie de fulltime referentienorm van het bedrijf in.");
+      } else if (resolvedHours.hoursPerPeriod !== null && resolvedHours.hoursPerPeriod >= reference.hoursPerPeriod) {
+        issues.push("De parttime arbeidsduur moet lager zijn dan de fulltime referentienorm voor deze niet-operationele functie.");
+      }
+      if (rawReferenceWeek !== null && rawReferencePeriod !== null && Math.abs((rawReferenceWeek * 4) - rawReferencePeriod) > 0.01) {
+        issues.push("De fulltime referentienorm per week en per loonperiode spreken elkaar tegen.");
+      }
+    }
   }
   if (form.salary_payment_frequency && form.salary_payment_frequency !== "four_weeks") {
     issues.push("Binnen deze CAO-PB-standaardtemplate wordt het loon per loonperiode van vier weken betaald.");

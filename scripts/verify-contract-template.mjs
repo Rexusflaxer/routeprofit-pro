@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
   PB_FULLTIME_STANDARD_TEMPLATE as preset,
+  PB_PARTTIME_REQUIRED_PLACEHOLDERS,
+  PB_PARTTIME_STANDARD_TEMPLATE as parttimePreset,
   getStandardContractTemplatePreset,
 } from "../src/lib/contractTemplateCatalog.js";
 import {
@@ -100,7 +102,20 @@ assert.equal(getStandardContractTemplatePreset({
   template_type: "employment_contract",
   cao_key: "cao_particuliere_beveiliging",
   contract_model: "parttime_employment",
-}), null);
+})?.id, parttimePreset.id);
+for (const contractModel of ["parttime", "parttime_employment", "parttime_fixed", "parttime_indefinite"]) {
+  assert.equal(getStandardContractTemplatePreset({
+    template_type: "employment_contract",
+    cao_key: "cao_particuliere_beveiliging",
+    contract_model: contractModel,
+  })?.id, parttimePreset.id);
+}
+assert.equal(getStandardContractTemplatePreset({
+  template_type: "employment_contract",
+  cao_key: "cao_particuliere_beveiliging",
+  contract_model: "parttime_employment",
+  employment_model_scope: "fulltime",
+})?.id, parttimePreset.id);
 
 const editorBlocks = contractTemplateBlocksFromBody(preset.body);
 assert.equal(editorBlocks.filter(block => block.kind === "article").length, 17);
@@ -115,6 +130,12 @@ const roundTripBody = contractTemplateBodyFromBlocks(editorBlocks);
 assert.deepEqual(getUnknownContractTemplatePlaceholders(roundTripBody), []);
 assert.deepEqual(getMissingStandardTemplatePlaceholders(roundTripBody), []);
 assert.match(roundTripBody, /Artikel 1 - Indiensttreding en duur\n\n1\.1/);
+const parttimeEditorBlocks = contractTemplateBlocksFromBody(parttimePreset.body);
+assert.equal(parttimeEditorBlocks.filter(block => block.kind === "article").length, 17);
+assert.match(parttimePreset.body, /Parttime dienstverband - CAO Particuliere Beveiliging/);
+assert.match(parttimePreset.body, /Artikel 5 - Arbeidsduur, vast parttimemodel, rooster en werktijden/);
+assert.deepEqual(getUnknownContractTemplatePlaceholders(parttimePreset.body), []);
+assert.deepEqual(getMissingStandardTemplatePlaceholders(parttimePreset.body, PB_PARTTIME_REQUIRED_PLACEHOLDERS), []);
 const firstArticleIndex = editorBlocks.findIndex(block => block.kind === "article");
 const reorderedBlocks = [...editorBlocks];
 [reorderedBlocks[firstArticleIndex], reorderedBlocks[firstArticleIndex + 1]] = [reorderedBlocks[firstArticleIndex + 1], reorderedBlocks[firstArticleIndex]];
@@ -283,6 +304,21 @@ function evaluate(form) {
   };
 }
 
+const parttimeTemplate = {
+  ...parttimePreset,
+  metadata: { standard_template_id: parttimePreset.id },
+  employment_model_scope: "parttime_fixed",
+};
+
+function evaluateParttime(form) {
+  const body = renderContractTemplateBody(parttimePreset.body, { personnel, form, company });
+  return {
+    body,
+    unresolved: getUnresolvedContractTemplatePlaceholders(body),
+    ...validateStandardContractTemplateContext({ personnel, form, company, template: parttimeTemplate }),
+  };
+}
+
 function operationalForm(overrides = {}) {
   return {
     ...baseForm,
@@ -369,4 +405,73 @@ const expiredVersion = evaluate(operationalForm({
 }));
 assert.ok(expiredVersion.issues.some(issue => issue.includes("bijgewerkte CAO-versie")));
 
-console.log("Contracttemplate verificatie geslaagd (11 contractsituaties, 5 presetselecties en editor-/versietests).\n");
+const operationalParttime = evaluateParttime(operationalForm({
+  employment_contract_model: "parttime_fixed",
+  contract_hours_per_week: "24",
+  contract_hours_per_pay_period: "96",
+}));
+assert.deepEqual(operationalParttime.issues, []);
+assert.deepEqual(operationalParttime.unresolved, []);
+assert.match(operationalParttime.body, /vaste parttimemodel/);
+assert.match(operationalParttime.body, /96 uur per loonperiode/);
+assert.match(operationalParttime.body, /133,33 uur per loonperiode/);
+assert.match(operationalParttime.body, /1\.776,00 bruto per loonperiode/);
+assert.match(operationalParttime.body, /naar rato van de betaalde arbeidstijd/);
+assert.doesNotMatch(operationalParttime.body, /9,24%/);
+
+const conflictingParttimeHours = evaluateParttime(operationalForm({
+  employment_contract_model: "parttime_fixed",
+  contract_hours_per_week: "24",
+  contract_hours_per_pay_period: "100",
+}));
+assert.ok(conflictingParttimeHours.issues.some(issue => issue.includes("spreken elkaar tegen")));
+
+const fulltimeHoursInParttime = evaluateParttime(operationalForm({
+  employment_contract_model: "parttime_fixed",
+  contract_hours_per_week: "36",
+  contract_hours_per_pay_period: "144",
+}));
+assert.ok(fulltimeHoursInParttime.issues.some(issue => issue.includes("minder dan 144")));
+
+const officeParttimeMissingReference = evaluateParttime({
+  ...baseForm,
+  employment_contract_model: "parttime_fixed",
+  function_type: "planner",
+  allowed_function_types_text: "planner",
+  cao_function_group: "non_security_staff",
+  cao_function_level: "not_applicable",
+  cao_scale: "",
+  cao_period: "",
+  performs_security_work: "false",
+  contract_hours_per_week: "24",
+  contract_hours_per_pay_period: "96",
+});
+assert.ok(officeParttimeMissingReference.issues.some(issue => issue.includes("fulltime referentienorm")));
+
+const officeParttime = evaluateParttime({
+  ...baseForm,
+  employment_contract_model: "parttime_fixed",
+  function_type: "planner",
+  allowed_function_types_text: "planner",
+  cao_function_group: "non_security_staff",
+  cao_function_level: "not_applicable",
+  cao_scale: "",
+  cao_period: "",
+  performs_security_work: "false",
+  contract_hours_per_week: "24",
+  contract_hours_per_pay_period: "96",
+  fulltime_reference_hours_per_week: "40",
+  fulltime_reference_hours_per_pay_period: "160",
+});
+assert.deepEqual(officeParttime.issues, []);
+assert.match(officeParttime.body, /fulltime referentienorm.*160 uur/);
+assert.doesNotMatch(officeParttime.body, /Werknemer werkt fulltime voor 144 uur/);
+
+const wrongParttimeModel = evaluateParttime(operationalForm({
+  employment_contract_model: "parttime_growth",
+  contract_hours_per_week: "24",
+  contract_hours_per_pay_period: "96",
+}));
+assert.ok(wrongParttimeModel.issues.some(issue => issue.includes("groei-, oproep- of min-maxmodel")));
+
+console.log("Contracttemplate verificatie geslaagd (17 contractsituaties, 10 presetselecties en editor-/versietests).\n");

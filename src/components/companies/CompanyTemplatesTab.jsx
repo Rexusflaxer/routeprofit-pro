@@ -37,7 +37,6 @@ import {
 } from "@/lib/securityCaoCatalog";
 import {
   CONTRACT_TEMPLATE_PLACEHOLDERS,
-  PB_FULLTIME_STANDARD_TEMPLATE_ID,
   getStandardContractTemplatePreset,
 } from "@/lib/contractTemplateCatalog";
 import {
@@ -2954,8 +2953,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     toolbar: { container: "#template-block-toolbar" },
     history: { delay: 700, maxStack: 100, userOnly: true },
   }), []);
-  const missingStandardTemplatePlaceholders = templateForm.standard_template_id === PB_FULLTIME_STANDARD_TEMPLATE_ID
-    ? getMissingStandardTemplatePlaceholders(templateForm.body)
+  const missingStandardTemplatePlaceholders = templateForm.standard_template_id && selectedStandardTemplatePreset
+    ? getMissingStandardTemplatePlaceholders(templateForm.body, selectedStandardTemplatePreset.required_placeholders)
     : [];
   const currentEditingLetterhead = editingLetterheadId
     ? letterheads.find(item => item.id === editingLetterheadId)
@@ -3193,8 +3192,11 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       if (status === "published" && templateForm.standard_template_id && unknownPlaceholders.length > 0) {
         throw new Error(`Publiceren is geblokkeerd: ${unknownPlaceholders.length} placeholder${unknownPlaceholders.length === 1 ? " is" : "s zijn"} niet gekoppeld aan de applicatie.`);
       }
-      const missingRequiredPlaceholders = templateForm.standard_template_id === PB_FULLTIME_STANDARD_TEMPLATE_ID
-        ? getMissingStandardTemplatePlaceholders(body)
+      const standardPreset = templateForm.standard_template_id
+        ? getStandardContractTemplatePreset(templateForm)
+        : null;
+      const missingRequiredPlaceholders = standardPreset
+        ? getMissingStandardTemplatePlaceholders(body, standardPreset.required_placeholders)
         : [];
       if (status === "published" && missingRequiredPlaceholders.length > 0) {
         throw new Error(`Publiceren is geblokkeerd: essentiële placeholders ontbreken (${missingRequiredPlaceholders.join(", ")}).`);
@@ -3207,9 +3209,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         ? (templateForm.version_source_id || familyVersions[0]?.id || null)
         : (previous.version_source_id || previous.metadata?.version_source_id || null);
       const clauseIds = sortClauseIdsByConfiguredOrder(extractClauseIds(body), clauses);
-      const appliedPreset = templateForm.standard_template_id
-        ? getStandardContractTemplatePreset(templateForm)
-        : null;
+      const appliedPreset = standardPreset;
       const auditMetadata = buildAuditMetadata(
         currentUser,
         createNewVersion ? "nieuwe versie" : (editingTemplateId ? "gewijzigd" : "toegevoegd"),

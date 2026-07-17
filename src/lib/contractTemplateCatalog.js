@@ -1,12 +1,20 @@
 export const CAO_PARTICULIERE_BEVEILIGING_KEY = "cao_particuliere_beveiliging";
 
 export const PB_FULLTIME_STANDARD_TEMPLATE_ID = "pb_fulltime_standard_v1";
+export const PB_PARTTIME_STANDARD_TEMPLATE_ID = "pb_parttime_fixed_standard_v1";
 
 const PB_FULLTIME_CONTRACT_MODEL_ALIASES = new Set([
   "fulltime",
   "fulltime_employment",
   "fulltime_fixed",
   "fulltime_indefinite",
+]);
+
+const PB_PARTTIME_CONTRACT_MODEL_ALIASES = new Set([
+  "parttime",
+  "parttime_employment",
+  "parttime_fixed",
+  "parttime_indefinite",
 ]);
 
 export const PB_CAO_FUNCTION_GROUP_OPTIONS = [
@@ -203,6 +211,16 @@ export const PB_FULLTIME_STANDARD_TEMPLATE_BODY = [
   "Handtekening: ______________________________",
 ].join("\n");
 
+export const PB_PARTTIME_STANDARD_TEMPLATE_BODY = PB_FULLTIME_STANDARD_TEMPLATE_BODY
+  .replace(
+    "Fulltime dienstverband - CAO Particuliere Beveiliging",
+    "Parttime dienstverband - CAO Particuliere Beveiliging",
+  )
+  .replace(
+    "Artikel 5 - Arbeidsduur, rooster en werktijden",
+    "Artikel 5 - Arbeidsduur, vast parttimemodel, rooster en werktijden",
+  );
+
 export const CONTRACT_TEMPLATE_PLACEHOLDERS = [
   { key: "bedrijf_statutaire_naam", label: "Juridische bedrijfsnaam", source: "Bedrijfsprofiel" },
   { key: "bedrijf_handelsnaam", label: "Handelsnaam", source: "Bedrijfsprofiel" },
@@ -290,6 +308,8 @@ export const PB_FULLTIME_REQUIRED_PLACEHOLDERS = [
   "contract_ondertekeningsdatum",
 ];
 
+export const PB_PARTTIME_REQUIRED_PLACEHOLDERS = [...PB_FULLTIME_REQUIRED_PLACEHOLDERS];
+
 export function isKnownContractTemplatePlaceholder(key) {
   return PLACEHOLDER_KEYS.has(String(key || "").trim());
 }
@@ -324,20 +344,54 @@ export const PB_FULLTIME_STANDARD_TEMPLATE = {
   },
 };
 
+export const PB_PARTTIME_STANDARD_TEMPLATE = {
+  id: PB_PARTTIME_STANDARD_TEMPLATE_ID,
+  version: 1,
+  name: "Parttime dienstverband - CAO Particuliere Beveiliging",
+  description: "Parttime basismodel volgens het vaste model van de CAO Particuliere Beveiliging. De overeengekomen uren gelden per loonperiode van vier weken; oproep-, min-max- en groeimodellen vallen buiten deze template.",
+  template_type: "employment_contract",
+  cao_key: CAO_PARTICULIERE_BEVEILIGING_KEY,
+  contract_model: "parttime_employment",
+  body: PB_PARTTIME_STANDARD_TEMPLATE_BODY,
+  required_placeholders: PB_PARTTIME_REQUIRED_PLACEHOLDERS,
+  legal_basis: {
+    ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
+    reviewed_at: "2026-07-17",
+    applicability_note: `${PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.applicability_note} Deze preset past uitsluitend bij het vaste parttimemodel uit artikel 11; het groeimodel en oproepovereenkomsten vereisen een eigen template.`,
+  },
+};
+
+function templateContextValue(form = {}) {
+  return [
+    form.contract_model,
+    form.employment_contract_model,
+    form.employment_model_scope,
+  ].map(value => String(value || "").trim().toLowerCase()).find(Boolean) || "";
+}
+
 export function isPbFulltimeStandardTemplateContext(form = {}) {
   if (form.template_type !== PB_FULLTIME_STANDARD_TEMPLATE.template_type) return false;
   if (form.cao_key !== PB_FULLTIME_STANDARD_TEMPLATE.cao_key) return false;
 
-  const modelValues = [
-    form.contract_model,
-    form.employment_contract_model,
-    form.employment_model_scope,
-  ].map(value => String(value || "").trim().toLowerCase()).filter(Boolean);
+  return PB_FULLTIME_CONTRACT_MODEL_ALIASES.has(templateContextValue(form));
+}
 
-  return modelValues.some(value => PB_FULLTIME_CONTRACT_MODEL_ALIASES.has(value));
+export function isPbParttimeStandardTemplateContext(form = {}) {
+  if (form.template_type !== PB_PARTTIME_STANDARD_TEMPLATE.template_type) return false;
+  if (form.cao_key !== PB_PARTTIME_STANDARD_TEMPLATE.cao_key) return false;
+
+  return PB_PARTTIME_CONTRACT_MODEL_ALIASES.has(templateContextValue(form));
+}
+
+export function getStandardContractTemplatePresetById(id) {
+  const normalizedId = String(id || "").trim();
+  if (normalizedId === PB_FULLTIME_STANDARD_TEMPLATE_ID) return PB_FULLTIME_STANDARD_TEMPLATE;
+  if (normalizedId === PB_PARTTIME_STANDARD_TEMPLATE_ID) return PB_PARTTIME_STANDARD_TEMPLATE;
+  return null;
 }
 
 export function getStandardContractTemplatePreset(form = {}) {
-  if (!isPbFulltimeStandardTemplateContext(form)) return null;
-  return PB_FULLTIME_STANDARD_TEMPLATE;
+  if (isPbFulltimeStandardTemplateContext(form)) return PB_FULLTIME_STANDARD_TEMPLATE;
+  if (isPbParttimeStandardTemplateContext(form)) return PB_PARTTIME_STANDARD_TEMPLATE;
+  return null;
 }
