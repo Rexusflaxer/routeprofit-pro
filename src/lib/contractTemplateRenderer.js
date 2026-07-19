@@ -8,6 +8,7 @@ import {
   PB_MIN_MAX_STANDARD_TEMPLATE_ID,
   PB_PARTTIME_GROWTH_STANDARD_TEMPLATE_ID,
   PB_PARTTIME_STANDARD_TEMPLATE_ID,
+  PB_ZERO_HOURS_STANDARD_TEMPLATE_ID,
   getContractTemplatePlaceholderDefinition,
   getStandardContractTemplatePresetById,
   isKnownContractTemplatePlaceholder,
@@ -71,6 +72,15 @@ const PB_MIN_MAX_MODEL_ALIASES = new Set([
   "min_max_indefinite",
 ]);
 
+const PB_ZERO_HOURS_MODEL_ALIASES = new Set([
+  "zero_hours",
+  "zero_hours_employment",
+  "call_employment",
+  "call_fixed",
+  "call_indefinite",
+  "call_agreement",
+]);
+
 const WEEKDAY_OPTIONS = [
   ["monday", "maandag"],
   ["tuesday", "dinsdag"],
@@ -126,6 +136,7 @@ function resolvedEmploymentModel(form = {}) {
     if (PB_FIXED_PARTTIME_MODEL_ALIASES.has(explicitModel)) return "parttime_fixed";
     if (PB_GROWTH_PARTTIME_MODEL_ALIASES.has(explicitModel)) return "parttime_growth";
     if (PB_MIN_MAX_MODEL_ALIASES.has(explicitModel)) return "min_max";
+    if (PB_ZERO_HOURS_MODEL_ALIASES.has(explicitModel)) return "zero_hours";
     if (PB_FULLTIME_MODEL_ALIASES.has(explicitModel)) return "fulltime";
     return explicitModel;
   }
@@ -135,6 +146,7 @@ function resolvedEmploymentModel(form = {}) {
   if (candidates.some(value => PB_FIXED_PARTTIME_MODEL_ALIASES.has(value))) return "parttime_fixed";
   if (candidates.some(value => PB_GROWTH_PARTTIME_MODEL_ALIASES.has(value))) return "parttime_growth";
   if (candidates.some(value => PB_MIN_MAX_MODEL_ALIASES.has(value))) return "min_max";
+  if (candidates.some(value => PB_ZERO_HOURS_MODEL_ALIASES.has(value))) return "zero_hours";
   if (candidates.some(value => PB_FULLTIME_MODEL_ALIASES.has(value))) return "fulltime";
   return candidates[0] || "";
 }
@@ -152,6 +164,11 @@ function isPbGrowthParttime(form = {}) {
 function isPbMinMax(form = {}) {
   return form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     && resolvedEmploymentModel(form) === "min_max";
+}
+
+function isPbZeroHours(form = {}) {
+  return form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    && resolvedEmploymentModel(form) === "zero_hours";
 }
 
 function isPbParttime(form = {}) {
@@ -219,7 +236,10 @@ function contractCallConditionsClause(form = {}) {
   const availability = windows.map(availabilityWindowLabel).join("; ");
   const channel = CALL_CHANNEL_LABELS[form.call_channel] || compact(form.call_channel);
   if (!availability || !channel) return "";
-  return `Werknemer is oproepbaar binnen de volgende overeengekomen beschikbaarheid: ${availability}. Werkgever doet oproepen schriftelijk of elektronisch via ${channel}. Buiten deze beschikbaarheid is werknemer niet verplicht een oproep te aanvaarden. Iedere oproep blijft gebonden aan het overeengekomen maximum, de Arbeidstijdenwet, de cao en de overige regels uit dit artikel.`;
+  const scope = isPbZeroHours(form)
+    ? "Iedere oproep blijft gebonden aan de Arbeidstijdenwet, de cao en de overige regels uit dit artikel; door een oproep ontstaat niet automatisch een vaste arbeidsomvang."
+    : "Iedere oproep blijft gebonden aan het overeengekomen maximum, de Arbeidstijdenwet, de cao en de overige regels uit dit artikel.";
+  return `Werknemer is oproepbaar binnen de volgende overeengekomen beschikbaarheid: ${availability}. Werkgever doet oproepen schriftelijk of elektronisch via ${channel}. Buiten deze beschikbaarheid is werknemer niet verplicht een oproep te aanvaarden. ${scope}`;
 }
 
 function resolvedFulltimeReferenceHours(form = {}) {
@@ -382,6 +402,13 @@ function contractProbationClause(form = {}) {
 }
 
 function contractTerminationClause(form = {}) {
+  if (isPbZeroHours(form)) {
+    const employeeNotice = "Werknemer kan schriftelijk opzeggen tegen iedere dag met een opzegtermijn van vier kalenderdagen, of een kortere termijn als de toepasselijke cao die rechtsgeldig bepaalt.";
+    if (durationType(form) === "fixed") {
+      return `${employeeNotice} Deze tijdelijke arbeidsovereenkomst kan tussentijds worden opgezegd. Werkgever kan uitsluitend opzeggen met inachtneming van de wettelijke ontslaggrond en -procedure en de toepasselijke cao-opzegtermijn.`;
+    }
+    return `${employeeNotice} Werkgever kan uitsluitend opzeggen met inachtneming van de wettelijke ontslaggrond en -procedure en de toepasselijke cao-opzegtermijn.`;
+  }
   if (durationType(form) === "fixed") {
     return "De arbeidsovereenkomst kan door ieder van de partijen schriftelijk tussentijds worden opgezegd tegen iedere dag, met inachtneming van de wettelijke opzeggingsregels en de cao-opzegtermijn van één loonperiode van vier weken.";
   }
@@ -391,6 +418,9 @@ function contractTerminationClause(form = {}) {
 function contractHoursClause(form = {}) {
   const securityWork = resolveSecurityWork(form);
   const { hoursPerWeek, hoursPerPeriod } = resolvedContractHours(form);
+  if (isPbZeroHours(form)) {
+    return "Partijen sluiten een oproepovereenkomst zonder vaste arbeidsomvang: een nulurencontract. Er gelden geen vaste contracturen, minimumuren, maximumuren of garantie-uren per week of loonperiode. Werkgever betaalt alle daadwerkelijk gewerkte en anderszins rechtens verschuldigde uren. Werknemer is binnen de overeengekomen beschikbaarheid verplicht gehoor te geven aan een tijdige oproep, met inachtneming van de wet, de cao en de Arbeidstijdenwet. Werknemer kan niet zonder instemming worden verplicht meer dan 144 uur per loonperiode van vier weken te werken. Incidentele oproepen wijzigen de arbeidsomvang niet automatisch; wettelijke en cao-rechten op basis van een structureel arbeidspatroon blijven volledig gelden.";
+  }
   if (isPbMinMax(form)) {
     const {
       minHoursPerPeriod,
@@ -453,7 +483,9 @@ function contractWorkplaceClause(form = {}, company = {}) {
 function contractSalaryClause(form = {}) {
   const hourlyRate = toNumber(form.hourly_rate_snapshot ?? form.custom_hourly_rate);
   const securityWork = resolveSecurityWork(form);
-  const periodHours = isPbMinMax(form)
+  const periodHours = isPbZeroHours(form)
+    ? null
+    : isPbMinMax(form)
     ? resolvedMinMaxHours(form).minHoursPerPeriod
     : resolvedContractHours(form).hoursPerPeriod;
   const periodSalary = hourlyRate !== null && periodHours !== null ? hourlyRate * periodHours : null;
@@ -464,7 +496,9 @@ function contractSalaryClause(form = {}) {
   const periodPart = periodSalary !== null
     ? `, overeenkomend met ${formatCurrency(periodSalary)} bruto per loonperiode ${isPbMinMax(form) ? "over de garantie-uren" : "bij de overeengekomen arbeidsduur"}`
     : "";
-  const additionalHours = isPbMinMax(form)
+  const additionalHours = isPbZeroHours(form)
+    ? " Werkgever betaalt alle daadwerkelijk gewerkte en anderszins rechtens verschuldigde oproepuren volgens de cao en de wet; er geldt geen gegarandeerd periodeloon."
+    : isPbMinMax(form)
     ? " Gewerkte of anderszins loongerechtigde uren boven de garantie-uren worden aanvullend betaald volgens de cao en de wet."
     : "";
   return `Het bruto basisuurloon bedraagt bij aanvang ${formatCurrency(hourlyRate)}${periodPart}, exclusief vakantiebijslag en toepasselijke toeslagen.${additionalHours}${classification}`;
@@ -493,8 +527,8 @@ function contractFunctionClassificationClause(form = {}) {
 }
 
 function contractVacationClause(form = {}) {
-  if (isPbMinMax(form)) {
-    return "Werknemer ontvangt per loonperiode overeenkomstig de cao een afzonderlijk gespecificeerde betaling van 9,24% over het loon tot maximaal 144 uur als geldswaarde van de cao-vakantie-uren. Daarnaast ontvangt werknemer 8% vakantiebijslag over het daarvoor geldende bruto loon. Deze betalingswijze neemt het recht op daadwerkelijke jaarlijkse vakantie en rust niet weg; dwingendrechtelijke vakantie- en verlofrechten en gunstiger toepasselijke cao-bepalingen blijven gelden.";
+  if (isPbMinMax(form) || isPbZeroHours(form)) {
+    return "Voor zover artikel 59 lid 3 van de cao werkgever en werknemer rechtsgeldig bindt, ontvangt werknemer per loonperiode een afzonderlijk gespecificeerde betaling van 9,24% over het daarvoor volgens de cao in aanmerking komende loon tot maximaal 144 uur als geldswaarde van de cao-vakantie-uren. Is die regeling niet bindend of gaat dwingend recht voor, dan bouwt werknemer over de loongerechtigde uren wettelijke en toepasselijke bovenwettelijke vakantie op en stelt werkgever werknemer in staat deze met behoud van loon op te nemen. Daarnaast ontvangt werknemer 8% vakantiebijslag over het daarvoor geldende bruto loon. In alle gevallen blijven het recht op daadwerkelijke jaarlijkse vakantie en rust, dwingendrechtelijke vakantie- en verlofrechten en gunstiger toepasselijke cao-bepalingen volledig gelden.";
   }
   if (isPbParttime(form)) {
     if (isCashValueLogistics(form)) {
@@ -513,8 +547,8 @@ function contractVacationClause(form = {}) {
 
 function contractWpbrClause(form = {}) {
   const securityWork = resolveSecurityWork(form);
-  const base = "Werknemer mag uitsluitend werkzaamheden verrichten indien en zolang is voldaan aan de voor werknemer en de werkzaamheden geldende toestemming, screening, betrouwbaarheid en vakbekwaamheid op grond van de Wpbr en daarop gebaseerde regels.";
-  if (securityWork !== true) return `${base} Werkgever bepaalt welke Wpbr-eisen voor de niet-operationele functie gelden.`;
+  const base = "Werknemer mag uitsluitend werkzaamheden voor werkgever verrichten indien en zolang werknemer beschikt over de vereiste toestemming van de korpschef en is voldaan aan de voor werknemer en de werkzaamheden geldende screening en betrouwbaarheidseisen op grond van de Wpbr en daarop gebaseerde regels.";
+  if (securityWork !== true) return `${base} Werknemer verricht geen operationele beveiligingswerkzaamheden zonder de daarvoor vereiste opleiding, vakbekwaamheid en legitimatie.`;
   return `${base} Voor beveiligingswerkzaamheden draagt werknemer het vereiste legitimatiebewijs tijdens het werk bij zich en levert werknemer dit bij het einde van de inzet of op eerste verzoek van werkgever in.`;
 }
 
@@ -579,7 +613,9 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
   const { hoursPerWeek, hoursPerPeriod } = resolvedContractHours(form);
   const minMaxHours = resolvedMinMaxHours(form);
   const hourlyRate = toNumber(form.hourly_rate_snapshot ?? form.custom_hourly_rate);
-  const salaryHoursPerPeriod = isPbMinMax(form) ? minMaxHours.minHoursPerPeriod : hoursPerPeriod;
+  const salaryHoursPerPeriod = isPbZeroHours(form)
+    ? null
+    : (isPbMinMax(form) ? minMaxHours.minHoursPerPeriod : hoursPerPeriod);
   const periodSalary = hourlyRate !== null && salaryHoursPerPeriod !== null ? hourlyRate * salaryHoursPerPeriod : null;
   const caoName = CAO_LABELS[form.cao_key] || compact(form.cao_key);
   const today = new Date().toISOString().slice(0, 10);
@@ -631,8 +667,8 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     hoofdfunctie: primaryFunction,
     functie_lijst: functions.join(", "),
     nevenfuncties_lijst: additionalFunctions.join(", "),
-    contracturen_per_week: (isPbMinMax(form) ? minMaxHours.minHoursPerWeek : hoursPerWeek) ?? "",
-    contracturen_per_periode: (isPbMinMax(form) ? minMaxHours.minHoursPerPeriod : hoursPerPeriod) ?? "",
+    contracturen_per_week: isPbZeroHours(form) ? "" : ((isPbMinMax(form) ? minMaxHours.minHoursPerWeek : hoursPerWeek) ?? ""),
+    contracturen_per_periode: isPbZeroHours(form) ? "" : ((isPbMinMax(form) ? minMaxHours.minHoursPerPeriod : hoursPerPeriod) ?? ""),
     pensioenregeling_naam: "Stichting Bedrijfstakpensioenfonds voor de Particuliere Beveiliging",
     meldpunt_privacy_datalekken: compact(company.privacy_email || company.email || company.phone),
     contract_ondertekeningsplaats: compact(form.signing_place || company.city),
@@ -718,6 +754,8 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   const isFixedParttimePreset = preset.id === PB_PARTTIME_STANDARD_TEMPLATE_ID;
   const isGrowthParttimePreset = preset.id === PB_PARTTIME_GROWTH_STANDARD_TEMPLATE_ID;
   const isMinMaxPreset = preset.id === PB_MIN_MAX_STANDARD_TEMPLATE_ID;
+  const isZeroHoursPreset = preset.id === PB_ZERO_HOURS_STANDARD_TEMPLATE_ID;
+  const isCallPreset = isMinMaxPreset || isZeroHoursPreset;
   const isParttimePreset = isFixedParttimePreset || isGrowthParttimePreset;
 
   if (form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY) issues.push("Deze standaardtemplate mag alleen met de CAO Particuliere Beveiliging worden gebruikt.");
@@ -725,6 +763,7 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (isFixedParttimePreset && resolvedEmploymentModel(form) !== "parttime_fixed") issues.push("Deze standaardtemplate is alleen geschikt voor een parttime dienstverband volgens het vaste model; gebruik voor een groei-, oproep- of min-maxmodel een andere template.");
   if (isGrowthParttimePreset && resolvedEmploymentModel(form) !== "parttime_growth") issues.push("Deze standaardtemplate is alleen geschikt voor een parttime dienstverband volgens het groeimodel; gebruik voor een vast, oproep- of min-maxmodel een andere template.");
   if (isMinMaxPreset && resolvedEmploymentModel(form) !== "min_max") issues.push("Deze standaardtemplate is alleen geschikt voor een min-maxcontract; gebruik voor een nuluren-, vast of groeimodel een andere template.");
+  if (isZeroHoursPreset && resolvedEmploymentModel(form) !== "zero_hours") issues.push("Deze standaardtemplate is alleen geschikt voor een nulurencontract; gebruik voor een min-maxcontract, voorovereenkomst of vaste arbeidsomvang een andere template.");
   const missingRequiredPlaceholders = getMissingStandardTemplatePlaceholders(template.body, preset.required_placeholders);
   if (missingRequiredPlaceholders.length > 0) issues.push(`In de standaardtemplate ontbreken verplichte placeholders: ${missingRequiredPlaceholders.join(", ")}.`);
   if (!compact(company.legal_name || company.display_name)) issues.push("De juridische bedrijfsnaam ontbreekt.");
@@ -775,6 +814,22 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   const resolvedHours = resolvedContractHours(form, { allowPbFulltimeDefault: false });
   const minMaxHours = resolvedMinMaxHours(form);
   if (securityWork === null) issues.push("Leg vast of de medewerker normaal operationeel beveiligingswerk verricht.");
+  if (isZeroHoursPreset) {
+    const enteredHourFields = [
+      form.contract_hours_per_week,
+      form.contract_hours_per_pay_period,
+      form.min_hours_per_week,
+      form.max_hours_per_week,
+      form.min_hours_per_pay_period,
+      form.max_hours_per_pay_period,
+    ].some(value => value !== "" && value !== null && value !== undefined);
+    if (enteredHourFields) {
+      issues.push("Een nulurencontract mag geen vaste, minimum-, maximum- of garantie-uren bevatten.");
+    }
+    if (form.call_agreement_type && form.call_agreement_type !== "zero_hours") {
+      issues.push("Het gekozen oproeptype moet voor deze standaardtemplate op nuluren staan.");
+    }
+  }
   if (isMinMaxPreset) {
     const rawMinWeek = toNumber(form.min_hours_per_week);
     const rawMaxWeek = toNumber(form.max_hours_per_week);
@@ -807,6 +862,8 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
       issues.push("De maximumuren per week en per loonperiode spreken elkaar tegen.");
     }
 
+  }
+  if (isCallPreset) {
     let rawAvailability = form.availability_windows;
     if (typeof rawAvailability === "string") {
       try {
@@ -831,6 +888,9 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     });
     if (!CALL_CHANNEL_LABELS[form.call_channel]) {
       issues.push("Kies via welk schriftelijk of elektronisch kanaal werkgever de oproep verstuurt.");
+    }
+    if (new Set(availability.map(window => window.weekday)).size === 7) {
+      warnings.push("De beschikbaarheid omvat alle zeven dagen. Controleer of de tijdvakken noodzakelijk, realistisch en verenigbaar met rusttijden en privébelangen zijn.");
     }
   }
   if (securityWork === true) {

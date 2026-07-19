@@ -4,6 +4,7 @@ export const PB_FULLTIME_STANDARD_TEMPLATE_ID = "pb_fulltime_standard_v1";
 export const PB_PARTTIME_STANDARD_TEMPLATE_ID = "pb_parttime_fixed_standard_v1";
 export const PB_PARTTIME_GROWTH_STANDARD_TEMPLATE_ID = "pb_parttime_growth_standard_v1";
 export const PB_MIN_MAX_STANDARD_TEMPLATE_ID = "pb_min_max_standard_v1";
+export const PB_ZERO_HOURS_STANDARD_TEMPLATE_ID = "pb_zero_hours_standard_v1";
 
 const PB_FULLTIME_CONTRACT_MODEL_ALIASES = new Set([
   "fulltime",
@@ -29,6 +30,15 @@ const PB_MIN_MAX_CONTRACT_MODEL_ALIASES = new Set([
   "min_max_employment",
   "min_max_fixed",
   "min_max_indefinite",
+]);
+
+const PB_ZERO_HOURS_CONTRACT_MODEL_ALIASES = new Set([
+  "zero_hours",
+  "zero_hours_employment",
+  "call_employment",
+  "call_fixed",
+  "call_indefinite",
+  "call_agreement",
 ]);
 
 export const PB_CAO_FUNCTION_GROUP_OPTIONS = [
@@ -306,6 +316,68 @@ export const PB_MIN_MAX_STANDARD_TEMPLATE_BODY = PB_FULLTIME_STANDARD_TEMPLATE_B
     "9.3 Loondoorbetaling en re-integratieverplichtingen worden vastgesteld volgens de wet en de {$cao_naam}. Bij een min-maxcontract wordt daarbij ten minste uitgegaan van de garantie-uren en de geldende wettelijke minimumwaarborgen.\n9.4 Voor reeds vastgestelde oproepen en een mogelijk structureel hogere gemiddelde arbeidsomvang wordt afzonderlijk beoordeeld welke loonaanspraak uit wet en cao voortvloeit.",
   );
 
+export const PB_ZERO_HOURS_STANDARD_TEMPLATE_BODY = PB_FULLTIME_STANDARD_TEMPLATE_BODY
+  .replace(
+    "Fulltime dienstverband - CAO Particuliere Beveiliging",
+    "Nulurencontract - CAO Particuliere Beveiliging",
+  )
+  .replace(
+    [
+      "Artikel 5 - Arbeidsduur, rooster en werktijden",
+      "5.1 {$contract_arbeidsduur_bepaling}",
+      "5.2 Werkgever stelt het rooster vast met inachtneming van de {$cao_naam}, de Arbeidstijdenwet en de daarin opgenomen regels over aankondiging, wijziging, rust en vrije tijd.",
+      "5.3 Werknemer kan, voor zover passend bij de functie en binnen de toepasselijke regels, worden ingeroosterd op wisselende dagen en tijden, waaronder avond-, nacht-, weekend- en feestdagdiensten.",
+      "5.4 Een wijziging van de structurele arbeidsduur wordt schriftelijk vastgelegd.",
+    ].join("\n"),
+    [
+      "Artikel 5 - Nulurenovereenkomst, beschikbaarheid en oproepen",
+      "5.1 {$contract_arbeidsduur_bepaling}",
+      "5.2 {$contract_oproepvoorwaarden_bepaling}",
+      "5.3 Werkgever roept werknemer ten minste vier kalenderdagen voor aanvang schriftelijk of elektronisch op en vermeldt datum, begin- en eindtijd, locatie en werkzaamheden.",
+      "5.4 Bij een oproep korter dan vier kalenderdagen voor aanvang is werknemer niet verplicht te werken. Werknemer kan een dergelijke oproep wel vrijwillig aanvaarden.",
+      "5.5 Trekt werkgever de oproep binnen vier kalenderdagen voor aanvang geheel of gedeeltelijk in of wijzigt werkgever binnen die termijn de tijdstippen, dan behoudt werknemer het recht op loon over de oorspronkelijke oproep voor zover wet en cao dat bepalen.",
+      "5.6 Per afzonderlijke oproep ontvangt werknemer ten minste drie uur loon, ook als minder dan drie uur is gewerkt.",
+      "5.7 Na iedere periode van twaalf maanden als oproepkracht doet werkgever binnen de wettelijke termijn schriftelijk of elektronisch een aanbod voor een vaste arbeidsomvang op basis van de gemiddelde arbeidsomvang in de voorafgaande twaalf maanden. Bij afwijzing wordt na een volgende periode van twaalf maanden opnieuw een aanbod gedaan.",
+      "5.8 Werknemer behoudt het recht zich te beroepen op het wettelijke rechtsvermoeden van arbeidsomvang en kan volgens de {$cao_naam} schriftelijk om aanpassing van de arbeidsduur verzoeken bij een regelmatig en structureel arbeidspatroon. Een wijziging ontstaat niet automatisch en wordt schriftelijk vastgelegd.",
+    ].join("\n"),
+  )
+  .replace(
+    [
+      "Artikel 6 - Beloning",
+      "6.1 {$contract_beloning_bepaling}",
+      "6.2 {$contract_loonperiode_bepaling}",
+      "6.3 Toeslagen voor bijzondere uren, feestdagen, overwerk, functiewaarneming en overige vergoedingen worden toegekend volgens de {$cao_naam} en de feitelijke werkzaamheden.",
+      "6.4 Wijzigingen in loon, schaal of periodiek worden toegepast volgens de geldende cao en loontabel.",
+    ].join("\n"),
+    [
+      "Artikel 6 - Beloning en toeslagen",
+      "6.1 {$contract_beloning_bepaling}",
+      "6.2 {$contract_loonperiode_bepaling}",
+      "6.3 Werkgever vermeldt op de loonstrook dat sprake is van een oproepovereenkomst en specificeert de gewerkte en anderszins loongerechtigde uren en toeslagen afzonderlijk.",
+      "6.4 Partijen sluiten het recht op loon bij niet-werken in deze standaardovereenkomst niet uit. Of en over welke uren loon is verschuldigd, wordt bepaald door de wet, de {$cao_naam}, vastgestelde oproepen en een eventueel aantoonbaar structureel arbeidspatroon.",
+      "6.5 Werknemer kan niet zonder instemming worden verplicht meer dan 144 uur per loonperiode te werken. Uren boven 152 uur per loonperiode gelden als overuren volgens de {$cao_naam}.",
+      "6.6 Een oproepkracht ontvangt geen verschuivingstoeslag voor zover de {$cao_naam} dit bepaalt.",
+      "6.7 Voor arbeid op een in de {$cao_naam} aangewezen feestdag ontvangt de oproepkracht een toeslag van 100% van het basisuurloon. Voor dezelfde uren worden geen looncomponenten gestapeld die de cao voor oproepkrachten uitsluit.",
+      "6.8 Overige toeslagen en vergoedingen worden uitsluitend toegekend voor zover de {$cao_naam} en de feitelijke werkzaamheden daarop aanspraak geven.",
+    ].join("\n"),
+  )
+  .replace(
+    [
+      "Artikel 7 - Vakantie, vakantiebijslag en verlof",
+      "7.1 {$contract_vakantie_bepaling}",
+      "7.2 Werknemer ontvangt 8% vakantiebijslag over het daarvoor geldende bruto jaarloon. Opbouw en uitbetaling vinden plaats volgens de {$cao_naam} en de wet.",
+      "7.3 Opname, verval en uitbetaling van vakantie-uren en overige verlofrechten worden toegepast volgens de wet en de {$cao_naam}.",
+    ].join("\n"),
+    [
+      "Artikel 7 - Vakantie, vakantiebijslag en verlof",
+      "7.1 {$contract_vakantie_bepaling}",
+    ].join("\n"),
+  )
+  .replace(
+    "9.3 Loondoorbetaling en re-integratieverplichtingen worden vastgesteld volgens de wet en de {$cao_naam}.",
+    "9.3 Is werknemer arbeidsongeschikt tijdens een reeds vastgestelde oproep, dan worden de loonaanspraak en re-integratieverplichtingen vastgesteld volgens de wet en de {$cao_naam}.\n9.4 Buiten reeds vastgestelde oproepen worden eventuele loonaanspraken beoordeeld aan de hand van de wet, de {$cao_naam} en een mogelijk aantoonbaar structureel arbeidspatroon. Deze overeenkomst bevat geen algemene uitsluiting van loondoorbetaling bij ziekte.",
+  );
+
 export const CONTRACT_TEMPLATE_PLACEHOLDERS = [
   { key: "bedrijf_statutaire_naam", label: "Juridische bedrijfsnaam", source: "Bedrijfsprofiel" },
   { key: "bedrijf_handelsnaam", label: "Handelsnaam", source: "Bedrijfsprofiel" },
@@ -397,6 +469,10 @@ export const PB_FULLTIME_REQUIRED_PLACEHOLDERS = [
 export const PB_PARTTIME_REQUIRED_PLACEHOLDERS = [...PB_FULLTIME_REQUIRED_PLACEHOLDERS];
 export const PB_PARTTIME_GROWTH_REQUIRED_PLACEHOLDERS = [...PB_FULLTIME_REQUIRED_PLACEHOLDERS];
 export const PB_MIN_MAX_REQUIRED_PLACEHOLDERS = [
+  ...PB_FULLTIME_REQUIRED_PLACEHOLDERS,
+  "contract_oproepvoorwaarden_bepaling",
+];
+export const PB_ZERO_HOURS_REQUIRED_PLACEHOLDERS = [
   ...PB_FULLTIME_REQUIRED_PLACEHOLDERS,
   "contract_oproepvoorwaarden_bepaling",
 ];
@@ -495,6 +571,32 @@ export const PB_MIN_MAX_STANDARD_TEMPLATE = {
   },
 };
 
+export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
+  id: PB_ZERO_HOURS_STANDARD_TEMPLATE_ID,
+  version: 1,
+  name: "Nulurencontract - CAO Particuliere Beveiliging",
+  description: "Nulurenmodel volgens de CAO Particuliere Beveiliging, zonder vaste, minimum- of garantie-uren en met vaste beschikbaarheidsafspraken, slimme oproepregels en een veilige standaard zonder loonuitsluiting.",
+  template_type: "employment_contract",
+  cao_key: CAO_PARTICULIERE_BEVEILIGING_KEY,
+  contract_model: "call_employment",
+  body: PB_ZERO_HOURS_STANDARD_TEMPLATE_BODY,
+  required_placeholders: PB_ZERO_HOURS_REQUIRED_PLACEHOLDERS,
+  legal_basis: {
+    ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
+    reviewed_at: "2026-07-19",
+    applicability_note: `${PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.applicability_note} Deze preset is uitsluitend bedoeld voor een nulurenovereenkomst zonder vaste, minimum-, maximum- of garantie-uren. Een voorovereenkomst, min-maxcontract of contract met vaste arbeidsomvang vereist een ander model. De standaard sluit het recht op loon bij niet-werken niet uit. De vakantieclausule past de cao-betaling van 9,24% alleen toe voor zover artikel 59 lid 3 werkgever en werknemer rechtsgeldig bindt en waarborgt anders de toepasselijke vakantieopbouw en opname.`,
+    sources: [
+      ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.sources,
+      "https://www.beveiligingsbranche.nl/wp-content/uploads/240724-Pers.wijzer-Arbeidsovereenkomst_oproep_nulurencontract.pdf",
+      "https://www.rijksoverheid.nl/vraag-en-antwoord/arbeidsovereenkomst-en-cao/welke-contracten-zijn-er-voor-oproepkrachten",
+      "https://www.rijksoverheid.nl/vraag-en-antwoord/arbeidsovereenkomst-en-cao/krijg-ik-als-oproepkracht-ook-loon-als-ik-maar-1-of-2-uur-heb-gewerkt",
+      "https://www.rijksoverheid.nl/vraag-en-antwoord/ziekteverzuim-van-het-werk/krijg-ik-als-oproepkracht-ook-loon-als-ik-ziek-ben",
+      "https://zoek.officielebekendmakingen.nl/stb-2026-205.html",
+      "https://zoek.officielebekendmakingen.nl/stb-2026-206.html",
+    ],
+  },
+};
+
 function templateContextValue(form = {}) {
   return [
     form.contract_model,
@@ -531,12 +633,20 @@ export function isPbMinMaxStandardTemplateContext(form = {}) {
   return PB_MIN_MAX_CONTRACT_MODEL_ALIASES.has(templateContextValue(form));
 }
 
+export function isPbZeroHoursStandardTemplateContext(form = {}) {
+  if (form.template_type !== PB_ZERO_HOURS_STANDARD_TEMPLATE.template_type) return false;
+  if (form.cao_key !== PB_ZERO_HOURS_STANDARD_TEMPLATE.cao_key) return false;
+
+  return PB_ZERO_HOURS_CONTRACT_MODEL_ALIASES.has(templateContextValue(form));
+}
+
 export function getStandardContractTemplatePresetById(id) {
   const normalizedId = String(id || "").trim();
   if (normalizedId === PB_FULLTIME_STANDARD_TEMPLATE_ID) return PB_FULLTIME_STANDARD_TEMPLATE;
   if (normalizedId === PB_PARTTIME_STANDARD_TEMPLATE_ID) return PB_PARTTIME_STANDARD_TEMPLATE;
   if (normalizedId === PB_PARTTIME_GROWTH_STANDARD_TEMPLATE_ID) return PB_PARTTIME_GROWTH_STANDARD_TEMPLATE;
   if (normalizedId === PB_MIN_MAX_STANDARD_TEMPLATE_ID) return PB_MIN_MAX_STANDARD_TEMPLATE;
+  if (normalizedId === PB_ZERO_HOURS_STANDARD_TEMPLATE_ID) return PB_ZERO_HOURS_STANDARD_TEMPLATE;
   return null;
 }
 
@@ -545,5 +655,6 @@ export function getStandardContractTemplatePreset(form = {}) {
   if (isPbParttimeStandardTemplateContext(form)) return PB_PARTTIME_STANDARD_TEMPLATE;
   if (isPbParttimeGrowthStandardTemplateContext(form)) return PB_PARTTIME_GROWTH_STANDARD_TEMPLATE;
   if (isPbMinMaxStandardTemplateContext(form)) return PB_MIN_MAX_STANDARD_TEMPLATE;
+  if (isPbZeroHoursStandardTemplateContext(form)) return PB_ZERO_HOURS_STANDARD_TEMPLATE;
   return null;
 }

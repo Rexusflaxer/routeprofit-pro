@@ -53,7 +53,7 @@ const CAO_OPTION_LABELS = Object.fromEntries(CAO_OPTIONS.map(option => [option.v
 const CONTRACT_FORM_OPTIONS = [
   { value: "bepaalde_tijd", label: "Bepaalde tijd" },
   { value: "onbepaalde_tijd", label: "Onbepaalde tijd" },
-  { value: "oproep", label: "Oproep / 0-uren" },
+  { value: "oproep", label: "Oproepovereenkomst" },
   { value: "stage", label: "Stage" },
   { value: "uitzend", label: "Uitzend" },
   { value: "payroll", label: "Payroll" },
@@ -65,7 +65,8 @@ const EMPLOYMENT_MODEL_OPTIONS = [
   { value: "fulltime", label: "Fulltime" },
   { value: "parttime_fixed", label: "Parttime vast" },
   { value: "parttime_growth", label: "Parttime groeimodel" },
-  { value: "call_agreement", label: "Oproep / nuluren" },
+  { value: "zero_hours", label: "Nulurencontract" },
+  { value: "call_agreement", label: "Nulurencontract" },
   { value: "min_max", label: "Min-max" },
   { value: "internship", label: "Stage" },
   { value: "zzp", label: "ZZP / opdracht" },
@@ -131,7 +132,7 @@ const CONTRACT_MODEL_OPTIONS = [
     contract_form: "oproep",
     underlying_contract_form: "bepaalde_tijd",
     duration_type: "fixed",
-    employment_model: "call_agreement",
+    employment_model: "zero_hours",
   },
   {
     value: "call_indefinite",
@@ -139,7 +140,7 @@ const CONTRACT_MODEL_OPTIONS = [
     contract_form: "oproep",
     underlying_contract_form: "onbepaalde_tijd",
     duration_type: "indefinite",
-    employment_model: "call_agreement",
+    employment_model: "zero_hours",
   },
   {
     value: "internship_fixed",
@@ -310,16 +311,18 @@ function getContractModel(value) {
 
 function inferContractModel(value) {
   if (value.contract_model) return value.contract_model;
-  const employmentModel = value.employment_contract_model || "unknown";
+  const hasMinMaxHours = value.min_hours_per_pay_period || value.max_hours_per_pay_period
+    || value.min_hours_per_week || value.max_hours_per_week;
+  const sourceEmploymentModel = value.employment_contract_model || "unknown";
+  const employmentModel = sourceEmploymentModel === "call_agreement"
+    ? (hasMinMaxHours || value.call_agreement_type === "min_max" ? "min_max" : "zero_hours")
+    : sourceEmploymentModel;
   const durationType = value.duration_type || (value.contract_form === "onbepaalde_tijd" ? "indefinite" : "fixed");
   const candidate = CONTRACT_MODEL_OPTIONS.find(option => {
     if (option.contract_form !== value.contract_form) return false;
     if (option.duration_type !== durationType) return false;
     if (value.contract_form === "oproep" && option.underlying_contract_form !== value.underlying_contract_form) return false;
-    const hasMinMaxHours = value.min_hours_per_pay_period || value.max_hours_per_pay_period
-      || value.min_hours_per_week || value.max_hours_per_week;
-    return option.employment_model === employmentModel
-      || (employmentModel === "call_agreement" && hasMinMaxHours && option.employment_model === "min_max");
+    return option.employment_model === employmentModel;
   });
   return candidate?.value || "";
 }
@@ -464,7 +467,9 @@ function templateMatchesWizard(template, form) {
   const model = getContractModel(form.contract_model);
   const formScope = template.contract_form_scope || "any";
   if (formScope !== "any" && formScope !== form.contract_form && formScope !== form.underlying_contract_form) return false;
-  const modelScope = template.employment_model_scope || "any";
+  const modelScope = template.employment_model_scope === "call_agreement"
+    ? "zero_hours"
+    : (template.employment_model_scope || "any");
   if (modelScope !== "any" && modelScope !== model?.employment_model && modelScope !== form.employment_contract_model) return false;
   const durationScope = template.duration_type_scope || "any";
   if (durationScope !== "any" && durationScope !== form.duration_type) return false;
@@ -481,10 +486,11 @@ function templateMatchesWizard(template, form) {
 function initialForm(personnel) {
   const minHoursPerWeek = numberOrNull(personnel.min_hours);
   const maxHoursPerWeek = numberOrNull(personnel.max_hours);
+  const initialCallModel = minHoursPerWeek !== null || maxHoursPerWeek !== null ? "min_max" : "zero_hours";
   const inferredModel = inferContractModel({
     contract_form: personnel.contract_form || "unknown",
     underlying_contract_form: personnel.underlying_contract_form || null,
-    employment_contract_model: personnel.contract_form === "oproep" ? "call_agreement" : "unknown",
+    employment_contract_model: personnel.contract_form === "oproep" ? initialCallModel : "unknown",
     min_hours_per_week: personnel.min_hours,
   });
   const model = getContractModel(inferredModel);
@@ -496,7 +502,8 @@ function initialForm(personnel) {
     contract_model: inferredModel,
     contract_form: model?.contract_form || personnel.contract_form || "unknown",
     underlying_contract_form: model?.underlying_contract_form || personnel.underlying_contract_form || null,
-    employment_contract_model: model?.employment_model || (personnel.contract_form === "oproep" ? "call_agreement" : "unknown"),
+    employment_contract_model: model?.employment_model || (personnel.contract_form === "oproep" ? initialCallModel : "unknown"),
+    call_agreement_type: model?.employment_model === "min_max" ? "min_max" : (personnel.contract_form === "oproep" ? initialCallModel : "not_applicable"),
     probation_agreed: "unknown",
     probation_context: "unknown",
     duration_type: model?.duration_type || (personnel.contract_form === "onbepaalde_tijd" ? "indefinite" : "fixed"),
@@ -558,8 +565,8 @@ function initialForm(personnel) {
 function formFromContract(contract) {
   const hasMinMaxHours = contract.min_hours_per_pay_period || contract.max_hours_per_pay_period
     || contract.min_hours_per_week || contract.max_hours_per_week;
-  const employmentModel = contract.employment_contract_model === "call_agreement" && hasMinMaxHours
-    ? "min_max"
+  const employmentModel = contract.employment_contract_model === "call_agreement"
+    ? (hasMinMaxHours || contract.call_agreement_type === "min_max" ? "min_max" : "zero_hours")
     : (contract.employment_contract_model || "unknown");
   const minHoursPerPeriod = contract.min_hours_per_pay_period
     ?? (contract.min_hours_per_week !== null && contract.min_hours_per_week !== undefined ? Number(contract.min_hours_per_week) * 4 : "");
@@ -572,6 +579,7 @@ function formFromContract(contract) {
   const inferredModel = inferContractModel({
     ...contract,
     employment_contract_model: employmentModel,
+    call_agreement_type: employmentModel === "min_max" ? "min_max" : (employmentModel === "zero_hours" ? "zero_hours" : "not_applicable"),
   });
   return {
     source_type: contract.source_type || (contract.generated_file_id ? "generated" : "uploaded_existing"),
@@ -674,14 +682,16 @@ function getMissingContractFields(form) {
   if (form.employment_contract_model === "min_max" && (!form.min_hours_per_pay_period || !form.max_hours_per_pay_period)) {
     missing.push("min-max uren");
   }
-  if (form.employment_contract_model === "min_max" && normalizeAvailabilityWindows(form.availability_windows).length === 0) {
+  if (["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model)
+    && normalizeAvailabilityWindows(form.availability_windows).length === 0) {
     missing.push("beschikbaarheidsvensters");
   }
-  if (form.employment_contract_model === "min_max" && !form.call_channel) missing.push("oproepkanaal");
+  if (["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model) && !form.call_channel) missing.push("oproepkanaal");
   return missing;
 }
 
 function normalizedEmploymentModel(form) {
+  if (form.employment_contract_model === "call_agreement") return "zero_hours";
   return form.employment_contract_model || null;
 }
 
@@ -736,7 +746,10 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
   const allowedFunctionTypes = fromArrayText(form.allowed_function_types_text);
   const allowedGroups = fromArrayText(form.allowed_cao_function_groups_text);
   const allowedLevels = fromArrayText(form.allowed_cao_function_levels_text);
-  const isCallAgreement = ["call_agreement", "min_max"].includes(form.employment_contract_model);
+  const employmentModel = normalizedEmploymentModel(form);
+  const isCallAgreement = ["zero_hours", "min_max"].includes(employmentModel);
+  const hasFixedHours = ["fulltime", "parttime_fixed", "parttime_growth"].includes(employmentModel);
+  const isMinMax = employmentModel === "min_max";
   const fixedHoursOfferDueAt = isCallAgreement ? addMonths(form.contract_start_date, 12) : null;
   const fixedHoursOfferDeadlineAt = isCallAgreement ? addMonths(form.contract_start_date, 13) : null;
 
@@ -753,7 +766,7 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     contract_model: form.contract_model || null,
     contract_form: form.contract_form || "unknown",
     underlying_contract_form: form.contract_form === "oproep" ? (form.underlying_contract_form || "unknown") : null,
-    employment_contract_model: normalizedEmploymentModel(form),
+    employment_contract_model: employmentModel,
     parttime_contract_model: parttimeModel(form),
     probation_agreed: form.probation_agreed === "not_applicable" ? null : boolOrNull(form.probation_agreed),
     probation_context: form.probation_agreed === "true" ? (form.probation_context || "unknown") : "not_applicable",
@@ -793,26 +806,28 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     works_cash_value_logistics: boolOrNull(form.works_cash_value_logistics),
     works_event_or_hospitality_security: boolOrNull(form.works_event_or_hospitality_security),
     event_hospitality_cao_applies: boolOrNull(form.event_hospitality_cao_applies),
-    contract_hours_per_week: numberOrNull(form.contract_hours_per_week),
-    contract_hours_per_pay_period: numberOrNull(form.contract_hours_per_pay_period),
-    fulltime_reference_hours_per_week: numberOrNull(form.fulltime_reference_hours_per_week),
-    fulltime_reference_hours_per_pay_period: numberOrNull(form.fulltime_reference_hours_per_pay_period),
-    min_hours_per_week: numberOrNull(form.min_hours_per_week),
-    max_hours_per_week: numberOrNull(form.max_hours_per_week),
-    min_hours_per_pay_period: numberOrNull(form.min_hours_per_pay_period),
-    max_hours_per_pay_period: numberOrNull(form.max_hours_per_pay_period),
-    availability_windows: form.employment_contract_model === "min_max"
+    contract_hours_per_week: hasFixedHours ? numberOrNull(form.contract_hours_per_week) : null,
+    contract_hours_per_pay_period: hasFixedHours ? numberOrNull(form.contract_hours_per_pay_period) : null,
+    fulltime_reference_hours_per_week: ["parttime_fixed", "parttime_growth"].includes(employmentModel) ? numberOrNull(form.fulltime_reference_hours_per_week) : null,
+    fulltime_reference_hours_per_pay_period: ["parttime_fixed", "parttime_growth"].includes(employmentModel) ? numberOrNull(form.fulltime_reference_hours_per_pay_period) : null,
+    min_hours_per_week: isMinMax ? numberOrNull(form.min_hours_per_week) : null,
+    max_hours_per_week: isMinMax ? numberOrNull(form.max_hours_per_week) : null,
+    min_hours_per_pay_period: isMinMax ? numberOrNull(form.min_hours_per_pay_period) : null,
+    max_hours_per_pay_period: isMinMax ? numberOrNull(form.max_hours_per_pay_period) : null,
+    availability_windows: isCallAgreement
       ? normalizeAvailabilityWindows(form.availability_windows)
       : [],
-    availability_timezone: form.employment_contract_model === "min_max"
+    availability_timezone: isCallAgreement
       ? (form.availability_timezone || "Europe/Amsterdam")
       : null,
     call_channel: isCallAgreement ? (form.call_channel || null) : null,
     is_call_agreement: isCallAgreement,
-    call_agreement_type: form.employment_contract_model === "min_max"
-      ? "min_max"
-      : (form.employment_contract_model === "call_agreement" ? "zero_hours" : "not_applicable"),
+    call_agreement_type: isMinMax ? "min_max" : (employmentModel === "zero_hours" ? "zero_hours" : "not_applicable"),
     call_notice_days: isCallAgreement ? 4 : null,
+    employee_notice_days: employmentModel === "zero_hours" ? 4 : null,
+    no_work_no_pay_first_6_months: employmentModel === "zero_hours"
+      ? false
+      : previous.no_work_no_pay_first_6_months === true,
     payslip_call_agreement_indicator_required: isCallAgreement,
     fixed_hours_offer_due_at: fixedHoursOfferDueAt,
     fixed_hours_offer_deadline_at: fixedHoursOfferDeadlineAt,
@@ -1206,6 +1221,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const isPbGrowthParttime = isPbParttimeModel && form.employment_contract_model === "parttime_growth";
   const isPbMinMaxModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     && form.employment_contract_model === "min_max";
+  const isPbZeroHoursModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    && ["zero_hours", "call_agreement"].includes(form.employment_contract_model);
+  const isPbCallModel = isPbMinMaxModel || isPbZeroHoursModel;
   const isPbNonOperationalRole = form.performs_security_work === "false"
     || form.cao_function_group === "non_security_staff";
 
@@ -1236,6 +1254,13 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.max_hours_per_pay_period = maxPeriodHours === null ? "" : String(maxPeriodHours);
         next.min_hours_per_week = minPeriodHours === null ? "" : String(Math.round((minPeriodHours / 4) * 100) / 100);
         next.max_hours_per_week = maxPeriodHours === null ? "" : String(Math.round((maxPeriodHours / 4) * 100) / 100);
+      } else if (["zero_hours", "call_agreement"].includes(prev.employment_contract_model)) {
+        next.contract_hours_per_week = "";
+        next.contract_hours_per_pay_period = "";
+        next.min_hours_per_week = "";
+        next.max_hours_per_week = "";
+        next.min_hours_per_pay_period = "";
+        next.max_hours_per_pay_period = "";
       }
     }
     return next;
@@ -1314,6 +1339,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         underlying_contract_form: model?.underlying_contract_form || null,
         duration_type: model?.duration_type || prev.duration_type,
         employment_contract_model: model?.employment_model || prev.employment_contract_model,
+        call_agreement_type: model?.employment_model === "min_max"
+          ? "min_max"
+          : (model?.employment_model === "zero_hours" ? "zero_hours" : "not_applicable"),
         template_id: null,
       };
       if (model?.employment_model === "fulltime" && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
@@ -1335,6 +1363,16 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.max_hours_per_pay_period = maxPeriodHours === null ? "" : String(maxPeriodHours);
         next.min_hours_per_week = minPeriodHours === null ? "" : String(Math.round((minPeriodHours / 4) * 100) / 100);
         next.max_hours_per_week = maxPeriodHours === null ? "" : String(Math.round((maxPeriodHours / 4) * 100) / 100);
+        next.salary_payment_frequency = "four_weeks";
+        next.contract_hours_per_week = "";
+        next.contract_hours_per_pay_period = "";
+      } else if (model?.employment_model === "zero_hours" && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
+        next.contract_hours_per_week = "";
+        next.contract_hours_per_pay_period = "";
+        next.min_hours_per_week = "";
+        next.max_hours_per_week = "";
+        next.min_hours_per_pay_period = "";
+        next.max_hours_per_pay_period = "";
         next.salary_payment_frequency = "four_weeks";
       } else if (model?.default_hours && !next.contract_hours_per_week) {
         next.contract_hours_per_week = String(model.default_hours);
@@ -2064,7 +2102,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     </>
                   ) : (
                     <>
-                      {["fulltime", "parttime_fixed", "parttime_growth", "call_agreement"].includes(form.employment_contract_model) && (
+                      {["fulltime", "parttime_fixed", "parttime_growth"].includes(form.employment_contract_model) && (
                         <div className="space-y-1">
                           <Label>Uren per week</Label>
                           <Input type="number" min="0" value={form.contract_hours_per_week ?? ""} onChange={event => set("contract_hours_per_week", event.target.value)} />
@@ -2111,20 +2149,29 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                         </p>
                         <p className="mt-1 text-xs text-muted-foreground">Automatisch afgeleid uit de vierweekse bandbreedte.</p>
                       </div>
-                      <div className="space-y-1">
-                        <Label>Oproepkanaal</Label>
-                        <Select value={form.call_channel || "none"} onValueChange={value => set("call_channel", value === "none" ? "" : value)}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="none">Kies oproepkanaal</SelectItem>
-                            {CALL_CHANNEL_OPTIONS.map(option => (
-                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-muted-foreground">Via dit kanaal wordt iedere oproep aantoonbaar verzonden.</p>
-                      </div>
                     </>
+                  )}
+                  {isPbZeroHoursModel && (
+                    <div className="rounded-lg border border-border bg-muted/20 p-3 md:col-span-2">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Geen vaste arbeidsomvang</p>
+                      <p className="mt-1 text-sm text-foreground">Geen vaste, minimum-, maximum- of garantie-uren</p>
+                      <p className="mt-1 text-xs text-muted-foreground">De gewerkte en anderszins rechtens verschuldigde oproepuren worden per loonperiode betaald.</p>
+                    </div>
+                  )}
+                  {isPbCallModel && (
+                    <div className="space-y-1">
+                      <Label>Oproepkanaal</Label>
+                      <Select value={form.call_channel || "none"} onValueChange={value => set("call_channel", value === "none" ? "" : value)}>
+                        <SelectTrigger><SelectValue /></SelectTrigger>
+                        <SelectContent>
+                          <SelectItem value="none">Kies oproepkanaal</SelectItem>
+                          {CALL_CHANNEL_OPTIONS.map(option => (
+                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                          ))}
+                        </SelectContent>
+                      </Select>
+                      <p className="text-xs text-muted-foreground">Via dit kanaal wordt iedere oproep aantoonbaar verzonden.</p>
+                    </div>
                   )}
                   {form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? (
                     <div className="rounded-lg border border-border bg-muted/20 p-3">
@@ -2156,12 +2203,12 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       </SelectContent>
                     </Select>
                   </div>
-                  {isPbMinMaxModel && (
+                  {isPbCallModel && (
                     <div className="space-y-3 rounded-lg border border-border p-4 md:col-span-3">
                       <div>
                         <Label>Referentiedagen en beschikbaarheid</Label>
                         <p className="mt-1 text-xs text-muted-foreground">
-                          Leg vast op welke dagen en binnen welke tijdvakken de medewerker kan worden opgeroepen. Buiten deze vensters is de medewerker niet verplicht een oproep te aanvaarden.
+                          Leg vast op welke dagen en binnen welke tijdvakken de medewerker kan worden opgeroepen. Buiten deze vensters is de medewerker niet verplicht een oproep te aanvaarden. Deze beschikbaarheid is geen vaste arbeidsomvang.
                         </p>
                       </div>
                       <div className="overflow-hidden rounded-lg border border-border">
@@ -2344,9 +2391,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             ?? (contract.min_hours_per_week !== null && contract.min_hours_per_week !== undefined ? Number(contract.min_hours_per_week) * 4 : null);
           const maxPeriodHours = contract.max_hours_per_pay_period
             ?? (contract.max_hours_per_week !== null && contract.max_hours_per_week !== undefined ? Number(contract.max_hours_per_week) * 4 : null);
-          const hoursLabel = ["call_agreement", "min_max"].includes(contract.employment_contract_model) && minPeriodHours !== null
-            ? `Min-max ${minPeriodHours || "-"}-${maxPeriodHours || "-"} u/4 weken`
-            : `${contract.contract_hours_per_week || contract.contract_hours_per_pay_period || "-"} u`;
+          const persistedEmploymentModel = contract.employment_contract_model === "call_agreement"
+            ? (contract.call_agreement_type === "min_max" || minPeriodHours !== null ? "min_max" : "zero_hours")
+            : contract.employment_contract_model;
+          const hoursLabel = persistedEmploymentModel === "zero_hours"
+            ? "Geen vaste uren"
+            : (persistedEmploymentModel === "min_max" && minPeriodHours !== null
+              ? `Min-max ${minPeriodHours || "-"}-${maxPeriodHours || "-"} u/4 weken`
+              : `${contract.contract_hours_per_week || contract.contract_hours_per_pay_period || "-"} u`);
           return (
             <button
               key={contract.id}
@@ -2361,7 +2413,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               <div className="truncate text-muted-foreground">{getCompanyLabel(companies, contract.company_id)}</div>
               <div className="truncate text-muted-foreground">{formatDate(contract.contract_start_date)}{contract.contract_end_date ? ` - ${formatDate(contract.contract_end_date)}` : ""}</div>
               <div className="truncate text-muted-foreground">{CAO_OPTION_LABELS[contract.cao_key] || contract.cao_key || "-"}{contract.cao_scale ? ` / ${contract.cao_scale}.${contract.cao_period || 0}` : ""}</div>
-              <div className="truncate text-muted-foreground">{hoursLabel} · {EMPLOYMENT_MODEL_LABELS[contract.employment_contract_model] || contract.employment_contract_model || "-"}</div>
+              <div className="truncate text-muted-foreground">{hoursLabel} · {EMPLOYMENT_MODEL_LABELS[persistedEmploymentModel] || persistedEmploymentModel || "-"}</div>
               <div>{documentStatusBadge(contract.document_status)}</div>
               <div className="truncate text-muted-foreground">{getAuditActorLabel(contract, auditActors)}</div>
               <div className="flex justify-end gap-1">

@@ -516,7 +516,7 @@ function normalizeContractModelScope(value) {
   if (["fulltime", "fulltime_fixed", "fulltime_indefinite", "fulltime_employment"].includes(normalized)) return "fulltime_employment";
   if (["parttime_fixed", "parttime_indefinite", "parttime_employment"].includes(normalized)) return "parttime_employment";
   if (["min_max", "min_max_fixed", "min_max_indefinite", "min_max_employment"].includes(normalized)) return "min_max_employment";
-  if (["call_agreement", "call_fixed", "call_indefinite", "call_employment"].includes(normalized)) return "call_employment";
+  if (["zero_hours", "zero_hours_employment", "call_agreement", "call_fixed", "call_indefinite", "call_employment"].includes(normalized)) return "call_employment";
   return normalized || "all";
 }
 

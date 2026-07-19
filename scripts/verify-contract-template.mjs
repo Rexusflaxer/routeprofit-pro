@@ -7,6 +7,8 @@ import {
   PB_PARTTIME_GROWTH_STANDARD_TEMPLATE as growthParttimePreset,
   PB_PARTTIME_REQUIRED_PLACEHOLDERS,
   PB_PARTTIME_STANDARD_TEMPLATE as parttimePreset,
+  PB_ZERO_HOURS_REQUIRED_PLACEHOLDERS,
+  PB_ZERO_HOURS_STANDARD_TEMPLATE as zeroHoursPreset,
   getStandardContractTemplatePreset,
 } from "../src/lib/contractTemplateCatalog.js";
 import {
@@ -128,6 +130,13 @@ for (const contractModel of ["min_max", "min_max_employment", "min_max_fixed", "
     contract_model: contractModel,
   })?.id, minMaxPreset.id);
 }
+for (const contractModel of ["zero_hours", "zero_hours_employment", "call_employment", "call_fixed", "call_indefinite", "call_agreement"]) {
+  assert.equal(getStandardContractTemplatePreset({
+    template_type: "employment_contract",
+    cao_key: "cao_particuliere_beveiliging",
+    contract_model: contractModel,
+  })?.id, zeroHoursPreset.id);
+}
 assert.equal(getStandardContractTemplatePreset({
   template_type: "employment_contract",
   cao_key: "cao_particuliere_beveiliging",
@@ -166,6 +175,12 @@ assert.match(minMaxPreset.body, /Min-maxcontract - CAO Particuliere Beveiliging/
 assert.match(minMaxPreset.body, /Artikel 5 - Arbeidsduur, min-maxmodel en oproepen/);
 assert.deepEqual(getUnknownContractTemplatePlaceholders(minMaxPreset.body), []);
 assert.deepEqual(getMissingStandardTemplatePlaceholders(minMaxPreset.body, PB_MIN_MAX_REQUIRED_PLACEHOLDERS), []);
+const zeroHoursEditorBlocks = contractTemplateBlocksFromBody(zeroHoursPreset.body);
+assert.equal(zeroHoursEditorBlocks.filter(block => block.kind === "article").length, 17);
+assert.match(zeroHoursPreset.body, /Nulurencontract - CAO Particuliere Beveiliging/);
+assert.match(zeroHoursPreset.body, /Artikel 5 - Nulurenovereenkomst, beschikbaarheid en oproepen/);
+assert.deepEqual(getUnknownContractTemplatePlaceholders(zeroHoursPreset.body), []);
+assert.deepEqual(getMissingStandardTemplatePlaceholders(zeroHoursPreset.body, PB_ZERO_HOURS_REQUIRED_PLACEHOLDERS), []);
 const firstArticleIndex = editorBlocks.findIndex(block => block.kind === "article");
 const reorderedBlocks = [...editorBlocks];
 [reorderedBlocks[firstArticleIndex], reorderedBlocks[firstArticleIndex + 1]] = [reorderedBlocks[firstArticleIndex + 1], reorderedBlocks[firstArticleIndex]];
@@ -376,6 +391,21 @@ function evaluateMinMax(form) {
     body,
     unresolved: getUnresolvedContractTemplatePlaceholders(body),
     ...validateStandardContractTemplateContext({ personnel, form, company, template: minMaxTemplate }),
+  };
+}
+
+const zeroHoursTemplate = {
+  ...zeroHoursPreset,
+  metadata: { standard_template_id: zeroHoursPreset.id },
+  employment_model_scope: "zero_hours",
+};
+
+function evaluateZeroHours(form) {
+  const body = renderContractTemplateBody(zeroHoursPreset.body, { personnel, form, company });
+  return {
+    body,
+    unresolved: getUnresolvedContractTemplatePlaceholders(body),
+    ...validateStandardContractTemplateContext({ personnel, form, company, template: zeroHoursTemplate }),
   };
 }
 
@@ -688,4 +718,67 @@ assert.ok(missingChannelMinMax.issues.some(issue => issue.includes("kanaal")));
 const wrongMinMaxModel = evaluateMinMax({ ...minMaxForm, employment_contract_model: "call_agreement" });
 assert.ok(wrongMinMaxModel.issues.some(issue => issue.includes("alleen geschikt voor een min-maxcontract")));
 
-console.log("Contracttemplate verificatie geslaagd (min-max, groeimodel, vaste/fulltime presets en editor-/versietests).\n");
+const zeroHoursForm = operationalForm({
+  employment_contract_model: "zero_hours",
+  call_agreement_type: "zero_hours",
+  contract_form: "oproep",
+  underlying_contract_form: "bepaalde_tijd",
+  contract_hours_per_week: "",
+  contract_hours_per_pay_period: "",
+  min_hours_per_week: "",
+  max_hours_per_week: "",
+  min_hours_per_pay_period: "",
+  max_hours_per_pay_period: "",
+  call_channel: "employee_app_and_email",
+  availability_windows: [
+    { weekday: "monday", start_time: "07:00", end_time: "23:00", crosses_midnight: false },
+    { weekday: "friday", start_time: "18:00", end_time: "03:00", crosses_midnight: true },
+  ],
+});
+const operationalZeroHours = evaluateZeroHours(zeroHoursForm);
+assert.deepEqual(operationalZeroHours.issues, []);
+assert.deepEqual(operationalZeroHours.unresolved, []);
+assert.match(operationalZeroHours.body, /zonder vaste arbeidsomvang: een nulurencontract/i);
+assert.match(operationalZeroHours.body, /geen vaste contracturen, minimumuren, maximumuren of garantie-uren/i);
+assert.match(operationalZeroHours.body, /maandag van 07:00 tot 23:00/);
+assert.match(operationalZeroHours.body, /vrijdag van 18:00 tot 03:00 de volgende dag/);
+assert.match(operationalZeroHours.body, /ten minste vier kalenderdagen/);
+assert.match(operationalZeroHours.body, /ten minste drie uur loon/);
+assert.match(operationalZeroHours.body, /periode van twaalf maanden/);
+assert.match(operationalZeroHours.body, /vier kalenderdagen.*opzegtermijn|opzegtermijn van vier kalenderdagen/);
+assert.match(operationalZeroHours.body, /geen gegarandeerd periodeloon/);
+assert.match(operationalZeroHours.body, /9,24%/);
+assert.match(operationalZeroHours.body, /8% vakantiebijslag/);
+assert.doesNotMatch(operationalZeroHours.body, /garantie-omvang bedraagt/);
+assert.doesNotMatch(operationalZeroHours.body, /bruto per loonperiode over de garantie-uren/);
+
+const pacZeroHours = evaluateZeroHours({
+  ...zeroHoursForm,
+  function_type: "centralist_pac",
+  allowed_function_types_text: "centralist_pac",
+  cao_function_group: "centralist",
+});
+assert.deepEqual(pacZeroHours.issues, []);
+assert.match(pacZeroHours.body, /Centralist PAC/);
+
+const legacyZeroHours = evaluateZeroHours({
+  ...zeroHoursForm,
+  employment_contract_model: "call_agreement",
+  call_agreement_type: "zero_hours",
+});
+assert.deepEqual(legacyZeroHours.issues, []);
+
+const zeroHoursWithFixedHours = evaluateZeroHours({ ...zeroHoursForm, contract_hours_per_week: "0" });
+assert.ok(zeroHoursWithFixedHours.issues.some(issue => issue.includes("geen vaste, minimum-, maximum- of garantie-uren")));
+const zeroHoursWithMinHours = evaluateZeroHours({ ...zeroHoursForm, min_hours_per_pay_period: "16" });
+assert.ok(zeroHoursWithMinHours.issues.some(issue => issue.includes("geen vaste, minimum-, maximum- of garantie-uren")));
+const missingAvailabilityZeroHours = evaluateZeroHours({ ...zeroHoursForm, availability_windows: [] });
+assert.ok(missingAvailabilityZeroHours.issues.some(issue => issue.includes("beschikbaarheidsvenster")));
+const missingChannelZeroHours = evaluateZeroHours({ ...zeroHoursForm, call_channel: "" });
+assert.ok(missingChannelZeroHours.issues.some(issue => issue.includes("kanaal")));
+const wrongCallTypeZeroHours = evaluateZeroHours({ ...zeroHoursForm, call_agreement_type: "pre_agreement" });
+assert.ok(wrongCallTypeZeroHours.issues.some(issue => issue.includes("oproeptype")));
+const wrongZeroHoursModel = evaluateZeroHours({ ...zeroHoursForm, employment_contract_model: "min_max" });
+assert.ok(wrongZeroHoursModel.issues.some(issue => issue.includes("alleen geschikt voor een nulurencontract")));
+
+console.log("Contracttemplate verificatie geslaagd (nuluren, min-max, groeimodel, vaste/fulltime presets en editor-/versietests).\n");

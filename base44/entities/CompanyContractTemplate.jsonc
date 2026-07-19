@@ -59,7 +59,7 @@
         "string",
         "null"
       ],
-      "description": "Optioneel uren-/dienstverbandmodel voor filtering in de contractwizard, zoals fulltime, parttime_fixed, min_max of call_agreement."
+      "description": "Optioneel uren-/dienstverbandmodel voor filtering in de contractwizard, zoals fulltime, parttime_fixed, min_max of zero_hours."
     },
     "probation_scope": {
       "type": [

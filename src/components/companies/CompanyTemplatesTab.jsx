@@ -165,7 +165,8 @@ const EMPLOYMENT_MODEL_LABELS = {
   fulltime: "Fulltime dienstverband",
   parttime_fixed: "Parttime dienstverband",
   parttime_growth: "Parttime groeimodel",
-  call_agreement: "Oproepkracht",
+  zero_hours: "Nulurencontract",
+  call_agreement: "Nulurencontract",
   min_max: "Min-max",
   internship: "Stage",
   zzp: "ZZP / opdracht",
@@ -207,11 +208,11 @@ const TEMPLATE_CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "call_employment",
-    label: "Oproepkracht",
-    description: "Voor oproepcontracten.",
+    label: "Nulurencontract",
+    description: "Voor oproepovereenkomsten zonder vaste, minimum- of garantie-uren.",
     contract_form: "oproep",
     duration_type: "any",
-    employment_model: "call_agreement",
+    employment_model: "zero_hours",
   },
   {
     value: "internship",
@@ -272,19 +273,19 @@ const LEGACY_CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "call_fixed",
-    label: "Oproepkracht",
+    label: "Nulurencontract",
     contract_form: "oproep",
     underlying_contract_form: "bepaalde_tijd",
     duration_type: "fixed",
-    employment_model: "call_agreement",
+    employment_model: "zero_hours",
   },
   {
     value: "call_indefinite",
-    label: "Oproepkracht",
+    label: "Nulurencontract",
     contract_form: "oproep",
     underlying_contract_form: "onbepaalde_tijd",
     duration_type: "indefinite",
-    employment_model: "call_agreement",
+    employment_model: "zero_hours",
   },
   {
     value: "internship_fixed",
@@ -1278,6 +1279,8 @@ function getContractModel(value) {
 }
 
 function normalizeTemplateContractModelValue(value) {
+  const normalized = String(value || "").trim().toLowerCase();
+  if (["zero_hours", "zero_hours_employment", "call_agreement"].includes(normalized)) return "call_employment";
   const option = getContractModel(value);
   if (!option) return "";
   if (EMPLOYMENT_TEMPLATE_CONTRACT_MODELS.some(item => item.value === option.value)) return option.value;
@@ -1301,7 +1304,8 @@ function inferContractModelFromTemplate(record = {}) {
     if (record.metadata?.underlying_contract_form && option.underlying_contract_form !== record.metadata.underlying_contract_form) return false;
     return true;
   })?.value || "";
-  return normalizeTemplateContractModelValue(scopedModel);
+  return normalizeTemplateContractModelValue(scopedModel)
+    || normalizeTemplateContractModelValue(record.employment_model_scope);
 }
 
 function contractModelMeta(option) {
@@ -1350,7 +1354,9 @@ function templateMatchesBuilder(template = {}, form = {}) {
   if (!model) return true;
   const formScope = template.contract_form_scope || "any";
   if (formScope !== "any" && formScope !== model.contract_form && formScope !== model.underlying_contract_form) return false;
-  const modelScope = template.employment_model_scope || "any";
+  const modelScope = template.employment_model_scope === "call_agreement"
+    ? "zero_hours"
+    : (template.employment_model_scope || "any");
   if (modelScope !== "any" && modelScope !== model.employment_model) return false;
   const durationScope = template.duration_type_scope || "any";
   if (durationScope !== "any" && durationScope !== model.duration_type) return false;
@@ -2633,7 +2639,7 @@ function templateFormFromRecord(companyId, record) {
     template_source_mode: "existing",
     contract_model: contractModel,
     contract_form_scope: record.contract_form_scope || "any",
-    employment_model_scope: record.employment_model_scope || "any",
+    employment_model_scope: getContractModel(contractModel)?.employment_model || record.employment_model_scope || "any",
     probation_scope: record.probation_scope || "any",
     duration_type_scope: record.duration_type_scope || "any",
     duration_options: durationOptions,
