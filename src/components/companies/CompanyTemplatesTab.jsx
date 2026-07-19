@@ -168,8 +168,8 @@ const EMPLOYMENT_MODEL_LABELS = {
   zero_hours: "Nulurencontract",
   call_agreement: "Nulurencontract",
   min_max: "Min-max",
-  internship: "Stageovereenkomst artikel 14",
-  bbl: "BBL-leerarbeidsovereenkomst",
+  internship: "Stageovereenkomst (BOL / re-integratie)",
+  bbl: "Leerarbeidsovereenkomst (BBL)",
   zzp: "ZZP / opdracht",
 };
 
@@ -227,10 +227,10 @@ const TEMPLATE_CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "bbl_employment",
-    label: "BBL-leerarbeidsovereenkomst",
-    description: "Arbeidsovereenkomst voor een aspirant in de BBL, naast een afzonderlijke praktijkovereenkomst met de school.",
-    contract_form: "any",
-    duration_type: "any",
+    label: "Leerarbeidsovereenkomst (BBL)",
+    description: "Arbeidsovereenkomst voor bepaalde tijd voor een aspirant in de BBL, naast een afzonderlijke praktijkovereenkomst met de school.",
+    contract_form: "bepaalde_tijd",
+    duration_type: "fixed",
     employment_model: "bbl",
     legal_document_type: "employment_agreement",
     learning_route: "bbl",
@@ -244,7 +244,7 @@ const LEGACY_CONTRACT_MODEL_OPTIONS = [
     contract_form: "bepaalde_tijd",
     duration_type: "fixed",
     employment_model: "fulltime",
-    default_hours: 40,
+    default_hours: 36,
   },
   {
     value: "fulltime_indefinite",
@@ -252,7 +252,7 @@ const LEGACY_CONTRACT_MODEL_OPTIONS = [
     contract_form: "onbepaalde_tijd",
     duration_type: "indefinite",
     employment_model: "fulltime",
-    default_hours: 40,
+    default_hours: 36,
   },
   {
     value: "parttime_fixed",
@@ -698,7 +698,7 @@ const CLAUSE_TYPE_CATALOG = {
       snippets: [
         {
           label: "Toekomstige bandbreedte",
-          text: "Controleer bij een contractdatum vanaf 1 januari 2027 of een nulurencontract nog is toegestaan of dat een bandbreedtecontract moet worden gebruikt.",
+          text: "Vanaf 1 januari 2028 worden oproepcontracten in beginsel vervangen door bandbreedtecontracten. Controleer dan ook of een wettelijke uitzondering voor de medewerker geldt.",
           help: "De regels voor oproepcontracten wijzigen. Deze waarschuwing moet zichtbaar blijven bij contractgeneratie.",
         },
       ],
@@ -1503,7 +1503,7 @@ function clauseValidationNotes(form = {}, definition = null) {
   }
   if (definition?.value === "call_min_max_terms") {
     notes.push("Controleer oproepkanaal, oproeptermijn, referentiedagen, loon bij intrekking en het aanbod vaste arbeidsomvang na twaalf maanden.");
-    notes.push("Bij contracten vanaf 1 januari 2027 moet worden gecontroleerd of nuluren/min-max nog passend is of dat een bandbreedtecontract nodig is.");
+    notes.push("Vanaf 1 januari 2028 worden oproepcontracten in beginsel vervangen door bandbreedtecontracten. Controleer dan ook of een wettelijke uitzondering voor de medewerker geldt.");
   }
   if (definition?.value === "business_integrity_protection") {
     notes.push("Deze clausule is bedoeld als veilige bescherming van vertrouwelijke informatie en zakelijke integriteit, niet als klassiek concurrentiebeding.");
@@ -2342,7 +2342,7 @@ function TemplatePreviewUnit({ item, highlightedBlockId, measurement = false }) 
   );
 }
 
-function TemplateDocumentPreview({ body, blocks, templateName, letterhead, clauses, highlightedBlockId }) {
+function TemplateDocumentPreview({ body, blocks, letterhead, clauses, highlightedBlockId }) {
   const previewScrollRef = useRef(null);
   const previewMeasurementRef = useRef(null);
   const [previewZoom, setPreviewZoom] = useState(100);
@@ -2373,15 +2373,14 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
   const measurementContentWidth = Math.max(40, textAreaWidth);
   const availableContentHeight = Math.max(48, textAreaHeight);
   const paginationSignature = useMemo(() => JSON.stringify({
-    templateName: templateName || "Arbeidsovereenkomst",
     measurementContentWidth,
     availableContentHeight,
     units: previewUnits.map(item => [item.id, item.heading, item.html]),
-  }), [availableContentHeight, measurementContentWidth, previewUnits, templateName]);
+  }), [availableContentHeight, measurementContentWidth, previewUnits]);
   const fallbackPages = useMemo(
     () => paginateContractTemplateBlocks(
       previewBlocks,
-      Math.max(8, Math.floor((availableContentHeight - 28) / 11)),
+      Math.max(8, Math.floor(availableContentHeight / 11)),
     ),
     [availableContentHeight, previewBlocks],
   );
@@ -2406,19 +2405,10 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
           + (Number.parseFloat(style.marginBottom) || 0),
         );
       });
-      const title = measurementRoot.querySelector("[data-preview-measure-title]");
-      const titleStyle = title ? window.getComputedStyle(title) : null;
-      const titleHeight = title
-        ? Math.ceil(
-          title.getBoundingClientRect().height
-          + (Number.parseFloat(titleStyle?.marginTop) || 0)
-          + (Number.parseFloat(titleStyle?.marginBottom) || 0),
-        )
-        : 0;
       const measuredPages = paginateContractTemplateUnitsByHeight(previewUnits, {
         heights,
         pageHeight: availableContentHeight,
-        firstPageReservedHeight: titleHeight,
+        firstPageReservedHeight: 0,
         safetyGap: TEMPLATE_PREVIEW_HEIGHT_SAFETY_PX,
       });
       const structure = measuredPages.map(page => page.map(item => item.id).join(",")).join("|");
@@ -2475,9 +2465,6 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
         className="pointer-events-none fixed left-[-10000px] top-0 invisible z-[-1] text-[8px] leading-[1.35] text-slate-900"
         style={{ width: `${measurementContentWidth}px` }}
       >
-        <p data-preview-measure-title className="mb-2 text-[10px] font-bold leading-tight text-slate-950">
-          {templateName || "Arbeidsovereenkomst"}
-        </p>
         {previewUnits.map(item => (
           <TemplatePreviewUnit key={`measurement-${item.id}`} item={item} measurement />
         ))}
@@ -2570,9 +2557,6 @@ function TemplateDocumentPreview({ body, blocks, templateName, letterhead, claus
                   left: `${left}%`,
                 }}
               >
-                {pageIndex === 0 && (
-                  <p className="mb-2 text-[10px] font-bold leading-tight text-slate-950">{templateName || "Arbeidsovereenkomst"}</p>
-                )}
                 {page.length === 0 ? (
                   <p>Voeg links een artikelblok toe.</p>
                 ) : page.map(item => (
@@ -3193,6 +3177,16 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       if (isEmploymentTemplate && !contractModel) throw new Error("Kies eerst een specifieke contractvorm.");
       if (isEmploymentTemplate && (!Array.isArray(templateForm.duration_options) || templateForm.duration_options.length === 0)) {
         throw new Error("Selecteer minimaal één duurkeuze voor deze template.");
+      }
+      if (isEmploymentTemplate) {
+        const allowedDurationOptions = new Set(durationOptionsForContractTemplate({
+          ...templateForm,
+          contract_model: contractModel.value,
+        }).map(option => option.value));
+        const unsupportedDurationOptions = templateForm.duration_options.filter(option => !allowedDurationOptions.has(option));
+        if (unsupportedDurationOptions.length > 0) {
+          throw new Error("Een of meer duurkeuzes passen niet bij deze contractvorm. Selecteer de duur opnieuw.");
+        }
       }
       const editorBlocks = normalizeContractTemplateBlocks(templateForm.editor_blocks, templateForm.body);
       const body = contractTemplateBodyFromBlocks(editorBlocks);
@@ -5854,7 +5848,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   <TemplateDocumentPreview
                     body={templateForm.body}
                     blocks={previewTemplateBlocks}
-                    templateName={templateForm.name || defaultTemplateName(templateForm)}
                     letterhead={selectedTemplateLetterhead}
                     clauses={clauses}
                     highlightedBlockId={previewHighlightedBlockId}

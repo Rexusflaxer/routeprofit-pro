@@ -3711,11 +3711,11 @@ function evaluateEmploymentContractModelRules(input, callAgreement, internship, 
 
   if (model === 'bbl') {
     const requiredBblFields = [
-      ['bbl_institution_name', 'Leg de onderwijsinstelling van de BBL-leerbaan vast.'],
+      ['bbl_institution_name', 'Leg de onderwijsinstelling van de leerarbeidsovereenkomst (BBL) vast.'],
       ['bbl_education_name', 'Leg de BBL-opleiding vast.'],
       ['bbl_practice_agreement_reference', 'Leg het kenmerk van de afzonderlijke praktijkovereenkomst vast.'],
       ['bbl_learning_company_recognition_number', 'Leg het SBB-erkenningsnummer van het leerbedrijf vast.'],
-      ['bbl_practice_trainer_name', 'Leg de praktijkopleider voor de BBL-leerbaan vast.']
+      ['bbl_practice_trainer_name', 'Leg de praktijkopleider voor de leerarbeidsovereenkomst (BBL) vast.']
     ];
     requiredBblFields.forEach(([field, message]) => {
       if (!String(input[field] || '').trim()) {
@@ -3730,11 +3730,22 @@ function evaluateEmploymentContractModelRules(input, callAgreement, internship, 
         message: 'BBL is een leerarbeidsovereenkomst met loon en mag niet als stageovereenkomst worden vastgelegd.'
       });
     }
+    if (!['bepaalde_tijd', 'onbepaalde_tijd'].includes(contractForm)) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0345',
+        severity: 'high',
+        field: 'contract_form',
+        message: 'BBL moet als arbeidsovereenkomst voor bepaalde of onbepaalde tijd worden vastgelegd en niet als stage- of oproepovereenkomst.'
+      });
+    }
+    if (contractForm === 'onbepaalde_tijd' || input.duration_type === 'indefinite') {
+      warnings.push('Een leerarbeidsovereenkomst (BBL) voor onbepaalde tijd is niet categorisch verboden, maar vereist duidelijke maatwerkafspraken over de functie, beloning en voortzetting nadat de praktijkovereenkomst of opleiding eindigt. De universele standaardpreset ondersteunt daarom alleen bepaalde tijd.');
+    }
     if (hours === null || hours <= 0) {
       missingEvidence.push({
         rule_id: 'CAO-PB-2024-R0337',
         field: 'contract_hours_per_pay_period',
-        message: 'Leg voor de BBL-leerarbeidsovereenkomst een positieve arbeidsduur per loonperiode vast.'
+        message: 'Leg voor de leerarbeidsovereenkomst (BBL) een positieve arbeidsduur per loonperiode vast.'
       });
     } else if (hours > 144) {
       violations.push({
@@ -3749,7 +3760,7 @@ function evaluateEmploymentContractModelRules(input, callAgreement, internship, 
         rule_id: 'CAO-PB-2024-R0345',
         severity: 'high',
         field: 'cao_function_level',
-        message: 'Een BBL-leerarbeidsovereenkomst voor beveiligingswerk moet als aspirant worden ingedeeld.'
+        message: 'Een leerarbeidsovereenkomst (BBL) voor beveiligingswerk moet als aspirant worden ingedeeld.'
       });
     }
     if (input.security_role_status !== 'aspirant_beveiliger') {

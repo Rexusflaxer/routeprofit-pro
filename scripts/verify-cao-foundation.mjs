@@ -2375,7 +2375,7 @@ function runCaoStaticGovernanceScenarios() {
   assert.equal(
     fs.existsSync(legacyPersonnelFormPath),
     false,
-    'Legacy PersonnelForm must stay removed; personnel onboarding must use PersonnelWizard + PersonnelContractsTab for CAO context'
+    'Legacy PersonnelForm must stay removed; personnel onboarding and PersonnelContractsTab must keep CAO context explicit'
   );
   const personnelPageSource = fs.readFileSync(path.join(repoRoot, 'src/pages/Personnel.jsx'), 'utf8');
   assert.equal(
@@ -2383,11 +2383,10 @@ function runCaoStaticGovernanceScenarios() {
     false,
     'Personnel page must not import the legacy PersonnelForm CAO shortcut'
   );
-  const personnelWizardSource = fs.readFileSync(path.join(repoRoot, 'src/components/personnel/PersonnelWizard.jsx'), 'utf8');
   assert.equal(
-    personnelWizardSource.includes('cao_configuration_id: data.personnel.cao_configuration_id || null'),
+    personnelContractsSource.includes('cao_configuration_id: personnel.cao_configuration_id || null'),
     false,
-    'Initial contract snapshot must not copy cao_configuration_id from personnel master data'
+    'A new contract must not copy cao_configuration_id from personnel master data; resolve it from company, CAO and contract date'
   );
 
   const costCalculatorSource = fs.readFileSync(path.join(repoRoot, 'src/components/personnel/CostCalculator.jsx'), 'utf8');

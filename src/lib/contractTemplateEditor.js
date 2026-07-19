@@ -37,49 +37,55 @@ export const CONTRACT_TEMPLATE_DURATION_OPTIONS = [
     value: "1_month",
     label: "1 maand",
     description: "Bepaalde tijd. Een proeftijd is niet toegestaan.",
-    contractTypes: ["standard", "call", "internship"],
+    contractTypes: ["standard", "call", "internship", "bbl"],
   },
   {
     value: "2_months",
     label: "2 maanden",
     description: "Bepaalde tijd. Een proeftijd is niet toegestaan.",
-    contractTypes: ["standard", "call", "internship"],
+    contractTypes: ["standard", "call", "internship", "bbl"],
   },
   {
     value: "6_months",
     label: "6 maanden",
     description: "Bepaalde tijd. Een proeftijd is niet toegestaan; de aanzegplicht geldt bij zes maanden wel.",
-    contractTypes: ["standard", "call", "internship"],
+    contractTypes: ["standard", "call", "internship", "bbl"],
   },
   {
     value: "7_months",
     label: "7 maanden",
     description: "Bepaalde tijd langer dan zes maanden. De app leidt de toegestane proeftijd later af uit de CAO en medewerkerssituatie.",
-    contractTypes: ["standard", "call", "internship"],
+    contractTypes: ["standard", "call", "internship", "bbl"],
   },
   {
     value: "1_year",
     label: "1 jaar",
     description: "Bepaalde tijd van twaalf maanden.",
-    contractTypes: ["standard", "call", "internship"],
+    contractTypes: ["standard", "call", "internship", "bbl"],
   },
   {
     value: "2_years",
     label: "2 jaar",
     description: "Bepaalde tijd van vierentwintig maanden. Controleer altijd de contractketen.",
-    contractTypes: ["standard", "call"],
+    contractTypes: ["standard", "call", "bbl"],
   },
   {
     value: "3_years",
     label: "3 jaar",
     description: "Bepaalde tijd van zesendertig maanden. Controleer altijd de contractketen.",
-    contractTypes: ["standard", "call"],
+    contractTypes: ["standard", "call", "bbl"],
+  },
+  {
+    value: "4_years",
+    label: "4 jaar",
+    description: "Bepaalde tijd van achtenveertig maanden.",
+    contractTypes: ["bbl"],
   },
   {
     value: "free",
     label: "Vrije einddatum",
     description: "De gebruiker kiest bij het contract zelf een einddatum; de app berekent de juridische duurregels uit de datums.",
-    contractTypes: ["standard", "call", "internship"],
+    contractTypes: ["standard", "call", "internship", "bbl"],
   },
 ];
 
@@ -484,6 +490,7 @@ export function centeredScrollOffset({
 
 function contractDurationType(form = {}) {
   if (form.contract_model === "internship") return "internship";
+  if (["bbl", "bbl_employment", "bbl_fixed"].includes(form.contract_model)) return "bbl";
   if (["min_max_employment", "call_employment"].includes(form.contract_model)) return "call";
   return "standard";
 }
@@ -494,6 +501,27 @@ export function durationOptionsForContractTemplate(form = {}) {
   return CONTRACT_TEMPLATE_DURATION_OPTIONS
     .filter(option => option.contractTypes.includes(contractType))
     .map(option => {
+      if (contractType === "internship") {
+        const routeNote = option.value === "2_months"
+          ? "Dit is tevens de maximale duur van een UWV-proefplaatsing; controleer altijd de gekozen route."
+          : "Stem de duur af op de BOL- of re-integratieroute en leg altijd een concrete einddatum vast.";
+        return {
+          ...option,
+          description: `Stage voor bepaalde tijd. ${routeNote}`,
+        };
+      }
+      if (contractType === "bbl") {
+        const routeNote = option.value === "free"
+          ? "Aanbevolen wanneer de exacte einddatum uit de praktijkovereenkomst wordt overgenomen."
+          : "Stem de einddatum af op de afzonderlijke praktijkovereenkomst (POK).";
+        const chainNote = ["2_years", "3_years", "4_years"].includes(option.value)
+          ? " BBL-contracten tellen niet mee voor de wettelijke ketenbepaling."
+          : "";
+        return {
+          ...option,
+          description: `Leerarbeidsovereenkomst voor bepaalde tijd. ${routeNote}${chainNote}`,
+        };
+      }
       if (form.cao_key === "cao_particuliere_beveiliging" && option.value === "indefinite") {
         return { ...option, description: `${option.description} CAO PB: de proeftijd bedraagt maximaal twee maanden.` };
       }

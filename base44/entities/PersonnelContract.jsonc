@@ -75,7 +75,7 @@
         "unknown",
         null
       ],
-      "description": "CAO PB contractmodel: fulltime 144u/loonperiode, parttime vast/groeimodel, nuluren, legacy oproep, min-max, artikel-14-stage, BBL-leerarbeidsovereenkomst, inhuur/payroll, zzp of onbekend."
+      "description": "CAO PB contractmodel: fulltime 144u/loonperiode, parttime vast/groeimodel, nuluren, legacy oproep, min-max, stageovereenkomst (BOL/re-integratie), leerarbeidsovereenkomst (BBL), inhuur/payroll, zzp of onbekend."
     },
     "legal_document_type": {
       "type": [

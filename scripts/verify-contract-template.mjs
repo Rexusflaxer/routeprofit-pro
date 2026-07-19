@@ -148,7 +148,7 @@ for (const contractModel of ["internship", "internship_fixed", "article_14_inter
     contract_model: contractModel,
   })?.id, internshipPreset.id);
 }
-for (const contractModel of ["bbl", "bbl_employment", "bbl_fixed", "bbl_indefinite"]) {
+for (const contractModel of ["bbl", "bbl_employment", "bbl_fixed"]) {
   assert.equal(getStandardContractTemplatePreset({
     template_type: "employment_contract",
     cao_key: "cao_particuliere_beveiliging",
@@ -158,11 +158,18 @@ for (const contractModel of ["bbl", "bbl_employment", "bbl_fixed", "bbl_indefini
 assert.equal(getStandardContractTemplatePreset({
   template_type: "employment_contract",
   cao_key: "cao_particuliere_beveiliging",
+  contract_model: "bbl_indefinite",
+}), null);
+assert.equal(getStandardContractTemplatePreset({
+  template_type: "employment_contract",
+  cao_key: "cao_particuliere_beveiliging",
   contract_model: "parttime_employment",
   employment_model_scope: "fulltime",
 })?.id, parttimePreset.id);
 
 const editorBlocks = contractTemplateBlocksFromBody(preset.body);
+assert.ok(preset.body.startsWith("ARBEIDSOVEREENKOMST\nFulltime dienstverband - CAO Particuliere Beveiliging"));
+assert.equal((preset.body.match(/Fulltime dienstverband - CAO Particuliere Beveiliging/g) || []).length, 1);
 assert.equal(editorBlocks.filter(block => block.kind === "article").length, 17);
 assert.equal(editorBlocks[0].kind, "preamble");
 assert.equal(editorBlocks.at(-1).kind, "closing");
@@ -207,7 +214,8 @@ assert.deepEqual(getUnknownContractTemplatePlaceholders(internshipPreset.body), 
 assert.deepEqual(getMissingStandardTemplatePlaceholders(internshipPreset.body, PB_ARTICLE_14_INTERNSHIP_REQUIRED_PLACEHOLDERS), []);
 const bblEditorBlocks = contractTemplateBlocksFromBody(bblPreset.body);
 assert.equal(bblEditorBlocks.filter(block => block.kind === "article").length, 17);
-assert.match(bblPreset.body, /BBL-leerarbeidsovereenkomst/);
+assert.match(bblPreset.body, /Leerarbeidsovereenkomst \(BBL\)/);
+assert.equal(bblPreset.supports_fixed_term_only, true);
 assert.deepEqual(getUnknownContractTemplatePlaceholders(bblPreset.body), []);
 assert.deepEqual(getMissingStandardTemplatePlaceholders(bblPreset.body, PB_BBL_EMPLOYMENT_REQUIRED_PLACEHOLDERS), []);
 const firstArticleIndex = editorBlocks.findIndex(block => block.kind === "article");
@@ -342,6 +350,16 @@ const internshipDurations = durationOptionsForContractTemplate({
 });
 assert.ok(!internshipDurations.some(option => option.value === "indefinite"));
 assert.ok(!internshipDurations.some(option => option.value === "2_years"));
+assert.ok(internshipDurations.find(option => option.value === "6_months")?.description.includes("Stage voor bepaalde tijd"));
+assert.ok(!internshipDurations.find(option => option.value === "6_months")?.description.includes("aanzegplicht"));
+const bblDurations = durationOptionsForContractTemplate({
+  template_type: "employment_contract",
+  cao_key: "cao_particuliere_beveiliging",
+  contract_model: "bbl_employment",
+});
+assert.ok(!bblDurations.some(option => option.value === "indefinite"));
+assert.ok(bblDurations.some(option => option.value === "4_years"));
+assert.ok(bblDurations.every(option => option.description.includes("bepaalde tijd")));
 
 const templateFamily = {
   template_type: "employment_contract",
@@ -949,12 +967,20 @@ const bblForm = operationalForm({
 const validBbl = evaluateBbl(bblForm);
 assert.deepEqual(validBbl.issues, []);
 assert.deepEqual(validBbl.unresolved, []);
-assert.match(validBbl.body, /BBL-leerarbeidsovereenkomst/);
+assert.match(validBbl.body, /Leerarbeidsovereenkomst \(BBL\)/);
 assert.match(validBbl.body, /afzonderlijke praktijkovereenkomst/);
 assert.match(validBbl.body, /eerste vier weken.*50%/s);
 assert.match(validBbl.body, /vanaf de vijfde week 100%/);
 
 const invalidBblRole = evaluateBbl({ ...bblForm, security_role_status: "qualified_security_officer" });
 assert.ok(invalidBblRole.issues.some(issue => issue.includes("aspirant-beveiliger")));
+const unsupportedIndefiniteBblPreset = evaluateBbl({
+  ...bblForm,
+  contract_model: "bbl_indefinite",
+  contract_form: "onbepaalde_tijd",
+  duration_type: "indefinite",
+  contract_end_date: "",
+});
+assert.ok(unsupportedIndefiniteBblPreset.issues.some(issue => issue.includes("uitsluitend ingericht") && issue.includes("bepaalde tijd")));
 
 console.log("Contracttemplate verificatie geslaagd (stage/BOL, BBL, nuluren, min-max, groeimodel, vaste/fulltime presets en editor-/versietests).\n");

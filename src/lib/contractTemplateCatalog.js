@@ -53,7 +53,6 @@ const PB_BBL_EMPLOYMENT_CONTRACT_MODEL_ALIASES = new Set([
   "bbl",
   "bbl_employment",
   "bbl_fixed",
-  "bbl_indefinite",
 ]);
 
 export const PB_CAO_FUNCTION_GROUP_OPTIONS = [
@@ -395,7 +394,7 @@ export const PB_ZERO_HOURS_STANDARD_TEMPLATE_BODY = PB_FULLTIME_STANDARD_TEMPLAT
 
 export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_BODY = [
   "STAGEOVEREENKOMST",
-  "Stage volgens artikel 14 van de CAO Particuliere Beveiliging",
+  "BOL / re-integratie - CAO Particuliere Beveiliging",
   "",
   "Partijen",
   "Stagebedrijf: {$bedrijf_statutaire_naam}, gevestigd aan {$bedrijf_adres_volledig}, ingeschreven bij de Kamer van Koophandel onder nummer {$bedrijf_kvk}, rechtsgeldig vertegenwoordigd door {$bedrijf_vertegenwoordiger_naam} in de functie van {$bedrijf_vertegenwoordiger_functie}, hierna: stagebedrijf;",
@@ -527,7 +526,7 @@ export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_BODY = [
 export const PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE_BODY = PB_FULLTIME_STANDARD_TEMPLATE_BODY
   .replace(
     "Fulltime dienstverband - CAO Particuliere Beveiliging",
-    "BBL-leerarbeidsovereenkomst - CAO Particuliere Beveiliging",
+    "Leerarbeidsovereenkomst (BBL) - CAO Particuliere Beveiliging",
   )
   .replace(
     [
@@ -862,8 +861,8 @@ export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
 
 export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE = {
   id: PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_ID,
-  version: 1,
-  name: "Stageovereenkomst artikel 14 - CAO Particuliere Beveiliging",
+  version: 2,
+  name: "Stageovereenkomst (BOL / re-integratie) - CAO Particuliere Beveiliging",
   description: "Stageovereenkomst voor relevante praktijkervaring als beveiliger via BOL, UWV-proefplaatsing, een re-integratiemaatregel of tweede spoor. Dit is geen arbeidsovereenkomst en niet geschikt voor BBL of een algemene kantoorstage.",
   template_type: "employment_contract",
   legal_document_type: "internship_agreement",
@@ -896,14 +895,15 @@ export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE = {
 
 export const PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE = {
   id: PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE_ID,
-  version: 1,
-  name: "BBL-leerarbeidsovereenkomst - CAO Particuliere Beveiliging",
-  description: "Arbeidsovereenkomst voor een aspirant-beveiliger in de beroepsbegeleidende leerweg. De werknemer ontvangt loon en sluit daarnaast met school en erkend leerbedrijf een afzonderlijke praktijkovereenkomst.",
+  version: 2,
+  name: "Leerarbeidsovereenkomst (BBL) - CAO Particuliere Beveiliging",
+  description: "Arbeidsovereenkomst voor bepaalde tijd voor een aspirant-beveiliger in de beroepsbegeleidende leerweg. De werknemer ontvangt loon en sluit daarnaast met school en erkend leerbedrijf een afzonderlijke praktijkovereenkomst.",
   template_type: "employment_contract",
   legal_document_type: "employment_agreement",
   is_employment_agreement: true,
   party_role_scheme: "employer_employee",
   learning_route_scope: "bbl",
+  supports_fixed_term_only: true,
   cao_key: CAO_PARTICULIERE_BEVEILIGING_KEY,
   contract_model: "bbl_employment",
   body: PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE_BODY,
@@ -911,10 +911,11 @@ export const PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE = {
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
     reviewed_at: "2026-07-19",
-    applicability_note: "Uitsluitend voor BBL: een arbeidsovereenkomst met loon voor een aspirant in combinatie met een afzonderlijke praktijkovereenkomst tussen werknemer, erkend leerbedrijf en onderwijsinstelling. Niet gebruiken voor een BOL-stage, proefplaatsing of andere artikel-14-stage.",
+    applicability_note: "Uitsluitend voor BBL: een arbeidsovereenkomst met loon voor een aspirant in combinatie met een afzonderlijke praktijkovereenkomst tussen werknemer, erkend leerbedrijf en onderwijsinstelling. Deze universele standaardpreset wordt alleen voor bepaalde tijd aangeboden en de einddatum moet worden afgestemd op de praktijkovereenkomst. Een BBL-arbeidsovereenkomst voor onbepaalde tijd is niet categorisch verboden, maar vereist aanvullende afspraken over voortzetting na het einde van de opleiding en valt daarom buiten deze standaardpreset. Niet gebruiken voor een BOL-stage, proefplaatsing of andere artikel-14-stage.",
     sources: [
       ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.sources,
       "https://www.rijksoverheid.nl/vraag-en-antwoord/middelbaar-beroepsonderwijs/moet-ik-stage-lopen-als-ik-een-mbo-opleiding-volg",
+      "https://www.rijksoverheid.nl/vraag-en-antwoord/arbeidsovereenkomst-en-cao/wanneer-verandert-mijn-tijdelijke-arbeidscontract-in-een-vast-contract",
       "https://www.s-bb.nl/bedrijven/wat-is-een-leerbedrijf/verschil-bol-en-bbl/",
       "https://www.justis.nl/producten/particuliere-beveiliging-en-recherche/opleidingseisen",
     ],

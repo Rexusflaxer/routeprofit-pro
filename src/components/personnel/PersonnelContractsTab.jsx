@@ -68,8 +68,8 @@ const EMPLOYMENT_MODEL_OPTIONS = [
   { value: "zero_hours", label: "Nulurencontract" },
   { value: "call_agreement", label: "Nulurencontract" },
   { value: "min_max", label: "Min-max" },
-  { value: "internship", label: "Stageovereenkomst artikel 14" },
-  { value: "bbl", label: "BBL-leerarbeidsovereenkomst" },
+  { value: "internship", label: "Stageovereenkomst (BOL / re-integratie)" },
+  { value: "bbl", label: "Leerarbeidsovereenkomst (BBL)" },
   { value: "zzp", label: "ZZP / opdracht" },
   { value: "unknown", label: "Onbekend" },
 ];
@@ -87,7 +87,7 @@ const CONTRACT_MODEL_OPTIONS = [
     contract_form: "bepaalde_tijd",
     duration_type: "fixed",
     employment_model: "fulltime",
-    default_hours: 40,
+    default_hours: 36,
   },
   {
     value: "fulltime_indefinite",
@@ -95,7 +95,7 @@ const CONTRACT_MODEL_OPTIONS = [
     contract_form: "onbepaalde_tijd",
     duration_type: "indefinite",
     employment_model: "fulltime",
-    default_hours: 40,
+    default_hours: 36,
   },
   {
     value: "parttime_fixed",
@@ -153,17 +153,9 @@ const CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "bbl_fixed",
-    label: "BBL-leerarbeidsovereenkomst - bepaalde tijd",
+    label: "Leerarbeidsovereenkomst (BBL)",
     contract_form: "bepaalde_tijd",
     duration_type: "fixed",
-    employment_model: "bbl",
-    learning_route: "bbl",
-  },
-  {
-    value: "bbl_indefinite",
-    label: "BBL-leerarbeidsovereenkomst - onbepaalde tijd",
-    contract_form: "onbepaalde_tijd",
-    duration_type: "indefinite",
     employment_model: "bbl",
     learning_route: "bbl",
   },
@@ -186,6 +178,7 @@ const DURATION_OPTIONS = [
   { value: "1_year", label: "1 jaar", months: 12 },
   { value: "2_years", label: "2 jaar", months: 24 },
   { value: "3_years", label: "3 jaar", months: 36 },
+  { value: "4_years", label: "4 jaar", months: 48 },
   { value: "free", label: "Vrij invullen", months: null },
 ];
 
@@ -349,6 +342,7 @@ function getContractModel(value) {
 }
 
 function inferContractModel(value) {
+  if (value.contract_model === "bbl_indefinite") return "";
   if (value.contract_model) return value.contract_model;
   const hasMinMaxHours = value.min_hours_per_pay_period || value.max_hours_per_pay_period
     || value.min_hours_per_week || value.max_hours_per_week;
@@ -543,7 +537,7 @@ function initialForm(personnel) {
     source_type: "generated",
     company_id: personnel.primary_company_id || null,
     cao_key: personnel.cao || null,
-    cao_configuration_id: personnel.cao_configuration_id || null,
+    cao_configuration_id: null,
     contract_model: inferredModel,
     contract_form: model?.contract_form || personnel.contract_form || "unknown",
     underlying_contract_form: model?.underlying_contract_form || personnel.underlying_contract_form || null,
@@ -841,6 +835,9 @@ function getMissingContractFields(form) {
     });
   }
   if (form.employment_contract_model === "bbl") {
+    if (form.source_type === "generated" && form.duration_type !== "fixed") {
+      missing.push("BBL-contract voor bepaalde tijd");
+    }
     if (!form.contract_hours_per_week && !form.contract_hours_per_pay_period) missing.push("arbeidsduur BBL");
     if (!form.bbl_institution_name) missing.push("onderwijsinstelling BBL");
     if (!form.bbl_education_name) missing.push("BBL-opleiding");
@@ -1130,7 +1127,7 @@ function contractRenderValues(personnel, form, company) {
 function renderContractBody(personnel, form, company, template, clauses = []) {
   const fallbackBody = form.employment_contract_model === "internship"
     ? [
-        "Stageovereenkomst",
+        "Stageovereenkomst (BOL / re-integratie)",
         "",
         "Deze stageovereenkomst wordt gesloten tussen het stagebedrijf, de stagiair en de onderwijs- of re-integratie-instelling.",
         "De stage begint op {{contract.startdatum}} en is gericht op leren onder begeleiding.",
@@ -1161,23 +1158,17 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
   const lineHeight = 16;
   const paragraphGap = 7;
   const isInternshipAgreement = form.employment_contract_model === "internship";
-  const title = template?.name || (isInternshipAgreement ? "Stageovereenkomst" : "Arbeidsovereenkomst");
   const body = renderContractBody(personnel, form, company, template, clauses);
   const values = contractRenderValues(personnel, form, company);
-  doc.setFont("helvetica", "bold");
-  doc.setFontSize(16);
-  doc.text(title, margin, 64);
   doc.setFont("helvetica", "normal");
-  doc.setFontSize(9);
-  doc.text(values.companyName, margin, 84);
-  if (letterhead?.name) doc.text(`Briefpapier: ${letterhead.name}`, margin, 98);
   doc.setFontSize(10);
-  let y = 132;
+  let y = continuationTop;
   const paragraphs = body.split(/\n{2,}/).map(paragraph => paragraph.trim()).filter(Boolean);
   const paragraphLines = paragraphs.map(paragraph => doc.splitTextToSize(paragraph, 486));
 
   paragraphLines.forEach((lines, index) => {
     const isArticleHeading = /^Artikel\s+\d+\b/i.test(paragraphs[index]);
+    const isDocumentHeading = index === 0;
     const ownHeight = lines.length * lineHeight + paragraphGap;
     const nextHeight = isArticleHeading && paragraphLines[index + 1]
       ? paragraphLines[index + 1].length * lineHeight + paragraphGap
@@ -1187,6 +1178,7 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
       y = continuationTop;
     }
 
+    doc.setFont("helvetica", isArticleHeading || isDocumentHeading ? "bold" : "normal");
     if (ownHeight <= pageBottom - continuationTop) {
       doc.text(lines, margin, y);
       y += ownHeight;
@@ -1203,6 +1195,7 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
     });
     y += paragraphGap;
   });
+  doc.setFont("helvetica", "normal");
 
   const pageCount = doc.getNumberOfPages();
   for (let page = 1; page <= pageCount; page += 1) {
@@ -1469,8 +1462,8 @@ function BblLearningFields({ form, set }) {
   return (
     <section className="space-y-3 border-b border-border pb-5">
       <div>
-        <p className="text-sm font-semibold text-foreground">BBL-leerbaan</p>
-        <p className="mt-1 text-xs text-muted-foreground">Dit is een arbeidsovereenkomst met loon. De praktijkovereenkomst met school en erkend leerbedrijf blijft een afzonderlijk verplicht document.</p>
+        <p className="text-sm font-semibold text-foreground">Leerarbeidsovereenkomst (BBL)</p>
+        <p className="mt-1 text-xs text-muted-foreground">Dit is een arbeidsovereenkomst met loon voor bepaalde tijd. Stem de einddatum af op de afzonderlijke praktijkovereenkomst met school en het erkende leerbedrijf.</p>
       </div>
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
         <div className="space-y-1">
@@ -1596,9 +1589,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const selectedTemplate = contractTemplates.find(template => template.id === form.template_id) || null;
   const selectableDurationOptions = useMemo(() => {
     const allowed = Array.isArray(selectedTemplate?.duration_options) ? selectedTemplate.duration_options : [];
-    if (allowed.length === 0) return DURATION_OPTIONS;
-    return DURATION_OPTIONS.filter(option => allowed.includes(option.value));
-  }, [selectedTemplate]);
+    const routeOptions = form.employment_contract_model === "internship"
+      ? DURATION_OPTIONS.filter(option => ["1_month", "2_months", "6_months", "7_months", "1_year", "free"].includes(option.value))
+      : form.employment_contract_model === "bbl"
+        ? DURATION_OPTIONS
+        : DURATION_OPTIONS.filter(option => option.value !== "4_years");
+    if (allowed.length === 0) return routeOptions;
+    return routeOptions.filter(option => allowed.includes(option.value));
+  }, [form.employment_contract_model, selectedTemplate]);
   const selectedLetterhead = letterheadOptions.find(item => item.id === form.letterhead_id) || null;
   const selectedTemplateClauses = useMemo(() => (contractClauses || [])
     .filter(clause => clause.company_id === form.company_id && clause.status !== "archived"),
@@ -2021,7 +2019,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           sourceEntity: "PersonnelContract",
           sourceEntityId: record.id,
           sourceField: "generated_file",
-          documentLabel: selectedTemplate?.name || (form.employment_contract_model === "internship" ? "Stageovereenkomst" : "Arbeidsovereenkomst"),
+          documentLabel: selectedTemplate?.name
+            || (form.employment_contract_model === "internship"
+              ? "Stageovereenkomst (BOL / re-integratie)"
+              : (form.employment_contract_model === "bbl" ? "Leerarbeidsovereenkomst (BBL)" : "Arbeidsovereenkomst")),
           validFrom: form.contract_start_date || null,
           validUntil: form.contract_end_date || null,
           isSensitive: true,
@@ -2417,6 +2418,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 {selectedContractModel?.duration_type === "indefinite" && (
                   <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
                     Onbepaalde tijd: er wordt geen einddatum gevraagd.
+                  </div>
+                )}
+                {isBblModel && (
+                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-foreground md:col-span-2 xl:col-span-3">
+                    De einddatum moet aansluiten op de praktijkovereenkomst (POK). Na de opleiding is voor voortzetting een regulier arbeidscontract of een juridisch beoordeelde vervolgafspraak nodig.
                   </div>
                 )}
                 <div className="space-y-1">
@@ -2926,6 +2932,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             : (persistedEmploymentModel === "min_max" && minPeriodHours !== null
               ? `Min-max ${minPeriodHours || "-"}-${maxPeriodHours || "-"} u/4 weken`
               : `${contract.contract_hours_per_week || contract.contract_hours_per_pay_period || "-"} u`);
+          const contractTypeLabel = contract.legal_document_type === "internship_agreement" || persistedEmploymentModel === "internship"
+            ? "Stageovereenkomst (BOL / re-integratie)"
+            : (persistedEmploymentModel === "bbl"
+              ? "Leerarbeidsovereenkomst (BBL)"
+              : (CONTRACT_FORM_LABELS[contract.contract_form] || "Arbeidscontract"));
           return (
             <button
               key={contract.id}
@@ -2934,7 +2945,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               className="grid w-full grid-cols-[minmax(220px,1.4fr)_minmax(160px,1fr)_minmax(150px,.9fr)_minmax(150px,.8fr)_minmax(140px,.8fr)_minmax(120px,.7fr)_minmax(130px,.8fr)_44px] items-center border-b border-border px-4 py-4 text-left text-sm last:border-b-0 hover:bg-muted/30"
             >
               <div className="min-w-0">
-                <p className="truncate font-semibold text-foreground">{contract.legal_document_type === "internship_agreement" || persistedEmploymentModel === "internship" ? "Stageovereenkomst" : (CONTRACT_FORM_LABELS[contract.contract_form] || "Arbeidscontract")}</p>
+                <p className="truncate font-semibold text-foreground">{contractTypeLabel}</p>
                 <p className="truncate text-xs text-muted-foreground">{readableFunctionLabel(contract.function_type) || contract.cao_function_group || "Functie onbekend"}</p>
               </div>
               <div className="truncate text-muted-foreground">{getCompanyLabel(companies, contract.company_id)}</div>

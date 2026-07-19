@@ -451,7 +451,7 @@ function contractHoursClause(form = {}) {
     if (hoursPerWeek === null && hoursPerPeriod === null) return "";
     const weekPart = hoursPerWeek !== null ? `gemiddeld ${formatHours(hoursPerWeek)} uur per week` : "";
     const periodPart = hoursPerPeriod !== null ? `${formatHours(hoursPerPeriod)} uur per loonperiode van vier weken` : "";
-    return `De overeengekomen arbeidsduur in de BBL-leerarbeidsovereenkomst bedraagt ${[periodPart, weekPart].filter(Boolean).join(", overeenkomend met ")}. School-, praktijk- en werktijd worden toegepast volgens de praktijkovereenkomst, de wet en de cao. Een wijziging van de structurele arbeidsduur wordt schriftelijk vastgelegd.`;
+    return `De overeengekomen arbeidsduur in de leerarbeidsovereenkomst (BBL) bedraagt ${[periodPart, weekPart].filter(Boolean).join(", overeenkomend met ")}. School-, praktijk- en werktijd worden toegepast volgens de praktijkovereenkomst, de wet en de cao. Een wijziging van de structurele arbeidsduur wordt schriftelijk vastgelegd.`;
   }
   if (isPbZeroHours(form)) {
     return "Partijen sluiten een oproepovereenkomst zonder vaste arbeidsomvang: een nulurencontract. Er gelden geen vaste contracturen, minimumuren, maximumuren of garantie-uren per week of loonperiode. Werkgever betaalt alle daadwerkelijk gewerkte en anderszins rechtens verschuldigde uren. Werknemer is binnen de overeengekomen beschikbaarheid verplicht gehoor te geven aan een tijdige oproep, met inachtneming van de wet, de cao en de Arbeidstijdenwet. Werknemer kan niet zonder instemming worden verplicht meer dan 144 uur per loonperiode van vier weken te werken. Incidentele oproepen wijzigen de arbeidsomvang niet automatisch; wettelijke en cao-rechten op basis van een structureel arbeidspatroon blijven volledig gelden.";
@@ -1000,8 +1000,8 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (isGrowthParttimePreset && resolvedEmploymentModel(form) !== "parttime_growth") issues.push("Deze standaardtemplate is alleen geschikt voor een parttime dienstverband volgens het groeimodel; gebruik voor een vast, oproep- of min-maxmodel een andere template.");
   if (isMinMaxPreset && resolvedEmploymentModel(form) !== "min_max") issues.push("Deze standaardtemplate is alleen geschikt voor een min-maxcontract; gebruik voor een nuluren-, vast of groeimodel een andere template.");
   if (isZeroHoursPreset && resolvedEmploymentModel(form) !== "zero_hours") issues.push("Deze standaardtemplate is alleen geschikt voor een nulurencontract; gebruik voor een min-maxcontract, voorovereenkomst of vaste arbeidsomvang een andere template.");
-  if (isInternshipPreset && resolvedEmploymentModel(form) !== "internship") issues.push("Deze standaardtemplate is alleen geschikt voor een artikel-14-stage zonder arbeidsovereenkomst; BBL vereist de aparte BBL-leerarbeidsovereenkomst.");
-  if (isBblPreset && resolvedEmploymentModel(form) !== "bbl") issues.push("Deze standaardtemplate is alleen geschikt voor een BBL-leerarbeidsovereenkomst; BOL en re-integratiestages vereisen de aparte artikel-14-stageovereenkomst.");
+  if (isInternshipPreset && resolvedEmploymentModel(form) !== "internship") issues.push("Deze standaardtemplate is alleen geschikt voor een stageovereenkomst (BOL / re-integratie) zonder arbeidsovereenkomst; BBL vereist de aparte leerarbeidsovereenkomst (BBL).");
+  if (isBblPreset && resolvedEmploymentModel(form) !== "bbl") issues.push("Deze standaardtemplate is alleen geschikt voor een leerarbeidsovereenkomst (BBL); BOL en re-integratiestages vereisen de aparte stageovereenkomst.");
   const missingRequiredPlaceholders = getMissingStandardTemplatePlaceholders(template.body, preset.required_placeholders);
   if (missingRequiredPlaceholders.length > 0) issues.push(`In de standaardtemplate ontbreken verplichte placeholders: ${missingRequiredPlaceholders.join(", ")}.`);
   if (!compact(company.legal_name || company.display_name)) issues.push("De juridische bedrijfsnaam ontbreekt.");
@@ -1110,16 +1110,18 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (!form.signing_date) issues.push("Vul de datum van ondertekening in.");
   if (!compact(company.privacy_email || company.email || company.phone)) issues.push("Vul bij het bedrijf een e-mailadres of telefoonnummer in voor privacy- en beveiligingsmeldingen.");
   if (isBblPreset) {
-    if (!["bepaalde_tijd", "onbepaalde_tijd"].includes(form.contract_form)) issues.push("Een BBL-route moet als arbeidsovereenkomst voor bepaalde of onbepaalde tijd worden opgeslagen.");
+    if (form.contract_form !== "bepaalde_tijd" || durationType(form) !== "fixed") {
+      issues.push("Deze universele BBL-standaardtemplate is uitsluitend ingericht voor een leerarbeidsovereenkomst voor bepaalde tijd. Een overeenkomst voor onbepaalde tijd is niet categorisch verboden, maar vereist maatwerkafspraken over voortzetting na de opleiding en juridische beoordeling.");
+    }
     if (!compact(form.bbl_institution_name)) issues.push("Vul de onderwijsinstelling voor de BBL-route in.");
     if (!compact(form.bbl_education_name)) issues.push("Vul de BBL-opleiding in.");
     if (!compact(form.bbl_practice_agreement_reference)) issues.push("Vul het kenmerk van de afzonderlijke praktijkovereenkomst in.");
     if (!compact(form.bbl_learning_company_recognition_number)) issues.push("Vul het SBB-erkenningsnummer van het leerbedrijf in.");
     if (!compact(form.bbl_practice_trainer_name)) issues.push("Vul de praktijkopleider voor de BBL-route in.");
-    if (form.cao_function_level !== "aspirant") issues.push("Een BBL-leerarbeidsovereenkomst voor beveiligingswerk moet als aspirant worden ingedeeld.");
+    if (form.cao_function_level !== "aspirant") issues.push("Een leerarbeidsovereenkomst (BBL) voor beveiligingswerk moet als aspirant worden ingedeeld.");
     if (form.security_role_status !== "aspirant_beveiliger") issues.push("Markeer de werknemer als aspirant-beveiliger.");
     const bblHours = resolvedContractHours(form, { allowPbFulltimeDefault: false });
-    if (bblHours.hoursPerPeriod === null || bblHours.hoursPerPeriod <= 0) issues.push("Vul de overeengekomen arbeidsduur van de BBL-leerarbeidsovereenkomst in.");
+    if (bblHours.hoursPerPeriod === null || bblHours.hoursPerPeriod <= 0) issues.push("Vul de overeengekomen arbeidsduur van de leerarbeidsovereenkomst (BBL) in.");
     if (bblHours.hoursPerPeriod !== null && bblHours.hoursPerPeriod > 144) issues.push("De structurele arbeidsduur mag niet hoger zijn dan 144 uur per loonperiode van vier weken.");
   }
   if (!["true", "false", true, false].includes(form.probation_agreed)) issues.push("Kies of een proeftijd wordt overeengekomen.");
