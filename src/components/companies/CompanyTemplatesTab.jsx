@@ -168,7 +168,8 @@ const EMPLOYMENT_MODEL_LABELS = {
   zero_hours: "Nulurencontract",
   call_agreement: "Nulurencontract",
   min_max: "Min-max",
-  internship: "Stage",
+  internship: "Stageovereenkomst artikel 14",
+  bbl: "BBL-leerarbeidsovereenkomst",
   zzp: "ZZP / opdracht",
 };
 
@@ -216,11 +217,23 @@ const TEMPLATE_CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "internship",
-    label: "Stage",
-    description: "Voor stageovereenkomsten en leer-/praktijktrajecten.",
+    label: "Stageovereenkomst (BOL / re-integratie)",
+    description: "Artikel-14-stage zonder arbeidsovereenkomst. Niet geschikt voor BBL of een algemene kantoorstage.",
     contract_form: "stage",
-    duration_type: "any",
+    duration_type: "fixed",
     employment_model: "internship",
+    legal_document_type: "internship_agreement",
+    learning_route: "article_14_internship",
+  },
+  {
+    value: "bbl_employment",
+    label: "BBL-leerarbeidsovereenkomst",
+    description: "Arbeidsovereenkomst voor een aspirant in de BBL, naast een afzonderlijke praktijkovereenkomst met de school.",
+    contract_form: "any",
+    duration_type: "any",
+    employment_model: "bbl",
+    legal_document_type: "employment_agreement",
+    learning_route: "bbl",
   },
 ];
 
@@ -289,10 +302,12 @@ const LEGACY_CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "internship_fixed",
-    label: "Stage",
+    label: "Stageovereenkomst (BOL / re-integratie)",
     contract_form: "stage",
     duration_type: "fixed",
     employment_model: "internship",
+    legal_document_type: "internship_agreement",
+    learning_route: "article_14_internship",
   },
   {
     value: "zzp_assignment",
@@ -3254,6 +3269,8 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           ...auditMetadata,
           contract_model: contractModel?.value || null,
           underlying_contract_form: contractModel?.underlying_contract_form || null,
+          legal_document_type: contractModel?.legal_document_type || appliedPreset?.legal_document_type || null,
+          learning_route_scope: contractModel?.learning_route || appliedPreset?.learning_route_scope || null,
           template_document_type_label: templateDocumentTypeLabel(templateForm.template_type),
           standard_template_id: templateForm.standard_template_id || null,
           standard_template_version: templateForm.standard_template_version || null,

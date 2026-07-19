@@ -68,7 +68,8 @@ const EMPLOYMENT_MODEL_OPTIONS = [
   { value: "zero_hours", label: "Nulurencontract" },
   { value: "call_agreement", label: "Nulurencontract" },
   { value: "min_max", label: "Min-max" },
-  { value: "internship", label: "Stage" },
+  { value: "internship", label: "Stageovereenkomst artikel 14" },
+  { value: "bbl", label: "BBL-leerarbeidsovereenkomst" },
   { value: "zzp", label: "ZZP / opdracht" },
   { value: "unknown", label: "Onbekend" },
 ];
@@ -144,10 +145,27 @@ const CONTRACT_MODEL_OPTIONS = [
   },
   {
     value: "internship_fixed",
-    label: "Stage - bepaalde tijd",
+    label: "Stageovereenkomst (BOL / re-integratie)",
     contract_form: "stage",
     duration_type: "fixed",
     employment_model: "internship",
+    learning_route: "article_14_internship",
+  },
+  {
+    value: "bbl_fixed",
+    label: "BBL-leerarbeidsovereenkomst - bepaalde tijd",
+    contract_form: "bepaalde_tijd",
+    duration_type: "fixed",
+    employment_model: "bbl",
+    learning_route: "bbl",
+  },
+  {
+    value: "bbl_indefinite",
+    label: "BBL-leerarbeidsovereenkomst - onbepaalde tijd",
+    contract_form: "onbepaalde_tijd",
+    duration_type: "indefinite",
+    employment_model: "bbl",
+    learning_route: "bbl",
   },
   {
     value: "zzp_assignment",
@@ -189,6 +207,27 @@ const CALL_CHANNEL_OPTIONS = [
   { value: "whatsapp", label: "WhatsApp" },
   { value: "sms", label: "Sms" },
   { value: "employee_app_and_email", label: "Medewerkersapp en e-mail" },
+];
+
+const INTERNSHIP_ROUTE_OPTIONS = [
+  { value: "bol", label: "BOL-stage" },
+  { value: "uwv_trial_placement", label: "UWV-proefplaatsing" },
+  { value: "reintegration_measure", label: "Re-integratiemaatregel" },
+  { value: "second_track_reintegration", label: "Tweede spoor" },
+];
+
+const INTERNSHIP_CONFIRMATION_FIELDS = [
+  ["internship_supervision_confirmed", "Leren onder begeleiding staat centraal"],
+  ["internship_relevant_practical_experience_confirmed", "Relevante praktijkervaring als beveiliger"],
+  ["internship_above_strength_confirmed", "Bovenformatief en niet ter vervanging"],
+  ["internship_not_customer_billed_confirmed", "Niet doorbelasten aan klant"],
+  ["internship_rostered_confirmed", "Herkenbaar opnemen in rooster"],
+  ["internship_one_to_one_guidance_confirmed", "Dagelijkse 1-op-1-begeleiding"],
+  ["internship_uniform_label_confirmed", "Uniform vermeldt duidelijk 'stagiair'"],
+  ["internship_agreement_with_institution_confirmed", "Instelling is partij bij de stageafspraken"],
+  ["internship_working_times_documented", "Werktijden zijn vastgelegd"],
+  ["internship_evaluation_agreement_documented", "Evaluatieafspraken zijn vastgelegd"],
+  ["internship_compensation_documented", "Vergoeding en onkosten zijn vastgelegd"],
 ];
 
 const DOCUMENT_STATUS_LABELS = {
@@ -471,6 +510,12 @@ function templateMatchesWizard(template, form) {
     ? "zero_hours"
     : (template.employment_model_scope || "any");
   if (modelScope !== "any" && modelScope !== model?.employment_model && modelScope !== form.employment_contract_model) return false;
+  const expectedLearningRoute = model?.employment_model === "internship"
+    ? "article_14_internship"
+    : (model?.employment_model === "bbl" ? "bbl" : null);
+  const templateLearningRoute = template.learning_route_scope || template.metadata?.learning_route_scope || null;
+  if (templateLearningRoute && expectedLearningRoute && templateLearningRoute !== expectedLearningRoute) return false;
+  if (templateLearningRoute && !expectedLearningRoute) return false;
   const durationScope = template.duration_type_scope || "any";
   if (durationScope !== "any" && durationScope !== form.duration_type) return false;
   const durationOptions = Array.isArray(template.duration_options) ? template.duration_options : [];
@@ -549,6 +594,46 @@ function initialForm(personnel) {
     availability_windows: [],
     availability_timezone: "Europe/Amsterdam",
     call_channel: "",
+    internship_type: "unknown",
+    internship_institution_name: "",
+    internship_institution_address: "",
+    internship_institution_representative_name: "",
+    internship_institution_representative_function: "",
+    internship_institution_email: "",
+    internship_education_name: "",
+    internship_bpv_reference: "",
+    internship_learning_company_recognition_number: "",
+    internship_route_reference: "",
+    internship_assignment_description: "",
+    internship_learning_objectives: "",
+    internship_practice_trainer_name: "",
+    internship_institution_supervisor_name: "",
+    internship_hours_per_week: "",
+    internship_working_times: "",
+    internship_evaluation_details: "",
+    internship_compensation_applies: "unknown",
+    internship_compensation_amount: "",
+    internship_compensation_period: "maand",
+    internship_expense_arrangement: "",
+    internship_insurance_description: "",
+    internship_attachments: "",
+    internship_legal_representative_name: "",
+    internship_supervision_confirmed: "false",
+    internship_relevant_practical_experience_confirmed: "false",
+    internship_above_strength_confirmed: "false",
+    internship_not_customer_billed_confirmed: "false",
+    internship_rostered_confirmed: "false",
+    internship_one_to_one_guidance_confirmed: "false",
+    internship_uniform_label_confirmed: "false",
+    internship_agreement_with_institution_confirmed: "false",
+    internship_working_times_documented: "false",
+    internship_evaluation_agreement_documented: "false",
+    internship_compensation_documented: "false",
+    bbl_institution_name: "",
+    bbl_education_name: "",
+    bbl_practice_agreement_reference: "",
+    bbl_learning_company_recognition_number: "",
+    bbl_practice_trainer_name: "",
     industry_seniority_pay_periods: personnel.industry_seniority_pay_periods ?? "",
     industry_start_date: personnel.industry_start_date || "",
     template_id: null,
@@ -635,6 +720,46 @@ function formFromContract(contract) {
     availability_windows: normalizeAvailabilityWindows(contract.availability_windows),
     availability_timezone: contract.availability_timezone || "Europe/Amsterdam",
     call_channel: contract.call_channel || "",
+    internship_type: contract.internship_type || "unknown",
+    internship_institution_name: contract.internship_institution_name || "",
+    internship_institution_address: contract.internship_institution_address || "",
+    internship_institution_representative_name: contract.internship_institution_representative_name || "",
+    internship_institution_representative_function: contract.internship_institution_representative_function || "",
+    internship_institution_email: contract.internship_institution_email || "",
+    internship_education_name: contract.internship_education_name || "",
+    internship_bpv_reference: contract.internship_bpv_reference || "",
+    internship_learning_company_recognition_number: contract.internship_learning_company_recognition_number || "",
+    internship_route_reference: contract.internship_route_reference || "",
+    internship_assignment_description: contract.internship_assignment_description || "",
+    internship_learning_objectives: contract.internship_learning_objectives || "",
+    internship_practice_trainer_name: contract.internship_practice_trainer_name || contract.internship_mentor_name || "",
+    internship_institution_supervisor_name: contract.internship_institution_supervisor_name || "",
+    internship_hours_per_week: contract.internship_hours_per_week ?? "",
+    internship_working_times: contract.internship_working_times || "",
+    internship_evaluation_details: contract.internship_evaluation_details || "",
+    internship_compensation_applies: boolToSelect(contract.internship_compensation_applies),
+    internship_compensation_amount: contract.internship_compensation_amount ?? "",
+    internship_compensation_period: contract.internship_compensation_period || "maand",
+    internship_expense_arrangement: contract.internship_expense_arrangement || "",
+    internship_insurance_description: contract.internship_insurance_description || "",
+    internship_attachments: contract.internship_attachments || "",
+    internship_legal_representative_name: contract.internship_legal_representative_name || "",
+    internship_supervision_confirmed: boolToSelect(contract.internship_supervision_confirmed),
+    internship_relevant_practical_experience_confirmed: boolToSelect(contract.internship_relevant_practical_experience_confirmed),
+    internship_above_strength_confirmed: boolToSelect(contract.internship_above_strength_confirmed),
+    internship_not_customer_billed_confirmed: boolToSelect(contract.internship_not_customer_billed_confirmed),
+    internship_rostered_confirmed: boolToSelect(contract.internship_rostered_confirmed),
+    internship_one_to_one_guidance_confirmed: boolToSelect(contract.internship_one_to_one_guidance_confirmed),
+    internship_uniform_label_confirmed: boolToSelect(contract.internship_uniform_label_confirmed),
+    internship_agreement_with_institution_confirmed: boolToSelect(contract.internship_agreement_with_institution_confirmed),
+    internship_working_times_documented: boolToSelect(contract.internship_working_times_documented),
+    internship_evaluation_agreement_documented: boolToSelect(contract.internship_evaluation_agreement_documented),
+    internship_compensation_documented: boolToSelect(contract.internship_compensation_documented),
+    bbl_institution_name: contract.bbl_institution_name || "",
+    bbl_education_name: contract.bbl_education_name || "",
+    bbl_practice_agreement_reference: contract.bbl_practice_agreement_reference || "",
+    bbl_learning_company_recognition_number: contract.bbl_learning_company_recognition_number || "",
+    bbl_practice_trainer_name: contract.bbl_practice_trainer_name || "",
     industry_seniority_pay_periods: contract.industry_seniority_pay_periods ?? "",
     industry_start_date: contract.industry_start_date || "",
     template_id: contract.template_id || null,
@@ -650,9 +775,10 @@ function formFromContract(contract) {
 
 function getMissingContractFields(form) {
   const missing = [];
+  const isArticle14Internship = form.employment_contract_model === "internship";
   if (!form.company_id) missing.push("bedrijf");
   if (!form.contract_model) missing.push("contractvorm");
-  if (!form.probation_agreed || form.probation_agreed === "unknown") missing.push("proeftijdkeuze");
+  if (!isArticle14Internship && (!form.probation_agreed || form.probation_agreed === "unknown")) missing.push("proeftijdkeuze");
   if (form.probation_agreed === "true" && (!form.probation_context || form.probation_context === "unknown")) missing.push("context proeftijd");
   if (form.source_type === "generated" && !form.template_id) missing.push("contracttemplate");
   if (form.source_type === "uploaded_existing" && !form.existing_contract_file && !form.signed_file_id) missing.push("contractdocument");
@@ -687,6 +813,41 @@ function getMissingContractFields(form) {
     missing.push("beschikbaarheidsvensters");
   }
   if (["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model) && !form.call_channel) missing.push("oproepkanaal");
+  if (form.employment_contract_model === "internship") {
+    if (!["bol", "uwv_trial_placement", "reintegration_measure", "second_track_reintegration"].includes(form.internship_type)) missing.push("geldige stageroute");
+    if (!form.internship_institution_name) missing.push("onderwijs- of re-integratie-instelling");
+    if (!form.internship_institution_address) missing.push("adres instelling");
+    if (!form.internship_institution_representative_name) missing.push("vertegenwoordiger instelling");
+    if (!form.internship_institution_representative_function) missing.push("functie vertegenwoordiger instelling");
+    if (!form.internship_institution_email) missing.push("e-mailadres instelling");
+    if (!form.internship_education_name) missing.push("opleiding of re-integratietraject");
+    if (form.internship_type === "bol" && !form.internship_bpv_reference) missing.push("POK/BPV-kenmerk");
+    if (form.internship_type === "bol" && !form.internship_learning_company_recognition_number) missing.push("SBB-erkenning");
+    if (["uwv_trial_placement", "reintegration_measure", "second_track_reintegration"].includes(form.internship_type) && !form.internship_route_reference) missing.push("routebesluit of toestemming");
+    if (!form.internship_assignment_description) missing.push("stageopdracht");
+    if (!form.internship_learning_objectives) missing.push("leerdoelen");
+    if (!form.internship_practice_trainer_name) missing.push("praktijkopleider");
+    if (!form.internship_institution_supervisor_name) missing.push("begeleider vanuit instelling");
+    if (!numberOrNull(form.internship_hours_per_week)) missing.push("stage-uren per week");
+    if (!form.internship_working_times) missing.push("stagewerktijden");
+    if (!form.internship_evaluation_details) missing.push("evaluatieafspraken");
+    if (!["true", "false"].includes(form.internship_compensation_applies)) missing.push("keuze stagevergoeding");
+    if (form.internship_compensation_applies === "true" && !numberOrNull(form.internship_compensation_amount)) missing.push("bedrag stagevergoeding");
+    if (!form.internship_expense_arrangement) missing.push("onkostenregeling");
+    if (!form.internship_insurance_description) missing.push("verzekeringsafspraken");
+    if (!form.internship_attachments) missing.push("stagebijlagen");
+    INTERNSHIP_CONFIRMATION_FIELDS.forEach(([field, label]) => {
+      if (form[field] !== "true") missing.push(label.toLowerCase());
+    });
+  }
+  if (form.employment_contract_model === "bbl") {
+    if (!form.contract_hours_per_week && !form.contract_hours_per_pay_period) missing.push("arbeidsduur BBL");
+    if (!form.bbl_institution_name) missing.push("onderwijsinstelling BBL");
+    if (!form.bbl_education_name) missing.push("BBL-opleiding");
+    if (!form.bbl_practice_agreement_reference) missing.push("praktijkovereenkomst BBL");
+    if (!form.bbl_learning_company_recognition_number) missing.push("SBB-erkenning");
+    if (!form.bbl_practice_trainer_name) missing.push("praktijkopleider BBL");
+  }
   return missing;
 }
 
@@ -748,7 +909,7 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
   const allowedLevels = fromArrayText(form.allowed_cao_function_levels_text);
   const employmentModel = normalizedEmploymentModel(form);
   const isCallAgreement = ["zero_hours", "min_max"].includes(employmentModel);
-  const hasFixedHours = ["fulltime", "parttime_fixed", "parttime_growth"].includes(employmentModel);
+  const hasFixedHours = ["fulltime", "parttime_fixed", "parttime_growth", "bbl"].includes(employmentModel);
   const isMinMax = employmentModel === "min_max";
   const fixedHoursOfferDueAt = isCallAgreement ? addMonths(form.contract_start_date, 12) : null;
   const fixedHoursOfferDeadlineAt = isCallAgreement ? addMonths(form.contract_start_date, 13) : null;
@@ -764,6 +925,8 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     cao_key: form.cao_key || null,
     cao_configuration_id: form.cao_configuration_id || null,
     contract_model: form.contract_model || null,
+    legal_document_type: employmentModel === "internship" ? "internship_agreement" : "employment_agreement",
+    learning_route: employmentModel === "bbl" ? "bbl" : (employmentModel === "internship" ? "article_14_internship" : null),
     contract_form: form.contract_form || "unknown",
     underlying_contract_form: form.contract_form === "oproep" ? (form.underlying_contract_form || "unknown") : null,
     employment_contract_model: employmentModel,
@@ -832,6 +995,48 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     fixed_hours_offer_due_at: fixedHoursOfferDueAt,
     fixed_hours_offer_deadline_at: fixedHoursOfferDeadlineAt,
     fixed_hours_offer_status: isCallAgreement ? (previous.fixed_hours_offer_status || "not_due") : null,
+    internship_type: employmentModel === "internship" ? (form.internship_type || "unknown") : "not_applicable",
+    internship_has_employment_contract: employmentModel === "internship" ? false : null,
+    internship_institution_name: employmentModel === "internship" ? (form.internship_institution_name || null) : null,
+    internship_institution_address: employmentModel === "internship" ? (form.internship_institution_address || null) : null,
+    internship_institution_representative_name: employmentModel === "internship" ? (form.internship_institution_representative_name || null) : null,
+    internship_institution_representative_function: employmentModel === "internship" ? (form.internship_institution_representative_function || null) : null,
+    internship_institution_email: employmentModel === "internship" ? (form.internship_institution_email || null) : null,
+    internship_education_name: employmentModel === "internship" ? (form.internship_education_name || null) : null,
+    internship_bpv_reference: employmentModel === "internship" ? (form.internship_bpv_reference || null) : null,
+    internship_learning_company_recognition_number: employmentModel === "internship" ? (form.internship_learning_company_recognition_number || null) : null,
+    internship_route_reference: employmentModel === "internship" ? (form.internship_route_reference || null) : null,
+    internship_assignment_description: employmentModel === "internship" ? (form.internship_assignment_description || null) : null,
+    internship_learning_objectives: employmentModel === "internship" ? (form.internship_learning_objectives || null) : null,
+    internship_practice_trainer_name: employmentModel === "internship" ? (form.internship_practice_trainer_name || null) : null,
+    internship_mentor_name: employmentModel === "internship" ? (form.internship_practice_trainer_name || null) : null,
+    internship_institution_supervisor_name: employmentModel === "internship" ? (form.internship_institution_supervisor_name || null) : null,
+    internship_hours_per_week: employmentModel === "internship" ? numberOrNull(form.internship_hours_per_week) : null,
+    internship_working_times: employmentModel === "internship" ? (form.internship_working_times || null) : null,
+    internship_evaluation_details: employmentModel === "internship" ? (form.internship_evaluation_details || null) : null,
+    internship_compensation_applies: employmentModel === "internship" ? boolOrNull(form.internship_compensation_applies) : null,
+    internship_compensation_amount: employmentModel === "internship" ? numberOrNull(form.internship_compensation_amount) : null,
+    internship_compensation_period: employmentModel === "internship" ? (form.internship_compensation_period || null) : null,
+    internship_expense_arrangement: employmentModel === "internship" ? (form.internship_expense_arrangement || null) : null,
+    internship_insurance_description: employmentModel === "internship" ? (form.internship_insurance_description || null) : null,
+    internship_attachments: employmentModel === "internship" ? (form.internship_attachments || null) : null,
+    internship_legal_representative_name: employmentModel === "internship" ? (form.internship_legal_representative_name || null) : null,
+    internship_supervision_confirmed: employmentModel === "internship" ? boolOrNull(form.internship_supervision_confirmed) : null,
+    internship_relevant_practical_experience_confirmed: employmentModel === "internship" ? boolOrNull(form.internship_relevant_practical_experience_confirmed) : null,
+    internship_above_strength_confirmed: employmentModel === "internship" ? boolOrNull(form.internship_above_strength_confirmed) : null,
+    internship_not_customer_billed_confirmed: employmentModel === "internship" ? boolOrNull(form.internship_not_customer_billed_confirmed) : null,
+    internship_rostered_confirmed: employmentModel === "internship" ? boolOrNull(form.internship_rostered_confirmed) : null,
+    internship_one_to_one_guidance_confirmed: employmentModel === "internship" ? boolOrNull(form.internship_one_to_one_guidance_confirmed) : null,
+    internship_uniform_label_confirmed: employmentModel === "internship" ? boolOrNull(form.internship_uniform_label_confirmed) : null,
+    internship_agreement_with_institution_confirmed: employmentModel === "internship" ? boolOrNull(form.internship_agreement_with_institution_confirmed) : null,
+    internship_working_times_documented: employmentModel === "internship" ? boolOrNull(form.internship_working_times_documented) : null,
+    internship_evaluation_agreement_documented: employmentModel === "internship" ? boolOrNull(form.internship_evaluation_agreement_documented) : null,
+    internship_compensation_documented: employmentModel === "internship" ? boolOrNull(form.internship_compensation_documented) : null,
+    bbl_institution_name: employmentModel === "bbl" ? (form.bbl_institution_name || null) : null,
+    bbl_education_name: employmentModel === "bbl" ? (form.bbl_education_name || null) : null,
+    bbl_practice_agreement_reference: employmentModel === "bbl" ? (form.bbl_practice_agreement_reference || null) : null,
+    bbl_learning_company_recognition_number: employmentModel === "bbl" ? (form.bbl_learning_company_recognition_number || null) : null,
+    bbl_practice_trainer_name: employmentModel === "bbl" ? (form.bbl_practice_trainer_name || null) : null,
     industry_seniority_pay_periods: numberOrNull(form.industry_seniority_pay_periods),
     industry_start_date: form.industry_start_date || null,
     contract_context_status: contextReady ? "context_ready" : "draft_missing_context",
@@ -923,17 +1128,25 @@ function contractRenderValues(personnel, form, company) {
 }
 
 function renderContractBody(personnel, form, company, template, clauses = []) {
-  const fallbackBody = [
-    "Arbeidsovereenkomst",
-    "",
-    "Ondergetekenden:",
-    "{{bedrijf.naam}}, hierna te noemen werkgever;",
-    "en {{medewerker.naam}}, hierna te noemen werknemer;",
-    "",
-    "komen overeen dat werknemer per {{contract.startdatum}} werkzaam is als {{contract.functie}}.",
-    "Op deze overeenkomst is {{contract.cao}} van toepassing.",
-    "De overeengekomen contractvorm is {{contract.contractvorm}}.",
-  ].join("\n");
+  const fallbackBody = form.employment_contract_model === "internship"
+    ? [
+        "Stageovereenkomst",
+        "",
+        "Deze stageovereenkomst wordt gesloten tussen het stagebedrijf, de stagiair en de onderwijs- of re-integratie-instelling.",
+        "De stage begint op {{contract.startdatum}} en is gericht op leren onder begeleiding.",
+        "Gebruik voor definitieve generatie het beheerde artikel-14-stagesjabloon.",
+      ].join("\n")
+    : [
+        "Arbeidsovereenkomst",
+        "",
+        "Ondergetekenden:",
+        "{{bedrijf.naam}}, hierna te noemen werkgever;",
+        "en {{medewerker.naam}}, hierna te noemen werknemer;",
+        "",
+        "komen overeen dat werknemer per {{contract.startdatum}} werkzaam is als {{contract.functie}}.",
+        "Op deze overeenkomst is {{contract.cao}} van toepassing.",
+        "De overeengekomen contractvorm is {{contract.contractvorm}}.",
+      ].join("\n");
   return renderContractTemplateBody(expandClauseMarkers(template?.body || fallbackBody, clauses), { personnel, form, company });
 }
 
@@ -947,7 +1160,8 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
   const continuationTop = 64;
   const lineHeight = 16;
   const paragraphGap = 7;
-  const title = template?.name || "Arbeidsovereenkomst";
+  const isInternshipAgreement = form.employment_contract_model === "internship";
+  const title = template?.name || (isInternshipAgreement ? "Stageovereenkomst" : "Arbeidsovereenkomst");
   const body = renderContractBody(personnel, form, company, template, clauses);
   const values = contractRenderValues(personnel, form, company);
   doc.setFont("helvetica", "bold");
@@ -1008,7 +1222,8 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
     }
   }
   const blob = doc.output("blob");
-  const safeName = `${values.employeeName.replace(/[^\w.-]+/g, "_")}_arbeidsovereenkomst_${form.contract_start_date || "concept"}.pdf`;
+  const documentSlug = isInternshipAgreement ? "stageovereenkomst" : "arbeidsovereenkomst";
+  const safeName = `${values.employeeName.replace(/[^\w.-]+/g, "_")}_${documentSlug}_${form.contract_start_date || "concept"}.pdf`;
   return new File([blob], safeName, { type: "application/pdf" });
 }
 
@@ -1069,6 +1284,221 @@ function getLetterheadOptions(letterheads, companies, companyId) {
       }]
     : [];
   return [...legacy, ...scoped].sort((a, b) => Number(b.is_default) - Number(a.is_default) || a.name.localeCompare(b.name));
+}
+
+function Article14InternshipFields({ form, set }) {
+  const isBol = form.internship_type === "bol";
+  const needsRouteReference = ["uwv_trial_placement", "reintegration_measure", "second_track_reintegration"].includes(form.internship_type);
+
+  return (
+    <div className="space-y-6">
+      <div className="border-b border-border pb-4">
+        <p className="text-sm font-semibold text-foreground">Stageafspraken volgens artikel 14</p>
+        <p className="mt-1 text-xs text-muted-foreground">
+          Dit is geen arbeidsovereenkomst. Leren, bovenformatieve inzet en dagelijkse een-op-eenbegeleiding moeten feitelijk centraal blijven staan.
+        </p>
+      </div>
+
+      <section className="space-y-3">
+        <div>
+          <p className="text-sm font-medium text-foreground">Route en instelling</p>
+          <p className="text-xs text-muted-foreground">BBL hoort niet in deze route en gebruikt een afzonderlijke leerarbeidsovereenkomst.</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="space-y-1">
+            <Label>Stageroute *</Label>
+            <Select value={form.internship_type || "unknown"} onValueChange={value => set("internship_type", value)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unknown">Kies route</SelectItem>
+                {INTERNSHIP_ROUTE_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-1">
+            <Label>Onderwijs- of re-integratie-instelling *</Label>
+            <Input value={form.internship_institution_name || ""} onChange={event => set("internship_institution_name", event.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>Adres instelling *</Label>
+            <Input value={form.internship_institution_address || ""} onChange={event => set("internship_institution_address", event.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>Vertegenwoordiger instelling *</Label>
+            <Input value={form.internship_institution_representative_name || ""} onChange={event => set("internship_institution_representative_name", event.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>Functie vertegenwoordiger *</Label>
+            <Input value={form.internship_institution_representative_function || ""} onChange={event => set("internship_institution_representative_function", event.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>E-mailadres instelling *</Label>
+            <Input type="email" value={form.internship_institution_email || ""} onChange={event => set("internship_institution_email", event.target.value)} />
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <Label>Opleiding of re-integratietraject *</Label>
+            <Input value={form.internship_education_name || ""} onChange={event => set("internship_education_name", event.target.value)} />
+          </div>
+          {isBol && (
+            <>
+              <div className="space-y-1">
+                <Label>POK/BPV-kenmerk *</Label>
+                <Input value={form.internship_bpv_reference || ""} onChange={event => set("internship_bpv_reference", event.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>SBB-erkenningsnummer *</Label>
+                <Input value={form.internship_learning_company_recognition_number || ""} onChange={event => set("internship_learning_company_recognition_number", event.target.value)} />
+              </div>
+            </>
+          )}
+          {needsRouteReference && (
+            <div className="space-y-1 md:col-span-2">
+              <Label>Kenmerk toestemming, besluit of trajectplan *</Label>
+              <Input value={form.internship_route_reference || ""} onChange={event => set("internship_route_reference", event.target.value)} />
+              {form.internship_type === "uwv_trial_placement" && <p className="text-xs text-amber-700">Binnen deze CAO-preset mag de proefplaatsing maximaal twee maanden duren.</p>}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="space-y-3 border-t border-border pt-5">
+        <p className="text-sm font-medium text-foreground">Stageopdracht en begeleiding</p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1 md:col-span-2">
+            <Label>Concrete stageopdracht *</Label>
+            <Textarea rows={3} value={form.internship_assignment_description || ""} onChange={event => set("internship_assignment_description", event.target.value)} />
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <Label>Meetbare leerdoelen *</Label>
+            <Textarea rows={3} value={form.internship_learning_objectives || ""} onChange={event => set("internship_learning_objectives", event.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>Praktijkopleider stagebedrijf *</Label>
+            <Input value={form.internship_practice_trainer_name || ""} onChange={event => set("internship_practice_trainer_name", event.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>Begeleider vanuit instelling *</Label>
+            <Input value={form.internship_institution_supervisor_name || ""} onChange={event => set("internship_institution_supervisor_name", event.target.value)} />
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-3 border-t border-border pt-5">
+        <p className="text-sm font-medium text-foreground">Omvang, evaluatie en vergoeding</p>
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          <div className="space-y-1">
+            <Label>Gemiddeld aantal stage-uren per week *</Label>
+            <Input type="number" min="0.25" step="0.25" value={form.internship_hours_per_week || ""} onChange={event => set("internship_hours_per_week", event.target.value)} />
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <Label>Stagedagen en tijdvakken *</Label>
+            <Input value={form.internship_working_times || ""} onChange={event => set("internship_working_times", event.target.value)} placeholder="Bijv. maandag t/m donderdag, 08:00-16:30" />
+          </div>
+          <div className="space-y-1 md:col-span-2 xl:col-span-3">
+            <Label>Evaluatiemomenten en werkwijze *</Label>
+            <Textarea rows={2} value={form.internship_evaluation_details || ""} onChange={event => set("internship_evaluation_details", event.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>Stagevergoeding *</Label>
+            <Select value={form.internship_compensation_applies || "unknown"} onValueChange={value => set("internship_compensation_applies", value)}>
+              <SelectTrigger><SelectValue /></SelectTrigger>
+              <SelectContent>
+                <SelectItem value="unknown">Kies afspraak</SelectItem>
+                <SelectItem value="true">Ja, vergoeding afgesproken</SelectItem>
+                <SelectItem value="false">Geen stagevergoeding</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {form.internship_compensation_applies === "true" && (
+            <>
+              <div className="space-y-1">
+                <Label>Brutobedrag *</Label>
+                <Input type="number" min="0" step="0.01" value={form.internship_compensation_amount || ""} onChange={event => set("internship_compensation_amount", event.target.value)} />
+              </div>
+              <div className="space-y-1">
+                <Label>Periode *</Label>
+                <Select value={form.internship_compensation_period || "maand"} onValueChange={value => set("internship_compensation_period", value)}>
+                  <SelectTrigger><SelectValue /></SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="uur">Per uur</SelectItem>
+                    <SelectItem value="dag">Per dag</SelectItem>
+                    <SelectItem value="vier_weken">Per vier weken</SelectItem>
+                    <SelectItem value="maand">Per maand</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+            </>
+          )}
+          <div className="space-y-1 md:col-span-2 xl:col-span-3">
+            <Label>Onkostenregeling *</Label>
+            <Textarea rows={2} value={form.internship_expense_arrangement || ""} onChange={event => set("internship_expense_arrangement", event.target.value)} placeholder="Beschrijf vergoeding of vermeld expliciet dat geen onkosten worden vergoed." />
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-3 border-t border-border pt-5">
+        <p className="text-sm font-medium text-foreground">Verzekering, bijlagen en artikel-14-controle</p>
+        <div className="grid gap-4 md:grid-cols-2">
+          <div className="space-y-1">
+            <Label>Verzekeringsdekking en meldprocedure *</Label>
+            <Textarea rows={3} value={form.internship_insurance_description || ""} onChange={event => set("internship_insurance_description", event.target.value)} />
+          </div>
+          <div className="space-y-1">
+            <Label>Bijlagen bij de stageovereenkomst *</Label>
+            <Textarea rows={3} value={form.internship_attachments || ""} onChange={event => set("internship_attachments", event.target.value)} placeholder="Bijv. POK, stageplan, SBB-erkenning en Wpbr-documenten" />
+          </div>
+          <div className="space-y-1 md:col-span-2">
+            <Label>Wettelijke vertegenwoordiger minderjarige</Label>
+            <Input value={form.internship_legal_representative_name || ""} onChange={event => set("internship_legal_representative_name", event.target.value)} placeholder="Alleen invullen indien vereist" />
+          </div>
+        </div>
+        <div className="grid gap-2 md:grid-cols-2">
+          {INTERNSHIP_CONFIRMATION_FIELDS.map(([field, label]) => (
+            <label key={field} className={`flex min-h-11 cursor-pointer items-center gap-3 border px-3 py-2 text-sm ${form[field] === "true" ? "border-primary bg-primary/5 text-foreground" : "border-border text-muted-foreground"}`}>
+              <input type="checkbox" checked={form[field] === "true"} onChange={event => set(field, event.target.checked ? "true" : "false")} />
+              <span>{label}</span>
+            </label>
+          ))}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function BblLearningFields({ form, set }) {
+  return (
+    <section className="space-y-3 border-b border-border pb-5">
+      <div>
+        <p className="text-sm font-semibold text-foreground">BBL-leerbaan</p>
+        <p className="mt-1 text-xs text-muted-foreground">Dit is een arbeidsovereenkomst met loon. De praktijkovereenkomst met school en erkend leerbedrijf blijft een afzonderlijk verplicht document.</p>
+      </div>
+      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+        <div className="space-y-1">
+          <Label>Onderwijsinstelling *</Label>
+          <Input value={form.bbl_institution_name || ""} onChange={event => set("bbl_institution_name", event.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label>BBL-opleiding *</Label>
+          <Input value={form.bbl_education_name || ""} onChange={event => set("bbl_education_name", event.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label>Kenmerk praktijkovereenkomst *</Label>
+          <Input value={form.bbl_practice_agreement_reference || ""} onChange={event => set("bbl_practice_agreement_reference", event.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label>SBB-erkenningsnummer *</Label>
+          <Input value={form.bbl_learning_company_recognition_number || ""} onChange={event => set("bbl_learning_company_recognition_number", event.target.value)} />
+        </div>
+        <div className="space-y-1">
+          <Label>Praktijkopleider *</Label>
+          <Input value={form.bbl_practice_trainer_name || ""} onChange={event => set("bbl_practice_trainer_name", event.target.value)} />
+        </div>
+        <div className="border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
+          Aspirant-beveiliger · schaal 2 · loon per vier weken. De template verwerkt de specifieke CAO-opbouw voor de praktijkopleiding.
+        </div>
+      </div>
+    </section>
+  );
 }
 
 export default function PersonnelContractsTab({ personnel, companies = [] }) {
@@ -1174,6 +1604,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     .filter(clause => clause.company_id === form.company_id && clause.status !== "archived"),
   [contractClauses, form.company_id]);
   const selectedContractModel = getContractModel(form.contract_model);
+  const isArticle14Internship = form.employment_contract_model === "internship";
+  const isBblModel = form.employment_contract_model === "bbl";
   const wageTableYear = getYear(form.contract_start_date || new Date());
   const companyCaoKeyOptions = useMemo(
     () => buildCompanyCaoKeyOptions(companyCaoAssignments, form.contract_start_date, caoConfigurationOptions),
@@ -1183,6 +1615,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     () => buildCompanyFunctionOptions(companyCaoAssignments, form.contract_start_date, form.cao_key, caoConfigurationOptions, form.function_type),
     [caoConfigurationOptions, companyCaoAssignments, form.cao_key, form.contract_start_date, form.function_type]
   );
+  const wizardFunctionOptions = useMemo(() => {
+    if (!isArticle14Internship) return companyFunctionOptions;
+    return companyFunctionOptions.filter(option => suggestPbCaoFunctionGroup(option.value) !== "non_security_staff");
+  }, [companyFunctionOptions, isArticle14Internship]);
   const selectedFunctionValues = useMemo(
     () => uniqueValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]),
     [form.allowed_function_types_text, form.function_type]
@@ -1374,6 +1810,52 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.min_hours_per_pay_period = "";
         next.max_hours_per_pay_period = "";
         next.salary_payment_frequency = "four_weeks";
+      } else if (model?.employment_model === "internship") {
+        const securityFunctions = uniqueValues([
+          prev.function_type,
+          ...fromArrayText(prev.allowed_function_types_text),
+        ]).filter(functionValue => {
+          const group = suggestPbCaoFunctionGroup(functionValue);
+          return group && group !== "non_security_staff";
+        });
+        const primaryFunction = securityFunctions.includes(prev.function_type)
+          ? prev.function_type
+          : (securityFunctions[0] || "");
+        next.probation_agreed = "not_applicable";
+        next.probation_context = "not_applicable";
+        next.contract_hours_per_week = "";
+        next.contract_hours_per_pay_period = "";
+        next.function_type = primaryFunction;
+        next.allowed_function_types_text = securityFunctions.join(", ");
+        next.cao_function_group = primaryFunction ? suggestPbCaoFunctionGroup(primaryFunction) : "";
+        next.performs_security_work = primaryFunction ? "true" : "unknown";
+        next.cao_function_level = "not_applicable";
+        next.cao_scale = "";
+        next.cao_period = "";
+        next.custom_hourly_rate = "";
+        next.hourly_rate_snapshot = "";
+        next.security_role_status = "not_applicable";
+        next.internship_type = prev.internship_type === "unknown" ? "bol" : prev.internship_type;
+      } else if (model?.employment_model === "bbl" && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
+        const securityFunctions = uniqueValues([
+          prev.function_type,
+          ...fromArrayText(prev.allowed_function_types_text),
+        ]).filter(functionValue => {
+          const group = suggestPbCaoFunctionGroup(functionValue);
+          return group && group !== "non_security_staff";
+        });
+        const primaryFunction = securityFunctions.includes(prev.function_type)
+          ? prev.function_type
+          : (securityFunctions[0] || "");
+        next.function_type = primaryFunction;
+        next.allowed_function_types_text = securityFunctions.join(", ");
+        next.cao_function_group = primaryFunction ? suggestPbCaoFunctionGroup(primaryFunction) : "";
+        next.performs_security_work = primaryFunction ? "true" : "unknown";
+        next.salary_payment_frequency = "four_weeks";
+        next.security_role_status = "aspirant_beveiliger";
+        next.cao_function_level = "aspirant";
+        next.cao_scale = "2";
+        next.cao_period = prev.cao_period || "0";
       } else if (model?.default_hours && !next.contract_hours_per_week) {
         next.contract_hours_per_week = String(model.default_hours);
       }
@@ -1381,7 +1863,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.contract_end_date = "";
         next.duration_option = "";
       }
-      if (["internship", "zzp"].includes(model?.employment_model)) next.probation_agreed = "not_applicable";
+      if (["internship", "zzp"].includes(model?.employment_model)) {
+        next.probation_agreed = "not_applicable";
+        next.probation_context = "not_applicable";
+      }
       return next;
     });
   };
@@ -1425,7 +1910,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       const suggestedGroup = prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
         ? suggestPbCaoFunctionGroup(nextValue)
         : "";
-      return {
+      const next = {
         ...prev,
         function_type: nextValue,
         allowed_function_types_text: functions.join(", "),
@@ -1440,6 +1925,21 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         cao_scale: suggestedGroup === "non_security_staff" ? "" : prev.cao_scale,
         cao_period: suggestedGroup === "non_security_staff" ? "" : prev.cao_period,
       };
+      if (prev.employment_contract_model === "internship") {
+        next.cao_function_level = "not_applicable";
+        next.cao_scale = "";
+        next.cao_period = "";
+        next.custom_hourly_rate = "";
+        next.hourly_rate_snapshot = "";
+        next.security_role_status = "not_applicable";
+      }
+      if (prev.employment_contract_model === "bbl") {
+        next.cao_function_level = "aspirant";
+        next.cao_scale = "2";
+        next.security_role_status = "aspirant_beveiliger";
+        next.salary_payment_frequency = "four_weeks";
+      }
+      return next;
     });
   };
 
@@ -1521,7 +2021,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           sourceEntity: "PersonnelContract",
           sourceEntityId: record.id,
           sourceField: "generated_file",
-          documentLabel: selectedTemplate?.name || "Arbeidsovereenkomst",
+          documentLabel: selectedTemplate?.name || (form.employment_contract_model === "internship" ? "Stageovereenkomst" : "Arbeidsovereenkomst"),
           validFrom: form.contract_start_date || null,
           validUntil: form.contract_end_date || null,
           isSensitive: true,
@@ -1660,7 +2160,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     if (nextEndDate && nextEndDate !== form.contract_end_date) set("contract_end_date", nextEndDate);
   }, [wizardOpen, form.duration_type, form.duration_option, form.contract_start_date, form.contract_end_date]);
 
-  const stepItems = ["Bedrijf", "CAO", "Contractvorm", "Periode & functie", "Loon & uren", "Controle"];
+  const stepItems = [
+    "Bedrijf",
+    "CAO",
+    "Contractvorm",
+    "Periode & functie",
+    isArticle14Internship ? "Stageafspraken" : (isBblModel ? "Loon, uren & BBL" : "Loon & uren"),
+    "Controle",
+  ];
 
   return (
     <div className="space-y-5">
@@ -1685,7 +2192,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           <div className="border-b border-border p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
-                <p className="text-sm font-semibold text-foreground">{editingId ? "Contract bewerken" : "Nieuw arbeidscontract"}</p>
+                <p className="text-sm font-semibold text-foreground">{editingId ? "Contract bewerken" : (isArticle14Internship ? "Nieuwe stageovereenkomst" : "Nieuw arbeidscontract")}</p>
                 <p className="text-xs text-muted-foreground">Stap {wizardStep} van 6: {stepItems[wizardStep - 1]}</p>
               </div>
               <Button type="button" variant="ghost" size="icon" onClick={() => setWizardOpen(false)}>
@@ -1785,40 +2292,47 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 </div>
 
                 <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-                  <div className="space-y-2">
-                    <Label>Proeftijd</Label>
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      {[
-                        ["true", "Met proeftijd"],
-                        ["false", "Zonder proeftijd"],
-                        ["not_applicable", "Niet van toepassing"],
-                      ].map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => setProbationChoice(value)}
-                          className={`rounded-lg border px-3 py-2 text-sm ${form.probation_agreed === value ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
+                  {isArticle14Internship ? (
+                    <div className="border border-border bg-muted/20 p-3">
+                      <p className="text-sm font-medium text-foreground">Geen proeftijd</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Een artikel-14-stage is geen arbeidsovereenkomst. Proeftijd en werknemersontslagregels worden daarom niet opgenomen.</p>
                     </div>
-                    {form.probation_agreed === "true" && (
-                      <div className="space-y-1 pt-2">
-                        <Label>Is eerder vergelijkbaar werk verricht?</Label>
-                        <Select value={form.probation_context || "unknown"} onValueChange={value => set("probation_context", value)}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            <SelectItem value="unknown">Kies de situatie</SelectItem>
-                            <SelectItem value="first_contract">Nee, dit is het eerste contract</SelectItem>
-                            <SelectItem value="successive_same_work">Ja, hetzelfde of vergelijkbaar werk</SelectItem>
-                            <SelectItem value="successive_new_skills">Ja, maar de functie vraagt wezenlijk andere vaardigheden</SelectItem>
-                          </SelectContent>
-                        </Select>
-                        <p className="text-xs text-muted-foreground">Ook eerder werk via een uitzend-, payroll- of andere opvolgende werkgever kan hierbij meetellen.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      <Label>Proeftijd</Label>
+                      <div className="grid gap-2 sm:grid-cols-3">
+                        {[
+                          ["true", "Met proeftijd"],
+                          ["false", "Zonder proeftijd"],
+                          ["not_applicable", "Niet van toepassing"],
+                        ].map(([value, label]) => (
+                          <button
+                            key={value}
+                            type="button"
+                            onClick={() => setProbationChoice(value)}
+                            className={`rounded-lg border px-3 py-2 text-sm ${form.probation_agreed === value ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
+                          >
+                            {label}
+                          </button>
+                        ))}
                       </div>
-                    )}
-                  </div>
+                      {form.probation_agreed === "true" && (
+                        <div className="space-y-1 pt-2">
+                          <Label>Is eerder vergelijkbaar werk verricht?</Label>
+                          <Select value={form.probation_context || "unknown"} onValueChange={value => set("probation_context", value)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="unknown">Kies de situatie</SelectItem>
+                              <SelectItem value="first_contract">Nee, dit is het eerste contract</SelectItem>
+                              <SelectItem value="successive_same_work">Ja, hetzelfde of vergelijkbaar werk</SelectItem>
+                              <SelectItem value="successive_new_skills">Ja, maar de functie vraagt wezenlijk andere vaardigheden</SelectItem>
+                            </SelectContent>
+                          </Select>
+                          <p className="text-xs text-muted-foreground">Ook eerder werk via een uitzend-, payroll- of andere opvolgende werkgever kan hierbij meetellen.</p>
+                        </div>
+                      )}
+                    </div>
+                  )}
                   <div className="space-y-2">
                     <Label>Documentbron</Label>
                     <div className="grid gap-2 sm:grid-cols-2">
@@ -1911,7 +2425,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     <SelectTrigger><SelectValue /></SelectTrigger>
                     <SelectContent>
                       <SelectItem value="none">Kies functie</SelectItem>
-                      {companyFunctionOptions.map(option => (
+                      {wizardFunctionOptions.map(option => (
                         <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
                       ))}
                     </SelectContent>
@@ -1924,9 +2438,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
                         <SelectItem value="none">Kies functiegroep</SelectItem>
-                        {PB_CAO_FUNCTION_GROUP_OPTIONS.map(option => (
+                        {PB_CAO_FUNCTION_GROUP_OPTIONS
+                          .filter(option => !isArticle14Internship || option.value !== "non_security_staff")
+                          .map(option => (
                           <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                        ))}
+                          ))}
                       </SelectContent>
                     </Select>
                   ) : (
@@ -1935,7 +2451,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 </div>
                 <div className="space-y-1">
                   <Label>CAO-functieniveau</Label>
-                  {form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? (
+                  {isArticle14Internship ? (
+                    <div className="border border-border bg-muted/20 p-3 text-sm text-muted-foreground">Niet van toepassing op de stageovereenkomst.</div>
+                  ) : isBblModel ? (
+                    <div className="border border-border bg-muted/20 p-3 text-sm text-muted-foreground">Aspirant-beveiliger · schaal 2</div>
+                  ) : form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? (
                     <Select value={form.cao_function_level || "none"} onValueChange={selectPbFunctionLevel}>
                       <SelectTrigger><SelectValue /></SelectTrigger>
                       <SelectContent>
@@ -1958,9 +2478,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   <Input value={form.work_area || ""} onChange={event => set("work_area", event.target.value)} placeholder="Bijv. Nederland of regio Midden" />
                 </div>
                 <div className="space-y-2 md:col-span-2 xl:col-span-3">
-                  <Label>Functies binnen deze arbeidsovereenkomst</Label>
+                  <Label>Functies binnen deze {isArticle14Internship ? "stageovereenkomst" : "arbeidsovereenkomst"}</Label>
                   <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    {companyFunctionOptions.map(option => {
+                    {wizardFunctionOptions.map(option => {
                       const selected = selectedFunctionValues.includes(option.value);
                       const primary = form.function_type === option.value;
                       return (
@@ -1991,6 +2511,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
 
             {wizardStep === 5 && (
               <div className="space-y-5">
+                {isArticle14Internship ? (
+                  <Article14InternshipFields form={form} set={set} />
+                ) : (
+                  <>
+                {isBblModel && <BblLearningFields form={form} set={set} />}
                 <div>
                   <p className="text-sm font-medium text-foreground">Salaristabel {wageTableYear}</p>
                   <p className="text-xs text-muted-foreground">Alleen de lonen uit het jaar van de contractstartdatum worden getoond.</p>
@@ -2102,13 +2627,13 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     </>
                   ) : (
                     <>
-                      {["fulltime", "parttime_fixed", "parttime_growth"].includes(form.employment_contract_model) && (
+                      {["fulltime", "parttime_fixed", "parttime_growth", "bbl"].includes(form.employment_contract_model) && (
                         <div className="space-y-1">
                           <Label>Uren per week</Label>
                           <Input type="number" min="0" value={form.contract_hours_per_week ?? ""} onChange={event => set("contract_hours_per_week", event.target.value)} />
                         </div>
                       )}
-                      {["fulltime", "parttime_fixed", "parttime_growth"].includes(form.employment_contract_model) && (
+                      {["fulltime", "parttime_fixed", "parttime_growth", "bbl"].includes(form.employment_contract_model) && (
                         <div className="space-y-1">
                           <Label>Uren per loonperiode</Label>
                           <Input type="number" min="0" value={form.contract_hours_per_pay_period ?? ""} onChange={event => set("contract_hours_per_pay_period", event.target.value)} />
@@ -2258,6 +2783,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     </div>
                   )}
                 </div>
+                  </>
+                )}
               </div>
             )}
 
@@ -2407,7 +2934,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               className="grid w-full grid-cols-[minmax(220px,1.4fr)_minmax(160px,1fr)_minmax(150px,.9fr)_minmax(150px,.8fr)_minmax(140px,.8fr)_minmax(120px,.7fr)_minmax(130px,.8fr)_44px] items-center border-b border-border px-4 py-4 text-left text-sm last:border-b-0 hover:bg-muted/30"
             >
               <div className="min-w-0">
-                <p className="truncate font-semibold text-foreground">{CONTRACT_FORM_LABELS[contract.contract_form] || "Arbeidscontract"}</p>
+                <p className="truncate font-semibold text-foreground">{contract.legal_document_type === "internship_agreement" || persistedEmploymentModel === "internship" ? "Stageovereenkomst" : (CONTRACT_FORM_LABELS[contract.contract_form] || "Arbeidscontract")}</p>
                 <p className="truncate text-xs text-muted-foreground">{readableFunctionLabel(contract.function_type) || contract.cao_function_group || "Functie onbekend"}</p>
               </div>
               <div className="truncate text-muted-foreground">{getCompanyLabel(companies, contract.company_id)}</div>

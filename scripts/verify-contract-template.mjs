@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
 import {
+  PB_ARTICLE_14_INTERNSHIP_REQUIRED_PLACEHOLDERS,
+  PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE as internshipPreset,
+  PB_BBL_EMPLOYMENT_REQUIRED_PLACEHOLDERS,
+  PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE as bblPreset,
   PB_FULLTIME_STANDARD_TEMPLATE as preset,
   PB_MIN_MAX_REQUIRED_PLACEHOLDERS,
   PB_MIN_MAX_STANDARD_TEMPLATE as minMaxPreset,
@@ -137,6 +141,20 @@ for (const contractModel of ["zero_hours", "zero_hours_employment", "call_employ
     contract_model: contractModel,
   })?.id, zeroHoursPreset.id);
 }
+for (const contractModel of ["internship", "internship_fixed", "article_14_internship"]) {
+  assert.equal(getStandardContractTemplatePreset({
+    template_type: "employment_contract",
+    cao_key: "cao_particuliere_beveiliging",
+    contract_model: contractModel,
+  })?.id, internshipPreset.id);
+}
+for (const contractModel of ["bbl", "bbl_employment", "bbl_fixed", "bbl_indefinite"]) {
+  assert.equal(getStandardContractTemplatePreset({
+    template_type: "employment_contract",
+    cao_key: "cao_particuliere_beveiliging",
+    contract_model: contractModel,
+  })?.id, bblPreset.id);
+}
 assert.equal(getStandardContractTemplatePreset({
   template_type: "employment_contract",
   cao_key: "cao_particuliere_beveiliging",
@@ -181,6 +199,17 @@ assert.match(zeroHoursPreset.body, /Nulurencontract - CAO Particuliere Beveiligi
 assert.match(zeroHoursPreset.body, /Artikel 5 - Nulurenovereenkomst, beschikbaarheid en oproepen/);
 assert.deepEqual(getUnknownContractTemplatePlaceholders(zeroHoursPreset.body), []);
 assert.deepEqual(getMissingStandardTemplatePlaceholders(zeroHoursPreset.body, PB_ZERO_HOURS_REQUIRED_PLACEHOLDERS), []);
+const internshipEditorBlocks = contractTemplateBlocksFromBody(internshipPreset.body);
+assert.equal(internshipEditorBlocks.filter(block => block.kind === "article").length, 17);
+assert.match(internshipPreset.body, /STAGEOVEREENKOMST/);
+assert.match(internshipPreset.body, /geen arbeidsovereenkomst/i);
+assert.deepEqual(getUnknownContractTemplatePlaceholders(internshipPreset.body), []);
+assert.deepEqual(getMissingStandardTemplatePlaceholders(internshipPreset.body, PB_ARTICLE_14_INTERNSHIP_REQUIRED_PLACEHOLDERS), []);
+const bblEditorBlocks = contractTemplateBlocksFromBody(bblPreset.body);
+assert.equal(bblEditorBlocks.filter(block => block.kind === "article").length, 17);
+assert.match(bblPreset.body, /BBL-leerarbeidsovereenkomst/);
+assert.deepEqual(getUnknownContractTemplatePlaceholders(bblPreset.body), []);
+assert.deepEqual(getMissingStandardTemplatePlaceholders(bblPreset.body, PB_BBL_EMPLOYMENT_REQUIRED_PLACEHOLDERS), []);
 const firstArticleIndex = editorBlocks.findIndex(block => block.kind === "article");
 const reorderedBlocks = [...editorBlocks];
 [reorderedBlocks[firstArticleIndex], reorderedBlocks[firstArticleIndex + 1]] = [reorderedBlocks[firstArticleIndex + 1], reorderedBlocks[firstArticleIndex]];
@@ -406,6 +435,40 @@ function evaluateZeroHours(form) {
     body,
     unresolved: getUnresolvedContractTemplatePlaceholders(body),
     ...validateStandardContractTemplateContext({ personnel, form, company, template: zeroHoursTemplate }),
+  };
+}
+
+const internshipTemplate = {
+  ...internshipPreset,
+  metadata: { standard_template_id: internshipPreset.id },
+  employment_model_scope: "internship",
+  legal_document_type: "internship_agreement",
+  learning_route_scope: "article_14_internship",
+};
+
+function evaluateInternship(form) {
+  const body = renderContractTemplateBody(internshipPreset.body, { personnel, form, company });
+  return {
+    body,
+    unresolved: getUnresolvedContractTemplatePlaceholders(body),
+    ...validateStandardContractTemplateContext({ personnel, form, company, template: internshipTemplate }),
+  };
+}
+
+const bblTemplate = {
+  ...bblPreset,
+  metadata: { standard_template_id: bblPreset.id },
+  employment_model_scope: "bbl",
+  legal_document_type: "employment_agreement",
+  learning_route_scope: "bbl",
+};
+
+function evaluateBbl(form) {
+  const body = renderContractTemplateBody(bblPreset.body, { personnel, form, company });
+  return {
+    body,
+    unresolved: getUnresolvedContractTemplatePlaceholders(body),
+    ...validateStandardContractTemplateContext({ personnel, form, company, template: bblTemplate }),
   };
 }
 
@@ -781,4 +844,117 @@ assert.ok(wrongCallTypeZeroHours.issues.some(issue => issue.includes("oproeptype
 const wrongZeroHoursModel = evaluateZeroHours({ ...zeroHoursForm, employment_contract_model: "min_max" });
 assert.ok(wrongZeroHoursModel.issues.some(issue => issue.includes("alleen geschikt voor een nulurencontract")));
 
-console.log("Contracttemplate verificatie geslaagd (nuluren, min-max, groeimodel, vaste/fulltime presets en editor-/versietests).\n");
+const article14Confirmations = {
+  internship_supervision_confirmed: "true",
+  internship_relevant_practical_experience_confirmed: "true",
+  internship_above_strength_confirmed: "true",
+  internship_not_customer_billed_confirmed: "true",
+  internship_rostered_confirmed: "true",
+  internship_one_to_one_guidance_confirmed: "true",
+  internship_uniform_label_confirmed: "true",
+  internship_agreement_with_institution_confirmed: "true",
+  internship_working_times_documented: "true",
+  internship_evaluation_agreement_documented: "true",
+  internship_compensation_documented: "true",
+};
+
+const bolInternshipForm = operationalForm({
+  contract_model: "internship_fixed",
+  employment_contract_model: "internship",
+  contract_form: "stage",
+  duration_type: "fixed",
+  probation_agreed: "not_applicable",
+  probation_context: "not_applicable",
+  contract_hours_per_week: "",
+  contract_hours_per_pay_period: "",
+  cao_function_level: "not_applicable",
+  cao_scale: "",
+  cao_period: "",
+  hourly_rate_snapshot: "",
+  security_role_status: "not_applicable",
+  internship_type: "bol",
+  internship_institution_name: "Veiligheidsacademie Midden",
+  internship_institution_address: "Schoolweg 10, 1234 AB Utrecht",
+  internship_institution_representative_name: "M. Opleider",
+  internship_institution_representative_function: "BPV-coordinator",
+  internship_institution_email: "bpv@veiligheidsacademie.nl",
+  internship_education_name: "Mbo Beveiliger niveau 2 (BOL)",
+  internship_bpv_reference: "POK-2026-001",
+  internship_learning_company_recognition_number: "SBB-123456",
+  internship_assignment_description: "Onder begeleiding oefenen met toegangscontrole, rondes en rapportage op het leerobject.",
+  internship_learning_objectives: "Veilig controleren, correct rapporteren en procedures aantoonbaar onder begeleiding toepassen.",
+  internship_practice_trainer_name: "P. Praktijkopleider",
+  internship_institution_supervisor_name: "M. Opleider",
+  internship_hours_per_week: "32",
+  internship_working_times: "Maandag tot en met donderdag van 08:00 tot 16:30",
+  internship_evaluation_details: "Een voortgangsgesprek na vier weken, daarna iedere acht weken en een eindevaluatie.",
+  internship_compensation_applies: "true",
+  internship_compensation_amount: "350",
+  internship_compensation_period: "vier_weken",
+  internship_expense_arrangement: "Noodzakelijke reiskosten worden vergoed volgens de stage- en schoolafspraken.",
+  internship_insurance_description: "Het stagebedrijf heeft een aansprakelijkheidsverzekering; incidenten worden direct gemeld bij de praktijkopleider en instelling.",
+  internship_attachments: "Praktijkovereenkomst, stageplan, SBB-erkenning en geldige Wpbr-documenten.",
+  ...article14Confirmations,
+});
+
+const validBolInternship = evaluateInternship(bolInternshipForm);
+assert.deepEqual(validBolInternship.issues, []);
+assert.deepEqual(validBolInternship.unresolved, []);
+assert.match(validBolInternship.body, /^STAGEOVEREENKOMST/m);
+assert.match(validBolInternship.body, /stagebedrijf, stagiair en instelling/i);
+assert.match(validBolInternship.body, /350,00 bruto per vier weken/);
+assert.doesNotMatch(validBolInternship.body, /vier_weken/);
+assert.doesNotMatch(validBolInternship.body, /hierna: werkgever|hierna: werknemer/i);
+assert.doesNotMatch(validBolInternship.body, /salarisschaal|pensioenregeling|proeftijd van/i);
+
+const tooLongUwvInternship = evaluateInternship({
+  ...bolInternshipForm,
+  internship_type: "uwv_trial_placement",
+  internship_bpv_reference: "",
+  internship_learning_company_recognition_number: "",
+  internship_route_reference: "UWV-TOESTEMMING-2026-44",
+  contract_start_date: "2026-01-01",
+  contract_end_date: "2026-03-01",
+});
+assert.ok(tooLongUwvInternship.issues.some(issue => issue.includes("maximaal twee maanden")));
+
+const officeInternship = evaluateInternship({
+  ...bolInternshipForm,
+  function_type: "planner",
+  allowed_function_types_text: "planner",
+  cao_function_group: "non_security_staff",
+  performs_security_work: "false",
+});
+assert.ok(officeInternship.issues.some(issue => issue.includes("kantoor- of managementstage")));
+
+const bblForm = operationalForm({
+  contract_model: "bbl_fixed",
+  employment_contract_model: "bbl",
+  contract_form: "bepaalde_tijd",
+  duration_type: "fixed",
+  contract_hours_per_week: "32",
+  contract_hours_per_pay_period: "128",
+  salary_payment_frequency: "four_weeks",
+  cao_function_level: "aspirant",
+  cao_scale: "2",
+  cao_period: "0",
+  security_role_status: "aspirant_beveiliger",
+  bbl_institution_name: "Veiligheidsacademie Midden",
+  bbl_education_name: "Mbo Beveiliger niveau 2 (BBL)",
+  bbl_practice_agreement_reference: "POK-BBL-2026-007",
+  bbl_learning_company_recognition_number: "SBB-123456",
+  bbl_practice_trainer_name: "P. Praktijkopleider",
+});
+
+const validBbl = evaluateBbl(bblForm);
+assert.deepEqual(validBbl.issues, []);
+assert.deepEqual(validBbl.unresolved, []);
+assert.match(validBbl.body, /BBL-leerarbeidsovereenkomst/);
+assert.match(validBbl.body, /afzonderlijke praktijkovereenkomst/);
+assert.match(validBbl.body, /eerste vier weken.*50%/s);
+assert.match(validBbl.body, /vanaf de vijfde week 100%/);
+
+const invalidBblRole = evaluateBbl({ ...bblForm, security_role_status: "qualified_security_officer" });
+assert.ok(invalidBblRole.issues.some(issue => issue.includes("aspirant-beveiliger")));
+
+console.log("Contracttemplate verificatie geslaagd (stage/BOL, BBL, nuluren, min-max, groeimodel, vaste/fulltime presets en editor-/versietests).\n");

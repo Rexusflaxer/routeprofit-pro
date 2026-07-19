@@ -3,6 +3,8 @@ import {
   CAO_PARTICULIERE_BEVEILIGING_KEY,
   PB_CAO_FUNCTION_GROUP_OPTIONS,
   PB_CAO_FUNCTION_LEVEL_OPTIONS,
+  PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_ID,
+  PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE_ID,
   PB_FULLTIME_STANDARD_TEMPLATE_ID,
   PB_FULLTIME_REQUIRED_PLACEHOLDERS,
   PB_MIN_MAX_STANDARD_TEMPLATE_ID,
@@ -81,6 +83,19 @@ const PB_ZERO_HOURS_MODEL_ALIASES = new Set([
   "call_agreement",
 ]);
 
+const PB_ARTICLE_14_INTERNSHIP_MODEL_ALIASES = new Set([
+  "internship",
+  "internship_fixed",
+  "article_14_internship",
+]);
+
+const PB_BBL_MODEL_ALIASES = new Set([
+  "bbl",
+  "bbl_employment",
+  "bbl_fixed",
+  "bbl_indefinite",
+]);
+
 const WEEKDAY_OPTIONS = [
   ["monday", "maandag"],
   ["tuesday", "dinsdag"],
@@ -137,6 +152,8 @@ function resolvedEmploymentModel(form = {}) {
     if (PB_GROWTH_PARTTIME_MODEL_ALIASES.has(explicitModel)) return "parttime_growth";
     if (PB_MIN_MAX_MODEL_ALIASES.has(explicitModel)) return "min_max";
     if (PB_ZERO_HOURS_MODEL_ALIASES.has(explicitModel)) return "zero_hours";
+    if (PB_ARTICLE_14_INTERNSHIP_MODEL_ALIASES.has(explicitModel)) return "internship";
+    if (PB_BBL_MODEL_ALIASES.has(explicitModel)) return "bbl";
     if (PB_FULLTIME_MODEL_ALIASES.has(explicitModel)) return "fulltime";
     return explicitModel;
   }
@@ -147,6 +164,8 @@ function resolvedEmploymentModel(form = {}) {
   if (candidates.some(value => PB_GROWTH_PARTTIME_MODEL_ALIASES.has(value))) return "parttime_growth";
   if (candidates.some(value => PB_MIN_MAX_MODEL_ALIASES.has(value))) return "min_max";
   if (candidates.some(value => PB_ZERO_HOURS_MODEL_ALIASES.has(value))) return "zero_hours";
+  if (candidates.some(value => PB_ARTICLE_14_INTERNSHIP_MODEL_ALIASES.has(value))) return "internship";
+  if (candidates.some(value => PB_BBL_MODEL_ALIASES.has(value))) return "bbl";
   if (candidates.some(value => PB_FULLTIME_MODEL_ALIASES.has(value))) return "fulltime";
   return candidates[0] || "";
 }
@@ -169,6 +188,16 @@ function isPbMinMax(form = {}) {
 function isPbZeroHours(form = {}) {
   return form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     && resolvedEmploymentModel(form) === "zero_hours";
+}
+
+function isPbArticle14Internship(form = {}) {
+  return form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    && resolvedEmploymentModel(form) === "internship";
+}
+
+function isPbBbl(form = {}) {
+  return form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    && resolvedEmploymentModel(form) === "bbl";
 }
 
 function isPbParttime(form = {}) {
@@ -418,6 +447,12 @@ function contractTerminationClause(form = {}) {
 function contractHoursClause(form = {}) {
   const securityWork = resolveSecurityWork(form);
   const { hoursPerWeek, hoursPerPeriod } = resolvedContractHours(form);
+  if (isPbBbl(form)) {
+    if (hoursPerWeek === null && hoursPerPeriod === null) return "";
+    const weekPart = hoursPerWeek !== null ? `gemiddeld ${formatHours(hoursPerWeek)} uur per week` : "";
+    const periodPart = hoursPerPeriod !== null ? `${formatHours(hoursPerPeriod)} uur per loonperiode van vier weken` : "";
+    return `De overeengekomen arbeidsduur in de BBL-leerarbeidsovereenkomst bedraagt ${[periodPart, weekPart].filter(Boolean).join(", overeenkomend met ")}. School-, praktijk- en werktijd worden toegepast volgens de praktijkovereenkomst, de wet en de cao. Een wijziging van de structurele arbeidsduur wordt schriftelijk vastgelegd.`;
+  }
   if (isPbZeroHours(form)) {
     return "Partijen sluiten een oproepovereenkomst zonder vaste arbeidsomvang: een nulurencontract. Er gelden geen vaste contracturen, minimumuren, maximumuren of garantie-uren per week of loonperiode. Werkgever betaalt alle daadwerkelijk gewerkte en anderszins rechtens verschuldigde uren. Werknemer is binnen de overeengekomen beschikbaarheid verplicht gehoor te geven aan een tijdige oproep, met inachtneming van de wet, de cao en de Arbeidstijdenwet. Werknemer kan niet zonder instemming worden verplicht meer dan 144 uur per loonperiode van vier weken te werken. Incidentele oproepen wijzigen de arbeidsomvang niet automatisch; wettelijke en cao-rechten op basis van een structureel arbeidspatroon blijven volledig gelden.";
   }
@@ -493,6 +528,12 @@ function contractSalaryClause(form = {}) {
     ? ` De beloning is bij aanvang ingedeeld in salarisschaal ${form.cao_scale}, periodiek ${form.cao_period ?? ""}.`
     : "";
   if (hourlyRate === null) return "";
+  if (isPbBbl(form)) {
+    const periodPart = periodSalary !== null
+      ? ` Bij 100% van het basisuurloon komt dit bij de overeengekomen arbeidsduur overeen met ${formatCurrency(periodSalary)} bruto per loonperiode van vier weken.`
+      : "";
+    return `Het voor werknemer geldende bruto basisuurloon bedraagt ${formatCurrency(hourlyRate)}, exclusief vakantiebijslag en toepasselijke toeslagen.${classification} Gedurende de eerste vier weken van de praktijkovereenkomst ontvangt werknemer overeenkomstig artikel 55 van de cao 50% van het voor de indeling geldende basisuurloon en vanaf de vijfde week 100%, tenzij dwingend recht of een gunstiger toepasselijke bepaling een hoger loon voorschrijft.${periodPart}`;
+  }
   const periodPart = periodSalary !== null
     ? `, overeenkomend met ${formatCurrency(periodSalary)} bruto per loonperiode ${isPbMinMax(form) ? "over de garantie-uren" : "bij de overeengekomen arbeidsduur"}`
     : "";
@@ -527,6 +568,13 @@ function contractFunctionClassificationClause(form = {}) {
 }
 
 function contractVacationClause(form = {}) {
+  if (isPbBbl(form)) {
+    const { hoursPerPeriod } = resolvedContractHours(form);
+    if (isCashValueLogistics(form)) {
+      return `Werknemer bouwt vakantie op naar rato van de betaalde arbeidstijd${hoursPerPeriod !== null ? ` van ${formatHours(hoursPerPeriod)} uur per loonperiode` : ""}. Voor geld- en waardelogistiek geldt daarbij de fulltime referentie van 180 vakantie-uren per kalenderjaar volgens hoofdstuk 15 van de cao.`;
+    }
+    return `Werknemer bouwt vakantie op naar rato van de betaalde arbeidstijd${hoursPerPeriod !== null ? ` van ${formatHours(hoursPerPeriod)} uur per loonperiode` : ""}. De fulltime referentie bedraagt 172,8 vakantie-uren per kalenderjaar volgens de cao.`;
+  }
   if (isPbMinMax(form) || isPbZeroHours(form)) {
     return "Voor zover artikel 59 lid 3 van de cao werkgever en werknemer rechtsgeldig bindt, ontvangt werknemer per loonperiode een afzonderlijk gespecificeerde betaling van 9,24% over het daarvoor volgens de cao in aanmerking komende loon tot maximaal 144 uur als geldswaarde van de cao-vakantie-uren. Is die regeling niet bindend of gaat dwingend recht voor, dan bouwt werknemer over de loongerechtigde uren wettelijke en toepasselijke bovenwettelijke vakantie op en stelt werkgever werknemer in staat deze met behoud van loon op te nemen. Daarnaast ontvangt werknemer 8% vakantiebijslag over het daarvoor geldende bruto loon. In alle gevallen blijven het recht op daadwerkelijke jaarlijkse vakantie en rust, dwingendrechtelijke vakantie- en verlofrechten en gunstiger toepasselijke cao-bepalingen volledig gelden.";
   }
@@ -550,6 +598,151 @@ function contractWpbrClause(form = {}) {
   const base = "Werknemer mag uitsluitend werkzaamheden voor werkgever verrichten indien en zolang werknemer beschikt over de vereiste toestemming van de korpschef en is voldaan aan de voor werknemer en de werkzaamheden geldende screening en betrouwbaarheidseisen op grond van de Wpbr en daarop gebaseerde regels.";
   if (securityWork !== true) return `${base} Werknemer verricht geen operationele beveiligingswerkzaamheden zonder de daarvoor vereiste opleiding, vakbekwaamheid en legitimatie.`;
   return `${base} Voor beveiligingswerkzaamheden draagt werknemer het vereiste legitimatiebewijs tijdens het werk bij zich en levert werknemer dit bij het einde van de inzet of op eerste verzoek van werkgever in.`;
+}
+
+function stageRouteClause(form = {}) {
+  const route = compact(form.internship_type || form.stage_route).toLowerCase();
+  const education = compact(form.internship_education_name || form.stage_education_name);
+  const institution = compact(form.internship_institution_name);
+  const reference = compact(form.internship_route_reference);
+  if (route === "bol") {
+    const pok = compact(form.internship_bpv_reference);
+    const recognition = compact(form.internship_learning_company_recognition_number);
+    return `De stage vindt plaats binnen de beroepsopleidende leerweg${education ? ` van ${education}` : ""}. ${institution || "De onderwijsinstelling"}, het stagebedrijf en stagiair voeren de stage uit overeenkomstig de geldige praktijkovereenkomst${pok ? ` met kenmerk ${pok}` : ""}. Het stagebedrijf is voor deze opleiding erkend als leerbedrijf${recognition ? ` onder nummer ${recognition}` : ""}.`;
+  }
+  if (route === "uwv_trial_placement") {
+    return `De stage vindt plaats als door UWV goedgekeurde proefplaatsing${reference ? ` onder referentie ${reference}` : ""}. De proefplaatsing duurt op grond van artikel 14 van de cao maximaal twee maanden en wordt uitgevoerd volgens de UWV-toestemming, voorwaarden en intentieverklaring. Deze overeenkomst garandeert geen aansluitende arbeidsovereenkomst.`;
+  }
+  if (route === "reintegration_measure") {
+    return `De stage vindt plaats als re-integratiemaatregel${institution ? ` onder begeleiding van ${institution}` : ""}${reference ? ` onder referentie ${reference}` : ""}. Doel, duur en uitvoering sluiten aan op het schriftelijke re-integratieplan en de voorwaarden van de betrokken instelling.`;
+  }
+  if (route === "second_track_reintegration") {
+    return `De stage vindt plaats in het kader van een tweede-spoortraject${institution ? ` onder begeleiding van ${institution}` : ""}${reference ? ` onder referentie ${reference}` : ""}. Doel, duur en uitvoering sluiten aan op het schriftelijke plan van aanpak en de afspraken met de betrokken werkgever en instelling.`;
+  }
+  return "";
+}
+
+function stageDurationClause(form = {}) {
+  const start = formatDate(form.contract_start_date);
+  const end = formatDate(form.contract_end_date);
+  if (!start || !end) return "";
+  return `De stage loopt van ${start} tot en met ${end} en eindigt op die datum zonder dat opzegging nodig is, tenzij partijen haar eerder rechtsgeldig beëindigen volgens deze overeenkomst en de onderliggende praktijkovereenkomst of maatregel.`;
+}
+
+function stageWorkClause(form = {}) {
+  const functions = readableFunctionValues(form);
+  const assignment = compact(form.internship_assignment_description);
+  const functionText = functions.length > 0 ? ` binnen de praktijkfunctie${functions.length === 1 ? "" : "s"} ${functions.join(", ")}` : "";
+  return assignment
+    ? `Stagiair verricht onder begeleiding de volgende leer- en praktijkwerkzaamheden${functionText}: ${assignment}`
+    : "";
+}
+
+function stageWorkplaceClause(form = {}, company = {}) {
+  const location = compact(form.work_location) || compact(company.city);
+  const area = compact(form.work_area);
+  if (!location) return "";
+  return `De primaire stageplaats is ${location}${area ? ` en het overeengekomen werkgebied is ${area}` : ""}. Inzet op een andere locatie is alleen toegestaan wanneer die locatie past bij de stageopdracht, de begeleiding vooraf is geregeld en aan alle Wpbr- en veiligheidsvoorwaarden is voldaan.`;
+}
+
+function stageGuidanceClause(form = {}) {
+  const trainer = compact(form.internship_practice_trainer_name || form.internship_mentor_name);
+  const institutionSupervisor = compact(form.internship_institution_supervisor_name);
+  if (!trainer || !institutionSupervisor) return "";
+  return `De dagelijkse praktijkbegeleiding wordt verzorgd door ${trainer}. De begeleider namens de instelling is ${institutionSupervisor}. Het stagebedrijf plant dagelijks ten minste één bevoegde praktijkopleider per stagiair en waarborgt daarmee de vereiste één-op-éénbegeleiding.`;
+}
+
+function stageWorkingTimesClause(form = {}) {
+  const hours = toNumber(form.internship_hours_per_week);
+  const times = compact(form.internship_working_times);
+  if (hours === null || !times) return "";
+  return `De stageomvang bedraagt gemiddeld ${formatHours(hours)} uur per week. De overeengekomen stagedagen en tijdvakken zijn: ${times}. Stagiair wordt in het rooster opgenomen; de Arbeidstijdenwet, regels voor jeugdigen en de toepasselijke onderwijs- of re-integratieafspraken worden nageleefd.`;
+}
+
+function stageEvaluationClause(form = {}) {
+  const agreement = compact(form.internship_evaluation_details);
+  if (!agreement) return "";
+  return `Partijen evalueren de stage als volgt: ${agreement}. De praktijkopleider en de begeleider van de instelling leggen de voortgang en gemaakte vervolgafspraken aantoonbaar vast.`;
+}
+
+function stageCompensationPeriodLabel(value) {
+  return ({
+    uur: "uur",
+    dag: "dag",
+    vier_weken: "vier weken",
+    maand: "maand",
+  })[compact(value)] || "maand";
+}
+
+function stageCompensationClause(form = {}) {
+  const applies = toBoolean(form.internship_compensation_applies);
+  const expenses = compact(form.internship_expense_arrangement);
+  if (applies === false) {
+    return `Partijen komen geen stagevergoeding overeen.${expenses ? ` Voor onkosten geldt: ${expenses}` : " Er geldt geen afzonderlijke onkostenvergoeding, tenzij partijen die later schriftelijk overeenkomen."}`;
+  }
+  const amount = toNumber(form.internship_compensation_amount);
+  const period = stageCompensationPeriodLabel(form.internship_compensation_period);
+  if (applies === true && amount !== null) {
+    return `Het stagebedrijf betaalt een stagevergoeding van ${formatCurrency(amount)} bruto per ${period}.${expenses ? ` Voor onkosten geldt daarnaast: ${expenses}` : ""}`;
+  }
+  return "";
+}
+
+function stageWpbrClause(form = {}) {
+  const functions = readableFunctionValues(form);
+  const context = functions.length > 0 ? ` voor de overeengekomen praktijkfunctie${functions.length === 1 ? "" : "s"} ${functions.join(", ")}` : "";
+  return `Stagiair verricht operationele beveiligingswerkzaamheden${context} uitsluitend indien en zolang de vereiste toestemming, geldige opleidingsverklaring, legitimatie, certificering en eventuele andere functie-eisen aanwezig zijn. De opleidingsuitzondering en het legitimatiebewijs voor een medewerker in opleiding worden alleen gebruikt binnen de toegestane termijn en voor de organisatie waarvoor zij zijn afgegeven.`;
+}
+
+function stageInsuranceClause(form = {}) {
+  const insurance = compact(form.internship_insurance_description);
+  if (!insurance) return "";
+  return `Voor de stage gelden de volgende verzekeringen en meldafspraken: ${insurance}. Het stagebedrijf en de instelling informeren stagiair vóór aanvang over dekking, uitsluitingen en de procedure bij schade of een ongeval.`;
+}
+
+function stageTerminationClause(form = {}) {
+  const route = compact(form.internship_type).toLowerCase();
+  const routeText = route === "bol"
+    ? "de praktijkovereenkomst en onderwijsregels"
+    : route === "uwv_trial_placement"
+    ? "de UWV-toestemming en voorwaarden"
+    : "het re-integratieplan en de afspraken met de instelling";
+  return `De stage kan vóór de einddatum schriftelijk worden beëindigd met instemming van partijen of wanneer voortzetting redelijkerwijs niet mogelijk of verantwoord is, nadat de betrokken partijen zijn gehoord en ${routeText} zijn gevolgd. Een acuut veiligheids-, integriteits- of bevoegdheidsrisico kan aanleiding zijn de activiteiten direct op te schorten in afwachting van een zorgvuldig besluit.`;
+}
+
+function ageOnDate(personnel = {}, referenceDate) {
+  const birth = dateValue(personnel.date_of_birth || personnel.birth_date);
+  const reference = dateValue(referenceDate);
+  if (!birth || !reference) return null;
+  let age = reference.getUTCFullYear() - birth.getUTCFullYear();
+  const beforeBirthday = reference.getUTCMonth() < birth.getUTCMonth()
+    || (reference.getUTCMonth() === birth.getUTCMonth() && reference.getUTCDate() < birth.getUTCDate());
+  if (beforeBirthday) age -= 1;
+  return age;
+}
+
+function stageMinorClause(personnel = {}, form = {}) {
+  const age = ageOnDate(personnel, form.contract_start_date);
+  if (age === null) return "";
+  if (age >= 18) return "Stagiair is bij aanvang van de stage meerderjarig; medeondertekening door een wettelijke vertegenwoordiger is niet vereist.";
+  const representative = compact(form.internship_legal_representative_name);
+  if (!representative) return "";
+  return `Stagiair is bij aanvang minderjarig. De wettelijke vertegenwoordiger ${representative} verklaart kennis te hebben genomen van deze overeenkomst en verleent, voor zover juridisch vereist, toestemming voor deelname aan de stage.`;
+}
+
+function bblLearningRouteClause(form = {}) {
+  const education = compact(form.bbl_education_name);
+  const institution = compact(form.bbl_institution_name);
+  const trainer = compact(form.bbl_practice_trainer_name);
+  if (!education || !institution || !trainer) return "";
+  return `Werknemer volgt de beroepsbegeleidende leerweg ${education} bij ${institution} en doet als aspirant-beveiliger onder begeleiding van praktijkopleider ${trainer} werkervaring op. Deze overeenkomst is een arbeidsovereenkomst: werknemer verricht arbeid, ontvangt loon en behoudt de wettelijke en cao-rechten van een werknemer.`;
+}
+
+function bblPracticeAgreementClause(form = {}) {
+  const reference = compact(form.bbl_practice_agreement_reference);
+  const recognition = compact(form.bbl_learning_company_recognition_number);
+  if (!reference || !recognition) return "";
+  return `Naast deze arbeidsovereenkomst geldt de afzonderlijke praktijkovereenkomst tussen werknemer, onderwijsinstelling en werkgever met kenmerk ${reference}. Werkgever is voor de opleiding erkend als leerbedrijf onder nummer ${recognition}. De praktijkovereenkomst en deze arbeidsovereenkomst hebben ieder hun eigen rechtskarakter; het einde of wijzigen van één document beëindigt het andere niet automatisch.`;
 }
 
 function deriveSalutation(gender) {
@@ -673,6 +866,47 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     meldpunt_privacy_datalekken: compact(company.privacy_email || company.email || company.phone),
     contract_ondertekeningsplaats: compact(form.signing_place || company.city),
     contract_ondertekeningsdatum: formatDate(form.signing_date || today),
+    stage_instelling_naam: compact(form.internship_institution_name),
+    stage_instelling_adres: compact(form.internship_institution_address),
+    stage_instelling_vertegenwoordiger_naam: compact(form.internship_institution_representative_name),
+    stage_instelling_vertegenwoordiger_functie: compact(form.internship_institution_representative_function),
+    stage_instelling_email: compact(form.internship_institution_email),
+    stage_opleiding_naam: compact(form.internship_education_name),
+    stage_bpv_kenmerk: compact(form.internship_bpv_reference),
+    stage_leerbedrijf_erkenningsnummer: compact(form.internship_learning_company_recognition_number),
+    stage_route_referentie: compact(form.internship_route_reference),
+    stage_opdracht_omschrijving: compact(form.internship_assignment_description),
+    stage_leerdoelen: compact(form.internship_learning_objectives),
+    stage_praktijkopleider_naam: compact(form.internship_practice_trainer_name || form.internship_mentor_name),
+    stage_instellingsbegeleider_naam: compact(form.internship_institution_supervisor_name),
+    stage_uren_per_week: formatHours(form.internship_hours_per_week),
+    stage_werktijden: compact(form.internship_working_times),
+    stage_evaluatie_afspraken: compact(form.internship_evaluation_details),
+    stage_vergoeding_bedrag: formatCurrency(form.internship_compensation_amount),
+    stage_vergoeding_periode: stageCompensationPeriodLabel(form.internship_compensation_period),
+    stage_onkostenregeling: compact(form.internship_expense_arrangement),
+    stage_verzekering_omschrijving: compact(form.internship_insurance_description),
+    stage_bijlagen_lijst: compact(form.internship_attachments),
+    stage_wettelijke_vertegenwoordiger_naam: compact(form.internship_legal_representative_name),
+    stage_route_bepaling: stageRouteClause(form),
+    stage_duur_bepaling: stageDurationClause(form),
+    stage_werkzaamheden_bepaling: stageWorkClause(form),
+    stage_werkplek_bepaling: stageWorkplaceClause(form, company),
+    stage_begeleiding_bepaling: stageGuidanceClause(form),
+    stage_werktijden_bepaling: stageWorkingTimesClause(form),
+    stage_evaluatie_bepaling: stageEvaluationClause(form),
+    stage_vergoeding_bepaling: stageCompensationClause(form),
+    stage_wpbr_bepaling: stageWpbrClause(form),
+    stage_verzekering_bepaling: stageInsuranceClause(form),
+    stage_beeindiging_bepaling: stageTerminationClause(form),
+    stage_minderjarigheid_bepaling: stageMinorClause(personnel, form),
+    bbl_onderwijsinstelling_naam: compact(form.bbl_institution_name),
+    bbl_opleiding_naam: compact(form.bbl_education_name),
+    bbl_praktijkovereenkomst_kenmerk: compact(form.bbl_practice_agreement_reference),
+    bbl_leerbedrijf_erkenningsnummer: compact(form.bbl_learning_company_recognition_number),
+    bbl_praktijkopleider_naam: compact(form.bbl_practice_trainer_name),
+    bbl_leerroute_bepaling: bblLearningRouteClause(form),
+    bbl_praktijkovereenkomst_bepaling: bblPracticeAgreementClause(form),
     exporteerdatum: formatDate(today),
   };
 
@@ -755,6 +989,8 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   const isGrowthParttimePreset = preset.id === PB_PARTTIME_GROWTH_STANDARD_TEMPLATE_ID;
   const isMinMaxPreset = preset.id === PB_MIN_MAX_STANDARD_TEMPLATE_ID;
   const isZeroHoursPreset = preset.id === PB_ZERO_HOURS_STANDARD_TEMPLATE_ID;
+  const isInternshipPreset = preset.id === PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_ID;
+  const isBblPreset = preset.id === PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE_ID;
   const isCallPreset = isMinMaxPreset || isZeroHoursPreset;
   const isParttimePreset = isFixedParttimePreset || isGrowthParttimePreset;
 
@@ -764,6 +1000,8 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (isGrowthParttimePreset && resolvedEmploymentModel(form) !== "parttime_growth") issues.push("Deze standaardtemplate is alleen geschikt voor een parttime dienstverband volgens het groeimodel; gebruik voor een vast, oproep- of min-maxmodel een andere template.");
   if (isMinMaxPreset && resolvedEmploymentModel(form) !== "min_max") issues.push("Deze standaardtemplate is alleen geschikt voor een min-maxcontract; gebruik voor een nuluren-, vast of groeimodel een andere template.");
   if (isZeroHoursPreset && resolvedEmploymentModel(form) !== "zero_hours") issues.push("Deze standaardtemplate is alleen geschikt voor een nulurencontract; gebruik voor een min-maxcontract, voorovereenkomst of vaste arbeidsomvang een andere template.");
+  if (isInternshipPreset && resolvedEmploymentModel(form) !== "internship") issues.push("Deze standaardtemplate is alleen geschikt voor een artikel-14-stage zonder arbeidsovereenkomst; BBL vereist de aparte BBL-leerarbeidsovereenkomst.");
+  if (isBblPreset && resolvedEmploymentModel(form) !== "bbl") issues.push("Deze standaardtemplate is alleen geschikt voor een BBL-leerarbeidsovereenkomst; BOL en re-integratiestages vereisen de aparte artikel-14-stageovereenkomst.");
   const missingRequiredPlaceholders = getMissingStandardTemplatePlaceholders(template.body, preset.required_placeholders);
   if (missingRequiredPlaceholders.length > 0) issues.push(`In de standaardtemplate ontbreken verplichte placeholders: ${missingRequiredPlaceholders.join(", ")}.`);
   if (!compact(company.legal_name || company.display_name)) issues.push("De juridische bedrijfsnaam ontbreekt.");
@@ -783,6 +1021,85 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (contractStart && presetValidUntil && contractStart > presetValidUntil) {
     issues.push(`Deze standaardtemplate is beoordeeld tot en met ${formatDate(preset.legal_basis.valid_until)}; publiceer eerst een bijgewerkte CAO-versie voor deze ingangsdatum.`);
   }
+  if (isInternshipPreset) {
+    if (form.contract_form !== "stage") issues.push("Een artikel-14-stage moet als stageovereenkomst worden opgeslagen en niet als arbeidsovereenkomst.");
+    if (durationType(form) !== "fixed") issues.push("Een stageovereenkomst moet een concrete begin- en einddatum hebben.");
+    if (!form.contract_end_date) issues.push("De einddatum van de stage ontbreekt.");
+    if (!form.function_type) issues.push("Kies één primaire praktijkfunctie voor de stage.");
+    if (!compact(form.work_location)) issues.push("Vul de primaire stageplaats in.");
+    if (!compact(form.employer_representative_name)) issues.push("Vul de vertegenwoordiger van het stagebedrijf in.");
+    if (!compact(form.employer_representative_function)) issues.push("Vul de functie van de vertegenwoordiger van het stagebedrijf in.");
+    if (!compact(form.signing_place)) issues.push("Vul de plaats van ondertekening in.");
+    if (!form.signing_date) issues.push("Vul de datum van ondertekening in.");
+    if (!compact(company.privacy_email || company.email || company.phone)) issues.push("Vul bij het stagebedrijf een meldpunt voor privacy- en beveiligingsincidenten in.");
+    if (form.probation_agreed === true || form.probation_agreed === "true") issues.push("Een stageovereenkomst mag geen proeftijd bevatten.");
+
+    const route = compact(form.internship_type).toLowerCase();
+    const allowedRoutes = new Set(["bol", "uwv_trial_placement", "reintegration_measure", "second_track_reintegration"]);
+    if (!allowedRoutes.has(route)) issues.push("Kies een toegestane artikel-14-route: BOL, UWV-proefplaatsing, re-integratiemaatregel of tweede spoor. BBL en algemene kantoorstages vallen buiten deze template.");
+    if (resolveSecurityWork(form) !== true) issues.push("Deze artikel-14-template is alleen bedoeld voor relevante operationele praktijkervaring als beveiliger. Gebruik voor een kantoor- of managementstage een afzonderlijke algemene stageovereenkomst.");
+    if (!compact(form.internship_institution_name)) issues.push("Vul de onderwijs- of re-integratie-instelling in.");
+    if (!compact(form.internship_institution_address)) issues.push("Vul het adres van de onderwijs- of re-integratie-instelling in.");
+    if (!compact(form.internship_institution_representative_name)) issues.push("Vul de vertegenwoordiger van de instelling in.");
+    if (!compact(form.internship_institution_representative_function)) issues.push("Vul de functie van de vertegenwoordiger van de instelling in.");
+    if (!compact(form.internship_institution_email)) issues.push("Vul het e-mailadres van de onderwijs- of re-integratie-instelling in.");
+    if (!compact(form.internship_education_name)) issues.push("Vul de opleiding of het re-integratietraject in.");
+    if (route === "bol") {
+      if (!compact(form.internship_bpv_reference)) issues.push("Vul bij BOL het kenmerk van de praktijkovereenkomst (POK/BPV) in.");
+      if (!compact(form.internship_learning_company_recognition_number)) issues.push("Vul bij BOL het SBB-erkenningsnummer van het leerbedrijf in.");
+    } else if (allowedRoutes.has(route) && !compact(form.internship_route_reference)) {
+      issues.push("Vul de referentie van de toestemming, maatregel of het trajectplan in.");
+    }
+    if (route === "uwv_trial_placement") {
+      const lastAllowedDay = addMonthsMinusOneDay(form.contract_start_date, 2);
+      const endDate = dateValue(form.contract_end_date);
+      if (lastAllowedDay && endDate && endDate > lastAllowedDay) {
+        issues.push(`Een UWV-proefplaatsing binnen artikel 14 mag maximaal twee maanden duren. De laatste toegestane dag is ${formatDate(lastAllowedDay.toISOString())}.`);
+      }
+    }
+    if (!compact(form.internship_assignment_description)) issues.push("Beschrijf de stageopdracht en werkzaamheden.");
+    if (!compact(form.internship_learning_objectives)) issues.push("Leg de leerdoelen vast.");
+    if (!compact(form.internship_practice_trainer_name || form.internship_mentor_name)) issues.push("Vul de praktijkopleider in.");
+    if (!compact(form.internship_institution_supervisor_name)) issues.push("Vul de begeleider vanuit de instelling in.");
+    if ((toNumber(form.internship_hours_per_week) ?? 0) <= 0) issues.push("Vul een positieve stageomvang per week in.");
+    if (!compact(form.internship_working_times)) issues.push("Leg stagedagen en tijdvakken vast.");
+    if (!compact(form.internship_evaluation_details)) issues.push("Leg de evaluatiemomenten en evaluatiewijze vast.");
+    if (![true, false, "true", "false"].includes(form.internship_compensation_applies)) issues.push("Leg vast of een stagevergoeding geldt.");
+    if (toBoolean(form.internship_compensation_applies) === true && toNumber(form.internship_compensation_amount) === null) issues.push("Vul de overeengekomen stagevergoeding in.");
+    if (toBoolean(form.internship_compensation_applies) === true && !compact(form.internship_compensation_period)) issues.push("Kies de periode waarop de stagevergoeding betrekking heeft.");
+    if (!compact(form.internship_expense_arrangement)) issues.push("Leg de onkostenregeling vast, ook wanneer geen onkosten worden vergoed.");
+    if (!compact(form.internship_insurance_description)) issues.push("Leg de verzekeringsdekking en meldprocedure vast.");
+    if (!compact(form.internship_attachments)) issues.push("Leg vast welke routeafhankelijke bijlagen onderdeel zijn van het stagedossier.");
+
+    const confirmations = [
+      ["internship_supervision_confirmed", "Bevestig dat leren onder begeleiding centraal staat."],
+      ["internship_relevant_practical_experience_confirmed", "Bevestig dat het relevante praktijkervaring als beveiliger betreft."],
+      ["internship_above_strength_confirmed", "Bevestig dat stagiair bovenformatief wordt ingezet."],
+      ["internship_not_customer_billed_confirmed", "Bevestig dat stagiair niet aan de klant wordt doorberekend."],
+      ["internship_rostered_confirmed", "Bevestig dat stagiair herkenbaar in het rooster wordt opgenomen."],
+      ["internship_one_to_one_guidance_confirmed", "Bevestig dagelijkse één-op-éénbegeleiding."],
+      ["internship_uniform_label_confirmed", "Bevestig de zichtbare aanduiding 'stagiair' op het uniform."],
+      ["internship_agreement_with_institution_confirmed", "Bevestig dat de instelling partij is bij de stageafspraken."],
+      ["internship_working_times_documented", "Bevestig dat de werktijden in de overeenkomst zijn vastgelegd."],
+      ["internship_evaluation_agreement_documented", "Bevestig dat de evaluatieafspraken zijn vastgelegd."],
+      ["internship_compensation_documented", "Bevestig dat vergoeding en onkosten zijn vastgelegd."],
+    ];
+    confirmations.forEach(([field, message]) => {
+      if (toBoolean(form[field]) !== true) issues.push(message);
+    });
+
+    const age = ageOnDate(personnel, form.contract_start_date);
+    if (age !== null && age < 18 && !compact(form.internship_legal_representative_name)) {
+      issues.push("Vul bij een minderjarige stagiair de wettelijke vertegenwoordiger in.");
+    }
+    const functions = parseFunctionValues(form);
+    if (functions.some(value => ["centralist_pac", "centralist_vtc", "videosurveillant", "geld_waardetransporteur", "waardetransport_chauffeur", "waardetransport_bijrijder"].includes(value))) {
+      warnings.push("De gekozen praktijkfunctie heeft aanvullende opleidings-, certificerings- of vergunningseisen. Controleer vóór iedere operationele inzet de specifieke Wpbr-route en begeleiding.");
+    }
+    if (personnel.wpbr_status && personnel.wpbr_status !== "approved") warnings.push("De Wpbr-toestemming staat niet op goedgekeurd. Operationele inzet blijft geblokkeerd zolang de vereiste toestemming of opleidingsroute ontbreekt.");
+    return { issues: uniqueStrings(issues), warnings: uniqueStrings(warnings) };
+  }
+
   if (!durationType(form)) issues.push("Kies of de arbeidsovereenkomst voor bepaalde of onbepaalde tijd geldt.");
   if (durationType(form) === "fixed" && !form.contract_end_date) issues.push("De einddatum ontbreekt bij een arbeidsovereenkomst voor bepaalde tijd.");
   if (!form.function_type) issues.push("Kies één hoofdfunctie.");
@@ -792,6 +1109,19 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (!compact(form.signing_place)) issues.push("Vul de plaats van ondertekening in.");
   if (!form.signing_date) issues.push("Vul de datum van ondertekening in.");
   if (!compact(company.privacy_email || company.email || company.phone)) issues.push("Vul bij het bedrijf een e-mailadres of telefoonnummer in voor privacy- en beveiligingsmeldingen.");
+  if (isBblPreset) {
+    if (!["bepaalde_tijd", "onbepaalde_tijd"].includes(form.contract_form)) issues.push("Een BBL-route moet als arbeidsovereenkomst voor bepaalde of onbepaalde tijd worden opgeslagen.");
+    if (!compact(form.bbl_institution_name)) issues.push("Vul de onderwijsinstelling voor de BBL-route in.");
+    if (!compact(form.bbl_education_name)) issues.push("Vul de BBL-opleiding in.");
+    if (!compact(form.bbl_practice_agreement_reference)) issues.push("Vul het kenmerk van de afzonderlijke praktijkovereenkomst in.");
+    if (!compact(form.bbl_learning_company_recognition_number)) issues.push("Vul het SBB-erkenningsnummer van het leerbedrijf in.");
+    if (!compact(form.bbl_practice_trainer_name)) issues.push("Vul de praktijkopleider voor de BBL-route in.");
+    if (form.cao_function_level !== "aspirant") issues.push("Een BBL-leerarbeidsovereenkomst voor beveiligingswerk moet als aspirant worden ingedeeld.");
+    if (form.security_role_status !== "aspirant_beveiliger") issues.push("Markeer de werknemer als aspirant-beveiliger.");
+    const bblHours = resolvedContractHours(form, { allowPbFulltimeDefault: false });
+    if (bblHours.hoursPerPeriod === null || bblHours.hoursPerPeriod <= 0) issues.push("Vul de overeengekomen arbeidsduur van de BBL-leerarbeidsovereenkomst in.");
+    if (bblHours.hoursPerPeriod !== null && bblHours.hoursPerPeriod > 144) issues.push("De structurele arbeidsduur mag niet hoger zijn dan 144 uur per loonperiode van vier weken.");
+  }
   if (!["true", "false", true, false].includes(form.probation_agreed)) issues.push("Kies of een proeftijd wordt overeengekomen.");
   if ((form.probation_agreed === "true" || form.probation_agreed === true) && durationType(form) === "fixed" && !isLongerThanSixMonths(form)) {
     issues.push("Bij een tijdelijk contract van zes maanden of korter mag geen proeftijd worden opgenomen.");

@@ -69,12 +69,41 @@
         "call_agreement",
         "min_max",
         "internship",
+        "bbl",
         "hired_worker",
         "zzp",
         "unknown",
         null
       ],
-      "description": "CAO PB contractmodel: fulltime 144u/loonperiode, parttime vast/groeimodel, nuluren, legacy oproep, min-max, stage, inhuur/payroll, zzp of onbekend."
+      "description": "CAO PB contractmodel: fulltime 144u/loonperiode, parttime vast/groeimodel, nuluren, legacy oproep, min-max, artikel-14-stage, BBL-leerarbeidsovereenkomst, inhuur/payroll, zzp of onbekend."
+    },
+    "legal_document_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "employment_agreement",
+        "internship_agreement",
+        "assignment_agreement",
+        "unknown",
+        null
+      ],
+      "description": "Juridisch documenttype. Dit veld bepaalt onder meer partijrollen, loonlogica en terminologie; een stageovereenkomst is geen arbeidsovereenkomst."
+    },
+    "learning_route": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "article_14_internship",
+        "bbl",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "description": "Leerroute waarmee artikel-14-stages en BBL-arbeidsovereenkomsten strikt van elkaar worden gescheiden."
     },
     "parttime_contract_model": {
       "type": [
@@ -1612,12 +1641,101 @@
         "null"
       ]
     },
+    "internship_institution_address": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_institution_representative_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_institution_representative_function": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_institution_email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_education_name": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Naam van de BOL-opleiding of het re-integratietraject."
+    },
+    "internship_bpv_reference": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Kenmerk van de praktijkovereenkomst (POK/BPV) bij een BOL-stage."
+    },
+    "internship_learning_company_recognition_number": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "SBB-erkenningsnummer van het leerbedrijf bij een BOL-stage."
+    },
+    "internship_route_reference": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Referentie van UWV-toestemming, re-integratiebesluit of tweede-spoorplan."
+    },
     "internship_assignment_description": {
       "type": [
         "string",
         "null"
       ],
       "description": "Werkzaamheden voor de stage-opdracht."
+    },
+    "internship_learning_objectives": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_practice_trainer_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_institution_supervisor_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_hours_per_week": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "minimum": 0
+    },
+    "internship_working_times": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_evaluation_details": {
+      "type": [
+        "string",
+        "null"
+      ]
     },
     "internship_working_times_documented": {
       "type": "boolean",
@@ -1639,6 +1757,74 @@
     "internship_compensation_amount": {
       "type": [
         "number",
+        "null"
+      ]
+    },
+    "internship_compensation_period": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "uur",
+        "dag",
+        "vier_weken",
+        "maand",
+        null
+      ]
+    },
+    "internship_expense_arrangement": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_insurance_description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_attachments": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "internship_legal_representative_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "bbl_institution_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "bbl_education_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "bbl_practice_agreement_reference": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Kenmerk van de afzonderlijke praktijkovereenkomst voor de BBL-route."
+    },
+    "bbl_learning_company_recognition_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "bbl_practice_trainer_name": {
+      "type": [
+        "string",
         "null"
       ]
     },

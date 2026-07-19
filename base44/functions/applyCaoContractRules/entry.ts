@@ -3061,6 +3061,24 @@ function evaluateInternshipContractRules(input) {
     });
   }
 
+  if (input.legal_document_type && input.legal_document_type !== 'internship_agreement') {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0414',
+      severity: 'high',
+      field: 'legal_document_type',
+      message: 'Een artikel-14-stage moet juridisch als stageovereenkomst worden vastgelegd en niet als arbeidsovereenkomst.'
+    });
+  }
+
+  if (booleanOrNull(input.probation_agreed) === true || numberOrNull(input.cao_scale) !== null || numberOrNull(input.cao_period) !== null) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0414',
+      severity: 'high',
+      field: 'probation_agreed/cao_scale/cao_period',
+      message: 'Proeftijd, salarisschaal en periodiek horen niet in een artikel-14-stageovereenkomst.'
+    });
+  }
+
   if (booleanOrNull(input.internship_has_employment_contract) === true) {
     violations.push({
       rule_id: 'CAO-PB-2024-R0414',
@@ -3097,6 +3115,46 @@ function evaluateInternshipContractRules(input) {
       });
     }
   }
+
+  const allowedArticle14Routes = ['bol', 'uwv_trial_placement', 'reintegration_measure', 'second_track_reintegration'];
+  if (!allowedArticle14Routes.includes(internshipType)) {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0402',
+      severity: 'high',
+      field: 'internship_type',
+      message: 'Deze stage valt niet onder een ondersteunde artikel-14-route. BBL en algemene kantoorstages vereisen een ander contractmodel.'
+    });
+  }
+  if (booleanOrNull(input.performs_security_work) !== true || input.cao_function_group === 'non_security_staff') {
+    violations.push({
+      rule_id: 'CAO-PB-2024-R0401',
+      severity: 'high',
+      field: 'performs_security_work',
+      message: 'Artikel 14 ziet op relevante praktijkervaring als beveiliger en is niet de juiste preset voor een algemene kantoor- of managementstage.'
+    });
+  }
+
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_institution_name || '').trim(), 'CAO-PB-2024-R0415', 'Leg de onderwijs- of re-integratie-instelling vast.', 'internship_institution_name');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_institution_address || '').trim(), 'CAO-PB-2024-R0415', 'Leg het adres van de onderwijs- of re-integratie-instelling vast.', 'internship_institution_address');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_institution_representative_name || '').trim(), 'CAO-PB-2024-R0415', 'Leg de bevoegde vertegenwoordiger van de instelling vast.', 'internship_institution_representative_name');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_institution_representative_function || '').trim(), 'CAO-PB-2024-R0415', 'Leg de functie van de vertegenwoordiger van de instelling vast.', 'internship_institution_representative_function');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_institution_email || '').trim(), 'CAO-PB-2024-R0415', 'Leg een contactadres van de instelling vast.', 'internship_institution_email');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_education_name || '').trim(), 'CAO-PB-2024-R0402', 'Leg de opleiding of het re-integratietraject vast.', 'internship_education_name');
+  if (internshipType === 'bol') {
+    addMissingInternshipEvidence(missingEvidence, !!String(input.internship_bpv_reference || '').trim(), 'CAO-PB-2024-R0402', 'Leg bij BOL het kenmerk van de praktijkovereenkomst vast.', 'internship_bpv_reference');
+    addMissingInternshipEvidence(missingEvidence, !!String(input.internship_learning_company_recognition_number || '').trim(), 'CAO-PB-2024-R0402', 'Leg bij BOL het SBB-erkenningsnummer van het leerbedrijf vast.', 'internship_learning_company_recognition_number');
+  } else if (allowedArticle14Routes.includes(internshipType)) {
+    addMissingInternshipEvidence(missingEvidence, !!String(input.internship_route_reference || '').trim(), 'CAO-PB-2024-R0402', 'Leg de referentie van toestemming, maatregel of trajectplan vast.', 'internship_route_reference');
+  }
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_learning_objectives || '').trim(), 'CAO-PB-2024-R0401', 'Leg concrete leerdoelen vast.', 'internship_learning_objectives');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_practice_trainer_name || input.internship_mentor_name || '').trim(), 'CAO-PB-2024-R0410', 'Leg de praktijkopleider vast.', 'internship_practice_trainer_name');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_institution_supervisor_name || '').trim(), 'CAO-PB-2024-R0415', 'Leg de begeleider vanuit de instelling vast.', 'internship_institution_supervisor_name');
+  addMissingInternshipEvidence(missingEvidence, (numberOrNull(input.internship_hours_per_week) ?? 0) > 0, 'CAO-PB-2024-R0420', 'Leg een positieve stageomvang per week vast.', 'internship_hours_per_week');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_working_times || '').trim(), 'CAO-PB-2024-R0420', 'Leg de stagedagen en tijdvakken vast.', 'internship_working_times');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_evaluation_details || '').trim(), 'CAO-PB-2024-R0421', 'Leg evaluatiemomenten en evaluatiewijze vast.', 'internship_evaluation_details');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_insurance_description || '').trim(), 'CAO-PB-2024-R0414', 'Leg verzekeringsdekking en de meldprocedure vast.', 'internship_insurance_description');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_attachments || '').trim(), 'CAO-PB-2024-R0415', 'Leg de routeafhankelijke bijlagen bij de stage vast.', 'internship_attachments');
+  addMissingInternshipEvidence(missingEvidence, !!String(input.internship_expense_arrangement || '').trim(), 'CAO-PB-2024-R0422', 'Leg de onkostenregeling vast, ook wanneer geen onkosten worden vergoed.', 'internship_expense_arrangement');
 
   addMissingInternshipEvidence(
     missingEvidence,
@@ -3206,17 +3264,27 @@ function evaluateInternshipContractRules(input) {
 
   if (booleanOrNull(input.internship_compensation_applies) === true) {
     const compensationAmount = numberOrNull(input.internship_compensation_amount);
+    const compensationPeriod = String(input.internship_compensation_period || '').trim();
     if (compensationAmount === null) {
       missingEvidence.push({
         rule_id: 'CAO-PB-2024-R0422',
         field: 'internship_compensation_amount',
         message: 'Stagevergoeding is van toepassing, maar de hoogte is niet vastgelegd.'
       });
-    } else {
+    }
+    if (!['uur', 'dag', 'vier_weken', 'maand'].includes(compensationPeriod)) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0422',
+        field: 'internship_compensation_period',
+        message: 'Stagevergoeding is van toepassing, maar de vergoedingseenheid ontbreekt.'
+      });
+    }
+    if (compensationAmount !== null && ['uur', 'dag', 'vier_weken', 'maand'].includes(compensationPeriod)) {
       payrollEntitlements.push({
         rule_id: 'CAO-PB-2024-R0422',
         type: 'internship_compensation_due_if_agreed',
         amount: compensationAmount,
+        period: compensationPeriod,
         message: 'Stagevergoeding is contractueel vastgelegd en moet volgens de stage-overeenkomst worden meegenomen.'
       });
     }
@@ -3567,6 +3635,10 @@ function normalizeContractModel(value) {
     min_max: 'call_agreement',
     stage: 'internship',
     internship: 'internship',
+    bbl: 'bbl',
+    bbl_employment: 'bbl',
+    bbl_fixed: 'bbl',
+    bbl_indefinite: 'bbl',
     uitzend: 'hired_worker',
     payroll: 'hired_worker',
     zzp: 'zzp'
@@ -3635,6 +3707,77 @@ function evaluateEmploymentContractModelRules(input, callAgreement, internship, 
       field: 'contract_form',
       message: 'Contractvorm ontbreekt of is onbekend; arbeidsovereenkomst voor bepaalde/onbepaalde tijd of bijzondere contractvorm moet expliciet zijn.'
     });
+  }
+
+  if (model === 'bbl') {
+    const requiredBblFields = [
+      ['bbl_institution_name', 'Leg de onderwijsinstelling van de BBL-leerbaan vast.'],
+      ['bbl_education_name', 'Leg de BBL-opleiding vast.'],
+      ['bbl_practice_agreement_reference', 'Leg het kenmerk van de afzonderlijke praktijkovereenkomst vast.'],
+      ['bbl_learning_company_recognition_number', 'Leg het SBB-erkenningsnummer van het leerbedrijf vast.'],
+      ['bbl_practice_trainer_name', 'Leg de praktijkopleider voor de BBL-leerbaan vast.']
+    ];
+    requiredBblFields.forEach(([field, message]) => {
+      if (!String(input[field] || '').trim()) {
+        missingEvidence.push({ rule_id: 'CAO-PB-2024-R0345', field, message });
+      }
+    });
+    if (input.legal_document_type && input.legal_document_type !== 'employment_agreement') {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0345',
+        severity: 'high',
+        field: 'legal_document_type',
+        message: 'BBL is een leerarbeidsovereenkomst met loon en mag niet als stageovereenkomst worden vastgelegd.'
+      });
+    }
+    if (hours === null || hours <= 0) {
+      missingEvidence.push({
+        rule_id: 'CAO-PB-2024-R0337',
+        field: 'contract_hours_per_pay_period',
+        message: 'Leg voor de BBL-leerarbeidsovereenkomst een positieve arbeidsduur per loonperiode vast.'
+      });
+    } else if (hours > 144) {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0337',
+        severity: 'high',
+        field: 'contract_hours_per_pay_period',
+        message: `De structurele BBL-arbeidsduur is ${hours} uur per loonperiode en mag niet hoger zijn dan 144 uur.`
+      });
+    }
+    if (input.cao_function_level !== 'aspirant') {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0345',
+        severity: 'high',
+        field: 'cao_function_level',
+        message: 'Een BBL-leerarbeidsovereenkomst voor beveiligingswerk moet als aspirant worden ingedeeld.'
+      });
+    }
+    if (input.security_role_status !== 'aspirant_beveiliger') {
+      violations.push({
+        rule_id: 'CAO-PB-2024-R0345',
+        severity: 'high',
+        field: 'security_role_status',
+        message: 'Markeer de werknemer in de BBL-route als aspirant-beveiliger.'
+      });
+    }
+    recommendedContractUpdate.employment_contract_model = 'bbl';
+    if (hours !== null) recommendedContractUpdate.contract_hours_per_pay_period = hours;
+    const blocked = violations.some(item => ['high', 'critical'].includes(item.severity));
+    return {
+      employment_contract_model: 'bbl',
+      parttime_contract_model: 'not_applicable',
+      contract_hours_per_pay_period_resolved: hours,
+      contract_hours_source: hoursInfo.source,
+      employment_contract_model_status: blocked ? 'blocked' : (missingEvidence.length > 0 ? 'manual_review_required' : 'compliant'),
+      employment_contract_model_compliant: !blocked && missingEvidence.length === 0,
+      source_rule_ids: [...new Set(sourceRuleIds)],
+      warnings,
+      missing_evidence: missingEvidence,
+      contract_rule_violations: violations,
+      payroll_entitlements: [],
+      manual_review_required: missingEvidence.length > 0,
+      recommended_contract_update: recommendedContractUpdate
+    };
   }
 
   if (model === 'call_agreement' || model === 'internship' || model === 'hired_worker' || model === 'zzp') {
@@ -4766,6 +4909,8 @@ function buildContractRuleInput(body, personnel, contract) {
     cao_equivalent_knowledge_experience_confirmed: pickFirst(body.cao_equivalent_knowledge_experience_confirmed, contract?.cao_equivalent_knowledge_experience_confirmed, false),
     cao_scale: pickFirst(body.cao_scale, contract?.cao_scale, personnel?.cao_scale, null),
     cao_period: pickFirst(body.cao_period, contract?.cao_period, personnel?.cao_period, null),
+    legal_document_type: pickFirst(body.legal_document_type, contract?.legal_document_type, null),
+    learning_route: pickFirst(body.learning_route, contract?.learning_route, null),
     employment_contract_model: pickFirst(body.employment_contract_model, contract?.employment_contract_model, null),
     contract_model: pickFirst(body.contract_model, body.employment_contract_model, contract?.contract_model, contract?.employment_contract_model, null),
     parttime_contract_model: pickFirst(body.parttime_contract_model, contract?.parttime_contract_model, null),
@@ -4827,12 +4972,36 @@ function buildContractRuleInput(body, personnel, contract) {
     internship_uniform_label_confirmed: pickFirst(body.internship_uniform_label_confirmed, contract?.internship_uniform_label_confirmed, null),
     internship_agreement_with_institution_confirmed: pickFirst(body.internship_agreement_with_institution_confirmed, contract?.internship_agreement_with_institution_confirmed, null),
     internship_institution_name: pickFirst(body.internship_institution_name, contract?.internship_institution_name, null),
+    internship_institution_address: pickFirst(body.internship_institution_address, contract?.internship_institution_address, null),
+    internship_institution_representative_name: pickFirst(body.internship_institution_representative_name, contract?.internship_institution_representative_name, null),
+    internship_institution_representative_function: pickFirst(body.internship_institution_representative_function, contract?.internship_institution_representative_function, null),
+    internship_institution_email: pickFirst(body.internship_institution_email, contract?.internship_institution_email, null),
+    internship_education_name: pickFirst(body.internship_education_name, contract?.internship_education_name, null),
+    internship_bpv_reference: pickFirst(body.internship_bpv_reference, contract?.internship_bpv_reference, null),
+    internship_learning_company_recognition_number: pickFirst(body.internship_learning_company_recognition_number, contract?.internship_learning_company_recognition_number, null),
+    internship_route_reference: pickFirst(body.internship_route_reference, contract?.internship_route_reference, null),
     internship_assignment_description: pickFirst(body.internship_assignment_description, contract?.internship_assignment_description, null),
+    internship_learning_objectives: pickFirst(body.internship_learning_objectives, contract?.internship_learning_objectives, null),
+    internship_practice_trainer_name: pickFirst(body.internship_practice_trainer_name, contract?.internship_practice_trainer_name, contract?.internship_mentor_name, null),
+    internship_institution_supervisor_name: pickFirst(body.internship_institution_supervisor_name, contract?.internship_institution_supervisor_name, null),
+    internship_hours_per_week: pickFirst(body.internship_hours_per_week, contract?.internship_hours_per_week, null),
+    internship_working_times: pickFirst(body.internship_working_times, contract?.internship_working_times, null),
+    internship_evaluation_details: pickFirst(body.internship_evaluation_details, contract?.internship_evaluation_details, null),
     internship_working_times_documented: pickFirst(body.internship_working_times_documented, contract?.internship_working_times_documented, null),
     internship_evaluation_agreement_documented: pickFirst(body.internship_evaluation_agreement_documented, contract?.internship_evaluation_agreement_documented, null),
     internship_compensation_documented: pickFirst(body.internship_compensation_documented, contract?.internship_compensation_documented, null),
     internship_compensation_applies: pickFirst(body.internship_compensation_applies, contract?.internship_compensation_applies, null),
     internship_compensation_amount: pickFirst(body.internship_compensation_amount, contract?.internship_compensation_amount, null),
+    internship_compensation_period: pickFirst(body.internship_compensation_period, contract?.internship_compensation_period, null),
+    internship_expense_arrangement: pickFirst(body.internship_expense_arrangement, contract?.internship_expense_arrangement, null),
+    internship_insurance_description: pickFirst(body.internship_insurance_description, contract?.internship_insurance_description, null),
+    internship_attachments: pickFirst(body.internship_attachments, contract?.internship_attachments, null),
+    internship_legal_representative_name: pickFirst(body.internship_legal_representative_name, contract?.internship_legal_representative_name, null),
+    bbl_institution_name: pickFirst(body.bbl_institution_name, contract?.bbl_institution_name, null),
+    bbl_education_name: pickFirst(body.bbl_education_name, contract?.bbl_education_name, null),
+    bbl_practice_agreement_reference: pickFirst(body.bbl_practice_agreement_reference, contract?.bbl_practice_agreement_reference, null),
+    bbl_learning_company_recognition_number: pickFirst(body.bbl_learning_company_recognition_number, contract?.bbl_learning_company_recognition_number, null),
+    bbl_practice_trainer_name: pickFirst(body.bbl_practice_trainer_name, contract?.bbl_practice_trainer_name, null),
     hired_worker_type: pickFirst(body.hired_worker_type, body.external_worker_type, contract?.hired_worker_type, null),
     external_worker_type: pickFirst(body.external_worker_type, null),
     is_agency_worker: pickFirst(body.is_agency_worker, contract?.is_agency_worker, null),
