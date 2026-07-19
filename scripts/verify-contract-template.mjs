@@ -252,6 +252,7 @@ assert.doesNotMatch(legacyMovedBody, /6\.[12]/);
 const previewPages = paginateContractTemplateBlocks(editorBlocks);
 assert.ok(previewPages.length > 1);
 assert.equal(new Set(previewPages.flat().map(item => item.id)).size, previewPages.flat().length);
+assert.equal(previewPages.flat()[0]?.block_kind, "preamble");
 const measuredPreviewUnits = [
   { id: "article-1", estimated_units: 1 },
   { id: "article-2", estimated_units: 1 },
@@ -349,16 +350,15 @@ const internshipDurations = durationOptionsForContractTemplate({
   contract_model: "internship",
 });
 assert.ok(!internshipDurations.some(option => option.value === "indefinite"));
-assert.ok(!internshipDurations.some(option => option.value === "2_years"));
-assert.ok(internshipDurations.find(option => option.value === "6_months")?.description.includes("Stage voor bepaalde tijd"));
-assert.ok(!internshipDurations.find(option => option.value === "6_months")?.description.includes("aanzegplicht"));
+assert.deepEqual(internshipDurations.map(option => option.value), ["pok_end_date", "free"]);
+assert.match(internshipDurations.find(option => option.value === "pok_end_date")?.description || "", /BOL/);
 const bblDurations = durationOptionsForContractTemplate({
   template_type: "employment_contract",
   cao_key: "cao_particuliere_beveiliging",
   contract_model: "bbl_employment",
 });
 assert.ok(!bblDurations.some(option => option.value === "indefinite"));
-assert.ok(bblDurations.some(option => option.value === "4_years"));
+assert.deepEqual(bblDurations.map(option => option.value), ["pok_end_date", "free"]);
 assert.ok(bblDurations.every(option => option.description.includes("bepaalde tijd")));
 
 const templateFamily = {
@@ -881,6 +881,7 @@ const bolInternshipForm = operationalForm({
   employment_contract_model: "internship",
   contract_form: "stage",
   duration_type: "fixed",
+  duration_option: "pok_end_date",
   probation_agreed: "not_applicable",
   probation_context: "not_applicable",
   contract_hours_per_week: "",
@@ -920,6 +921,7 @@ assert.deepEqual(validBolInternship.issues, []);
 assert.deepEqual(validBolInternship.unresolved, []);
 assert.match(validBolInternship.body, /^STAGEOVEREENKOMST/m);
 assert.match(validBolInternship.body, /stagebedrijf, stagiair en instelling/i);
+assert.match(validBolInternship.body, /einddatum is afgestemd op de praktijkovereenkomst \(POK\)/i);
 assert.match(validBolInternship.body, /350,00 bruto per vier weken/);
 assert.doesNotMatch(validBolInternship.body, /vier_weken/);
 assert.doesNotMatch(validBolInternship.body, /hierna: werkgever|hierna: werknemer/i);
@@ -931,6 +933,7 @@ const tooLongUwvInternship = evaluateInternship({
   internship_bpv_reference: "",
   internship_learning_company_recognition_number: "",
   internship_route_reference: "UWV-TOESTEMMING-2026-44",
+  duration_option: "free",
   contract_start_date: "2026-01-01",
   contract_end_date: "2026-03-01",
 });
@@ -950,6 +953,7 @@ const bblForm = operationalForm({
   employment_contract_model: "bbl",
   contract_form: "bepaalde_tijd",
   duration_type: "fixed",
+  duration_option: "pok_end_date",
   contract_hours_per_week: "32",
   contract_hours_per_pay_period: "128",
   salary_payment_frequency: "four_weeks",
@@ -969,6 +973,7 @@ assert.deepEqual(validBbl.issues, []);
 assert.deepEqual(validBbl.unresolved, []);
 assert.match(validBbl.body, /Leerarbeidsovereenkomst \(BBL\)/);
 assert.match(validBbl.body, /afzonderlijke praktijkovereenkomst/);
+assert.match(validBbl.body, /einddatum is afgestemd op de afzonderlijke praktijkovereenkomst/);
 assert.match(validBbl.body, /eerste vier weken.*50%/s);
 assert.match(validBbl.body, /vanaf de vijfde week 100%/);
 

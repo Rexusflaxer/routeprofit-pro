@@ -2236,7 +2236,7 @@ function LetterheadPreview({
               )}
               {mode === "sample" || allowMarginDrag ? (
                 <div className="h-full overflow-hidden text-[8px] leading-snug text-slate-800 sm:text-[9px]">
-                  <p className="mb-3 text-[11px] font-bold text-slate-950">Arbeidsovereenkomst</p>
+                  <p className="mb-3 text-[14px] font-bold leading-tight text-slate-950">Arbeidsovereenkomst</p>
                   <p className="mb-3">Ondergetekenden verklaren hierbij de arbeidsovereenkomst aan te gaan conform de gekozen contractvorm, CAO en functie-indeling.</p>
                   <div className="space-y-1.5">
                     <div className="h-1.5 w-full rounded bg-slate-300" />
@@ -2323,6 +2323,7 @@ function centerElementInScrollContainer(scrollContainer, target, behavior = "smo
 
 function TemplatePreviewUnit({ item, highlightedBlockId, measurement = false }) {
   const isHighlighted = !measurement && item.block_id === highlightedBlockId;
+  const isDocumentHeading = item.block_kind === "preamble";
   return (
     <div
       data-template-block-id={measurement ? undefined : item.block_id}
@@ -2333,7 +2334,11 @@ function TemplatePreviewUnit({ item, highlightedBlockId, measurement = false }) 
           : ""
       }`}
     >
-      {item.heading && <p className="mb-1 font-bold text-slate-950">{item.heading}</p>}
+      {item.heading && (
+        <p className={isDocumentHeading ? "mb-1.5 text-[13px] font-bold leading-tight text-slate-950" : "mb-1 font-bold text-slate-950"}>
+          {item.heading}
+        </p>
+      )}
       <div
         className={TEMPLATE_PREVIEW_RICH_TEXT_CLASS}
         dangerouslySetInnerHTML={{ __html: sanitizeContractBlockHtml(item.html) }}
@@ -2375,7 +2380,7 @@ function TemplateDocumentPreview({ body, blocks, letterhead, clauses, highlighte
   const paginationSignature = useMemo(() => JSON.stringify({
     measurementContentWidth,
     availableContentHeight,
-    units: previewUnits.map(item => [item.id, item.heading, item.html]),
+    units: previewUnits.map(item => [item.id, item.block_kind, item.heading, item.html]),
   }), [availableContentHeight, measurementContentWidth, previewUnits]);
   const fallbackPages = useMemo(
     () => paginateContractTemplateBlocks(
@@ -2622,13 +2627,19 @@ function templateFormFromRecord(companyId, record) {
   const upgradeLegacyBody = Boolean(standardPreset && isUnchangedLegacyEmploymentTemplateBody(record.body));
   const body = upgradeLegacyBody ? standardPreset.body : (record.body || DEFAULT_TEMPLATE_BODY);
   const editorBlocks = normalizeContractTemplateBlocks(record.editor_blocks || record.metadata?.editor_blocks, body);
-  const durationOptions = Array.isArray(record.duration_options) && record.duration_options.length > 0
-    ? record.duration_options
-    : durationOptionsForContractTemplate({
-      template_type: templateType,
-      cao_key: record.cao_key || "",
-      contract_model: contractModel,
-    }).map(option => option.value);
+  const allowedDurationOptions = durationOptionsForContractTemplate({
+    template_type: templateType,
+    cao_key: record.cao_key || "",
+    contract_model: contractModel,
+  }).map(option => option.value);
+  const persistedDurationOptions = Array.isArray(record.duration_options) ? record.duration_options : [];
+  const employmentModel = getContractModel(contractModel)?.employment_model;
+  const isLearningRouteTemplate = ["internship", "bbl"].includes(employmentModel);
+  const durationOptions = isLearningRouteTemplate
+    ? allowedDurationOptions
+    : (persistedDurationOptions.length > 0
+      ? persistedDurationOptions.filter(option => allowedDurationOptions.includes(option))
+      : allowedDurationOptions);
   return {
     company_id: companyId,
     name: record.name || "",
@@ -2638,7 +2649,7 @@ function templateFormFromRecord(companyId, record) {
     template_source_mode: "existing",
     contract_model: contractModel,
     contract_form_scope: record.contract_form_scope || "any",
-    employment_model_scope: getContractModel(contractModel)?.employment_model || record.employment_model_scope || "any",
+    employment_model_scope: employmentModel || record.employment_model_scope || "any",
     probation_scope: record.probation_scope || "any",
     duration_type_scope: record.duration_type_scope || "any",
     duration_options: durationOptions,
@@ -2938,6 +2949,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   const unknownTemplatePlaceholders = getUnknownContractTemplatePlaceholders(templateForm.body);
   const selectedStandardTemplatePreset = getStandardContractTemplatePreset(templateForm);
   const standardTemplateSourceAvailable = Boolean(standardTemplateBody(templateForm));
+  const isLearningDurationTemplate = ["internship", "bbl"].includes(getContractModel(templateForm.contract_model)?.employment_model);
   const availableTemplateDurationOptions = useMemo(
     () => durationOptionsForContractTemplate(templateForm),
     [templateForm.template_type, templateForm.contract_model, templateForm.cao_key],
@@ -5858,11 +5870,15 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
               {isEmploymentTemplate && templateStep === duurkeuzesStep && (
                 <div className="space-y-4">
                   <div>
-                    <p className="text-sm font-medium text-foreground">Duurkeuzes</p>
-                    <p className="mt-1 text-xs text-muted-foreground">Selecteer voor welke contractduren deze template gebruikt mag worden.</p>
+                    <p className="text-sm font-medium text-foreground">{isLearningDurationTemplate ? "Einddatumbron" : "Duurkeuzes"}</p>
+                    <p className="mt-1 text-xs text-muted-foreground">
+                      {isLearningDurationTemplate
+                        ? "Selecteer hoe de einddatum bij het medewerkerscontract mag worden bepaald."
+                        : "Selecteer voor welke contractduren deze template gebruikt mag worden."}
+                    </p>
                   </div>
                   <div className="flex items-center justify-between">
-                    <span className="text-xs font-medium text-muted-foreground">Toepasbaar op deze contractvorm</span>
+                    <span className="text-xs font-medium text-muted-foreground">{isLearningDurationTemplate ? "Beschikbare keuzes" : "Toepasbaar op deze contractvorm"}</span>
                     <div className="flex gap-1">
                       <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setTemplateForm(prev => ({ ...prev, duration_options: availableTemplateDurationOptions.map(o => o.value) }))}>Alles</Button>
                       <Button type="button" variant="ghost" size="sm" className="h-7 px-2 text-xs" onClick={() => setTemplateForm(prev => ({ ...prev, duration_options: [] }))}>Wissen</Button>

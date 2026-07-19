@@ -178,8 +178,8 @@ const DURATION_OPTIONS = [
   { value: "1_year", label: "1 jaar", months: 12 },
   { value: "2_years", label: "2 jaar", months: 24 },
   { value: "3_years", label: "3 jaar", months: 36 },
-  { value: "4_years", label: "4 jaar", months: 48 },
-  { value: "free", label: "Vrij invullen", months: null },
+  { value: "pok_end_date", label: "Einddatum volgens POK", months: null },
+  { value: "free", label: "Vrije einddatum", months: null },
 ];
 
 const DURATION_OPTION_LABELS = Object.fromEntries(DURATION_OPTIONS.map(option => [option.value, option.label]));
@@ -808,6 +808,8 @@ function getMissingContractFields(form) {
   }
   if (["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model) && !form.call_channel) missing.push("oproepkanaal");
   if (form.employment_contract_model === "internship") {
+    if (form.source_type === "generated" && !["pok_end_date", "free"].includes(form.duration_option)) missing.push("bron van de stage-einddatum");
+    if (form.internship_type !== "bol" && form.duration_option === "pok_end_date") missing.push("vrije einddatum voor deze re-integratieroute");
     if (!["bol", "uwv_trial_placement", "reintegration_measure", "second_track_reintegration"].includes(form.internship_type)) missing.push("geldige stageroute");
     if (!form.internship_institution_name) missing.push("onderwijs- of re-integratie-instelling");
     if (!form.internship_institution_address) missing.push("adres instelling");
@@ -838,6 +840,7 @@ function getMissingContractFields(form) {
     if (form.source_type === "generated" && form.duration_type !== "fixed") {
       missing.push("BBL-contract voor bepaalde tijd");
     }
+    if (form.source_type === "generated" && !["pok_end_date", "free"].includes(form.duration_option)) missing.push("bron van de BBL-einddatum");
     if (!form.contract_hours_per_week && !form.contract_hours_per_pay_period) missing.push("arbeidsduur BBL");
     if (!form.bbl_institution_name) missing.push("onderwijsinstelling BBL");
     if (!form.bbl_education_name) missing.push("BBL-opleiding");
@@ -1156,6 +1159,7 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
   const pageBottom = 760;
   const continuationTop = 64;
   const lineHeight = 16;
+  const documentTitleLineHeight = 22;
   const paragraphGap = 7;
   const isInternshipAgreement = form.employment_contract_model === "internship";
   const body = renderContractBody(personnel, form, company, template, clauses);
@@ -1169,7 +1173,9 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
   paragraphLines.forEach((lines, index) => {
     const isArticleHeading = /^Artikel\s+\d+\b/i.test(paragraphs[index]);
     const isDocumentHeading = index === 0;
-    const ownHeight = lines.length * lineHeight + paragraphGap;
+    const ownHeight = isDocumentHeading
+      ? documentTitleLineHeight + Math.max(0, lines.length - 1) * lineHeight + paragraphGap
+      : lines.length * lineHeight + paragraphGap;
     const nextHeight = isArticleHeading && paragraphLines[index + 1]
       ? paragraphLines[index + 1].length * lineHeight + paragraphGap
       : 0;
@@ -1178,7 +1184,23 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
       y = continuationTop;
     }
 
-    doc.setFont("helvetica", isArticleHeading || isDocumentHeading ? "bold" : "normal");
+    if (isDocumentHeading && ownHeight <= pageBottom - continuationTop) {
+      doc.setFont("helvetica", "bold");
+      doc.setFontSize(16);
+      doc.text(lines[0], margin, y);
+      y += documentTitleLineHeight;
+      doc.setFont("helvetica", "normal");
+      doc.setFontSize(10);
+      lines.slice(1).forEach(line => {
+        doc.text(line, margin, y);
+        y += lineHeight;
+      });
+      y += paragraphGap;
+      return;
+    }
+
+    doc.setFontSize(10);
+    doc.setFont("helvetica", isArticleHeading ? "bold" : "normal");
     if (ownHeight <= pageBottom - continuationTop) {
       doc.text(lines, margin, y);
       y += ownHeight;
@@ -1588,15 +1610,18 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const letterheadOptions = useMemo(() => getLetterheadOptions(letterheads, companies, form.company_id), [companies, form.company_id, letterheads]);
   const selectedTemplate = contractTemplates.find(template => template.id === form.template_id) || null;
   const selectableDurationOptions = useMemo(() => {
-    const allowed = Array.isArray(selectedTemplate?.duration_options) ? selectedTemplate.duration_options : [];
+    const persistedAllowed = Array.isArray(selectedTemplate?.duration_options) ? selectedTemplate.duration_options : [];
+    const hasLegacyLearningDuration = ["internship", "bbl"].includes(form.employment_contract_model)
+      && persistedAllowed.some(value => !["pok_end_date", "free"].includes(value));
+    const allowed = hasLegacyLearningDuration ? ["pok_end_date", "free"] : persistedAllowed;
     const routeOptions = form.employment_contract_model === "internship"
-      ? DURATION_OPTIONS.filter(option => ["1_month", "2_months", "6_months", "7_months", "1_year", "free"].includes(option.value))
+      ? DURATION_OPTIONS.filter(option => (form.internship_type === "bol" ? ["pok_end_date", "free"] : ["free"]).includes(option.value))
       : form.employment_contract_model === "bbl"
-        ? DURATION_OPTIONS
-        : DURATION_OPTIONS.filter(option => option.value !== "4_years");
+        ? DURATION_OPTIONS.filter(option => ["pok_end_date", "free"].includes(option.value))
+        : DURATION_OPTIONS.filter(option => option.value !== "pok_end_date");
     if (allowed.length === 0) return routeOptions;
     return routeOptions.filter(option => allowed.includes(option.value));
-  }, [form.employment_contract_model, selectedTemplate]);
+  }, [form.employment_contract_model, form.internship_type, selectedTemplate]);
   const selectedLetterhead = letterheadOptions.find(item => item.id === form.letterhead_id) || null;
   const selectedTemplateClauses = useMemo(() => (contractClauses || [])
     .filter(clause => clause.company_id === form.company_id && clause.status !== "archived"),
@@ -1834,6 +1859,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.hourly_rate_snapshot = "";
         next.security_role_status = "not_applicable";
         next.internship_type = prev.internship_type === "unknown" ? "bol" : prev.internship_type;
+        next.duration_option = next.internship_type === "bol" ? "pok_end_date" : "free";
+        next.contract_end_date = "";
       } else if (model?.employment_model === "bbl" && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
         const securityFunctions = uniqueValues([
           prev.function_type,
@@ -1854,10 +1881,15 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.cao_function_level = "aspirant";
         next.cao_scale = "2";
         next.cao_period = prev.cao_period || "0";
+        next.duration_option = "pok_end_date";
+        next.contract_end_date = "";
       } else if (model?.default_hours && !next.contract_hours_per_week) {
         next.contract_hours_per_week = String(model.default_hours);
       }
       if (model?.duration_type === "indefinite") {
+        next.contract_end_date = "";
+        next.duration_option = "";
+      } else if (!["internship", "bbl"].includes(model?.employment_model) && prev.duration_option === "pok_end_date") {
         next.contract_end_date = "";
         next.duration_option = "";
       }
@@ -1875,7 +1907,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       return {
         ...prev,
         duration_option: value,
-        contract_end_date: option?.months ? addMonthsMinusOneDay(prev.contract_start_date, option.months) : prev.contract_end_date,
+        contract_end_date: option?.months
+          ? addMonthsMinusOneDay(prev.contract_start_date, option.months)
+          : (value === "pok_end_date" ? "" : prev.contract_end_date),
       };
     });
   };
@@ -2155,11 +2189,16 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   }, [wizardOpen, form.source_type, form.template_id, publishedTemplates]);
 
   useEffect(() => {
-    if (!wizardOpen || form.duration_type !== "fixed" || !form.duration_option || form.duration_option === "free" || !form.contract_start_date) return;
+    if (!wizardOpen || form.duration_type !== "fixed" || !form.duration_option || ["free", "pok_end_date"].includes(form.duration_option) || !form.contract_start_date) return;
     const option = DURATION_OPTIONS.find(item => item.value === form.duration_option);
     const nextEndDate = option?.months ? addMonthsMinusOneDay(form.contract_start_date, option.months) : "";
     if (nextEndDate && nextEndDate !== form.contract_end_date) set("contract_end_date", nextEndDate);
   }, [wizardOpen, form.duration_type, form.duration_option, form.contract_start_date, form.contract_end_date]);
+
+  useEffect(() => {
+    if (!wizardOpen || form.employment_contract_model !== "internship" || form.internship_type === "bol" || form.duration_option !== "pok_end_date") return;
+    setForm(prev => ({ ...prev, duration_option: "free", contract_end_date: "" }));
+  }, [wizardOpen, form.employment_contract_model, form.internship_type, form.duration_option]);
 
   const stepItems = [
     "Bedrijf",
@@ -2399,7 +2438,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 {selectedContractModel?.duration_type === "fixed" && (
                   <>
                     <div className="space-y-1">
-                      <Label>Duur</Label>
+                      <Label>{isArticle14Internship || isBblModel ? "Bron einddatum" : "Duur"}</Label>
                       <Select value={form.duration_option || "free"} onValueChange={setDurationOption}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
@@ -2410,8 +2449,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       </Select>
                     </div>
                     <div className="space-y-1">
-                      <Label>Einddatum</Label>
-                      <Input type="date" value={form.contract_end_date || ""} onChange={event => set("contract_end_date", event.target.value)} disabled={form.duration_option && form.duration_option !== "free"} />
+                      <Label>{form.duration_option === "pok_end_date" ? "Einddatum volgens POK" : "Einddatum"}</Label>
+                      <Input type="date" value={form.contract_end_date || ""} onChange={event => set("contract_end_date", event.target.value)} disabled={form.duration_option && !["free", "pok_end_date"].includes(form.duration_option)} />
+                      {form.duration_option === "pok_end_date" && (
+                        <p className="text-xs text-muted-foreground">Neem deze datum voorlopig handmatig over uit de POK. Automatische uitlezing wordt later toegevoegd.</p>
+                      )}
                     </div>
                   </>
                 )}

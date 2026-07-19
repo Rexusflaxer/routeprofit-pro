@@ -37,49 +37,49 @@ export const CONTRACT_TEMPLATE_DURATION_OPTIONS = [
     value: "1_month",
     label: "1 maand",
     description: "Bepaalde tijd. Een proeftijd is niet toegestaan.",
-    contractTypes: ["standard", "call", "internship", "bbl"],
+    contractTypes: ["standard", "call"],
   },
   {
     value: "2_months",
     label: "2 maanden",
     description: "Bepaalde tijd. Een proeftijd is niet toegestaan.",
-    contractTypes: ["standard", "call", "internship", "bbl"],
+    contractTypes: ["standard", "call"],
   },
   {
     value: "6_months",
     label: "6 maanden",
     description: "Bepaalde tijd. Een proeftijd is niet toegestaan; de aanzegplicht geldt bij zes maanden wel.",
-    contractTypes: ["standard", "call", "internship", "bbl"],
+    contractTypes: ["standard", "call"],
   },
   {
     value: "7_months",
     label: "7 maanden",
     description: "Bepaalde tijd langer dan zes maanden. De app leidt de toegestane proeftijd later af uit de CAO en medewerkerssituatie.",
-    contractTypes: ["standard", "call", "internship", "bbl"],
+    contractTypes: ["standard", "call"],
   },
   {
     value: "1_year",
     label: "1 jaar",
     description: "Bepaalde tijd van twaalf maanden.",
-    contractTypes: ["standard", "call", "internship", "bbl"],
+    contractTypes: ["standard", "call"],
   },
   {
     value: "2_years",
     label: "2 jaar",
     description: "Bepaalde tijd van vierentwintig maanden. Controleer altijd de contractketen.",
-    contractTypes: ["standard", "call", "bbl"],
+    contractTypes: ["standard", "call"],
   },
   {
     value: "3_years",
     label: "3 jaar",
     description: "Bepaalde tijd van zesendertig maanden. Controleer altijd de contractketen.",
-    contractTypes: ["standard", "call", "bbl"],
+    contractTypes: ["standard", "call"],
   },
   {
-    value: "4_years",
-    label: "4 jaar",
-    description: "Bepaalde tijd van achtenveertig maanden.",
-    contractTypes: ["bbl"],
+    value: "pok_end_date",
+    label: "Einddatum volgens POK",
+    description: "De einddatum wordt afgestemd op de afzonderlijke praktijkovereenkomst (POK). Totdat POK-uitlezing beschikbaar is, vult de gebruiker deze datum handmatig in.",
+    contractTypes: ["internship", "bbl"],
   },
   {
     value: "free",
@@ -422,9 +422,11 @@ export function paginateContractTemplateBlocks(blocks, maxUnits = 57) {
       units.push({
         id: `${block.id}-segment-${index}`,
         block_id: block.id,
+        block_kind: block.kind,
         heading: index === 0 && showHeading ? block.rendered_title : "",
         html,
-        estimated_units: estimatePreviewUnits(html, index === 0 && showHeading),
+        estimated_units: estimatePreviewUnits(html, index === 0 && showHeading)
+          + (index === 0 && block.kind === "preamble" ? 1.5 : 0),
       });
     });
   });
@@ -502,24 +504,21 @@ export function durationOptionsForContractTemplate(form = {}) {
     .filter(option => option.contractTypes.includes(contractType))
     .map(option => {
       if (contractType === "internship") {
-        const routeNote = option.value === "2_months"
-          ? "Dit is tevens de maximale duur van een UWV-proefplaatsing; controleer altijd de gekozen route."
-          : "Stem de duur af op de BOL- of re-integratieroute en leg altijd een concrete einddatum vast.";
+        const routeNote = option.value === "pok_end_date"
+          ? "Gebruik deze keuze voor BOL; de einddatum moet overeenkomen met de praktijkovereenkomst."
+          : "Gebruik deze keuze voor een re-integratieroute of wanneer de einddatum niet uit een POK wordt overgenomen.";
         return {
           ...option,
-          description: `Stage voor bepaalde tijd. ${routeNote}`,
+          description: routeNote,
         };
       }
       if (contractType === "bbl") {
-        const routeNote = option.value === "free"
-          ? "Aanbevolen wanneer de exacte einddatum uit de praktijkovereenkomst wordt overgenomen."
-          : "Stem de einddatum af op de afzonderlijke praktijkovereenkomst (POK).";
-        const chainNote = ["2_years", "3_years", "4_years"].includes(option.value)
-          ? " BBL-contracten tellen niet mee voor de wettelijke ketenbepaling."
-          : "";
+        const routeNote = option.value === "pok_end_date"
+          ? "De einddatum van de leerarbeidsovereenkomst wordt afgestemd op de afzonderlijke praktijkovereenkomst."
+          : "De gebruiker vult zelf een concrete einddatum in; controleer dat deze past bij de praktijkovereenkomst.";
         return {
           ...option,
-          description: `Leerarbeidsovereenkomst voor bepaalde tijd. ${routeNote}${chainNote}`,
+          description: `Leerarbeidsovereenkomst voor bepaalde tijd. ${routeNote}`,
         };
       }
       if (form.cao_key === "cao_particuliere_beveiliging" && option.value === "indefinite") {

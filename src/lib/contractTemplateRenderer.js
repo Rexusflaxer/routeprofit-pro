@@ -362,6 +362,7 @@ function durationDescription(form = {}) {
     "1_year": "1 jaar",
     "2_years": "2 jaar",
     "3_years": "3 jaar",
+    "pok_end_date": "tot de einddatum volgens de praktijkovereenkomst (POK)",
   };
   return labels[form.duration_option] || compact(form.duration_label) || "bepaalde tijd";
 }
@@ -403,6 +404,9 @@ function contractDurationClause(form = {}) {
     return `De arbeidsovereenkomst wordt met ingang van ${startDate} aangegaan voor onbepaalde tijd.`;
   }
   if (durationType(form) === "fixed") {
+    if (form.duration_option === "pok_end_date") {
+      return `De arbeidsovereenkomst wordt met ingang van ${startDate} aangegaan voor bepaalde tijd tot en met ${endDate}. Deze einddatum is afgestemd op de afzonderlijke praktijkovereenkomst (POK). De arbeidsovereenkomst eindigt op die datum van rechtswege zonder dat opzegging nodig is.`;
+    }
     return `De arbeidsovereenkomst wordt aangegaan voor bepaalde tijd, van ${startDate} tot en met ${endDate}, en eindigt daarna van rechtswege zonder dat opzegging nodig is.`;
   }
   return "";
@@ -626,7 +630,10 @@ function stageDurationClause(form = {}) {
   const start = formatDate(form.contract_start_date);
   const end = formatDate(form.contract_end_date);
   if (!start || !end) return "";
-  return `De stage loopt van ${start} tot en met ${end} en eindigt op die datum zonder dat opzegging nodig is, tenzij partijen haar eerder rechtsgeldig beëindigen volgens deze overeenkomst en de onderliggende praktijkovereenkomst of maatregel.`;
+  const sourceText = form.duration_option === "pok_end_date"
+    ? " Deze einddatum is afgestemd op de praktijkovereenkomst (POK)."
+    : "";
+  return `De stage loopt van ${start} tot en met ${end}.${sourceText} De stage eindigt op die datum zonder dat opzegging nodig is, tenzij partijen haar eerder rechtsgeldig beëindigen volgens deze overeenkomst en de onderliggende praktijkovereenkomst of maatregel.`;
 }
 
 function stageWorkClause(form = {}) {
@@ -1050,6 +1057,9 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     } else if (allowedRoutes.has(route) && !compact(form.internship_route_reference)) {
       issues.push("Vul de referentie van de toestemming, maatregel of het trajectplan in.");
     }
+    if (route !== "bol" && form.duration_option === "pok_end_date") {
+      issues.push("De keuze 'Einddatum volgens POK' is alleen geschikt voor BOL. Kies voor deze re-integratieroute een vrije einddatum.");
+    }
     if (route === "uwv_trial_placement") {
       const lastAllowedDay = addMonthsMinusOneDay(form.contract_start_date, 2);
       const endDate = dateValue(form.contract_end_date);
@@ -1113,6 +1123,7 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     if (form.contract_form !== "bepaalde_tijd" || durationType(form) !== "fixed") {
       issues.push("Deze universele BBL-standaardtemplate is uitsluitend ingericht voor een leerarbeidsovereenkomst voor bepaalde tijd. Een overeenkomst voor onbepaalde tijd is niet categorisch verboden, maar vereist maatwerkafspraken over voortzetting na de opleiding en juridische beoordeling.");
     }
+    if (!["pok_end_date", "free"].includes(form.duration_option)) issues.push("Kies voor BBL 'Einddatum volgens POK' of 'Vrije einddatum'.");
     if (!compact(form.bbl_institution_name)) issues.push("Vul de onderwijsinstelling voor de BBL-route in.");
     if (!compact(form.bbl_education_name)) issues.push("Vul de BBL-opleiding in.");
     if (!compact(form.bbl_practice_agreement_reference)) issues.push("Vul het kenmerk van de afzonderlijke praktijkovereenkomst in.");

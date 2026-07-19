@@ -165,7 +165,7 @@
         "string",
         "null"
       ],
-      "description": "Gekozen duur uit de wizard, bijvoorbeeld 6_months, 1_year of free."
+      "description": "Gekozen duur uit de wizard, bijvoorbeeld 6_months, 1_year, pok_end_date of free."
     },
     "duration_label": {
       "type": [
