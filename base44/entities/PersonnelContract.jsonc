@@ -66,13 +66,14 @@
         "parttime_growth",
         "parttime_unknown_model",
         "call_agreement",
+        "min_max",
         "internship",
         "hired_worker",
         "zzp",
         "unknown",
         null
       ],
-      "description": "CAO PB contractmodel: fulltime 144u/loonperiode, parttime vast/groeimodel, oproep, stage, inhuur/payroll, zzp of onbekend."
+      "description": "CAO PB contractmodel: fulltime 144u/loonperiode, parttime vast/groeimodel, oproep/nuluren, min-max, stage, inhuur/payroll, zzp of onbekend."
     },
     "parttime_contract_model": {
       "type": [
@@ -1191,6 +1192,68 @@
         "null"
       ],
       "description": "Maximum uren per loonperiode bij min-maxcontract."
+    },
+    "availability_windows": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object",
+        "properties": {
+          "weekday": {
+            "type": "string",
+            "enum": [
+              "monday",
+              "tuesday",
+              "wednesday",
+              "thursday",
+              "friday",
+              "saturday",
+              "sunday"
+            ]
+          },
+          "start_time": {
+            "type": "string"
+          },
+          "end_time": {
+            "type": "string"
+          },
+          "crosses_midnight": {
+            "type": "boolean",
+            "default": false
+          }
+        },
+        "required": [
+          "weekday",
+          "start_time",
+          "end_time"
+        ],
+        "additionalProperties": false
+      },
+      "description": "Referentiedagen en tijdvakken waarbinnen de werknemer bij een geheel of grotendeels onvoorspelbaar werkpatroon kan worden opgeroepen."
+    },
+    "availability_timezone": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Tijdzone waarin de beschikbaarheidsvensters gelden, standaard Europe/Amsterdam."
+    },
+    "call_channel": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "employee_app",
+        "email",
+        "whatsapp",
+        "sms",
+        "employee_app_and_email",
+        null
+      ],
+      "description": "Schriftelijk of elektronisch kanaal waarmee werkgever oproepen aantoonbaar verstuurt."
     },
     "is_call_agreement": {
       "type": "boolean",

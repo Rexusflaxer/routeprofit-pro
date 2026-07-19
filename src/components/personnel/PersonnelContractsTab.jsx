@@ -172,6 +172,24 @@ const DURATION_OPTIONS = [
 
 const DURATION_OPTION_LABELS = Object.fromEntries(DURATION_OPTIONS.map(option => [option.value, option.label]));
 
+const MIN_MAX_WEEKDAY_OPTIONS = [
+  { value: "monday", label: "Maandag" },
+  { value: "tuesday", label: "Dinsdag" },
+  { value: "wednesday", label: "Woensdag" },
+  { value: "thursday", label: "Donderdag" },
+  { value: "friday", label: "Vrijdag" },
+  { value: "saturday", label: "Zaterdag" },
+  { value: "sunday", label: "Zondag" },
+];
+
+const CALL_CHANNEL_OPTIONS = [
+  { value: "employee_app", label: "Medewerkersapp" },
+  { value: "email", label: "E-mail" },
+  { value: "whatsapp", label: "WhatsApp" },
+  { value: "sms", label: "Sms" },
+  { value: "employee_app_and_email", label: "Medewerkersapp en e-mail" },
+];
+
 const DOCUMENT_STATUS_LABELS = {
   concept: "Concept",
   generated: "Gegenereerd",
@@ -253,6 +271,35 @@ function addMonthsMinusOneDay(value, months) {
   return date.toISOString().slice(0, 10);
 }
 
+function addMonths(value, months) {
+  if (!value || !months) return "";
+  const start = new Date(`${value}T00:00:00.000Z`);
+  if (Number.isNaN(start.getTime())) return "";
+  const originalDay = start.getUTCDate();
+  const target = new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + months, 1));
+  const lastDay = new Date(Date.UTC(target.getUTCFullYear(), target.getUTCMonth() + 1, 0)).getUTCDate();
+  target.setUTCDate(Math.min(originalDay, lastDay));
+  return target.toISOString().slice(0, 10);
+}
+
+function normalizeAvailabilityWindows(value) {
+  let source = value;
+  if (typeof value === "string") {
+    try {
+      source = JSON.parse(value);
+    } catch {
+      source = [];
+    }
+  }
+  if (!Array.isArray(source)) return [];
+  return source.map(item => ({
+    weekday: item?.weekday || item?.day || item?.day_of_week || "",
+    start_time: item?.start_time || item?.start || "09:00",
+    end_time: item?.end_time || item?.end || "17:00",
+    crosses_midnight: item?.crosses_midnight === true,
+  })).filter(item => MIN_MAX_WEEKDAY_OPTIONS.some(day => day.value === item.weekday));
+}
+
 function durationLabel(value) {
   return DURATION_OPTION_LABELS[value] || "";
 }
@@ -269,7 +316,10 @@ function inferContractModel(value) {
     if (option.contract_form !== value.contract_form) return false;
     if (option.duration_type !== durationType) return false;
     if (value.contract_form === "oproep" && option.underlying_contract_form !== value.underlying_contract_form) return false;
-    return option.employment_model === employmentModel || (employmentModel === "call_agreement" && value.min_hours_per_week && option.employment_model === "min_max");
+    const hasMinMaxHours = value.min_hours_per_pay_period || value.max_hours_per_pay_period
+      || value.min_hours_per_week || value.max_hours_per_week;
+    return option.employment_model === employmentModel
+      || (employmentModel === "call_agreement" && hasMinMaxHours && option.employment_model === "min_max");
   });
   return candidate?.value || "";
 }
@@ -429,6 +479,8 @@ function templateMatchesWizard(template, form) {
 }
 
 function initialForm(personnel) {
+  const minHoursPerWeek = numberOrNull(personnel.min_hours);
+  const maxHoursPerWeek = numberOrNull(personnel.max_hours);
   const inferredModel = inferContractModel({
     contract_form: personnel.contract_form || "unknown",
     underlying_contract_form: personnel.underlying_contract_form || null,
@@ -483,10 +535,13 @@ function initialForm(personnel) {
     contract_hours_per_pay_period: "",
     fulltime_reference_hours_per_week: "",
     fulltime_reference_hours_per_pay_period: "",
-    min_hours_per_week: personnel.min_hours ?? "",
-    max_hours_per_week: personnel.max_hours ?? "",
-    min_hours_per_pay_period: "",
-    max_hours_per_pay_period: "",
+    min_hours_per_week: minHoursPerWeek ?? "",
+    max_hours_per_week: maxHoursPerWeek ?? "",
+    min_hours_per_pay_period: minHoursPerWeek === null ? "" : String(minHoursPerWeek * 4),
+    max_hours_per_pay_period: maxHoursPerWeek === null ? "" : String(maxHoursPerWeek * 4),
+    availability_windows: [],
+    availability_timezone: "Europe/Amsterdam",
+    call_channel: "",
     industry_seniority_pay_periods: personnel.industry_seniority_pay_periods ?? "",
     industry_start_date: personnel.industry_start_date || "",
     template_id: null,
@@ -501,9 +556,19 @@ function initialForm(personnel) {
 }
 
 function formFromContract(contract) {
-  const employmentModel = contract.employment_contract_model === "call_agreement" && contract.min_hours_per_week
+  const hasMinMaxHours = contract.min_hours_per_pay_period || contract.max_hours_per_pay_period
+    || contract.min_hours_per_week || contract.max_hours_per_week;
+  const employmentModel = contract.employment_contract_model === "call_agreement" && hasMinMaxHours
     ? "min_max"
     : (contract.employment_contract_model || "unknown");
+  const minHoursPerPeriod = contract.min_hours_per_pay_period
+    ?? (contract.min_hours_per_week !== null && contract.min_hours_per_week !== undefined ? Number(contract.min_hours_per_week) * 4 : "");
+  const maxHoursPerPeriod = contract.max_hours_per_pay_period
+    ?? (contract.max_hours_per_week !== null && contract.max_hours_per_week !== undefined ? Number(contract.max_hours_per_week) * 4 : "");
+  const minHoursPerWeek = contract.min_hours_per_week
+    ?? (minHoursPerPeriod !== "" ? Number(minHoursPerPeriod) / 4 : "");
+  const maxHoursPerWeek = contract.max_hours_per_week
+    ?? (maxHoursPerPeriod !== "" ? Number(maxHoursPerPeriod) / 4 : "");
   const inferredModel = inferContractModel({
     ...contract,
     employment_contract_model: employmentModel,
@@ -555,10 +620,13 @@ function formFromContract(contract) {
     contract_hours_per_pay_period: contract.contract_hours_per_pay_period ?? "",
     fulltime_reference_hours_per_week: contract.fulltime_reference_hours_per_week ?? "",
     fulltime_reference_hours_per_pay_period: contract.fulltime_reference_hours_per_pay_period ?? "",
-    min_hours_per_week: contract.min_hours_per_week ?? "",
-    max_hours_per_week: contract.max_hours_per_week ?? "",
-    min_hours_per_pay_period: contract.min_hours_per_pay_period ?? "",
-    max_hours_per_pay_period: contract.max_hours_per_pay_period ?? "",
+    min_hours_per_week: minHoursPerWeek,
+    max_hours_per_week: maxHoursPerWeek,
+    min_hours_per_pay_period: minHoursPerPeriod,
+    max_hours_per_pay_period: maxHoursPerPeriod,
+    availability_windows: normalizeAvailabilityWindows(contract.availability_windows),
+    availability_timezone: contract.availability_timezone || "Europe/Amsterdam",
+    call_channel: contract.call_channel || "",
     industry_seniority_pay_periods: contract.industry_seniority_pay_periods ?? "",
     industry_start_date: contract.industry_start_date || "",
     template_id: contract.template_id || null,
@@ -603,14 +671,17 @@ function getMissingContractFields(form) {
     && !form.fulltime_reference_hours_per_week && !form.fulltime_reference_hours_per_pay_period) {
     missing.push("fulltime referentienorm");
   }
-  if (form.employment_contract_model === "min_max" && (!form.min_hours_per_week || !form.max_hours_per_week)) {
+  if (form.employment_contract_model === "min_max" && (!form.min_hours_per_pay_period || !form.max_hours_per_pay_period)) {
     missing.push("min-max uren");
   }
+  if (form.employment_contract_model === "min_max" && normalizeAvailabilityWindows(form.availability_windows).length === 0) {
+    missing.push("beschikbaarheidsvensters");
+  }
+  if (form.employment_contract_model === "min_max" && !form.call_channel) missing.push("oproepkanaal");
   return missing;
 }
 
 function normalizedEmploymentModel(form) {
-  if (form.employment_contract_model === "min_max") return "call_agreement";
   return form.employment_contract_model || null;
 }
 
@@ -665,6 +736,9 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
   const allowedFunctionTypes = fromArrayText(form.allowed_function_types_text);
   const allowedGroups = fromArrayText(form.allowed_cao_function_groups_text);
   const allowedLevels = fromArrayText(form.allowed_cao_function_levels_text);
+  const isCallAgreement = ["call_agreement", "min_max"].includes(form.employment_contract_model);
+  const fixedHoursOfferDueAt = isCallAgreement ? addMonths(form.contract_start_date, 12) : null;
+  const fixedHoursOfferDeadlineAt = isCallAgreement ? addMonths(form.contract_start_date, 13) : null;
 
   return {
     personnel_id: personnel.id,
@@ -727,6 +801,22 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     max_hours_per_week: numberOrNull(form.max_hours_per_week),
     min_hours_per_pay_period: numberOrNull(form.min_hours_per_pay_period),
     max_hours_per_pay_period: numberOrNull(form.max_hours_per_pay_period),
+    availability_windows: form.employment_contract_model === "min_max"
+      ? normalizeAvailabilityWindows(form.availability_windows)
+      : [],
+    availability_timezone: form.employment_contract_model === "min_max"
+      ? (form.availability_timezone || "Europe/Amsterdam")
+      : null,
+    call_channel: isCallAgreement ? (form.call_channel || null) : null,
+    is_call_agreement: isCallAgreement,
+    call_agreement_type: form.employment_contract_model === "min_max"
+      ? "min_max"
+      : (form.employment_contract_model === "call_agreement" ? "zero_hours" : "not_applicable"),
+    call_notice_days: isCallAgreement ? 4 : null,
+    payslip_call_agreement_indicator_required: isCallAgreement,
+    fixed_hours_offer_due_at: fixedHoursOfferDueAt,
+    fixed_hours_offer_deadline_at: fixedHoursOfferDeadlineAt,
+    fixed_hours_offer_status: isCallAgreement ? (previous.fixed_hours_offer_status || "not_due") : null,
     industry_seniority_pay_periods: numberOrNull(form.industry_seniority_pay_periods),
     industry_start_date: form.industry_start_date || null,
     contract_context_status: contextReady ? "context_ready" : "draft_missing_context",
@@ -1114,6 +1204,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const isPbParttimeModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     && ["parttime_fixed", "parttime_growth"].includes(form.employment_contract_model);
   const isPbGrowthParttime = isPbParttimeModel && form.employment_contract_model === "parttime_growth";
+  const isPbMinMaxModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    && form.employment_contract_model === "min_max";
   const isPbNonOperationalRole = form.performs_security_work === "false"
     || form.cao_function_group === "non_security_staff";
 
@@ -1135,6 +1227,15 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           ?? (numberOrNull(prev.contract_hours_per_week) !== null ? numberOrNull(prev.contract_hours_per_week) * 4 : null);
         next.contract_hours_per_pay_period = periodHours === null ? "" : String(periodHours);
         next.contract_hours_per_week = periodHours === null ? "" : String(Math.round((periodHours / 4) * 100) / 100);
+      } else if (prev.employment_contract_model === "min_max") {
+        const minPeriodHours = numberOrNull(prev.min_hours_per_pay_period)
+          ?? (numberOrNull(prev.min_hours_per_week) !== null ? numberOrNull(prev.min_hours_per_week) * 4 : null);
+        const maxPeriodHours = numberOrNull(prev.max_hours_per_pay_period)
+          ?? (numberOrNull(prev.max_hours_per_week) !== null ? numberOrNull(prev.max_hours_per_week) * 4 : null);
+        next.min_hours_per_pay_period = minPeriodHours === null ? "" : String(minPeriodHours);
+        next.max_hours_per_pay_period = maxPeriodHours === null ? "" : String(maxPeriodHours);
+        next.min_hours_per_week = minPeriodHours === null ? "" : String(Math.round((minPeriodHours / 4) * 100) / 100);
+        next.max_hours_per_week = maxPeriodHours === null ? "" : String(Math.round((maxPeriodHours / 4) * 100) / 100);
       }
     }
     return next;
@@ -1155,6 +1256,31 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       fulltime_reference_hours_per_week: periodHours === null ? "" : String(Math.round((periodHours / 4) * 100) / 100),
     };
   });
+  const setPbMinMaxPeriodHours = (field, value) => setForm(prev => {
+    const periodHours = numberOrNull(value);
+    const weekField = field === "min_hours_per_pay_period" ? "min_hours_per_week" : "max_hours_per_week";
+    return {
+      ...prev,
+      [field]: value,
+      [weekField]: periodHours === null ? "" : String(Math.round((periodHours / 4) * 100) / 100),
+    };
+  });
+  const toggleMinMaxAvailabilityDay = (weekday) => setForm(prev => {
+    const windows = normalizeAvailabilityWindows(prev.availability_windows);
+    const exists = windows.some(window => window.weekday === weekday);
+    return {
+      ...prev,
+      availability_windows: exists
+        ? windows.filter(window => window.weekday !== weekday)
+        : [...windows, { weekday, start_time: "09:00", end_time: "17:00", crosses_midnight: false }],
+    };
+  });
+  const updateMinMaxAvailabilityWindow = (weekday, field, value) => setForm(prev => ({
+    ...prev,
+    availability_windows: normalizeAvailabilityWindows(prev.availability_windows).map(window => (
+      window.weekday === weekday ? { ...window, [field]: value } : window
+    )),
+  }));
   const setCompanyId = (value) => setForm(prev => {
     const companyId = value === "none" ? null : value;
     if (prev.company_id === companyId) return prev;
@@ -1199,6 +1325,16 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           ?? (numberOrNull(prev.contract_hours_per_week) !== null ? numberOrNull(prev.contract_hours_per_week) * 4 : null);
         next.contract_hours_per_pay_period = periodHours === null ? "" : String(periodHours);
         next.contract_hours_per_week = periodHours === null ? "" : String(Math.round((periodHours / 4) * 100) / 100);
+        next.salary_payment_frequency = "four_weeks";
+      } else if (model?.employment_model === "min_max" && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
+        const minPeriodHours = numberOrNull(prev.min_hours_per_pay_period)
+          ?? (numberOrNull(prev.min_hours_per_week) !== null ? numberOrNull(prev.min_hours_per_week) * 4 : null);
+        const maxPeriodHours = numberOrNull(prev.max_hours_per_pay_period)
+          ?? (numberOrNull(prev.max_hours_per_week) !== null ? numberOrNull(prev.max_hours_per_week) * 4 : null);
+        next.min_hours_per_pay_period = minPeriodHours === null ? "" : String(minPeriodHours);
+        next.max_hours_per_pay_period = maxPeriodHours === null ? "" : String(maxPeriodHours);
+        next.min_hours_per_week = minPeriodHours === null ? "" : String(Math.round((minPeriodHours / 4) * 100) / 100);
+        next.max_hours_per_week = maxPeriodHours === null ? "" : String(Math.round((maxPeriodHours / 4) * 100) / 100);
         next.salary_payment_frequency = "four_weeks";
       } else if (model?.default_hours && !next.contract_hours_per_week) {
         next.contract_hours_per_week = String(model.default_hours);
@@ -1942,15 +2078,51 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       )}
                     </>
                   )}
-                  {form.employment_contract_model === "min_max" && (
+                  {isPbMinMaxModel && (
                     <>
                       <div className="space-y-1">
-                        <Label>Minimale uren per week</Label>
-                        <Input type="number" min="0" value={form.min_hours_per_week ?? ""} onChange={event => set("min_hours_per_week", event.target.value)} />
+                        <Label>Garantie-uren per loonperiode (4 weken)</Label>
+                        <Input
+                          type="number"
+                          min="0.25"
+                          max="143.75"
+                          step="0.25"
+                          value={form.min_hours_per_pay_period ?? ""}
+                          onChange={event => setPbMinMaxPeriodHours("min_hours_per_pay_period", event.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">Dit minimum wordt in iedere loonperiode betaald.</p>
                       </div>
                       <div className="space-y-1">
-                        <Label>Maximale uren per week</Label>
-                        <Input type="number" min="0" value={form.max_hours_per_week ?? ""} onChange={event => set("max_hours_per_week", event.target.value)} />
+                        <Label>Maximumuren per loonperiode (4 weken)</Label>
+                        <Input
+                          type="number"
+                          min="0.5"
+                          max="144"
+                          step="0.25"
+                          value={form.max_hours_per_pay_period ?? ""}
+                          onChange={event => setPbMinMaxPeriodHours("max_hours_per_pay_period", event.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">Binnen dit maximum kan tijdig worden opgeroepen.</p>
+                      </div>
+                      <div className="rounded-lg border border-border bg-muted/20 p-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Gemiddeld per week</p>
+                        <p className="mt-1 text-sm text-foreground">
+                          {form.min_hours_per_week || "-"} tot {form.max_hours_per_week || "-"} uur
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">Automatisch afgeleid uit de vierweekse bandbreedte.</p>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Oproepkanaal</Label>
+                        <Select value={form.call_channel || "none"} onValueChange={value => set("call_channel", value === "none" ? "" : value)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none">Kies oproepkanaal</SelectItem>
+                            {CALL_CHANNEL_OPTIONS.map(option => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">Via dit kanaal wordt iedere oproep aantoonbaar verzonden.</p>
                       </div>
                     </>
                   )}
@@ -1984,6 +2156,60 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       </SelectContent>
                     </Select>
                   </div>
+                  {isPbMinMaxModel && (
+                    <div className="space-y-3 rounded-lg border border-border p-4 md:col-span-3">
+                      <div>
+                        <Label>Referentiedagen en beschikbaarheid</Label>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          Leg vast op welke dagen en binnen welke tijdvakken de medewerker kan worden opgeroepen. Buiten deze vensters is de medewerker niet verplicht een oproep te aanvaarden.
+                        </p>
+                      </div>
+                      <div className="overflow-hidden rounded-lg border border-border">
+                        {MIN_MAX_WEEKDAY_OPTIONS.map(day => {
+                          const window = normalizeAvailabilityWindows(form.availability_windows)
+                            .find(item => item.weekday === day.value);
+                          return (
+                            <div
+                              key={day.value}
+                              className="grid min-h-14 items-center gap-3 border-b border-border px-3 py-2 last:border-b-0 sm:grid-cols-[140px_1fr_1fr_150px]"
+                            >
+                              <label className="flex cursor-pointer items-center gap-2 text-sm font-medium text-foreground">
+                                <input
+                                  type="checkbox"
+                                  checked={!!window}
+                                  onChange={() => toggleMinMaxAvailabilityDay(day.value)}
+                                />
+                                {day.label}
+                              </label>
+                              <Input
+                                type="time"
+                                aria-label={`Begintijd ${day.label}`}
+                                value={window?.start_time || "09:00"}
+                                disabled={!window}
+                                onChange={event => updateMinMaxAvailabilityWindow(day.value, "start_time", event.target.value)}
+                              />
+                              <Input
+                                type="time"
+                                aria-label={`Eindtijd ${day.label}`}
+                                value={window?.end_time || "17:00"}
+                                disabled={!window}
+                                onChange={event => updateMinMaxAvailabilityWindow(day.value, "end_time", event.target.value)}
+                              />
+                              <label className={`flex items-center gap-2 text-xs ${window ? "cursor-pointer text-muted-foreground" : "text-muted-foreground/50"}`}>
+                                <input
+                                  type="checkbox"
+                                  checked={window?.crosses_midnight === true}
+                                  disabled={!window}
+                                  onChange={event => updateMinMaxAvailabilityWindow(day.value, "crosses_midnight", event.target.checked)}
+                                />
+                                Tot volgende dag
+                              </label>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </div>
+                  )}
                 </div>
               </div>
             )}
@@ -2114,8 +2340,12 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         )}
         {!isLoading && sortedContracts.map(contract => {
           const fileDescriptor = contractFileDescriptor(contract);
-          const hoursLabel = ["call_agreement", "min_max"].includes(contract.employment_contract_model) && contract.min_hours_per_week
-            ? `Min-max ${contract.min_hours_per_week || "-"}-${contract.max_hours_per_week || "-"} u/w`
+          const minPeriodHours = contract.min_hours_per_pay_period
+            ?? (contract.min_hours_per_week !== null && contract.min_hours_per_week !== undefined ? Number(contract.min_hours_per_week) * 4 : null);
+          const maxPeriodHours = contract.max_hours_per_pay_period
+            ?? (contract.max_hours_per_week !== null && contract.max_hours_per_week !== undefined ? Number(contract.max_hours_per_week) * 4 : null);
+          const hoursLabel = ["call_agreement", "min_max"].includes(contract.employment_contract_model) && minPeriodHours !== null
+            ? `Min-max ${minPeriodHours || "-"}-${maxPeriodHours || "-"} u/4 weken`
             : `${contract.contract_hours_per_week || contract.contract_hours_per_pay_period || "-"} u`;
           return (
             <button

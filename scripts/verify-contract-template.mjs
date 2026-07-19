@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
   PB_FULLTIME_STANDARD_TEMPLATE as preset,
+  PB_MIN_MAX_REQUIRED_PLACEHOLDERS,
+  PB_MIN_MAX_STANDARD_TEMPLATE as minMaxPreset,
   PB_PARTTIME_GROWTH_REQUIRED_PLACEHOLDERS,
   PB_PARTTIME_GROWTH_STANDARD_TEMPLATE as growthParttimePreset,
   PB_PARTTIME_REQUIRED_PLACEHOLDERS,
@@ -119,6 +121,13 @@ for (const contractModel of ["parttime_growth", "parttime_growth_employment"]) {
     contract_model: contractModel,
   })?.id, growthParttimePreset.id);
 }
+for (const contractModel of ["min_max", "min_max_employment", "min_max_fixed", "min_max_indefinite"]) {
+  assert.equal(getStandardContractTemplatePreset({
+    template_type: "employment_contract",
+    cao_key: "cao_particuliere_beveiliging",
+    contract_model: contractModel,
+  })?.id, minMaxPreset.id);
+}
 assert.equal(getStandardContractTemplatePreset({
   template_type: "employment_contract",
   cao_key: "cao_particuliere_beveiliging",
@@ -151,6 +160,12 @@ assert.match(growthParttimePreset.body, /Parttime groeimodel - CAO Particuliere 
 assert.match(growthParttimePreset.body, /Artikel 5 - Arbeidsduur, groeimodel, rooster en werktijden/);
 assert.deepEqual(getUnknownContractTemplatePlaceholders(growthParttimePreset.body), []);
 assert.deepEqual(getMissingStandardTemplatePlaceholders(growthParttimePreset.body, PB_PARTTIME_GROWTH_REQUIRED_PLACEHOLDERS), []);
+const minMaxEditorBlocks = contractTemplateBlocksFromBody(minMaxPreset.body);
+assert.equal(minMaxEditorBlocks.filter(block => block.kind === "article").length, 17);
+assert.match(minMaxPreset.body, /Min-maxcontract - CAO Particuliere Beveiliging/);
+assert.match(minMaxPreset.body, /Artikel 5 - Arbeidsduur, min-maxmodel en oproepen/);
+assert.deepEqual(getUnknownContractTemplatePlaceholders(minMaxPreset.body), []);
+assert.deepEqual(getMissingStandardTemplatePlaceholders(minMaxPreset.body, PB_MIN_MAX_REQUIRED_PLACEHOLDERS), []);
 const firstArticleIndex = editorBlocks.findIndex(block => block.kind === "article");
 const reorderedBlocks = [...editorBlocks];
 [reorderedBlocks[firstArticleIndex], reorderedBlocks[firstArticleIndex + 1]] = [reorderedBlocks[firstArticleIndex + 1], reorderedBlocks[firstArticleIndex]];
@@ -346,6 +361,21 @@ function evaluateGrowthParttime(form) {
     body,
     unresolved: getUnresolvedContractTemplatePlaceholders(body),
     ...validateStandardContractTemplateContext({ personnel, form, company, template: growthParttimeTemplate }),
+  };
+}
+
+const minMaxTemplate = {
+  ...minMaxPreset,
+  metadata: { standard_template_id: minMaxPreset.id },
+  employment_model_scope: "min_max",
+};
+
+function evaluateMinMax(form) {
+  const body = renderContractTemplateBody(minMaxPreset.body, { personnel, form, company });
+  return {
+    body,
+    unresolved: getUnresolvedContractTemplatePlaceholders(body),
+    ...validateStandardContractTemplateContext({ personnel, form, company, template: minMaxTemplate }),
   };
 }
 
@@ -583,4 +613,79 @@ const wrongGrowthParttimeModel = evaluateGrowthParttime(operationalForm({
 }));
 assert.ok(wrongGrowthParttimeModel.issues.some(issue => issue.includes("volgens het groeimodel")));
 
-console.log("Contracttemplate verificatie geslaagd (groeimodel, vaste/fulltime presets en editor-/versietests).\n");
+const minMaxForm = operationalForm({
+  employment_contract_model: "min_max",
+  contract_form: "oproep",
+  underlying_contract_form: "bepaalde_tijd",
+  contract_hours_per_week: "",
+  contract_hours_per_pay_period: "",
+  min_hours_per_week: "16",
+  max_hours_per_week: "32",
+  min_hours_per_pay_period: "64",
+  max_hours_per_pay_period: "128",
+  call_channel: "employee_app_and_email",
+  availability_windows: [
+    { weekday: "monday", start_time: "07:00", end_time: "23:00", crosses_midnight: false },
+    { weekday: "friday", start_time: "18:00", end_time: "03:00", crosses_midnight: true },
+  ],
+});
+const operationalMinMax = evaluateMinMax(minMaxForm);
+assert.deepEqual(operationalMinMax.issues, []);
+assert.deepEqual(operationalMinMax.unresolved, []);
+assert.match(operationalMinMax.body, /garantie-omvang bedraagt 64 uur/);
+assert.match(operationalMinMax.body, /maximale arbeidsomvang 128 uur/);
+assert.match(operationalMinMax.body, /maandag van 07:00 tot 23:00/);
+assert.match(operationalMinMax.body, /vrijdag van 18:00 tot 03:00 de volgende dag/);
+assert.match(operationalMinMax.body, /medewerkersapp en e-mail/);
+assert.match(operationalMinMax.body, /ten minste vier kalenderdagen/);
+assert.match(operationalMinMax.body, /ten minste drie uur loon/);
+assert.match(operationalMinMax.body, /periode van twaalf maanden/);
+assert.match(operationalMinMax.body, /1\.184,00 bruto per loonperiode over de garantie-uren/);
+assert.match(operationalMinMax.body, /9,24%/);
+assert.match(operationalMinMax.body, /8% vakantiebijslag/);
+assert.match(operationalMinMax.body, /geen verschuivingstoeslag/);
+assert.match(operationalMinMax.body, /toeslag van 100%/);
+
+const pacMinMax = evaluateMinMax({
+  ...minMaxForm,
+  function_type: "centralist_pac",
+  allowed_function_types_text: "centralist_pac",
+  cao_function_group: "centralist",
+});
+assert.deepEqual(pacMinMax.issues, []);
+assert.match(pacMinMax.body, /Centralist PAC/);
+
+const officeMinMax = evaluateMinMax({
+  ...minMaxForm,
+  function_type: "planner",
+  allowed_function_types_text: "planner",
+  cao_function_group: "non_security_staff",
+  cao_function_level: "not_applicable",
+  cao_scale: "",
+  cao_period: "",
+  performs_security_work: "false",
+});
+assert.deepEqual(officeMinMax.issues, []);
+assert.doesNotMatch(officeMinMax.body, /fulltime referentienorm/);
+
+const zeroGuaranteeMinMax = evaluateMinMax({ ...minMaxForm, min_hours_per_week: "0", min_hours_per_pay_period: "0" });
+assert.ok(zeroGuaranteeMinMax.issues.some(issue => issue.includes("nulurenmodel")));
+const equalBandMinMax = evaluateMinMax({ ...minMaxForm, min_hours_per_week: "32", min_hours_per_pay_period: "128" });
+assert.ok(equalBandMinMax.issues.some(issue => issue.includes("vaste arbeidsomvang")));
+const tooHighMinMax = evaluateMinMax({ ...minMaxForm, max_hours_per_week: "40", max_hours_per_pay_period: "160" });
+assert.ok(tooHighMinMax.issues.some(issue => issue.includes("niet hoger zijn dan 144")));
+const conflictingMinMax = evaluateMinMax({ ...minMaxForm, min_hours_per_week: "20" });
+assert.ok(conflictingMinMax.issues.some(issue => issue.includes("minimumuren per week")));
+const missingAvailabilityMinMax = evaluateMinMax({ ...minMaxForm, availability_windows: [] });
+assert.ok(missingAvailabilityMinMax.issues.some(issue => issue.includes("beschikbaarheidsvenster")));
+const invalidOvernightMinMax = evaluateMinMax({
+  ...minMaxForm,
+  availability_windows: [{ weekday: "friday", start_time: "18:00", end_time: "03:00", crosses_midnight: false }],
+});
+assert.ok(invalidOvernightMinMax.issues.some(issue => issue.includes("volgende dag")));
+const missingChannelMinMax = evaluateMinMax({ ...minMaxForm, call_channel: "" });
+assert.ok(missingChannelMinMax.issues.some(issue => issue.includes("kanaal")));
+const wrongMinMaxModel = evaluateMinMax({ ...minMaxForm, employment_contract_model: "call_agreement" });
+assert.ok(wrongMinMaxModel.issues.some(issue => issue.includes("alleen geschikt voor een min-maxcontract")));
+
+console.log("Contracttemplate verificatie geslaagd (min-max, groeimodel, vaste/fulltime presets en editor-/versietests).\n");
