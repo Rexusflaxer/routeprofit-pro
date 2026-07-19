@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 import {
   PB_FULLTIME_STANDARD_TEMPLATE as preset,
+  PB_PARTTIME_GROWTH_REQUIRED_PLACEHOLDERS,
+  PB_PARTTIME_GROWTH_STANDARD_TEMPLATE as growthParttimePreset,
   PB_PARTTIME_REQUIRED_PLACEHOLDERS,
   PB_PARTTIME_STANDARD_TEMPLATE as parttimePreset,
   getStandardContractTemplatePreset,
@@ -110,6 +112,13 @@ for (const contractModel of ["parttime", "parttime_employment", "parttime_fixed"
     contract_model: contractModel,
   })?.id, parttimePreset.id);
 }
+for (const contractModel of ["parttime_growth", "parttime_growth_employment"]) {
+  assert.equal(getStandardContractTemplatePreset({
+    template_type: "employment_contract",
+    cao_key: "cao_particuliere_beveiliging",
+    contract_model: contractModel,
+  })?.id, growthParttimePreset.id);
+}
 assert.equal(getStandardContractTemplatePreset({
   template_type: "employment_contract",
   cao_key: "cao_particuliere_beveiliging",
@@ -136,6 +145,12 @@ assert.match(parttimePreset.body, /Parttime dienstverband - CAO Particuliere Bev
 assert.match(parttimePreset.body, /Artikel 5 - Arbeidsduur, vast parttimemodel, rooster en werktijden/);
 assert.deepEqual(getUnknownContractTemplatePlaceholders(parttimePreset.body), []);
 assert.deepEqual(getMissingStandardTemplatePlaceholders(parttimePreset.body, PB_PARTTIME_REQUIRED_PLACEHOLDERS), []);
+const growthParttimeEditorBlocks = contractTemplateBlocksFromBody(growthParttimePreset.body);
+assert.equal(growthParttimeEditorBlocks.filter(block => block.kind === "article").length, 17);
+assert.match(growthParttimePreset.body, /Parttime groeimodel - CAO Particuliere Beveiliging/);
+assert.match(growthParttimePreset.body, /Artikel 5 - Arbeidsduur, groeimodel, rooster en werktijden/);
+assert.deepEqual(getUnknownContractTemplatePlaceholders(growthParttimePreset.body), []);
+assert.deepEqual(getMissingStandardTemplatePlaceholders(growthParttimePreset.body, PB_PARTTIME_GROWTH_REQUIRED_PLACEHOLDERS), []);
 const firstArticleIndex = editorBlocks.findIndex(block => block.kind === "article");
 const reorderedBlocks = [...editorBlocks];
 [reorderedBlocks[firstArticleIndex], reorderedBlocks[firstArticleIndex + 1]] = [reorderedBlocks[firstArticleIndex + 1], reorderedBlocks[firstArticleIndex]];
@@ -319,6 +334,21 @@ function evaluateParttime(form) {
   };
 }
 
+const growthParttimeTemplate = {
+  ...growthParttimePreset,
+  metadata: { standard_template_id: growthParttimePreset.id },
+  employment_model_scope: "parttime_growth",
+};
+
+function evaluateGrowthParttime(form) {
+  const body = renderContractTemplateBody(growthParttimePreset.body, { personnel, form, company });
+  return {
+    body,
+    unresolved: getUnresolvedContractTemplatePlaceholders(body),
+    ...validateStandardContractTemplateContext({ personnel, form, company, template: growthParttimeTemplate }),
+  };
+}
+
 function operationalForm(overrides = {}) {
   return {
     ...baseForm,
@@ -474,4 +504,83 @@ const wrongParttimeModel = evaluateParttime(operationalForm({
 }));
 assert.ok(wrongParttimeModel.issues.some(issue => issue.includes("groei-, oproep- of min-maxmodel")));
 
-console.log("Contracttemplate verificatie geslaagd (17 contractsituaties, 10 presetselecties en editor-/versietests).\n");
+const operationalGrowthParttime = evaluateGrowthParttime(operationalForm({
+  employment_contract_model: "parttime_growth",
+  contract_hours_per_week: "24",
+  contract_hours_per_pay_period: "96",
+}));
+assert.deepEqual(operationalGrowthParttime.issues, []);
+assert.deepEqual(operationalGrowthParttime.unresolved, []);
+assert.match(operationalGrowthParttime.body, /parttime groeimodel/i);
+assert.match(operationalGrowthParttime.body, /geen oproepkracht/);
+assert.match(operationalGrowthParttime.body, /niet worden verplicht boven 144 uur/);
+assert.match(operationalGrowthParttime.body, /tot en met 152 uur zijn meeruren/);
+assert.match(operationalGrowthParttime.body, /boven 152 uur zijn overuren/);
+assert.match(operationalGrowthParttime.body, /maximaal 24 nieuwe minuren/);
+assert.match(operationalGrowthParttime.body, /dertien weken/);
+assert.match(operationalGrowthParttime.body, /1\.776,00 bruto per loonperiode/);
+assert.doesNotMatch(operationalGrowthParttime.body, /parttimepercentage maal 200/);
+assert.doesNotMatch(operationalGrowthParttime.body, /9,24%/);
+
+const growthParttimeAtFulltimeHours = evaluateGrowthParttime(operationalForm({
+  employment_contract_model: "parttime_growth",
+  contract_hours_per_week: "36",
+  contract_hours_per_pay_period: "144",
+}));
+assert.ok(growthParttimeAtFulltimeHours.issues.some(issue => issue.includes("minder dan 144")));
+
+const officeGrowthParttime = evaluateGrowthParttime({
+  ...baseForm,
+  employment_contract_model: "parttime_growth",
+  function_type: "planner",
+  allowed_function_types_text: "planner",
+  cao_function_group: "non_security_staff",
+  cao_function_level: "not_applicable",
+  cao_scale: "",
+  cao_period: "",
+  performs_security_work: "false",
+  contract_hours_per_week: "24",
+  contract_hours_per_pay_period: "96",
+  fulltime_reference_hours_per_week: "40",
+  fulltime_reference_hours_per_pay_period: "160",
+});
+assert.deepEqual(officeGrowthParttime.issues, []);
+assert.match(officeGrowthParttime.body, /fulltime referentienorm.*160 uur/);
+assert.match(officeGrowthParttime.body, /operationele fulltime definitie/);
+assert.doesNotMatch(officeGrowthParttime.body, /overwerktoeslag/);
+
+const officeGrowthParttimeMissingReference = evaluateGrowthParttime({
+  ...baseForm,
+  employment_contract_model: "parttime_growth",
+  function_type: "planner",
+  allowed_function_types_text: "planner",
+  cao_function_group: "non_security_staff",
+  cao_function_level: "not_applicable",
+  cao_scale: "",
+  cao_period: "",
+  performs_security_work: "false",
+  contract_hours_per_week: "24",
+  contract_hours_per_pay_period: "96",
+});
+assert.ok(officeGrowthParttimeMissingReference.issues.some(issue => issue.includes("fulltime referentienorm")));
+
+const cashValueGrowthParttime = evaluateGrowthParttime(operationalForm({
+  employment_contract_model: "parttime_growth",
+  contract_hours_per_week: "25",
+  contract_hours_per_pay_period: "100",
+  function_type: "geld_waardetransporteur",
+  allowed_function_types_text: "geld_waardetransporteur",
+  cao_function_group: "geld_waardetransporteur",
+  works_cash_value_logistics: "true",
+}));
+assert.deepEqual(cashValueGrowthParttime.issues, []);
+assert.match(cashValueGrowthParttime.body, /180 vakantie-uren/);
+
+const wrongGrowthParttimeModel = evaluateGrowthParttime(operationalForm({
+  employment_contract_model: "parttime_fixed",
+  contract_hours_per_week: "24",
+  contract_hours_per_pay_period: "96",
+}));
+assert.ok(wrongGrowthParttimeModel.issues.some(issue => issue.includes("volgens het groeimodel")));
+
+console.log("Contracttemplate verificatie geslaagd (groeimodel, vaste/fulltime presets en editor-/versietests).\n");

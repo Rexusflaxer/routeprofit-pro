@@ -5,6 +5,7 @@ import {
   PB_CAO_FUNCTION_LEVEL_OPTIONS,
   PB_FULLTIME_STANDARD_TEMPLATE_ID,
   PB_FULLTIME_REQUIRED_PLACEHOLDERS,
+  PB_PARTTIME_GROWTH_STANDARD_TEMPLATE_ID,
   PB_PARTTIME_STANDARD_TEMPLATE_ID,
   getContractTemplatePlaceholderDefinition,
   getStandardContractTemplatePresetById,
@@ -57,6 +58,11 @@ const PB_FIXED_PARTTIME_MODEL_ALIASES = new Set([
   "parttime_indefinite",
 ]);
 
+const PB_GROWTH_PARTTIME_MODEL_ALIASES = new Set([
+  "parttime_growth",
+  "parttime_growth_employment",
+]);
+
 /** @typedef {Record<string, any>} LooseRecord */
 
 function compact(value) {
@@ -89,6 +95,7 @@ function resolvedEmploymentModel(form = {}) {
   const explicitModel = String(form.employment_contract_model || "").trim().toLowerCase();
   if (explicitModel) {
     if (PB_FIXED_PARTTIME_MODEL_ALIASES.has(explicitModel)) return "parttime_fixed";
+    if (PB_GROWTH_PARTTIME_MODEL_ALIASES.has(explicitModel)) return "parttime_growth";
     if (PB_FULLTIME_MODEL_ALIASES.has(explicitModel)) return "fulltime";
     return explicitModel;
   }
@@ -96,6 +103,7 @@ function resolvedEmploymentModel(form = {}) {
     .map(value => String(value || "").trim().toLowerCase())
     .filter(Boolean);
   if (candidates.some(value => PB_FIXED_PARTTIME_MODEL_ALIASES.has(value))) return "parttime_fixed";
+  if (candidates.some(value => PB_GROWTH_PARTTIME_MODEL_ALIASES.has(value))) return "parttime_growth";
   if (candidates.some(value => PB_FULLTIME_MODEL_ALIASES.has(value))) return "fulltime";
   return candidates[0] || "";
 }
@@ -103,6 +111,15 @@ function resolvedEmploymentModel(form = {}) {
 function isPbFixedParttime(form = {}) {
   return form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     && resolvedEmploymentModel(form) === "parttime_fixed";
+}
+
+function isPbGrowthParttime(form = {}) {
+  return form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    && resolvedEmploymentModel(form) === "parttime_growth";
+}
+
+function isPbParttime(form = {}) {
+  return isPbFixedParttime(form) || isPbGrowthParttime(form);
 }
 
 function resolvedContractHours(form = {}, { allowPbFulltimeDefault = true } = {}) {
@@ -303,6 +320,18 @@ function contractHoursClause(form = {}) {
       : "";
     return `Werknemer werkt parttime voor ${formatHours(hoursPerPeriod)} uur per loonperiode van vier weken${weekText}.${referenceText} De cao-definitie van 144 uur en de operationele regels van het vaste parttimemodel zijn door de uitzonderingen voor niet-operationele functies niet automatisch van toepassing. Extra uren worden alleen in onderling overleg gewerkt en wijzigen de structurele arbeidsduur niet automatisch.`;
   }
+  if (isPbGrowthParttime(form) && hoursPerPeriod !== null) {
+    const weekText = hoursPerWeek !== null ? `, gemiddeld ${formatHours(hoursPerWeek)} uur per week` : "";
+    if (securityWork === true) {
+      return `Partijen kiezen het parttime groeimodel. De vaste overeengekomen arbeidsduur bedraagt ${formatHours(hoursPerPeriod)} uur per loonperiode van vier weken${weekText}; werknemer is geen oproepkracht en dit is geen nuluren- of min-maxcontract. Werkgever betaalt ten minste de overeengekomen arbeidsduur. Werknemer kan volgens het tijdig vastgestelde rooster meer werken dan de contracturen, met inachtneming van de cao, de Arbeidstijdenwet en de geldende tijdvakken en arbeidstijd. Een extra dienst buiten de vastgestelde tijdvakken of arbeidstijd wordt door werkgever en werknemer samen overeengekomen. Werknemer kan niet worden verplicht boven 144 uur per loonperiode te werken; uren boven 144 worden alleen met instemming gewerkt. Uren boven de contractuele arbeidsduur tot en met 152 uur zijn meeruren en uren boven 152 uur zijn overuren. Minuren worden betaald, geregistreerd en eventueel later ingehaald volgens de algemene cao-regeling; vanaf 144 uur gebeurt inhalen in overleg, met maximaal 24 nieuwe minuren per loonperiode en een maximaal saldo van 40 minuren. Werkt werknemer gedurende de cao-meetperiode van dertien weken in een regelmatig patroon structureel meer, dan kan werknemer schriftelijk aanpassing van de contracturen verzoeken volgens artikel 11 van de cao. Extra gewerkte uren wijzigen de structurele arbeidsduur niet zonder die cao- of wettelijke procedure.`;
+    }
+
+    const reference = resolvedFulltimeReferenceHours(form);
+    const referenceText = reference.hoursPerPeriod !== null
+      ? ` De overeengekomen fulltime referentienorm voor deze niet-operationele functie bedraagt ${formatHours(reference.hoursPerPeriod)} uur per loonperiode van vier weken${reference.hoursPerWeek !== null ? `, gemiddeld ${formatHours(reference.hoursPerWeek)} uur per week` : ""}.`
+      : "";
+    return `Partijen kiezen het parttime groeimodel. De vaste overeengekomen arbeidsduur bedraagt ${formatHours(hoursPerPeriod)} uur per loonperiode van vier weken${weekText}; werknemer is geen oproepkracht en dit is geen nuluren- of min-maxcontract. Werkgever betaalt ten minste de overeengekomen arbeidsduur.${referenceText} Omdat werknemer normaal geen beveiligingswerk verricht, zijn de operationele fulltime definitie, functie- en loonindeling en vergoedingen die artikel 3 van de cao uitzondert niet automatisch van toepassing. Werknemer kan binnen het overeengekomen rooster en de geldende arbeidsvoorwaarden meer uren werken dan de contracturen. Extra uren, minuren en eventuele vergoedingen worden verwerkt volgens de voor werknemer geldende wet, cao-bepalingen en bedrijfs- of individuele arbeidsvoorwaarden. Werkt werknemer structureel meer, dan beoordelen partijen op schriftelijk verzoek en volgens de toepasselijke cao- en wettelijke procedure of de contracturen moeten worden aangepast.`;
+  }
   if (securityWork === true) {
     return "Werknemer werkt fulltime voor 144 uur per loonperiode van vier weken, gemiddeld 36 uur per week. Een regulier jaar telt dertien loonperioden; een kalenderjaar met een drieënvijftigste week wordt verwerkt volgens de cao.";
   }
@@ -360,12 +389,9 @@ function contractFunctionClassificationClause(form = {}) {
 }
 
 function contractVacationClause(form = {}) {
-  if (isPbFixedParttime(form)) {
+  if (isPbParttime(form)) {
     if (isCashValueLogistics(form)) {
       return "Werknemer bouwt vakantie op naar rato van de betaalde arbeidstijd per loonperiode. Voor geld- en waardelogistiek geldt daarbij de fulltime referentie van 180 vakantie-uren, overeenkomend met 25 vakantiedagen per kalenderjaar, volgens hoofdstuk 15 van de cao.";
-    }
-    if (resolveSecurityWork(form) === false) {
-      return "Werknemer bouwt vakantie op naar rato van de overeengekomen parttime arbeidsduur ten opzichte van de voor deze niet-operationele functie vastgelegde fulltime referentienorm. Bij een volledig kalenderjaar geldt de cao-referentie van 20 wettelijke en 4 bovenwettelijke vakantiedagen.";
     }
     return "Werknemer bouwt vakantie op naar rato van de betaalde arbeidstijd per loonperiode, tot maximaal 144 betaalde uren per loonperiode. De fulltime referentie bedraagt 172,8 vakantie-uren, overeenkomend met 24 vakantiedagen per kalenderjaar, volgens de cao.";
   }
@@ -579,11 +605,14 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   const preset = standardTemplatePreset(template);
   if (!preset) return { issues, warnings };
   const isFulltimePreset = preset.id === PB_FULLTIME_STANDARD_TEMPLATE_ID;
-  const isParttimePreset = preset.id === PB_PARTTIME_STANDARD_TEMPLATE_ID;
+  const isFixedParttimePreset = preset.id === PB_PARTTIME_STANDARD_TEMPLATE_ID;
+  const isGrowthParttimePreset = preset.id === PB_PARTTIME_GROWTH_STANDARD_TEMPLATE_ID;
+  const isParttimePreset = isFixedParttimePreset || isGrowthParttimePreset;
 
   if (form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY) issues.push("Deze standaardtemplate mag alleen met de CAO Particuliere Beveiliging worden gebruikt.");
   if (isFulltimePreset && resolvedEmploymentModel(form) !== "fulltime") issues.push("Deze standaardtemplate is alleen geschikt voor een fulltime dienstverband.");
-  if (isParttimePreset && resolvedEmploymentModel(form) !== "parttime_fixed") issues.push("Deze standaardtemplate is alleen geschikt voor een parttime dienstverband volgens het vaste model; gebruik voor een groei-, oproep- of min-maxmodel een andere template.");
+  if (isFixedParttimePreset && resolvedEmploymentModel(form) !== "parttime_fixed") issues.push("Deze standaardtemplate is alleen geschikt voor een parttime dienstverband volgens het vaste model; gebruik voor een groei-, oproep- of min-maxmodel een andere template.");
+  if (isGrowthParttimePreset && resolvedEmploymentModel(form) !== "parttime_growth") issues.push("Deze standaardtemplate is alleen geschikt voor een parttime dienstverband volgens het groeimodel; gebruik voor een vast, oproep- of min-maxmodel een andere template.");
   const missingRequiredPlaceholders = getMissingStandardTemplatePlaceholders(template.body, preset.required_placeholders);
   if (missingRequiredPlaceholders.length > 0) issues.push(`In de standaardtemplate ontbreken verplichte placeholders: ${missingRequiredPlaceholders.join(", ")}.`);
   if (!compact(company.legal_name || company.display_name)) issues.push("De juridische bedrijfsnaam ontbreekt.");
@@ -641,9 +670,9 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     }
     if (isParttimePreset) {
       if (hoursPerPeriod === null) {
-        issues.push("Vul voor het vaste parttimemodel een vast aantal contracturen per loonperiode van vier weken in.");
+        issues.push(`Vul voor het ${isGrowthParttimePreset ? "parttime groeimodel" : "vaste parttimemodel"} een vast aantal contracturen per loonperiode van vier weken in.`);
       } else if (hoursPerPeriod <= 0 || hoursPerPeriod >= 144) {
-        issues.push("Een operationele parttimer in het vaste model moet meer dan 0 en minder dan 144 contracturen per loonperiode hebben.");
+        issues.push(`Een parttimer in het ${isGrowthParttimePreset ? "groeimodel" : "vaste model"} moet meer dan 0 en minder dan 144 contracturen per loonperiode hebben.`);
       }
       if (hoursPerWeek !== null && hoursPerPeriod !== null && Math.abs((hoursPerWeek * 4) - hoursPerPeriod) > 0.01) {
         issues.push("De weekuren en uren per loonperiode spreken elkaar tegen. De gemiddelde weekuren moeten gelijk zijn aan de periode-uren gedeeld door vier.");
@@ -664,6 +693,8 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     if (isParttimePreset) {
       if (hoursPerPeriod === null || hoursPerPeriod <= 0) {
         issues.push("Vul voor de niet-operationele parttime functie een vast aantal contracturen per loonperiode in.");
+      } else if (hoursPerPeriod >= 144) {
+        issues.push("De CAO Particuliere Beveiliging definieert een parttimer als een werknemer met minder dan 144 contracturen per loonperiode; laat een afwijkende niet-operationele omvang juridisch controleren.");
       }
       if (hoursPerWeek !== null && hoursPerPeriod !== null && Math.abs((hoursPerWeek * 4) - hoursPerPeriod) > 0.01) {
         issues.push("De weekuren en uren per loonperiode spreken elkaar tegen. De gemiddelde weekuren moeten gelijk zijn aan de periode-uren gedeeld door vier.");

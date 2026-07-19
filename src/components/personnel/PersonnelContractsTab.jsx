@@ -592,13 +592,14 @@ function getMissingContractFields(form) {
   if (form.contract_form !== "zzp" && form.contract_form !== "stage" && form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY && !form.salary_payment_frequency) {
     missing.push("betaalperiode loon");
   }
-  const pbFixedParttime = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY && form.employment_contract_model === "parttime_fixed";
-  if (pbFixedParttime && !form.contract_hours_per_pay_period) {
+  const pbParttimeModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    && ["parttime_fixed", "parttime_growth"].includes(form.employment_contract_model);
+  if (pbParttimeModel && !form.contract_hours_per_pay_period) {
     missing.push("contracturen per loonperiode");
   } else if (["fulltime", "parttime_fixed", "parttime_growth"].includes(form.employment_contract_model) && !form.contract_hours_per_week && !form.contract_hours_per_pay_period) {
     missing.push("arbeidsduur");
   }
-  if (pbFixedParttime && (form.performs_security_work === "false" || form.cao_function_group === "non_security_staff")
+  if (pbParttimeModel && (form.performs_security_work === "false" || form.cao_function_group === "non_security_staff")
     && !form.fulltime_reference_hours_per_week && !form.fulltime_reference_hours_per_pay_period) {
     missing.push("fulltime referentienorm");
   }
@@ -1110,8 +1111,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     () => validateStandardContractTemplateContext({ personnel, form, company: selectedCompany || {}, template: selectedTemplate || {} }),
     [form, personnel, selectedCompany, selectedTemplate]
   );
-  const isPbFixedParttime = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
-    && form.employment_contract_model === "parttime_fixed";
+  const isPbParttimeModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    && ["parttime_fixed", "parttime_growth"].includes(form.employment_contract_model);
+  const isPbGrowthParttime = isPbParttimeModel && form.employment_contract_model === "parttime_growth";
   const isPbNonOperationalRole = form.performs_security_work === "false"
     || form.cao_function_group === "non_security_staff";
 
@@ -1128,7 +1130,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       if (prev.employment_contract_model === "fulltime") {
         next.contract_hours_per_week = "36";
         next.contract_hours_per_pay_period = "144";
-      } else if (prev.employment_contract_model === "parttime_fixed") {
+      } else if (["parttime_fixed", "parttime_growth"].includes(prev.employment_contract_model)) {
         const periodHours = numberOrNull(prev.contract_hours_per_pay_period)
           ?? (numberOrNull(prev.contract_hours_per_week) !== null ? numberOrNull(prev.contract_hours_per_week) * 4 : null);
         next.contract_hours_per_pay_period = periodHours === null ? "" : String(periodHours);
@@ -1192,7 +1194,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.contract_hours_per_week = "36";
         next.contract_hours_per_pay_period = "144";
         next.salary_payment_frequency = "four_weeks";
-      } else if (model?.employment_model === "parttime_fixed" && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
+      } else if (["parttime_fixed", "parttime_growth"].includes(model?.employment_model) && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
         const periodHours = numberOrNull(prev.contract_hours_per_pay_period)
           ?? (numberOrNull(prev.contract_hours_per_week) !== null ? numberOrNull(prev.contract_hours_per_week) * 4 : null);
         next.contract_hours_per_pay_period = periodHours === null ? "" : String(periodHours);
@@ -1874,24 +1876,34 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 )}
 
                 <div className="grid gap-4 md:grid-cols-3">
-                  {isPbFixedParttime ? (
+                  {isPbParttimeModel ? (
                     <>
                       <div className="space-y-1">
                         <Label>Vaste contracturen per loonperiode (4 weken)</Label>
                         <Input
                           type="number"
                           min="0"
-                          max={isPbNonOperationalRole ? undefined : "143.99"}
+                          max="143.99"
                           step="0.25"
                           value={form.contract_hours_per_pay_period ?? ""}
                           onChange={event => setPbParttimePeriodHours(event.target.value)}
                         />
-                        <p className="text-xs text-muted-foreground">Dit is de juridische arbeidsduur voor het vaste parttimemodel.</p>
+                        <p className="text-xs text-muted-foreground">
+                          {isPbGrowthParttime
+                            ? "Dit is de gegarandeerde vaste arbeidsduur. Extra inzet blijft gebonden aan de rooster- en urenregels van de cao."
+                            : "Dit is de juridische arbeidsduur voor het vaste parttimemodel."}
+                        </p>
                       </div>
                       <div className="rounded-lg border border-border bg-muted/20 p-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Gemiddeld per week</p>
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+                          {isPbGrowthParttime ? "Groeimodel" : "Gemiddeld per week"}
+                        </p>
                         <p className="mt-1 text-sm text-foreground">{form.contract_hours_per_week || "-"} uur</p>
-                        <p className="mt-1 text-xs text-muted-foreground">Automatisch: periode-uren gedeeld door vier.</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {isPbGrowthParttime
+                            ? "Gemiddeld per week. Geen oproepcontract; boven 144 uur kan alleen met instemming worden gewerkt."
+                            : "Automatisch: periode-uren gedeeld door vier."}
+                        </p>
                       </div>
                       {isPbNonOperationalRole && (
                         <>
