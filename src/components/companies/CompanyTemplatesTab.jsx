@@ -2600,7 +2600,7 @@ function initialTemplate(companyId) {
     probation_scope: "any",
     duration_type_scope: "",
     duration_options: [],
-    visible_in_contract_wizard: true,
+    visible_in_contract_wizard: false,
     cao_key: "",
     function_type: "",
     default_letterhead_id: "none",
@@ -2653,7 +2653,7 @@ function templateFormFromRecord(companyId, record) {
     probation_scope: record.probation_scope || "any",
     duration_type_scope: record.duration_type_scope || "any",
     duration_options: durationOptions,
-    visible_in_contract_wizard: record.visible_in_contract_wizard !== false,
+    visible_in_contract_wizard: record.status === "published" && record.visible_in_contract_wizard !== false,
     cao_key: record.cao_key || "",
     function_type: record.function_type || "",
     default_letterhead_id: record.default_letterhead_id || "none",
@@ -3260,7 +3260,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         probation_scope: templateForm.probation_scope || "any",
         duration_type_scope: contractModel?.duration_type || "any",
         duration_options: isEmploymentTemplate ? templateForm.duration_options : null,
-        visible_in_contract_wizard: isEmploymentTemplate ? templateForm.visible_in_contract_wizard !== false : false,
+        visible_in_contract_wizard: isEmploymentTemplate && status === "published",
         cao_key: isEmploymentTemplate ? (templateForm.cao_key || null) : null,
         function_type: templateForm.function_type || null,
         default_letterhead_id: templateForm.default_letterhead_id === "none" ? null : templateForm.default_letterhead_id,
@@ -3373,7 +3373,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
         metadata: {
           ...buildAuditMetadata(currentUser, "gearchiveerd", record.metadata || {}, auditActors),
           status_before_archive: record.status || "draft",
-          visible_before_archive: record.visible_in_contract_wizard !== false,
+          visible_before_archive: record.status === "published" && record.visible_in_contract_wizard !== false,
         },
       });
       setMessage({ type: "success", text: `Versie ${record.version || 1} is naar het archief verplaatst.` });
@@ -3389,7 +3389,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     try {
       setTemplateActionId(record.id);
       const restoredStatus = statusBeforeTemplateArchive(record);
-      const restoredVisibility = isEmploymentTemplateType(record.template_type)
+      const restoredVisibility = isEmploymentTemplateType(record.template_type) && restoredStatus === "published"
         ? record.metadata?.visible_before_archive !== false
         : false;
       await base44.entities.CompanyContractTemplate.update(record.id, {
@@ -3407,7 +3407,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
   };
 
   const toggleTemplateVisibility = async (record, visible) => {
-    if (!isEmploymentTemplateType(record.template_type) || record.status === "archived") return;
+    if (!isEmploymentTemplateType(record.template_type) || record.status !== "published") return;
     try {
       setTemplateActionId(record.id);
       await base44.entities.CompanyContractTemplate.update(record.id, {
@@ -3629,7 +3629,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       default_letterhead_id: defaultLetterhead?.id || "none",
       template_type: templateBrowserType,
       template_choice: "new",
-      visible_in_contract_wizard: isEmploymentTemplate,
+      visible_in_contract_wizard: false,
     };
 
     let nextStep = templateSourceStep(templateBrowserType);
@@ -3649,24 +3649,6 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     setTemplateWizardOpen(true);
   };
 
-  const startEditTemplate = (record) => {
-    if (["published", "archived"].includes(record.status)) {
-      setMessage({
-        type: "error",
-        text: `Versie ${record.version || 1} is ${record.status === "published" ? "gepubliceerd" : "gearchiveerd"} en kan niet rechtstreeks worden gewijzigd. Maak via de versieregel een nieuwe versie aan.`,
-      });
-      return;
-    }
-    setMessage(null);
-    setEditingTemplateId(record.id);
-    const nextForm = templateFormFromRecord(companyId, record);
-    setTemplateForm(nextForm);
-    setEditingTemplateBlockId(null);
-    setTemplateBlockDraft(null);
-    setTemplateStep(templateEditorStep(nextForm.template_type));
-    setTemplateWizardOpen(true);
-  };
-
   const createNewTemplateVersion = (record) => {
     const familyKey = contractTemplateFamilyKey(record);
     const familyVersions = templates.filter(item => contractTemplateFamilyKey(item) === familyKey);
@@ -3674,7 +3656,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       .filter(item => ["draft", "review"].includes(item.status))
       .sort((a, b) => Number(b.version || 1) - Number(a.version || 1))[0];
     if (existingDraft) {
-      setMessage({ type: "error", text: `Voor deze contractcategorie bestaat al een open versie ${existingDraft.version || 1}. Die versie is geopend.` });
+      setMessage({ type: "success", text: `Open versie ${existingDraft.version || 1} wordt hervat.` });
       setEditingTemplateId(existingDraft.id);
       const draftForm = templateFormFromRecord(companyId, existingDraft);
       setTemplateForm(draftForm);
@@ -3692,6 +3674,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       template_source_mode: "existing",
       version: nextContractTemplateVersion(templates, familyKey),
       status: "draft",
+      visible_in_contract_wizard: false,
       is_new_version: true,
       version_source_id: record.id,
     };
@@ -3720,7 +3703,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       ...initialTemplate(companyId),
       default_letterhead_id: prev.default_letterhead_id || defaultLetterhead?.id || "none",
       template_type: templateType,
-      visible_in_contract_wizard: isEmploymentTemplateType(templateType),
+      visible_in_contract_wizard: false,
       body: "",
     }));
     setTemplateStep(isEmploymentTemplateType(templateType) ? 2 : 2);
@@ -5898,23 +5881,10 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                   <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-medium text-foreground">Afronden</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Bepaal de weergave en voeg eventueel een interne notitie aan deze versie toe.</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Voeg eventueel een interne notitie aan deze versie toe.</p>
                     </div>
                     <Badge variant="outline" className="h-7 px-2.5 text-xs">Versie {templateForm.version || 1}</Badge>
                   </div>
-                  {isEmploymentTemplate && (
-                    <div className="flex items-center justify-between gap-4 rounded-lg border border-border bg-background/50 px-4 py-3">
-                      <div>
-                        <p className="text-sm font-medium text-foreground">Zichtbaar bij personeelscontracten</p>
-                        <p className="mt-0.5 text-xs text-muted-foreground">Na publicatie kan deze versie worden gekozen bij het aanmaken van een contract voor een personeelslid.</p>
-                      </div>
-                      <Switch
-                        checked={templateForm.visible_in_contract_wizard !== false}
-                        onCheckedChange={checked => setTemplateForm(prev => ({ ...prev, visible_in_contract_wizard: checked }))}
-                        aria-label="Zichtbaar bij personeelscontracten"
-                      />
-                    </div>
-                  )}
                   <div className="space-y-2">
                     <Label>Notitie voor deze versie</Label>
                     <Textarea
@@ -6052,7 +6022,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
             </div>
           ) : visibleTemplateBrowserItems.map((item, index) => {
             const actionPending = templateActionId === item.id;
-            const canEdit = !["published", "archived"].includes(item.status);
+            const hasOpenVersion = ["draft", "review"].includes(item.status);
             return (
               <div key={item.id} className={`${TEMPLATE_TABLE_GRID} items-start border-b border-border px-5 py-4 text-sm transition-colors hover:bg-accent/35`}>
                 <div className="flex min-w-0 flex-wrap items-center gap-1.5">
@@ -6063,7 +6033,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                 </p>
                 <div>{statusBadge(item.status)}</div>
                 <div className="min-w-0">
-                  {isEmploymentTemplateType(item.template_type) && item.status !== "archived" ? (
+                  {isEmploymentTemplateType(item.template_type) && item.status === "published" ? (
                     <div className="flex items-center gap-2">
                       <Switch
                         checked={item.visible_in_contract_wizard !== false}
@@ -6072,11 +6042,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         aria-label={`Versie ${item.version || 1} ${item.visible_in_contract_wizard === false ? "zichtbaar" : "onzichtbaar"} maken bij personeelscontracten`}
                       />
                     </div>
-                  ) : (
+                  ) : item.status === "archived" ? (
                     <span className="flex items-center gap-1 text-xs text-muted-foreground">
                       <EyeOff className="h-3.5 w-3.5" />
-                      {item.status === "archived" ? "Verborgen" : "Niet van toepassing"}
+                      Verborgen
                     </span>
+                  ) : (
+                    <span className="text-muted-foreground" aria-label="Zichtbaarheid is pas beschikbaar na publicatie">-</span>
                   )}
                 </div>
                 <span className="min-w-0 truncate text-sm text-muted-foreground">{getAuditActorLabel(item, auditActors)}</span>
@@ -6114,23 +6086,13 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="h-7 w-7 text-muted-foreground hover:text-foreground disabled:opacity-35"
-                        onClick={() => startEditTemplate(item)}
-                        disabled={!canEdit || actionPending}
-                        title={canEdit ? "Versie bewerken" : "Gepubliceerde versie; maak een nieuwe versie om te wijzigen"}
-                        aria-label={`Versie ${item.version || 1} bewerken`}
-                      >
-                        <Edit className="h-3.5 w-3.5" />
-                      </Button>
-                      <Button
-                        type="button"
-                        variant="ghost"
-                        size="icon"
                         className="h-7 w-7 text-muted-foreground hover:text-foreground"
                         onClick={() => createNewTemplateVersion(item)}
                         disabled={actionPending}
-                        title="Nieuwe versie maken op basis van deze versie"
-                        aria-label={`Nieuwe versie maken op basis van versie ${item.version || 1}`}
+                        title={hasOpenVersion ? "Open versie hervatten" : "Nieuwe versie maken op basis van deze versie"}
+                        aria-label={hasOpenVersion
+                          ? `Open versie ${item.version || 1} hervatten`
+                          : `Nieuwe versie maken op basis van versie ${item.version || 1}`}
                       >
                         <Copy className="h-3.5 w-3.5" />
                       </Button>
