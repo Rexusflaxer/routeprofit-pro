@@ -1748,7 +1748,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
           );
         })}
       </div>
-      <div className={`min-w-0 flex-1 ${["identity", "payroll", "bank"].includes(active) ? "" : "p-5 overflow-hidden"}`}>{renderTab()}</div>
+      <div className={`min-w-0 flex-1 ${["identity", "payroll", "bank", "contracts"].includes(active) ? "" : "p-5 overflow-hidden"}`}>{renderTab()}</div>
     </div>
   );
 }

@@ -1713,8 +1713,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const [form, setForm] = useState(() => initialForm(personnel));
   const [previewFile, setPreviewFile] = useState(null);
   const [actionMessage, setActionMessage] = useState(null);
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [companyFilter, setCompanyFilter] = useState("all");
+  const [showArchive, setShowArchive] = useState(false);
   const [signedUploadId, setSignedUploadId] = useState(null);
 
   const { data: currentUser = null } = useQuery({
@@ -1737,18 +1736,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const sortedContracts = useMemo(() => [...contracts].sort((a, b) =>
     String(b.contract_start_date || "").localeCompare(String(a.contract_start_date || ""))
   ), [contracts]);
-  const filteredContracts = useMemo(() => sortedContracts.filter(contract => {
-    if (companyFilter !== "all" && contract.company_id !== companyFilter) return false;
-    if (statusFilter === "all") return true;
-    if (statusFilter === "current") return !["archived", "expired"].includes(contract.document_status);
-    return contract.document_status === statusFilter;
-  }), [companyFilter, sortedContracts, statusFilter]);
-  const contractSummary = useMemo(() => ({
-    active: contracts.filter(contract => contract.document_status === "active").length,
-    scheduled: contracts.filter(contract => contract.document_status === "scheduled").length,
-    attention: contracts.filter(contract => ["concept", "generated", "signed"].includes(contract.document_status)).length,
-    archived: contracts.filter(contract => ["archived", "expired"].includes(contract.document_status)).length,
-  }), [contracts]);
+  const activeContracts = useMemo(() => sortedContracts.filter(c => !["archived", "expired"].includes(c.document_status)), [sortedContracts]);
+  const archivedContracts = useMemo(() => sortedContracts.filter(c => ["archived", "expired"].includes(c.document_status)), [sortedContracts]);
+  const visibleContracts = showArchive ? archivedContracts : activeContracts;
 
   const companyIds = useMemo(() => uniqueValues([
     form.company_id,
@@ -2610,19 +2600,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   ];
 
   return (
-    <div className="space-y-5">
-      <div className="flex flex-wrap items-center justify-between gap-3">
-        <div>
-          <p className="text-xs font-semibold uppercase tracking-wider text-primary">Contracten</p>
-          <p className="text-sm text-muted-foreground">Arbeidscontracten en contractdocumenten voor planning en payroll.</p>
-        </div>
-        <Button type="button" onClick={openNew} size="sm">
-          <Plus className="mr-1 h-4 w-4" /> Nieuw contract
-        </Button>
-      </div>
-
+    <div className="flex flex-col h-full">
       {actionMessage && (
-        <div className={`rounded-lg border p-3 text-sm ${actionMessage.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"}`}>
+        <div className={`mb-3 rounded-lg border p-3 text-sm ${actionMessage.type === "error" ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-emerald-200 bg-emerald-50 text-emerald-700 dark:border-emerald-900 dark:bg-emerald-950/40 dark:text-emerald-200"}`}>
           {actionMessage.text}
         </div>
       )}
@@ -3574,22 +3554,18 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       )}
       </AnimatePresence>
 
-      <div className="overflow-x-auto rounded-lg border border-border">
-        <div className="grid min-w-[1280px] grid-cols-[minmax(220px,1.4fr)_minmax(160px,1fr)_minmax(150px,.9fr)_minmax(150px,.8fr)_minmax(140px,.8fr)_minmax(120px,.7fr)_minmax(130px,.8fr)_128px] border-b border-border bg-muted/30 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-          <div>Contract / functie</div>
-          <div>Bedrijf</div>
-          <div>Periode</div>
-          <div>CAO / schaal</div>
-          <div>Uren / model</div>
-          <div>Status</div>
-          <div>Door</div>
-          <div />
+      <div className="grid grid-cols-[minmax(200px,1.4fr)_minmax(150px,1fr)_minmax(140px,.9fr)_minmax(140px,.8fr)_minmax(130px,.8fr)_minmax(110px,.7fr)_minmax(120px,.7fr)_132px] items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="truncate">Contract / functie</span><span className="truncate">Bedrijf</span><span className="truncate">Periode</span><span className="truncate">CAO / schaal</span><span className="truncate">Uren / model</span><span className="truncate">Status</span><span className="truncate">Door</span>
+        <div className="flex items-center justify-end gap-2">
+          {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
+          {showArchive ? <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs whitespace-nowrap"><ChevronLeft className="w-3 h-3 mr-1" /> Actieve contracten</Button> : <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs whitespace-nowrap"><Archive className="w-3 h-3 mr-1" /> Archief {archivedContracts.length > 0 ? `(${archivedContracts.length})` : ""}</Button>}
+          {!showArchive && <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs whitespace-nowrap"><Plus className="w-3 h-3 mr-1" /> Nieuw contract</Button>}
         </div>
-        {isLoading && <div className="p-6 text-sm text-muted-foreground">Contracten laden...</div>}
-        {!isLoading && filteredContracts.length === 0 && (
-          <div className="p-8 text-center text-sm text-muted-foreground">Geen contracten binnen deze filters.</div>
-        )}
-        {!isLoading && filteredContracts.map(contract => {
+      </div>
+      {isLoading && <div className="p-6 text-sm text-muted-foreground">Contracten laden...</div>}
+      {!isLoading && visibleContracts.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{showArchive ? "Geen contracten in het archief." : "Nog geen contracten geregistreerd."}</div>}
+      <div className="divide-y divide-border">
+      {!isLoading && visibleContracts.map(contract => {
           const fileDescriptor = contractFileDescriptor(contract);
           const minPeriodHours = contract.min_hours_per_pay_period
             ?? (contract.min_hours_per_week !== null && contract.min_hours_per_week !== undefined ? Number(contract.min_hours_per_week) * 4 : null);
@@ -3617,7 +3593,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               onKeyDown={event => {
                 if (event.key === "Enter" || event.key === " ") openPreview(contract);
               }}
-              className="grid min-w-[1280px] w-full cursor-pointer grid-cols-[minmax(220px,1.4fr)_minmax(160px,1fr)_minmax(150px,.9fr)_minmax(150px,.8fr)_minmax(140px,.8fr)_minmax(120px,.7fr)_minmax(130px,.8fr)_128px] items-center border-b border-border px-4 py-4 text-left text-sm last:border-b-0 hover:bg-muted/30"
+              className="grid w-full cursor-pointer grid-cols-[minmax(200px,1.4fr)_minmax(150px,1fr)_minmax(140px,.9fr)_minmax(140px,.8fr)_minmax(130px,.8fr)_minmax(110px,.7fr)_minmax(120px,.7fr)_132px] items-center px-4 py-4 text-left text-sm hover:bg-muted/30"
             >
               <div className="min-w-0">
                 <p className="truncate font-semibold text-foreground">{contractTypeLabel}</p>
