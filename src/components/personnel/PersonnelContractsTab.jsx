@@ -17,6 +17,7 @@ import {
   CAO_OPTIONS,
   FUNCTION_CATALOG_OPTIONS,
   functionLabel,
+  getActiveWpbrLicenses,
   SHARED_BACKOFFICE_FUNCTIONS,
 } from "@/lib/securityCaoCatalog";
 import {
@@ -47,7 +48,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Eye,
-  FileText,
   FileSignature,
   Pencil,
   Plus,
@@ -615,6 +615,64 @@ function templateMatchesWizard(template, form) {
   if (probationScope === "without_probation" && form.probation_agreed !== "false") return false;
   if (probationScope === "not_applicable" && form.probation_agreed !== "not_applicable") return false;
   return true;
+}
+
+const TEMPLATE_CONTRACT_MODEL_ALIASES = {
+  fulltime_employment: "fulltime",
+  fulltime_fixed: "fulltime",
+  fulltime_indefinite: "fulltime",
+  parttime_employment: "parttime_fixed",
+  parttime_fixed: "parttime_fixed",
+  parttime_indefinite: "parttime_fixed",
+  parttime_growth: "parttime_growth",
+  parttime_growth_fixed: "parttime_growth",
+  parttime_growth_indefinite: "parttime_growth",
+  min_max_employment: "min_max",
+  min_max_fixed: "min_max",
+  min_max_indefinite: "min_max",
+  call_employment: "zero_hours",
+  call_fixed: "zero_hours",
+  call_indefinite: "zero_hours",
+  call_agreement: "zero_hours",
+  zero_hours: "zero_hours",
+  internship: "internship",
+  internship_fixed: "internship",
+  bbl: "bbl",
+  bbl_fixed: "bbl",
+  bbl_employment: "bbl",
+};
+
+function inferredTemplateEmploymentModel(template = {}) {
+  const scopedModel = template.employment_model_scope === "call_agreement"
+    ? "zero_hours"
+    : template.employment_model_scope;
+  if (scopedModel && scopedModel !== "any") return scopedModel;
+  const storedModel = template.contract_model || template.metadata?.contract_model;
+  return TEMPLATE_CONTRACT_MODEL_ALIASES[storedModel] || null;
+}
+
+function templateSupportsContractKind(template, caoKey, employmentModel) {
+  if (!template || template.status !== "published" || template.visible_in_contract_wizard === false) return false;
+  if (template.template_type && template.template_type !== "employment_contract") return false;
+  if (caoKey && template.cao_key && template.cao_key !== caoKey) return false;
+
+  const scopedEmploymentModel = inferredTemplateEmploymentModel(template);
+  if (scopedEmploymentModel && scopedEmploymentModel !== employmentModel) return false;
+
+  const expectedLearningRoute = employmentModel === "internship"
+    ? "article_14_internship"
+    : (employmentModel === "bbl" ? "bbl" : null);
+  const templateLearningRoute = template.learning_route_scope || template.metadata?.learning_route_scope || null;
+  if (templateLearningRoute && templateLearningRoute !== expectedLearningRoute) return false;
+
+  return CONTRACT_MODEL_OPTIONS
+    .filter(option => option.employment_model === employmentModel && contractModelAllowedForCao(option, caoKey))
+    .some(option => {
+      const formScope = template.contract_form_scope || "any";
+      if (formScope !== "any" && formScope !== option.contract_form && formScope !== option.underlying_contract_form) return false;
+      const durationScope = template.duration_type_scope || "any";
+      return durationScope === "any" || durationScope === option.duration_type;
+    });
 }
 
 function initialForm(personnel) {
@@ -1739,6 +1797,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const activeContracts = useMemo(() => sortedContracts.filter(c => c.document_status === "active"), [sortedContracts]);
   const archivedContracts = useMemo(() => sortedContracts.filter(c => c.document_status !== "active"), [sortedContracts]);
   const visibleContracts = showArchive ? archivedContracts : activeContracts;
+  const activeCompanies = useMemo(
+    () => companies.filter(company => (company.status || "active") === "active"),
+    [companies]
+  );
 
   const companyIds = useMemo(() => uniqueValues([
     form.company_id,
@@ -1746,20 +1808,27 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     ...contracts.map(contract => contract.company_id),
   ].filter(Boolean)), [companies, contracts, form.company_id]);
 
-  const { data: companyCaoAssignments = [], isLoading: companyCaoAssignmentsLoading } = useQuery({
-    queryKey: ["company-cao-assignments", form.company_id],
-    queryFn: () => base44.entities.CompanyCaoAssignment.filter({ company_id: form.company_id }, "-created_date"),
-    enabled: !!form.company_id,
+  const { data: allCompanyCaoAssignments = [], isLoading: companyCaoAssignmentsLoading } = useQuery({
+    queryKey: ["company-cao-assignments", "personnel-contracts", companyIds],
+    queryFn: async () => {
+      const lists = await Promise.all(companyIds.map(companyId => safeFilterEntity("CompanyCaoAssignment", { company_id: companyId }, "-created_date")));
+      return lists.flat();
+    },
+    enabled: companyIds.length > 0,
   });
+  const companyCaoAssignments = useMemo(
+    () => allCompanyCaoAssignments.filter(assignment => assignment.company_id === form.company_id),
+    [allCompanyCaoAssignments, form.company_id]
+  );
 
   const selectedCaoConfigurationIds = useMemo(() => uniqueValues([
     personnel.cao_configuration_id,
     form.cao_configuration_id,
     ...contracts.map(contract => contract.cao_configuration_id),
-    ...companyCaoAssignments.map(assignment => assignment.cao_configuration_id),
-  ]), [companyCaoAssignments, contracts, form.cao_configuration_id, personnel.cao_configuration_id]);
+    ...allCompanyCaoAssignments.map(assignment => assignment.cao_configuration_id),
+  ]), [allCompanyCaoAssignments, contracts, form.cao_configuration_id, personnel.cao_configuration_id]);
 
-  const { data: caoConfigurationOptions = [] } = useQuery({
+  const { data: caoConfigurationOptions = [], isLoading: caoConfigurationOptionsLoading } = useQuery({
     queryKey: ["cao-configuration-options", "personnel-contracts", personnel.id, selectedCaoConfigurationIds],
     queryFn: async () => {
       const { data } = await base44.functions.invoke("listCaoConfigurationOptions", {
@@ -1769,13 +1838,20 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     },
   });
 
-  const { data: companyWpbrLicenses = [] } = useQuery({
-    queryKey: ["company-wpbr-licenses", "personnel-contracts", form.company_id],
-    queryFn: () => safeFilterEntity("CompanyWpbrLicense", { company_id: form.company_id }, "-created_date"),
-    enabled: !!form.company_id,
+  const { data: allCompanyWpbrLicenses = [], isLoading: companyWpbrLicensesLoading } = useQuery({
+    queryKey: ["company-wpbr-licenses", "personnel-contracts", companyIds],
+    queryFn: async () => {
+      const lists = await Promise.all(companyIds.map(companyId => safeFilterEntity("CompanyWpbrLicense", { company_id: companyId }, "-created_date")));
+      return lists.flat();
+    },
+    enabled: companyIds.length > 0,
   });
+  const companyWpbrLicenses = useMemo(
+    () => allCompanyWpbrLicenses.filter(license => license.company_id === form.company_id),
+    [allCompanyWpbrLicenses, form.company_id]
+  );
 
-  const { data: contractTemplates = [] } = useQuery({
+  const { data: contractTemplates = [], isLoading: contractTemplatesLoading } = useQuery({
     queryKey: ["company-contract-templates", companyIds],
     queryFn: async () => {
       const lists = await Promise.all(companyIds.map(companyId => safeFilterEntity("CompanyContractTemplate", { company_id: companyId }, "-created_date")));
@@ -1827,10 +1903,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const selectedTemplateClauses = useMemo(() => (contractClauses || [])
     .filter(clause => clause.company_id === form.company_id && clause.status !== "archived"),
   [contractClauses, form.company_id]);
-  const availableContractKinds = useMemo(
-    () => CONTRACT_KIND_OPTIONS.filter(option => contractKindAllowedForCao(option, form.cao_key)),
-    [form.cao_key]
-  );
   const isArticle14Internship = form.employment_contract_model === "internship";
   const isBblModel = form.employment_contract_model === "bbl";
   const isLegacyCallModel = ["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model);
@@ -1842,10 +1914,71 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     && form.contract_start_date < FLEX_REFORM_EFFECTIVE_DATE
     && (!form.contract_end_date || form.contract_end_date >= FLEX_REFORM_EFFECTIVE_DATE);
   const wageTableYear = getYear(form.contract_start_date || new Date());
+  const activeConfigurationDate = new Date().toISOString().slice(0, 10);
   const companyCaoKeyOptions = useMemo(
-    () => buildCompanyCaoKeyOptions(companyCaoAssignments, form.contract_start_date, caoConfigurationOptions),
-    [caoConfigurationOptions, companyCaoAssignments, form.contract_start_date]
+    () => buildCompanyCaoKeyOptions(companyCaoAssignments, activeConfigurationDate, caoConfigurationOptions),
+    [activeConfigurationDate, caoConfigurationOptions, companyCaoAssignments]
   );
+  const companyReadinessLoading = activeCompanies.length > 0 && (
+    companyCaoAssignmentsLoading
+    || caoConfigurationOptionsLoading
+    || companyWpbrLicensesLoading
+    || contractTemplatesLoading
+  );
+  const companySelectionOptions = useMemo(() => activeCompanies.map(company => {
+    if (companyReadinessLoading) {
+      return { company, selectable: false, loading: true, missing: ["bedrijfsgegevens controleren"] };
+    }
+
+    const activeAssignments = allCompanyCaoAssignments.filter(assignment => (
+      assignment.company_id === company.id && isDateWithinOptionRange(assignment, activeConfigurationDate)
+    ));
+    const activeCaoKeys = uniqueValues(activeAssignments.map(assignment => resolveAssignmentCaoKey(assignment, caoConfigurationOptions)));
+    const activeLicenses = getActiveWpbrLicenses(allCompanyWpbrLicenses
+      .filter(license => license.company_id === company.id)
+      .filter(license => (!license.status || license.status === "active")
+        && isDateWithinOptionRange(license, activeConfigurationDate)));
+    const companyTemplates = contractTemplates.filter(template => template.company_id === company.id);
+    const hasConfiguredFunctions = activeAssignments.some(assignment => (
+      Array.isArray(assignment.applies_to_activities) && assignment.applies_to_activities.length > 0
+    ));
+    const hasUsableTemplate = activeCaoKeys.some(caoKey => CONTRACT_KIND_OPTIONS.some(option => (
+      contractKindAllowedForCao(option, caoKey)
+      && companyTemplates.some(template => templateSupportsContractKind(template, caoKey, option.value))
+    )));
+    const missing = [];
+    if (!compact(company.legal_name || company.display_name)) missing.push("juridische bedrijfsnaam");
+    if (!compact(company.kvk_number)) missing.push("KvK-nummer");
+    if (!compact(company.street_name || company.street) || !compact(company.postal_code) || !compact(company.city)) missing.push("volledig adres");
+    if (activeLicenses.length === 0) missing.push("actieve WPBR-vergunning");
+    if (activeCaoKeys.length === 0) missing.push("actieve CAO");
+    if (activeCaoKeys.length > 0 && !hasConfiguredFunctions) missing.push("functies bij de CAO");
+    if (activeCaoKeys.length > 0 && !hasUsableTemplate) missing.push("gepubliceerd contractsjabloon");
+    return { company, selectable: missing.length === 0, loading: false, missing };
+  }), [
+    activeCompanies,
+    activeConfigurationDate,
+    allCompanyCaoAssignments,
+    allCompanyWpbrLicenses,
+    caoConfigurationOptions,
+    companyReadinessLoading,
+    contractTemplates,
+  ]);
+  const contractKindOptions = useMemo(() => CONTRACT_KIND_OPTIONS.map(option => {
+    const allowedForCao = contractKindAllowedForCao(option, form.cao_key);
+    const matchingTemplates = contractTemplates.filter(template => (
+      template.company_id === form.company_id
+      && templateSupportsContractKind(template, form.cao_key, option.value)
+    ));
+    return {
+      ...option,
+      selectable: allowedForCao && matchingTemplates.length > 0,
+      templateCount: matchingTemplates.length,
+      unavailableReason: allowedForCao
+        ? "Nog geen gepubliceerd template voor dit contracttype."
+        : `Niet beschikbaar binnen ${CAO_OPTION_LABELS[form.cao_key] || "de gekozen CAO"}.`,
+    };
+  }), [contractTemplates, form.cao_key, form.company_id]);
   const companyFunctionOptions = useMemo(
     () => buildCompanyFunctionOptions(companyCaoAssignments, form.contract_start_date, form.cao_key, caoConfigurationOptions, form.function_type),
     [caoConfigurationOptions, companyCaoAssignments, form.cao_key, form.contract_start_date, form.function_type]
@@ -2001,7 +2134,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         written_scale_period_notice_confirmed: "unknown",
         periodic_increase_due_confirmed: "unknown",
       } : {}),
-      ...(keepSelectedModel ? {} : {
+      ...(!caoChanged && keepSelectedModel ? {} : {
         contract_model: "",
         contract_form: "unknown",
         underlying_contract_form: null,
@@ -2589,13 +2722,30 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
 
   const nextStep = () => setWizardStep(step => Math.min(step + 1, 10));
   const previousStep = () => setWizardStep(step => Math.max(step - 1, 1));
+  const chooseDocumentSource = (sourceType) => {
+    setForm(prev => ({
+      ...prev,
+      source_type: sourceType,
+      ...(sourceType === "generated" ? { existing_contract_file: null } : {}),
+    }));
+    setWizardStep(2);
+  };
+  const chooseCompany = (companyId) => {
+    setCompanyId(companyId);
+    setWizardStep(3);
+  };
+  const chooseCao = (caoKey) => {
+    setCaoKey(caoKey);
+    setWizardStep(4);
+  };
+  const chooseContractKind = (employmentModel) => {
+    setContractKind(employmentModel);
+    setWizardStep(5);
+  };
 
   useEffect(() => {
     if (!wizardOpen || !form.company_id || companyCaoAssignmentsLoading) return;
     setForm(prev => {
-      if (companyCaoKeyOptions.length === 1 && prev.cao_key !== companyCaoKeyOptions[0].value) {
-        return { ...prev, cao_key: companyCaoKeyOptions[0].value, cao_configuration_id: null };
-      }
       if (prev.cao_key && !companyCaoKeyOptions.some(option => option.value === prev.cao_key)) {
         return { ...prev, cao_key: null, cao_configuration_id: null };
       }
@@ -2658,9 +2808,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const stepItems = [
     "Documentbron",
     "Bedrijf",
-    "Startdatum",
     "CAO",
     "Contractvorm",
+    "Startdatum",
     "Looptijd",
     "Functies",
     "Proeftijd",
@@ -2668,11 +2818,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     "Controle",
   ];
   const currentStepComplete = [
-    !!form.source_type && (form.source_type !== "uploaded_existing" || !!form.existing_contract_file || !!form.signed_file_id),
+    !!form.source_type,
     !!form.company_id,
-    !!form.contract_start_date,
     !!form.cao_key,
     !!form.contract_model,
+    !!form.contract_start_date,
     form.duration_type !== "fixed" || (!!form.duration_option && !!form.contract_end_date),
     selectedFunctionValues.length > 0,
     isArticle14Internship || ["true", "false", "not_applicable"].includes(form.probation_agreed),
@@ -2698,8 +2848,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           className="rounded-none border-0 border-b border-primary/30 bg-muted/20 p-5 overflow-hidden"
         >
           {editingId && <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">Contract bewerken</p>}
-          <div className="flex items-center justify-between gap-3 mb-4">
-            <div className="flex items-center gap-1 min-w-0 flex-1">
+          <div className="flex items-center gap-1 mb-4">
               {stepItems.map((s, i) => (
                 <React.Fragment key={s}>
                   <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full shrink-0 transition-colors ${i + 1 === wizardStep ? "bg-primary text-primary-foreground" : i + 1 < wizardStep ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" : "text-muted-foreground"}`}>
@@ -2709,117 +2858,137 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   {i < stepItems.length - 1 && <div className={`h-px flex-1 min-w-2 ${i + 1 < wizardStep ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />}
                 </React.Fragment>
               ))}
-            </div>
-            <Button type="button" variant="ghost" size="icon" onClick={() => setWizardOpen(false)} className="shrink-0">
-              <X className="h-4 w-4" />
-            </Button>
           </div>
           <div className="relative">
             <AnimatePresence mode="wait">
               <motion.div key={wizardStep} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
             {wizardStep === 1 && (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm font-medium text-foreground">Hoe wilt u het contract vastleggen?</p>
-                </div>
+              <div className="space-y-3">
+                <p className="text-sm font-medium text-foreground">Kies de documentbron</p>
                 <div className="grid grid-cols-1 gap-2">
                   {[
                     { value: "generated", label: "Nieuw contract genereren", description: "Gebruik een gepubliceerd contractsjabloon en laat alle contractgegevens automatisch invullen." },
-                    { value: "uploaded_existing", label: "Bestaand contract uploaden", description: "Voeg ook oudere contracten toe; de volledige keten wordt daarna opnieuw juridisch beoordeeld." },
-                  ].map(option => {
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => { set("source_type", option.value); if (option.value === "generated") setWizardStep(2); }}
-                        className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${form.source_type === option.value ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
-                      >
-                        <div className="min-w-0">
-                          <p className="text-sm font-semibold text-foreground">{option.label}</p>
-                          <p className="mt-0.5 text-xs text-muted-foreground">{option.description}</p>
-                        </div>
-                        {form.source_type === option.value ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
-                      </button>
-                    );
-                  })}
+                    { value: "uploaded_existing", label: "Nieuw contract uploaden", description: "Registreer een bestaand of eerder ondertekend contract en laat de contracthistorie controleren." },
+                  ].map(option => (
+                    <button
+                      key={option.value}
+                      type="button"
+                      onClick={() => chooseDocumentSource(option.value)}
+                      className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${form.source_type === option.value ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                    >
+                      <div className="min-w-0">
+                        <span className="text-sm font-semibold text-foreground">{option.label}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">{option.description}</span>
+                      </div>
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
+                    </button>
+                  ))}
                 </div>
-                {form.source_type === "uploaded_existing" && (
-                  <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-primary/40 bg-primary/5 p-5 text-center transition-colors hover:bg-primary/10">
-                    <Upload className="h-6 w-6 text-primary" />
-                    <span className="mt-2 text-sm font-medium text-foreground">{form.existing_contract_file?.name || "Selecteer het bestaande contract"}</span>
-                    <span className="mt-0.5 text-xs text-muted-foreground">PDF, JPG of PNG. OCR en documentherkenning kunnen hier later op aansluiten.</span>
-                    <input
-                      type="file"
-                      accept=".pdf,image/*"
-                      className="hidden"
-                      onChange={event => { set("existing_contract_file", event.target.files?.[0] || null); setWizardStep(2); }}
-                    />
-                  </label>
-                )}
               </div>
             )}
 
             {wizardStep === 2 && (
               <div className="space-y-3">
-                <p className="text-sm text-muted-foreground">Kies het bedrijf waarmee deze medewerker het contract aangaat. De CAO's en sjablonen worden daarna hierop gefilterd.</p>
+                <p className="text-sm font-medium text-foreground">Kies het actieve bedrijf dat het contract aangaat</p>
                 <div className="grid grid-cols-1 gap-2">
-                  {companies.map(company => (
-                    <button
-                      key={company.id}
-                      type="button"
-                      onClick={() => { setCompanyId(company.id); nextStep(); }}
-                      className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${form.company_id === company.id ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
-                    >
-                      <div>
-                        <p className="font-semibold text-foreground">{company.display_name || company.legal_name}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">{company.legal_name && company.display_name !== company.legal_name ? company.legal_name : company.city || "Bedrijf"}</p>
-                      </div>
-                      {form.company_id === company.id ? <Check className="h-4 w-4 text-primary" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-                    </button>
-                  ))}
+                  {companySelectionOptions.map(({ company, selectable, loading, missing }) => {
+                    const selected = form.company_id === company.id;
+                    return (
+                      <button
+                        key={company.id}
+                        type="button"
+                        disabled={!selectable}
+                        onClick={() => chooseCompany(company.id)}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all ${!selectable
+                          ? "cursor-not-allowed border-border bg-muted/40 opacity-60"
+                          : selected
+                            ? "border-primary bg-accent active:scale-[0.99]"
+                            : "border-border bg-card hover:border-primary hover:bg-accent active:scale-[0.99]"}`}
+                      >
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold text-foreground">{company.display_name || company.legal_name}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">
+                            {selectable
+                              ? (company.legal_name && company.display_name !== company.legal_name ? company.legal_name : company.city || "Bedrijf gereed")
+                              : `${loading ? "Controleren" : "Ontbreekt"}: ${missing.join(", ")}`}
+                          </span>
+                        </div>
+                        {!selectable
+                          ? <Badge className="shrink-0 border-0 bg-muted text-xs text-muted-foreground">{loading ? "Controleren" : "Aanvullen"}</Badge>
+                          : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                      </button>
+                    );
+                  })}
                 </div>
-                {companies.length === 0 && <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">Er zijn nog geen bedrijven beschikbaar voor dit contract.</p>}
+                {activeCompanies.length === 0 && <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">Er zijn geen actieve bedrijven beschikbaar voor dit contract.</p>}
               </div>
             )}
 
             {wizardStep === 3 && (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div>
-                  <p className="text-sm font-medium text-foreground">Wanneer begint het contract?</p>
-                  <p className="mt-1 text-sm text-muted-foreground">De startdatum bepaalt welke bedrijfs-CAO, CAO-versie en salaristabel beschikbaar zijn. Dit werkt ook voor historische contracten.</p>
-                </div>
-                <div className="max-w-md space-y-1">
-                  <Label>Startdatum *</Label>
-                  <Input type="date" value={form.contract_start_date || ""} onChange={event => set("contract_start_date", event.target.value)} />
-                </div>
-              </div>
-            )}
-
-            {wizardStep === 4 && (
-              <div className="space-y-4">
-                <div>
-                  <p className="text-sm font-medium text-foreground">{selectedCompany?.display_name || selectedCompany?.legal_name || "Geen bedrijf geselecteerd"}</p>
-                  <p className="text-xs text-muted-foreground">Alleen CAO's die in het bedrijfsprofiel aan dit bedrijf zijn gekoppeld worden getoond.</p>
+                  <p className="text-sm font-medium text-foreground">Kies de actieve CAO</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{selectedCompany?.display_name || selectedCompany?.legal_name}. Alleen CAO's die nu actief aan dit bedrijf zijn gekoppeld worden getoond.</p>
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   {companyCaoKeyOptions.map(option => (
                     <button
                       key={option.value}
                       type="button"
-                      onClick={() => setCaoKey(option.value)}
-                      className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${form.cao_key === option.value ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                      onClick={() => chooseCao(option.value)}
+                      className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${form.cao_key === option.value ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
                     >
-                      <div>
-                        <p className="font-semibold text-foreground">{option.label}</p>
-                        <p className="mt-1 text-xs text-muted-foreground">De juiste cao-versie en salaristabel worden automatisch bepaald op de contractstartdatum.</p>
+                      <div className="min-w-0">
+                        <span className="text-sm font-semibold text-foreground">{option.label}</span>
+                        <span className="ml-2 text-xs text-muted-foreground">Versie en salaristabel worden later automatisch op de startdatum bepaald.</span>
                       </div>
-                      {form.cao_key === option.value ? <Check className="h-4 w-4 text-primary" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                      <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                     </button>
                   ))}
                 </div>
                 {form.company_id && !companyCaoAssignmentsLoading && companyCaoKeyOptions.length === 0 && (
                   <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                    Dit bedrijf heeft nog geen actieve CAO-koppeling voor de gekozen contractdatum. Voeg deze eerst toe in het bedrijfsprofiel.
+                    Dit bedrijf heeft geen actieve CAO-koppeling. Voeg deze eerst toe in het bedrijfsprofiel.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {wizardStep === 4 && (
+              <div className="space-y-3">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Kies het contracttype</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Alleen contracttypen met een gepubliceerd template voor dit bedrijf en deze CAO kunnen worden gekozen.</p>
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  {contractKindOptions.map(option => {
+                    const selected = form.employment_contract_model === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        disabled={!option.selectable}
+                        onClick={() => chooseContractKind(option.value)}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all ${!option.selectable
+                          ? "cursor-not-allowed border-border bg-muted/40 opacity-60"
+                          : selected
+                            ? "border-primary bg-accent active:scale-[0.99]"
+                            : "border-border bg-card hover:border-primary hover:bg-accent active:scale-[0.99]"}`}
+                      >
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold text-foreground">{option.label}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">{option.selectable ? option.description : option.unavailableReason}</span>
+                        </div>
+                        {!option.selectable
+                          ? <Badge className="shrink-0 border-0 bg-muted text-xs text-muted-foreground">Niet beschikbaar</Badge>
+                          : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                {!contractKindOptions.some(option => option.selectable) && (
+                  <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    Publiceer eerst minimaal één passend contractsjabloon onder {CAO_OPTION_LABELS[form.cao_key] || "de gekozen CAO"}.
                   </p>
                 )}
               </div>
@@ -2828,33 +2997,13 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             {wizardStep === 5 && (
               <div className="space-y-4">
                 <div>
-                  <p className="text-sm font-medium text-foreground">Kies het type dienstverband</p>
-                  <p className="mt-1 text-sm text-muted-foreground">De looptijd wordt in de volgende stap gekozen. Alleen contractsoorten die passen bij de geselecteerde CAO worden getoond.</p>
+                  <p className="text-sm font-medium text-foreground">Wanneer begint het contract?</p>
+                  <p className="mt-1 text-sm text-muted-foreground">De startdatum bepaalt automatisch de geldige CAO-versie en salaristabel. Dit werkt ook voor historische contracten.</p>
                 </div>
-                <div className="grid grid-cols-1 gap-2">
-                  {availableContractKinds.map(option => {
-                    const selected = form.employment_contract_model === option.value;
-                    return (
-                      <button
-                        key={option.value}
-                        type="button"
-                        onClick={() => setContractKind(option.value)}
-                        className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
-                      >
-                        <div className="min-w-0">
-                          <p className="font-semibold text-foreground">{option.label}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
-                        </div>
-                        {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
-                      </button>
-                    );
-                  })}
+                <div className="max-w-md space-y-1">
+                  <Label>Startdatum *</Label>
+                  <Input type="date" value={form.contract_start_date || ""} onChange={event => set("contract_start_date", event.target.value)} />
                 </div>
-                {availableContractKinds.length === 0 && (
-                  <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                    Voor deze CAO zijn nog geen ondersteunde contractvormen ingericht.
-                  </p>
-                )}
               </div>
             )}
 
@@ -3444,9 +3593,21 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       </div>
                     </section>
                   ) : (
-                    <section className="rounded-lg border border-border p-4">
+                    <section className="space-y-3 rounded-lg border border-border p-4">
                       <p className="text-sm font-semibold text-foreground">Geüpload contract</p>
-                      <p className="mt-1 text-sm text-muted-foreground">{form.existing_contract_file?.name || "Het bestaande contractbestand is al gekoppeld."}</p>
+                      <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-4 py-3 transition-colors hover:bg-primary/10">
+                        <Upload className="h-5 w-5 shrink-0 text-primary" />
+                        <span className="min-w-0 flex-1">
+                          <span className="block truncate text-sm font-medium text-foreground">{form.existing_contract_file?.name || (form.signed_file_id ? "Het bestaande contractbestand is gekoppeld" : "Selecteer het contractdocument")}</span>
+                          <span className="block text-xs text-muted-foreground">PDF, JPG of PNG</span>
+                        </span>
+                        <input
+                          type="file"
+                          accept=".pdf,image/*"
+                          className="hidden"
+                          onChange={event => set("existing_contract_file", event.target.files?.[0] || null)}
+                        />
+                      </label>
                     </section>
                   )}
                   <div className="rounded-lg border border-border p-3">
@@ -3559,12 +3720,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             )}
               </motion.div></AnimatePresence></div>
 
-          <div className="flex items-center justify-between border-t border-border p-4">
-            {wizardStep > 1 && <Button type="button" variant="ghost" size="sm" onClick={previousStep}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>}
+          <div className="flex items-center justify-between pt-3">
+            {wizardStep > 1
+              ? <Button type="button" variant="ghost" size="sm" onClick={previousStep}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+              : <span aria-hidden="true" />}
             <div className="flex gap-2">
               {wizardStep === 1 && <Button type="button" variant="ghost" size="sm" onClick={() => setWizardOpen(false)}><X className="w-4 h-4 mr-1" /> Annuleren</Button>}
               {wizardStep < 10 ? (
-                wizardStep > 2 && (<Button type="button" size="sm" onClick={nextStep} disabled={!currentStepComplete}>
+                wizardStep > 4 && (<Button type="button" size="sm" onClick={nextStep} disabled={!currentStepComplete}>
                   Volgende <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>)
               ) : (
