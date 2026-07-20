@@ -2768,8 +2768,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     <button
                       key={company.id}
                       type="button"
-                      onClick={() => setCompanyId(company.id)}
-                      className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${form.company_id === company.id ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                      onClick={() => { setCompanyId(company.id); nextStep(); }}
+                      className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${form.company_id === company.id ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
                     >
                       <div>
                         <p className="font-semibold text-foreground">{company.display_name || company.legal_name}</p>
@@ -3561,15 +3561,13 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               </motion.div></AnimatePresence></div>
 
           <div className="flex items-center justify-between border-t border-border p-4">
-            <Button type="button" variant="ghost" onClick={previousStep} disabled={wizardStep === 1}>
-              <ChevronLeft className="mr-1 h-4 w-4" /> Terug
-            </Button>
+            {wizardStep > 1 && <Button type="button" variant="ghost" onClick={previousStep}><ChevronLeft className="mr-1 h-4 w-4" /> Terug</Button>}
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={() => setWizardOpen(false)}>Annuleren</Button>
               {wizardStep < 10 ? (
-                <Button type="button" onClick={nextStep} disabled={!currentStepComplete} hidden={wizardStep === 1}>
+                wizardStep > 2 && (<Button type="button" onClick={nextStep} disabled={!currentStepComplete}>
                   Volgende <ChevronRight className="ml-1 h-4 w-4" />
-                </Button>
+                </Button>)
               ) : (
                 <Button
                   type="button"
