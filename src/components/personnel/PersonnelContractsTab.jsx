@@ -1713,7 +1713,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const [form, setForm] = useState(() => initialForm(personnel));
   const [previewFile, setPreviewFile] = useState(null);
   const [actionMessage, setActionMessage] = useState(null);
-  const [statusFilter, setStatusFilter] = useState("current");
+  const [statusFilter, setStatusFilter] = useState("all");
   const [companyFilter, setCompanyFilter] = useState("all");
   const [signedUploadId, setSignedUploadId] = useState(null);
 
@@ -3573,55 +3573,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         </motion.div>
       )}
       </AnimatePresence>
-
-      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
-        {[
-          ["Actief", contractSummary.active, ShieldCheck, "text-emerald-600"],
-          ["Ingepland", contractSummary.scheduled, CalendarClock, "text-sky-600"],
-          ["Actie nodig", contractSummary.attention, FileSignature, "text-amber-600"],
-          ["Archief", contractSummary.archived, Archive, "text-muted-foreground"],
-        ].map(([label, count, Icon, color]) => (
-          <div key={label} className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
-            <div>
-              <p className="text-xs font-medium text-muted-foreground">{label}</p>
-              <p className="mt-1 text-xl font-semibold text-foreground">{count}</p>
-            </div>
-            <Icon className={`h-5 w-5 ${color}`} />
-          </div>
-        ))}
-      </div>
-
-      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-3">
-        <div className="min-w-[200px] space-y-1">
-          <Label className="text-xs">Status</Label>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="current">Lopend en in behandeling</SelectItem>
-              <SelectItem value="all">Alle contracten</SelectItem>
-              <SelectItem value="active">Actief</SelectItem>
-              <SelectItem value="scheduled">Ingepland</SelectItem>
-              <SelectItem value="generated">Wacht op ondertekening</SelectItem>
-              <SelectItem value="signed">Getekend - controle nodig</SelectItem>
-              <SelectItem value="archived">Gearchiveerd</SelectItem>
-              <SelectItem value="expired">Verlopen</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="min-w-[220px] space-y-1">
-          <Label className="text-xs">Bedrijf</Label>
-          <Select value={companyFilter} onValueChange={setCompanyFilter}>
-            <SelectTrigger><SelectValue /></SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">Alle bedrijven</SelectItem>
-              {companies.map(company => (
-                <SelectItem key={company.id} value={company.id}>{company.display_name || company.legal_name}</SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
-        </div>
-        <p className="pb-2 text-xs text-muted-foreground">{filteredContracts.length} van {contracts.length} contracten</p>
-      </div>
 
       <div className="overflow-x-auto rounded-lg border border-border">
         <div className="grid min-w-[1280px] grid-cols-[minmax(220px,1.4fr)_minmax(160px,1fr)_minmax(150px,.9fr)_minmax(150px,.8fr)_minmax(140px,.8fr)_minmax(120px,.7fr)_minmax(130px,.8fr)_128px] border-b border-border bg-muted/30 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
