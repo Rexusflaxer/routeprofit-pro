@@ -632,7 +632,7 @@ function initialForm(personnel) {
     source_type: "",
     company_id: personnel.primary_company_id || null,
     cao_key: personnel.cao || null,
-    cao_configuration_id: form.cao_configuration_id || null,
+    cao_configuration_id: personnel.cao_configuration_id || null,
     contract_model: inferredModel,
     contract_form: model?.contract_form || personnel.contract_form || "unknown",
     underlying_contract_form: model?.underlying_contract_form || personnel.underlying_contract_form || null,
