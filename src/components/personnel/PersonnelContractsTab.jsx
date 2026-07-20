@@ -227,7 +227,10 @@ const DURATION_OPTIONS = [
   { value: "free", label: "Vrije einddatum", months: null },
 ];
 
-const DURATION_OPTION_LABELS = Object.fromEntries(DURATION_OPTIONS.map(option => [option.value, option.label]));
+const DURATION_OPTION_LABELS = {
+  indefinite: "Onbepaalde tijd",
+  ...Object.fromEntries(DURATION_OPTIONS.map(option => [option.value, option.label])),
+};
 
 const MIN_MAX_WEEKDAY_OPTIONS = [
   { value: "monday", label: "Maandag" },
@@ -588,35 +591,6 @@ function extractWageRows(option, targetYear) {
   return rows;
 }
 
-function templateMatchesWizard(template, form) {
-  if (!template || template.visible_in_contract_wizard === false) return false;
-  if (template.template_type && template.template_type !== "employment_contract") return false;
-  if (form.cao_key && template.cao_key && template.cao_key !== form.cao_key) return false;
-  const model = getContractModel(form.contract_model);
-  const formScope = template.contract_form_scope || "any";
-  if (formScope !== "any" && formScope !== form.contract_form && formScope !== form.underlying_contract_form) return false;
-  const modelScope = template.employment_model_scope === "call_agreement"
-    ? "zero_hours"
-    : (template.employment_model_scope || "any");
-  if (modelScope !== "any" && modelScope !== model?.employment_model && modelScope !== form.employment_contract_model) return false;
-  const expectedLearningRoute = model?.employment_model === "internship"
-    ? "article_14_internship"
-    : (model?.employment_model === "bbl" ? "bbl" : null);
-  const templateLearningRoute = template.learning_route_scope || template.metadata?.learning_route_scope || null;
-  if (templateLearningRoute && expectedLearningRoute && templateLearningRoute !== expectedLearningRoute) return false;
-  if (templateLearningRoute && !expectedLearningRoute) return false;
-  const durationScope = template.duration_type_scope || "any";
-  if (durationScope !== "any" && durationScope !== form.duration_type) return false;
-  const durationOptions = Array.isArray(template.duration_options) ? template.duration_options : [];
-  const selectedDurationOption = form.duration_type === "indefinite" ? "indefinite" : form.duration_option;
-  if (durationOptions.length > 0 && selectedDurationOption && !durationOptions.includes(selectedDurationOption)) return false;
-  const probationScope = template.probation_scope || "any";
-  if (probationScope === "with_probation" && form.probation_agreed !== "true") return false;
-  if (probationScope === "without_probation" && form.probation_agreed !== "false") return false;
-  if (probationScope === "not_applicable" && form.probation_agreed !== "not_applicable") return false;
-  return true;
-}
-
 const TEMPLATE_CONTRACT_MODEL_ALIASES = {
   fulltime_employment: "fulltime",
   fulltime_fixed: "fulltime",
@@ -655,6 +629,7 @@ function templateSupportsContractKind(template, caoKey, employmentModel) {
   if (!template || template.status !== "published" || template.visible_in_contract_wizard === false) return false;
   if (template.template_type && template.template_type !== "employment_contract") return false;
   if (caoKey && template.cao_key && template.cao_key !== caoKey) return false;
+  if (!Array.isArray(template.duration_options) || template.duration_options.length === 0) return false;
 
   const scopedEmploymentModel = inferredTemplateEmploymentModel(template);
   if (scopedEmploymentModel && scopedEmploymentModel !== employmentModel) return false;
@@ -665,7 +640,7 @@ function templateSupportsContractKind(template, caoKey, employmentModel) {
   const templateLearningRoute = template.learning_route_scope || template.metadata?.learning_route_scope || null;
   if (templateLearningRoute && templateLearningRoute !== expectedLearningRoute) return false;
 
-  return CONTRACT_MODEL_OPTIONS
+  const supportsModelScope = CONTRACT_MODEL_OPTIONS
     .filter(option => option.employment_model === employmentModel && contractModelAllowedForCao(option, caoKey))
     .some(option => {
       const formScope = template.contract_form_scope || "any";
@@ -673,6 +648,39 @@ function templateSupportsContractKind(template, caoKey, employmentModel) {
       const durationScope = template.duration_type_scope || "any";
       return durationScope === "any" || durationScope === option.duration_type;
     });
+  if (!supportsModelScope) return false;
+
+  const durations = configuredTemplateDurations(template, caoKey, employmentModel);
+  return durations.allowsFixed || durations.allowsIndefinite;
+}
+
+function configuredTemplateDurations(template, caoKey, employmentModel, internshipType = "bol") {
+  const configured = new Set(Array.isArray(template?.duration_options) ? template.duration_options : []);
+  const formScope = template?.contract_form_scope || "any";
+  const durationScope = template?.duration_type_scope || "any";
+  const availableModels = CONTRACT_MODEL_OPTIONS.filter(option => (
+    option.employment_model === employmentModel
+    && contractModelAllowedForCao(option, caoKey)
+    && (formScope === "any" || formScope === option.contract_form || formScope === option.underlying_contract_form)
+  ));
+  const legalFixedValues = employmentModel === "internship"
+    ? (internshipType === "bol" ? ["pok_end_date", "free"] : ["free"])
+    : (employmentModel === "bbl"
+      ? ["pok_end_date", "free"]
+      : DURATION_OPTIONS.filter(option => option.value !== "pok_end_date").map(option => option.value));
+  const fixedOptions = DURATION_OPTIONS.filter(option => (
+    legalFixedValues.includes(option.value) && configured.has(option.value)
+  ));
+
+  return {
+    fixedOptions,
+    allowsFixed: durationScope !== "indefinite"
+      && availableModels.some(option => option.duration_type === "fixed")
+      && fixedOptions.length > 0,
+    allowsIndefinite: durationScope !== "fixed"
+      && availableModels.some(option => option.duration_type === "indefinite")
+      && configured.has("indefinite"),
+  };
 }
 
 function initialForm(personnel) {
@@ -1773,6 +1781,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const [showArchive, setShowArchive] = useState(false);
   const [signedUploadId, setSignedUploadId] = useState(null);
   const [wageScaleFilter, setWageScaleFilter] = useState(null);
+  const [durationTypeConfirmed, setDurationTypeConfirmed] = useState(false);
 
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
@@ -1880,25 +1889,22 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
 
   const selectedCompany = companies.find(company => company.id === form.company_id) || null;
   const publishedTemplates = useMemo(() => groupContractTemplateVersions((contractTemplates || [])
-    .filter(template => template.company_id === form.company_id && template.status === "published" && templateMatchesWizard(template, form)))
+    .filter(template => (
+      template.company_id === form.company_id
+      && templateSupportsContractKind(template, form.cao_key, form.employment_contract_model)
+    )))
     .map(group => group.versions[0])
     .filter(Boolean)
-    .sort((a, b) => a.name.localeCompare(b.name)), [contractTemplates, form]);
+    .sort((a, b) => a.name.localeCompare(b.name)), [contractTemplates, form.cao_key, form.company_id, form.employment_contract_model]);
   const letterheadOptions = useMemo(() => getLetterheadOptions(letterheads, companies, form.company_id), [companies, form.company_id, letterheads]);
   const selectedTemplate = contractTemplates.find(template => template.id === form.template_id) || null;
-  const selectableDurationOptions = useMemo(() => {
-    const persistedAllowed = Array.isArray(selectedTemplate?.duration_options) ? selectedTemplate.duration_options : [];
-    const hasLegacyLearningDuration = ["internship", "bbl"].includes(form.employment_contract_model)
-      && persistedAllowed.some(value => !["pok_end_date", "free"].includes(value));
-    const allowed = hasLegacyLearningDuration ? ["pok_end_date", "free"] : persistedAllowed;
-    const routeOptions = form.employment_contract_model === "internship"
-      ? DURATION_OPTIONS.filter(option => (form.internship_type === "bol" ? ["pok_end_date", "free"] : ["free"]).includes(option.value))
-      : form.employment_contract_model === "bbl"
-        ? DURATION_OPTIONS.filter(option => ["pok_end_date", "free"].includes(option.value))
-        : DURATION_OPTIONS.filter(option => option.value !== "pok_end_date");
-    if (allowed.length === 0) return routeOptions;
-    return routeOptions.filter(option => allowed.includes(option.value));
-  }, [form.employment_contract_model, form.internship_type, selectedTemplate]);
+  const templateDurationConfiguration = useMemo(() => configuredTemplateDurations(
+    selectedTemplate,
+    form.cao_key,
+    form.employment_contract_model,
+    form.internship_type,
+  ), [form.cao_key, form.employment_contract_model, form.internship_type, selectedTemplate]);
+  const selectableDurationOptions = templateDurationConfiguration.fixedOptions;
   const selectedLetterhead = letterheadOptions.find(item => item.id === form.letterhead_id) || null;
   const selectedTemplateClauses = useMemo(() => (contractClauses || [])
     .filter(clause => clause.company_id === form.company_id && clause.status !== "archived"),
@@ -1975,7 +1981,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       selectable: allowedForCao && matchingTemplates.length > 0,
       templateCount: matchingTemplates.length,
       unavailableReason: allowedForCao
-        ? "Nog geen gepubliceerd template voor dit contracttype."
+        ? "Nog geen gepubliceerd sjabloon voor dit contracttype."
         : `Niet beschikbaar binnen ${CAO_OPTION_LABELS[form.cao_key] || "de gekozen CAO"}.`,
     };
   }), [contractTemplates, form.cao_key, form.company_id]);
@@ -2251,7 +2257,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     };
   });
 
-  const setContractModel = (value) => {
+  const setContractModel = (value, { preserveTemplate = false, resetDurationChoice = false } = {}) => {
     const model = getContractModel(value);
     setForm(prev => {
       const next = {
@@ -2264,7 +2270,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         call_agreement_type: model?.employment_model === "min_max"
           ? "min_max"
           : (model?.employment_model === "zero_hours" ? "zero_hours" : "not_applicable"),
-        template_id: null,
+        template_id: preserveTemplate ? prev.template_id : null,
       };
       if (model?.employment_model === "fulltime" && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
         next.contract_hours_per_week = "36";
@@ -2368,6 +2374,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.probation_agreed = "not_applicable";
         next.probation_context = "not_applicable";
       }
+      if (resetDurationChoice) {
+        next.duration_option = "";
+        next.contract_end_date = "";
+      }
       return next;
     });
   };
@@ -2381,21 +2391,29 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   };
 
   const setContractDurationType = (durationType) => {
+    const allowed = durationType === "fixed"
+      ? templateDurationConfiguration.allowsFixed
+      : templateDurationConfiguration.allowsIndefinite;
+    if (!allowed) return;
     const model = modelForKindAndDuration(form.employment_contract_model, durationType);
     if (!model) return;
-    setContractModel(model.value);
-    if (durationType === "indefinite") {
-      setForm(prev => ({
+    setContractModel(model.value, { preserveTemplate: true, resetDurationChoice: true });
+    setDurationTypeConfirmed(true);
+  };
+
+  const setContractStartDate = (value) => {
+    setForm(prev => {
+      const selectedDuration = DURATION_OPTIONS.find(option => option.value === prev.duration_option);
+      return {
         ...prev,
-        contract_model: model.value,
-        contract_form: model.contract_form,
-        underlying_contract_form: model.underlying_contract_form || null,
-        duration_type: "indefinite",
-        duration_option: "",
-        contract_end_date: "",
-        prior_similar_work_status: "not_applicable",
-      }));
-    }
+        contract_start_date: value,
+        contract_end_date: selectedDuration?.months
+          ? (value ? addMonthsMinusOneDay(value, selectedDuration.months) : "")
+          : (prev.duration_option === "free" && prev.contract_end_date && value && prev.contract_end_date < value
+            ? ""
+            : prev.contract_end_date),
+      };
+    });
   };
 
   const setDurationOption = (value) => {
@@ -2406,7 +2424,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         duration_option: value,
         contract_end_date: option?.months
           ? addMonthsMinusOneDay(prev.contract_start_date, option.months)
-          : (value === "pok_end_date" ? "" : prev.contract_end_date),
+          : (value === "free" && prev.duration_option === "free" ? prev.contract_end_date : ""),
       };
     });
   };
@@ -2698,6 +2716,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const openNew = () => {
     setEditingId(null);
     setForm(initialForm(personnel));
+    setDurationTypeConfirmed(false);
     setWizardStep(1);
     setActionMessage(null);
     setWizardOpen(true);
@@ -2706,6 +2725,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const openEdit = (contract) => {
     setEditingId(contract.id);
     setForm(formFromContract(contract));
+    setDurationTypeConfirmed(true);
     setWizardStep(1);
     setActionMessage(null);
     setWizardOpen(true);
@@ -2732,15 +2752,28 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   };
   const chooseCompany = (companyId) => {
     setCompanyId(companyId);
+    setDurationTypeConfirmed(false);
     setWizardStep(3);
   };
   const chooseCao = (caoKey) => {
     setCaoKey(caoKey);
+    setDurationTypeConfirmed(false);
     setWizardStep(4);
   };
   const chooseContractKind = (employmentModel) => {
     setContractKind(employmentModel);
+    setDurationTypeConfirmed(false);
     setWizardStep(5);
+  };
+  const chooseTemplate = (templateId) => {
+    setForm(prev => ({
+      ...prev,
+      template_id: templateId,
+      duration_option: "",
+      contract_end_date: "",
+    }));
+    setDurationTypeConfirmed(false);
+    setWizardStep(6);
   };
 
   useEffect(() => {
@@ -2768,13 +2801,12 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   }, [wizardOpen, form.source_type, form.letterhead_id, selectedTemplate?.default_letterhead_id, letterheadOptions]);
 
   useEffect(() => {
-    if (!wizardOpen || form.source_type !== "generated") return;
-    if (form.template_id && !publishedTemplates.some(template => template.id === form.template_id)) {
+    if (!wizardOpen || !form.template_id) return;
+    if (!publishedTemplates.some(template => template.id === form.template_id)) {
       set("template_id", null);
-      return;
+      setDurationTypeConfirmed(false);
     }
-    if (!form.template_id && publishedTemplates.length > 0) set("template_id", publishedTemplates[0].id);
-  }, [wizardOpen, form.source_type, form.template_id, publishedTemplates]);
+  }, [wizardOpen, form.template_id, publishedTemplates]);
 
   useEffect(() => {
     if (!wizardOpen || form.duration_type !== "fixed" || !form.duration_option || ["free", "pok_end_date"].includes(form.duration_option) || !form.contract_start_date) return;
@@ -2810,7 +2842,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     "Bedrijf",
     "CAO",
     "Contractvorm",
-    "Startdatum",
+    "Sjabloon",
     "Looptijd",
     "Functies",
     "Proeftijd",
@@ -2822,8 +2854,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     !!form.company_id,
     !!form.cao_key,
     !!form.contract_model,
-    !!form.contract_start_date,
-    form.duration_type !== "fixed" || (!!form.duration_option && !!form.contract_end_date),
+    !!form.template_id,
+    durationTypeConfirmed
+      && !!form.contract_start_date
+      && (form.duration_type !== "fixed"
+        || (!!form.duration_option && (form.duration_option === "pok_end_date" || !!form.contract_end_date))),
     selectedFunctionValues.length > 0,
     isArticle14Internship || ["true", "false", "not_applicable"].includes(form.probation_agreed),
     true,
@@ -2975,7 +3010,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               <div className="space-y-3">
                 <div>
                   <p className="text-sm font-medium text-foreground">Kies het contracttype</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Alleen contracttypen met een gepubliceerd template voor dit bedrijf en deze CAO kunnen worden gekozen.</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Alleen contracttypen met een gepubliceerd sjabloon voor dit bedrijf en deze CAO kunnen worden gekozen.</p>
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   {contractKindOptions.map(option => {
@@ -3018,14 +3053,47 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             )}
 
             {wizardStep === 5 && (
-              <div className="space-y-4">
+              <div className="space-y-3">
                 <div>
-                  <p className="text-sm font-medium text-foreground">Wanneer begint het contract?</p>
-                  <p className="mt-1 text-sm text-muted-foreground">De startdatum bepaalt automatisch de geldige CAO-versie en salaristabel. Dit werkt ook voor historische contracten.</p>
+                  <p className="text-sm font-medium text-foreground">Kies het contractsjabloon</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Het sjabloon bepaalt welke looptijden in de volgende stap beschikbaar zijn.</p>
                 </div>
-                <div className="max-w-md space-y-1">
-                  <Label>Startdatum *</Label>
-                  <Input type="date" value={form.contract_start_date || ""} onChange={event => set("contract_start_date", event.target.value)} />
+                <div className="grid grid-cols-1 gap-2">
+                  {publishedTemplates.map(template => {
+                    const selected = form.template_id === template.id;
+                    const durations = configuredTemplateDurations(template, form.cao_key, form.employment_contract_model, form.internship_type);
+                    const durationLabels = [
+                      ...(durations.allowsIndefinite ? [durationLabel("indefinite")] : []),
+                      ...durations.fixedOptions.map(option => option.label),
+                    ];
+                    return (
+                      <button
+                        key={template.id}
+                        type="button"
+                        onClick={() => chooseTemplate(template.id)}
+                        className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                      >
+                        <div className="min-w-0">
+                          <span className="text-sm font-semibold text-foreground">{template.name}</span>
+                          <span className="ml-2 text-xs text-muted-foreground">Versie {template.version || 1}</span>
+                          {template.description && <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{template.description}</p>}
+                          <p className="mt-1 text-xs text-muted-foreground">Looptijden: {durationLabels.join(", ") || "niet ingesteld"}</p>
+                        </div>
+                        {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                {publishedTemplates.length === 0 && (
+                  <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    Voor dit bedrijf, deze CAO en dit contracttype is geen zichtbaar gepubliceerd sjabloon met duurkeuzes beschikbaar.
+                  </p>
+                )}
+                <div className="flex items-center justify-between pt-1">
+                  <Button type="button" variant="ghost" size="sm" onClick={previousStep}>
+                    <ChevronLeft className="w-4 h-4 mr-1" /> Terug
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setWizardOpen(false)}>Annuleren</Button>
                 </div>
               </div>
             )}
@@ -3034,38 +3102,59 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               <div className="space-y-5">
                 <div>
                   <p className="text-sm font-medium text-foreground">Hoe lang loopt het contract?</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Kies de looptijd en, bij een tijdelijk contract, de manier waarop de einddatum wordt bepaald.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Kies eerst de looptijdsoort. Daarna verschijnen alleen de velden en duurkeuzes die bij {selectedTemplate?.name || "het gekozen sjabloon"} horen.</p>
                 </div>
 
-                {!isArticle14Internship && !isBblModel && (
-                  <div className="space-y-2">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Looptijd</p>
-                    <div className="grid grid-cols-1 gap-2">
-                      {[
-                        { value: "fixed", label: "Bepaalde tijd", description: "Het contract eindigt op een vooraf vastgelegde einddatum." },
-                        { value: "indefinite", label: "Onbepaalde tijd", description: "Het contract heeft geen vooraf vastgelegde einddatum." },
-                      ].map(option => {
-                        const selected = form.duration_type === option.value;
-                        return (
-                          <button
-                            key={option.value}
-                            type="button"
-                            onClick={() => setContractDurationType(option.value)}
-                            className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
-                          >
-                            <div>
-                              <p className="font-semibold text-foreground">{option.label}</p>
-                              <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
-                            </div>
-                            {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
-                          </button>
-                        );
-                      })}
-                    </div>
+                <div className="space-y-2">
+                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Looptijdsoort</p>
+                  <div className="grid grid-cols-1 gap-2">
+                    {[
+                      { value: "fixed", label: "Bepaalde tijd", description: "Het contract eindigt op een vooraf bepaalde of uit de POK afgeleide datum.", allowed: templateDurationConfiguration.allowsFixed },
+                      { value: "indefinite", label: "Onbepaalde tijd", description: "Het contract heeft geen vooraf vastgelegde einddatum.", allowed: templateDurationConfiguration.allowsIndefinite },
+                    ].map(option => {
+                      const selected = durationTypeConfirmed && form.duration_type === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          disabled={!option.allowed}
+                          onClick={() => setContractDurationType(option.value)}
+                          className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all ${!option.allowed
+                            ? "cursor-not-allowed border-border bg-muted/40 opacity-60"
+                            : selected
+                              ? "border-primary bg-accent active:scale-[0.99]"
+                              : "border-border bg-card hover:border-primary hover:bg-accent active:scale-[0.99]"}`}
+                        >
+                          <div>
+                            <p className="font-semibold text-foreground">{option.label}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{option.allowed ? option.description : "Niet opgenomen in het gekozen sjabloon."}</p>
+                          </div>
+                          {!option.allowed
+                            ? <Badge className="shrink-0 border-0 bg-muted text-xs text-muted-foreground">Niet beschikbaar</Badge>
+                            : selected
+                              ? <Check className="h-4 w-4 shrink-0 text-primary" />
+                              : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {!templateDurationConfiguration.allowsFixed && !templateDurationConfiguration.allowsIndefinite && (
+                  <p className="rounded-lg border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+                    Dit sjabloon bevat geen bruikbare duurkeuze voor het gekozen contracttype. Pas het sjabloon aan voordat je verdergaat.
+                  </p>
+                )}
+
+                {durationTypeConfirmed && (
+                  <div className="max-w-md space-y-1">
+                    <Label>Startdatum *</Label>
+                    <Input type="date" value={form.contract_start_date || ""} onChange={event => setContractStartDate(event.target.value)} />
+                    <p className="text-xs text-muted-foreground">De startdatum bepaalt automatisch de geldige CAO-versie en salaristabel.</p>
                   </div>
                 )}
 
-                {form.duration_type === "fixed" && (
+                {durationTypeConfirmed && form.contract_start_date && form.duration_type === "fixed" && (
                   <div className="space-y-3">
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{isArticle14Internship || isBblModel ? "Bron einddatum" : "Duur"}</p>
                     <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
@@ -3084,18 +3173,40 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                         );
                       })}
                     </div>
-                    <div className="max-w-md space-y-1">
-                      <Label>{form.duration_option === "pok_end_date" ? "Einddatum volgens POK *" : "Einddatum *"}</Label>
-                      <Input
-                        type="date"
-                        value={form.contract_end_date || ""}
-                        onChange={event => set("contract_end_date", event.target.value)}
-                        disabled={!!form.duration_option && !["free", "pok_end_date"].includes(form.duration_option)}
-                      />
-                      {form.duration_option === "pok_end_date" && (
-                        <p className="text-xs text-muted-foreground">Neem de datum voorlopig over uit de POK. Upload en OCR van de POK worden in een vervolgstap toegevoegd.</p>
-                      )}
-                    </div>
+
+                    {form.duration_option === "free" && (
+                      <div className="max-w-md space-y-1">
+                        <Label>Einddatum *</Label>
+                        <Input
+                          type="date"
+                          min={form.contract_start_date || undefined}
+                          value={form.contract_end_date || ""}
+                          onChange={event => set("contract_end_date", event.target.value)}
+                        />
+                        <p className="text-xs text-muted-foreground">Vul de concrete einddatum van het contract in.</p>
+                      </div>
+                    )}
+
+                    {form.duration_option && !["free", "pok_end_date"].includes(form.duration_option) && (
+                      <div className="max-w-md rounded-lg border border-border bg-muted/30 px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Berekende einddatum</p>
+                        <p className="mt-1 text-sm font-medium text-foreground">{formatDate(form.contract_end_date)}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Automatisch berekend uit de startdatum en de gekozen duur.</p>
+                      </div>
+                    )}
+
+                    {form.duration_option === "pok_end_date" && (
+                      <div className="max-w-xl rounded-lg border border-primary/30 bg-primary/5 px-4 py-3">
+                        <p className="flex items-center gap-2 text-sm font-medium text-foreground"><CalendarClock className="h-4 w-4 text-primary" /> Einddatum volgens POK</p>
+                        <p className="mt-1 text-xs text-muted-foreground">De einddatum wordt in de geplande POK-stap uit de praktijkovereenkomst overgenomen. Er wordt hier daarom geen losse datum gevraagd.</p>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {durationTypeConfirmed && form.contract_start_date && form.duration_type === "indefinite" && (
+                  <div className="max-w-xl rounded-lg border border-primary/30 bg-primary/5 px-4 py-3 text-sm text-foreground">
+                    Dit contract heeft geen vooraf bepaalde einddatum. Een duur of einddatum is daarom niet nodig.
                   </div>
                 )}
 
@@ -3564,28 +3675,21 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     <section className="space-y-3 rounded-lg border border-border p-4">
                       <div>
                         <p className="text-sm font-semibold text-foreground">Documentopmaak</p>
-                        <p className="mt-1 text-xs text-muted-foreground">Kies het gepubliceerde sjabloon en briefpapier voor het definitieve contract.</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Controleer het gekozen sjabloon en kies het briefpapier voor het definitieve contract.</p>
                       </div>
                       <div className="space-y-2">
                         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sjabloon</p>
-                        {publishedTemplates.map(template => {
-                          const selected = form.template_id === template.id;
-                          return (
-                            <button
-                              key={template.id}
-                              type="button"
-                              onClick={() => set("template_id", template.id)}
-                              className={`flex min-h-12 w-full items-center justify-between rounded-lg border px-3 py-2 text-left ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
-                            >
-                              <div>
-                                <p className="text-sm font-medium text-foreground">{template.name}</p>
-                                <p className="text-xs text-muted-foreground">Versie {template.version || 1}</p>
-                              </div>
-                              {selected ? <Check className="h-4 w-4 text-primary" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-                            </button>
-                          );
-                        })}
-                        {publishedTemplates.length === 0 && <p className="text-sm text-amber-700">Geen gepubliceerd sjabloon gevonden voor deze combinatie van CAO, contractvorm, looptijd en proeftijd.</p>}
+                        {selectedTemplate ? (
+                          <div className="flex min-h-12 w-full items-center justify-between rounded-lg border border-primary bg-accent px-3 py-2">
+                            <div>
+                              <p className="text-sm font-medium text-foreground">{selectedTemplate.name}</p>
+                              <p className="text-xs text-muted-foreground">Versie {selectedTemplate.version || 1}</p>
+                            </div>
+                            <Check className="h-4 w-4 text-primary" />
+                          </div>
+                        ) : (
+                          <p className="text-sm text-destructive">Er is geen contractsjabloon geselecteerd.</p>
+                        )}
                       </div>
                       <div className="space-y-2">
                         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Briefpapier</p>
@@ -3743,7 +3847,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             )}
               </motion.div></AnimatePresence></div>
 
-          {wizardStep >= 5 && (
+          {wizardStep >= 6 && (
             <div className="flex items-center justify-between pt-3">
               <Button type="button" variant="ghost" size="sm" onClick={previousStep}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
               <div className="flex gap-2">
