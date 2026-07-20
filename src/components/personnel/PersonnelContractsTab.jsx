@@ -2725,23 +2725,19 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   {[
-                    { value: "generated", label: "Nieuw contract genereren", description: "Gebruik een gepubliceerd contractsjabloon en laat alle contractgegevens automatisch invullen.", icon: FileText },
-                    { value: "uploaded_existing", label: "Bestaand contract uploaden", description: "Voeg ook oudere contracten toe; de volledige keten wordt daarna opnieuw juridisch beoordeeld.", icon: Upload },
+                    { value: "generated", label: "Nieuw contract genereren", description: "Gebruik een gepubliceerd contractsjabloon en laat alle contractgegevens automatisch invullen." },
+                    { value: "uploaded_existing", label: "Bestaand contract uploaden", description: "Voeg ook oudere contracten toe; de volledige keten wordt daarna opnieuw juridisch beoordeeld." },
                   ].map(option => {
-                    const Icon = option.icon;
                     return (
                       <button
                         key={option.value}
                         type="button"
-                        onClick={() => set("source_type", option.value)}
+                        onClick={() => { set("source_type", option.value); if (option.value === "generated") setWizardStep(2); }}
                         className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${form.source_type === option.value ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
                       >
-                        <div className="flex min-w-0 items-center gap-3">
-                          <Icon className={`h-5 w-5 shrink-0 ${form.source_type === option.value ? "text-primary" : "text-muted-foreground"}`} />
-                          <div className="min-w-0">
-                            <p className="text-sm font-semibold text-foreground">{option.label}</p>
-                            <p className="mt-0.5 text-xs text-muted-foreground">{option.description}</p>
-                          </div>
+                        <div className="min-w-0">
+                          <p className="text-sm font-semibold text-foreground">{option.label}</p>
+                          <p className="mt-0.5 text-xs text-muted-foreground">{option.description}</p>
                         </div>
                         {form.source_type === option.value ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
                       </button>
@@ -2757,7 +2753,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       type="file"
                       accept=".pdf,image/*"
                       className="hidden"
-                      onChange={event => set("existing_contract_file", event.target.files?.[0] || null)}
+                      onChange={event => { set("existing_contract_file", event.target.files?.[0] || null); setWizardStep(2); }}
                     />
                   </label>
                 )}
@@ -3571,7 +3567,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={() => setWizardOpen(false)}>Annuleren</Button>
               {wizardStep < 10 ? (
-                <Button type="button" onClick={nextStep} disabled={!currentStepComplete}>
+                <Button type="button" onClick={nextStep} disabled={!currentStepComplete} hidden={wizardStep === 1}>
                   Volgende <ChevronRight className="ml-1 h-4 w-4" />
                 </Button>
               ) : (
