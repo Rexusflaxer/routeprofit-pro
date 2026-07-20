@@ -1146,6 +1146,7 @@ async function resolveRouteContractContext(base44, personnel, route, shiftDate, 
   try {
     const res = await base44.asServiceRole.functions.invoke('resolvePersonnelContractForService', {
       personnel_id: personnel.id,
+      contract_id: route.personnel_contract_id || serviceContext.personnel_contract_id || serviceContext.contract_id || null,
       route_id: route.id,
       company_id: operatingCompanyId,
       operating_company_id: operatingCompanyId,
@@ -1156,7 +1157,8 @@ async function resolveRouteContractContext(base44, personnel, route, shiftDate, 
         operating_company_id: serviceContext.operating_company_id || operatingCompanyId,
         cao_key: serviceContext.cao_key || route.cao_key || route.cao || null,
         cao: serviceContext.cao || route.cao || null,
-        contract_assignment_policy: serviceContext.contract_assignment_policy || 'strict_contract_match'
+        contract_assignment_policy: serviceContext.contract_assignment_policy || 'strict_contract_match',
+        personnel_contract_id: route.personnel_contract_id || serviceContext.personnel_contract_id || serviceContext.contract_id || null
       }
     });
     const resolution = res?.data || {

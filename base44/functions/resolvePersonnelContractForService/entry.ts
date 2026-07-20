@@ -4,22 +4,28 @@ const CAO_PB_KEY = 'cao_particuliere_beveiliging';
 const CAO_EVENT_HOSPITALITY_SECURITY_KEY = 'cao_evenementen_horecabeveiliging';
 const CAO_TRAFFIC_CONTROLLERS_KEY = 'cao_verkeersregelaars';
 const CAO_SAFETY_DOMAIN_KEY = 'cao_veiligheidsdomein';
-const SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS = [CAO_PB_KEY];
+const SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS = [
+  CAO_PB_KEY,
+  CAO_EVENT_HOSPITALITY_SECURITY_KEY,
+  CAO_TRAFFIC_CONTROLLERS_KEY,
+  CAO_SAFETY_DOMAIN_KEY
+];
+const VERIFIED_PAYROLL_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
 
 function getCaoRuntimeSupport(caoKey, functionName) {
   const key = caoKey || null;
-  const supported = SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS.includes(key);
+  const supported = VERIFIED_PAYROLL_RUNTIME_CAO_KEYS.includes(key);
   return {
     supported,
     status: supported ? 'supported' : key ? 'blocked_unsupported_cao_runtime' : 'blocked_missing_cao_key',
     cao_key: key,
     function_name: functionName,
-    supported_cao_keys: SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS,
+    supported_cao_keys: VERIFIED_PAYROLL_RUNTIME_CAO_KEYS,
     message: supported
       ? `Runtime ${functionName} ondersteunt CAO ${key}.`
       : !key
-      ? `Runtime ${functionName} mist cao_key. Contractkoppeling voor definitieve planning/payroll is geblokkeerd zodat geen PB-default wordt toegepast.`
-      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Contractkoppeling voor definitieve planning/payroll is geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
+      ? `Runtime ${functionName} mist cao_key. Definitieve payroll is geblokkeerd zodat geen PB-default wordt toegepast.`
+      : `Runtime ${functionName} ondersteunt CAO ${key} nog niet. Definitieve payroll is geblokkeerd zodat geen PB-regels op een andere CAO worden toegepast.`
   };
 }
 
@@ -213,6 +219,8 @@ function companyCaoAssignmentMatchesService(assignment, serviceContext, requeste
 
 function isContractActive(contract, date) {
   if (!contract || contract.is_current === false) return false;
+  if (contract.document_status && !['active', 'scheduled'].includes(contract.document_status)) return false;
+  if (contract.legal_validation_status && contract.legal_validation_status !== 'compliant') return false;
   if (contract.contract_start_date && contract.contract_start_date > date) return false;
   if (contract.contract_end_date && contract.contract_end_date < date) return false;
   return true;
@@ -909,16 +917,28 @@ function evaluateCaoPbQualificationForService(contract, personnelQualifications,
 
 function getContractResolutionRuntimeSupport(caoKey) {
   const key = caoKey || null;
-  const supported = SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS.includes(key);
+  const planningSupported = SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS.includes(key);
+  const payrollRuntimeSupported = VERIFIED_PAYROLL_RUNTIME_CAO_KEYS.includes(key);
   return {
-    supported,
-    status: supported ? 'supported' : key ? 'blocked_unsupported_cao_runtime' : 'blocked_missing_cao_key',
+    supported: planningSupported,
+    planning_supported: planningSupported,
+    payroll_runtime_supported: payrollRuntimeSupported,
+    status: !planningSupported
+      ? key
+        ? 'blocked_unsupported_cao_runtime'
+        : 'blocked_missing_cao_key'
+      : payrollRuntimeSupported
+      ? 'supported'
+      : 'contract_resolution_only',
     cao_key: key,
     supported_cao_keys: SUPPORTED_CONTRACT_RESOLUTION_CAO_KEYS,
-    message: supported
-      ? `Contractresolver ondersteunt CAO ${key}.`
+    verified_payroll_runtime_cao_keys: VERIFIED_PAYROLL_RUNTIME_CAO_KEYS,
+    message: payrollRuntimeSupported
+      ? `Contractresolver en geverifieerde payroll-runtime ondersteunen CAO ${key}.`
+      : planningSupported
+      ? `Contractresolver ondersteunt CAO ${key} voor contractselectie en planning. Definitieve payroll blijft geblokkeerd totdat de lokale CAO-rekenruntime volledig is geimplementeerd en geverifieerd.`
       : key
-      ? `Contractresolver ondersteunt CAO ${key} nog niet volledig. Definitieve planning/payroll is geblokkeerd totdat deze CAO-runtime lokaal is geimplementeerd en geverifieerd.`
+      ? `Contractresolver ondersteunt CAO ${key} nog niet. Definitieve planning en payroll zijn geblokkeerd zodat geen regels van een andere CAO worden toegepast.`
       : 'Contractresolver mist cao_key. Definitieve planning/payroll is geblokkeerd zodat geen PB-default wordt toegepast.'
   };
 }
@@ -1750,21 +1770,25 @@ function evaluateStoredContractReadiness(contract) {
   const warnings = [];
   const contextStatus = contract.contract_context_status || 'unknown';
   const ruleStatus = contract.cao_contract_rule_status || 'unknown';
+  const centrallyValidated = contract.legal_validation_status === 'compliant';
+  const pbContract = contract.cao_key === CAO_PB_KEY;
 
   if (['draft_missing_context', 'blocked'].includes(contextStatus)) {
     blockingReasons.push(`Geselecteerd contract heeft contract_context_status=${contextStatus}; contractbasis moet eerst worden aangevuld voordat planning/payroll definitief mag zijn.`);
   } else if (contextStatus === 'manual_review_required') {
     manualReviewReasons.push('Geselecteerd contract heeft contract_context_status=manual_review_required. Rond contractreview af voordat planning/payroll definitief mag zijn.');
-  } else if (contextStatus !== 'compliant') {
-    manualReviewReasons.push(`Geselecteerd contract is nog niet contract-final beoordeeld (contract_context_status=${contextStatus}). Voer applyCaoContractRules met save uit voordat planning/payroll definitief mag zijn.`);
+  } else if (contextStatus !== 'compliant' && !centrallyValidated) {
+    manualReviewReasons.push(`Geselecteerd contract is nog niet centraal beoordeeld (contract_context_status=${contextStatus}). Hercontroleer het contract voordat planning/payroll definitief mag zijn.`);
   }
 
   if (ruleStatus === 'blocked') {
     blockingReasons.push('Geselecteerd contract heeft cao_contract_rule_status=blocked; CAO-contractregels blokkeren definitieve inzet.');
   } else if (ruleStatus === 'manual_review_required') {
     manualReviewReasons.push('Geselecteerd contract heeft cao_contract_rule_status=manual_review_required. Rond CAO-contractreview af voordat planning/payroll definitief mag zijn.');
-  } else if (ruleStatus !== 'compliant') {
-    manualReviewReasons.push(`Geselecteerd contract heeft cao_contract_rule_status=${ruleStatus}. Contractregels moeten compliant zijn voordat planning/payroll definitief mag zijn.`);
+  } else if (pbContract && ruleStatus !== 'compliant') {
+    manualReviewReasons.push(`Geselecteerd CAO PB-contract heeft cao_contract_rule_status=${ruleStatus}. De CAO PB-contractregels moeten compliant zijn voordat planning/payroll definitief mag zijn.`);
+  } else if (!pbContract && !['compliant', 'not_applicable'].includes(ruleStatus) && !centrallyValidated) {
+    manualReviewReasons.push(`Geselecteerd contract heeft cao_contract_rule_status=${ruleStatus} en mist een centrale juridische validatie.`);
   }
 
   if (contract.contract_final_allowed !== true) {
@@ -1774,7 +1798,7 @@ function evaluateStoredContractReadiness(contract) {
     manualReviewReasons.push('Geselecteerd contract heeft planning_allowed niet op true. Planning blijft geblokkeerd of vereist review.');
   }
   if (contract.payroll_final_allowed !== true) {
-    manualReviewReasons.push('Geselecteerd contract heeft payroll_final_allowed niet op true. Payroll-final blijft geblokkeerd.');
+    warnings.push('Geselecteerd contract heeft payroll_final_allowed niet op true. Contractselectie en planning kunnen doorgaan als de overige controles slagen, maar definitieve loonverwerking blijft geblokkeerd.');
   }
   if (Array.isArray(contract.contract_context_missing_fields) && contract.contract_context_missing_fields.length > 0) {
     blockingReasons.push(`Geselecteerd contract mist contractbasisvelden: ${contract.contract_context_missing_fields.join(', ')}.`);
@@ -2274,6 +2298,8 @@ Deno.serve(async (req) => {
     const caoRuntimeSupport = getContractResolutionRuntimeSupport(resolvedCaoKey);
     if (!caoRuntimeSupport.supported) {
       manualReviewReasons.push(caoRuntimeSupport.message);
+    } else if (!caoRuntimeSupport.payroll_runtime_supported) {
+      warnings.push(caoRuntimeSupport.message);
     }
 
     let caoApplicability = null;
@@ -2311,7 +2337,10 @@ Deno.serve(async (req) => {
     const hasBlocking = blockingReasons.length > 0;
     const manualReviewRequired = manualReviewReasons.length > 0;
     const planningAllowed = !hasBlocking && !manualReviewRequired;
-    const payrollFinalAllowed = planningAllowed && caoPayrollReadiness.ready;
+    const payrollFinalAllowed = planningAllowed &&
+      selectedContractReadiness?.payroll_final_allowed === true &&
+      caoPayrollReadiness.ready &&
+      caoRuntimeSupport.payroll_runtime_supported;
 
     const status = hasBlocking
       ? 'blocked'
@@ -2349,11 +2378,14 @@ Deno.serve(async (req) => {
         contract_context_status: selectedContract.contract_context_status || null,
         contract_context_missing_fields: selectedContract.contract_context_missing_fields || [],
         cao_contract_rule_status: selectedContract.cao_contract_rule_status || null,
+        legal_validation_status: selectedContract.legal_validation_status || null,
+        legal_validation_checked_at: selectedContract.legal_validation_checked_at || null,
         planning_allowed: selectedContract.planning_allowed === true,
         contract_final_allowed: selectedContract.contract_final_allowed === true,
         payroll_final_allowed: selectedContract.payroll_final_allowed === true,
         function_type: selectedContract.function_type || null,
         allowed_function_types: selectedContract.allowed_function_types || [],
+        function_assignments: selectedContract.function_assignments || [],
         security_role_status: selectedContract.security_role_status || null,
         allowed_security_role_statuses: selectedContract.allowed_security_role_statuses || [],
         performs_security_work: selectedContract.performs_security_work ?? null,

@@ -40,6 +40,52 @@
         "null"
       ]
     },
+    "operating_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Juridische entiteit waarvoor de route wordt uitgevoerd."
+    },
+    "personnel_contract_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Contract waarop planning en payroll voor deze route zijn gerouteerd."
+    },
+    "contract_function_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contract_cao_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contract_routing_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "resolved",
+        "blocked",
+        "manual_review_required",
+        "not_applicable",
+        null
+      ]
+    },
+    "contract_routing_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
     "vehicle_id": {
       "type": [
         "string",

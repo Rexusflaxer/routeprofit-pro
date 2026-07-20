@@ -10,6 +10,7 @@ export const CAO_OPTION_LABELS = Object.fromEntries(CAO_OPTIONS.map(option => [o
 export const SECURITY_EMPLOYMENT_CAO_KEYS = [
   "cao_particuliere_beveiliging",
   "cao_evenementen_horecabeveiliging",
+  "cao_verkeersregelaars",
   "cao_veiligheidsdomein",
 ];
 

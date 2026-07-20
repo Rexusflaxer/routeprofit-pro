@@ -64,6 +64,25 @@
       ],
       "description": "Legacy/reference configuratie. Niet gebruiken om een ontbrekende contract-CAO aan te vullen; contracten moeten zelf cao_key bevatten."
     },
+    "source_contract_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Actieve en toekomstige contracten waaruit deze medewerker-bedrijfskoppeling is afgeleid."
+    },
+    "managed_by_contracts": {
+      "type": "boolean",
+      "default": false,
+      "description": "True als status en geldigheid automatisch uit arbeidscontracten worden onderhouden."
+    },
+    "contract_sync_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
     "future_contract_placeholder": {
       "type": [
         "object",

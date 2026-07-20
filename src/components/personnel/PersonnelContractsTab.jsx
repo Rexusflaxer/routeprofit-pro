@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
+import { AnimatePresence, motion } from "framer-motion";
 import { jsPDF } from "jspdf";
 import { base44 } from "@/api/base44Client";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
@@ -37,18 +38,43 @@ import {
 } from "@/lib/letterheadDocumentSettings";
 import { groupContractTemplateVersions } from "@/lib/contractTemplateEditor";
 import {
+  AlertTriangle,
+  Archive,
+  Building2,
+  CalendarClock,
   CheckCircle,
   ChevronLeft,
   ChevronRight,
   Eye,
+  FileSignature,
   Pencil,
   Plus,
+  RefreshCw,
   Save,
+  ShieldCheck,
   Upload,
   X,
 } from "lucide-react";
 
 const CAO_OPTION_LABELS = Object.fromEntries(CAO_OPTIONS.map(option => [option.value, option.label]));
+const FLEX_REFORM_EFFECTIVE_DATE = "2028-01-01";
+const CAO_EHB_KEY = "cao_evenementen_horecabeveiliging";
+
+const EHB_CAO_FUNCTION_LEVEL_OPTIONS = [
+  { value: "a", label: "a - Niet-zelfstandig uitvoerende" },
+  { value: "b", label: "b - Zelfstandig uitvoerende" },
+  { value: "c", label: "c - Subgroepsleider" },
+  { value: "d", label: "d - Groepsleider" },
+  { value: "e", label: "e - Projectleider" },
+];
+
+const CALL_EXCEPTION_OPTIONS = [
+  { value: "none", label: "Geen uitzondering" },
+  { value: "minor", label: "Jonger dan 18 jaar" },
+  { value: "pupil", label: "Scholier" },
+  { value: "student", label: "Student" },
+  { value: "aow", label: "AOW-gerechtigd" },
+];
 
 const CONTRACT_FORM_OPTIONS = [
   { value: "bepaalde_tijd", label: "Bepaalde tijd" },
@@ -112,6 +138,22 @@ const CONTRACT_MODEL_OPTIONS = [
     employment_model: "parttime_fixed",
   },
   {
+    value: "parttime_growth_fixed",
+    label: "Parttime groeimodel - bepaalde tijd",
+    contract_form: "bepaalde_tijd",
+    duration_type: "fixed",
+    employment_model: "parttime_growth",
+    allowed_cao_keys: [CAO_PARTICULIERE_BEVEILIGING_KEY],
+  },
+  {
+    value: "parttime_growth_indefinite",
+    label: "Parttime groeimodel - onbepaalde tijd",
+    contract_form: "onbepaalde_tijd",
+    duration_type: "indefinite",
+    employment_model: "parttime_growth",
+    allowed_cao_keys: [CAO_PARTICULIERE_BEVEILIGING_KEY],
+  },
+  {
     value: "min_max_fixed",
     label: "Min-max - bepaalde tijd",
     contract_form: "oproep",
@@ -150,6 +192,7 @@ const CONTRACT_MODEL_OPTIONS = [
     duration_type: "fixed",
     employment_model: "internship",
     learning_route: "article_14_internship",
+    allowed_cao_keys: [CAO_PARTICULIERE_BEVEILIGING_KEY],
   },
   {
     value: "bbl_fixed",
@@ -158,6 +201,7 @@ const CONTRACT_MODEL_OPTIONS = [
     duration_type: "fixed",
     employment_model: "bbl",
     learning_route: "bbl",
+    allowed_cao_keys: [CAO_PARTICULIERE_BEVEILIGING_KEY],
   },
   {
     value: "zzp_assignment",
@@ -165,10 +209,9 @@ const CONTRACT_MODEL_OPTIONS = [
     contract_form: "zzp",
     duration_type: "fixed",
     employment_model: "zzp",
+    show_in_employee_wizard: false,
   },
 ];
-
-const CONTRACT_MODEL_LABELS = Object.fromEntries(CONTRACT_MODEL_OPTIONS.map(option => [option.value, option.label]));
 
 const DURATION_OPTIONS = [
   { value: "1_month", label: "1 maand", months: 1 },
@@ -226,7 +269,8 @@ const INTERNSHIP_CONFIRMATION_FIELDS = [
 const DOCUMENT_STATUS_LABELS = {
   concept: "Concept",
   generated: "Gegenereerd",
-  signed: "Getekend",
+  signed: "Getekend - controle nodig",
+  scheduled: "Ingepland",
   active: "Actief",
   archived: "Gearchiveerd",
   expired: "Verlopen",
@@ -235,7 +279,8 @@ const DOCUMENT_STATUS_LABELS = {
 const DOCUMENT_STATUS_STYLES = {
   concept: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
   generated: "bg-blue-100 text-blue-700 dark:bg-blue-950 dark:text-blue-200",
-  signed: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200",
+  signed: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200",
+  scheduled: "bg-sky-100 text-sky-700 dark:bg-sky-950 dark:text-sky-200",
   active: "bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-200",
   archived: "bg-slate-100 text-slate-600 dark:bg-slate-800 dark:text-slate-300",
   expired: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200",
@@ -256,6 +301,30 @@ function numberOrNull(value) {
   if (value === "" || value === null || value === undefined) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function getMinMaxBand(value) {
+  const minPayPeriod = numberOrNull(value?.min_hours_per_pay_period);
+  const maxPayPeriod = numberOrNull(value?.max_hours_per_pay_period);
+  if (minPayPeriod !== null && maxPayPeriod !== null) {
+    return { minimum: minPayPeriod, maximum: maxPayPeriod, period: "loonperiode" };
+  }
+  const minWeek = numberOrNull(value?.min_hours_per_week);
+  const maxWeek = numberOrNull(value?.max_hours_per_week);
+  if (minWeek !== null && maxWeek !== null) {
+    return { minimum: minWeek, maximum: maxWeek, period: "week" };
+  }
+  return { minimum: null, maximum: null, period: null };
+}
+
+function isStatutoryBandwidthModel(value) {
+  if (value?.employment_contract_model !== "min_max" || value?.contract_agreed_at < FLEX_REFORM_EFFECTIVE_DATE) return false;
+  const band = getMinMaxBand(value);
+  return band.minimum !== null
+    && band.maximum !== null
+    && band.minimum > 0
+    && band.maximum >= band.minimum
+    && band.maximum <= band.minimum * 1.3;
 }
 
 function boolOrNull(value) {
@@ -341,6 +410,21 @@ function getContractModel(value) {
   return CONTRACT_MODEL_OPTIONS.find(option => option.value === value) || null;
 }
 
+function contractModelAllowedForCao(option, caoKey) {
+  if (!option || option.show_in_employee_wizard === false) return false;
+  if (!Array.isArray(option.allowed_cao_keys) || option.allowed_cao_keys.length === 0) return true;
+  return !!caoKey && option.allowed_cao_keys.includes(caoKey);
+}
+
+function contractModelDisplayLabel(option, agreedAt) {
+  if (!option) return "";
+  if (agreedAt < FLEX_REFORM_EFFECTIVE_DATE) return option.label;
+  const suffix = option.duration_type === "indefinite" ? "onbepaalde tijd" : "bepaalde tijd";
+  if (option.employment_model === "min_max") return `Bandbreedtecontract - ${suffix}`;
+  if (option.employment_model === "zero_hours") return `Oproepcontract met wettelijke uitzondering - ${suffix}`;
+  return option.label;
+}
+
 function inferContractModel(value) {
   if (value.contract_model === "bbl_indefinite") return "";
   if (value.contract_model) return value.contract_model;
@@ -351,6 +435,11 @@ function inferContractModel(value) {
     ? (hasMinMaxHours || value.call_agreement_type === "min_max" ? "min_max" : "zero_hours")
     : sourceEmploymentModel;
   const durationType = value.duration_type || (value.contract_form === "onbepaalde_tijd" ? "indefinite" : "fixed");
+  if (employmentModel === "min_max" && value.call_agreement_type === "statutory_bandwidth") {
+    return CONTRACT_MODEL_OPTIONS.find(option => (
+      option.employment_model === "min_max" && option.duration_type === durationType
+    ))?.value || "";
+  }
   const candidate = CONTRACT_MODEL_OPTIONS.find(option => {
     if (option.contract_form !== value.contract_form) return false;
     if (option.duration_type !== durationType) return false;
@@ -406,14 +495,12 @@ function readableFunctionLabel(value) {
 }
 
 function buildCompanyFunctionOptions(assignments, referenceDate, caoKey, caoOptions = [], selectedValue = null) {
-  if (!caoKey) return FUNCTION_TYPES;
+  if (!caoKey) return [];
   const activeAssignments = (assignments || []).filter(assignment => isDateWithinOptionRange(assignment, referenceDate));
   const scopedAssignments = activeAssignments.filter(assignment => resolveAssignmentCaoKey(assignment, caoOptions) === caoKey);
   const configuredFunctions = uniqueValues(scopedAssignments.flatMap(assignment => assignment.applies_to_activities || []))
     .filter(value => value !== "all");
-  const values = configuredFunctions.length > 0
-    ? configuredFunctions
-    : FUNCTION_TYPES.map(option => option.value);
+  const values = configuredFunctions;
   const withSelected = selectedValue && !values.includes(selectedValue)
     ? [...values, selectedValue]
     : values;
@@ -555,6 +642,13 @@ function initialForm(personnel) {
     employer_representative_function: "",
     signing_place: "",
     signing_date: new Date().toISOString().slice(0, 10),
+    contract_agreed_at: "",
+    call_contract_exception_profile: "none",
+    call_contract_exception_average_hours_per_week: "",
+    call_contract_exception_evidence_reference: "",
+    call_contract_exception_valid_until: "",
+    employee_already_receives_aow: "false",
+    employee_aow_date: "",
     cao_scale: personnel.cao_scale ?? "",
     cao_period: personnel.cao_period ?? "",
     custom_hourly_rate: personnel.custom_hourly_rate ?? "",
@@ -630,6 +724,12 @@ function initialForm(personnel) {
     bbl_practice_trainer_name: "",
     industry_seniority_pay_periods: personnel.industry_seniority_pay_periods ?? "",
     industry_start_date: personnel.industry_start_date || "",
+    prior_similar_work_status: "unknown",
+    prior_external_employer_name: "",
+    prior_external_contract_count: "",
+    prior_external_first_start_date: "",
+    prior_external_last_end_date: "",
+    successor_employer_confirmed: "unknown",
     template_id: null,
     template_version: null,
     template_name_snapshot: null,
@@ -658,16 +758,20 @@ function formFromContract(contract) {
   const inferredModel = inferContractModel({
     ...contract,
     employment_contract_model: employmentModel,
-    call_agreement_type: employmentModel === "min_max" ? "min_max" : (employmentModel === "zero_hours" ? "zero_hours" : "not_applicable"),
+    call_agreement_type: contract.call_agreement_type
+      || (employmentModel === "min_max" ? "min_max" : (employmentModel === "zero_hours" ? "zero_hours" : "not_applicable")),
   });
+  const isStoredStatutoryBandwidth = contract.call_agreement_type === "statutory_bandwidth";
   return {
     source_type: contract.source_type || (contract.generated_file_id ? "generated" : "uploaded_existing"),
     company_id: contract.company_id || null,
     cao_key: contract.cao_key || null,
     cao_configuration_id: contract.cao_configuration_id || null,
     contract_model: inferredModel,
-    contract_form: contract.contract_form || "unknown",
-    underlying_contract_form: contract.underlying_contract_form || null,
+    contract_form: isStoredStatutoryBandwidth ? "oproep" : (contract.contract_form || "unknown"),
+    underlying_contract_form: isStoredStatutoryBandwidth
+      ? (contract.contract_form || (contract.duration_type === "indefinite" ? "onbepaalde_tijd" : "bepaalde_tijd"))
+      : (contract.underlying_contract_form || null),
     employment_contract_model: employmentModel,
     probation_agreed: contract.probation_agreed === true ? "true" : contract.probation_agreed === false ? "false" : (contract.probation_agreed === "not_applicable" ? "not_applicable" : "unknown"),
     probation_context: contract.probation_context || (contract.probation_agreed === false ? "not_applicable" : "unknown"),
@@ -681,6 +785,13 @@ function formFromContract(contract) {
     employer_representative_function: contract.employer_representative_function || "",
     signing_place: contract.signing_place || "",
     signing_date: contract.signing_date || "",
+    contract_agreed_at: contract.contract_agreed_at || contract.signing_date || "",
+    call_contract_exception_profile: contract.call_contract_exception_profile || "none",
+    call_contract_exception_average_hours_per_week: contract.call_contract_exception_average_hours_per_week ?? "",
+    call_contract_exception_evidence_reference: contract.call_contract_exception_evidence_reference || "",
+    call_contract_exception_valid_until: contract.call_contract_exception_valid_until || "",
+    employee_already_receives_aow: boolToSelect(contract.employee_already_receives_aow),
+    employee_aow_date: contract.employee_aow_date || "",
     cao_scale: contract.cao_scale ?? "",
     cao_period: contract.cao_period ?? "",
     custom_hourly_rate: contract.custom_hourly_rate ?? "",
@@ -756,6 +867,12 @@ function formFromContract(contract) {
     bbl_practice_trainer_name: contract.bbl_practice_trainer_name || "",
     industry_seniority_pay_periods: contract.industry_seniority_pay_periods ?? "",
     industry_start_date: contract.industry_start_date || "",
+    prior_similar_work_status: contract.prior_similar_work_status || (contract.duration_type === "fixed" ? "unknown" : "not_applicable"),
+    prior_external_employer_name: contract.chain_external_history?.employer_name || "",
+    prior_external_contract_count: contract.chain_external_history?.contract_count ?? "",
+    prior_external_first_start_date: contract.chain_external_history?.first_start_date || "",
+    prior_external_last_end_date: contract.chain_external_history?.last_end_date || "",
+    successor_employer_confirmed: boolToSelect(contract.chain_external_history?.successor_employer_confirmed),
     template_id: contract.template_id || null,
     template_version: contract.template_version || null,
     template_name_snapshot: contract.template_name_snapshot || null,
@@ -778,9 +895,24 @@ function getMissingContractFields(form) {
   if (form.source_type === "uploaded_existing" && !form.existing_contract_file && !form.signed_file_id) missing.push("contractdocument");
   if (!form.cao_key && form.contract_form !== "zzp") missing.push("CAO");
   if (!form.contract_start_date) missing.push("startdatum");
+  if (!isArticle14Internship && form.contract_form !== "zzp" && !form.contract_agreed_at) missing.push("datum overeengekomen");
   if (form.duration_type === "fixed" && !form.contract_end_date) missing.push("einddatum");
+  if (form.duration_type === "fixed"
+    && !["internship", "bbl"].includes(form.employment_contract_model)
+    && !["no", "yes"].includes(form.prior_similar_work_status)) {
+    missing.push("eerdere vergelijkbare contracthistorie");
+  }
+  if (form.prior_similar_work_status === "yes") {
+    if (!form.prior_external_employer_name) missing.push("vorige werkgever");
+    if (!numberOrNull(form.prior_external_contract_count)) missing.push("aantal externe tijdelijke contracten");
+    if (!form.prior_external_last_end_date) missing.push("einddatum vorige externe contract");
+    if (form.successor_employer_confirmed === "unknown") missing.push("beoordeling opvolgend werkgeverschap");
+  }
   if (!form.function_type && !form.cao_function_group && !form.cao_function_level) {
     missing.push("functiecontext");
+  }
+  if (form.cao_key === CAO_EHB_KEY && !form.cao_function_level) {
+    missing.push("CAO EHB-functieniveau a-e");
   }
   if (form.contract_form !== "zzp" && form.contract_form !== "stage" && !form.cao_scale && !form.cao_period && !form.custom_hourly_rate) {
     missing.push("loonschaal/trede");
@@ -802,11 +934,31 @@ function getMissingContractFields(form) {
   if (form.employment_contract_model === "min_max" && (!form.min_hours_per_pay_period || !form.max_hours_per_pay_period)) {
     missing.push("min-max uren");
   }
+  if (form.employment_contract_model === "min_max") {
+    const band = getMinMaxBand(form);
+    if (band.minimum !== null && band.minimum <= 0) missing.push("minimumuren groter dan nul");
+    if (band.minimum !== null && band.maximum !== null && band.maximum < band.minimum) missing.push("maximumuren minimaal gelijk aan minimumuren");
+  }
   if (["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model)
     && normalizeAvailabilityWindows(form.availability_windows).length === 0) {
     missing.push("beschikbaarheidsvensters");
   }
   if (["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model) && !form.call_channel) missing.push("oproepkanaal");
+  const futureLegacyCallModel = form.contract_agreed_at >= FLEX_REFORM_EFFECTIVE_DATE
+    && ["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model);
+  if (futureLegacyCallModel && !isStatutoryBandwidthModel(form)) {
+    if (!form.call_contract_exception_profile || form.call_contract_exception_profile === "none") missing.push("wettelijke oproepuitzondering");
+    const averageHours = numberOrNull(form.call_contract_exception_average_hours_per_week);
+    if (averageHours === null || averageHours < 0 || averageHours > 16) missing.push("gemiddeld maximaal 16 uur per week");
+    if (["pupil", "student"].includes(form.call_contract_exception_profile)) {
+      if (!form.call_contract_exception_evidence_reference) missing.push("inschrijvingsbewijs");
+      if (!form.call_contract_exception_valid_until) missing.push("geldigheid inschrijvingsbewijs");
+    }
+    if (form.call_contract_exception_profile === "aow") {
+      if (form.employee_already_receives_aow !== "true") missing.push("bevestiging AOW-status");
+      if (!form.employee_aow_date) missing.push("AOW-datum");
+    }
+  }
   if (form.employment_contract_model === "internship") {
     if (form.source_type === "generated" && !["pok_end_date", "free"].includes(form.duration_option)) missing.push("bron van de stage-einddatum");
     if (form.internship_type !== "bol" && form.duration_option === "pok_end_date") missing.push("vrije einddatum voor deze re-integratieroute");
@@ -863,35 +1015,38 @@ function parttimeModel(form) {
   return "not_applicable";
 }
 
-function functionContextKey(value) {
-  return [
-    value.company_id || "",
-    value.function_type || "",
-    value.cao_function_group || "",
-    value.cao_function_level || "",
-  ].join("|");
-}
-
 function isActiveContract(contract) {
-  if (["archived", "expired", "concept", "generated"].includes(contract.document_status)) return false;
-  return contract.is_current !== false || ["active", "signed"].includes(contract.document_status);
+  if (["active", "scheduled", "signed", "expired"].includes(contract.document_status)) return true;
+  return contract.document_status === "archived"
+    && !!(contract.signed_at || contract.signed_file_id || contract.signed_file_url);
 }
 
-function validateConflicts(form, contracts, editingId) {
+function companyLegalKey(companyId, companies) {
+  const company = (companies || []).find(item => item.id === companyId);
+  const kvk = String(company?.kvk_number || "").replace(/\D/g, "");
+  return kvk ? `kvk:${kvk}` : `company:${companyId || "unknown"}`;
+}
+
+function validateConflicts(form, contracts, editingId, companies) {
   const issues = [];
   const warnings = [];
   if (!form.company_id || !form.contract_start_date) return { issues, warnings };
 
-  const nextContext = functionContextKey(form);
+  const nextFunctions = uniqueValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]);
   const activeCandidates = (contracts || []).filter(contract => contract.id !== editingId && isActiveContract(contract));
   activeCandidates.forEach(contract => {
-    if (contract.company_id !== form.company_id) return;
     if (!rangesOverlap(form.contract_start_date, form.contract_end_date, contract.contract_start_date, contract.contract_end_date)) return;
-    if (functionContextKey(contract) === nextContext) {
-      issues.push(`Overlap met actief contract bij ${contract.contract_start_date || "?"}${contract.contract_end_date ? ` t/m ${contract.contract_end_date}` : ""} voor dezelfde functiecontext.`);
+    const otherFunctions = uniqueValues([contract.function_type, ...(contract.allowed_function_types || [])]);
+    const duplicateFunctions = nextFunctions.filter(value => otherFunctions.includes(value));
+    if (companyLegalKey(contract.company_id, companies) === companyLegalKey(form.company_id, companies)) {
+      issues.push(`Er bestaat in deze periode al een contract bij dezelfde juridische werkgever. Voeg meerdere functies samen in één contract in plaats van overlappende contracten te maken.`);
       return;
     }
-    warnings.push("Deze medewerker heeft in dezelfde periode al een actief contract bij dit bedrijf met een andere functiecontext. Controleer of planning/payroll dit bewust zo moet verwerken.");
+    if (duplicateFunctions.length > 0) {
+      issues.push(`De functie ${duplicateFunctions.map(readableFunctionLabel).join(", ")} is in deze periode al gekoppeld aan een contract bij een ander bedrijf. Kies per functie één werkgever zodat planning en uitbetaling eenduidig blijven.`);
+    } else {
+      warnings.push("De medewerker heeft in dezelfde periode ook een contract bij een ander bedrijf. De applicatie controleert de gezamenlijke arbeidsduur en contractroutering.");
+    }
   });
 
   return { issues, warnings };
@@ -901,9 +1056,7 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
   const missing = getMissingContractFields(form);
   const contextReady = missing.length === 0;
   const generated = form.source_type === "generated";
-  const uploadedExisting = form.source_type === "uploaded_existing";
-  const activeUploadedContract = uploadedExisting && contextReady;
-  const documentStatus = generated ? "generated" : (activeUploadedContract ? "active" : "concept");
+  const documentStatus = "concept";
   const allowedFunctionTypes = fromArrayText(form.allowed_function_types_text);
   const allowedGroups = fromArrayText(form.allowed_cao_function_groups_text);
   const allowedLevels = fromArrayText(form.allowed_cao_function_levels_text);
@@ -911,6 +1064,10 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
   const isCallAgreement = ["zero_hours", "min_max"].includes(employmentModel);
   const hasFixedHours = ["fulltime", "parttime_fixed", "parttime_growth", "bbl"].includes(employmentModel);
   const isMinMax = employmentModel === "min_max";
+  const isStatutoryBandwidth = isStatutoryBandwidthModel({ ...form, employment_contract_model: employmentModel });
+  const persistedContractForm = isStatutoryBandwidth
+    ? (form.underlying_contract_form || (form.duration_type === "indefinite" ? "onbepaalde_tijd" : "bepaalde_tijd"))
+    : (form.contract_form || "unknown");
   const fixedHoursOfferDueAt = isCallAgreement ? addMonths(form.contract_start_date, 12) : null;
   const fixedHoursOfferDeadlineAt = isCallAgreement ? addMonths(form.contract_start_date, 13) : null;
 
@@ -927,8 +1084,8 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     contract_model: form.contract_model || null,
     legal_document_type: employmentModel === "internship" ? "internship_agreement" : "employment_agreement",
     learning_route: employmentModel === "bbl" ? "bbl" : (employmentModel === "internship" ? "article_14_internship" : null),
-    contract_form: form.contract_form || "unknown",
-    underlying_contract_form: form.contract_form === "oproep" ? (form.underlying_contract_form || "unknown") : null,
+    contract_form: persistedContractForm,
+    underlying_contract_form: isStatutoryBandwidth ? null : (form.contract_form === "oproep" ? (form.underlying_contract_form || "unknown") : null),
     employment_contract_model: employmentModel,
     parttime_contract_model: parttimeModel(form),
     probation_agreed: form.probation_agreed === "not_applicable" ? null : boolOrNull(form.probation_agreed),
@@ -938,6 +1095,19 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     duration_label: durationLabel(form.duration_option),
     contract_start_date: form.contract_start_date || null,
     contract_end_date: form.contract_end_date || null,
+    contract_agreed_at: form.contract_agreed_at || null,
+    call_contract_exception_profile: isCallAgreement ? (form.call_contract_exception_profile || "none") : "none",
+    call_contract_exception_average_hours_per_week: isCallAgreement
+      ? numberOrNull(form.call_contract_exception_average_hours_per_week)
+      : null,
+    call_contract_exception_evidence_reference: isCallAgreement
+      ? (form.call_contract_exception_evidence_reference || null)
+      : null,
+    call_contract_exception_valid_until: isCallAgreement
+      ? (form.call_contract_exception_valid_until || null)
+      : null,
+    employee_already_receives_aow: form.employee_already_receives_aow === "true",
+    employee_aow_date: form.employee_aow_date || null,
     work_location: form.work_location || null,
     work_area: form.work_area || null,
     employer_representative_name: form.employer_representative_name || null,
@@ -956,6 +1126,15 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     periodic_increase_due_confirmed: boolOrNull(form.periodic_increase_due_confirmed),
     function_type: form.function_type || null,
     allowed_function_types: allowedFunctionTypes,
+    function_assignments: allowedFunctionTypes.map(functionKey => ({
+      function_key: functionKey,
+      function_label: readableFunctionLabel(functionKey),
+      is_primary: functionKey === form.function_type,
+      cao_function_group: form.cao_function_group || null,
+      cao_function_level: form.cao_function_level || null,
+      cao_scale: numberOrNull(form.cao_scale),
+    })),
+    function_assignment_policy_version: "employee-contract-routing-v1",
     cao_function_group: form.cao_function_group || null,
     allowed_cao_function_groups: allowedGroups,
     cao_function_level: form.cao_function_level || null,
@@ -984,14 +1163,14 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
       ? (form.availability_timezone || "Europe/Amsterdam")
       : null,
     call_channel: isCallAgreement ? (form.call_channel || null) : null,
-    is_call_agreement: isCallAgreement,
-    call_agreement_type: isMinMax ? "min_max" : (employmentModel === "zero_hours" ? "zero_hours" : "not_applicable"),
+    is_call_agreement: isCallAgreement && !isStatutoryBandwidth,
+    call_agreement_type: isStatutoryBandwidth ? "statutory_bandwidth" : (isMinMax ? "min_max" : (employmentModel === "zero_hours" ? "zero_hours" : "not_applicable")),
     call_notice_days: isCallAgreement ? 4 : null,
-    employee_notice_days: employmentModel === "zero_hours" ? 4 : null,
+    employee_notice_days: isCallAgreement ? 4 : null,
     no_work_no_pay_first_6_months: employmentModel === "zero_hours"
       ? false
       : previous.no_work_no_pay_first_6_months === true,
-    payslip_call_agreement_indicator_required: isCallAgreement,
+    payslip_call_agreement_indicator_required: isCallAgreement && !isStatutoryBandwidth,
     fixed_hours_offer_due_at: fixedHoursOfferDueAt,
     fixed_hours_offer_deadline_at: fixedHoursOfferDeadlineAt,
     fixed_hours_offer_status: isCallAgreement ? (previous.fixed_hours_offer_status || "not_due") : null,
@@ -1039,14 +1218,24 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     bbl_practice_trainer_name: employmentModel === "bbl" ? (form.bbl_practice_trainer_name || null) : null,
     industry_seniority_pay_periods: numberOrNull(form.industry_seniority_pay_periods),
     industry_start_date: form.industry_start_date || null,
+    prior_similar_work_status: form.duration_type === "fixed"
+      ? (form.prior_similar_work_status || "unknown")
+      : "not_applicable",
+    chain_external_history: form.prior_similar_work_status === "yes" ? {
+      employer_name: form.prior_external_employer_name || null,
+      contract_count: numberOrNull(form.prior_external_contract_count),
+      first_start_date: form.prior_external_first_start_date || null,
+      last_end_date: form.prior_external_last_end_date || null,
+      successor_employer_confirmed: boolOrNull(form.successor_employer_confirmed),
+    } : null,
     contract_context_status: contextReady ? "context_ready" : "draft_missing_context",
     contract_context_missing_fields: missing,
     contract_context_checked_at: new Date().toISOString(),
     cao_contract_rule_status: contextReady ? "unknown" : "blocked",
     planning_allowed: false,
-    contract_final_allowed: activeUploadedContract,
+    contract_final_allowed: false,
     payroll_final_allowed: false,
-    is_current: activeUploadedContract,
+    is_current: false,
     notes: form.notes || null,
     metadata: buildAuditMetadata(currentUser, previous?.id ? "gewijzigd" : "toegevoegd", previous?.metadata || {}, auditActors),
   };
@@ -1524,6 +1713,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const [form, setForm] = useState(() => initialForm(personnel));
   const [previewFile, setPreviewFile] = useState(null);
   const [actionMessage, setActionMessage] = useState(null);
+  const [statusFilter, setStatusFilter] = useState("current");
+  const [companyFilter, setCompanyFilter] = useState("all");
+  const [signedUploadId, setSignedUploadId] = useState(null);
 
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
@@ -1545,6 +1737,18 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const sortedContracts = useMemo(() => [...contracts].sort((a, b) =>
     String(b.contract_start_date || "").localeCompare(String(a.contract_start_date || ""))
   ), [contracts]);
+  const filteredContracts = useMemo(() => sortedContracts.filter(contract => {
+    if (companyFilter !== "all" && contract.company_id !== companyFilter) return false;
+    if (statusFilter === "all") return true;
+    if (statusFilter === "current") return !["archived", "expired"].includes(contract.document_status);
+    return contract.document_status === statusFilter;
+  }), [companyFilter, sortedContracts, statusFilter]);
+  const contractSummary = useMemo(() => ({
+    active: contracts.filter(contract => contract.document_status === "active").length,
+    scheduled: contracts.filter(contract => contract.document_status === "scheduled").length,
+    attention: contracts.filter(contract => ["concept", "generated", "signed"].includes(contract.document_status)).length,
+    archived: contracts.filter(contract => ["archived", "expired"].includes(contract.document_status)).length,
+  }), [contracts]);
 
   const companyIds = useMemo(() => uniqueValues([
     form.company_id,
@@ -1627,8 +1831,20 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     .filter(clause => clause.company_id === form.company_id && clause.status !== "archived"),
   [contractClauses, form.company_id]);
   const selectedContractModel = getContractModel(form.contract_model);
+  const availableContractModels = useMemo(
+    () => CONTRACT_MODEL_OPTIONS.filter(option => contractModelAllowedForCao(option, form.cao_key)),
+    [form.cao_key]
+  );
   const isArticle14Internship = form.employment_contract_model === "internship";
   const isBblModel = form.employment_contract_model === "bbl";
+  const isLegacyCallModel = ["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model);
+  const futureFlexModel = form.contract_agreed_at >= FLEX_REFORM_EFFECTIVE_DATE && isLegacyCallModel;
+  const futureStatutoryBandwidth = isStatutoryBandwidthModel(form);
+  const futureCallRequiresException = futureFlexModel && !futureStatutoryBandwidth;
+  const legacyCallContinuesAfterReform = isLegacyCallModel
+    && form.contract_start_date
+    && form.contract_start_date < FLEX_REFORM_EFFECTIVE_DATE
+    && (!form.contract_end_date || form.contract_end_date >= FLEX_REFORM_EFFECTIVE_DATE);
   const wageTableYear = getYear(form.contract_start_date || new Date());
   const companyCaoKeyOptions = useMemo(
     () => buildCompanyCaoKeyOptions(companyCaoAssignments, form.contract_start_date, caoConfigurationOptions),
@@ -1664,8 +1880,43 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     if (!expectedPbSalaryScale) return rows;
     return rows.filter(row => Number(row.scale) === expectedPbSalaryScale);
   }, [effectiveCaoConfiguration, expectedPbSalaryScale, form.cao_function_group, form.cao_key, wageTableYear]);
-  const conflicts = validateConflicts(form, contracts, editingId);
+  const conflicts = validateConflicts(form, contracts, editingId, companies);
   const missingFields = getMissingContractFields(form);
+  const evaluationContract = useMemo(() => buildContractPayload(personnel, {
+    ...form,
+    template_version: selectedTemplate?.version || null,
+    template_name_snapshot: selectedTemplate?.name || null,
+    letterhead_name_snapshot: selectedLetterhead?.name || null,
+    wage_table_year: form.wage_table_year || wageTableYear,
+  }, currentUser, auditActors, editingId ? contracts.find(contract => contract.id === editingId) || {} : {}), [
+    auditActors,
+    contracts,
+    currentUser,
+    editingId,
+    form,
+    personnel,
+    selectedLetterhead?.name,
+    selectedTemplate?.name,
+    selectedTemplate?.version,
+    wageTableYear,
+  ]);
+  const { data: contractEvaluation = null, isFetching: contractEvaluationLoading, error: contractEvaluationError } = useQuery({
+    queryKey: ["personnel-contract-evaluation", personnel.id, editingId, evaluationContract],
+    queryFn: async () => {
+      const { data } = await base44.functions.invoke("managePersonnelContract", {
+        action: "evaluate",
+        contract_id: editingId || null,
+        contract: evaluationContract,
+      });
+      return data?.evaluation || null;
+    },
+    enabled: wizardOpen
+      && wizardStep === 6
+      && !!form.company_id
+      && !!form.contract_start_date
+      && selectedFunctionValues.length > 0,
+    retry: false,
+  });
   const generatedPreview = useMemo(() => renderContractBody(personnel, form, selectedCompany, selectedTemplate, selectedTemplateClauses), [form, personnel, selectedCompany, selectedTemplate, selectedTemplateClauses]);
   const unresolvedTemplatePlaceholders = useMemo(
     () => form.source_type === "generated" ? getUnresolvedContractTemplatePlaceholders(generatedPreview) : [],
@@ -1688,11 +1939,38 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
 
   const set = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
   const setCaoKey = (value) => setForm(prev => {
+    const selectedModel = getContractModel(prev.contract_model);
+    const keepSelectedModel = contractModelAllowedForCao(selectedModel, value);
+    const caoChanged = prev.cao_key !== value;
     const next = {
       ...prev,
       cao_key: value,
       cao_configuration_id: null,
       template_id: null,
+      ...(caoChanged ? {
+        cao_function_group: "",
+        allowed_cao_function_groups_text: "",
+        cao_function_level: "",
+        allowed_cao_function_levels_text: "",
+        cao_scale: "",
+        cao_period: "",
+        custom_hourly_rate: "",
+        hourly_rate_snapshot: "",
+        written_scale_period_notice_confirmed: "unknown",
+        periodic_increase_due_confirmed: "unknown",
+      } : {}),
+      ...(keepSelectedModel ? {} : {
+        contract_model: "",
+        contract_form: "unknown",
+        underlying_contract_form: null,
+        duration_type: "fixed",
+        employment_contract_model: "unknown",
+        call_agreement_type: "not_applicable",
+        duration_option: "",
+        contract_end_date: "",
+        probation_agreed: "unknown",
+        probation_context: "unknown",
+      }),
     };
     if (value === CAO_PARTICULIERE_BEVEILIGING_KEY) {
       next.salary_payment_frequency = "four_weeks";
@@ -1780,6 +2058,16 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       company_id: companyId,
       cao_key: null,
       cao_configuration_id: null,
+      contract_model: "",
+      contract_form: "unknown",
+      underlying_contract_form: null,
+      duration_type: "fixed",
+      employment_contract_model: "unknown",
+      call_agreement_type: "not_applicable",
+      duration_option: "",
+      contract_end_date: "",
+      probation_agreed: "unknown",
+      probation_context: "unknown",
       template_id: null,
       letterhead_id: null,
       work_location: defaultWorkLocation,
@@ -1889,9 +2177,17 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       if (model?.duration_type === "indefinite") {
         next.contract_end_date = "";
         next.duration_option = "";
+        next.prior_similar_work_status = "not_applicable";
       } else if (!["internship", "bbl"].includes(model?.employment_model) && prev.duration_option === "pok_end_date") {
         next.contract_end_date = "";
         next.duration_option = "";
+      }
+      if (model?.duration_type === "fixed" && !["internship", "bbl"].includes(model?.employment_model)
+        && prev.prior_similar_work_status === "not_applicable") {
+        next.prior_similar_work_status = "unknown";
+      }
+      if (["internship", "bbl", "zzp"].includes(model?.employment_model)) {
+        next.prior_similar_work_status = "not_applicable";
       }
       if (["internship", "zzp"].includes(model?.employment_model)) {
         next.probation_agreed = "not_applicable";
@@ -2029,9 +2325,25 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         wage_table_year: form.wage_table_year || wageTableYear,
         signed_file_id: previous.signed_file_id || null,
       }, currentUser, auditActors, previous);
-      let record = editingId
-        ? await base44.entities.PersonnelContract.update(editingId, payload)
-        : await base44.entities.PersonnelContract.create(payload);
+      const evaluationResponse = await base44.functions.invoke("managePersonnelContract", {
+        action: "evaluate",
+        contract_id: editingId || null,
+        contract: payload,
+      });
+      const latestEvaluation = evaluationResponse.data?.evaluation;
+      if (form.source_type === "generated" && latestEvaluation?.status !== "compliant") {
+        throw new Error(latestEvaluation?.blocking_reasons?.[0]
+          || latestEvaluation?.manual_review_reasons?.[0]
+          || "Het contract moet eerst juridisch compleet zijn voordat een document kan worden gegenereerd.");
+      }
+
+      const draftResponse = await base44.functions.invoke("managePersonnelContract", {
+        action: "save_draft",
+        contract_id: editingId || null,
+        contract: payload,
+      });
+      let record = draftResponse.data?.contract;
+      if (!record?.id) throw new Error("Het contractconcept kon niet worden aangemaakt.");
 
       if (form.source_type === "generated") {
         const pdfFile = makePdfFile({
@@ -2065,15 +2377,15 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           auditAction: editingId ? "gegenereerd bijgewerkt" : "gegenereerd",
           folderSegments: ["contracten"],
         });
-        record = await base44.entities.PersonnelContract.update(record.id, {
+        const attachedResponse = await base44.functions.invoke("managePersonnelContract", {
+          action: "attach_generated",
+          contract_id: record.id,
           generated_file_url: result.file_url,
           generated_file_id: result.managed_file_id,
           generated_download_filename: result.download_filename,
           generated_logical_path: result.logical_path,
-          document_status: "generated",
-          is_current: false,
-          metadata: buildAuditMetadata(currentUser, "gegenereerd", record.metadata || {}, auditActors),
         });
+        record = attachedResponse.data?.contract || record;
       }
 
       if (form.source_type === "uploaded_existing" && form.existing_contract_file) {
@@ -2097,30 +2409,118 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           auditAction: editingId ? "vernieuwd" : "toegevoegd",
           folderSegments: ["contracten"],
         });
-        record = await base44.entities.PersonnelContract.update(record.id, {
+        const signedResponse = await base44.functions.invoke("managePersonnelContract", {
+          action: "register_signed",
+          contract_id: record.id,
           signed_file_url: result.file_url,
           signed_file_id: result.managed_file_id,
           signed_download_filename: result.download_filename,
           signed_logical_path: result.logical_path,
-          document_status: missingFields.length === 0 ? "active" : "concept",
-          is_current: missingFields.length === 0,
-          contract_final_allowed: missingFields.length === 0,
-          metadata: buildAuditMetadata(currentUser, "contractdocument toegevoegd", record.metadata || {}, auditActors),
+          contract_agreed_at: form.contract_agreed_at || form.signing_date || null,
         });
+        record = signedResponse.data?.contract || record;
+        return {
+          record,
+          activated: signedResponse.data?.activated === true,
+          evaluation: signedResponse.data?.evaluation || null,
+        };
       }
 
-      return record;
+      return { record, activated: false, evaluation: latestEvaluation };
     },
-    onSuccess: () => {
+    onSuccess: (result) => {
       setWizardOpen(false);
       setWizardStep(1);
       setEditingId(null);
       setForm(initialForm(personnel));
-      setActionMessage({ type: "success", text: "Contract opgeslagen." });
+      setActionMessage({
+        type: "success",
+        text: result?.activated
+          ? "Het getekende contract is gecontroleerd en actief gemaakt."
+          : result?.record?.document_status === "signed"
+            ? "Het getekende contract is opgeslagen en wacht op juridische controle."
+            : "Het contractdocument is gegenereerd. Upload na ondertekening de getekende versie om het te activeren.",
+      });
       refresh();
     },
     onError: (error) => {
       setActionMessage({ type: "error", text: error?.message || "Contract kon niet worden opgeslagen." });
+    },
+  });
+
+  const lifecycleMutation = useMutation({
+    mutationFn: async ({ action, contract }) => {
+      const { data } = await base44.functions.invoke("managePersonnelContract", {
+        action,
+        contract_id: contract.id,
+      });
+      return data;
+    },
+    onSuccess: (data, variables) => {
+      const labels = {
+        archive: "Contract gearchiveerd.",
+        revalidate: data?.activated
+          ? "Contract opnieuw gecontroleerd en inzetbaar gemaakt."
+          : "Hercontrole afgerond; het contract vraagt nog aandacht.",
+      };
+      setActionMessage({ type: "success", text: labels[variables.action] || "Contract bijgewerkt." });
+      refresh();
+    },
+    onError: (error) => setActionMessage({
+      type: "error",
+      text: error?.response?.data?.error || error?.message || "De contractactie is mislukt.",
+    }),
+  });
+
+  const signedUploadMutation = useMutation({
+    mutationFn: async ({ contract, file }) => {
+      const result = await uploadManagedFile({
+        file,
+        ownerType: "personnel",
+        ownerId: personnel.id,
+        companyId: contract.company_id,
+        ownerLabel: personnel.full_name || personnel.display_name || "Medewerker",
+        domain: "hr",
+        category: "employment_contract",
+        sourceEntity: "PersonnelContract",
+        sourceEntityId: contract.id,
+        sourceField: "signed_file",
+        documentLabel: "Getekend arbeidscontract",
+        validFrom: contract.contract_start_date || null,
+        validUntil: contract.contract_end_date || null,
+        isSensitive: true,
+        uploadedBy: currentUser,
+        auditActors,
+        auditAction: "getekende versie toegevoegd",
+        folderSegments: ["contracten"],
+      });
+      const { data } = await base44.functions.invoke("managePersonnelContract", {
+        action: "register_signed",
+        contract_id: contract.id,
+        signed_file_url: result.file_url,
+        signed_file_id: result.managed_file_id,
+        signed_download_filename: result.download_filename,
+        signed_logical_path: result.logical_path,
+        contract_agreed_at: contract.contract_agreed_at || contract.signing_date || new Date().toISOString().slice(0, 10),
+      });
+      return data;
+    },
+    onSuccess: (data) => {
+      setSignedUploadId(null);
+      setActionMessage({
+        type: "success",
+        text: data?.activated
+          ? "De getekende versie is gecontroleerd en het contract is actief."
+          : "De getekende versie is opgeslagen. Bekijk de aandachtspunten voordat het contract inzetbaar wordt.",
+      });
+      refresh();
+    },
+    onError: (error) => {
+      setSignedUploadId(null);
+      setActionMessage({
+        type: "error",
+        text: error?.response?.data?.error || error?.message || "De getekende versie kon niet worden verwerkt.",
+      });
     },
   });
 
@@ -2227,8 +2627,15 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         </div>
       )}
 
+      <AnimatePresence initial={false}>
       {wizardOpen && (
-        <div className="rounded-lg border border-border bg-card">
+        <motion.div
+          initial={{ opacity: 0, y: 12 }}
+          animate={{ opacity: 1, y: 0 }}
+          exit={{ opacity: 0, y: 8 }}
+          transition={{ duration: 0.22, ease: "easeOut" }}
+          className="rounded-lg border border-border bg-card"
+        >
           <div className="border-b border-border p-4">
             <div className="flex items-center justify-between gap-3">
               <div>
@@ -2264,7 +2671,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       onClick={() => setCompanyId(company.id)}
                       className={`rounded-lg border p-4 text-left transition-colors ${form.company_id === company.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"}`}
                     >
-                      <p className="font-semibold text-foreground">{company.display_name || company.legal_name}</p>
+                      <p className="flex items-center gap-2 font-semibold text-foreground"><Building2 className="h-4 w-4 text-primary" /> {company.display_name || company.legal_name}</p>
                       <p className="mt-1 text-xs text-muted-foreground">{company.legal_name && company.display_name !== company.legal_name ? company.legal_name : company.city || "Bedrijf"}</p>
                     </button>
                   ))}
@@ -2318,14 +2725,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             {wizardStep === 3 && (
               <div className="space-y-5">
                 <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {CONTRACT_MODEL_OPTIONS.map(option => (
+                  {availableContractModels.map(option => (
                     <button
                       key={option.value}
                       type="button"
                       onClick={() => setContractModel(option.value)}
                       className={`rounded-lg border p-4 text-left transition-colors ${form.contract_model === option.value ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"}`}
                     >
-                      <p className="font-semibold text-foreground">{option.label}</p>
+                      <p className="font-semibold text-foreground">{contractModelDisplayLabel(option, form.contract_agreed_at)}</p>
                       <p className="mt-1 text-xs text-muted-foreground">{CONTRACT_FORM_LABELS[option.contract_form] || option.contract_form} · {EMPLOYMENT_MODEL_LABELS[option.employment_model] || option.employment_model}</p>
                     </button>
                   ))}
@@ -2435,6 +2842,104 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   <Label>Startdatum</Label>
                   <Input type="date" value={form.contract_start_date || ""} onChange={event => set("contract_start_date", event.target.value)} />
                 </div>
+                <div className="space-y-1">
+                  <Label>Datum overeengekomen</Label>
+                  <Input type="date" value={form.contract_agreed_at || ""} onChange={event => set("contract_agreed_at", event.target.value)} />
+                  <p className="text-xs text-muted-foreground">De datum waarop werkgever en medewerker de overeenkomst aangaan. Deze datum bepaalt het toepasselijke overgangsrecht.</p>
+                </div>
+                {futureStatutoryBandwidth && (
+                  <div className="rounded-lg border border-emerald-300 bg-emerald-50/70 p-4 text-sm md:col-span-2 xl:col-span-3 dark:border-emerald-700 dark:bg-emerald-950/20">
+                    <p className="font-medium text-foreground">Wettelijk bandbreedtecontract</p>
+                    <p className="mt-1 text-muted-foreground">
+                      De gekozen minimum- en maximumuren voldoen aan het model dat vanaf 1 januari 2028 geldt: het minimum is groter dan nul en het maximum is niet hoger dan 130% daarvan.
+                    </p>
+                  </div>
+                )}
+                {futureCallRequiresException && (
+                  <div className="space-y-4 rounded-lg border border-amber-300 bg-amber-50/70 p-4 md:col-span-2 xl:col-span-3 dark:border-amber-700 dark:bg-amber-950/20">
+                    <div>
+                      <p className="font-medium text-foreground">Wettelijke uitzondering voor flexibel oproepmodel</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Vanaf 1 januari 2028 is dit model alleen beschikbaar voor een medewerker die gemiddeld maximaal 16 uur per week werkt en onder een wettelijke uitzonderingsgroep valt. Een min-maxmodel heeft geen uitzondering nodig zodra het maximum ten hoogste 130% van het minimum bedraagt.
+                      </p>
+                    </div>
+                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                      <div className="space-y-1">
+                        <Label>Uitzonderingsgroep</Label>
+                        <Select value={form.call_contract_exception_profile || "none"} onValueChange={value => set("call_contract_exception_profile", value)}>
+                          <SelectTrigger><SelectValue /></SelectTrigger>
+                          <SelectContent>
+                            {CALL_EXCEPTION_OPTIONS.map(option => (
+                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Verwacht gemiddelde uren per week</Label>
+                        <Input
+                          type="number"
+                          min="0"
+                          max="16"
+                          step="0.25"
+                          value={form.call_contract_exception_average_hours_per_week || ""}
+                          onChange={event => set("call_contract_exception_average_hours_per_week", event.target.value)}
+                        />
+                      </div>
+                      {form.call_contract_exception_profile === "minor" && (
+                        <div className="rounded-lg border border-border bg-background/70 p-3 text-xs text-muted-foreground">
+                          De leeftijd wordt automatisch gecontroleerd aan de hand van de geboortedatum in het medewerkersprofiel.
+                        </div>
+                      )}
+                      {["pupil", "student"].includes(form.call_contract_exception_profile) && (
+                        <>
+                          <div className="space-y-1">
+                            <Label>Referentie inschrijvingsbewijs</Label>
+                            <Input
+                              value={form.call_contract_exception_evidence_reference || ""}
+                              onChange={event => set("call_contract_exception_evidence_reference", event.target.value)}
+                              placeholder="Bijv. documentnummer of dossierkenmerk"
+                            />
+                          </div>
+                          <div className="space-y-1">
+                            <Label>Bewijs geldig tot en met</Label>
+                            <Input
+                              type="date"
+                              value={form.call_contract_exception_valid_until || ""}
+                              onChange={event => set("call_contract_exception_valid_until", event.target.value)}
+                            />
+                          </div>
+                        </>
+                      )}
+                      {form.call_contract_exception_profile === "aow" && (
+                        <>
+                          <div className="space-y-1">
+                            <Label>Ontvangt medewerker al AOW?</Label>
+                            <Select value={form.employee_already_receives_aow || "false"} onValueChange={value => set("employee_already_receives_aow", value)}>
+                              <SelectTrigger><SelectValue /></SelectTrigger>
+                              <SelectContent>
+                                <SelectItem value="false">Nee</SelectItem>
+                                <SelectItem value="true">Ja</SelectItem>
+                              </SelectContent>
+                            </Select>
+                          </div>
+                          <div className="space-y-1">
+                            <Label>AOW-datum</Label>
+                            <Input type="date" value={form.employee_aow_date || ""} onChange={event => set("employee_aow_date", event.target.value)} />
+                          </div>
+                        </>
+                      )}
+                    </div>
+                  </div>
+                )}
+                {legacyCallContinuesAfterReform && !futureFlexModel && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50/70 p-4 text-sm md:col-span-2 xl:col-span-3 dark:border-amber-700 dark:bg-amber-950/20">
+                    <p className="font-medium text-foreground">Overgangsmoment op 1 januari 2028</p>
+                    <p className="mt-1 text-muted-foreground">
+                      Dit oproepcontract loopt door na de wetswijziging. Plan voor die datum een controle en leg zo nodig een bandbreedte vast; alleen een aantoonbare wettelijke uitzondering kan het oproepmodel behouden.
+                    </p>
+                  </div>
+                )}
                 {selectedContractModel?.duration_type === "fixed" && (
                   <>
                     <div className="space-y-1">
@@ -2467,6 +2972,64 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     De einddatum moet aansluiten op de praktijkovereenkomst (POK). Na de opleiding is voor voortzetting een regulier arbeidscontract of een juridisch beoordeelde vervolgafspraak nodig.
                   </div>
                 )}
+                {selectedContractModel?.duration_type === "fixed"
+                  && !["internship", "bbl", "zzp"].includes(form.employment_contract_model) && (
+                  <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4 md:col-span-2 xl:col-span-3">
+                    <div>
+                      <Label>Eerder vergelijkbaar werk buiten deze contracthistorie?</Label>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        De applicatie kent contracten die hier zijn opgeslagen. Alleen eerder vergelijkbaar werk via een andere of opvolgende werkgever moet u nog aangeven.
+                      </p>
+                    </div>
+                    <div className="grid gap-2 sm:grid-cols-3">
+                      {[
+                        ["no", "Nee"],
+                        ["yes", "Ja"],
+                        ["unknown", "Nog uitzoeken"],
+                      ].map(([value, label]) => (
+                        <button
+                          key={value}
+                          type="button"
+                          onClick={() => set("prior_similar_work_status", value)}
+                          className={`rounded-lg border px-3 py-2 text-sm ${form.prior_similar_work_status === value ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
+                        >
+                          {label}
+                        </button>
+                      ))}
+                    </div>
+                    {form.prior_similar_work_status === "yes" && (
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <div className="space-y-1">
+                          <Label>Vorige werkgever</Label>
+                          <Input value={form.prior_external_employer_name || ""} onChange={event => set("prior_external_employer_name", event.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label>Aantal tijdelijke contracten</Label>
+                          <Input type="number" min="1" step="1" value={form.prior_external_contract_count || ""} onChange={event => set("prior_external_contract_count", event.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label>Einddatum laatste contract</Label>
+                          <Input type="date" value={form.prior_external_last_end_date || ""} onChange={event => set("prior_external_last_end_date", event.target.value)} />
+                        </div>
+                        <div className="space-y-1">
+                          <Label>Eerste startdatum (indien bekend)</Label>
+                          <Input type="date" value={form.prior_external_first_start_date || ""} onChange={event => set("prior_external_first_start_date", event.target.value)} />
+                        </div>
+                        <div className="space-y-1 md:col-span-2">
+                          <Label>Opvolgend werkgeverschap beoordeeld?</Label>
+                          <Select value={form.successor_employer_confirmed || "unknown"} onValueChange={value => set("successor_employer_confirmed", value)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              <SelectItem value="unknown">Nog niet beoordeeld</SelectItem>
+                              <SelectItem value="true">Ja, telt mee</SelectItem>
+                              <SelectItem value="false">Nee, telt niet mee</SelectItem>
+                            </SelectContent>
+                          </Select>
+                        </div>
+                      </div>
+                    )}
+                  </div>
+                )}
                 <div className="space-y-1">
                   <Label>Functietype</Label>
                   <Select value={form.function_type || "none"} onValueChange={selectPrimaryFunction}>
@@ -2478,6 +3041,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       ))}
                     </SelectContent>
                   </Select>
+                  {form.cao_key && !companyCaoAssignmentsLoading && wizardFunctionOptions.length === 0 && (
+                    <p className="text-xs text-destructive">Voor deze CAO zijn nog geen functies geconfigureerd in het bedrijfsprofiel. Voeg daar eerst de inzetbare functies toe.</p>
+                  )}
                 </div>
                 <div className="space-y-1">
                   <Label>CAO-functiegroep</Label>
@@ -2513,8 +3079,21 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                         ))}
                       </SelectContent>
                     </Select>
+                  ) : form.cao_key === CAO_EHB_KEY ? (
+                    <Select value={form.cao_function_level || "none"} onValueChange={value => set("cao_function_level", value === "none" ? null : value)}>
+                      <SelectTrigger><SelectValue /></SelectTrigger>
+                      <SelectContent>
+                        <SelectItem value="none">Kies functieniveau</SelectItem>
+                        {EHB_CAO_FUNCTION_LEVEL_OPTIONS.map(option => (
+                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
                   ) : (
                     <Input value={form.cao_function_level || ""} onChange={event => set("cao_function_level", event.target.value || null)} placeholder="CAO-functieniveau" />
+                  )}
+                  {form.cao_key === CAO_EHB_KEY && form.cao_function_level === "e" && (
+                    <p className="text-xs text-muted-foreground">Projectleider (niveau e) valt niet onder de CAO EHB-uitzondering van maximaal 6 tijdelijke contracten in 48 maanden.</p>
                   )}
                 </div>
                 <div className="space-y-1">
@@ -2869,6 +3448,51 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       <p key={`template-warning-${index}`} className="mt-2 text-sm text-amber-700">{warning}</p>
                     ))}
                   </div>
+                  <div className="rounded-lg border border-border p-4">
+                    <div className="flex items-start justify-between gap-3">
+                      <div>
+                        <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
+                          <ShieldCheck className="h-4 w-4 text-primary" /> Juridische contractcontrole
+                        </p>
+                        <p className="mt-1 text-xs text-muted-foreground">Servercontrole op keten, looptijd, functieconflicten, CAO-context en gezamenlijke contracturen.</p>
+                      </div>
+                      {contractEvaluationLoading ? (
+                        <Badge variant="outline">Controleren...</Badge>
+                      ) : contractEvaluation?.status === "compliant" ? (
+                        <Badge className="bg-emerald-100 text-emerald-700">Gereed</Badge>
+                      ) : contractEvaluation ? (
+                        <Badge className="bg-amber-100 text-amber-700">Aandacht nodig</Badge>
+                      ) : null}
+                    </div>
+                    {contractEvaluationError && (
+                      <p className="mt-3 flex items-center gap-2 text-sm text-destructive">
+                        <AlertTriangle className="h-4 w-4" /> {contractEvaluationError?.response?.data?.error || contractEvaluationError.message || "Controle kon niet worden uitgevoerd."}
+                      </p>
+                    )}
+                    {contractEvaluation && (
+                      <div className="mt-3 space-y-2 text-sm">
+                        {contractEvaluation.chain?.status !== "not_applicable" && (
+                          <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/40 px-3 py-2">
+                            <CalendarClock className="h-4 w-4 text-muted-foreground" />
+                            <span className="font-medium text-foreground">Keten {contractEvaluation.chain?.position || "-"} van {contractEvaluation.chain?.contract_limit || "-"}</span>
+                            <span className="text-muted-foreground">binnen {contractEvaluation.chain?.period_limit_months || "-"} maanden</span>
+                          </div>
+                        )}
+                        {contractEvaluation.blocking_reasons?.map((reason, index) => (
+                          <p key={`legal-block-${index}`} className="flex gap-2 text-destructive"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {reason}</p>
+                        ))}
+                        {contractEvaluation.manual_review_reasons?.map((reason, index) => (
+                          <p key={`legal-review-${index}`} className="flex gap-2 text-amber-700"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {reason}</p>
+                        ))}
+                        {contractEvaluation.warnings?.map((warning, index) => (
+                          <p key={`legal-warning-${index}`} className="text-muted-foreground">{warning}</p>
+                        ))}
+                        {contractEvaluation.status === "compliant" && (
+                          <p className="flex items-center gap-2 text-emerald-700"><CheckCircle className="h-4 w-4" /> Geen blokkades gevonden. Een gegenereerd document wordt pas actief na upload en controle van de getekende versie.</p>
+                        )}
+                      </div>
+                    )}
+                  </div>
                   {form.source_type === "generated" && (
                     <div className="grid gap-3 md:grid-cols-2">
                       <div className="space-y-1">
@@ -2934,7 +3558,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   type="button"
                   onClick={() => saveMutation.mutate()}
                   disabled={saveMutation.isPending
+                    || contractEvaluationLoading
+                    || missingFields.length > 0
                     || conflicts.issues.length > 0
+                    || contractEvaluation?.status === "blocked"
+                    || contractEvaluation?.status === "manual_review_required"
                     || (form.source_type === "generated" && (standardTemplateValidation.issues.length > 0 || unresolvedTemplatePlaceholders.length > 0))}
                 >
                   <Save className="mr-1 h-4 w-4" /> {saveMutation.isPending ? "Opslaan..." : "Contract opslaan"}
@@ -2942,11 +3570,61 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               )}
             </div>
           </div>
-        </div>
+        </motion.div>
       )}
+      </AnimatePresence>
 
-      <div className="overflow-hidden rounded-lg border border-border">
-        <div className="grid grid-cols-[minmax(220px,1.4fr)_minmax(160px,1fr)_minmax(150px,.9fr)_minmax(150px,.8fr)_minmax(140px,.8fr)_minmax(120px,.7fr)_minmax(130px,.8fr)_44px] border-b border-border bg-muted/30 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+      <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+        {[
+          ["Actief", contractSummary.active, ShieldCheck, "text-emerald-600"],
+          ["Ingepland", contractSummary.scheduled, CalendarClock, "text-sky-600"],
+          ["Actie nodig", contractSummary.attention, FileSignature, "text-amber-600"],
+          ["Archief", contractSummary.archived, Archive, "text-muted-foreground"],
+        ].map(([label, count, Icon, color]) => (
+          <div key={label} className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3">
+            <div>
+              <p className="text-xs font-medium text-muted-foreground">{label}</p>
+              <p className="mt-1 text-xl font-semibold text-foreground">{count}</p>
+            </div>
+            <Icon className={`h-5 w-5 ${color}`} />
+          </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border border-border bg-card p-3">
+        <div className="min-w-[200px] space-y-1">
+          <Label className="text-xs">Status</Label>
+          <Select value={statusFilter} onValueChange={setStatusFilter}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="current">Lopend en in behandeling</SelectItem>
+              <SelectItem value="all">Alle contracten</SelectItem>
+              <SelectItem value="active">Actief</SelectItem>
+              <SelectItem value="scheduled">Ingepland</SelectItem>
+              <SelectItem value="generated">Wacht op ondertekening</SelectItem>
+              <SelectItem value="signed">Getekend - controle nodig</SelectItem>
+              <SelectItem value="archived">Gearchiveerd</SelectItem>
+              <SelectItem value="expired">Verlopen</SelectItem>
+            </SelectContent>
+          </Select>
+        </div>
+        <div className="min-w-[220px] space-y-1">
+          <Label className="text-xs">Bedrijf</Label>
+          <Select value={companyFilter} onValueChange={setCompanyFilter}>
+            <SelectTrigger><SelectValue /></SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">Alle bedrijven</SelectItem>
+              {companies.map(company => (
+                <SelectItem key={company.id} value={company.id}>{company.display_name || company.legal_name}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <p className="pb-2 text-xs text-muted-foreground">{filteredContracts.length} van {contracts.length} contracten</p>
+      </div>
+
+      <div className="overflow-x-auto rounded-lg border border-border">
+        <div className="grid min-w-[1280px] grid-cols-[minmax(220px,1.4fr)_minmax(160px,1fr)_minmax(150px,.9fr)_minmax(150px,.8fr)_minmax(140px,.8fr)_minmax(120px,.7fr)_minmax(130px,.8fr)_128px] border-b border-border bg-muted/30 px-4 py-3 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
           <div>Contract / functie</div>
           <div>Bedrijf</div>
           <div>Periode</div>
@@ -2957,10 +3635,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           <div />
         </div>
         {isLoading && <div className="p-6 text-sm text-muted-foreground">Contracten laden...</div>}
-        {!isLoading && sortedContracts.length === 0 && (
-          <div className="p-8 text-center text-sm text-muted-foreground">Nog geen arbeidscontracten vastgelegd.</div>
+        {!isLoading && filteredContracts.length === 0 && (
+          <div className="p-8 text-center text-sm text-muted-foreground">Geen contracten binnen deze filters.</div>
         )}
-        {!isLoading && sortedContracts.map(contract => {
+        {!isLoading && filteredContracts.map(contract => {
           const fileDescriptor = contractFileDescriptor(contract);
           const minPeriodHours = contract.min_hours_per_pay_period
             ?? (contract.min_hours_per_week !== null && contract.min_hours_per_week !== undefined ? Number(contract.min_hours_per_week) * 4 : null);
@@ -2980,15 +3658,23 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               ? "Leerarbeidsovereenkomst (BBL)"
               : (CONTRACT_FORM_LABELS[contract.contract_form] || "Arbeidscontract"));
           return (
-            <button
+            <div
               key={contract.id}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => openPreview(contract)}
-              className="grid w-full grid-cols-[minmax(220px,1.4fr)_minmax(160px,1fr)_minmax(150px,.9fr)_minmax(150px,.8fr)_minmax(140px,.8fr)_minmax(120px,.7fr)_minmax(130px,.8fr)_44px] items-center border-b border-border px-4 py-4 text-left text-sm last:border-b-0 hover:bg-muted/30"
+              onKeyDown={event => {
+                if (event.key === "Enter" || event.key === " ") openPreview(contract);
+              }}
+              className="grid min-w-[1280px] w-full cursor-pointer grid-cols-[minmax(220px,1.4fr)_minmax(160px,1fr)_minmax(150px,.9fr)_minmax(150px,.8fr)_minmax(140px,.8fr)_minmax(120px,.7fr)_minmax(130px,.8fr)_128px] items-center border-b border-border px-4 py-4 text-left text-sm last:border-b-0 hover:bg-muted/30"
             >
               <div className="min-w-0">
                 <p className="truncate font-semibold text-foreground">{contractTypeLabel}</p>
-                <p className="truncate text-xs text-muted-foreground">{readableFunctionLabel(contract.function_type) || contract.cao_function_group || "Functie onbekend"}</p>
+                <p className="truncate text-xs text-muted-foreground">
+                  {(contract.function_assignments?.length
+                    ? contract.function_assignments.map(item => item.function_label || readableFunctionLabel(item.function_key)).join(", ")
+                    : readableFunctionLabel(contract.function_type)) || contract.cao_function_group || "Functie onbekend"}
+                </p>
               </div>
               <div className="truncate text-muted-foreground">{getCompanyLabel(companies, contract.company_id)}</div>
               <div className="truncate text-muted-foreground">{formatDate(contract.contract_start_date)}{contract.contract_end_date ? ` - ${formatDate(contract.contract_end_date)}` : ""}</div>
@@ -2996,10 +3682,72 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               <div className="truncate text-muted-foreground">{hoursLabel} · {EMPLOYMENT_MODEL_LABELS[persistedEmploymentModel] || persistedEmploymentModel || "-"}</div>
               <div>{documentStatusBadge(contract.document_status)}</div>
               <div className="truncate text-muted-foreground">{getAuditActorLabel(contract, auditActors)}</div>
-              <div className="flex justify-end gap-1">
-                {fileDescriptor ? <Eye className="h-4 w-4 text-muted-foreground" /> : <Pencil className="h-4 w-4 text-muted-foreground" />}
+              <div className="flex justify-end gap-1" onClick={event => event.stopPropagation()}>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  title={fileDescriptor ? "Contract bekijken" : "Concept bewerken"}
+                  onClick={() => fileDescriptor ? openPreview(contract) : openEdit(contract)}
+                >
+                  {fileDescriptor ? <Eye className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
+                </Button>
+                {["concept", "generated"].includes(contract.document_status) && (
+                  <label
+                    className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
+                    title="Getekende versie uploaden"
+                  >
+                    {signedUploadMutation.isPending && signedUploadId === contract.id
+                      ? <RefreshCw className="h-4 w-4 animate-spin" />
+                      : <FileSignature className="h-4 w-4" />}
+                    <input
+                      type="file"
+                      accept=".pdf,image/*"
+                      className="hidden"
+                      disabled={signedUploadMutation.isPending}
+                      onChange={event => {
+                        const file = event.target.files?.[0];
+                        event.target.value = "";
+                        if (!file) return;
+                        setSignedUploadId(contract.id);
+                        signedUploadMutation.mutate({ contract, file });
+                      }}
+                    />
+                  </label>
+                )}
+                {contract.document_status === "signed" && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    title="Juridische controle opnieuw uitvoeren"
+                    disabled={lifecycleMutation.isPending}
+                    onClick={() => lifecycleMutation.mutate({ action: "revalidate", contract })}
+                  >
+                    <RefreshCw className={`h-4 w-4 ${lifecycleMutation.isPending ? "animate-spin" : ""}`} />
+                  </Button>
+                )}
+                {!["archived", "active", "scheduled"].includes(contract.document_status) && (
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                    title="Contract archiveren"
+                    disabled={lifecycleMutation.isPending}
+                    onClick={() => {
+                      if (window.confirm("Wilt u dit contract archiveren? Het wordt direct uitgesloten van planning en payroll.")) {
+                        lifecycleMutation.mutate({ action: "archive", contract });
+                      }
+                    }}
+                  >
+                    <Archive className="h-4 w-4" />
+                  </Button>
+                )}
               </div>
-            </button>
+            </div>
           );
         })}
       </div>

@@ -595,6 +595,49 @@
       ],
       "format": "date"
     },
+    "contract_agreed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Datum waarop partijen de overeenkomst juridisch zijn aangegaan. Deze datum bepaalt onder meer welk overgangsrecht geldt."
+    },
+    "signed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO-datetime waarop het getekende contract in de applicatie is geregistreerd."
+    },
+    "activated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO-datetime waarop het contract na juridische validatie actief of ingepland is gemaakt."
+    },
+    "ended_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO-datetime waarop het contract administratief is beeindigd."
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ISO-datetime waarop het contract is gearchiveerd."
+    },
+    "supersedes_contract_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Contract dat door deze overeenkomst wordt opgevolgd of vervangen."
+    },
     "work_location": {
       "type": [
         "string",
@@ -948,6 +991,57 @@
       },
       "description": "Functiesoorten/dienstsoorten die onder dit contract gepland mogen worden. Leeg betekent niet bewezen en dus manual review."
     },
+    "function_assignments": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "function_key": {
+            "type": "string"
+          },
+          "function_label": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "is_primary": {
+            "type": "boolean"
+          },
+          "cao_function_group": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cao_function_level": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "cao_scale": {
+            "type": [
+              "number",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "function_key",
+          "is_primary"
+        ]
+      },
+      "default": [],
+      "description": "Genormaliseerde, versievaste functie-toewijzingen voor contract-, planning- en payrollroutering."
+    },
+    "function_assignment_policy_version": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Versie van de beleidsregel waarmee functieconflicten zijn beoordeeld."
+    },
     "cao_function_group": {
       "type": [
         "string",
@@ -967,7 +1061,7 @@
         "string",
         "null"
       ],
-      "description": "Bijlage-2 functieniveau voor dit contract."
+      "description": "CAO-functieniveau voor dit contract, bijvoorbeeld een niveau uit bijlage 2 CAO PB of a-e uit artikel 17 lid 2 CAO EHB."
     },
     "cao_scale": {
       "type": [
@@ -1014,7 +1108,7 @@
       "items": {
         "type": "string"
       },
-      "description": "CAO-functieniveaus waarvoor dit contract inzetbaar is. Bij CAO PB bijlage 2 geldt hiërarchisch: een hoger niveau (bijv. D/E) mag ook een lager vereist niveau binnen dezelfde functiegroep uitvoeren; een lager niveau mag geen hoger vereist niveau uitvoeren."
+      "description": "CAO-functieniveaus waarvoor dit contract inzetbaar is. Bij CAO PB bijlage 2 geldt hiërarchisch: een hoger niveau (bijv. D/E) mag ook een lager vereist niveau binnen dezelfde functiegroep uitvoeren; een lager niveau mag geen hoger vereist niveau uitvoeren. Bij CAO EHB wordt het functieniveau a-e uit artikel 17 lid 2 vastgelegd."
     },
     "cao_function_experience_months": {
       "type": [
@@ -1299,13 +1393,52 @@
         "pre_agreement",
         "zero_hours",
         "min_max",
+        "statutory_bandwidth",
         "annualized_bandwidth",
         "no_work_no_pay_first_6_months",
         "not_applicable",
         "unknown",
         null
       ],
-      "description": "Type oproepovereenkomst conform artikel 13: voorovereenkomst, nul-uren, min-max, jaaruren/bandbreedte of eerste-6-maanden geen werk geen loon."
+      "description": "Type flexibele arbeidsomvang: voorovereenkomst, nul-uren, min-max, wettelijk bandbreedtecontract vanaf 2028, jaaruren/bandbreedte of eerste-6-maanden geen werk geen loon."
+    },
+    "call_contract_exception_profile": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "none",
+        "minor",
+        "pupil",
+        "student",
+        "aow",
+        "not_assessed",
+        null
+      ],
+      "description": "Wettelijke uitzondering waarmee vanaf 1 januari 2028 nog een oproepovereenkomst kan worden gebruikt. Niet gebruiken als algemene bedrijfskeuze."
+    },
+    "call_contract_exception_average_hours_per_week": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Aantoonbaar gemiddelde uren per week voor de wettelijke oproepuitzondering; maximaal 16."
+    },
+    "call_contract_exception_evidence_reference": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Dossierreferentie van bijvoorbeeld een geldig bewijs van inschrijving."
+    },
+    "call_contract_exception_valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date",
+      "description": "Einddatum van het bewijs waarop de oproepuitzondering is gebaseerd."
     },
     "annualized_hours_with_bandwidth": {
       "type": "boolean",
@@ -1987,6 +2120,124 @@
       "format": "date",
       "description": "Startdatum brancheancienniteit"
     },
+    "prior_similar_work_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "no",
+        "yes",
+        "unknown",
+        "not_applicable",
+        null
+      ],
+      "description": "Of sprake kan zijn van voorafgaand soortgelijk werk buiten de geregistreerde contracthistorie en mogelijk opvolgend werkgeverschap."
+    },
+    "chain_external_history": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Door de gebruiker vastgelegde externe contracthistorie die relevant kan zijn voor de ketenregeling."
+    },
+    "chain_evaluation_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "not_applicable",
+        "unknown",
+        null
+      ],
+      "default": "unknown"
+    },
+    "chain_position": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Positie van dit tijdelijke arbeidscontract in de actuele keten."
+    },
+    "chain_contract_limit": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "chain_period_limit_months": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "chain_interruption_months": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "chain_evaluated_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "chain_evaluation_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "chain_source_rule_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "legal_validation_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "compliant",
+        "blocked",
+        "manual_review_required",
+        "draft",
+        "unknown",
+        null
+      ],
+      "default": "unknown"
+    },
+    "legal_validation_checked_at": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "legal_validation_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "routing_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Vaste contractroutering voor bedrijf, CAO en functies waarmee planning/payroll eenduidig kan resolveren."
+    },
     "is_current": {
       "type": "boolean",
       "default": true,
@@ -2076,6 +2327,7 @@
         "concept",
         "generated",
         "signed",
+        "scheduled",
         "active",
         "archived",
         "expired"

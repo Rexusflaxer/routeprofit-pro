@@ -29,6 +29,50 @@
     "task_type": {
       "type": "string"
     },
+    "operating_company_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "personnel_contract_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contract_function_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contract_cao_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contract_routing_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "resolved",
+        "blocked",
+        "manual_review_required",
+        "not_applicable",
+        null
+      ]
+    },
+    "contract_routing_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
     "repeat_index": {
       "type": [
         "number",

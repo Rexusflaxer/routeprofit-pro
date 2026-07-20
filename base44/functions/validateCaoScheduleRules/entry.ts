@@ -5023,7 +5023,11 @@ async function validateShiftContractResolution(base44, { shifts, periodStart, pe
     try {
       const res = await base44.asServiceRole.functions.invoke('resolvePersonnelContractForService', {
         personnel_id,
-        contract_id: shift.contract_id || body.contract_id || null,
+        contract_id: shift.personnel_contract_id
+          || shift.contract_routing_snapshot?.contract_id
+          || shift.contract_id
+          || body.contract_id
+          || null,
         company_id: serviceContext.company_id || null,
         route_id: serviceContext.route_id || null,
         task_id: serviceContext.task_id || null,
