@@ -3561,16 +3561,16 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               </motion.div></AnimatePresence></div>
 
           <div className="flex items-center justify-between border-t border-border p-4">
-            {wizardStep > 1 && <Button type="button" variant="ghost" onClick={previousStep}><ChevronLeft className="mr-1 h-4 w-4" /> Terug</Button>}
+            {wizardStep > 1 && <Button type="button" variant="ghost" size="sm" onClick={previousStep}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>}
             <div className="flex gap-2">
-              <Button type="button" variant="outline" onClick={() => setWizardOpen(false)}>Annuleren</Button>
+              {wizardStep === 1 && <Button type="button" variant="ghost" size="sm" onClick={() => setWizardOpen(false)}><X className="w-4 h-4 mr-1" /> Annuleren</Button>}
               {wizardStep < 10 ? (
-                wizardStep > 2 && (<Button type="button" onClick={nextStep} disabled={!currentStepComplete}>
-                  Volgende <ChevronRight className="ml-1 h-4 w-4" />
+                wizardStep > 2 && (<Button type="button" size="sm" onClick={nextStep} disabled={!currentStepComplete}>
+                  Volgende <ChevronRight className="w-4 h-4 ml-1" />
                 </Button>)
               ) : (
                 <Button
-                  type="button"
+                  type="button" size="sm"
                   onClick={() => saveMutation.mutate()}
                   disabled={saveMutation.isPending
                     || contractEvaluationLoading
@@ -3580,7 +3580,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     || contractEvaluation?.status === "manual_review_required"
                     || (form.source_type === "generated" && (standardTemplateValidation.issues.length > 0 || unresolvedTemplatePlaceholders.length > 0))}
                 >
-                  <Save className="mr-1 h-4 w-4" /> {saveMutation.isPending ? "Opslaan..." : "Contract opslaan"}
+                  <Save className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : "Contract opslaan"}
                 </Button>
               )}
             </div>
