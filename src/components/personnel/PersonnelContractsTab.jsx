@@ -2884,6 +2884,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     </button>
                   ))}
                 </div>
+                <div className="flex justify-end pt-1">
+                  <Button type="button" variant="ghost" size="sm" onClick={() => setWizardOpen(false)}>
+                    <X className="w-4 h-4 mr-1" /> Annuleren
+                  </Button>
+                </div>
               </div>
             )}
 
@@ -2921,6 +2926,12 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   })}
                 </div>
                 {activeCompanies.length === 0 && <p className="rounded-lg border border-border p-4 text-sm text-muted-foreground">Er zijn geen actieve bedrijven beschikbaar voor dit contract.</p>}
+                <div className="flex items-center justify-between pt-1">
+                  <Button type="button" variant="ghost" size="sm" onClick={previousStep}>
+                    <ChevronLeft className="w-4 h-4 mr-1" /> Terug
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setWizardOpen(false)}>Annuleren</Button>
+                </div>
               </div>
             )}
 
@@ -2951,6 +2962,12 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     Dit bedrijf heeft geen actieve CAO-koppeling. Voeg deze eerst toe in het bedrijfsprofiel.
                   </p>
                 )}
+                <div className="flex items-center justify-between pt-1">
+                  <Button type="button" variant="ghost" size="sm" onClick={previousStep}>
+                    <ChevronLeft className="w-4 h-4 mr-1" /> Terug
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setWizardOpen(false)}>Annuleren</Button>
+                </div>
               </div>
             )}
 
@@ -2991,6 +3008,12 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     Publiceer eerst minimaal één passend contractsjabloon onder {CAO_OPTION_LABELS[form.cao_key] || "de gekozen CAO"}.
                   </p>
                 )}
+                <div className="flex items-center justify-between pt-1">
+                  <Button type="button" variant="ghost" size="sm" onClick={previousStep}>
+                    <ChevronLeft className="w-4 h-4 mr-1" /> Terug
+                  </Button>
+                  <Button type="button" variant="outline" size="sm" onClick={() => setWizardOpen(false)}>Annuleren</Button>
+                </div>
               </div>
             )}
 
@@ -3720,33 +3743,33 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             )}
               </motion.div></AnimatePresence></div>
 
-          <div className="flex items-center justify-between pt-3">
-            {wizardStep > 1
-              ? <Button type="button" variant="ghost" size="sm" onClick={previousStep}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
-              : <span aria-hidden="true" />}
-            <div className="flex gap-2">
-              {wizardStep === 1 && <Button type="button" variant="ghost" size="sm" onClick={() => setWizardOpen(false)}><X className="w-4 h-4 mr-1" /> Annuleren</Button>}
-              {wizardStep < 10 ? (
-                wizardStep > 4 && (<Button type="button" size="sm" onClick={nextStep} disabled={!currentStepComplete}>
+          {wizardStep >= 5 && (
+            <div className="flex items-center justify-between pt-3">
+              <Button type="button" variant="ghost" size="sm" onClick={previousStep}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+              <div className="flex gap-2">
+                <Button type="button" variant="outline" size="sm" onClick={() => setWizardOpen(false)}>Annuleren</Button>
+                {wizardStep < 10 ? (
+                  <Button type="button" size="sm" onClick={nextStep} disabled={!currentStepComplete}>
                   Volgende <ChevronRight className="w-4 h-4 ml-1" />
-                </Button>)
-              ) : (
-                <Button
-                  type="button" size="sm"
-                  onClick={() => saveMutation.mutate()}
-                  disabled={saveMutation.isPending
-                    || contractEvaluationLoading
-                    || missingFields.length > 0
-                    || conflicts.issues.length > 0
-                    || contractEvaluation?.status === "blocked"
-                    || contractEvaluation?.status === "manual_review_required"
-                    || (form.source_type === "generated" && (standardTemplateValidation.issues.length > 0 || unresolvedTemplatePlaceholders.length > 0))}
-                >
-                  <Save className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : "Contract opslaan"}
-                </Button>
-              )}
+                  </Button>
+                ) : (
+                  <Button
+                    type="button" size="sm"
+                    onClick={() => saveMutation.mutate()}
+                    disabled={saveMutation.isPending
+                      || contractEvaluationLoading
+                      || missingFields.length > 0
+                      || conflicts.issues.length > 0
+                      || contractEvaluation?.status === "blocked"
+                      || contractEvaluation?.status === "manual_review_required"
+                      || (form.source_type === "generated" && (standardTemplateValidation.issues.length > 0 || unresolvedTemplatePlaceholders.length > 0))}
+                  >
+                    <Save className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : "Contract opslaan"}
+                  </Button>
+                )}
+              </div>
             </div>
-          </div>
+          )}
         </motion.div>
       )}
       </AnimatePresence>
