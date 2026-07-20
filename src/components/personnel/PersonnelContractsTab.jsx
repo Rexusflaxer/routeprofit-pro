@@ -13,13 +13,14 @@ import { Textarea } from "@/components/ui/textarea";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { uploadManagedFile } from "@/lib/managedFiles";
 import {
+  buildFunctionGroupsForWpbrLicenses,
   CAO_OPTIONS,
   FUNCTION_CATALOG_OPTIONS,
   functionLabel,
+  SHARED_BACKOFFICE_FUNCTIONS,
 } from "@/lib/securityCaoCatalog";
 import {
   CAO_PARTICULIERE_BEVEILIGING_KEY,
-  PB_CAO_FUNCTION_GROUP_OPTIONS,
   PB_CAO_FUNCTION_LEVEL_OPTIONS,
   pbFunctionGroupsForFunctions,
   pbSalaryScaleForFunctionLevel,
@@ -41,10 +42,12 @@ import {
   AlertTriangle,
   Archive,
   CalendarClock,
+  Check,
   CheckCircle,
   ChevronLeft,
   ChevronRight,
   Eye,
+  FileText,
   FileSignature,
   Pencil,
   Plus,
@@ -56,15 +59,6 @@ import {
 
 const CAO_OPTION_LABELS = Object.fromEntries(CAO_OPTIONS.map(option => [option.value, option.label]));
 const FLEX_REFORM_EFFECTIVE_DATE = "2028-01-01";
-const CAO_EHB_KEY = "cao_evenementen_horecabeveiliging";
-
-const EHB_CAO_FUNCTION_LEVEL_OPTIONS = [
-  { value: "a", label: "a - Niet-zelfstandig uitvoerende" },
-  { value: "b", label: "b - Zelfstandig uitvoerende" },
-  { value: "c", label: "c - Subgroepsleider" },
-  { value: "d", label: "d - Groepsleider" },
-  { value: "e", label: "e - Projectleider" },
-];
 
 const CALL_EXCEPTION_OPTIONS = [
   { value: "none", label: "Geen uitzondering" },
@@ -211,6 +205,16 @@ const CONTRACT_MODEL_OPTIONS = [
   },
 ];
 
+const CONTRACT_KIND_OPTIONS = [
+  { value: "fulltime", label: "Fulltime dienstverband", description: "Een volledige arbeidsomvang volgens de gekozen cao." },
+  { value: "parttime_fixed", label: "Parttime dienstverband", description: "Een vaste arbeidsomvang die lager is dan fulltime." },
+  { value: "parttime_growth", label: "Parttime groeimodel", description: "Een vaste parttimebasis met de cao-afspraken van het groeimodel.", allowed_cao_keys: [CAO_PARTICULIERE_BEVEILIGING_KEY] },
+  { value: "min_max", label: "Min-maxcontract", description: "Garantie-uren met een vooraf begrensde maximale inzet." },
+  { value: "zero_hours", label: "Nulurencontract", description: "Een oproepovereenkomst zonder vaste arbeidsomvang." },
+  { value: "internship", label: "Stageovereenkomst (BOL / re-integratie)", description: "Een leer- of re-integratietraject dat geen arbeidsovereenkomst is.", allowed_cao_keys: [CAO_PARTICULIERE_BEVEILIGING_KEY] },
+  { value: "bbl", label: "Leerarbeidsovereenkomst (BBL)", description: "Een arbeidsovereenkomst naast de praktijkovereenkomst met de onderwijsinstelling.", allowed_cao_keys: [CAO_PARTICULIERE_BEVEILIGING_KEY] },
+];
+
 const DURATION_OPTIONS = [
   { value: "1_month", label: "1 maand", months: 1 },
   { value: "2_months", label: "2 maanden", months: 2 },
@@ -315,8 +319,12 @@ function getMinMaxBand(value) {
   return { minimum: null, maximum: null, period: null };
 }
 
+function legalReferenceDate(value) {
+  return value?.contract_agreed_at || value?.signing_date || value?.contract_start_date || "";
+}
+
 function isStatutoryBandwidthModel(value) {
-  if (value?.employment_contract_model !== "min_max" || value?.contract_agreed_at < FLEX_REFORM_EFFECTIVE_DATE) return false;
+  if (value?.employment_contract_model !== "min_max" || legalReferenceDate(value) < FLEX_REFORM_EFFECTIVE_DATE) return false;
   const band = getMinMaxBand(value);
   return band.minimum !== null
     && band.maximum !== null
@@ -414,13 +422,33 @@ function contractModelAllowedForCao(option, caoKey) {
   return !!caoKey && option.allowed_cao_keys.includes(caoKey);
 }
 
-function contractModelDisplayLabel(option, agreedAt) {
-  if (!option) return "";
-  if (agreedAt < FLEX_REFORM_EFFECTIVE_DATE) return option.label;
-  const suffix = option.duration_type === "indefinite" ? "onbepaalde tijd" : "bepaalde tijd";
-  if (option.employment_model === "min_max") return `Bandbreedtecontract - ${suffix}`;
-  if (option.employment_model === "zero_hours") return `Oproepcontract met wettelijke uitzondering - ${suffix}`;
-  return option.label;
+function contractKindAllowedForCao(option, caoKey) {
+  return !Array.isArray(option?.allowed_cao_keys)
+    || option.allowed_cao_keys.length === 0
+    || option.allowed_cao_keys.includes(caoKey);
+}
+
+function modelForKindAndDuration(employmentModel, durationType) {
+  return CONTRACT_MODEL_OPTIONS.find(option => (
+    option.employment_model === employmentModel
+    && option.duration_type === durationType
+    && option.show_in_employee_wizard !== false
+  )) || null;
+}
+
+function pbFunctionLevelForSalaryScale(scale) {
+  const numericScale = Number(scale);
+  return PB_CAO_FUNCTION_LEVEL_OPTIONS.find(option => pbSalaryScaleForFunctionLevel(option.value) === numericScale)?.value || null;
+}
+
+function probationMaximumMonths(form) {
+  if (["internship", "zzp"].includes(form.employment_contract_model)) return 0;
+  if (form.duration_type === "indefinite") return 2;
+  if (!form.contract_start_date || !form.contract_end_date) return 0;
+  const sixMonthBoundary = addMonths(form.contract_start_date, 6);
+  if (form.contract_end_date < sixMonthBoundary) return 0;
+  const twoYearBoundary = addMonths(form.contract_start_date, 24);
+  return form.contract_end_date < twoYearBoundary ? 1 : 2;
 }
 
 function inferContractModel(value) {
@@ -459,6 +487,12 @@ function rangesOverlap(startA, endA, startB, endB) {
   const bStart = dateKey(startB, "0000-01-01");
   const bEnd = dateKey(endB);
   return aStart <= bEnd && bStart <= aEnd;
+}
+
+function effectiveEndForContract(contract) {
+  if (contract?.effective_contract_end_date) return contract.effective_contract_end_date;
+  if (contract?.statutory_conversion_applies === true || contract?.effective_duration_type === "indefinite") return null;
+  return contract?.contract_end_date || null;
 }
 
 function hasMeaningfulSecurityRole(value) {
@@ -505,15 +539,6 @@ function buildCompanyFunctionOptions(assignments, referenceDate, caoKey, caoOpti
   return withSelected.map(value => ({ value, label: readableFunctionLabel(value) }));
 }
 
-function caoConfigurationLabel(option) {
-  const label = option?.label || option?.display_name || option?.name || option?.cao_key || "CAO";
-  const version = option?.version_label ? ` (${option.version_label})` : "";
-  const validity = option?.valid_from || option?.valid_until
-    ? ` | ${option.valid_from || "?"} t/m ${option.valid_until || "?"}`
-    : "";
-  return `${label}${version}${validity}`;
-}
-
 function filterCaoConfigurationOptions(options, form) {
   const selectedId = form.cao_configuration_id || null;
   return (options || []).filter(option => {
@@ -522,21 +547,6 @@ function filterCaoConfigurationOptions(options, form) {
     if (!isDateWithinOptionRange(option, form.contract_start_date)) return false;
     return option.selectable !== false;
   });
-}
-
-function selectedCaoConfigurationWarning(selectedOption, form) {
-  if (!selectedOption) return null;
-  const warnings = [];
-  if (selectedOption.selectable === false) {
-    warnings.push("Deze CAO-configuratie is niet actief en blijft zichtbaar omdat het contract hier al aan gekoppeld is.");
-  }
-  if (form.cao_key && selectedOption.cao_key && selectedOption.cao_key !== form.cao_key) {
-    warnings.push(`Deze CAO-configuratie hoort bij ${selectedOption.cao_key}, niet bij ${form.cao_key}.`);
-  }
-  if (!isDateWithinOptionRange(selectedOption, form.contract_start_date)) {
-    warnings.push("Deze CAO-configuratie is niet geldig op de contractstartdatum.");
-  }
-  return warnings.length > 0 ? warnings.join(" ") : null;
 }
 
 function getSalaryTables(option) {
@@ -619,10 +629,10 @@ function initialForm(personnel) {
   });
   const model = getContractModel(inferredModel);
   return {
-    source_type: "generated",
+    source_type: "",
     company_id: personnel.primary_company_id || null,
     cao_key: personnel.cao || null,
-    cao_configuration_id: null,
+    cao_configuration_id: form.cao_configuration_id || null,
     contract_model: inferredModel,
     contract_form: model?.contract_form || personnel.contract_form || "unknown",
     underlying_contract_form: model?.underlying_contract_form || personnel.underlying_contract_form || null,
@@ -632,14 +642,14 @@ function initialForm(personnel) {
     probation_context: "unknown",
     duration_type: model?.duration_type || (personnel.contract_form === "onbepaalde_tijd" ? "indefinite" : "fixed"),
     duration_option: "",
-    contract_start_date: personnel.contract_start_date || "",
+    contract_start_date: personnel.contract_start_date || new Date().toISOString().slice(0, 10),
     contract_end_date: personnel.contract_end_date || "",
     work_location: "",
     work_area: "Nederland",
     employer_representative_name: "",
     employer_representative_function: "",
     signing_place: "",
-    signing_date: new Date().toISOString().slice(0, 10),
+    signing_date: "",
     contract_agreed_at: "",
     call_contract_exception_profile: "none",
     call_contract_exception_average_hours_per_week: "",
@@ -722,7 +732,7 @@ function initialForm(personnel) {
     bbl_practice_trainer_name: "",
     industry_seniority_pay_periods: personnel.industry_seniority_pay_periods ?? "",
     industry_start_date: personnel.industry_start_date || "",
-    prior_similar_work_status: "unknown",
+    prior_similar_work_status: "not_applicable",
     prior_external_employer_name: "",
     prior_external_contract_count: "",
     prior_external_first_start_date: "",
@@ -885,33 +895,16 @@ function formFromContract(contract) {
 function getMissingContractFields(form) {
   const missing = [];
   const isArticle14Internship = form.employment_contract_model === "internship";
+  if (!form.source_type) missing.push("documentbron");
   if (!form.company_id) missing.push("bedrijf");
   if (!form.contract_model) missing.push("contractvorm");
   if (!isArticle14Internship && (!form.probation_agreed || form.probation_agreed === "unknown")) missing.push("proeftijdkeuze");
-  if (form.probation_agreed === "true" && (!form.probation_context || form.probation_context === "unknown")) missing.push("context proeftijd");
   if (form.source_type === "generated" && !form.template_id) missing.push("contracttemplate");
   if (form.source_type === "uploaded_existing" && !form.existing_contract_file && !form.signed_file_id) missing.push("contractdocument");
   if (!form.cao_key && form.contract_form !== "zzp") missing.push("CAO");
   if (!form.contract_start_date) missing.push("startdatum");
-  if (!isArticle14Internship && form.contract_form !== "zzp" && !form.contract_agreed_at) missing.push("datum overeengekomen");
   if (form.duration_type === "fixed" && !form.contract_end_date) missing.push("einddatum");
-  if (form.duration_type === "fixed"
-    && !["internship", "bbl"].includes(form.employment_contract_model)
-    && !["no", "yes"].includes(form.prior_similar_work_status)) {
-    missing.push("eerdere vergelijkbare contracthistorie");
-  }
-  if (form.prior_similar_work_status === "yes") {
-    if (!form.prior_external_employer_name) missing.push("vorige werkgever");
-    if (!numberOrNull(form.prior_external_contract_count)) missing.push("aantal externe tijdelijke contracten");
-    if (!form.prior_external_last_end_date) missing.push("einddatum vorige externe contract");
-    if (form.successor_employer_confirmed === "unknown") missing.push("beoordeling opvolgend werkgeverschap");
-  }
-  if (!form.function_type && !form.cao_function_group && !form.cao_function_level) {
-    missing.push("functiecontext");
-  }
-  if (form.cao_key === CAO_EHB_KEY && !form.cao_function_level) {
-    missing.push("CAO EHB-functieniveau a-e");
-  }
+  if (!form.function_type && fromArrayText(form.allowed_function_types_text).length === 0) missing.push("minimaal één functie");
   if (form.contract_form !== "zzp" && form.contract_form !== "stage" && !form.cao_scale && !form.cao_period && !form.custom_hourly_rate) {
     missing.push("loonschaal/trede");
   }
@@ -942,7 +935,7 @@ function getMissingContractFields(form) {
     missing.push("beschikbaarheidsvensters");
   }
   if (["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model) && !form.call_channel) missing.push("oproepkanaal");
-  const futureLegacyCallModel = form.contract_agreed_at >= FLEX_REFORM_EFFECTIVE_DATE
+  const futureLegacyCallModel = legalReferenceDate(form) >= FLEX_REFORM_EFFECTIVE_DATE
     && ["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model);
   if (futureLegacyCallModel && !isStatutoryBandwidthModel(form)) {
     if (!form.call_contract_exception_profile || form.call_contract_exception_profile === "none") missing.push("wettelijke oproepuitzondering");
@@ -1033,7 +1026,7 @@ function validateConflicts(form, contracts, editingId, companies) {
   const nextFunctions = uniqueValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]);
   const activeCandidates = (contracts || []).filter(contract => contract.id !== editingId && isActiveContract(contract));
   activeCandidates.forEach(contract => {
-    if (!rangesOverlap(form.contract_start_date, form.contract_end_date, contract.contract_start_date, contract.contract_end_date)) return;
+    if (!rangesOverlap(form.contract_start_date, form.contract_end_date, contract.contract_start_date, effectiveEndForContract(contract))) return;
     const otherFunctions = uniqueValues([contract.function_type, ...(contract.allowed_function_types || [])]);
     const duplicateFunctions = nextFunctions.filter(value => otherFunctions.includes(value));
     if (companyLegalKey(contract.company_id, companies) === companyLegalKey(form.company_id, companies)) {
@@ -1068,6 +1061,12 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     : (form.contract_form || "unknown");
   const fixedHoursOfferDueAt = isCallAgreement ? addMonths(form.contract_start_date, 12) : null;
   const fixedHoursOfferDeadlineAt = isCallAgreement ? addMonths(form.contract_start_date, 13) : null;
+  const derivedPbFunctionLevel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    ? (form.cao_function_level || pbFunctionLevelForSalaryScale(form.cao_scale))
+    : (form.cao_function_level || null);
+  const derivedPrimaryFunctionGroup = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    ? (suggestPbCaoFunctionGroup(form.function_type) || form.cao_function_group || null)
+    : (form.cao_function_group || null);
 
   return {
     personnel_id: personnel.id,
@@ -1078,7 +1077,7 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     letterhead_id: generated ? form.letterhead_id || null : null,
     document_status: documentStatus,
     cao_key: form.cao_key || null,
-    cao_configuration_id: form.cao_configuration_id || null,
+    cao_configuration_id: null,
     contract_model: form.contract_model || null,
     legal_document_type: employmentModel === "internship" ? "internship_agreement" : "employment_agreement",
     learning_route: employmentModel === "bbl" ? "bbl" : (employmentModel === "internship" ? "article_14_internship" : null),
@@ -1087,7 +1086,7 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     employment_contract_model: employmentModel,
     parttime_contract_model: parttimeModel(form),
     probation_agreed: form.probation_agreed === "not_applicable" ? null : boolOrNull(form.probation_agreed),
-    probation_context: form.probation_agreed === "true" ? (form.probation_context || "unknown") : "not_applicable",
+    probation_context: form.probation_agreed === "true" ? (form.probation_context || "first_contract") : "not_applicable",
     duration_type: form.duration_type || null,
     duration_option: form.duration_option || null,
     duration_label: durationLabel(form.duration_option),
@@ -1120,7 +1119,9 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     salary_payment_frequency: form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? "four_weeks" : (form.salary_payment_frequency || null),
     template_name_snapshot: generated ? (form.template_name_snapshot || null) : null,
     letterhead_name_snapshot: generated ? (form.letterhead_name_snapshot || null) : null,
-    written_scale_period_notice_confirmed: boolOrNull(form.written_scale_period_notice_confirmed),
+    written_scale_period_notice_confirmed: generated && numberOrNull(form.cao_scale) !== null
+      ? true
+      : boolOrNull(form.written_scale_period_notice_confirmed),
     periodic_increase_due_confirmed: boolOrNull(form.periodic_increase_due_confirmed),
     function_type: form.function_type || null,
     allowed_function_types: allowedFunctionTypes,
@@ -1128,14 +1129,16 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
       function_key: functionKey,
       function_label: readableFunctionLabel(functionKey),
       is_primary: functionKey === form.function_type,
-      cao_function_group: form.cao_function_group || null,
-      cao_function_level: form.cao_function_level || null,
+      cao_function_group: form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+        ? (suggestPbCaoFunctionGroup(functionKey) || derivedPrimaryFunctionGroup)
+        : derivedPrimaryFunctionGroup,
+      cao_function_level: derivedPbFunctionLevel,
       cao_scale: numberOrNull(form.cao_scale),
     })),
     function_assignment_policy_version: "employee-contract-routing-v1",
-    cao_function_group: form.cao_function_group || null,
+    cao_function_group: derivedPrimaryFunctionGroup,
     allowed_cao_function_groups: allowedGroups,
-    cao_function_level: form.cao_function_level || null,
+    cao_function_level: derivedPbFunctionLevel,
     allowed_cao_function_levels: allowedLevels,
     allowed_task_types: fromArrayText(form.allowed_task_types_text),
     security_role_status: form.security_role_status || "unknown",
@@ -1216,16 +1219,8 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     bbl_practice_trainer_name: employmentModel === "bbl" ? (form.bbl_practice_trainer_name || null) : null,
     industry_seniority_pay_periods: numberOrNull(form.industry_seniority_pay_periods),
     industry_start_date: form.industry_start_date || null,
-    prior_similar_work_status: form.duration_type === "fixed"
-      ? (form.prior_similar_work_status || "unknown")
-      : "not_applicable",
-    chain_external_history: form.prior_similar_work_status === "yes" ? {
-      employer_name: form.prior_external_employer_name || null,
-      contract_count: numberOrNull(form.prior_external_contract_count),
-      first_start_date: form.prior_external_first_start_date || null,
-      last_end_date: form.prior_external_last_end_date || null,
-      successor_employer_confirmed: boolOrNull(form.successor_employer_confirmed),
-    } : null,
+    prior_similar_work_status: "not_applicable",
+    chain_external_history: null,
     contract_context_status: contextReady ? "context_ready" : "draft_missing_context",
     contract_context_missing_fields: missing,
     contract_context_checked_at: new Date().toISOString(),
@@ -1462,6 +1457,12 @@ function contractFileDescriptor(contract) {
 function documentStatusBadge(status) {
   const key = status || "concept";
   return <Badge className={`${DOCUMENT_STATUS_STYLES[key] || DOCUMENT_STATUS_STYLES.concept} text-xs`}>{DOCUMENT_STATUS_LABELS[key] || key}</Badge>;
+}
+
+function firstNotificationMessage(notifications) {
+  const notification = Array.isArray(notifications) ? notifications[0] : null;
+  if (typeof notification === "string") return notification;
+  return notification?.message || null;
 }
 
 function getCompanyLabel(companies, companyId) {
@@ -1713,6 +1714,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const [actionMessage, setActionMessage] = useState(null);
   const [showArchive, setShowArchive] = useState(false);
   const [signedUploadId, setSignedUploadId] = useState(null);
+  const [wageScaleFilter, setWageScaleFilter] = useState(null);
 
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
@@ -1734,8 +1736,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const sortedContracts = useMemo(() => [...contracts].sort((a, b) =>
     String(b.contract_start_date || "").localeCompare(String(a.contract_start_date || ""))
   ), [contracts]);
-  const activeContracts = useMemo(() => sortedContracts.filter(c => !["archived", "expired"].includes(c.document_status)), [sortedContracts]);
-  const archivedContracts = useMemo(() => sortedContracts.filter(c => ["archived", "expired"].includes(c.document_status)), [sortedContracts]);
+  const activeContracts = useMemo(() => sortedContracts.filter(c => c.document_status === "active"), [sortedContracts]);
+  const archivedContracts = useMemo(() => sortedContracts.filter(c => c.document_status !== "active"), [sortedContracts]);
   const visibleContracts = showArchive ? archivedContracts : activeContracts;
 
   const companyIds = useMemo(() => uniqueValues([
@@ -1744,11 +1746,18 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     ...contracts.map(contract => contract.company_id),
   ].filter(Boolean)), [companies, contracts, form.company_id]);
 
+  const { data: companyCaoAssignments = [], isLoading: companyCaoAssignmentsLoading } = useQuery({
+    queryKey: ["company-cao-assignments", form.company_id],
+    queryFn: () => base44.entities.CompanyCaoAssignment.filter({ company_id: form.company_id }, "-created_date"),
+    enabled: !!form.company_id,
+  });
+
   const selectedCaoConfigurationIds = useMemo(() => uniqueValues([
     personnel.cao_configuration_id,
     form.cao_configuration_id,
-    ...contracts.map(contract => contract.cao_configuration_id)
-  ]), [contracts, form.cao_configuration_id, personnel.cao_configuration_id]);
+    ...contracts.map(contract => contract.cao_configuration_id),
+    ...companyCaoAssignments.map(assignment => assignment.cao_configuration_id),
+  ]), [companyCaoAssignments, contracts, form.cao_configuration_id, personnel.cao_configuration_id]);
 
   const { data: caoConfigurationOptions = [] } = useQuery({
     queryKey: ["cao-configuration-options", "personnel-contracts", personnel.id, selectedCaoConfigurationIds],
@@ -1760,9 +1769,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     },
   });
 
-  const { data: companyCaoAssignments = [], isLoading: companyCaoAssignmentsLoading } = useQuery({
-    queryKey: ["company-cao-assignments", form.company_id],
-    queryFn: () => base44.entities.CompanyCaoAssignment.filter({ company_id: form.company_id }, "-created_date"),
+  const { data: companyWpbrLicenses = [] } = useQuery({
+    queryKey: ["company-wpbr-licenses", "personnel-contracts", form.company_id],
+    queryFn: () => safeFilterEntity("CompanyWpbrLicense", { company_id: form.company_id }, "-created_date"),
     enabled: !!form.company_id,
   });
 
@@ -1818,15 +1827,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const selectedTemplateClauses = useMemo(() => (contractClauses || [])
     .filter(clause => clause.company_id === form.company_id && clause.status !== "archived"),
   [contractClauses, form.company_id]);
-  const selectedContractModel = getContractModel(form.contract_model);
-  const availableContractModels = useMemo(
-    () => CONTRACT_MODEL_OPTIONS.filter(option => contractModelAllowedForCao(option, form.cao_key)),
+  const availableContractKinds = useMemo(
+    () => CONTRACT_KIND_OPTIONS.filter(option => contractKindAllowedForCao(option, form.cao_key)),
     [form.cao_key]
   );
   const isArticle14Internship = form.employment_contract_model === "internship";
   const isBblModel = form.employment_contract_model === "bbl";
   const isLegacyCallModel = ["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model);
-  const futureFlexModel = form.contract_agreed_at >= FLEX_REFORM_EFFECTIVE_DATE && isLegacyCallModel;
+  const futureFlexModel = legalReferenceDate(form) >= FLEX_REFORM_EFFECTIVE_DATE && isLegacyCallModel;
   const futureStatutoryBandwidth = isStatutoryBandwidthModel(form);
   const futureCallRequiresException = futureFlexModel && !futureStatutoryBandwidth;
   const legacyCallContinuesAfterReform = isLegacyCallModel
@@ -1846,6 +1854,24 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     if (!isArticle14Internship) return companyFunctionOptions;
     return companyFunctionOptions.filter(option => suggestPbCaoFunctionGroup(option.value) !== "non_security_staff");
   }, [companyFunctionOptions, isArticle14Internship]);
+  const wizardFunctionGroups = useMemo(() => {
+    const allowed = new Set(wizardFunctionOptions.map(option => option.value));
+    const catalogGroups = buildFunctionGroupsForWpbrLicenses(companyWpbrLicenses, form.cao_key)
+      .map(group => ({ ...group, functions: group.functions.filter(value => allowed.has(value)) }))
+      .filter(group => group.functions.length > 0);
+    const groupedValues = new Set(catalogGroups.flatMap(group => group.functions));
+    const ungroupedOffice = wizardFunctionOptions
+      .map(option => option.value)
+      .filter(value => SHARED_BACKOFFICE_FUNCTIONS.includes(value) && !groupedValues.has(value));
+    const ungroupedOperational = wizardFunctionOptions
+      .map(option => option.value)
+      .filter(value => !SHARED_BACKOFFICE_FUNCTIONS.includes(value) && !groupedValues.has(value));
+    return [
+      ...catalogGroups,
+      ...(ungroupedOperational.length > 0 ? [{ key: "contract_other_operational", label: "Operationele functies", functions: ungroupedOperational }] : []),
+      ...(ungroupedOffice.length > 0 ? [{ key: "contract_shared_office", label: "Binnendienst functies", functions: ungroupedOffice, shared: true }] : []),
+    ];
+  }, [companyWpbrLicenses, form.cao_key, wizardFunctionOptions]);
   const selectedFunctionValues = useMemo(
     () => uniqueValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]),
     [form.allowed_function_types_text, form.function_type]
@@ -1858,9 +1884,15 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     ? pbSalaryScaleForFunctionLevel(form.cao_function_level)
     : null;
   const visibleCaoConfigurationOptions = filterCaoConfigurationOptions(caoConfigurationOptions, form);
-  const selectedCaoConfiguration = caoConfigurationOptions.find(option => option.id === form.cao_configuration_id) || null;
-  const effectiveCaoConfiguration = selectedCaoConfiguration || visibleCaoConfigurationOptions[0] || null;
-  const caoConfigurationSelectionWarning = selectedCaoConfigurationWarning(selectedCaoConfiguration, form);
+  const activeCaoAssignmentConfigurationIds = useMemo(() => companyCaoAssignments
+    .filter(assignment => isDateWithinOptionRange(assignment, form.contract_start_date))
+    .filter(assignment => resolveAssignmentCaoKey(assignment, caoConfigurationOptions) === form.cao_key)
+    .map(assignment => assignment.cao_configuration_id)
+    .filter(Boolean), [caoConfigurationOptions, companyCaoAssignments, form.cao_key, form.contract_start_date]);
+  const effectiveCaoConfiguration = caoConfigurationOptions.find(option => (
+    activeCaoAssignmentConfigurationIds.includes(option.id)
+    && isDateWithinOptionRange(option, form.contract_start_date)
+  )) || visibleCaoConfigurationOptions[0] || null;
   const wageRows = useMemo(() => {
     const rows = extractWageRows(effectiveCaoConfiguration, wageTableYear);
     if (form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY) return rows;
@@ -1868,10 +1900,15 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     if (!expectedPbSalaryScale) return rows;
     return rows.filter(row => Number(row.scale) === expectedPbSalaryScale);
   }, [effectiveCaoConfiguration, expectedPbSalaryScale, form.cao_function_group, form.cao_key, wageTableYear]);
+  const wageScaleOptions = useMemo(() => uniqueValues(wageRows.map(row => String(row.scale))).sort((a, b) => Number(a) - Number(b)), [wageRows]);
+  const visibleWageRows = useMemo(() => wageScaleFilter === null
+    ? wageRows
+    : wageRows.filter(row => String(row.scale) === String(wageScaleFilter)), [wageRows, wageScaleFilter]);
   const conflicts = validateConflicts(form, contracts, editingId, companies);
   const missingFields = getMissingContractFields(form);
   const evaluationContract = useMemo(() => buildContractPayload(personnel, {
     ...form,
+    cao_configuration_id: effectiveCaoConfiguration?.id || null,
     template_version: selectedTemplate?.version || null,
     template_name_snapshot: selectedTemplate?.name || null,
     letterhead_name_snapshot: selectedLetterhead?.name || null,
@@ -1883,6 +1920,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     editingId,
     form,
     personnel,
+    effectiveCaoConfiguration?.id,
     selectedLetterhead?.name,
     selectedTemplate?.name,
     selectedTemplate?.version,
@@ -1899,7 +1937,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       return data?.evaluation || null;
     },
     enabled: wizardOpen
-      && wizardStep === 6
+      && wizardStep === 10
       && !!form.company_id
       && !!form.contract_start_date
       && selectedFunctionValues.length > 0,
@@ -1924,6 +1962,22 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const isPbCallModel = isPbMinMaxModel || isPbZeroHoursModel;
   const isPbNonOperationalRole = form.performs_security_work === "false"
     || form.cao_function_group === "non_security_staff";
+  const probationMonths = probationMaximumMonths(form);
+  const connectedPriorContract = useMemo(() => {
+    if (!form.company_id || !form.contract_start_date) return null;
+    const employerKey = companyLegalKey(form.company_id, companies);
+    return [...contracts]
+      .filter(contract => contract.id !== editingId && isActiveContract(contract))
+      .filter(contract => companyLegalKey(contract.company_id, companies) === employerKey)
+      .filter(contract => contract.contract_start_date && contract.contract_start_date < form.contract_start_date)
+      .filter(contract => {
+        const endDate = effectiveEndForContract(contract);
+        if (!endDate) return true;
+        return addMonths(endDate, 6) >= form.contract_start_date;
+      })
+      .sort((a, b) => String(b.contract_start_date).localeCompare(String(a.contract_start_date)))[0] || null;
+  }, [companies, contracts, editingId, form.company_id, form.contract_start_date]);
+  const probationAllowed = probationMonths > 0 && !connectedPriorContract && !isArticle14Internship;
 
   const set = (field, value) => setForm(prev => ({ ...prev, [field]: value }));
   const setCaoKey = (value) => setForm(prev => {
@@ -2185,6 +2239,32 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     });
   };
 
+  const setContractKind = (employmentModel) => {
+    const fixedOnly = ["internship", "bbl"].includes(employmentModel);
+    const preferredDuration = fixedOnly ? "fixed" : (form.duration_type || "fixed");
+    const model = modelForKindAndDuration(employmentModel, preferredDuration)
+      || modelForKindAndDuration(employmentModel, "fixed");
+    if (model) setContractModel(model.value);
+  };
+
+  const setContractDurationType = (durationType) => {
+    const model = modelForKindAndDuration(form.employment_contract_model, durationType);
+    if (!model) return;
+    setContractModel(model.value);
+    if (durationType === "indefinite") {
+      setForm(prev => ({
+        ...prev,
+        contract_model: model.value,
+        contract_form: model.contract_form,
+        underlying_contract_form: model.underlying_contract_form || null,
+        duration_type: "indefinite",
+        duration_option: "",
+        contract_end_date: "",
+        prior_similar_work_status: "not_applicable",
+      }));
+    }
+  };
+
   const setDurationOption = (value) => {
     setForm(prev => {
       const option = DURATION_OPTIONS.find(item => item.value === value);
@@ -2202,9 +2282,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setForm(prev => ({
       ...prev,
       probation_agreed: value,
-      probation_context: value === "true"
-        ? (prev.probation_context === "not_applicable" ? "unknown" : prev.probation_context)
-        : "not_applicable",
+      probation_context: value === "true" ? "first_contract" : "not_applicable",
     }));
   };
 
@@ -2216,69 +2294,37 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       custom_hourly_rate: row.hourlyRate ?? prev.custom_hourly_rate,
       hourly_rate_snapshot: row.hourlyRate ?? "",
       wage_table_year: row.year || wageTableYear,
-    }));
-  };
-
-  const selectPrimaryFunction = (value) => {
-    const nextValue = value === "none" ? null : value;
-    setForm(prev => {
-      const functions = uniqueValues([nextValue, ...fromArrayText(prev.allowed_function_types_text)]);
-      const suggestedGroup = prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
-        ? suggestPbCaoFunctionGroup(nextValue)
-        : "";
-      const next = {
-        ...prev,
-        function_type: nextValue,
-        allowed_function_types_text: functions.join(", "),
-        cao_function_group: suggestedGroup || prev.cao_function_group,
-        performs_security_work: suggestedGroup
-          ? (suggestedGroup === "non_security_staff" ? "false" : "true")
-          : prev.performs_security_work,
-        salary_payment_frequency: suggestedGroup && suggestedGroup !== "non_security_staff"
-          ? "four_weeks"
-          : prev.salary_payment_frequency,
-        cao_function_level: suggestedGroup === "non_security_staff" ? "not_applicable" : prev.cao_function_level,
-        cao_scale: suggestedGroup === "non_security_staff" ? "" : prev.cao_scale,
-        cao_period: suggestedGroup === "non_security_staff" ? "" : prev.cao_period,
-      };
-      if (prev.employment_contract_model === "internship") {
-        next.cao_function_level = "not_applicable";
-        next.cao_scale = "";
-        next.cao_period = "";
-        next.custom_hourly_rate = "";
-        next.hourly_rate_snapshot = "";
-        next.security_role_status = "not_applicable";
-      }
-      if (prev.employment_contract_model === "bbl") {
-        next.cao_function_level = "aspirant";
-        next.cao_scale = "2";
-        next.security_role_status = "aspirant_beveiliger";
-        next.salary_payment_frequency = "four_weeks";
-      }
-      return next;
-    });
-  };
-
-  const selectPbFunctionLevel = (value) => {
-    const nextValue = value === "none" ? null : value;
-    const expectedScale = pbSalaryScaleForFunctionLevel(nextValue);
-    setForm(prev => ({
-      ...prev,
-      cao_function_level: nextValue,
-      cao_scale: expectedScale ?? "",
-      cao_period: expectedScale === Number(prev.cao_scale) ? prev.cao_period : "",
-      hourly_rate_snapshot: expectedScale === Number(prev.cao_scale) ? prev.hourly_rate_snapshot : "",
-      custom_hourly_rate: expectedScale === Number(prev.cao_scale) ? prev.custom_hourly_rate : "",
+      cao_function_level: prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+        ? (pbFunctionLevelForSalaryScale(row.scale) || prev.cao_function_level)
+        : prev.cao_function_level,
     }));
   };
 
   const toggleAllowedFunction = (value) => {
     setForm(prev => {
-      const selected = new Set(fromArrayText(prev.allowed_function_types_text));
-      if (selected.has(value)) selected.delete(value);
-      else selected.add(value);
-      if (prev.function_type) selected.add(prev.function_type);
-      return { ...prev, allowed_function_types_text: [...selected].join(", ") };
+      const selected = uniqueValues([prev.function_type, ...fromArrayText(prev.allowed_function_types_text)]);
+      const alreadySelected = selected.includes(value);
+      const nextFunctions = alreadySelected
+        ? selected.filter(item => item !== value)
+        : [...selected, value];
+      const nextPrimary = prev.function_type === value
+        ? (nextFunctions[0] || null)
+        : (prev.function_type || nextFunctions[0] || null);
+      const suggestedGroup = prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+        ? suggestPbCaoFunctionGroup(nextPrimary)
+        : null;
+      return {
+        ...prev,
+        function_type: nextPrimary,
+        allowed_function_types_text: nextFunctions.join(", "),
+        cao_function_group: suggestedGroup || null,
+        performs_security_work: suggestedGroup
+          ? (suggestedGroup === "non_security_staff" ? "false" : "true")
+          : prev.performs_security_work,
+        cao_function_level: suggestedGroup === "non_security_staff" ? "not_applicable" : prev.cao_function_level,
+        cao_scale: suggestedGroup === "non_security_staff" ? "" : prev.cao_scale,
+        cao_period: suggestedGroup === "non_security_staff" ? "" : prev.cao_period,
+      };
     });
   };
 
@@ -2307,6 +2353,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       const previous = editingId ? contracts.find(contract => contract.id === editingId) || {} : {};
       const payload = buildContractPayload(personnel, {
         ...form,
+        cao_configuration_id: effectiveCaoConfiguration?.id || null,
         template_version: selectedTemplate?.version || null,
         template_name_snapshot: selectedTemplate?.name || null,
         letterhead_name_snapshot: selectedLetterhead?.name || null,
@@ -2411,6 +2458,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           record,
           activated: signedResponse.data?.activated === true,
           evaluation: signedResponse.data?.evaluation || null,
+          notifications: signedResponse.data?.notifications || [],
         };
       }
 
@@ -2423,11 +2471,12 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       setForm(initialForm(personnel));
       setActionMessage({
         type: "success",
-        text: result?.activated
+        text: firstNotificationMessage(result?.notifications)
+          || (result?.activated
           ? "Het getekende contract is gecontroleerd en actief gemaakt."
           : result?.record?.document_status === "signed"
             ? "Het getekende contract is opgeslagen en wacht op juridische controle."
-            : "Het contractdocument is gegenereerd. Upload na ondertekening de getekende versie om het te activeren.",
+            : "Het contractdocument is gegenereerd. Upload na ondertekening de getekende versie om het te activeren."),
       });
       refresh();
     },
@@ -2497,9 +2546,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       setSignedUploadId(null);
       setActionMessage({
         type: "success",
-        text: data?.activated
+        text: firstNotificationMessage(data?.notifications)
+          || (data?.activated
           ? "De getekende versie is gecontroleerd en het contract is actief."
-          : "De getekende versie is opgeslagen. Bekijk de aandachtspunten voordat het contract inzetbaar wordt.",
+          : "De getekende versie is opgeslagen. Bekijk de aandachtspunten voordat het contract inzetbaar wordt."),
       });
       refresh();
     },
@@ -2537,7 +2587,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setPreviewFile(descriptor);
   };
 
-  const nextStep = () => setWizardStep(step => Math.min(step + 1, 6));
+  const nextStep = () => setWizardStep(step => Math.min(step + 1, 10));
   const previousStep = () => setWizardStep(step => Math.max(step - 1, 1));
 
   useEffect(() => {
@@ -2588,14 +2638,47 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setForm(prev => ({ ...prev, duration_option: "free", contract_end_date: "" }));
   }, [wizardOpen, form.employment_contract_model, form.internship_type, form.duration_option]);
 
+  useEffect(() => {
+    if (!wizardOpen || probationAllowed || form.probation_agreed === "false" || form.probation_agreed === "not_applicable") return;
+    setForm(prev => ({ ...prev, probation_agreed: "false", probation_context: "not_applicable" }));
+  }, [form.probation_agreed, probationAllowed, wizardOpen]);
+
+  useEffect(() => {
+    if (wageScaleOptions.length === 0) {
+      if (wageScaleFilter !== null) setWageScaleFilter(null);
+      return;
+    }
+    const selectedScale = form.cao_scale ? String(form.cao_scale) : null;
+    const nextScale = selectedScale && wageScaleOptions.includes(selectedScale)
+      ? selectedScale
+      : (wageScaleFilter && wageScaleOptions.includes(String(wageScaleFilter)) ? String(wageScaleFilter) : wageScaleOptions[0]);
+    if (String(wageScaleFilter || "") !== String(nextScale || "")) setWageScaleFilter(nextScale);
+  }, [form.cao_scale, wageScaleFilter, wageScaleOptions]);
+
   const stepItems = [
+    "Documentbron",
     "Bedrijf",
+    "Startdatum",
     "CAO",
     "Contractvorm",
-    "Periode & functie",
+    "Looptijd",
+    "Functies",
+    "Proeftijd",
     isArticle14Internship ? "Stageafspraken" : (isBblModel ? "Loon, uren & BBL" : "Loon & uren"),
     "Controle",
   ];
+  const currentStepComplete = [
+    !!form.source_type && (form.source_type !== "uploaded_existing" || !!form.existing_contract_file || !!form.signed_file_id),
+    !!form.company_id,
+    !!form.contract_start_date,
+    !!form.cao_key,
+    !!form.contract_model,
+    form.duration_type !== "fixed" || (!!form.duration_option && !!form.contract_end_date),
+    selectedFunctionValues.length > 0,
+    isArticle14Internship || ["true", "false", "not_applicable"].includes(form.probation_agreed),
+    true,
+    true,
+  ][wizardStep - 1];
 
   return (
     <div className="flex flex-col h-full">
@@ -2635,18 +2718,68 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             <AnimatePresence mode="wait">
               <motion.div key={wizardStep} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
             {wizardStep === 1 && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Hoe wilt u het contract vastleggen?</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Kies direct of Secure-it een nieuw contract samenstelt of dat u een bestaand, ondertekend contract aan de historie toevoegt.</p>
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  {[
+                    { value: "generated", label: "Nieuw contract genereren", description: "Gebruik een gepubliceerd contractsjabloon en laat alle contractgegevens automatisch invullen.", icon: FileText },
+                    { value: "uploaded_existing", label: "Bestaand contract uploaden", description: "Voeg ook oudere contracten toe; de volledige keten wordt daarna opnieuw juridisch beoordeeld.", icon: Upload },
+                  ].map(option => {
+                    const Icon = option.icon;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => set("source_type", option.value)}
+                        className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${form.source_type === option.value ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                      >
+                        <div className="flex min-w-0 items-center gap-3">
+                          <Icon className={`h-5 w-5 shrink-0 ${form.source_type === option.value ? "text-primary" : "text-muted-foreground"}`} />
+                          <div className="min-w-0">
+                            <p className="text-sm font-semibold text-foreground">{option.label}</p>
+                            <p className="mt-0.5 text-xs text-muted-foreground">{option.description}</p>
+                          </div>
+                        </div>
+                        {form.source_type === option.value ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                {form.source_type === "uploaded_existing" && (
+                  <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-primary/40 bg-primary/5 p-5 text-center transition-colors hover:bg-primary/10">
+                    <Upload className="h-6 w-6 text-primary" />
+                    <span className="mt-2 text-sm font-medium text-foreground">{form.existing_contract_file?.name || "Selecteer het bestaande contract"}</span>
+                    <span className="mt-0.5 text-xs text-muted-foreground">PDF, JPG of PNG. OCR en documentherkenning kunnen hier later op aansluiten.</span>
+                    <input
+                      type="file"
+                      accept=".pdf,image/*"
+                      className="hidden"
+                      onChange={event => set("existing_contract_file", event.target.files?.[0] || null)}
+                    />
+                  </label>
+                )}
+              </div>
+            )}
+
+            {wizardStep === 2 && (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">Kies het bedrijf waarmee deze medewerker het contract aangaat. De CAO's en sjablonen worden daarna hierop gefilterd.</p>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2">
                   {companies.map(company => (
                     <button
                       key={company.id}
                       type="button"
                       onClick={() => setCompanyId(company.id)}
-                      className={`px-4 py-3 rounded-lg border text-left transition-all ${form.company_id === company.id ? "border-primary bg-accent" : "hover:border-primary hover:bg-accent active:scale-[0.99] border-border bg-card"}`}
+                      className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${form.company_id === company.id ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
                     >
-                      <p className="font-semibold text-foreground">{company.display_name || company.legal_name}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{company.legal_name && company.display_name !== company.legal_name ? company.legal_name : company.city || "Bedrijf"}</p>
+                      <div>
+                        <p className="font-semibold text-foreground">{company.display_name || company.legal_name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{company.legal_name && company.display_name !== company.legal_name ? company.legal_name : company.city || "Bedrijf"}</p>
+                      </div>
+                      {form.company_id === company.id ? <Check className="h-4 w-4 text-primary" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                     </button>
                   ))}
                 </div>
@@ -2654,22 +2787,38 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               </div>
             )}
 
-            {wizardStep === 2 && (
+            {wizardStep === 3 && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Wanneer begint het contract?</p>
+                  <p className="mt-1 text-sm text-muted-foreground">De startdatum bepaalt welke bedrijfs-CAO, CAO-versie en salaristabel beschikbaar zijn. Dit werkt ook voor historische contracten.</p>
+                </div>
+                <div className="max-w-md space-y-1">
+                  <Label>Startdatum *</Label>
+                  <Input type="date" value={form.contract_start_date || ""} onChange={event => set("contract_start_date", event.target.value)} />
+                </div>
+              </div>
+            )}
+
+            {wizardStep === 4 && (
               <div className="space-y-4">
                 <div>
                   <p className="text-sm font-medium text-foreground">{selectedCompany?.display_name || selectedCompany?.legal_name || "Geen bedrijf geselecteerd"}</p>
                   <p className="text-xs text-muted-foreground">Alleen CAO's die in het bedrijfsprofiel aan dit bedrijf zijn gekoppeld worden getoond.</p>
                 </div>
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                <div className="grid grid-cols-1 gap-2">
                   {companyCaoKeyOptions.map(option => (
                     <button
                       key={option.value}
                       type="button"
                       onClick={() => setCaoKey(option.value)}
-                      className={`px-4 py-3 rounded-lg border text-left transition-all ${form.cao_key === option.value ? "border-primary bg-accent" : "hover:border-primary hover:bg-accent active:scale-[0.99] border-border bg-card"}`}
+                      className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${form.cao_key === option.value ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
                     >
-                      <p className="font-semibold text-foreground">{option.label}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{option.assignment_count} bedrijfsconfiguratie{option.assignment_count === 1 ? "" : "s"}</p>
+                      <div>
+                        <p className="font-semibold text-foreground">{option.label}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">De juiste cao-versie en salaristabel worden automatisch bepaald op de contractstartdatum.</p>
+                      </div>
+                      {form.cao_key === option.value ? <Check className="h-4 w-4 text-primary" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                     </button>
                   ))}
                 </div>
@@ -2678,439 +2827,232 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     Dit bedrijf heeft nog geen actieve CAO-koppeling voor de gekozen contractdatum. Voeg deze eerst toe in het bedrijfsprofiel.
                   </p>
                 )}
-                <div className="max-w-xl space-y-1">
-                  <Label>CAO-configuratie</Label>
-                  <Select value={form.cao_configuration_id || "auto"} onValueChange={value => set("cao_configuration_id", value === "auto" ? null : value)}>
-                    <SelectTrigger><SelectValue placeholder="Automatisch bepalen" /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="auto">Automatisch bepalen</SelectItem>
-                      {visibleCaoConfigurationOptions.map(option => (
-                        <SelectItem key={option.id} value={option.id} disabled={option.selectable === false}>
-                          {caoConfigurationLabel(option)}{option.selectable === false ? " (niet actief)" : ""}
-                        </SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {caoConfigurationSelectionWarning && <p className="text-xs text-amber-700">{caoConfigurationSelectionWarning}</p>}
-                </div>
-              </div>
-            )}
-
-            {wizardStep === 3 && (
-              <div className="space-y-5">
-                <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                  {availableContractModels.map(option => (
-                    <button
-                      key={option.value}
-                      type="button"
-                      onClick={() => setContractModel(option.value)}
-                      className={`px-4 py-3 rounded-lg border text-left transition-all ${form.contract_model === option.value ? "border-primary bg-accent" : "hover:border-primary hover:bg-accent active:scale-[0.99] border-border bg-card"}`}
-                    >
-                      <p className="font-semibold text-foreground">{contractModelDisplayLabel(option, form.contract_agreed_at)}</p>
-                      <p className="mt-1 text-xs text-muted-foreground">{CONTRACT_FORM_LABELS[option.contract_form] || option.contract_form} · {EMPLOYMENT_MODEL_LABELS[option.employment_model] || option.employment_model}</p>
-                    </button>
-                  ))}
-                </div>
-
-                <div className="grid gap-4 lg:grid-cols-[1fr_1fr]">
-                  {isArticle14Internship ? (
-                    <div className="border border-border bg-muted/20 p-3">
-                      <p className="text-sm font-medium text-foreground">Geen proeftijd</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Een artikel-14-stage is geen arbeidsovereenkomst. Proeftijd en werknemersontslagregels worden daarom niet opgenomen.</p>
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      <Label>Proeftijd</Label>
-                      <div className="grid gap-2 sm:grid-cols-3">
-                        {[
-                          ["true", "Met proeftijd"],
-                          ["false", "Zonder proeftijd"],
-                          ["not_applicable", "Niet van toepassing"],
-                        ].map(([value, label]) => (
-                          <button
-                            key={value}
-                            type="button"
-                            onClick={() => setProbationChoice(value)}
-                            className={`rounded-lg border px-3 py-2 text-sm ${form.probation_agreed === value ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
-                          >
-                            {label}
-                          </button>
-                        ))}
-                      </div>
-                      {form.probation_agreed === "true" && (
-                        <div className="space-y-1 pt-2">
-                          <Label>Is eerder vergelijkbaar werk verricht?</Label>
-                          <Select value={form.probation_context || "unknown"} onValueChange={value => set("probation_context", value)}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="unknown">Kies de situatie</SelectItem>
-                              <SelectItem value="first_contract">Nee, dit is het eerste contract</SelectItem>
-                              <SelectItem value="successive_same_work">Ja, hetzelfde of vergelijkbaar werk</SelectItem>
-                              <SelectItem value="successive_new_skills">Ja, maar de functie vraagt wezenlijk andere vaardigheden</SelectItem>
-                            </SelectContent>
-                          </Select>
-                          <p className="text-xs text-muted-foreground">Ook eerder werk via een uitzend-, payroll- of andere opvolgende werkgever kan hierbij meetellen.</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                  <div className="space-y-2">
-                    <Label>Documentbron</Label>
-                    <div className="grid gap-2 sm:grid-cols-2">
-                      {[
-                        ["generated", "Genereren uit sjabloon"],
-                        ["uploaded_existing", "Oud contract uploaden"],
-                      ].map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => set("source_type", value)}
-                          className={`rounded-lg border px-3 py-2 text-sm ${form.source_type === value ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                  </div>
-                </div>
-
-                {form.source_type === "generated" && (
-                  <div className="grid gap-4 md:grid-cols-2">
-                    <div className="space-y-1">
-                      <Label>Sjabloon</Label>
-                      <Select value={form.template_id || "none"} onValueChange={value => set("template_id", value === "none" ? null : value)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Kies sjabloon</SelectItem>
-                          {publishedTemplates.map(template => (
-                            <SelectItem key={template.id} value={template.id}>
-                              {template.name} v{template.version || 1}
-                            </SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                      {form.company_id && publishedTemplates.length === 0 && (
-                        <p className="text-xs text-amber-700">Geen gepubliceerd sjabloon gevonden voor deze contractvorm/proeftijd.</p>
-                      )}
-                    </div>
-                    <div className="space-y-1">
-                      <Label>Briefpapier</Label>
-                      <Select value={form.letterhead_id || "none"} onValueChange={value => set("letterhead_id", value === "none" ? null : value)}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="none">Geen briefpapier</SelectItem>
-                          {letterheadOptions.map(item => (
-                            <SelectItem key={item.id} value={item.id}>{item.name}{item.is_default ? " (standaard)" : ""}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                  </div>
-                )}
-              </div>
-            )}
-
-            {wizardStep === 4 && (
-              <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
-                <div className="space-y-1">
-                  <Label>Startdatum</Label>
-                  <Input type="date" value={form.contract_start_date || ""} onChange={event => set("contract_start_date", event.target.value)} />
-                </div>
-                <div className="space-y-1">
-                  <Label>Datum overeengekomen</Label>
-                  <Input type="date" value={form.contract_agreed_at || ""} onChange={event => set("contract_agreed_at", event.target.value)} />
-                  <p className="text-xs text-muted-foreground">De datum waarop werkgever en medewerker de overeenkomst aangaan. Deze datum bepaalt het toepasselijke overgangsrecht.</p>
-                </div>
-                {futureStatutoryBandwidth && (
-                  <div className="rounded-lg border border-emerald-300 bg-emerald-50/70 p-4 text-sm md:col-span-2 xl:col-span-3 dark:border-emerald-700 dark:bg-emerald-950/20">
-                    <p className="font-medium text-foreground">Wettelijk bandbreedtecontract</p>
-                    <p className="mt-1 text-muted-foreground">
-                      De gekozen minimum- en maximumuren voldoen aan het model dat vanaf 1 januari 2028 geldt: het minimum is groter dan nul en het maximum is niet hoger dan 130% daarvan.
-                    </p>
-                  </div>
-                )}
-                {futureCallRequiresException && (
-                  <div className="space-y-4 rounded-lg border border-amber-300 bg-amber-50/70 p-4 md:col-span-2 xl:col-span-3 dark:border-amber-700 dark:bg-amber-950/20">
-                    <div>
-                      <p className="font-medium text-foreground">Wettelijke uitzondering voor flexibel oproepmodel</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Vanaf 1 januari 2028 is dit model alleen beschikbaar voor een medewerker die gemiddeld maximaal 16 uur per week werkt en onder een wettelijke uitzonderingsgroep valt. Een min-maxmodel heeft geen uitzondering nodig zodra het maximum ten hoogste 130% van het minimum bedraagt.
-                      </p>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                      <div className="space-y-1">
-                        <Label>Uitzonderingsgroep</Label>
-                        <Select value={form.call_contract_exception_profile || "none"} onValueChange={value => set("call_contract_exception_profile", value)}>
-                          <SelectTrigger><SelectValue /></SelectTrigger>
-                          <SelectContent>
-                            {CALL_EXCEPTION_OPTIONS.map(option => (
-                              <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                            ))}
-                          </SelectContent>
-                        </Select>
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Verwacht gemiddelde uren per week</Label>
-                        <Input
-                          type="number"
-                          min="0"
-                          max="16"
-                          step="0.25"
-                          value={form.call_contract_exception_average_hours_per_week || ""}
-                          onChange={event => set("call_contract_exception_average_hours_per_week", event.target.value)}
-                        />
-                      </div>
-                      {form.call_contract_exception_profile === "minor" && (
-                        <div className="rounded-lg border border-border bg-background/70 p-3 text-xs text-muted-foreground">
-                          De leeftijd wordt automatisch gecontroleerd aan de hand van de geboortedatum in het medewerkersprofiel.
-                        </div>
-                      )}
-                      {["pupil", "student"].includes(form.call_contract_exception_profile) && (
-                        <>
-                          <div className="space-y-1">
-                            <Label>Referentie inschrijvingsbewijs</Label>
-                            <Input
-                              value={form.call_contract_exception_evidence_reference || ""}
-                              onChange={event => set("call_contract_exception_evidence_reference", event.target.value)}
-                              placeholder="Bijv. documentnummer of dossierkenmerk"
-                            />
-                          </div>
-                          <div className="space-y-1">
-                            <Label>Bewijs geldig tot en met</Label>
-                            <Input
-                              type="date"
-                              value={form.call_contract_exception_valid_until || ""}
-                              onChange={event => set("call_contract_exception_valid_until", event.target.value)}
-                            />
-                          </div>
-                        </>
-                      )}
-                      {form.call_contract_exception_profile === "aow" && (
-                        <>
-                          <div className="space-y-1">
-                            <Label>Ontvangt medewerker al AOW?</Label>
-                            <Select value={form.employee_already_receives_aow || "false"} onValueChange={value => set("employee_already_receives_aow", value)}>
-                              <SelectTrigger><SelectValue /></SelectTrigger>
-                              <SelectContent>
-                                <SelectItem value="false">Nee</SelectItem>
-                                <SelectItem value="true">Ja</SelectItem>
-                              </SelectContent>
-                            </Select>
-                          </div>
-                          <div className="space-y-1">
-                            <Label>AOW-datum</Label>
-                            <Input type="date" value={form.employee_aow_date || ""} onChange={event => set("employee_aow_date", event.target.value)} />
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                )}
-                {legacyCallContinuesAfterReform && !futureFlexModel && (
-                  <div className="rounded-lg border border-amber-300 bg-amber-50/70 p-4 text-sm md:col-span-2 xl:col-span-3 dark:border-amber-700 dark:bg-amber-950/20">
-                    <p className="font-medium text-foreground">Overgangsmoment op 1 januari 2028</p>
-                    <p className="mt-1 text-muted-foreground">
-                      Dit oproepcontract loopt door na de wetswijziging. Plan voor die datum een controle en leg zo nodig een bandbreedte vast; alleen een aantoonbare wettelijke uitzondering kan het oproepmodel behouden.
-                    </p>
-                  </div>
-                )}
-                {selectedContractModel?.duration_type === "fixed" && (
-                  <>
-                    <div className="space-y-1">
-                      <Label>{isArticle14Internship || isBblModel ? "Bron einddatum" : "Duur"}</Label>
-                      <Select value={form.duration_option || "free"} onValueChange={setDurationOption}>
-                        <SelectTrigger><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          {selectableDurationOptions.map(option => (
-                            <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                          ))}
-                        </SelectContent>
-                      </Select>
-                    </div>
-                    <div className="space-y-1">
-                      <Label>{form.duration_option === "pok_end_date" ? "Einddatum volgens POK" : "Einddatum"}</Label>
-                      <Input type="date" value={form.contract_end_date || ""} onChange={event => set("contract_end_date", event.target.value)} disabled={form.duration_option && !["free", "pok_end_date"].includes(form.duration_option)} />
-                      {form.duration_option === "pok_end_date" && (
-                        <p className="text-xs text-muted-foreground">Neem deze datum voorlopig handmatig over uit de POK. Automatische uitlezing wordt later toegevoegd.</p>
-                      )}
-                    </div>
-                  </>
-                )}
-                {selectedContractModel?.duration_type === "indefinite" && (
-                  <div className="rounded-lg border border-border bg-muted/20 p-3 text-sm text-muted-foreground">
-                    Onbepaalde tijd: er wordt geen einddatum gevraagd.
-                  </div>
-                )}
-                {isBblModel && (
-                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-3 text-sm text-foreground md:col-span-2 xl:col-span-3">
-                    De einddatum moet aansluiten op de praktijkovereenkomst (POK). Na de opleiding is voor voortzetting een regulier arbeidscontract of een juridisch beoordeelde vervolgafspraak nodig.
-                  </div>
-                )}
-                {selectedContractModel?.duration_type === "fixed"
-                  && !["internship", "bbl", "zzp"].includes(form.employment_contract_model) && (
-                  <div className="space-y-3 rounded-lg border border-border bg-muted/20 p-4 md:col-span-2 xl:col-span-3">
-                    <div>
-                      <Label>Eerder vergelijkbaar werk buiten deze contracthistorie?</Label>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        De applicatie kent contracten die hier zijn opgeslagen. Alleen eerder vergelijkbaar werk via een andere of opvolgende werkgever moet u nog aangeven.
-                      </p>
-                    </div>
-                    <div className="grid gap-2 sm:grid-cols-3">
-                      {[
-                        ["no", "Nee"],
-                        ["yes", "Ja"],
-                        ["unknown", "Nog uitzoeken"],
-                      ].map(([value, label]) => (
-                        <button
-                          key={value}
-                          type="button"
-                          onClick={() => set("prior_similar_work_status", value)}
-                          className={`rounded-lg border px-3 py-2 text-sm ${form.prior_similar_work_status === value ? "border-primary bg-primary/5 text-primary" : "border-border text-muted-foreground hover:bg-muted/40"}`}
-                        >
-                          {label}
-                        </button>
-                      ))}
-                    </div>
-                    {form.prior_similar_work_status === "yes" && (
-                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
-                        <div className="space-y-1">
-                          <Label>Vorige werkgever</Label>
-                          <Input value={form.prior_external_employer_name || ""} onChange={event => set("prior_external_employer_name", event.target.value)} />
-                        </div>
-                        <div className="space-y-1">
-                          <Label>Aantal tijdelijke contracten</Label>
-                          <Input type="number" min="1" step="1" value={form.prior_external_contract_count || ""} onChange={event => set("prior_external_contract_count", event.target.value)} />
-                        </div>
-                        <div className="space-y-1">
-                          <Label>Einddatum laatste contract</Label>
-                          <Input type="date" value={form.prior_external_last_end_date || ""} onChange={event => set("prior_external_last_end_date", event.target.value)} />
-                        </div>
-                        <div className="space-y-1">
-                          <Label>Eerste startdatum (indien bekend)</Label>
-                          <Input type="date" value={form.prior_external_first_start_date || ""} onChange={event => set("prior_external_first_start_date", event.target.value)} />
-                        </div>
-                        <div className="space-y-1 md:col-span-2">
-                          <Label>Opvolgend werkgeverschap beoordeeld?</Label>
-                          <Select value={form.successor_employer_confirmed || "unknown"} onValueChange={value => set("successor_employer_confirmed", value)}>
-                            <SelectTrigger><SelectValue /></SelectTrigger>
-                            <SelectContent>
-                              <SelectItem value="unknown">Nog niet beoordeeld</SelectItem>
-                              <SelectItem value="true">Ja, telt mee</SelectItem>
-                              <SelectItem value="false">Nee, telt niet mee</SelectItem>
-                            </SelectContent>
-                          </Select>
-                        </div>
-                      </div>
-                    )}
-                  </div>
-                )}
-                <div className="space-y-1">
-                  <Label>Functietype</Label>
-                  <Select value={form.function_type || "none"} onValueChange={selectPrimaryFunction}>
-                    <SelectTrigger><SelectValue /></SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="none">Kies functie</SelectItem>
-                      {wizardFunctionOptions.map(option => (
-                        <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                  {form.cao_key && !companyCaoAssignmentsLoading && wizardFunctionOptions.length === 0 && (
-                    <p className="text-xs text-destructive">Voor deze CAO zijn nog geen functies geconfigureerd in het bedrijfsprofiel. Voeg daar eerst de inzetbare functies toe.</p>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <Label>CAO-functiegroep</Label>
-                  {form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? (
-                    <Select value={form.cao_function_group || "none"} onValueChange={value => set("cao_function_group", value === "none" ? null : value)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Kies functiegroep</SelectItem>
-                        {PB_CAO_FUNCTION_GROUP_OPTIONS
-                          .filter(option => !isArticle14Internship || option.value !== "non_security_staff")
-                          .map(option => (
-                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                          ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input value={form.cao_function_group || ""} onChange={event => set("cao_function_group", event.target.value || null)} placeholder="CAO-functiegroep" />
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <Label>CAO-functieniveau</Label>
-                  {isArticle14Internship ? (
-                    <div className="border border-border bg-muted/20 p-3 text-sm text-muted-foreground">Niet van toepassing op de stageovereenkomst.</div>
-                  ) : isBblModel ? (
-                    <div className="border border-border bg-muted/20 p-3 text-sm text-muted-foreground">Aspirant-beveiliger · schaal 2</div>
-                  ) : form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? (
-                    <Select value={form.cao_function_level || "none"} onValueChange={selectPbFunctionLevel}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Kies functieniveau</SelectItem>
-                        {PB_CAO_FUNCTION_LEVEL_OPTIONS.map(option => (
-                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : form.cao_key === CAO_EHB_KEY ? (
-                    <Select value={form.cao_function_level || "none"} onValueChange={value => set("cao_function_level", value === "none" ? null : value)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="none">Kies functieniveau</SelectItem>
-                        {EHB_CAO_FUNCTION_LEVEL_OPTIONS.map(option => (
-                          <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>
-                        ))}
-                      </SelectContent>
-                    </Select>
-                  ) : (
-                    <Input value={form.cao_function_level || ""} onChange={event => set("cao_function_level", event.target.value || null)} placeholder="CAO-functieniveau" />
-                  )}
-                  {form.cao_key === CAO_EHB_KEY && form.cao_function_level === "e" && (
-                    <p className="text-xs text-muted-foreground">Projectleider (niveau e) valt niet onder de CAO EHB-uitzondering van maximaal 6 tijdelijke contracten in 48 maanden.</p>
-                  )}
-                </div>
-                <div className="space-y-1">
-                  <Label>Standplaats</Label>
-                  <Input value={form.work_location || ""} onChange={event => set("work_location", event.target.value)} placeholder="Vestiging of primaire werkplek" />
-                </div>
-                <div className="space-y-1">
-                  <Label>Werkgebied</Label>
-                  <Input value={form.work_area || ""} onChange={event => set("work_area", event.target.value)} placeholder="Bijv. Nederland of regio Midden" />
-                </div>
-                <div className="space-y-2 md:col-span-2 xl:col-span-3">
-                  <Label>Functies binnen deze {isArticle14Internship ? "stageovereenkomst" : "arbeidsovereenkomst"}</Label>
-                  <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                    {wizardFunctionOptions.map(option => {
-                      const selected = selectedFunctionValues.includes(option.value);
-                      const primary = form.function_type === option.value;
-                      return (
-                        <label
-                          key={option.value}
-                          className={`flex min-h-10 items-center gap-2 rounded-lg border px-3 py-2 text-sm ${selected ? "border-primary bg-primary/5 text-foreground" : "border-border text-muted-foreground"} ${primary ? "cursor-default" : "cursor-pointer hover:bg-muted/40"}`}
-                        >
-                          <input
-                            type="checkbox"
-                            checked={selected}
-                            disabled={primary}
-                            onChange={() => toggleAllowedFunction(option.value)}
-                          />
-                          <span className="min-w-0 flex-1 truncate">{option.label}</span>
-                          {primary && <Badge variant="outline" className="text-[10px]">Hoofd</Badge>}
-                        </label>
-                      );
-                    })}
-                  </div>
-                  {form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY && selectedPbFunctionGroups.length > 1 && (
-                    <p className="text-xs text-amber-700">
-                      Meerdere CAO-functiegroepen geselecteerd. De gekozen hoofdfunctiegroep moet aansluiten op de werkzaamheden die ten minste 50% van de arbeidsduur beslaan.
-                    </p>
-                  )}
-                </div>
               </div>
             )}
 
             {wizardStep === 5 && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Kies het type dienstverband</p>
+                  <p className="mt-1 text-sm text-muted-foreground">De looptijd wordt in de volgende stap gekozen. Alleen contractsoorten die passen bij de geselecteerde CAO worden getoond.</p>
+                </div>
+                <div className="grid grid-cols-1 gap-2">
+                  {availableContractKinds.map(option => {
+                    const selected = form.employment_contract_model === option.value;
+                    return (
+                      <button
+                        key={option.value}
+                        type="button"
+                        onClick={() => setContractKind(option.value)}
+                        className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                      >
+                        <div className="min-w-0">
+                          <p className="font-semibold text-foreground">{option.label}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+                        </div>
+                        {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                      </button>
+                    );
+                  })}
+                </div>
+                {availableContractKinds.length === 0 && (
+                  <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    Voor deze CAO zijn nog geen ondersteunde contractvormen ingericht.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {wizardStep === 6 && (
+              <div className="space-y-5">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Hoe lang loopt het contract?</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Kies de looptijd en, bij een tijdelijk contract, de manier waarop de einddatum wordt bepaald.</p>
+                </div>
+
+                {!isArticle14Internship && !isBblModel && (
+                  <div className="space-y-2">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Looptijd</p>
+                    <div className="grid grid-cols-1 gap-2">
+                      {[
+                        { value: "fixed", label: "Bepaalde tijd", description: "Het contract eindigt op een vooraf vastgelegde einddatum." },
+                        { value: "indefinite", label: "Onbepaalde tijd", description: "Het contract heeft geen vooraf vastgelegde einddatum." },
+                      ].map(option => {
+                        const selected = form.duration_type === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setContractDurationType(option.value)}
+                            className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                          >
+                            <div>
+                              <p className="font-semibold text-foreground">{option.label}</p>
+                              <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+                            </div>
+                            {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
+                )}
+
+                {form.duration_type === "fixed" && (
+                  <div className="space-y-3">
+                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{isArticle14Internship || isBblModel ? "Bron einddatum" : "Duur"}</p>
+                    <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                      {selectableDurationOptions.map(option => {
+                        const selected = form.duration_option === option.value;
+                        return (
+                          <button
+                            key={option.value}
+                            type="button"
+                            onClick={() => setDurationOption(option.value)}
+                            className={`flex min-h-12 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                          >
+                            <span className="text-sm font-medium text-foreground">{option.label}</span>
+                            {selected && <Check className="h-4 w-4 shrink-0 text-primary" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                    <div className="max-w-md space-y-1">
+                      <Label>{form.duration_option === "pok_end_date" ? "Einddatum volgens POK *" : "Einddatum *"}</Label>
+                      <Input
+                        type="date"
+                        value={form.contract_end_date || ""}
+                        onChange={event => set("contract_end_date", event.target.value)}
+                        disabled={!!form.duration_option && !["free", "pok_end_date"].includes(form.duration_option)}
+                      />
+                      {form.duration_option === "pok_end_date" && (
+                        <p className="text-xs text-muted-foreground">Neem de datum voorlopig over uit de POK. Upload en OCR van de POK worden in een vervolgstap toegevoegd.</p>
+                      )}
+                    </div>
+                  </div>
+                )}
+
+                {legacyCallContinuesAfterReform && !futureFlexModel && (
+                  <div className="rounded-lg border border-amber-300 bg-amber-50/70 p-4 text-sm dark:border-amber-700 dark:bg-amber-950/20">
+                    <p className="font-medium text-foreground">Controle nodig voor 1 januari 2028</p>
+                    <p className="mt-1 text-muted-foreground">Dit oproepcontract loopt door na de voorgenomen wetswijziging. De applicatie markeert het contract voor een tijdige herbeoordeling.</p>
+                  </div>
+                )}
+                {isBblModel && (
+                  <div className="rounded-lg border border-primary/30 bg-primary/5 p-4 text-sm text-foreground">
+                    Een BBL-leerarbeidsovereenkomst is hier altijd voor bepaalde tijd. De einddatum sluit aan op de POK of wordt als vrije einddatum vastgelegd.
+                  </div>
+                )}
+              </div>
+            )}
+
+            {wizardStep === 7 && (
+              <div className="space-y-5">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Functies binnen dit contract</p>
+                  <p className="mt-1 text-sm text-muted-foreground">De eerste gekozen functie wordt automatisch de hoofdfunctie. De applicatie leidt vergunningcontext en CAO-indeling uit de geselecteerde functies af.</p>
+                </div>
+                {wizardFunctionGroups.length > 0 ? (
+                  <div className="space-y-5">
+                    {wizardFunctionGroups.map(group => (
+                      <section key={group.key} className="space-y-2">
+                        <div className="flex flex-wrap items-center gap-2">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">{group.label}</p>
+                          {group.shared && group.licenseTypes?.length > 0 && (
+                            <span className="text-[11px] text-muted-foreground">Geldt voor {group.licenseTypes.join(" + ")}</span>
+                          )}
+                        </div>
+                        <div className="flex flex-wrap gap-2">
+                          {group.functions.map(value => {
+                            const selected = selectedFunctionValues.includes(value);
+                            const primary = form.function_type === value;
+                            return (
+                              <button
+                                key={value}
+                                type="button"
+                                onClick={() => toggleAllowedFunction(value)}
+                                className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:border-primary/40"}`}
+                              >
+                                {readableFunctionLabel(value)}
+                                {primary && <span className="rounded-full bg-primary-foreground/15 px-1.5 py-0.5 text-[10px]">Hoofd</span>}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </section>
+                    ))}
+                  </div>
+                ) : (
+                  <p className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    Voor deze CAO zijn nog geen functies gekoppeld aan het bedrijf. Voeg de functies eerst toe via de CAO-instellingen van het bedrijf.
+                  </p>
+                )}
+                {form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY && selectedPbFunctionGroups.length > 1 && (
+                  <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
+                    De functies vallen in meerdere CAO-functiegroepen. De hoofdfunctie bepaalt de primaire loonindeling; de servercontrole bewaakt de combinatie.
+                  </p>
+                )}
+              </div>
+            )}
+
+            {wizardStep === 8 && (
+              <div className="space-y-4">
+                <div>
+                  <p className="text-sm font-medium text-foreground">Proeftijd</p>
+                  <p className="mt-1 text-sm text-muted-foreground">De toegestane keuze wordt automatisch bepaald uit contractduur en eerdere contracten bij dezelfde juridische werkgever.</p>
+                </div>
+                {isArticle14Internship ? (
+                  <div className="flex min-h-16 items-center justify-between rounded-lg border border-primary bg-accent px-4 py-3">
+                    <div>
+                      <p className="font-semibold text-foreground">Niet van toepassing</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Een stageovereenkomst is geen arbeidsovereenkomst en bevat daarom geen proeftijd.</p>
+                    </div>
+                    <Check className="h-4 w-4 text-primary" />
+                  </div>
+                ) : !probationAllowed ? (
+                  <button
+                    type="button"
+                    onClick={() => setProbationChoice("false")}
+                    className="flex min-h-16 w-full items-center justify-between rounded-lg border border-primary bg-accent px-4 py-3 text-left"
+                  >
+                    <div>
+                      <p className="font-semibold text-foreground">Zonder proeftijd</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {connectedPriorContract
+                          ? "Er is een aansluitend eerder contract bij dezelfde juridische werkgever; daarom wordt geen nieuwe proeftijd aangeboden."
+                          : "De gekozen contractduur staat geen proeftijd toe."}
+                      </p>
+                    </div>
+                    <Check className="h-4 w-4 text-primary" />
+                  </button>
+                ) : (
+                  <div className="grid grid-cols-1 gap-2">
+                    {[
+                      { value: "false", label: "Zonder proeftijd", description: "Het contract gaat direct in zonder proefperiode." },
+                      { value: "true", label: "Met proeftijd", description: `Maximaal ${probationMonths} ${probationMonths === 1 ? "maand" : "maanden"}; de definitieve tekst volgt automatisch uit het sjabloon.` },
+                    ].map(option => {
+                      const selected = form.probation_agreed === option.value;
+                      return (
+                        <button
+                          key={option.value}
+                          type="button"
+                          onClick={() => setProbationChoice(option.value)}
+                          className={`flex min-h-16 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                        >
+                          <div>
+                            <p className="font-semibold text-foreground">{option.label}</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{option.description}</p>
+                          </div>
+                          {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
+                        </button>
+                      );
+                    })}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {wizardStep === 9 && (
               <div className="space-y-5">
                 {isArticle14Internship ? (
                   <Article14InternshipFields form={form} set={set} />
@@ -3118,33 +3060,43 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   <>
                 {isBblModel && <BblLearningFields form={form} set={set} />}
                 <div>
-                  <p className="text-sm font-medium text-foreground">Salaristabel {wageTableYear}</p>
-                  <p className="text-xs text-muted-foreground">Alleen de lonen uit het jaar van de contractstartdatum worden getoond.</p>
+                  <p className="text-sm font-medium text-foreground">Loon en arbeidsomvang</p>
+                  <p className="mt-1 text-xs text-muted-foreground">De salaristabel en betaalperiode worden automatisch gekozen op basis van de CAO en contractstartdatum.</p>
                 </div>
                 {wageRows.length > 0 ? (
-                  <div className="overflow-hidden rounded-lg border border-border">
-                    <div className="grid grid-cols-[1fr_1fr_1fr_1fr] bg-muted/30 px-3 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                      <div>Schaal</div>
-                      <div>Trede</div>
-                      <div>Uurloon</div>
-                      <div />
-                    </div>
-                    {wageRows.map((row, index) => {
-                      const selected = String(form.cao_scale) === String(row.scale) && String(form.cao_period) === String(row.period);
-                      return (
+                  <div className="space-y-3">
+                    <div className="flex flex-wrap items-center gap-2">
+                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Schaal</span>
+                      {wageScaleOptions.map(scale => (
                         <button
-                          key={`${row.scale}-${row.period}-${index}`}
+                          key={scale}
                           type="button"
-                          onClick={() => selectWageRow(row)}
-                          className={`grid w-full grid-cols-[1fr_1fr_1fr_1fr] px-3 py-2 text-left text-sm hover:bg-muted/40 ${selected ? "bg-primary/5 text-primary" : ""}`}
+                          onClick={() => setWageScaleFilter(scale)}
+                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${String(wageScaleFilter) === String(scale) ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:border-primary/40"}`}
                         >
-                          <div>{row.scale ?? "-"}</div>
-                          <div>{row.period ?? "-"}</div>
-                          <div>{formatCurrency(row.hourlyRate)}</div>
-                          <div className="text-right">{selected ? "Geselecteerd" : "Kies"}</div>
+                          Schaal {scale}
                         </button>
-                      );
-                    })}
+                      ))}
+                    </div>
+                    <div className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                      {visibleWageRows.map((row, index) => {
+                        const selected = String(form.cao_scale) === String(row.scale) && String(form.cao_period) === String(row.period);
+                        return (
+                          <button
+                            key={`${row.scale}-${row.period}-${index}`}
+                            type="button"
+                            onClick={() => selectWageRow(row)}
+                            className={`flex min-h-14 items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                          >
+                            <div>
+                              <p className="text-sm font-semibold text-foreground">Trede {row.period ?? "-"}</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">{formatCurrency(row.hourlyRate)} per uur</p>
+                            </div>
+                            {selected ? <Check className="h-4 w-4 text-primary" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                          </button>
+                        );
+                      })}
+                    </div>
                   </div>
                 ) : form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY && form.cao_function_group === "non_security_staff" ? (
                   <div className="max-w-sm space-y-1">
@@ -3318,17 +3270,66 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       </Select>
                     </div>
                   )}
-                  <div className="space-y-1">
-                    <Label>Schaal schriftelijk bevestigd</Label>
-                    <Select value={form.written_scale_period_notice_confirmed || "unknown"} onValueChange={value => set("written_scale_period_notice_confirmed", value)}>
-                      <SelectTrigger><SelectValue /></SelectTrigger>
-                      <SelectContent>
-                        <SelectItem value="unknown">Nog niet vastgelegd</SelectItem>
-                        <SelectItem value="true">Ja</SelectItem>
-                        <SelectItem value="false">Nee</SelectItem>
-                      </SelectContent>
-                    </Select>
-                  </div>
+                  {futureStatutoryBandwidth && (
+                    <div className="rounded-lg border border-emerald-300 bg-emerald-50/70 p-4 text-sm md:col-span-3 dark:border-emerald-700 dark:bg-emerald-950/20">
+                      <p className="font-medium text-foreground">Wettelijk bandbreedtecontract</p>
+                      <p className="mt-1 text-muted-foreground">De gekozen bandbreedte heeft een minimum boven nul en een maximum van ten hoogste 130% daarvan.</p>
+                    </div>
+                  )}
+                  {futureCallRequiresException && (
+                    <div className="space-y-4 rounded-lg border border-amber-300 bg-amber-50/70 p-4 md:col-span-3 dark:border-amber-700 dark:bg-amber-950/20">
+                      <div>
+                        <p className="font-medium text-foreground">Wettelijke uitzondering vereist</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Voor dit flexmodel vanaf 1 januari 2028 moet een geldige uitzonderingsgroep worden vastgelegd. De server controleert de combinatie en de maximale gemiddelde arbeidsduur.</p>
+                      </div>
+                      <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                        <div className="space-y-1">
+                          <Label>Uitzonderingsgroep</Label>
+                          <Select value={form.call_contract_exception_profile || "none"} onValueChange={value => set("call_contract_exception_profile", value)}>
+                            <SelectTrigger><SelectValue /></SelectTrigger>
+                            <SelectContent>
+                              {CALL_EXCEPTION_OPTIONS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
+                            </SelectContent>
+                          </Select>
+                        </div>
+                        <div className="space-y-1">
+                          <Label>Gemiddeld aantal uren per week</Label>
+                          <Input type="number" min="0" max="16" step="0.25" value={form.call_contract_exception_average_hours_per_week || ""} onChange={event => set("call_contract_exception_average_hours_per_week", event.target.value)} />
+                        </div>
+                        {form.call_contract_exception_profile === "minor" && (
+                          <div className="rounded-lg border border-border bg-background/70 p-3 text-xs text-muted-foreground">De geboortedatum uit het medewerkersprofiel wordt automatisch gecontroleerd.</div>
+                        )}
+                        {["pupil", "student"].includes(form.call_contract_exception_profile) && (
+                          <>
+                            <div className="space-y-1">
+                              <Label>Referentie inschrijvingsbewijs</Label>
+                              <Input value={form.call_contract_exception_evidence_reference || ""} onChange={event => set("call_contract_exception_evidence_reference", event.target.value)} />
+                            </div>
+                            <div className="space-y-1">
+                              <Label>Bewijs geldig tot en met</Label>
+                              <Input type="date" value={form.call_contract_exception_valid_until || ""} onChange={event => set("call_contract_exception_valid_until", event.target.value)} />
+                            </div>
+                          </>
+                        )}
+                        {form.call_contract_exception_profile === "aow" && (
+                          <>
+                            <button
+                              type="button"
+                              onClick={() => set("employee_already_receives_aow", form.employee_already_receives_aow === "true" ? "false" : "true")}
+                              className={`flex min-h-10 items-center justify-between rounded-lg border px-3 py-2 text-left text-sm ${form.employee_already_receives_aow === "true" ? "border-primary bg-accent" : "border-border bg-card"}`}
+                            >
+                              Medewerker ontvangt AOW
+                              {form.employee_already_receives_aow === "true" && <Check className="h-4 w-4 text-primary" />}
+                            </button>
+                            <div className="space-y-1">
+                              <Label>AOW-datum</Label>
+                              <Input type="date" value={form.employee_aow_date || ""} onChange={event => set("employee_aow_date", event.target.value)} />
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    </div>
+                  )}
                   {isPbCallModel && (
                     <div className="space-y-3 rounded-lg border border-border p-4 md:col-span-3">
                       <div>
@@ -3389,9 +3390,70 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               </div>
             )}
 
-            {wizardStep === 6 && (
+            {wizardStep === 10 && (
               <div className="grid gap-4 lg:grid-cols-[1fr_420px]">
                 <div className="space-y-3">
+                  {form.source_type === "generated" ? (
+                    <section className="space-y-3 rounded-lg border border-border p-4">
+                      <div>
+                        <p className="text-sm font-semibold text-foreground">Documentopmaak</p>
+                        <p className="mt-1 text-xs text-muted-foreground">Kies het gepubliceerde sjabloon en briefpapier voor het definitieve contract.</p>
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sjabloon</p>
+                        {publishedTemplates.map(template => {
+                          const selected = form.template_id === template.id;
+                          return (
+                            <button
+                              key={template.id}
+                              type="button"
+                              onClick={() => set("template_id", template.id)}
+                              className={`flex min-h-12 w-full items-center justify-between rounded-lg border px-3 py-2 text-left ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                            >
+                              <div>
+                                <p className="text-sm font-medium text-foreground">{template.name}</p>
+                                <p className="text-xs text-muted-foreground">Versie {template.version || 1}</p>
+                              </div>
+                              {selected ? <Check className="h-4 w-4 text-primary" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
+                            </button>
+                          );
+                        })}
+                        {publishedTemplates.length === 0 && <p className="text-sm text-amber-700">Geen gepubliceerd sjabloon gevonden voor deze combinatie van CAO, contractvorm, looptijd en proeftijd.</p>}
+                      </div>
+                      <div className="space-y-2">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Briefpapier</p>
+                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
+                          <button
+                            type="button"
+                            onClick={() => set("letterhead_id", null)}
+                            className={`flex min-h-12 items-center justify-between rounded-lg border px-3 py-2 text-left ${!form.letterhead_id ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                          >
+                            <span className="text-sm font-medium text-foreground">Zonder briefpapier</span>
+                            {!form.letterhead_id && <Check className="h-4 w-4 text-primary" />}
+                          </button>
+                          {letterheadOptions.map(item => {
+                            const selected = form.letterhead_id === item.id;
+                            return (
+                              <button
+                                key={item.id}
+                                type="button"
+                                onClick={() => set("letterhead_id", item.id)}
+                                className={`flex min-h-12 items-center justify-between rounded-lg border px-3 py-2 text-left ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                              >
+                                <span className="text-sm font-medium text-foreground">{item.name}{item.is_default ? " (standaard)" : ""}</span>
+                                {selected && <Check className="h-4 w-4 text-primary" />}
+                              </button>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    </section>
+                  ) : (
+                    <section className="rounded-lg border border-border p-4">
+                      <p className="text-sm font-semibold text-foreground">Geüpload contract</p>
+                      <p className="mt-1 text-sm text-muted-foreground">{form.existing_contract_file?.name || "Het bestaande contractbestand is al gekoppeld."}</p>
+                    </section>
+                  )}
                   <div className="rounded-lg border border-border p-3">
                     <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Controle</p>
                     {missingFields.length === 0
@@ -3489,19 +3551,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     <Label>Interne notities</Label>
                     <Textarea rows={4} value={form.notes || ""} onChange={event => set("notes", event.target.value)} />
                   </div>
-                  {form.source_type === "uploaded_existing" && (
-                    <label className="flex min-h-[120px] cursor-pointer flex-col items-center justify-center rounded-lg border border-dashed border-border bg-muted/20 p-6 text-center hover:bg-muted/40">
-                      <Upload className="h-6 w-6 text-muted-foreground" />
-                      <span className="mt-2 text-sm font-medium">{form.existing_contract_file?.name || "Klik om bestaand contract te uploaden"}</span>
-                      <span className="text-xs text-muted-foreground">PDF, JPG of PNG</span>
-                      <input
-                        type="file"
-                        accept=".pdf,image/*"
-                        className="hidden"
-                        onChange={event => set("existing_contract_file", event.target.files?.[0] || null)}
-                      />
-                    </label>
-                  )}
                 </div>
                 <div className="rounded-lg border border-border bg-muted/20 p-3">
                   <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Document</p>
@@ -3521,8 +3570,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             </Button>
             <div className="flex gap-2">
               <Button type="button" variant="outline" onClick={() => setWizardOpen(false)}>Annuleren</Button>
-              {wizardStep < 6 ? (
-                <Button type="button" onClick={nextStep}>
+              {wizardStep < 10 ? (
+                <Button type="button" onClick={nextStep} disabled={!currentStepComplete}>
                   Volgende <ChevronRight className="ml-1 h-4 w-4" />
                 </Button>
               ) : (
@@ -3546,8 +3595,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       )}
       </AnimatePresence>
 
-      <div className="grid grid-cols-[minmax(200px,1.4fr)_minmax(150px,1fr)_minmax(140px,.9fr)_minmax(140px,.8fr)_minmax(130px,.8fr)_minmax(110px,.7fr)_minmax(120px,.7fr)_132px] items-center px-4 py-2 border-b border-border bg-muted/30 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="truncate">Contract / functie</span><span className="truncate">Bedrijf</span><span className="truncate">Periode</span><span className="truncate">CAO / schaal</span><span className="truncate">Uren / model</span><span className="truncate">Status</span><span className="truncate">Door</span>
+      <div className="overflow-x-auto">
+      <div className="grid min-w-[1120px] grid-cols-[minmax(260px,1.6fr)_minmax(170px,1fr)_minmax(190px,1.1fr)_minmax(190px,1fr)_minmax(120px,.7fr)_270px] items-center border-b border-border bg-muted/30 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
+        <span className="truncate">Contract / functie</span><span className="truncate">Bedrijf</span><span className="truncate">CAO / schaal</span><span className="truncate">Uren / model</span><span className="truncate">Door</span>
         <div className="flex items-center justify-end gap-2">
           {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
           {showArchive ? <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs whitespace-nowrap"><ChevronLeft className="w-3 h-3 mr-1" /> Actieve contracten</Button> : <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs whitespace-nowrap"><Archive className="w-3 h-3 mr-1" /> Archief {archivedContracts.length > 0 ? `(${archivedContracts.length})` : ""}</Button>}
@@ -3575,7 +3625,13 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             ? "Stageovereenkomst (BOL / re-integratie)"
             : (persistedEmploymentModel === "bbl"
               ? "Leerarbeidsovereenkomst (BBL)"
-              : (CONTRACT_FORM_LABELS[contract.contract_form] || "Arbeidscontract"));
+              : ({
+                fulltime: "Fulltime dienstverband",
+                parttime_fixed: "Parttime dienstverband",
+                parttime_growth: "Parttime groeimodel",
+                min_max: "Min-maxcontract",
+                zero_hours: "Nulurencontract",
+              }[persistedEmploymentModel] || CONTRACT_FORM_LABELS[contract.contract_form] || "Arbeidscontract"));
           return (
             <div
               key={contract.id}
@@ -3585,21 +3641,26 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               onKeyDown={event => {
                 if (event.key === "Enter" || event.key === " ") openPreview(contract);
               }}
-              className="grid w-full cursor-pointer grid-cols-[minmax(200px,1.4fr)_minmax(150px,1fr)_minmax(140px,.9fr)_minmax(140px,.8fr)_minmax(130px,.8fr)_minmax(110px,.7fr)_minmax(120px,.7fr)_132px] items-center px-4 py-4 text-left text-sm hover:bg-muted/30"
+              className="grid min-w-[1120px] w-full cursor-pointer grid-cols-[minmax(260px,1.6fr)_minmax(170px,1fr)_minmax(190px,1.1fr)_minmax(190px,1fr)_minmax(120px,.7fr)_270px] items-center px-4 py-4 text-left text-sm hover:bg-muted/30"
             >
               <div className="min-w-0">
-                <p className="truncate font-semibold text-foreground">{contractTypeLabel}</p>
+                <div className="flex min-w-0 items-center gap-2">
+                  <p className="truncate font-semibold text-foreground">{contractTypeLabel}</p>
+                  {showArchive && documentStatusBadge(contract.document_status)}
+                  {contract.statutory_conversion_applies === true && <Badge className="shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200">Van rechtswege onbepaalde tijd</Badge>}
+                </div>
                 <p className="truncate text-xs text-muted-foreground">
                   {(contract.function_assignments?.length
                     ? contract.function_assignments.map(item => item.function_label || readableFunctionLabel(item.function_key)).join(", ")
                     : readableFunctionLabel(contract.function_type)) || contract.cao_function_group || "Functie onbekend"}
                 </p>
+                <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                  {formatDate(contract.contract_start_date)}{effectiveEndForContract(contract) ? ` - ${formatDate(effectiveEndForContract(contract))}` : " - onbepaalde tijd"}
+                </p>
               </div>
               <div className="truncate text-muted-foreground">{getCompanyLabel(companies, contract.company_id)}</div>
-              <div className="truncate text-muted-foreground">{formatDate(contract.contract_start_date)}{contract.contract_end_date ? ` - ${formatDate(contract.contract_end_date)}` : ""}</div>
               <div className="truncate text-muted-foreground">{CAO_OPTION_LABELS[contract.cao_key] || contract.cao_key || "-"}{contract.cao_scale ? ` / ${contract.cao_scale}.${contract.cao_period || 0}` : ""}</div>
               <div className="truncate text-muted-foreground">{hoursLabel} · {EMPLOYMENT_MODEL_LABELS[persistedEmploymentModel] || persistedEmploymentModel || "-"}</div>
-              <div>{documentStatusBadge(contract.document_status)}</div>
               <div className="truncate text-muted-foreground">{getAuditActorLabel(contract, auditActors)}</div>
               <div className="flex justify-end gap-1" onClick={event => event.stopPropagation()}>
                 <Button
@@ -3648,7 +3709,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     <RefreshCw className={`h-4 w-4 ${lifecycleMutation.isPending ? "animate-spin" : ""}`} />
                   </Button>
                 )}
-                {!["archived", "active", "scheduled"].includes(contract.document_status) && (
+                {contract.document_status !== "archived" && (
                   <Button
                     type="button"
                     variant="ghost"
@@ -3669,6 +3730,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             </div>
           );
         })}
+      </div>
       </div>
 
       <ManagedFilePreviewDialog

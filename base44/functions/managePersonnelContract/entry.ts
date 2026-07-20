@@ -137,7 +137,7 @@ function buildFunctionAssignments(contract) {
   return assignments;
 }
 
-function isFixedTermEmployment(contract) {
+function isOriginallyFixedTermEmployment(contract) {
   const model = normalizeToken(contract?.employment_contract_model);
   const legalType = contract?.legal_document_type || 'employment_agreement';
   if (legalType !== 'employment_agreement') return false;
@@ -145,6 +145,26 @@ function isFixedTermEmployment(contract) {
   if (contract?.learning_route === 'bbl') return false;
   if (contract?.contract_form === 'bepaalde_tijd') return true;
   return contract?.contract_form === 'oproep' && contract?.underlying_contract_form === 'bepaalde_tijd';
+}
+
+function isFixedTermEmployment(contract) {
+  if (contract?.statutory_conversion_applies === true || contract?.effective_duration_type === 'indefinite') return false;
+  return isOriginallyFixedTermEmployment(contract);
+}
+
+function effectiveContractEndDate(contract) {
+  if (contract?.effective_contract_end_date) {
+    return contract.effective_contract_end_date;
+  }
+  if (contract?.statutory_conversion_applies === true || contract?.effective_duration_type === 'indefinite') return null;
+  return contract?.contract_end_date || null;
+}
+
+function effectiveDurationType(contract) {
+  if (contract?.statutory_conversion_applies === true) return 'indefinite';
+  return contract?.effective_duration_type
+    || contract?.duration_type
+    || (isOriginallyFixedTermEmployment(contract) ? 'fixed' : 'indefinite');
 }
 
 function isChainExcluded(contract) {
@@ -226,7 +246,7 @@ function legalEmployerKey(contract, companyById) {
 }
 
 function evaluateChain(candidate, contracts, companyById, personnel = null) {
-  if (!isFixedTermEmployment(candidate)) {
+  if (!isOriginallyFixedTermEmployment(candidate)) {
     return {
       status: isChainExcluded(candidate) ? 'not_applicable' : 'not_applicable',
       position: null,
@@ -304,6 +324,9 @@ function evaluateChain(candidate, contracts, companyById, personnel = null) {
   const blockingReasons = [];
   const manualReviewReasons = [];
   const warnings = [];
+  const conversionReasons = [];
+  const conversionDates = [];
+  const committedContract = isLegallyCommittedContract(candidate);
 
   if (profile.ehbExtensionCandidate && !profile.ehbExtensionAllowed) {
     if (profile.ehbFunctionLevels.length === 0) {
@@ -317,9 +340,6 @@ function evaluateChain(candidate, contracts, companyById, personnel = null) {
     manualReviewReasons.push('Leg de AOW-datum vast om te bepalen welke tijdelijke contracten binnen de bijzondere AOW-keten van 6 contracten in 48 maanden vallen.');
   }
 
-  if (candidate?.prior_similar_work_status === 'unknown' || !candidate?.prior_similar_work_status) {
-    manualReviewReasons.push('Leg vast of de medewerker voorafgaand soortgelijk werk bij een andere (mogelijk opvolgende) werkgever heeft verricht.');
-  }
   if (candidate?.prior_similar_work_status === 'yes') {
     if (!externalHistory.contract_count || !externalHistory.last_end_date || externalHistory.successor_employer_confirmed === null || externalHistory.successor_employer_confirmed === undefined) {
       manualReviewReasons.push('Externe contracthistorie of opvolgend werkgeverschap is nog niet volledig beoordeeld.');
@@ -333,17 +353,40 @@ function evaluateChain(candidate, contracts, companyById, personnel = null) {
     blockingReasons.push('Een tijdelijk arbeidscontract moet een bepaalbare einddatum hebben.');
   }
   if (position > profile.contractLimit) {
-    blockingReasons.push(`Dit zou contract ${position} in de keten zijn; binnen dit profiel zijn maximaal ${profile.contractLimit} tijdelijke contracten toegestaan.`);
+    const reason = `Dit is contract ${position} in de keten, terwijl binnen dit profiel maximaal ${profile.contractLimit} tijdelijke contracten zijn toegestaan.`;
+    if (committedContract) {
+      conversionReasons.push(reason);
+      conversionDates.push(candidate.contract_start_date);
+    } else {
+      blockingReasons.push(`${reason} Kies voor het nieuwe contract onbepaalde tijd.`);
+    }
   }
   if (candidate.contract_end_date && periodLimitExclusive && candidate.contract_end_date >= periodLimitExclusive) {
-    blockingReasons.push(`De aaneengesloten keten duurt circa ${totalMonths} maanden en overschrijdt de grens van ${profile.periodLimitMonths} maanden.`);
+    const reason = `De aaneengesloten keten duurt circa ${totalMonths} maanden en overschrijdt de grens van ${profile.periodLimitMonths} maanden.`;
+    if (committedContract) {
+      conversionReasons.push(reason);
+      conversionDates.push(periodLimitExclusive);
+    } else {
+      blockingReasons.push(`${reason} Kies voor het nieuwe contract onbepaalde tijd of pas de looptijd aan.`);
+    }
   }
   if (position === profile.contractLimit && blockingReasons.length === 0) {
     warnings.push('Dit is het laatste tijdelijke contract binnen de berekende keten. Een volgende aaneengesloten overeenkomst moet opnieuw juridisch worden beoordeeld.');
   }
+  const statutoryConversionApplies = conversionReasons.length > 0;
+  const statutoryConversionEffectiveDate = conversionDates.filter(Boolean).sort()[0] || null;
+  if (statutoryConversionApplies) {
+    warnings.push(`Deze reeds aangegane overeenkomst geldt van rechtswege als een arbeidsovereenkomst voor onbepaalde tijd vanaf ${statutoryConversionEffectiveDate || 'de wettelijke omzettingsdatum'}. Het document blijft ongewijzigd; planning en payroll gebruiken de juridisch effectieve duur.`);
+  }
 
   return {
-    status: blockingReasons.length > 0 ? 'blocked' : manualReviewReasons.length > 0 ? 'manual_review_required' : 'compliant',
+    status: blockingReasons.length > 0
+      ? 'blocked'
+      : statutoryConversionApplies
+      ? 'converted_to_indefinite'
+      : manualReviewReasons.length > 0
+      ? 'manual_review_required'
+      : 'compliant',
     policy_version: CHAIN_POLICY_VERSION,
     profile: profile.profile,
     position,
@@ -353,7 +396,12 @@ function evaluateChain(candidate, contracts, companyById, personnel = null) {
     total_chain_months: totalMonths,
     counted_contract_ids: currentChain.map(contract => contract.id).filter(Boolean),
     external_contract_count: externalCount,
-    recommended_duration_type: blockingReasons.length > 0 ? 'indefinite' : null,
+    recommended_duration_type: blockingReasons.length > 0 || statutoryConversionApplies ? 'indefinite' : null,
+    statutory_conversion: {
+      applies: statutoryConversionApplies,
+      effective_date: statutoryConversionEffectiveDate,
+      reasons: conversionReasons
+    },
     blocking_reasons: blockingReasons,
     manual_review_reasons: manualReviewReasons,
     warnings,
@@ -374,9 +422,9 @@ function evaluateFunctionConflicts(candidate, contracts, companyById) {
     .filter(isLegallyCommittedContract)
     .filter(contract => rangesOverlap(
       candidate.contract_start_date,
-      candidate.contract_end_date,
+      effectiveContractEndDate(candidate),
       contract.contract_start_date,
-      contract.contract_end_date
+      effectiveContractEndDate(contract)
     ))
     .forEach(contract => {
       const otherFunctions = contractFunctionKeys(contract);
@@ -490,7 +538,12 @@ function evaluateCombinedHours(candidate, contracts) {
   const overlapping = contracts
     .filter(contract => contract.id !== candidate.id)
     .filter(isLegallyCommittedContract)
-    .filter(contract => rangesOverlap(candidate.contract_start_date, candidate.contract_end_date, contract.contract_start_date, contract.contract_end_date));
+    .filter(contract => rangesOverlap(
+      candidate.contract_start_date,
+      effectiveContractEndDate(candidate),
+      contract.contract_start_date,
+      effectiveContractEndDate(contract)
+    ));
   const total = Math.round(([candidate, ...overlapping].reduce((sum, contract) => sum + weeklyHours(contract), 0)) * 100) / 100;
   const warnings = [];
   const manualReviewReasons = [];
@@ -575,14 +628,8 @@ function requiredContext(candidate) {
   if (!candidate.company_id) missing.push('company_id');
   if (!candidate.cao_key && candidate.contract_form !== 'zzp') missing.push('cao_key');
   if (!candidate.contract_start_date) missing.push('contract_start_date');
-  if (candidate.legal_document_type !== 'internship_agreement' && candidate.contract_form !== 'zzp' && !candidate.contract_agreed_at) {
-    missing.push('contract_agreed_at');
-  }
   if (candidate.duration_type === 'fixed' && !candidate.contract_end_date) missing.push('contract_end_date');
   if (contractFunctionKeys(candidate).length === 0) missing.push('function_assignments');
-  if (candidate.cao_key === CAO_EHB_KEY && contractCaoFunctionLevels(candidate).length === 0) {
-    missing.push('cao_function_level');
-  }
   if (candidate.legal_document_type !== 'internship_agreement' && candidate.contract_form !== 'zzp' && !candidate.probation_agreed && candidate.probation_agreed !== false) {
     missing.push('probation_agreed');
   }
@@ -618,9 +665,17 @@ async function evaluateContract(base44, candidateInput) {
   const peers = (contracts || []).filter(contract => contract.id !== candidate.id);
   const missingFields = requiredContext(candidate);
   const companyCaoScope = evaluateCompanyCaoScope(candidate, companyCaoAssignments, configurationById);
-  const functionConflicts = evaluateFunctionConflicts(candidate, peers, companyById);
   const chain = evaluateChain(candidate, peers, companyById, personnel);
-  const combinedHours = evaluateCombinedHours(candidate, peers);
+  const candidateWithEffectiveDuration = chain.statutory_conversion?.applies
+    ? {
+        ...candidate,
+        statutory_conversion_applies: true,
+        effective_duration_type: 'indefinite',
+        effective_contract_end_date: null
+      }
+    : candidate;
+  const functionConflicts = evaluateFunctionConflicts(candidateWithEffectiveDuration, peers, companyById);
+  const combinedHours = evaluateCombinedHours(candidateWithEffectiveDuration, peers);
   const flexRules = evaluateFutureFlexRules(candidate, personnel);
   const blockingReasons = unique([
     ...missingFields.map(field => `Verplicht contractgegeven ontbreekt: ${field}.`),
@@ -660,6 +715,15 @@ async function evaluateContract(base44, candidateInput) {
     combined_hours: combinedHours,
     normalized_contract: {
       ...(flexRules.normalized_contract || {}),
+      effective_duration_type: chain.statutory_conversion?.applies
+        ? 'indefinite'
+        : (candidate.duration_type || effectiveDurationType(candidate)),
+      effective_contract_end_date: chain.statutory_conversion?.applies
+        ? (candidate.ended_at ? (candidate.effective_contract_end_date || candidate.contract_end_date || null) : null)
+        : (candidate.contract_end_date || null),
+      statutory_conversion_applies: chain.statutory_conversion?.applies === true,
+      statutory_conversion_effective_date: chain.statutory_conversion?.effective_date || null,
+      statutory_conversion_reason: chain.statutory_conversion?.reasons?.join(' ') || null,
       function_type: candidate.function_type || null,
       allowed_function_types: candidate.allowed_function_types,
       function_assignments: candidate.function_assignments,
@@ -717,7 +781,10 @@ function stripProtectedFields(input = {}) {
     'legal_validation_status', 'legal_validation_checked_at', 'legal_validation_snapshot',
     'chain_evaluation_status', 'chain_position', 'chain_contract_limit',
     'chain_period_limit_months', 'chain_interruption_months', 'chain_evaluated_at',
-    'chain_evaluation_snapshot', 'chain_source_rule_ids', 'routing_snapshot'
+    'chain_evaluation_snapshot', 'chain_source_rule_ids', 'routing_snapshot',
+    'effective_duration_type', 'effective_contract_end_date',
+    'statutory_conversion_applies', 'statutory_conversion_effective_date',
+    'statutory_conversion_reason', 'history_revalidated_at', 'is_historical_import'
   ].forEach(field => delete output[field]);
   return output;
 }
@@ -749,12 +816,12 @@ async function syncCompanyAssignment(base44, personnelId, companyId) {
   );
   const activeNow = relevant.some(contract =>
     dateKey(contract.contract_start_date, '0000-01-01') <= today
-    && dateKey(contract.contract_end_date) >= today
+    && dateKey(effectiveContractEndDate(contract)) >= today
   );
   const existing = (assignments || []).find(assignment => assignment.company_id === companyId) || null;
   const starts = relevant.map(contract => contract.contract_start_date).filter(Boolean).sort();
-  const hasOpenEnd = relevant.some(contract => !contract.contract_end_date);
-  const ends = relevant.map(contract => contract.contract_end_date).filter(Boolean).sort();
+  const hasOpenEnd = relevant.some(contract => !effectiveContractEndDate(contract));
+  const ends = relevant.map(effectiveContractEndDate).filter(Boolean).sort();
   const relationTypes = unique(relevant.map(contract => {
     if (contract.legal_document_type === 'internship_agreement') return 'intern';
     if (contract.contract_form === 'zzp') return 'contractor';
@@ -805,9 +872,64 @@ async function applyPbRules(base44, contract) {
 
 function signedLifecycleStatus(contract) {
   const today = todayIsoDate();
-  if (contract.contract_end_date && contract.contract_end_date < today) return 'expired';
+  if (contract.is_historical_import === true && contract.contract_end_date && contract.contract_end_date < today) return 'expired';
+  const effectiveEndDate = effectiveContractEndDate(contract);
+  if (effectiveEndDate && effectiveEndDate < today) return 'expired';
   if (contract.contract_start_date && contract.contract_start_date > today) return 'scheduled';
   return 'active';
+}
+
+async function revalidateLaterContractHistory(base44, changedContract) {
+  if (!changedContract?.personnel_id || !changedContract?.contract_start_date) return [];
+  const contracts = await base44.asServiceRole.entities.PersonnelContract
+    .filter({ personnel_id: changedContract.personnel_id })
+    .catch(() => []);
+  const candidates = (contracts || [])
+    .filter(contract => contract.id !== changedContract.id)
+    .filter(isLegallyCommittedContract)
+    .filter(contract => dateKey(contract.contract_start_date, '0000-01-01') >= dateKey(changedContract.contract_start_date, '0000-01-01'))
+    .sort((a, b) => dateKey(a.contract_start_date, '0000-01-01').localeCompare(dateKey(b.contract_start_date, '0000-01-01')));
+  const updates = [];
+
+  for (const contract of candidates) {
+    const evaluation = await evaluateContract(base44, contract);
+    const persisted = evaluationPersistence(evaluation);
+    const pbReady = contract.cao_key !== CAO_PB_KEY
+      || contract.cao_contract_rule_status === 'compliant'
+      || contract.contract_final_allowed === true;
+    const signedDocumentAvailable = !!(contract.signed_file_id || contract.signed_file_url || contract.signed_at);
+    const canActivate = evaluation.status === 'compliant' && signedDocumentAvailable && pbReady;
+    const lifecycleStatus = contract.document_status === 'archived'
+      ? 'archived'
+      : canActivate
+      ? signedLifecycleStatus({ ...contract, ...persisted })
+      : 'signed';
+    const convertedNow = persisted.statutory_conversion_applies === true;
+    const conversionChanged = convertedNow && contract.statutory_conversion_applies !== true;
+    const updated = await base44.asServiceRole.entities.PersonnelContract.update(contract.id, {
+      ...persisted,
+      history_revalidated_at: nowIso(),
+      document_status: lifecycleStatus,
+      is_current: canActivate && lifecycleStatus !== 'expired' && lifecycleStatus !== 'archived',
+      planning_allowed: canActivate && lifecycleStatus !== 'expired' && lifecycleStatus !== 'archived',
+      contract_final_allowed: canActivate,
+      payroll_final_allowed: canActivate && contract.cao_key === CAO_PB_KEY && pbReady
+    });
+    updates.push({
+      contract_id: updated.id,
+      document_status: updated.document_status,
+      legal_validation_status: updated.legal_validation_status,
+      statutory_conversion_applies: convertedNow,
+      statutory_conversion_effective_date: updated.statutory_conversion_effective_date || null,
+      conversion_changed: conversionChanged,
+      message: conversionChanged
+        ? `Een later contract geldt door de aangevulde contracthistorie vanaf ${updated.statutory_conversion_effective_date || 'de wettelijke omzettingsdatum'} van rechtswege voor onbepaalde tijd.`
+        : null
+    });
+    await syncCompanyAssignment(base44, updated.personnel_id, updated.company_id);
+  }
+
+  return updates;
 }
 
 Deno.serve(async (req) => {
@@ -847,6 +969,9 @@ Deno.serve(async (req) => {
       }
       const normalized = {
         ...input,
+        is_historical_import: input.source_type === 'uploaded_existing'
+          && !!input.contract_end_date
+          && input.contract_end_date < todayIsoDate(),
         function_assignments: buildFunctionAssignments(input),
         allowed_function_types: contractFunctionKeys(input),
         document_status: 'concept',
@@ -916,7 +1041,8 @@ Deno.serve(async (req) => {
         metadata: auditMetadata(existing.metadata, user, 'archived')
       });
       await syncCompanyAssignment(base44, existing.personnel_id, existing.company_id);
-      return Response.json({ success: true, contract: updated });
+      const historyUpdates = await revalidateLaterContractHistory(base44, updated);
+      return Response.json({ success: true, contract: updated, history_updates: historyUpdates });
     }
 
     if (action === 'end') {
@@ -932,6 +1058,7 @@ Deno.serve(async (req) => {
         : signedLifecycleStatus({ ...existing, contract_end_date: endDate });
       const updated = await base44.asServiceRole.entities.PersonnelContract.update(contractId, {
         contract_end_date: endDate,
+        effective_contract_end_date: endDate,
         document_status: endedStatus,
         ended_at: nowIso(),
         is_current: endDate >= todayIsoDate(),
@@ -939,7 +1066,8 @@ Deno.serve(async (req) => {
         metadata: auditMetadata(existing.metadata, user, 'ended')
       });
       await syncCompanyAssignment(base44, existing.personnel_id, existing.company_id);
-      return Response.json({ success: true, contract: updated });
+      const historyUpdates = await revalidateLaterContractHistory(base44, updated);
+      return Response.json({ success: true, contract: updated, history_updates: historyUpdates });
     }
 
     if (!['register_signed', 'revalidate'].includes(action)) {
@@ -962,7 +1090,11 @@ Deno.serve(async (req) => {
           signed_file_id: body.signed_file_id || existing.signed_file_id || null,
           signed_download_filename: body.signed_download_filename || existing.signed_download_filename || null,
           signed_logical_path: body.signed_logical_path || existing.signed_logical_path || null,
-          contract_agreed_at: body.contract_agreed_at || existing.contract_agreed_at || existing.signing_date || todayIsoDate(),
+          contract_agreed_at: body.contract_agreed_at
+            || existing.contract_agreed_at
+            || existing.signing_date
+            || (existing.source_type === 'uploaded_existing' ? existing.contract_start_date : null)
+            || todayIsoDate(),
           signed_at: body.signed_at || nowIso(),
           document_status: 'signed',
           metadata: auditMetadata(existing.metadata, user, 'signed_document_registered')
@@ -1009,7 +1141,27 @@ Deno.serve(async (req) => {
         : (evaluation.status === 'compliant' ? 'not_applicable' : evaluation.status)
     });
     await syncCompanyAssignment(base44, updated.personnel_id, updated.company_id);
-    return Response.json({ success: true, contract: updated, evaluation: finalSnapshot, activated: canActivate });
+    const historyUpdates = await revalidateLaterContractHistory(base44, updated);
+    const notifications = [
+      ...(updated.statutory_conversion_applies === true ? [{
+        type: 'statutory_conversion',
+        contract_id: updated.id,
+        message: `Dit contract geldt vanaf ${updated.statutory_conversion_effective_date || 'de wettelijke omzettingsdatum'} van rechtswege voor onbepaalde tijd. De oorspronkelijke contracttekst blijft als brondocument bewaard.`
+      }] : []),
+      ...historyUpdates.filter(item => item.message).map(item => ({
+        type: 'history_revalidation',
+        contract_id: item.contract_id,
+        message: item.message
+      }))
+    ];
+    return Response.json({
+      success: true,
+      contract: updated,
+      evaluation: finalSnapshot,
+      activated: canActivate,
+      history_updates: historyUpdates,
+      notifications
+    });
   } catch (error) {
     return Response.json({ error: error?.message || 'Contractactie is mislukt.' }, { status: 500 });
   }

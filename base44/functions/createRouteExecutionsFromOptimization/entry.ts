@@ -45,7 +45,11 @@ function compactRoutingSnapshot(resolution, serviceContext, source) {
       function_type: resolution.selected_contract.function_type || null,
       allowed_function_types: resolution.selected_contract.allowed_function_types || [],
       contract_start_date: resolution.selected_contract.contract_start_date || null,
-      contract_end_date: resolution.selected_contract.contract_end_date || null,
+      contract_end_date: resolution.selected_contract.statutory_conversion_applies === true
+        ? (resolution.selected_contract.effective_contract_end_date || null)
+        : (resolution.selected_contract.effective_contract_end_date
+          ?? resolution.selected_contract.contract_end_date
+          ?? null),
       legal_validation_status: resolution.selected_contract.legal_validation_status || null,
     } : null,
     function_match: resolution.function_match || null,

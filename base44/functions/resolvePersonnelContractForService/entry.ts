@@ -40,6 +40,12 @@ function isWithinDateRange(record, date, startField = 'valid_from', endField = '
   return true;
 }
 
+function contractEffectiveEndDate(contract) {
+  if (contract?.effective_contract_end_date) return contract.effective_contract_end_date;
+  if (contract?.statutory_conversion_applies === true || contract?.effective_duration_type === 'indefinite') return null;
+  return contract?.contract_end_date || null;
+}
+
 function normalizeToken(value) {
   return String(value || '')
     .toLowerCase()
@@ -222,7 +228,8 @@ function isContractActive(contract, date) {
   if (contract.document_status && !['active', 'scheduled'].includes(contract.document_status)) return false;
   if (contract.legal_validation_status && contract.legal_validation_status !== 'compliant') return false;
   if (contract.contract_start_date && contract.contract_start_date > date) return false;
-  if (contract.contract_end_date && contract.contract_end_date < date) return false;
+  const effectiveEndDate = contractEffectiveEndDate(contract);
+  if (effectiveEndDate && effectiveEndDate < date) return false;
   return true;
 }
 
@@ -2373,6 +2380,10 @@ Deno.serve(async (req) => {
         call_contract_type: selectedContract.call_contract_type || null,
         contract_start_date: selectedContract.contract_start_date || null,
         contract_end_date: selectedContract.contract_end_date || null,
+        effective_duration_type: selectedContract.effective_duration_type || selectedContract.duration_type || null,
+        effective_contract_end_date: contractEffectiveEndDate(selectedContract),
+        statutory_conversion_applies: selectedContract.statutory_conversion_applies === true,
+        statutory_conversion_effective_date: selectedContract.statutory_conversion_effective_date || null,
         cao_key: selectedContract.cao_key || null,
         cao_configuration_id: selectedContract.cao_configuration_id || null,
         contract_context_status: selectedContract.contract_context_status || null,
@@ -2439,6 +2450,9 @@ Deno.serve(async (req) => {
         company_id: item.contract.company_id || null,
         contract_start_date: item.contract.contract_start_date || null,
         contract_end_date: item.contract.contract_end_date || null,
+        effective_duration_type: item.contract.effective_duration_type || item.contract.duration_type || null,
+        effective_contract_end_date: contractEffectiveEndDate(item.contract),
+        statutory_conversion_applies: item.contract.statutory_conversion_applies === true,
         contract_form: item.contract.contract_form || null,
         is_call_agreement: item.contract.is_call_agreement === true,
         call_agreement_type: item.contract.call_agreement_type || null,
