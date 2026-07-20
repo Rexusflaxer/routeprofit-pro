@@ -40,7 +40,6 @@ import { groupContractTemplateVersions } from "@/lib/contractTemplateEditor";
 import {
   AlertTriangle,
   Archive,
-  Building2,
   CalendarClock,
   CheckCircle,
   ChevronLeft,
@@ -51,7 +50,6 @@ import {
   Plus,
   RefreshCw,
   Save,
-  ShieldCheck,
   Upload,
   X,
 } from "lucide-react";
@@ -2610,36 +2608,32 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       <AnimatePresence initial={false}>
       {wizardOpen && (
         <motion.div
-          initial={{ opacity: 0, y: 12 }}
+          initial={{ opacity: 0, y: -8 }}
           animate={{ opacity: 1, y: 0 }}
-          exit={{ opacity: 0, y: 8 }}
-          transition={{ duration: 0.22, ease: "easeOut" }}
-          className="rounded-lg border border-border bg-card"
+          exit={{ opacity: 0, y: -8 }}
+          transition={{ duration: 0.2 }}
+          className="rounded-none border-0 border-b border-primary/30 bg-muted/20 p-5 overflow-hidden"
         >
-          <div className="border-b border-border p-4">
-            <div className="flex items-center justify-between gap-3">
-              <div>
-                <p className="text-sm font-semibold text-foreground">{editingId ? "Contract bewerken" : (isArticle14Internship ? "Nieuwe stageovereenkomst" : "Nieuw arbeidscontract")}</p>
-                <p className="text-xs text-muted-foreground">Stap {wizardStep} van 6: {stepItems[wizardStep - 1]}</p>
-              </div>
-              <Button type="button" variant="ghost" size="icon" onClick={() => setWizardOpen(false)}>
-                <X className="h-4 w-4" />
-              </Button>
-            </div>
-            <div className="mt-4 grid grid-cols-6 gap-2">
-              {stepItems.map((item, index) => (
-                <button
-                  key={item}
-                  type="button"
-                  onClick={() => setWizardStep(index + 1)}
-                  className={`h-1.5 rounded-full transition-colors ${wizardStep >= index + 1 ? "bg-primary" : "bg-muted"}`}
-                  aria-label={item}
-                />
+          {editingId && <p className="text-xs font-semibold text-primary mb-3 uppercase tracking-wider">Contract bewerken</p>}
+          <div className="flex items-center justify-between gap-3 mb-4">
+            <div className="flex items-center gap-1 min-w-0 flex-1">
+              {stepItems.map((s, i) => (
+                <React.Fragment key={s}>
+                  <div className={`flex items-center gap-1.5 text-xs font-medium px-2 py-1 rounded-full shrink-0 transition-colors ${i + 1 === wizardStep ? "bg-primary text-primary-foreground" : i + 1 < wizardStep ? "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300" : "text-muted-foreground"}`}>
+                    <span className={`w-4 h-4 rounded-full flex items-center justify-center text-[10px] font-bold shrink-0 ${i + 1 === wizardStep ? "bg-primary-foreground text-primary" : i + 1 < wizardStep ? "text-green-700 dark:text-green-300" : "border border-muted-foreground/30 text-muted-foreground"}`}>{i + 1 < wizardStep ? "✓" : i + 1}</span>
+                    <span className="hidden md:inline truncate">{s}</span>
+                  </div>
+                  {i < stepItems.length - 1 && <div className={`h-px flex-1 min-w-2 ${i + 1 < wizardStep ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />}
+                </React.Fragment>
               ))}
             </div>
+            <Button type="button" variant="ghost" size="icon" onClick={() => setWizardOpen(false)} className="shrink-0">
+              <X className="h-4 w-4" />
+            </Button>
           </div>
-
-          <div className="p-4">
+          <div className="relative">
+            <AnimatePresence mode="wait">
+              <motion.div key={wizardStep} initial={{ opacity: 0, y: 6 }} animate={{ opacity: 1, y: 0 }} exit={{ opacity: 0, y: -6 }} transition={{ duration: 0.18, ease: "easeOut" }}>
             {wizardStep === 1 && (
               <div className="space-y-3">
                 <p className="text-sm text-muted-foreground">Kies het bedrijf waarmee deze medewerker het contract aangaat. De CAO's en sjablonen worden daarna hierop gefilterd.</p>
@@ -2649,9 +2643,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       key={company.id}
                       type="button"
                       onClick={() => setCompanyId(company.id)}
-                      className={`rounded-lg border p-4 text-left transition-colors ${form.company_id === company.id ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"}`}
+                      className={`px-4 py-3 rounded-lg border text-left transition-all ${form.company_id === company.id ? "border-primary bg-accent" : "hover:border-primary hover:bg-accent active:scale-[0.99] border-border bg-card"}`}
                     >
-                      <p className="flex items-center gap-2 font-semibold text-foreground"><Building2 className="h-4 w-4 text-primary" /> {company.display_name || company.legal_name}</p>
+                      <p className="font-semibold text-foreground">{company.display_name || company.legal_name}</p>
                       <p className="mt-1 text-xs text-muted-foreground">{company.legal_name && company.display_name !== company.legal_name ? company.legal_name : company.city || "Bedrijf"}</p>
                     </button>
                   ))}
@@ -2672,7 +2666,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       key={option.value}
                       type="button"
                       onClick={() => setCaoKey(option.value)}
-                      className={`rounded-lg border p-4 text-left transition-colors ${form.cao_key === option.value ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"}`}
+                      className={`px-4 py-3 rounded-lg border text-left transition-all ${form.cao_key === option.value ? "border-primary bg-accent" : "hover:border-primary hover:bg-accent active:scale-[0.99] border-border bg-card"}`}
                     >
                       <p className="font-semibold text-foreground">{option.label}</p>
                       <p className="mt-1 text-xs text-muted-foreground">{option.assignment_count} bedrijfsconfiguratie{option.assignment_count === 1 ? "" : "s"}</p>
@@ -2710,7 +2704,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       key={option.value}
                       type="button"
                       onClick={() => setContractModel(option.value)}
-                      className={`rounded-lg border p-4 text-left transition-colors ${form.contract_model === option.value ? "border-primary bg-primary/5" : "border-border hover:bg-muted/40"}`}
+                      className={`px-4 py-3 rounded-lg border text-left transition-all ${form.contract_model === option.value ? "border-primary bg-accent" : "hover:border-primary hover:bg-accent active:scale-[0.99] border-border bg-card"}`}
                     >
                       <p className="font-semibold text-foreground">{contractModelDisplayLabel(option, form.contract_agreed_at)}</p>
                       <p className="mt-1 text-xs text-muted-foreground">{CONTRACT_FORM_LABELS[option.contract_form] || option.contract_form} · {EMPLOYMENT_MODEL_LABELS[option.employment_model] || option.employment_model}</p>
@@ -3431,9 +3425,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   <div className="rounded-lg border border-border p-4">
                     <div className="flex items-start justify-between gap-3">
                       <div>
-                        <p className="flex items-center gap-2 text-sm font-semibold text-foreground">
-                          <ShieldCheck className="h-4 w-4 text-primary" /> Juridische contractcontrole
-                        </p>
+                        <p className="text-sm font-semibold text-foreground">Juridische contractcontrole</p>
                         <p className="mt-1 text-xs text-muted-foreground">Servercontrole op keten, looptijd, functieconflicten, CAO-context en gezamenlijke contracturen.</p>
                       </div>
                       {contractEvaluationLoading ? (
@@ -3521,7 +3513,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 </div>
               </div>
             )}
-          </div>
+              </motion.div></AnimatePresence></div>
 
           <div className="flex items-center justify-between border-t border-border p-4">
             <Button type="button" variant="ghost" onClick={previousStep} disabled={wizardStep === 1}>
