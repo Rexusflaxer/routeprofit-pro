@@ -563,7 +563,7 @@ function contractPaymentPeriodClause(form = {}) {
 function contractFunctionClassificationClause(form = {}) {
   const securityWork = resolveSecurityWork(form);
   if (securityWork === false) {
-    return "De hoofdfunctie is een niet-operationele functie. De cao-onderdelen die artikel 3 van de CAO Particuliere Beveiliging voor niet-beveiligingswerk uitzondert, zijn niet automatisch op werknemer van toepassing; de overeengekomen beloning en arbeidsduur staan in deze arbeidsovereenkomst.";
+    return "De overeengekomen werkzaamheden zijn niet-operationeel. De cao-onderdelen die artikel 3 van de CAO Particuliere Beveiliging voor niet-beveiligingswerk uitzondert, zijn niet automatisch op werknemer van toepassing; de overeengekomen beloning en arbeidsduur staan in deze arbeidsovereenkomst.";
   }
   if (securityWork === true) {
     return `Voor de cao-indeling geldt functiegroep ${pbFunctionGroupLabel(form.cao_function_group)}, functieniveau ${pbFunctionLevelLabel(form.cao_function_level)}, salarisschaal ${compact(form.cao_scale)} en periodiek ${compact(form.cao_period)}.`;
@@ -1115,7 +1115,7 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
 
   if (!durationType(form)) issues.push("Kies of de arbeidsovereenkomst voor bepaalde of onbepaalde tijd geldt.");
   if (durationType(form) === "fixed" && !form.contract_end_date) issues.push("De einddatum ontbreekt bij een arbeidsovereenkomst voor bepaalde tijd.");
-  if (!form.function_type) issues.push("Kies één hoofdfunctie.");
+  if (!form.function_type) issues.push("Kies de functie die de CAO-indeling bepaalt.");
   if (!compact(form.work_location)) issues.push("Vul de standplaats in.");
   if (!compact(form.employer_representative_name)) issues.push("Vul de naam van de vertegenwoordiger van werkgever in.");
   if (!compact(form.employer_representative_function)) issues.push("Vul de functie van de vertegenwoordiger van werkgever in.");
@@ -1240,7 +1240,7 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     }
   }
   if (securityWork === true) {
-    if (!PB_SECURITY_FUNCTION_GROUPS.has(form.cao_function_group)) issues.push("Kies de bij de hoofdfunctie passende CAO-functiegroep.");
+    if (!PB_SECURITY_FUNCTION_GROUPS.has(form.cao_function_group)) issues.push("Kies de CAO-functiegroep die bij de bepalende functie past.");
     if (!form.cao_function_level || form.cao_function_level === "not_applicable") issues.push("Kies het CAO-functieniveau voor de operationele functie.");
     if (isFulltimePreset && (hoursPerWeek !== 36 || hoursPerPeriod !== 144)) {
       issues.push("Een operationele fulltimer onder de CAO Particuliere Beveiliging moet zijn vastgelegd als 36 uur per week en 144 uur per loonperiode.");
@@ -1298,10 +1298,10 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   const mappedGroups = pbFunctionGroupsForFunctions(functions);
   const expectedPrimaryGroup = suggestPbCaoFunctionGroup(form.function_type);
   if (expectedPrimaryGroup && form.cao_function_group !== expectedPrimaryGroup) {
-    issues.push(`De hoofdfunctie ${functionLabel(form.function_type)} hoort in deze configuratie bij CAO-functiegroep ${pbFunctionGroupLabel(expectedPrimaryGroup)}.`);
+    issues.push(`De CAO-bepalende functie ${functionLabel(form.function_type)} hoort in deze configuratie bij CAO-functiegroep ${pbFunctionGroupLabel(expectedPrimaryGroup)}.`);
   }
   if (mappedGroups.length > 1) {
-    warnings.push("De gekozen functies vallen in meerdere CAO-functiegroepen. De hoofdfunctie en inschaling moeten aansluiten op de werkzaamheden die ten minste 50% van de arbeidsduur beslaan.");
+    warnings.push("De gekozen functies vallen in meerdere CAO-functiegroepen. De CAO-bepalende functie en functiegroep moeten aansluiten op de werkzaamheden die structureel ten minste 50% van de arbeidsduur beslaan.");
   }
   if (toBoolean(form.event_hospitality_cao_applies) === true) {
     issues.push("Voor deze medewerker is een evenementen- of horecabeveiligings-CAO gemarkeerd; gebruik daarom niet de CAO-PB-standaardtemplate.");

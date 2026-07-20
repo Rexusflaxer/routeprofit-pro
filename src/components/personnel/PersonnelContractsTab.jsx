@@ -2019,6 +2019,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     () => pbFunctionGroupsForFunctions(selectedFunctionValues),
     [selectedFunctionValues]
   );
+  const requiresPbClassificationFunction = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    && selectedPbFunctionGroups.length > 1;
   const expectedPbSalaryScale = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     ? pbSalaryScaleForFunctionLevel(form.cao_function_level)
     : null;
@@ -2477,6 +2479,23 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         cao_period: suggestedGroup === "non_security_staff" ? "" : prev.cao_period,
       };
     });
+  };
+
+  const setPbClassificationFunction = (value) => {
+    if (!selectedFunctionValues.includes(value)) return;
+    const suggestedGroup = suggestPbCaoFunctionGroup(value);
+    if (!suggestedGroup) return;
+    setForm(prev => ({
+      ...prev,
+      function_type: value,
+      cao_function_group: suggestedGroup,
+      performs_security_work: suggestedGroup === "non_security_staff" ? "false" : "true",
+      cao_function_level: suggestedGroup === "non_security_staff"
+        ? "not_applicable"
+        : (prev.cao_function_level === "not_applicable" ? "" : prev.cao_function_level),
+      cao_scale: suggestedGroup === "non_security_staff" ? "" : prev.cao_scale,
+      cao_period: suggestedGroup === "non_security_staff" ? "" : prev.cao_period,
+    }));
   };
 
   const refresh = () => {
@@ -3061,11 +3080,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 <div className="grid grid-cols-1 gap-2">
                   {publishedTemplates.map(template => {
                     const selected = form.template_id === template.id;
-                    const durations = configuredTemplateDurations(template, form.cao_key, form.employment_contract_model, form.internship_type);
-                    const durationLabels = [
-                      ...(durations.allowsIndefinite ? [durationLabel("indefinite")] : []),
-                      ...durations.fixedOptions.map(option => option.label),
-                    ];
                     return (
                       <button
                         key={template.id}
@@ -3074,10 +3088,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                         className={`flex items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
                       >
                         <div className="min-w-0">
-                          <span className="text-sm font-semibold text-foreground">{template.name}</span>
-                          <span className="ml-2 text-xs text-muted-foreground">Versie {template.version || 1}</span>
-                          {template.description && <p className="mt-1 line-clamp-1 text-xs text-muted-foreground">{template.description}</p>}
-                          <p className="mt-1 text-xs text-muted-foreground">Looptijden: {durationLabels.join(", ") || "niet ingesteld"}</p>
+                          <span className="text-sm font-semibold text-foreground">Versie {template.version || 1}</span>
+                          {template.description && <p className="mt-1 line-clamp-2 text-xs text-muted-foreground">{template.description}</p>}
                         </div>
                         {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
                       </button>
@@ -3228,7 +3240,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               <div className="space-y-5">
                 <div>
                   <p className="text-sm font-medium text-foreground">Functies binnen dit contract</p>
-                  <p className="mt-1 text-sm text-muted-foreground">De eerste gekozen functie wordt automatisch de hoofdfunctie. De applicatie leidt vergunningcontext en CAO-indeling uit de geselecteerde functies af.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Selecteer alleen de functies waarvoor de medewerker binnen dit contract kan worden ingepland. De applicatie leidt de vergunningcontext automatisch uit deze selectie af.</p>
                 </div>
                 {wizardFunctionGroups.length > 0 ? (
                   <div className="space-y-5">
@@ -3243,7 +3255,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                         <div className="flex flex-wrap gap-2">
                           {group.functions.map(value => {
                             const selected = selectedFunctionValues.includes(value);
-                            const primary = form.function_type === value;
+                            const classificationFunction = requiresPbClassificationFunction && form.function_type === value;
                             return (
                               <button
                                 key={value}
@@ -3252,7 +3264,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                                 className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:border-primary/40"}`}
                               >
                                 {readableFunctionLabel(value)}
-                                {primary && <span className="rounded-full bg-primary-foreground/15 px-1.5 py-0.5 text-[10px]">Hoofd</span>}
+                                {classificationFunction && <span className="rounded-full bg-primary-foreground/15 px-1.5 py-0.5 text-[10px]">CAO-bepalend</span>}
                               </button>
                             );
                           })}
@@ -3265,10 +3277,31 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     Voor deze CAO zijn nog geen functies gekoppeld aan het bedrijf. Voeg de functies eerst toe via de CAO-instellingen van het bedrijf.
                   </p>
                 )}
-                {form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY && selectedPbFunctionGroups.length > 1 && (
-                  <p className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-xs text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
-                    De functies vallen in meerdere CAO-functiegroepen. De hoofdfunctie bepaalt de primaire loonindeling; de servercontrole bewaakt de combinatie.
-                  </p>
+                {requiresPbClassificationFunction && (
+                  <section className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Welke functie bepaalt de CAO-indeling?</p>
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        Dit is alleen nodig omdat de gekozen functies in verschillende CAO-functiegroepen vallen. Kies de functie waarvan de werkzaamheden structureel ten minste 50% van de arbeidsduur beslaan. Het functieniveau, de schaal en periodiek worden hierna één keer voor het contract vastgelegd.
+                      </p>
+                    </div>
+                    <div className="flex flex-wrap gap-2">
+                      {selectedFunctionValues.map(value => {
+                        const selected = form.function_type === value;
+                        return (
+                          <button
+                            key={`classification-${value}`}
+                            type="button"
+                            onClick={() => setPbClassificationFunction(value)}
+                            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:border-primary/40"}`}
+                          >
+                            {readableFunctionLabel(value)}
+                            {selected && <Check className="h-3.5 w-3.5" />}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </section>
                 )}
               </div>
             )}
@@ -3681,9 +3714,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                         <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sjabloon</p>
                         {selectedTemplate ? (
                           <div className="flex min-h-12 w-full items-center justify-between rounded-lg border border-primary bg-accent px-3 py-2">
-                            <div>
-                              <p className="text-sm font-medium text-foreground">{selectedTemplate.name}</p>
-                              <p className="text-xs text-muted-foreground">Versie {selectedTemplate.version || 1}</p>
+                            <div className="min-w-0">
+                              <p className="text-sm font-medium text-foreground">Versie {selectedTemplate.version || 1}</p>
+                              {selectedTemplate.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{selectedTemplate.description}</p>}
                             </div>
                             <Check className="h-4 w-4 text-primary" />
                           </div>
