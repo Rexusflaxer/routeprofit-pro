@@ -2721,7 +2721,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               <div className="space-y-4">
                 <div>
                   <p className="text-sm font-medium text-foreground">Hoe wilt u het contract vastleggen?</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Kies direct of Secure-it een nieuw contract samenstelt of dat u een bestaand, ondertekend contract aan de historie toevoegt.</p>
                 </div>
                 <div className="grid grid-cols-1 gap-2">
                   {[
