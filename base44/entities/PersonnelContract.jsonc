@@ -1094,6 +1094,20 @@
       ],
       "description": "Versie van de beleidsregel waarmee functieconflicten zijn beoordeeld."
     },
+    "primary_function_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Status van de automatische hoofdfunctiebepaling binnen dit contract: determined of pending_work_history."
+    },
+    "primary_function_source": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bron van de automatische hoofdfunctie, bijvoorbeeld single_contract_function, provisional_contract_start, worked_services of legacy_contract."
+    },
     "cao_function_group": {
       "type": [
         "string",

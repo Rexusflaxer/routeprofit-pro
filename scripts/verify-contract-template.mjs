@@ -519,8 +519,13 @@ assert.match(pac.body, /Centralist PAC/);
 
 const multipleFunctions = evaluate(operationalForm({
   allowed_function_types_text: "objectbeveiliger, centralist_pac",
+  primary_function_status: "pending_work_history",
+  primary_function_source: "provisional_contract_start",
 }));
-assert.equal(multipleFunctions.warnings.length, 1);
+assert.deepEqual(multipleFunctions.warnings, []);
+assert.match(multipleFunctions.body, /periodiek automatisch herberekenen/);
+assert.match(multipleFunctions.body, /automatisch schriftelijk of elektronisch meegedeeld/);
+assert.match(multipleFunctions.body, /wijzigt de overeengekomen salarisschaal of periodiek niet automatisch, tenzij wet of cao anders voorschrijft/);
 
 const cashValue = evaluate(operationalForm({
   function_type: "geld_waardetransporteur",

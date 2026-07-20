@@ -160,13 +160,12 @@ export const PB_FULLTIME_STANDARD_TEMPLATE_BODY = [
   "3.1 {$contract_proeftijd_bepaling}",
   "",
   "Artikel 4 - Functie, werkzaamheden en werkplek",
-  "4.1 Werknemer treedt in dienst in de hoofdfunctie van {$hoofdfunctie}.",
-  "4.2 De overeengekomen inzetbare functies zijn: {$functie_lijst}.",
-  "4.3 {$contract_functie_indeling_bepaling}",
-  "4.4 Werknemer verricht de werkzaamheden die bij de overeengekomen functie of functies horen en andere redelijke werkzaamheden die passen bij opleiding, ervaring, bevoegdheden, vakbekwaamheid en cao-indeling.",
-  "4.5 Werknemer wordt niet ingezet voor werkzaamheden waarvoor de vereiste toestemming, legitimatie, opleiding, certificering of wettelijke bevoegdheid ontbreekt.",
-  "4.6 {$contract_werkplek_bepaling}",
-  "4.7 Als werknemer structureel andere werkzaamheden gaat verrichten, leggen partijen de gewijzigde functie en eventuele gevolgen voor de cao-indeling schriftelijk vast.",
+  "4.1 De overeengekomen inzetbare functies zijn: {$functie_lijst}.",
+  "4.2 {$contract_functie_indeling_bepaling}",
+  "4.3 Werknemer verricht de werkzaamheden die bij de overeengekomen functie of functies horen en andere redelijke werkzaamheden die passen bij opleiding, ervaring, bevoegdheden, vakbekwaamheid en cao-indeling.",
+  "4.4 Werknemer wordt niet ingezet voor werkzaamheden waarvoor de vereiste toestemming, legitimatie, opleiding, certificering of wettelijke bevoegdheid ontbreekt.",
+  "4.5 {$contract_werkplek_bepaling}",
+  "4.6 Als werknemer structureel andere werkzaamheden gaat verrichten, leggen partijen de gewijzigde functie en eventuele gevolgen voor de cao-indeling schriftelijk vast.",
   "",
   "Artikel 5 - Arbeidsduur, rooster en werktijden",
   "5.1 {$contract_arbeidsduur_bepaling}",
@@ -601,7 +600,7 @@ export const CONTRACT_TEMPLATE_PLACEHOLDERS = [
   { key: "contract_loonperiode_bepaling", label: "Betaalperiode van het loon", source: "Slim afgeleid" },
   { key: "contract_vakantie_bepaling", label: "Vakantiebepaling", source: "Slim afgeleid" },
   { key: "contract_wpbr_bepaling", label: "Wpbr-bepaling", source: "Slim afgeleid" },
-  { key: "hoofdfunctie", label: "Hoofdfunctie", source: "Contractwizard" },
+  { key: "hoofdfunctie", label: "Automatisch afgeleide hoofdfunctie", source: "Slim afgeleid" },
   { key: "functie_lijst", label: "Alle overeengekomen functies", source: "Contractwizard" },
   { key: "nevenfuncties_lijst", label: "Aanvullende functies", source: "Contractwizard" },
   { key: "contracturen_per_week", label: "Contracturen per week", source: "Contractwizard" },
@@ -679,7 +678,6 @@ export const PB_FULLTIME_REQUIRED_PLACEHOLDERS = [
   "contract_loonperiode_bepaling",
   "contract_vakantie_bepaling",
   "contract_wpbr_bepaling",
-  "hoofdfunctie",
   "functie_lijst",
   "pensioenregeling_naam",
   "meldpunt_privacy_datalekken",
@@ -749,7 +747,7 @@ export function getContractTemplatePlaceholderDefinition(key) {
 
 export const PB_FULLTIME_STANDARD_TEMPLATE = {
   id: PB_FULLTIME_STANDARD_TEMPLATE_ID,
-  version: 1,
+  version: 2,
   name: "Fulltime dienstverband - CAO Particuliere Beveiliging",
   description: "Fulltime basismodel voor situaties waarin de CAO Particuliere Beveiliging daadwerkelijk van toepassing is, met slimme looptijd-, proeftijd-, arbeidsduur-, vakantie-, Wpbr- en opzegbepalingen.",
   template_type: "employment_contract",
@@ -762,7 +760,7 @@ export const PB_FULLTIME_STANDARD_TEMPLATE = {
     cao_version: "Versie 3 - juli 2026",
     valid_from: "2024-12-18",
     valid_until: "2026-12-27",
-    reviewed_at: "2026-07-10",
+    reviewed_at: "2026-07-21",
     applicability_note: "De vergunning bepaalt niet zelfstandig de cao. De werkingssfeer omvat volgens artikel 2 in beginsel ND/HND als Wpbr artikel 3 sub a, PAC, PGW en VTC, met cao-uitzonderingen voor onder meer bepaalde evenementen- en horecabeveiliging. BD, HBD en POB vallen niet alleen op grond van hun vergunning onder deze cao.",
     sources: [
       "https://www.beveiligingsbranche.nl/wp-content/uploads/CAO-PB-18-dec-2024-27-dec-2026-versie-3-juli-2026-.pdf",
@@ -775,7 +773,7 @@ export const PB_FULLTIME_STANDARD_TEMPLATE = {
 
 export const PB_PARTTIME_STANDARD_TEMPLATE = {
   id: PB_PARTTIME_STANDARD_TEMPLATE_ID,
-  version: 1,
+  version: 2,
   name: "Parttime dienstverband - CAO Particuliere Beveiliging",
   description: "Parttime basismodel volgens het vaste model van de CAO Particuliere Beveiliging. De overeengekomen uren gelden per loonperiode van vier weken; oproep-, min-max- en groeimodellen vallen buiten deze template.",
   template_type: "employment_contract",
@@ -785,14 +783,14 @@ export const PB_PARTTIME_STANDARD_TEMPLATE = {
   required_placeholders: PB_PARTTIME_REQUIRED_PLACEHOLDERS,
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
-    reviewed_at: "2026-07-17",
+    reviewed_at: "2026-07-21",
     applicability_note: `${PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.applicability_note} Deze preset past uitsluitend bij het vaste parttimemodel uit artikel 11; het groeimodel en oproepovereenkomsten vereisen een eigen template.`,
   },
 };
 
 export const PB_PARTTIME_GROWTH_STANDARD_TEMPLATE = {
   id: PB_PARTTIME_GROWTH_STANDARD_TEMPLATE_ID,
-  version: 1,
+  version: 2,
   name: "Parttime groeimodel - CAO Particuliere Beveiliging",
   description: "Parttime basismodel volgens het groeimodel van de CAO Particuliere Beveiliging. De contracturen staan vast per loonperiode van vier weken; inzet boven die uren blijft gebonden aan rooster-, instemmings-, meeruren-, overwerk- en minurenregels.",
   template_type: "employment_contract",
@@ -802,14 +800,14 @@ export const PB_PARTTIME_GROWTH_STANDARD_TEMPLATE = {
   required_placeholders: PB_PARTTIME_GROWTH_REQUIRED_PLACEHOLDERS,
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
-    reviewed_at: "2026-07-19",
+    reviewed_at: "2026-07-21",
     applicability_note: `${PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.applicability_note} Deze preset past uitsluitend bij het parttime groeimodel uit artikel 11. Het vaste parttimemodel, min-maxcontract en overige oproepovereenkomsten vereisen een eigen template.`,
   },
 };
 
 export const PB_MIN_MAX_STANDARD_TEMPLATE = {
   id: PB_MIN_MAX_STANDARD_TEMPLATE_ID,
-  version: 1,
+  version: 2,
   name: "Min-maxcontract - CAO Particuliere Beveiliging",
   description: "Min-maxmodel volgens de CAO Particuliere Beveiliging, met garantie-uren en een maximale oproepomvang per loonperiode van vier weken, vaste beschikbaarheidsafspraken en slimme oproepregels.",
   template_type: "employment_contract",
@@ -819,7 +817,7 @@ export const PB_MIN_MAX_STANDARD_TEMPLATE = {
   required_placeholders: PB_MIN_MAX_REQUIRED_PLACEHOLDERS,
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
-    reviewed_at: "2026-07-19",
+    reviewed_at: "2026-07-21",
     applicability_note: `${PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.applicability_note} Deze preset is uitsluitend bedoeld voor een oproepovereenkomst in de vorm van een min-maxcontract. Minimum en maximum worden per loonperiode van vier weken vastgelegd; een minimum van nul hoort bij een nulurenmodel en gelijke minimum- en maximumuren horen bij een vaste arbeidsomvang.`,
     sources: [
       ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.sources,
@@ -835,7 +833,7 @@ export const PB_MIN_MAX_STANDARD_TEMPLATE = {
 
 export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
   id: PB_ZERO_HOURS_STANDARD_TEMPLATE_ID,
-  version: 1,
+  version: 2,
   name: "Nulurencontract - CAO Particuliere Beveiliging",
   description: "Nulurenmodel volgens de CAO Particuliere Beveiliging, zonder vaste, minimum- of garantie-uren en met vaste beschikbaarheidsafspraken, slimme oproepregels en een veilige standaard zonder loonuitsluiting.",
   template_type: "employment_contract",
@@ -845,7 +843,7 @@ export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
   required_placeholders: PB_ZERO_HOURS_REQUIRED_PLACEHOLDERS,
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
-    reviewed_at: "2026-07-19",
+    reviewed_at: "2026-07-21",
     applicability_note: `${PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.applicability_note} Deze preset is uitsluitend bedoeld voor een nulurenovereenkomst zonder vaste, minimum-, maximum- of garantie-uren. Een voorovereenkomst, min-maxcontract of contract met vaste arbeidsomvang vereist een ander model. De standaard sluit het recht op loon bij niet-werken niet uit. De vakantieclausule past de cao-betaling van 9,24% alleen toe voor zover artikel 59 lid 3 werkgever en werknemer rechtsgeldig bindt en waarborgt anders de toepasselijke vakantieopbouw en opname.`,
     sources: [
       ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.sources,
@@ -895,7 +893,7 @@ export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE = {
 
 export const PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE = {
   id: PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE_ID,
-  version: 2,
+  version: 3,
   name: "Leerarbeidsovereenkomst (BBL) - CAO Particuliere Beveiliging",
   description: "Arbeidsovereenkomst voor bepaalde tijd voor een aspirant-beveiliger in de beroepsbegeleidende leerweg. De werknemer ontvangt loon en sluit daarnaast met school en erkend leerbedrijf een afzonderlijke praktijkovereenkomst.",
   template_type: "employment_contract",
@@ -910,7 +908,7 @@ export const PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE = {
   required_placeholders: PB_BBL_EMPLOYMENT_REQUIRED_PLACEHOLDERS,
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
-    reviewed_at: "2026-07-19",
+    reviewed_at: "2026-07-21",
     applicability_note: "Uitsluitend voor BBL: een arbeidsovereenkomst met loon voor een aspirant in combinatie met een afzonderlijke praktijkovereenkomst tussen werknemer, erkend leerbedrijf en onderwijsinstelling. Deze universele standaardpreset wordt alleen voor bepaalde tijd aangeboden en de einddatum moet worden afgestemd op de praktijkovereenkomst. Een BBL-arbeidsovereenkomst voor onbepaalde tijd is niet categorisch verboden, maar vereist aanvullende afspraken over voortzetting na het einde van de opleiding en valt daarom buiten deze standaardpreset. Niet gebruiken voor een BOL-stage, proefplaatsing of andere artikel-14-stage.",
     sources: [
       ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.sources,

@@ -352,6 +352,49 @@ function uniqueValues(values) {
   return [...new Set((values || []).filter(Boolean))];
 }
 
+function deriveAutomaticPrimaryFunctionState(functionValues, caoKey, current = {}) {
+  const functions = uniqueValues(functionValues);
+  if (functions.length === 0) {
+    return {
+      functionType: null,
+      functionGroup: null,
+      functionGroups: [],
+      primaryFunctionStatus: null,
+      primaryFunctionSource: null,
+      performsSecurityWork: null,
+    };
+  }
+
+  const functionGroups = caoKey === CAO_PARTICULIERE_BEVEILIGING_KEY
+    ? pbFunctionGroupsForFunctions(functions)
+    : [];
+  const currentFunction = functions.includes(current.function_type) ? current.function_type : null;
+  const preservedDetermination = ["worked_services", "legacy_contract"].includes(current.primary_function_source)
+    && currentFunction;
+  const onlyFunction = functions.length === 1 ? functions[0] : null;
+  const provisionalFunction = functions.find(value => {
+    const group = suggestPbCaoFunctionGroup(value);
+    return group && group !== "non_security_staff";
+  }) || functions[0];
+  const functionType = preservedDetermination || onlyFunction || provisionalFunction;
+  const securityGroups = functionGroups.filter(group => group !== "non_security_staff");
+
+  return {
+    functionType,
+    functionGroup: caoKey === CAO_PARTICULIERE_BEVEILIGING_KEY
+      ? (suggestPbCaoFunctionGroup(functionType) || securityGroups[0] || functionGroups[0] || null)
+      : (current.cao_function_group || null),
+    functionGroups,
+    primaryFunctionStatus: preservedDetermination || onlyFunction ? "determined" : "pending_work_history",
+    primaryFunctionSource: preservedDetermination
+      ? current.primary_function_source
+      : (onlyFunction ? "single_contract_function" : "provisional_contract_start"),
+    performsSecurityWork: securityGroups.length > 0
+      ? true
+      : (functionGroups.length > 0 && functionGroups.every(group => group === "non_security_staff") ? false : null),
+  };
+}
+
 function compact(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
 }
@@ -733,6 +776,8 @@ function initialForm(personnel) {
     periodic_increase_due_confirmed: boolToSelect(personnel.periodic_increase_due_confirmed),
     function_type: personnel.function_type || null,
     allowed_function_types_text: personnel.function_type ? personnel.function_type : "",
+    primary_function_status: personnel.function_type ? "determined" : null,
+    primary_function_source: personnel.function_type ? "single_contract_function" : null,
     cao_function_group: personnel.cao_function_group || null,
     allowed_cao_function_groups_text: personnel.cao_function_group ? personnel.cao_function_group : "",
     cao_function_level: personnel.cao_function_level || null,
@@ -876,6 +921,8 @@ function formFromContract(contract) {
     periodic_increase_due_confirmed: boolToSelect(contract.periodic_increase_due_confirmed),
     function_type: contract.function_type || null,
     allowed_function_types_text: toArrayText(contract.allowed_function_types),
+    primary_function_status: contract.primary_function_status || (contract.function_type ? "determined" : null),
+    primary_function_source: contract.primary_function_source || (contract.function_type ? "legacy_contract" : null),
     cao_function_group: contract.cao_function_group || null,
     allowed_cao_function_groups_text: toArrayText(contract.allowed_cao_function_groups),
     cao_function_level: contract.cao_function_level || null,
@@ -1114,8 +1161,11 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
   const contextReady = missing.length === 0;
   const generated = form.source_type === "generated";
   const documentStatus = "concept";
-  const allowedFunctionTypes = fromArrayText(form.allowed_function_types_text);
-  const allowedGroups = fromArrayText(form.allowed_cao_function_groups_text);
+  const allowedFunctionTypes = uniqueValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]);
+  const automaticFunctionState = deriveAutomaticPrimaryFunctionState(allowedFunctionTypes, form.cao_key, form);
+  const allowedGroups = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    ? automaticFunctionState.functionGroups
+    : fromArrayText(form.allowed_cao_function_groups_text);
   const allowedLevels = fromArrayText(form.allowed_cao_function_levels_text);
   const employmentModel = normalizedEmploymentModel(form);
   const isCallAgreement = ["zero_hours", "min_max"].includes(employmentModel);
@@ -1130,9 +1180,7 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
   const derivedPbFunctionLevel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     ? (form.cao_function_level || pbFunctionLevelForSalaryScale(form.cao_scale))
     : (form.cao_function_level || null);
-  const derivedPrimaryFunctionGroup = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
-    ? (suggestPbCaoFunctionGroup(form.function_type) || form.cao_function_group || null)
-    : (form.cao_function_group || null);
+  const derivedPrimaryFunctionGroup = automaticFunctionState.functionGroup;
 
   return {
     personnel_id: personnel.id,
@@ -1189,19 +1237,22 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
       ? true
       : boolOrNull(form.written_scale_period_notice_confirmed),
     periodic_increase_due_confirmed: boolOrNull(form.periodic_increase_due_confirmed),
-    function_type: form.function_type || null,
+    function_type: automaticFunctionState.functionType,
     allowed_function_types: allowedFunctionTypes,
     function_assignments: allowedFunctionTypes.map(functionKey => ({
       function_key: functionKey,
       function_label: readableFunctionLabel(functionKey),
-      is_primary: functionKey === form.function_type,
+      is_primary: automaticFunctionState.primaryFunctionStatus === "determined"
+        && functionKey === automaticFunctionState.functionType,
       cao_function_group: form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
         ? (suggestPbCaoFunctionGroup(functionKey) || derivedPrimaryFunctionGroup)
         : derivedPrimaryFunctionGroup,
       cao_function_level: derivedPbFunctionLevel,
       cao_scale: numberOrNull(form.cao_scale),
     })),
-    function_assignment_policy_version: "employee-contract-routing-v1",
+    function_assignment_policy_version: "employee-contract-routing-v2",
+    primary_function_status: automaticFunctionState.primaryFunctionStatus,
+    primary_function_source: automaticFunctionState.primaryFunctionSource,
     cao_function_group: derivedPrimaryFunctionGroup,
     allowed_cao_function_groups: allowedGroups,
     cao_function_level: derivedPbFunctionLevel,
@@ -1209,7 +1260,7 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     allowed_task_types: fromArrayText(form.allowed_task_types_text),
     security_role_status: form.security_role_status || "unknown",
     allowed_security_role_statuses: hasMeaningfulSecurityRole(form.security_role_status) ? [form.security_role_status] : [],
-    performs_security_work: boolOrNull(form.performs_security_work),
+    performs_security_work: automaticFunctionState.performsSecurityWork ?? boolOrNull(form.performs_security_work),
     security_work_percentage: numberOrNull(form.security_work_percentage),
     works_airport_schiphol: boolOrNull(form.works_airport_schiphol),
     works_cash_value_logistics: boolOrNull(form.works_cash_value_logistics),
@@ -2015,12 +2066,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     () => uniqueValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]),
     [form.allowed_function_types_text, form.function_type]
   );
-  const selectedPbFunctionGroups = useMemo(
-    () => pbFunctionGroupsForFunctions(selectedFunctionValues),
-    [selectedFunctionValues]
-  );
-  const requiresPbClassificationFunction = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
-    && selectedPbFunctionGroups.length > 1;
   const expectedPbSalaryScale = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     ? pbSalaryScaleForFunctionLevel(form.cao_function_level)
     : null;
@@ -2312,17 +2357,18 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           const group = suggestPbCaoFunctionGroup(functionValue);
           return group && group !== "non_security_staff";
         });
-        const primaryFunction = securityFunctions.includes(prev.function_type)
-          ? prev.function_type
-          : (securityFunctions[0] || "");
+        const functionState = deriveAutomaticPrimaryFunctionState(securityFunctions, prev.cao_key, prev);
         next.probation_agreed = "not_applicable";
         next.probation_context = "not_applicable";
         next.contract_hours_per_week = "";
         next.contract_hours_per_pay_period = "";
-        next.function_type = primaryFunction;
+        next.function_type = functionState.functionType;
         next.allowed_function_types_text = securityFunctions.join(", ");
-        next.cao_function_group = primaryFunction ? suggestPbCaoFunctionGroup(primaryFunction) : "";
-        next.performs_security_work = primaryFunction ? "true" : "unknown";
+        next.primary_function_status = functionState.primaryFunctionStatus;
+        next.primary_function_source = functionState.primaryFunctionSource;
+        next.cao_function_group = functionState.functionGroup || "";
+        next.allowed_cao_function_groups_text = functionState.functionGroups.join(", ");
+        next.performs_security_work = functionState.performsSecurityWork === null ? "unknown" : String(functionState.performsSecurityWork);
         next.cao_function_level = "not_applicable";
         next.cao_scale = "";
         next.cao_period = "";
@@ -2340,13 +2386,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           const group = suggestPbCaoFunctionGroup(functionValue);
           return group && group !== "non_security_staff";
         });
-        const primaryFunction = securityFunctions.includes(prev.function_type)
-          ? prev.function_type
-          : (securityFunctions[0] || "");
-        next.function_type = primaryFunction;
+        const functionState = deriveAutomaticPrimaryFunctionState(securityFunctions, prev.cao_key, prev);
+        next.function_type = functionState.functionType;
         next.allowed_function_types_text = securityFunctions.join(", ");
-        next.cao_function_group = primaryFunction ? suggestPbCaoFunctionGroup(primaryFunction) : "";
-        next.performs_security_work = primaryFunction ? "true" : "unknown";
+        next.primary_function_status = functionState.primaryFunctionStatus;
+        next.primary_function_source = functionState.primaryFunctionSource;
+        next.cao_function_group = functionState.functionGroup || "";
+        next.allowed_cao_function_groups_text = functionState.functionGroups.join(", ");
+        next.performs_security_work = functionState.performsSecurityWork === null ? "unknown" : String(functionState.performsSecurityWork);
         next.salary_payment_frequency = "four_weeks";
         next.security_role_status = "aspirant_beveiliger";
         next.cao_function_level = "aspirant";
@@ -2460,42 +2507,27 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       const nextFunctions = alreadySelected
         ? selected.filter(item => item !== value)
         : [...selected, value];
-      const nextPrimary = prev.function_type === value
-        ? (nextFunctions[0] || null)
-        : (prev.function_type || nextFunctions[0] || null);
-      const suggestedGroup = prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
-        ? suggestPbCaoFunctionGroup(nextPrimary)
-        : null;
+      const functionState = deriveAutomaticPrimaryFunctionState(nextFunctions, prev.cao_key, prev);
+      const allNonSecurity = functionState.functionGroups.length > 0
+        && functionState.functionGroups.every(group => group === "non_security_staff");
       return {
         ...prev,
-        function_type: nextPrimary,
+        function_type: functionState.functionType,
         allowed_function_types_text: nextFunctions.join(", "),
-        cao_function_group: suggestedGroup || null,
-        performs_security_work: suggestedGroup
-          ? (suggestedGroup === "non_security_staff" ? "false" : "true")
-          : prev.performs_security_work,
-        cao_function_level: suggestedGroup === "non_security_staff" ? "not_applicable" : prev.cao_function_level,
-        cao_scale: suggestedGroup === "non_security_staff" ? "" : prev.cao_scale,
-        cao_period: suggestedGroup === "non_security_staff" ? "" : prev.cao_period,
+        primary_function_status: functionState.primaryFunctionStatus,
+        primary_function_source: functionState.primaryFunctionSource,
+        cao_function_group: functionState.functionGroup,
+        allowed_cao_function_groups_text: functionState.functionGroups.join(", "),
+        performs_security_work: nextFunctions.length === 0
+          ? "unknown"
+          : (functionState.performsSecurityWork === null
+            ? prev.performs_security_work
+            : String(functionState.performsSecurityWork)),
+        cao_function_level: allNonSecurity
+          ? "not_applicable"
+          : (prev.cao_function_level === "not_applicable" ? "" : prev.cao_function_level),
       };
     });
-  };
-
-  const setPbClassificationFunction = (value) => {
-    if (!selectedFunctionValues.includes(value)) return;
-    const suggestedGroup = suggestPbCaoFunctionGroup(value);
-    if (!suggestedGroup) return;
-    setForm(prev => ({
-      ...prev,
-      function_type: value,
-      cao_function_group: suggestedGroup,
-      performs_security_work: suggestedGroup === "non_security_staff" ? "false" : "true",
-      cao_function_level: suggestedGroup === "non_security_staff"
-        ? "not_applicable"
-        : (prev.cao_function_level === "not_applicable" ? "" : prev.cao_function_level),
-      cao_scale: suggestedGroup === "non_security_staff" ? "" : prev.cao_scale,
-      cao_period: suggestedGroup === "non_security_staff" ? "" : prev.cao_period,
-    }));
   };
 
   const refresh = () => {
@@ -3240,7 +3272,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               <div className="space-y-5">
                 <div>
                   <p className="text-sm font-medium text-foreground">Functies binnen dit contract</p>
-                  <p className="mt-1 text-sm text-muted-foreground">Selecteer alleen de functies waarvoor de medewerker binnen dit contract kan worden ingepland. De applicatie leidt de vergunningcontext automatisch uit deze selectie af.</p>
+                  <p className="mt-1 text-sm text-muted-foreground">Selecteer alle functies waarvoor de medewerker binnen dit contract kan worden ingepland. LOQ leidt vergunningcontext en functie-indeling op de achtergrond af; schaal en periodiek blijven afzonderlijke contractafspraken.</p>
                 </div>
                 {wizardFunctionGroups.length > 0 ? (
                   <div className="space-y-5">
@@ -3255,7 +3287,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                         <div className="flex flex-wrap gap-2">
                           {group.functions.map(value => {
                             const selected = selectedFunctionValues.includes(value);
-                            const classificationFunction = requiresPbClassificationFunction && form.function_type === value;
                             return (
                               <button
                                 key={value}
@@ -3264,7 +3295,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                                 className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:border-primary/40"}`}
                               >
                                 {readableFunctionLabel(value)}
-                                {classificationFunction && <span className="rounded-full bg-primary-foreground/15 px-1.5 py-0.5 text-[10px]">CAO-bepalend</span>}
                               </button>
                             );
                           })}
@@ -3276,32 +3306,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   <p className="rounded-lg border border-amber-300 bg-amber-50 p-4 text-sm text-amber-800 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-200">
                     Voor deze CAO zijn nog geen functies gekoppeld aan het bedrijf. Voeg de functies eerst toe via de CAO-instellingen van het bedrijf.
                   </p>
-                )}
-                {requiresPbClassificationFunction && (
-                  <section className="space-y-3 rounded-lg border border-primary/30 bg-primary/5 p-4">
-                    <div>
-                      <p className="text-sm font-medium text-foreground">Welke functie bepaalt de CAO-indeling?</p>
-                      <p className="mt-1 text-xs text-muted-foreground">
-                        Dit is alleen nodig omdat de gekozen functies in verschillende CAO-functiegroepen vallen. Kies de functie waarvan de werkzaamheden structureel ten minste 50% van de arbeidsduur beslaan. Het functieniveau, de schaal en periodiek worden hierna één keer voor het contract vastgelegd.
-                      </p>
-                    </div>
-                    <div className="flex flex-wrap gap-2">
-                      {selectedFunctionValues.map(value => {
-                        const selected = form.function_type === value;
-                        return (
-                          <button
-                            key={`classification-${value}`}
-                            type="button"
-                            onClick={() => setPbClassificationFunction(value)}
-                            className={`inline-flex items-center gap-2 rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${selected ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:border-primary/40"}`}
-                          >
-                            {readableFunctionLabel(value)}
-                            {selected && <Check className="h-3.5 w-3.5" />}
-                          </button>
-                        );
-                      })}
-                    </div>
-                  </section>
                 )}
               </div>
             )}
@@ -3970,6 +3974,19 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     ? contract.function_assignments.map(item => item.function_label || readableFunctionLabel(item.function_key)).join(", ")
                     : readableFunctionLabel(contract.function_type)) || contract.cao_function_group || "Functie onbekend"}
                 </p>
+                {!showArchive && contract.primary_function_status === "pending_work_history" && (
+                  <p
+                    className="mt-0.5 truncate text-xs text-sky-600 dark:text-sky-300"
+                    title="LOQ bepaalt de hoofdfunctie per contract zodra voldoende gewerkte diensten zijn geregistreerd"
+                  >
+                    Hoofdfunctie: automatisch na voldoende geregistreerde inzet
+                  </p>
+                )}
+                {!showArchive && contract.primary_function_status !== "pending_work_history" && contract.function_type && (
+                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                    Hoofdfunctie: {readableFunctionLabel(contract.function_type)}
+                  </p>
+                )}
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">
                   {formatDate(contract.contract_start_date)}{effectiveEndForContract(contract) ? ` - ${formatDate(effectiveEndForContract(contract))}` : " - onbepaalde tijd"}
                 </p>

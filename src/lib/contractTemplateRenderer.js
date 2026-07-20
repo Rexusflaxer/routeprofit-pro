@@ -566,7 +566,13 @@ function contractFunctionClassificationClause(form = {}) {
     return "De overeengekomen werkzaamheden zijn niet-operationeel. De cao-onderdelen die artikel 3 van de CAO Particuliere Beveiliging voor niet-beveiligingswerk uitzondert, zijn niet automatisch op werknemer van toepassing; de overeengekomen beloning en arbeidsduur staan in deze arbeidsovereenkomst.";
   }
   if (securityWork === true) {
-    return `Voor de cao-indeling geldt functiegroep ${pbFunctionGroupLabel(form.cao_function_group)}, functieniveau ${pbFunctionLevelLabel(form.cao_function_level)}, salarisschaal ${compact(form.cao_scale)} en periodiek ${compact(form.cao_period)}.`;
+    const functions = parseFunctionValues(form);
+    const mappedGroups = pbFunctionGroupsForFunctions(functions);
+    const salarySentence = `Voor de beloning zijn functieniveau ${pbFunctionLevelLabel(form.cao_function_level)}, salarisschaal ${compact(form.cao_scale)} en periodiek ${compact(form.cao_period)} vastgelegd.`;
+    if (mappedGroups.length > 1) {
+      return `Bij aanvang wordt voor de administratieve functie-indeling voorlopig uitgegaan van functiegroep ${pbFunctionGroupLabel(form.cao_function_group)}. Werkgever laat de functie-indeling daarna periodiek automatisch herberekenen op basis van de per functie geregistreerde gewerkte diensten. Zodra voldoende representatieve inzetgegevens beschikbaar zijn, bepaalt het cao-criterium van 50% of meer welke functiegroep van toepassing is. Een gewijzigde indeling wordt werknemer overeenkomstig de cao automatisch schriftelijk of elektronisch meegedeeld. ${salarySentence} Een wijziging van de hoofdfunctie wijzigt de overeengekomen salarisschaal of periodiek niet automatisch, tenzij wet of cao anders voorschrijft.`;
+    }
+    return `De overeengekomen functies vallen bij aanvang onder functiegroep ${pbFunctionGroupLabel(form.cao_function_group)}. ${salarySentence}`;
   }
   return "";
 }
@@ -811,7 +817,9 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     country: company.country,
   });
   const functions = readableFunctionValues(form);
-  const primaryFunction = functionLabel(form.function_type) || functions[0] || "";
+  const primaryFunction = form.primary_function_status === "pending_work_history" && functions.length > 1
+    ? "een van de overeengekomen inzetbare functies"
+    : (functionLabel(form.function_type) || functions[0] || "");
   const additionalFunctions = functions.filter(value => value !== primaryFunction);
   const { hoursPerWeek, hoursPerPeriod } = resolvedContractHours(form);
   const minMaxHours = resolvedMinMaxHours(form);
@@ -1115,7 +1123,7 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
 
   if (!durationType(form)) issues.push("Kies of de arbeidsovereenkomst voor bepaalde of onbepaalde tijd geldt.");
   if (durationType(form) === "fixed" && !form.contract_end_date) issues.push("De einddatum ontbreekt bij een arbeidsovereenkomst voor bepaalde tijd.");
-  if (!form.function_type) issues.push("Kies de functie die de CAO-indeling bepaalt.");
+  if (parseFunctionValues(form).length === 0) issues.push("Selecteer minimaal één inzetbare functie voor dit contract.");
   if (!compact(form.work_location)) issues.push("Vul de standplaats in.");
   if (!compact(form.employer_representative_name)) issues.push("Vul de naam van de vertegenwoordiger van werkgever in.");
   if (!compact(form.employer_representative_function)) issues.push("Vul de functie van de vertegenwoordiger van werkgever in.");
@@ -1240,7 +1248,7 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     }
   }
   if (securityWork === true) {
-    if (!PB_SECURITY_FUNCTION_GROUPS.has(form.cao_function_group)) issues.push("Kies de CAO-functiegroep die bij de bepalende functie past.");
+    if (!PB_SECURITY_FUNCTION_GROUPS.has(form.cao_function_group)) issues.push("De CAO-functiegroep kon niet automatisch uit de geselecteerde functies worden afgeleid.");
     if (!form.cao_function_level || form.cao_function_level === "not_applicable") issues.push("Kies het CAO-functieniveau voor de operationele functie.");
     if (isFulltimePreset && (hoursPerWeek !== 36 || hoursPerPeriod !== 144)) {
       issues.push("Een operationele fulltimer onder de CAO Particuliere Beveiliging moet zijn vastgelegd als 36 uur per week en 144 uur per loonperiode.");
@@ -1294,14 +1302,9 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   }
   if (toNumber(form.hourly_rate_snapshot ?? form.custom_hourly_rate) === null) issues.push("Het bruto uurloon ontbreekt.");
 
-  const functions = parseFunctionValues(form);
-  const mappedGroups = pbFunctionGroupsForFunctions(functions);
   const expectedPrimaryGroup = suggestPbCaoFunctionGroup(form.function_type);
   if (expectedPrimaryGroup && form.cao_function_group !== expectedPrimaryGroup) {
-    issues.push(`De CAO-bepalende functie ${functionLabel(form.function_type)} hoort in deze configuratie bij CAO-functiegroep ${pbFunctionGroupLabel(expectedPrimaryGroup)}.`);
-  }
-  if (mappedGroups.length > 1) {
-    warnings.push("De gekozen functies vallen in meerdere CAO-functiegroepen. De CAO-bepalende functie en functiegroep moeten aansluiten op de werkzaamheden die structureel ten minste 50% van de arbeidsduur beslaan.");
+    issues.push(`De automatisch afgeleide startindeling voor ${functionLabel(form.function_type)} hoort bij CAO-functiegroep ${pbFunctionGroupLabel(expectedPrimaryGroup)}.`);
   }
   if (toBoolean(form.event_hospitality_cao_applies) === true) {
     issues.push("Voor deze medewerker is een evenementen- of horecabeveiligings-CAO gemarkeerd; gebruik daarom niet de CAO-PB-standaardtemplate.");

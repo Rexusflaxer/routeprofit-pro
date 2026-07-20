@@ -3,7 +3,7 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.39';
 const CAO_PB_KEY = 'cao_particuliere_beveiliging';
 const CAO_EHB_KEY = 'cao_evenementen_horecabeveiliging';
 const FLEX_REFORM_EFFECTIVE_DATE = '2028-01-01';
-const FUNCTION_POLICY_VERSION = 'employee-contract-routing-v1';
+const FUNCTION_POLICY_VERSION = 'employee-contract-routing-v2';
 const CHAIN_POLICY_VERSION = 'nl-chain-rule-2026-v1';
 
 const COMMITTED_DOCUMENT_STATUSES = new Set(['signed', 'scheduled', 'active', 'expired']);
@@ -97,6 +97,44 @@ function contractFunctionKeys(contract) {
   return unique([...assignments, ...legacy]).filter(value => !['unknown', 'all'].includes(value));
 }
 
+function normalizePrimaryFunctionState(contract) {
+  const functionKeys = contractFunctionKeys(contract);
+  if (functionKeys.length === 0) {
+    return {
+      function_type: null,
+      primary_function_status: null,
+      primary_function_source: null
+    };
+  }
+
+  const currentFunction = normalizeToken(contract?.function_type);
+  const currentIsAllowed = functionKeys.includes(currentFunction);
+  const source = normalizeToken(contract?.primary_function_source);
+  const status = normalizeToken(contract?.primary_function_status);
+
+  if (functionKeys.length === 1) {
+    return {
+      function_type: functionKeys[0],
+      primary_function_status: 'determined',
+      primary_function_source: source === 'worked_services' ? 'worked_services' : 'single_contract_function'
+    };
+  }
+
+  if (currentIsAllowed && status === 'determined' && ['worked_services', 'legacy_contract'].includes(source)) {
+    return {
+      function_type: currentFunction,
+      primary_function_status: 'determined',
+      primary_function_source: source
+    };
+  }
+
+  return {
+    function_type: currentIsAllowed ? currentFunction : functionKeys[0],
+    primary_function_status: 'pending_work_history',
+    primary_function_source: 'provisional_contract_start'
+  };
+}
+
 function contractCaoFunctionLevels(contract) {
   const assignmentLevels = normalizeArray(contract?.function_assignments)
     .map(item => normalizeToken(item?.cao_function_level))
@@ -109,7 +147,9 @@ function contractCaoFunctionLevels(contract) {
 }
 
 function buildFunctionAssignments(contract) {
-  const primaryKey = normalizeToken(contract?.function_type);
+  const primaryState = normalizePrimaryFunctionState(contract);
+  const primaryKey = primaryState.function_type;
+  const primaryIsDetermined = primaryState.primary_function_status === 'determined';
   const existing = normalizeArray(contract?.function_assignments)
     .map(item => ({
       function_key: normalizeToken(item?.function_key),
@@ -126,14 +166,17 @@ function buildFunctionAssignments(contract) {
     byKey.set(functionKey, {
       function_key: functionKey,
       function_label: previous.function_label || null,
-      is_primary: functionKey === primaryKey,
+      is_primary: primaryIsDetermined && functionKey === primaryKey,
       cao_function_group: previous.cao_function_group || contract?.cao_function_group || null,
       cao_function_level: previous.cao_function_level || contract?.cao_function_level || null,
       cao_scale: previous.cao_scale ?? contract?.cao_scale ?? null
     });
   });
   const assignments = [...byKey.values()];
-  if (assignments.length > 0 && !assignments.some(item => item.is_primary)) assignments[0].is_primary = true;
+  if (primaryIsDetermined && assignments.length > 0 && !assignments.some(item => item.is_primary)) {
+    const primaryAssignment = assignments.find(item => item.function_key === primaryKey) || assignments[0];
+    primaryAssignment.is_primary = true;
+  }
   return assignments;
 }
 
@@ -637,14 +680,13 @@ function requiredContext(candidate) {
 }
 
 async function evaluateContract(base44, candidateInput) {
+  const primaryFunctionState = normalizePrimaryFunctionState(candidateInput);
+  const normalizedInput = { ...candidateInput, ...primaryFunctionState };
   const candidate = {
-    ...candidateInput,
-    function_assignments: buildFunctionAssignments(candidateInput),
-    allowed_function_types: contractFunctionKeys(candidateInput)
+    ...normalizedInput,
+    function_assignments: buildFunctionAssignments(normalizedInput),
+    allowed_function_types: contractFunctionKeys(normalizedInput)
   };
-  if (!candidate.function_type && candidate.function_assignments.length > 0) {
-    candidate.function_type = candidate.function_assignments.find(item => item.is_primary)?.function_key || candidate.function_assignments[0].function_key;
-  }
 
   const [contracts, companies, personnel, companyCaoAssignments] = await Promise.all([
     base44.asServiceRole.entities.PersonnelContract.filter({ personnel_id: candidate.personnel_id }).catch(() => []),
@@ -728,11 +770,17 @@ async function evaluateContract(base44, candidateInput) {
       allowed_function_types: candidate.allowed_function_types,
       function_assignments: candidate.function_assignments,
       function_assignment_policy_version: FUNCTION_POLICY_VERSION,
+      primary_function_status: candidate.primary_function_status || null,
+      primary_function_source: candidate.primary_function_source || null,
       routing_snapshot: {
         company_id: candidate.company_id || null,
         cao_key: candidate.cao_key || null,
         function_keys: candidate.allowed_function_types,
-        primary_function_key: candidate.function_type || null,
+        primary_function_key: candidate.primary_function_status === 'determined'
+          ? (candidate.function_type || null)
+          : null,
+        primary_function_status: candidate.primary_function_status || null,
+        primary_function_source: candidate.primary_function_source || null,
         policy_version: FUNCTION_POLICY_VERSION
       }
     },
@@ -967,13 +1015,16 @@ Deno.serve(async (req) => {
       if (existing && existing.personnel_id !== input.personnel_id) {
         return Response.json({ error: 'Een contractconcept kan niet naar een andere medewerker worden verplaatst.' }, { status: 409 });
       }
+      const primaryFunctionState = normalizePrimaryFunctionState(input);
+      const normalizedInput = { ...input, ...primaryFunctionState };
       const normalized = {
-        ...input,
+        ...normalizedInput,
         is_historical_import: input.source_type === 'uploaded_existing'
           && !!input.contract_end_date
           && input.contract_end_date < todayIsoDate(),
-        function_assignments: buildFunctionAssignments(input),
-        allowed_function_types: contractFunctionKeys(input),
+        function_assignments: buildFunctionAssignments(normalizedInput),
+        allowed_function_types: contractFunctionKeys(normalizedInput),
+        function_assignment_policy_version: FUNCTION_POLICY_VERSION,
         document_status: 'concept',
         is_current: false,
         planning_allowed: false,
