@@ -787,6 +787,9 @@ export function replaceContractTemplatePlaceholders(templateBody, values = {}) {
  * @param {{ personnel?: LooseRecord, form?: LooseRecord, company?: LooseRecord }} context
  */
 export function buildContractTemplateValues({ personnel = {}, form = {}, company = {} } = {}) {
+  personnel = personnel || {};
+  form = form || {};
+  company = company || {};
   const employeeName = compact(personnel.full_name || personnel.display_name || personnel.name
     || [personnel.legal_first_names || personnel.first_name, personnel.name_prefix, personnel.last_name].filter(Boolean).join(" "));
   const firstName = compact(personnel.first_name || personnel.call_name || personnel.legal_first_names);
