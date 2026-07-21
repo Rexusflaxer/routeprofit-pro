@@ -45,6 +45,10 @@ import {
   pageNumberHorizontalAlignment,
   pageNumberPositionPercentages,
 } from "../src/lib/letterheadDocumentSettings.js";
+import {
+  DEFAULT_CONTRACT_PDF_MARGINS,
+  normalizeContractPdfMargins,
+} from "../src/lib/contractPdfLetterhead.js";
 
 const company = {
   legal_name: "Voorbeeld Beveiliging B.V.",
@@ -336,6 +340,15 @@ assert.deepEqual(normalizePageNumberSettings({
   font_size_pt: 18,
   format: "page",
 });
+assert.deepEqual(normalizeContractPdfMargins({}), DEFAULT_CONTRACT_PDF_MARGINS);
+assert.deepEqual(normalizeContractPdfMargins({
+  document_settings: {
+    margins_mm: { top: 12, right: 18, bottom: 23, left: 16 },
+  },
+}), { top: 12, right: 18, bottom: 23, left: 16 });
+assert.deepEqual(normalizeContractPdfMargins({
+  metadata: { margins_mm: { top: -5, right: 110, bottom: 20, left: 14 } },
+}), { top: 0, right: 90, bottom: 20, left: 14 });
 
 const pbFulltimeDurations = durationOptionsForContractTemplate({
   template_type: "employment_contract",

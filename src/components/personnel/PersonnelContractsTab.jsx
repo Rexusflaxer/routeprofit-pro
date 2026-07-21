@@ -38,6 +38,7 @@ import {
   normalizePageNumberSettings,
   pageNumberHorizontalAlignment,
 } from "@/lib/letterheadDocumentSettings";
+import { buildContractPdfLetterhead } from "@/lib/contractPdfLetterhead";
 import { groupContractTemplateVersions } from "@/lib/contractTemplateEditor";
 import {
   AlertTriangle,
@@ -1509,25 +1510,54 @@ function renderContractBody(personnel, form, company, template, clauses = []) {
   return renderContractTemplateBody(expandClauseMarkers(template?.body || fallbackBody, clauses), { personnel, form, company });
 }
 
-function makePdfFile({ personnel, form, company, template, letterhead, clauses = [] }) {
+async function makePdfFile({ personnel, form, company, template, letterhead, clauses = [] }) {
   const doc = new jsPDF({ unit: "pt", format: "a4" });
+  const { backgroundDataUrl, margins } = await buildContractPdfLetterhead(letterhead);
   const pageNumberSettings = normalizePageNumberSettings(letterhead || {});
   const pageNumberAlignment = pageNumberHorizontalAlignment(pageNumberSettings);
   const millimeterToPoint = 72 / 25.4;
-  const margin = 54;
-  const pageBottom = 760;
-  const continuationTop = 64;
+  const pageWidth = doc.internal.pageSize.getWidth();
+  const pageHeight = doc.internal.pageSize.getHeight();
+  const margin = margins.left * millimeterToPoint;
+  const textWidth = pageWidth - ((margins.left + margins.right) * millimeterToPoint);
+  const continuationTop = margins.top * millimeterToPoint;
+  const pageBottom = pageHeight - (margins.bottom * millimeterToPoint);
   const lineHeight = 16;
   const documentTitleLineHeight = 22;
   const paragraphGap = 7;
   const isInternshipAgreement = form.employment_contract_model === "internship";
   const body = renderContractBody(personnel, form, company, template, clauses);
   const values = contractRenderValues(personnel, form, company);
+  if (textWidth < 120 || pageBottom - continuationTop < 180) {
+    throw new Error("De ingestelde briefpapiermarges laten onvoldoende ruimte over voor de contracttekst.");
+  }
+  const applyLetterhead = () => {
+    if (!backgroundDataUrl) return;
+    doc.addImage(
+      backgroundDataUrl,
+      "PNG",
+      0,
+      0,
+      pageWidth,
+      pageHeight,
+      "loq-contract-letterhead",
+      "FAST",
+    );
+  };
+  const addPage = () => {
+    doc.addPage();
+    applyLetterhead();
+  };
+  applyLetterhead();
+  doc.setProperties({
+    creator: "LOQ",
+    subject: "Onveranderlijke contractsnapshot; latere sjabloonwijzigingen wijzigen dit document niet.",
+  });
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   let y = continuationTop;
   const paragraphs = body.split(/\n{2,}/).map(paragraph => paragraph.trim()).filter(Boolean);
-  const paragraphLines = paragraphs.map(paragraph => doc.splitTextToSize(paragraph, 486));
+  const paragraphLines = paragraphs.map(paragraph => doc.splitTextToSize(paragraph, textWidth));
 
   paragraphLines.forEach((lines, index) => {
     const isArticleHeading = /^Artikel\s+\d+\b/i.test(paragraphs[index]);
@@ -1539,7 +1569,7 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
       ? paragraphLines[index + 1].length * lineHeight + paragraphGap
       : 0;
     if (y > continuationTop && y + ownHeight + nextHeight > pageBottom) {
-      doc.addPage();
+      addPage();
       y = continuationTop;
     }
 
@@ -1568,7 +1598,7 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
 
     lines.forEach(line => {
       if (y + lineHeight > pageBottom) {
-        doc.addPage();
+        addPage();
         y = continuationTop;
       }
       doc.text(line, margin, y);
@@ -1581,8 +1611,6 @@ function makePdfFile({ personnel, form, company, template, letterhead, clauses =
   const pageCount = doc.getNumberOfPages();
   for (let page = 1; page <= pageCount; page += 1) {
     doc.setPage(page);
-    doc.setFontSize(8);
-    doc.text("PDF-snapshot gegenereerd door LOQ. Latere sjabloonwijzigingen wijzigen dit document niet.", margin, 806);
     if (pageNumberSettings.enabled) {
       doc.setFontSize(pageNumberSettings.font_size_pt);
       doc.setTextColor(100, 116, 139);
@@ -1896,6 +1924,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const [confirmedContract, setConfirmedContract] = useState(null);
   const [paperSignedDate, setPaperSignedDate] = useState("");
   const [paperSignedFile, setPaperSignedFile] = useState(null);
+  const [reviewDocument, setReviewDocument] = useState({ file: null, error: null, loading: false });
   const [reviewDocumentUrl, setReviewDocumentUrl] = useState(null);
 
   const { data: currentUser = null } = useQuery({
@@ -2021,7 +2050,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     form.internship_type,
   ), [form.cao_key, form.employment_contract_model, form.internship_type, selectedTemplate]);
   const selectableDurationOptions = templateDurationConfiguration.fixedOptions;
-  const selectedLetterhead = letterheadOptions.find(item => item.id === form.letterhead_id) || null;
+  const templateLetterheadId = selectedTemplate?.default_letterhead_id === "none"
+    ? null
+    : (selectedTemplate?.default_letterhead_id || null);
+  const effectiveLetterheadId = form.source_type === "generated" && selectedTemplate
+    ? templateLetterheadId
+    : form.letterhead_id;
+  const selectedLetterhead = letterheadOptions.find(item => item.id === effectiveLetterheadId) || null;
+  const templateLetterheadMissing = !!templateLetterheadId && !selectedLetterhead;
   const selectedTemplateClauses = useMemo(() => (contractClauses || [])
     .filter(clause => clause.company_id === form.company_id && clause.status !== "archived"),
   [contractClauses, form.company_id]);
@@ -2207,38 +2243,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     () => validateStandardContractTemplateContext({ personnel, form, company: selectedCompany || {}, template: selectedTemplate || {} }),
     [form, personnel, selectedCompany, selectedTemplate]
   );
-  const reviewDocument = useMemo(() => {
-    if (!wizardOpen || wizardStep !== 10 || confirmedContract) return { file: null, error: null };
-    if (form.source_type === "uploaded_existing") {
-      return { file: form.existing_contract_file || null, error: null };
-    }
-    if (form.source_type !== "generated") return { file: null, error: null };
-    try {
-      return {
-        file: makePdfFile({
-          personnel,
-          form,
-          company: selectedCompany,
-          template: selectedTemplate,
-          letterhead: selectedLetterhead,
-          clauses: selectedTemplateClauses,
-        }),
-        error: null,
-      };
-    } catch (error) {
-      return { file: null, error: error?.message || "De documentpreview kon niet worden opgebouwd." };
-    }
-  }, [
-    confirmedContract,
-    form,
-    personnel,
-    selectedCompany,
-    selectedLetterhead,
-    selectedTemplate,
-    selectedTemplateClauses,
-    wizardOpen,
-    wizardStep,
-  ]);
   const isPbParttimeModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     && ["parttime_fixed", "parttime_growth"].includes(form.employment_contract_model);
   const isPbGrowthParttime = isPbParttimeModel && form.employment_contract_model === "parttime_growth";
@@ -2685,6 +2689,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       if (form.source_type === "generated" && standardTemplateValidation.issues.length > 0) {
         throw new Error(standardTemplateValidation.issues[0]);
       }
+      if (form.source_type === "generated" && templateLetterheadMissing) {
+        throw new Error("Het briefpapier dat aan dit contractsjabloon is gekoppeld, is niet meer actief of beschikbaar.");
+      }
 
       const previous = editingId ? contracts.find(contract => contract.id === editingId) || {} : {};
       const payload = buildContractPayload(personnel, {
@@ -2717,7 +2724,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       if (!record?.id) throw new Error("Het contractconcept kon niet worden aangemaakt.");
 
       if (form.source_type === "generated") {
-        const pdfFile = makePdfFile({
+        const pdfFile = reviewDocument.file || await makePdfFile({
           personnel,
           form,
           company: selectedCompany,
@@ -2991,15 +2998,75 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setWizardStep(5);
   };
   const chooseTemplate = (templateId) => {
+    const template = contractTemplates.find(item => item.id === templateId);
     setForm(prev => ({
       ...prev,
       template_id: templateId,
+      letterhead_id: template?.default_letterhead_id === "none" ? null : (template?.default_letterhead_id || null),
       duration_option: "",
       contract_end_date: "",
     }));
     setDurationTypeConfirmed(false);
     setWizardStep(6);
   };
+
+  useEffect(() => {
+    let cancelled = false;
+    if (!wizardOpen || wizardStep !== 10 || confirmedContract) {
+      setReviewDocument({ file: null, error: null, loading: false });
+      return undefined;
+    }
+    if (form.source_type === "uploaded_existing") {
+      setReviewDocument({ file: form.existing_contract_file || null, error: null, loading: false });
+      return undefined;
+    }
+    if (form.source_type !== "generated") {
+      setReviewDocument({ file: null, error: null, loading: false });
+      return undefined;
+    }
+    if (templateLetterheadMissing) {
+      setReviewDocument({
+        file: null,
+        error: "Het briefpapier dat aan dit contractsjabloon is gekoppeld, is niet meer actief of beschikbaar.",
+        loading: false,
+      });
+      return undefined;
+    }
+
+    setReviewDocument({ file: null, error: null, loading: true });
+    makePdfFile({
+      personnel,
+      form,
+      company: selectedCompany,
+      template: selectedTemplate,
+      letterhead: selectedLetterhead,
+      clauses: selectedTemplateClauses,
+    }).then(file => {
+      if (!cancelled) setReviewDocument({ file, error: null, loading: false });
+    }).catch(error => {
+      if (!cancelled) {
+        setReviewDocument({
+          file: null,
+          error: error?.message || "De documentpreview kon niet worden opgebouwd.",
+          loading: false,
+        });
+      }
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    confirmedContract,
+    form,
+    personnel,
+    selectedCompany,
+    selectedLetterhead,
+    selectedTemplate,
+    selectedTemplateClauses,
+    templateLetterheadMissing,
+    wizardOpen,
+    wizardStep,
+  ]);
 
   useEffect(() => {
     if (!reviewDocument.file) {
@@ -3022,16 +3089,13 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   }, [wizardOpen, form.company_id, companyCaoAssignmentsLoading, companyCaoKeyOptions]);
 
   useEffect(() => {
-    if (!wizardOpen || form.letterhead_id || letterheadOptions.length === 0) return;
-    const defaultLetterhead = letterheadOptions.find(option => option.is_default) || letterheadOptions[0];
-    if (defaultLetterhead) set("letterhead_id", defaultLetterhead.id);
-  }, [wizardOpen, form.letterhead_id, letterheadOptions]);
-
-  useEffect(() => {
-    if (!wizardOpen || form.source_type !== "generated" || !selectedTemplate?.default_letterhead_id) return;
-    if (!letterheadOptions.some(option => option.id === selectedTemplate.default_letterhead_id)) return;
-    if (form.letterhead_id !== selectedTemplate.default_letterhead_id) {
-      set("letterhead_id", selectedTemplate.default_letterhead_id);
+    if (!wizardOpen || form.source_type !== "generated" || !selectedTemplate) return;
+    const nextLetterheadId = selectedTemplate.default_letterhead_id === "none"
+      ? null
+      : (selectedTemplate.default_letterhead_id || null);
+    if (nextLetterheadId && !letterheadOptions.some(option => option.id === nextLetterheadId)) return;
+    if (form.letterhead_id !== nextLetterheadId) {
+      set("letterhead_id", nextLetterheadId);
     }
   }, [wizardOpen, form.source_type, form.letterhead_id, selectedTemplate?.default_letterhead_id, letterheadOptions]);
 
@@ -3155,7 +3219,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     || null;
   const reviewBlockingMessages = uniqueValues([
     reviewDocument.error,
-    !reviewDocument.file ? "Het contractdocument is nog niet beschikbaar voor controle." : null,
+    !reviewDocument.loading && !reviewDocument.file ? "Het contractdocument is nog niet beschikbaar voor controle." : null,
     ...missingFields.map(field => `Vul eerst ${field} in.`),
     ...conflicts.issues,
     ...(form.source_type === "generated" ? standardTemplateValidation.issues : []),
@@ -3167,6 +3231,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     ...(form.source_type === "generated" ? (contractEvaluation?.manual_review_reasons || []) : []),
   ]);
   const reviewReady = !!reviewDocument.file
+    && !reviewDocument.loading
     && !contractEvaluationLoading
     && !evaluationErrorMessage
     && reviewBlockingMessages.length === 0
@@ -4085,15 +4150,20 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     {!reviewDocumentUrl && reviewDocument.file && (
                       <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Documentpreview wordt opgebouwd...</div>
                     )}
-                    {!reviewDocument.file && (
+                    {reviewDocument.loading && !reviewDocument.file && (
+                      <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                        <RefreshCw className="h-4 w-4 animate-spin" /> Contract en briefpapier worden opgebouwd...
+                      </div>
+                    )}
+                    {!reviewDocument.loading && !reviewDocument.file && (
                       <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">Selecteer of herstel eerst het contractdocument.</div>
                     )}
                   </div>
 
-                  {(contractEvaluationLoading || reviewBlockingMessages.length > 0) && (
+                  {(reviewDocument.loading || contractEvaluationLoading || reviewBlockingMessages.length > 0) && (
                     <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${reviewBlockingMessages.length > 0 ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border bg-muted/30 text-muted-foreground"}`}>
                       {reviewBlockingMessages.length > 0 ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />}
-                      <span>{reviewBlockingMessages[0] || "LOQ controleert het contract..."}</span>
+                      <span>{reviewBlockingMessages[0] || (reviewDocument.loading ? "LOQ verwerkt het ingestelde briefpapier..." : "LOQ controleert het contract...")}</span>
                     </div>
                   )}
                 </div>
