@@ -18,6 +18,8 @@ const PUBLIC_CAO_CONFIGURATION_OPTION_FIELDS = [
 const SENSITIVE_CAO_CONFIGURATION_FIELDS = [
   'wage_scales',
   'wage_scales_detailed',
+  'wage_scales_by_year',
+  'wage_scales_detailed_by_year',
   'holidays',
   'pay_periods',
   'surcharges',
@@ -80,7 +82,8 @@ function normalizedWageOptionRows(config) {
           year: year ? Number(year) : null,
           scale: Number.isFinite(Number(scale)) ? Number(scale) : scale,
           period: Number.isFinite(Number(period)) ? Number(period) : period,
-          hourly_rate: numericRate
+          hourly_rate: numericRate,
+          source: year ? 'cao_configuration_by_year' : 'cao_configuration_unversioned'
         });
       }
     }
@@ -110,7 +113,12 @@ function buildCaoConfigurationOption(config, includeIds = [], { includeWageOptio
   option.warning = includedInactive
     ? 'Deze CAO-configuratie is niet actief en wordt alleen getoond omdat dit bedrijf er al aan gekoppeld is.'
     : null;
-  if (includeWageOptions) option.wage_options = normalizedWageOptionRows(config);
+  if (includeWageOptions) {
+    option.wage_options = normalizedWageOptionRows(config);
+    option.wage_option_count = option.wage_options.length;
+    option.wage_table_years = [...new Set(option.wage_options.map(row => row.year).filter(Boolean))];
+    option.wage_options_status = option.wage_options.length > 0 ? 'available' : 'missing';
+  }
   return option;
 }
 

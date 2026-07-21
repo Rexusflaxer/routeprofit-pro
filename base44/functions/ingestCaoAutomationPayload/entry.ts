@@ -1768,7 +1768,9 @@ async function verifyPersistedRuleRegistry(base44, { caoKey, configId, candidate
 
 function hasWageScales(candidateCfg) {
   return Object.keys(candidateCfg?.wage_scales || {}).length > 0 ||
-    Object.keys(candidateCfg?.wage_scales_detailed || {}).length > 0;
+    Object.keys(candidateCfg?.wage_scales_detailed || {}).length > 0 ||
+    Object.keys(candidateCfg?.wage_scales_by_year || {}).length > 0 ||
+    Object.keys(candidateCfg?.wage_scales_detailed_by_year || {}).length > 0;
 }
 
 function hasPayPeriods(candidateCfg) {

@@ -3,6 +3,35 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.31';
 const CAO_PB_KEY = 'cao_particuliere_beveiliging';
 const SUPPORTED_FUNCTION_CLASSIFICATION_RUNTIME_CAO_KEYS = [CAO_PB_KEY];
 
+const OFFICIAL_CAO_PB_WAGE_TABLES = [
+  {
+    year: 2025,
+    valid_from: '2024-12-30',
+    valid_until: '2025-12-28',
+    wage_scales: {
+      2: { 0: 16.02, 1: 16.38 },
+      3: { 1: 16.73, 2: 17.09, 3: 17.45, 4: 17.80, 5: 18.16, 6: 18.52, 7: 18.87, 8: 19.23, 9: 19.58, 10: 19.94 },
+      4: { 2: 17.45, 3: 17.80, 4: 18.16, 5: 18.52, 6: 18.87, 7: 19.23, 8: 19.58, 9: 19.94, 10: 20.30, 11: 20.65, 12: 21.01 },
+      5: { 4: 18.52, 5: 18.87, 6: 19.23, 7: 19.58, 8: 19.94, 9: 20.30, 10: 20.65, 11: 21.01, 12: 21.36, 13: 21.72 },
+      6: { 5: 19.23, 6: 19.58, 7: 19.94, 8: 20.30, 9: 20.65, 10: 21.01, 11: 21.36, 12: 21.72, 13: 22.08, 14: 22.43 },
+      7: { 6: 20.30, 7: 20.65, 8: 21.01, 9: 21.36, 10: 21.72, 11: 22.08, 12: 22.43, 13: 22.79, 14: 23.14, 15: 23.52, 16: 23.89 }
+    }
+  },
+  {
+    year: 2026,
+    valid_from: '2025-12-29',
+    valid_until: '2026-12-27',
+    wage_scales: {
+      2: { 0: 16.63, 1: 17.00 },
+      3: { 1: 17.37, 2: 17.74, 3: 18.11, 4: 18.48, 5: 18.85, 6: 19.22, 7: 19.59, 8: 19.96, 9: 20.33, 10: 20.70 },
+      4: { 2: 18.11, 3: 18.48, 4: 18.85, 5: 19.22, 6: 19.59, 7: 19.96, 8: 20.33, 9: 20.70, 10: 21.07, 11: 21.44, 12: 21.81 },
+      5: { 4: 19.22, 5: 19.59, 6: 19.96, 7: 20.33, 8: 20.70, 9: 21.07, 10: 21.44, 11: 21.81, 12: 22.18, 13: 22.55 },
+      6: { 5: 19.96, 6: 20.33, 7: 20.70, 8: 21.07, 9: 21.44, 10: 21.81, 11: 22.18, 12: 22.55, 13: 22.92, 14: 23.29 },
+      7: { 6: 21.07, 7: 21.44, 8: 21.81, 9: 22.18, 10: 22.55, 11: 22.92, 12: 23.29, 13: 23.66, 14: 24.02, 15: 24.41, 16: 24.80 }
+    }
+  }
+];
+
 function getCaoRuntimeSupport(caoKey, functionName) {
   const key = caoKey || null;
   const supported = SUPPORTED_FUNCTION_CLASSIFICATION_RUNTIME_CAO_KEYS.includes(key);
@@ -412,13 +441,31 @@ async function resolveActiveCaoConfig(base44, referenceDate, caoKey = null) {
   };
 }
 
+function officialPbWageTableForDate(caoConfig, referenceDate) {
+  if (caoConfig?.cao_key !== CAO_PB_KEY) return null;
+  const iso = asIsoDate(referenceDate);
+  if (!iso) return null;
+  return OFFICIAL_CAO_PB_WAGE_TABLES.find(table => (
+    table.valid_from <= iso && table.valid_until >= iso
+  )) || null;
+}
+
+function wageTableYearForDate(caoConfig, referenceDate) {
+  const payPeriod = findPayPeriodForDate(flattenPayPeriods(caoConfig), referenceDate);
+  if (Number.isFinite(payPeriod?.pay_period_year)) return payPeriod.pay_period_year;
+  const officialTable = officialPbWageTableForDate(caoConfig, referenceDate);
+  if (officialTable) return officialTable.year;
+  const refYear = Number((asIsoDate(referenceDate) || '').slice(0, 4));
+  return Number.isFinite(refYear) ? refYear : null;
+}
+
 /**
- * Haal uurloon op uit datumvaste jaartabellen of fallback wage_scales_detailed/legacy wage_scales.
- * Geen fallback. Retourneert null als niet gevonden.
+ * Haal het uurloon op uit een datumvaste configuratie. Voor bekende PB-loonperiodes
+ * dient de gepubliceerde tabel als begrensde terugval wanneer synchronisatiegegevens ontbreken.
  */
 function resolveWageScaleTablesForDate(caoConfig, referenceDate) {
-  const refYear = Number((asIsoDate(referenceDate) || '').slice(0, 4));
-  const yearKey = Number.isFinite(refYear) ? String(refYear) : null;
+  const wageTableYear = wageTableYearForDate(caoConfig, referenceDate);
+  const yearKey = Number.isFinite(wageTableYear) ? String(wageTableYear) : null;
   const detailedByYear = yearKey && caoConfig?.wage_scales_detailed_by_year?.[yearKey]
     ? caoConfig.wage_scales_detailed_by_year[yearKey]
     : null;
@@ -426,10 +473,30 @@ function resolveWageScaleTablesForDate(caoConfig, referenceDate) {
     ? caoConfig.wage_scales_by_year[yearKey]
     : null;
 
+  if (detailedByYear || legacyByYear) {
+    return {
+      wage_scales_detailed: detailedByYear,
+      wage_scales: legacyByYear,
+      wage_table_year: wageTableYear,
+      wage_table_source: 'cao_configuration_by_year'
+    };
+  }
+
+  const officialTable = officialPbWageTableForDate(caoConfig, referenceDate);
+  if (officialTable) {
+    return {
+      wage_scales_detailed: null,
+      wage_scales: officialTable.wage_scales,
+      wage_table_year: officialTable.year,
+      wage_table_source: 'official_cao_pb_fallback'
+    };
+  }
+
   return {
-    wage_scales_detailed: detailedByYear || caoConfig?.wage_scales_detailed || null,
-    wage_scales: legacyByYear || caoConfig?.wage_scales || null,
-    wage_table_year: detailedByYear || legacyByYear ? refYear : null
+    wage_scales_detailed: caoConfig?.wage_scales_detailed || null,
+    wage_scales: caoConfig?.wage_scales || null,
+    wage_table_year: null,
+    wage_table_source: 'cao_configuration_unversioned'
   };
 }
 
@@ -439,13 +506,28 @@ function getHourlyRate(scale, period, caoConfig, referenceDate = null) {
   const tables = resolveWageScaleTablesForDate(caoConfig, referenceDate);
   if (tables.wage_scales_detailed?.[sk]) {
     const entry = tables.wage_scales_detailed[sk][pk];
-    if (entry?.hourly_rate) return { hourly_rate: entry.hourly_rate, found: true, wage_table_year: tables.wage_table_year };
+    if (entry?.hourly_rate) return {
+      hourly_rate: entry.hourly_rate,
+      found: true,
+      wage_table_year: tables.wage_table_year,
+      wage_table_source: tables.wage_table_source
+    };
   }
   if (tables.wage_scales?.[sk]) {
     const rate = tables.wage_scales[sk][pk];
-    if (rate != null) return { hourly_rate: rate, found: true, wage_table_year: tables.wage_table_year };
+    if (rate != null) return {
+      hourly_rate: rate,
+      found: true,
+      wage_table_year: tables.wage_table_year,
+      wage_table_source: tables.wage_table_source
+    };
   }
-  return { hourly_rate: null, found: false, wage_table_year: tables.wage_table_year };
+  return {
+    hourly_rate: null,
+    found: false,
+    wage_table_year: tables.wage_table_year,
+    wage_table_source: tables.wage_table_source
+  };
 }
 
 /**
@@ -974,10 +1056,12 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate, pe
   let hourlyRate = null;
   let wageRateFound = false;
   let wageTableYear = null;
+  let wageTableSource = null;
 
   if (caoConfig && wageScaleToUse != null) {
     const r = getHourlyRate(wageScaleToUse, wagePeriodToUse, caoConfig, referenceDate);
     wageTableYear = r.wage_table_year || null;
+    wageTableSource = r.wage_table_source || null;
     if (r.found) {
       hourlyRate = r.hourly_rate;
       wageRateFound = true;
@@ -1011,6 +1095,7 @@ function classify(personnel, workContext, caoScope, caoConfig, referenceDate, pe
     period_valid_for_scale: periodValid,
     wage_rate_found: wageRateFound,
     wage_table_year: wageTableYear,
+    wage_table_source: wageTableSource,
     hourly_rate: hourlyRate,
     monthly_or_period_salary: null,
     confidence,

@@ -40,6 +40,7 @@ import {
 } from "@/lib/letterheadDocumentSettings";
 import { buildContractPdfLetterhead } from "@/lib/contractPdfLetterhead";
 import { groupContractTemplateVersions } from "@/lib/contractTemplateEditor";
+import { getOfficialPbWageRows, getOfficialPbWageTableYear } from "@/lib/caoPbWageTables";
 import {
   AlertTriangle,
   Archive,
@@ -613,17 +614,76 @@ function getSalaryTables(option) {
   return option?.salary_tables || option?.salaryTables || option?.wage_tables || option?.wageTables || option?.scales || [];
 }
 
-function extractWageRows(option, targetYear) {
+function extractWageRows(option, referenceDate, caoKey) {
+  if (!option) return [];
+
+  const targetDate = dateKey(referenceDate, "");
+  const calendarYear = getYear(referenceDate || new Date());
+  const officialPbYear = caoKey === CAO_PARTICULIERE_BEVEILIGING_KEY
+    ? getOfficialPbWageTableYear(referenceDate)
+    : null;
+  const targetYear = officialPbYear || calendarYear;
   const normalizedOptions = Array.isArray(option?.wage_options) ? option.wage_options : [];
   if (normalizedOptions.length > 0) {
+    const dateBoundRows = normalizedOptions.filter(row => (
+      targetDate
+      && row.valid_from
+      && row.valid_until
+      && String(row.valid_from).slice(0, 10) <= targetDate
+      && String(row.valid_until).slice(0, 10) >= targetDate
+    ));
     const exactYearRows = normalizedOptions.filter(row => targetYear && Number(row.year) === Number(targetYear));
     const unversionedRows = normalizedOptions.filter(row => !row.year);
-    const selectedRows = exactYearRows.length > 0 ? exactYearRows : unversionedRows;
-    return selectedRows.map(row => ({
+    const selectedRows = dateBoundRows.length > 0
+      ? dateBoundRows
+      : exactYearRows.length > 0
+        ? exactYearRows
+        : caoKey === CAO_PARTICULIERE_BEVEILIGING_KEY && officialPbYear
+          ? []
+          : unversionedRows;
+    if (selectedRows.length > 0) {
+      return selectedRows.map(row => ({
+        year: row.year || targetYear,
+        scale: row.scale,
+        period: row.period,
+        hourlyRate: row.hourly_rate,
+        validFrom: row.valid_from || null,
+        validUntil: row.valid_until || null,
+        source: row.source || "cao_configuration",
+        sourceUrl: row.source_url || null,
+        label: `Schaal ${row.scale ?? "-"} / periodiek ${row.period ?? "-"}`,
+      }));
+    }
+  }
+
+  if (caoKey === CAO_PARTICULIERE_BEVEILIGING_KEY) {
+    const officialRows = getOfficialPbWageRows(referenceDate);
+    if (officialRows.length > 0) {
+      return officialRows.map(row => ({
+        year: row.year,
+        scale: row.scale,
+        period: row.period,
+        hourlyRate: row.hourly_rate,
+        validFrom: row.valid_from,
+        validUntil: row.valid_until,
+        source: row.source,
+        sourceUrl: row.source_url,
+        label: `Schaal ${row.scale} / periodiek ${row.period}`,
+      }));
+    }
+  }
+
+  if (normalizedOptions.length > 0) {
+    const unversionedRows = normalizedOptions.filter(row => !row.year);
+    return unversionedRows.map(row => ({
       year: row.year || targetYear,
       scale: row.scale,
       period: row.period,
       hourlyRate: row.hourly_rate,
+      validFrom: row.valid_from || null,
+      validUntil: row.valid_until || null,
+      source: row.source || "cao_configuration",
+      sourceUrl: row.source_url || null,
       label: `Schaal ${row.scale ?? "-"} / periodiek ${row.period ?? "-"}`,
     }));
   }
@@ -1982,7 +2042,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   ]), [allCompanyCaoAssignments, contracts, form.cao_configuration_id, personnel.cao_configuration_id]);
 
   const { data: caoConfigurationOptions = [], isLoading: caoConfigurationOptionsLoading } = useQuery({
-    queryKey: ["cao-configuration-options", "personnel-contracts", personnel.id, selectedCaoConfigurationIds],
+    queryKey: ["cao-configuration-options", "personnel-contracts", "wage-options-v2", personnel.id, selectedCaoConfigurationIds],
     queryFn: async () => {
       const { data } = await base44.functions.invoke("listCaoConfigurationOptions", {
         include_ids: selectedCaoConfigurationIds,
@@ -2071,7 +2131,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     && form.contract_start_date
     && form.contract_start_date < FLEX_REFORM_EFFECTIVE_DATE
     && (!form.contract_end_date || form.contract_end_date >= FLEX_REFORM_EFFECTIVE_DATE);
-  const wageTableYear = getYear(form.contract_start_date || new Date());
+  const wageReferenceDate = form.contract_start_date || new Date().toISOString().slice(0, 10);
+  const requestedWageTableYear = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    ? (getOfficialPbWageTableYear(wageReferenceDate) || getYear(wageReferenceDate))
+    : getYear(wageReferenceDate);
   const activeConfigurationDate = new Date().toISOString().slice(0, 10);
   const companyCaoKeyOptions = useMemo(
     () => buildCompanyCaoKeyOptions(companyCaoAssignments, activeConfigurationDate, caoConfigurationOptions),
@@ -2178,12 +2241,13 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     && isDateWithinOptionRange(option, form.contract_start_date)
   )) || visibleCaoConfigurationOptions[0] || null;
   const wageRows = useMemo(() => {
-    const rows = extractWageRows(effectiveCaoConfiguration, wageTableYear);
+    const rows = extractWageRows(effectiveCaoConfiguration, wageReferenceDate, form.cao_key);
     if (form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY) return rows;
     if (form.cao_function_group === "non_security_staff") return [];
     if (isBblModel) return rows.filter(row => Number(row.scale) === 2);
     return rows;
-  }, [effectiveCaoConfiguration, form.cao_function_group, form.cao_key, isBblModel, wageTableYear]);
+  }, [effectiveCaoConfiguration, form.cao_function_group, form.cao_key, isBblModel, wageReferenceDate]);
+  const wageTableYear = wageRows[0]?.year || requestedWageTableYear;
   const wageScaleOptions = useMemo(() => uniqueValues(wageRows.map(row => String(row.scale))).sort((a, b) => Number(a) - Number(b)), [wageRows]);
   const visibleWageRows = useMemo(() => wageScaleFilter === null
     ? []
@@ -3748,7 +3812,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 px-4 py-3">
                         <div>
                           <p className="text-sm font-semibold text-foreground">Schaal {selectedWageRow.scale} · periodiek {selectedWageRow.period}</p>
-                          <p className="mt-1 text-xs text-muted-foreground">Loontabel {selectedWageRow.year || wageTableYear}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">
+                            Loontabel {selectedWageRow.year || wageTableYear}
+                            {selectedWageRow.source === "official_cao_pb_fallback" ? " · officiële CAO PB-tabel" : ""}
+                          </p>
                         </div>
                         <p className="text-sm font-semibold text-primary">{formatCurrency(selectedWageRow.hourlyRate)} bruto per uur</p>
                       </div>
@@ -3764,7 +3831,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   <section className="space-y-3 rounded-lg border border-amber-300 bg-amber-50/60 p-4 dark:border-amber-800 dark:bg-amber-950/20">
                     <div>
                       <p className="text-sm font-semibold text-foreground">Geen loontabel beschikbaar</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Vul eerst de loonschalen en periodieken in de actieve CAO-configuratie aan. LOQ laat geen vrije schaal- of periodiekinvoer toe, omdat daarmee een onjuiste loonafspraak kan ontstaan.</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Voor de gekozen CAO en startdatum is geen gevalideerde loontabel beschikbaar. Ga terug en controleer de CAO of startdatum. LOQ staat geen vrije schaal- of periodiekinvoer toe.</p>
                     </div>
                   </section>
                 )}

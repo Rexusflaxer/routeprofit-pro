@@ -3,6 +3,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 import vm from 'node:vm';
 import { fileURLToPath } from 'node:url';
+import {
+  getOfficialPbWageRows,
+  getOfficialPbWageTableYear
+} from '../src/lib/caoPbWageTables.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -1918,6 +1922,51 @@ function runRouteCostScheduleGateScenarios() {
 }
 
 function runFunctionClassificationScenarios() {
+  assert.equal(getOfficialPbWageTableYear('2025-12-28'), 2025, 'Last day of PB wage table 2025 must use table 2025');
+  assert.equal(getOfficialPbWageTableYear('2025-12-29'), 2026, 'First pay-period day of PB wage table 2026 must use table 2026');
+  const officialRows2025 = getOfficialPbWageRows('2025-06-01');
+  const officialRows2026 = getOfficialPbWageRows('2026-06-01');
+  assert.equal(officialRows2025.length, 54, 'Official PB 2025 fallback must expose every valid scale/period combination');
+  assert.equal(officialRows2026.length, 54, 'Official PB 2026 fallback must expose every valid scale/period combination');
+  assertAlmostEqual(
+    officialRows2025.find(row => row.scale === 3 && row.period === 1)?.hourly_rate,
+    16.73,
+    'Official PB 2025 scale 3 period 1 rate mismatch'
+  );
+  assertAlmostEqual(
+    officialRows2026.find(row => row.scale === 7 && row.period === 16)?.hourly_rate,
+    24.80,
+    'Official PB 2026 scale 7 period 16 rate mismatch'
+  );
+
+  const officialFallbackConfig = { cao_key: 'cao_particuliere_beveiliging' };
+  const fallback2025 = functionClassification.getHourlyRate(3, 1, officialFallbackConfig, '2025-12-28');
+  const fallback2026 = functionClassification.getHourlyRate(3, 1, officialFallbackConfig, '2025-12-29');
+  assertAlmostEqual(fallback2025.hourly_rate, 16.73, 'Runtime fallback must use PB table 2025 through 28 December 2025');
+  assert.equal(fallback2025.wage_table_year, 2025);
+  assert.equal(fallback2025.wage_table_source, 'official_cao_pb_fallback');
+  assertAlmostEqual(fallback2026.hourly_rate, 17.37, 'Runtime fallback must use PB table 2026 from 29 December 2025');
+  assert.equal(fallback2026.wage_table_year, 2026);
+  assert.equal(fallback2026.wage_table_source, 'official_cao_pb_fallback');
+  for (const [referenceDate, rows] of [
+    ['2025-06-01', officialRows2025],
+    ['2026-06-01', officialRows2026]
+  ]) {
+    for (const row of rows) {
+      const runtimeRate = functionClassification.getHourlyRate(
+        row.scale,
+        row.period,
+        officialFallbackConfig,
+        referenceDate
+      );
+      assertAlmostEqual(
+        runtimeRate.hourly_rate,
+        row.hourly_rate,
+        `Frontend/runtime PB wage-table mismatch for ${referenceDate}, scale ${row.scale}, period ${row.period}`
+      );
+    }
+  }
+
   const nonSecurity = functionClassification.classify({
     function_type: 'klantrelatie',
     cao_function_group: 'non_security_staff',
@@ -2070,9 +2119,42 @@ function runCaoGovernanceUiOptionScenarios() {
 
   const wageOption = caoConfigurationOptions.buildCaoConfigurationOption(activeConfig, [], { includeWageOptions: true });
   assert.equal(wageOption.wage_options.length, 1, 'Contract wizard must receive one normalized wage choice');
+  assert.equal(wageOption.wage_option_count, 1);
+  assert.equal(wageOption.wage_options_status, 'available');
   assert.equal(wageOption.wage_options[0].year, null);
   assert.equal(wageOption.wage_options[0].scale, 3);
   assert.equal(wageOption.wage_options[0].period, 0);
+  assert.equal(wageOption.wage_options[0].source, 'cao_configuration_unversioned');
+
+  const yearBoundWageOption = caoConfigurationOptions.buildCaoConfigurationOption({
+    ...activeConfig,
+    wage_scales: {},
+    wage_scales_by_year: {
+      2026: { 3: { 1: 17.37 } }
+    }
+  }, [], { includeWageOptions: true });
+  assert.equal(yearBoundWageOption.wage_options.length, 1);
+  assertSameValues(yearBoundWageOption.wage_table_years, [2026], 'Contract wizard must expose the available dated wage-table years');
+  assert.equal(yearBoundWageOption.wage_options[0].source, 'cao_configuration_by_year');
+  assert.equal(caoConfigurationOptions.assertNoSensitiveCaoConfigurationFields(yearBoundWageOption).passed, true);
+  assert.equal(yearBoundWageOption.wage_scales_by_year, undefined);
+
+  assert.equal(
+    ingestCaoAutomation.hasWageScales({ wage_scales_detailed_by_year: { 2026: { 3: { 1: { hourly_rate: 17.37 } } } } }),
+    true,
+    'Ingest validation must accept date-versioned wage tables'
+  );
+  assert.equal(
+    syncCaoFromCloudflare.hasWageScales({ wage_scales_by_year: { 2026: { 3: { 1: 17.37 } } } }),
+    true,
+    'Cloudflare sync validation must accept date-versioned wage tables'
+  );
+  const caoConfigurationSchema = fs.readFileSync(path.join(repoRoot, 'base44/entities/CAOConfiguration.jsonc'), 'utf8');
+  const caoSyncSource = fs.readFileSync(path.join(repoRoot, 'base44/functions/syncCaoFromCloudflare/entry.ts'), 'utf8');
+  assert.ok(caoConfigurationSchema.includes('"wage_scales_by_year"'), 'CAOConfiguration must persist year-bound wage tables');
+  assert.ok(caoConfigurationSchema.includes('"wage_scales_detailed_by_year"'), 'CAOConfiguration must persist detailed year-bound wage tables');
+  assert.ok(caoSyncSource.includes('wage_scales_by_year: candidateCfg.wage_scales_by_year'), 'Cloudflare sync must retain year-bound wage tables');
+  assert.ok(caoSyncSource.includes('wage_scales_detailed_by_year: candidateCfg.wage_scales_detailed_by_year'), 'Cloudflare sync must retain detailed year-bound wage tables');
   assert.equal(wageOption.wage_options[0].hourly_rate, 16.02);
   assert.equal(wageOption.wage_scales, undefined, 'Normalized wage choices must not expose the raw wage scale object');
 

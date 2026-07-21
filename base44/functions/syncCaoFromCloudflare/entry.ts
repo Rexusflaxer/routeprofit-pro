@@ -1821,7 +1821,9 @@ async function buildPayloadManifestRuleRegistrySnapshot({ candidateCfg, candidat
 
 function hasWageScales(candidateCfg) {
   return Object.keys(candidateCfg?.wage_scales || {}).length > 0 ||
-    Object.keys(candidateCfg?.wage_scales_detailed || {}).length > 0;
+    Object.keys(candidateCfg?.wage_scales_detailed || {}).length > 0 ||
+    Object.keys(candidateCfg?.wage_scales_by_year || {}).length > 0 ||
+    Object.keys(candidateCfg?.wage_scales_detailed_by_year || {}).length > 0;
 }
 
 function hasPayPeriods(candidateCfg) {
@@ -3032,6 +3034,8 @@ Deno.serve(async (req) => {
       status: 'draft',
       wage_scales: candidateCfg.wage_scales || {},
       wage_scales_detailed: candidateCfg.wage_scales_detailed || null,
+      wage_scales_by_year: candidateCfg.wage_scales_by_year || null,
+      wage_scales_detailed_by_year: candidateCfg.wage_scales_detailed_by_year || null,
       holidays: candidateCfg.holidays || [],
       pay_periods: normalizePayPeriods(candidateCfg.pay_periods),
       surcharges: candidateCfg.surcharges || null,

@@ -842,7 +842,9 @@ function hasAnyNeedle(value, needles) {
 
 function hasWageScales(config) {
   return Object.keys(config?.wage_scales || {}).length > 0 ||
-    Object.keys(config?.wage_scales_detailed || {}).length > 0;
+    Object.keys(config?.wage_scales_detailed || {}).length > 0 ||
+    Object.keys(config?.wage_scales_by_year || {}).length > 0 ||
+    Object.keys(config?.wage_scales_detailed_by_year || {}).length > 0;
 }
 
 function hasPayPeriods(config) {

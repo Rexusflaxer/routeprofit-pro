@@ -152,6 +152,20 @@
       ],
       "additionalProperties": true
     },
+    "wage_scales_by_year": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "wage_scales_detailed_by_year": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
     "holidays": {
       "type": "array",
       "items": {
