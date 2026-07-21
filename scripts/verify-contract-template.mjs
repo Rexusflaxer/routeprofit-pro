@@ -16,12 +16,18 @@ import {
   getStandardContractTemplatePreset,
 } from "../src/lib/contractTemplateCatalog.js";
 import {
+  buildContractTemplateValues,
   getMissingStandardTemplatePlaceholders,
   getUnknownContractTemplatePlaceholders,
   getUnresolvedContractTemplatePlaceholders,
   renderContractTemplateBody,
   validateStandardContractTemplateContext,
 } from "../src/lib/contractTemplateRenderer.js";
+import {
+  addressPartsFromSuggestion,
+  formatAddress,
+  normalizeAddressParts,
+} from "../src/lib/addressFormatting.js";
 import {
   contractTemplateBodyFromBlocks,
   contractTemplateBlocksFromBody,
@@ -105,6 +111,57 @@ const template = {
   metadata: { standard_template_id: preset.id },
   employment_model_scope: "fulltime",
 };
+
+const pollutedCompanyAddress = {
+  street_name: "Ir. R.R. van der Zeelaan 1, 8191JH Wapenveld",
+  house_number: "1",
+  postal_code: "8191JH",
+  city: "Wapenveld",
+  country: "Nederland",
+};
+assert.deepEqual(normalizeAddressParts(pollutedCompanyAddress), {
+  street_name: "Ir. R.R. van der Zeelaan",
+  house_number: "1",
+  house_number_addition: "",
+  postal_code: "8191JH",
+  city: "Wapenveld",
+  country: "Nederland",
+});
+assert.equal(
+  formatAddress(pollutedCompanyAddress),
+  "Ir. R.R. van der Zeelaan 1, 8191JH Wapenveld, Nederland",
+);
+assert.deepEqual(
+  addressPartsFromSuggestion({ address: "Ir. R.R. van der Zeelaan 1, 8191JH Wapenveld" }),
+  normalizeAddressParts(pollutedCompanyAddress),
+);
+assert.equal(formatAddress({
+  street_name: "Vicarielaan 32, 8181KA Heerde",
+  house_number: "32",
+  postal_code: "8181KA",
+  city: "8181KA Heerde",
+  country: "Nederland",
+}), "Vicarielaan 32, 8181KA Heerde, Nederland");
+assert.equal(formatAddress({
+  street_name: "Plein 1944",
+  house_number: "12",
+  postal_code: "6511AA",
+  city: "Nijmegen",
+  country: "Nederland",
+}), "Plein 1944 12, 6511AA Nijmegen, Nederland");
+const pollutedAddressValues = buildContractTemplateValues({
+  personnel: {
+    ...personnel,
+    street_name: "Dorpsweg 2, 2345CD Zeist",
+    city: "2345CD Zeist",
+  },
+  company: { ...company, ...pollutedCompanyAddress },
+  form: baseForm,
+});
+assert.equal(pollutedAddressValues.bedrijf_adres_volledig, "Ir. R.R. van der Zeelaan 1, 8191JH Wapenveld, Nederland");
+assert.equal(pollutedAddressValues.medewerker_adres_volledig, "Dorpsweg 2, 2345CD Zeist, Nederland");
+assert.equal(pollutedAddressValues.medewerker_postcode, "2345CD");
+assert.equal(pollutedAddressValues.medewerker_plaats, "Zeist");
 
 for (const contractModel of ["fulltime_employment", "fulltime", "fulltime_fixed", "fulltime_indefinite"]) {
   assert.equal(getStandardContractTemplatePreset({

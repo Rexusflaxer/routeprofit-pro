@@ -46,6 +46,7 @@ import PageHeader from "../components/ui-custom/PageHeader";
 import EmptyState from "../components/ui-custom/EmptyState";
 import PersonnelAccessTab from "../components/personnel/PersonnelAccessTab";
 import PersonnelContractsTab from "../components/personnel/PersonnelContractsTab";
+import { formatAddress, normalizeAddressParts } from "@/lib/addressFormatting";
 import { uploadManagedFile } from "@/lib/managedFiles";
 import { FUNCTION_LABELS } from "@/lib/securityCaoCatalog";
 
@@ -298,11 +299,11 @@ function ProfileInfoRow({ label, editing, children, value }) {
 
 function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
   const queryClient = useQueryClient();
-  const [form, setForm] = useState(person);
+  const [form, setForm] = useState(() => ({ ...person, ...normalizeAddressParts(person) }));
   const [uploadingPhoto, setUploadingPhoto] = useState(false);
 
   useEffect(() => {
-    setForm(person);
+    setForm({ ...person, ...normalizeAddressParts(person) });
   }, [person]);
 
   const set = (field, value) => setForm(current => ({ ...current, [field]: value }));
@@ -317,8 +318,10 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
   const saveMutation = useMutation({
     mutationFn: async () => {
       const displayName = buildPersonnelDisplayName(form);
+      const address = normalizeAddressParts(form);
       return base44.entities.Personnel.update(person.id, {
         ...form,
+        ...address,
         name: displayName,
         is_active: !["inactive", "archived"].includes(form.status || "active"),
       });
@@ -361,11 +364,8 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
 
   const data = editing ? form : person;
   const relationship = getRelationshipType(data);
-  const address = [
-    data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(),
-    [data.postal_code, data.city].filter(Boolean).join(" "),
-    data.country && data.country !== "Nederland" ? data.country : null,
-  ].filter(Boolean).join(", ");
+  const normalizedAddress = normalizeAddressParts(data);
+  const address = formatAddress(normalizedAddress, { omitDefaultCountry: true });
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
@@ -496,22 +496,22 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
           <ProfileInfoRow label="Telefoon" editing={editing} value={data.phone}>
             <Input value={data.phone || ""} onChange={event => set("phone", event.target.value)} />
           </ProfileInfoRow>
-          <ProfileInfoRow label="Straatnaam" editing={editing} value={data.street_name}>
+          <ProfileInfoRow label="Straatnaam" editing={editing} value={normalizedAddress.street_name}>
             <Input value={data.street_name || ""} onChange={event => set("street_name", event.target.value)} />
           </ProfileInfoRow>
-          <ProfileInfoRow label="Huisnummer" editing={editing} value={[data.house_number, data.house_number_addition].filter(Boolean).join(" ")}>
+          <ProfileInfoRow label="Huisnummer" editing={editing} value={[normalizedAddress.house_number, normalizedAddress.house_number_addition].filter(Boolean).join(" ")}>
             <div className="grid grid-cols-[1fr_120px] gap-2">
               <Input value={data.house_number || ""} onChange={event => set("house_number", event.target.value)} placeholder="Nr." />
               <Input value={data.house_number_addition || ""} onChange={event => set("house_number_addition", event.target.value)} placeholder="Toev." />
             </div>
           </ProfileInfoRow>
-          <ProfileInfoRow label="Postcode" editing={editing} value={data.postal_code}>
+          <ProfileInfoRow label="Postcode" editing={editing} value={normalizedAddress.postal_code}>
             <Input value={data.postal_code || ""} onChange={event => set("postal_code", event.target.value)} />
           </ProfileInfoRow>
-          <ProfileInfoRow label="Plaats" editing={editing} value={data.city}>
+          <ProfileInfoRow label="Plaats" editing={editing} value={normalizedAddress.city}>
             <Input value={data.city || ""} onChange={event => set("city", event.target.value)} />
           </ProfileInfoRow>
-          <ProfileInfoRow label="Land" editing={editing} value={data.country || "Nederland"}>
+          <ProfileInfoRow label="Land" editing={editing} value={normalizedAddress.country || "Nederland"}>
             <Input value={data.country || "Nederland"} onChange={event => set("country", event.target.value)} />
           </ProfileInfoRow>
         </div>

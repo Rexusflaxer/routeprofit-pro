@@ -13,7 +13,6 @@ import {
   Check,
   Edit,
   Handshake,
-  MapPin,
   Trash2,
   Upload,
   X,
@@ -30,6 +29,8 @@ import {
 } from "@/components/ui/alert-dialog";
 import { useNavigate } from "react-router-dom";
 import SidebarPanel from "@/components/companies/CompanySidebarPanel";
+import AddressAutocomplete from "@/components/ui-custom/AddressAutocomplete";
+import { formatAddress, normalizeAddressParts } from "@/lib/addressFormatting";
 import { uploadManagedFile, updateManagedFileSource } from "@/lib/managedFiles";
 
 const ROLE_LABELS = {
@@ -76,14 +77,16 @@ function DeleteGuardLoadingState() {
 
 function editableCompanyForm(company, blankPlaceholder = false) {
   const shouldBlank = blankPlaceholder && company.display_name === NEW_COMPANY_PLACEHOLDER && company.legal_name === NEW_COMPANY_PLACEHOLDER;
+  const address = normalizeAddressParts(company);
   return {
     ...company,
+    ...address,
     display_name: shouldBlank ? "" : company.display_name || "",
     legal_name: shouldBlank ? "" : company.legal_name || "",
     trade_name: company.trade_name || "",
     status: company.status || "active",
     company_role: company.company_role || "operating_company",
-    country: company.country || "Nederland",
+    country: address.country || "Nederland",
     activities: company.activities || [],
   };
 }
@@ -91,6 +94,7 @@ function editableCompanyForm(company, blankPlaceholder = false) {
 function normalizeCompanyPayload(data) {
   const displayName = data.display_name?.trim() || NEW_COMPANY_PLACEHOLDER;
   const legalName = data.legal_name?.trim() || displayName;
+  const address = normalizeAddressParts(data);
 
   return {
     ...data,
@@ -104,12 +108,12 @@ function normalizeCompanyPayload(data) {
     holding_company_id: data.holding_company_id || null,
     primary_activity: data.primary_activity || null,
     activities: data.activities || [],
-    street_name: data.street_name?.trim() || null,
-    house_number: data.house_number?.trim() || null,
-    house_number_addition: data.house_number_addition?.trim() || null,
-    postal_code: data.postal_code?.trim() || null,
-    city: data.city?.trim() || null,
-    country: data.country?.trim() || "Nederland",
+    street_name: address.street_name || null,
+    house_number: address.house_number || null,
+    house_number_addition: address.house_number_addition || null,
+    postal_code: address.postal_code || null,
+    city: address.city || null,
+    country: address.country || "Nederland",
     phone: data.phone?.trim() || null,
     email: data.email?.trim() || null,
     website: data.website?.trim() || null,
@@ -630,10 +634,7 @@ export default function CompanyDetail() {
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [archiveDialogOpen, setArchiveDialogOpen] = useState(false);
   const [permanentDeleteDialogOpen, setPermanentDeleteDialogOpen] = useState(false);
-  const addressTimeout = useRef(null);
   const initializedRequestedEdit = useRef(false);
-  const [addressSuggestions, setAddressSuggestions] = useState([]);
-  const [showAddressSugg, setShowAddressSugg] = useState(false);
 
   const { data: companies = [] } = useQuery({
     queryKey: ["companies"],
@@ -781,29 +782,6 @@ export default function CompanyDetail() {
     initializedRequestedEdit.current = true;
   }, [company, isNewProfileFlow, shouldOpenInEditMode]);
 
-  const handleAddressQuery = (val) => {
-    set("street_name", val);
-    if (addressTimeout.current) clearTimeout(addressTimeout.current);
-    if (val.length >= 3) {
-      addressTimeout.current = setTimeout(async () => {
-        const { data } = await base44.functions.invoke("searchAddress", { query: val });
-        setAddressSuggestions(data.suggestions || []);
-        setShowAddressSugg(true);
-      }, 300);
-    } else setShowAddressSugg(false);
-  };
-
-  const selectAddress = (s) => {
-    setForm(f => ({
-      ...f,
-      street_name: s.street_name || s.address,
-      house_number: s.house_number || f.house_number,
-      postal_code: s.postal_code || f.postal_code,
-      city: s.city || f.city,
-    }));
-    setShowAddressSugg(false);
-  };
-
   const uploadLogo = async (file) => {
     setUploadingLogo(true);
     try {
@@ -850,11 +828,7 @@ export default function CompanyDetail() {
   const data = editing ? form : company;
   const isArchived = company.status === "archived";
 
-  const address = [
-    company.street_name && `${company.street_name} ${company.house_number || ""}${company.house_number_addition || ""}`.trim(),
-    company.postal_code && company.city && `${company.postal_code} ${company.city}`,
-    company.country !== "Nederland" ? company.country : null,
-  ].filter(Boolean).join(", ");
+  const address = formatAddress(data, { omitDefaultCountry: true });
 
   const caoName = caoConfigurations.find(c => c.id === company.default_cao_configuration_id);
   const holdingOptions = companies.filter(c => c.id !== companyId && c.company_role === "holding");
@@ -988,38 +962,14 @@ export default function CompanyDetail() {
           {/* Contact & Adres */}
           <div className="space-y-1">
             <h3 className="text-xs font-semibold uppercase tracking-wider text-muted-foreground mb-3">Contact & Adres</h3>
-            <InfoRow label="Straatnaam">
+            <InfoRow label="Adres">
               {editing
-                ? <div className="relative">
-                    <Input value={data.street_name || ""} onChange={e => handleAddressQuery(e.target.value)} className="h-8 text-sm" autoComplete="off" />
-                    {showAddressSugg && addressSuggestions.length > 0 && (
-                      <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-lg shadow-lg max-h-40 overflow-y-auto">
-                        {addressSuggestions.map((s, i) => (
-                          <button key={i} type="button" onClick={() => selectAddress(s)} className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex gap-2 text-foreground">
-                            <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />{s.address}
-                          </button>
-                        ))}
-                      </div>
-                    )}
-                  </div>
-                : <ViewText value={data.street_name} />}
-            </InfoRow>
-            <InfoRow label="Huisnummer">
-              {editing
-                ? <div className="flex gap-2">
-                    <Input value={data.house_number || ""} onChange={e => set("house_number", e.target.value)} className="h-8 text-sm w-24" placeholder="Nr." />
-                    <Input value={data.house_number_addition || ""} onChange={e => set("house_number_addition", e.target.value)} className="h-8 text-sm w-20" placeholder="Toev." />
-                  </div>
-                : <ViewText value={[data.house_number, data.house_number_addition].filter(Boolean).join(" ")} />}
-            </InfoRow>
-            <InfoRow label="Postcode">
-              {editing ? <Input value={data.postal_code || ""} onChange={e => set("postal_code", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.postal_code} />}
-            </InfoRow>
-            <InfoRow label="Plaats">
-              {editing ? <Input value={data.city || ""} onChange={e => set("city", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.city} />}
-            </InfoRow>
-            <InfoRow label="Land">
-              {editing ? <Input value={data.country || "Nederland"} onChange={e => set("country", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.country} />}
+                ? <AddressAutocomplete
+                    value={data}
+                    onAddressSelect={selectedAddress => setForm(current => ({ ...current, ...selectedAddress }))}
+                    className="h-8 text-sm"
+                  />
+                : <ViewText value={address} />}
             </InfoRow>
             <InfoRow label="Telefoon">
               {editing ? <Input value={data.phone || ""} onChange={e => set("phone", e.target.value)} className="h-8 text-sm" /> : <ViewText value={data.phone} />}

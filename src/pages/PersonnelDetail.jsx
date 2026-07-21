@@ -44,6 +44,8 @@ import PhotoCropUpload from "@/components/personnel/PhotoCropUpload";
 import IdentityDocumentWizard from "@/components/personnel/IdentityDocumentWizard";
 import PayrollTab from "@/components/personnel/PayrollTab";
 import PersonnelBankTab from "@/components/personnel/PersonnelBankTab";
+import AddressAutocomplete from "@/components/ui-custom/AddressAutocomplete";
+import { formatAddress, normalizeAddressParts } from "@/lib/addressFormatting";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { FUNCTION_LABELS } from "@/lib/securityCaoCatalog";
 
@@ -504,78 +506,6 @@ function NationalitySelect({ value, onChange }) {
   );
 }
 
-function AddressAutocomplete({ data, onAddressSelect }) {
-  const currentAddress = [
-    data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(),
-    [data.postal_code, data.city].filter(Boolean).join(" "),
-  ].filter(Boolean).join(", ");
-
-  const [query, setQuery] = useState(currentAddress);
-  const [suggestions, setSuggestions] = useState([]);
-  const [open, setOpen] = useState(false);
-  const [loading, setLoading] = useState(false);
-  const abortRef = React.useRef(null);
-
-  const search = async (q) => {
-    if (q.length < 3) { setSuggestions([]); return; }
-    const token = {};
-    abortRef.current = token;
-    setLoading(true);
-    try {
-      const res = await base44.functions.invoke("searchAddress", { query: q });
-      if (abortRef.current !== token) return;
-      const raw = res.data?.suggestions || res.data?.results || [];
-      setSuggestions(raw.slice(0, 8));
-      setOpen(true);
-    } catch { setSuggestions([]); }
-    finally { setLoading(false); }
-  };
-
-  const handleSelect = (s) => {
-    // Parse suggestion into address parts
-    const label = s.label || s.address || "";
-    // Try to extract postcode + city from label
-    const postcodeMatch = label.match(/\b(\d{4}\s?[A-Z]{2})\b/);
-    const parts = label.split(",").map(p => p.trim());
-    onAddressSelect({
-      street_name: s.street || s.streetName || parts[0]?.replace(/\s+\d+.*$/, "").trim() || "",
-      house_number: s.houseNumber || (parts[0]?.match(/\d+[a-zA-Z]?/))?.[0] || "",
-      house_number_addition: s.houseNumberAddition || "",
-      postal_code: postcodeMatch?.[1] || s.postalCode || s.postcode || "",
-      city: s.city || s.municipality || parts[1] || "",
-      country: s.country || "Nederland",
-    });
-    setQuery(label);
-    setOpen(false);
-    setSuggestions([]);
-  };
-
-  return (
-    <div className="space-y-2">
-      <div className="relative">
-        <Input
-          value={query}
-          onChange={e => { setQuery(e.target.value); search(e.target.value); }}
-          onFocus={() => { if (suggestions.length > 0) setOpen(true); }}
-          onBlur={() => setTimeout(() => setOpen(false), 150)}
-          placeholder="Zoek adres, bijv. Dorpsstraat 12 Amsterdam..."
-        />
-        {loading && <div className="absolute right-3 top-2.5 h-4 w-4 animate-spin rounded-full border-2 border-border border-t-primary" />}
-        {open && suggestions.length > 0 && (
-          <div className="absolute z-50 w-full mt-1 rounded-md border border-border bg-popover shadow-lg max-h-56 overflow-auto">
-            {suggestions.map((s, i) => (
-              <button key={i} type="button" className="w-full text-left px-3 py-2 text-sm hover:bg-accent transition-colors"
-                onMouseDown={() => handleSelect(s)}>
-                {s.label || s.address || JSON.stringify(s)}
-              </button>
-            ))}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
 function PlaceSearchInput({ value, onChange }) {
   const [query, setQuery] = useState(value || "");
   const [open, setOpen] = useState(false);
@@ -813,8 +743,11 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
   const saveMutation = useMutation({
     mutationFn: async () => {
       const displayName = buildDisplayName(form);
+      const address = normalizeAddressParts(form);
       return base44.entities.Personnel.update(person.id, {
-        ...form, name: displayName,
+        ...form,
+        ...address,
+        name: displayName,
         is_active: !["inactive", "archived"].includes(form.status || "active"),
       });
     },
@@ -825,11 +758,7 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
   };
   const data = editing ? form : person;
   const relationship = getRelationshipType(data);
-  const address = [
-    data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(),
-    [data.postal_code, data.city].filter(Boolean).join(" "),
-    data.country && data.country !== "Nederland" ? data.country : null,
-  ].filter(Boolean).join(", ");
+  const address = formatAddress(data, { omitDefaultCountry: true });
 
   return (
     <div className="overflow-hidden rounded-xl border border-border bg-card shadow-sm">
@@ -890,8 +819,7 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
                       { label: "Geboorteplaats", value: data.place_of_birth },
                       { label: "Geboorteland", value: data.country_of_birth },
                       { label: "Nationaliteit", value: data.nationality },
-                      { label: "Adres", value: [data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(), [data.postal_code, data.city].filter(Boolean).join(" ")].filter(Boolean).join(", ") || null },
-                      { label: "Land", value: data.country && data.country !== "Nederland" ? data.country : null },
+                      { label: "Adres", value: address || null },
                       { label: "Personeelsnr.", value: data.personnel_number ? `#${data.personnel_number}` : null },
                     ].filter(f => f.value).map(f => (
                       <div key={f.label} className="flex gap-2 py-0.5">
@@ -985,14 +913,10 @@ function PersonnelProfileCard({ person, editing, onEdit, onCancel, onSaved }) {
                   />
                 </div>
               </ProfileInfoRow>
-              <ProfileInfoRow label="Adres" editing={editing} value={[
-                  data.street_name && `${data.street_name} ${data.house_number || ""}${data.house_number_addition || ""}`.trim(),
-                  [data.postal_code, data.city].filter(Boolean).join(" "),
-                  data.country && data.country !== "Nederland" ? data.country : null,
-                ].filter(Boolean).join(", ")}>
+              <ProfileInfoRow label="Adres" editing={editing} value={address}>
                 <AddressAutocomplete
-                  data={data}
-                  onAddressSelect={addr => { Object.entries(addr).forEach(([k, v]) => set(k, v)); }}
+                  value={data}
+                  onAddressSelect={selectedAddress => setForm(current => ({ ...current, ...selectedAddress }))}
                 />
               </ProfileInfoRow>
             </div>

@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef } from "react";
+import React, { useEffect, useState } from "react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -8,7 +8,9 @@ import { Checkbox } from "@/components/ui/checkbox";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Switch } from "@/components/ui/switch";
-import { Search, Upload, X, MapPin } from "lucide-react";
+import { Search, Upload, X } from "lucide-react";
+import AddressAutocomplete from "@/components/ui-custom/AddressAutocomplete";
+import { normalizeAddressParts } from "@/lib/addressFormatting";
 import { createManagedUploadSession, uploadManagedFile } from "@/lib/managedFiles";
 import {
   TEAMHUB_LICENSE_SERVICE_GROUPS,
@@ -61,11 +63,8 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
   const [kvkSearch, setKvkSearch] = useState("");
   const [kvkResults, setKvkResults] = useState([]);
   const [kvkLoading, setKvkLoading] = useState(false);
-  const [addressSuggestions, setAddressSuggestions] = useState([]);
-  const [showAddressSugg, setShowAddressSugg] = useState(false);
   const [uploadingLogo, setUploadingLogo] = useState(false);
   const [uploadingLetterhead, setUploadingLetterhead] = useState(false);
-  const addressTimeout = useRef(null);
 
   const set = (field, value) => setForm(f => ({ ...f, [field]: value }));
 
@@ -92,32 +91,6 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
       city: result.city || f.city,
     }));
     setKvkResults([]);
-  };
-
-  const handleAddressQuery = (val) => {
-    set("street_name", val);
-    if (addressTimeout.current) clearTimeout(addressTimeout.current);
-    if (val.length >= 3) {
-      addressTimeout.current = setTimeout(async () => {
-        const { data } = await base44.functions.invoke("searchAddress", { query: val });
-        setAddressSuggestions(data.suggestions || []);
-        setShowAddressSugg(true);
-      }, 300);
-    } else {
-      setShowAddressSugg(false);
-    }
-  };
-
-  const selectAddress = (s) => {
-    setForm(f => ({
-      ...f,
-      street_name: s.street_name || s.address,
-      house_number: s.house_number || f.house_number,
-      postal_code: s.postal_code || f.postal_code,
-      city: s.city || f.city,
-      full_address: s.address,
-    }));
-    setShowAddressSugg(false);
   };
 
   const uploadFile = async (file, field, setLoading) => {
@@ -179,6 +152,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
 
   const buildSavePayload = () => ({
     ...form,
+    ...normalizeAddressParts(form),
     teamhub_intro: form.teamhub_intro?.trim() || null,
     teamhub_contact_name: form.teamhub_contact_name?.trim() || null,
     teamhub_contact_email: form.teamhub_contact_email?.trim() || null,
@@ -370,40 +344,12 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
         {/* ADRES & CONTACT */}
         <TabsContent value="address" className="space-y-4 pt-2">
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            <div className="space-y-1 relative">
-              <Label>Straatnaam</Label>
-              <Input value={form.street_name || ""} onChange={e => handleAddressQuery(e.target.value)} autoComplete="off" />
-              {showAddressSugg && addressSuggestions.length > 0 && (
-                <div className="absolute z-50 w-full mt-1 bg-popover border border-border rounded-lg shadow-lg max-h-48 overflow-y-auto">
-                  {addressSuggestions.map((s, i) => (
-                    <button key={i} type="button" onClick={() => selectAddress(s)} className="w-full px-3 py-2 text-left text-sm hover:bg-accent flex gap-2 text-foreground">
-                      <MapPin className="w-4 h-4 text-muted-foreground mt-0.5 shrink-0" />{s.address}
-                    </button>
-                  ))}
-                </div>
-              )}
-            </div>
-            <div className="flex gap-2">
-              <div className="space-y-1 flex-1">
-                <Label>Huisnummer</Label>
-                <Input value={form.house_number || ""} onChange={e => set("house_number", e.target.value)} />
-              </div>
-              <div className="space-y-1 w-24">
-                <Label>Toev.</Label>
-                <Input value={form.house_number_addition || ""} onChange={e => set("house_number_addition", e.target.value)} />
-              </div>
-            </div>
-            <div className="space-y-1">
-              <Label>Postcode</Label>
-              <Input value={form.postal_code || ""} onChange={e => set("postal_code", e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label>Plaats</Label>
-              <Input value={form.city || ""} onChange={e => set("city", e.target.value)} />
-            </div>
-            <div className="space-y-1">
-              <Label>Land</Label>
-              <Input value={form.country || "Nederland"} onChange={e => set("country", e.target.value)} />
+            <div className="space-y-1 md:col-span-2">
+              <Label>Adres</Label>
+              <AddressAutocomplete
+                value={form}
+                onAddressSelect={selectedAddress => setForm(current => ({ ...current, ...selectedAddress }))}
+              />
             </div>
             <div className="space-y-1">
               <Label>Telefoon</Label>

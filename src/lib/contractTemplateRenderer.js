@@ -1,4 +1,5 @@
 import { functionLabel } from "./securityCaoCatalog.js";
+import { formatAddress, normalizeAddressParts } from "./addressFormatting.js";
 import {
   CAO_PARTICULIERE_BEVEILIGING_KEY,
   PB_CAO_FUNCTION_GROUP_OPTIONS,
@@ -300,12 +301,6 @@ function formatCurrency(value, fallback = "") {
     currency: "EUR",
     minimumFractionDigits: 2,
   }).format(number);
-}
-
-function joinAddress({ street, houseNumber, addition, postalCode, city, country }) {
-  const streetLine = compact([street, houseNumber, addition].filter(Boolean).join(" "));
-  const cityLine = compact([postalCode, city].filter(Boolean).join(" "));
-  return [streetLine, cityLine, compact(country)].filter(Boolean).join(", ");
 }
 
 function parseFunctionValues(form = {}) {
@@ -800,22 +795,10 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     || [personnel.legal_first_names || personnel.first_name, personnel.name_prefix, personnel.last_name].filter(Boolean).join(" "));
   const firstName = compact(personnel.first_name || personnel.call_name || personnel.legal_first_names);
   const lastName = compact([personnel.name_prefix, personnel.last_name].filter(Boolean).join(" "));
-  const employeeAddress = joinAddress({
-    street: personnel.street_name || personnel.street,
-    houseNumber: personnel.house_number,
-    addition: personnel.house_number_addition,
-    postalCode: personnel.postal_code,
-    city: personnel.city || personnel.place,
-    country: personnel.country,
-  });
-  const companyAddress = joinAddress({
-    street: company.street_name || company.street,
-    houseNumber: company.house_number,
-    addition: company.house_number_addition,
-    postalCode: company.postal_code,
-    city: company.city || company.place,
-    country: company.country,
-  });
+  const employeeAddressParts = normalizeAddressParts(personnel);
+  const companyAddressParts = normalizeAddressParts(company);
+  const employeeAddress = formatAddress(employeeAddressParts);
+  const companyAddress = formatAddress(companyAddressParts);
   const functions = readableFunctionValues(form);
   const primaryFunction = form.primary_function_status === "pending_work_history" && functions.length > 1
     ? "een van de overeengekomen inzetbare functies"
@@ -945,16 +928,16 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     "contract.contractvorm": values.contract_duursoort,
     bedrijf_naam: values.bedrijf_statutaire_naam,
     bedrijf_adres: values.bedrijf_adres_volledig,
-    bedrijf_postcode: compact(company.postal_code),
-    bedrijf_plaats: compact(company.city),
-    bedrijf_land: compact(company.country),
+    bedrijf_postcode: companyAddressParts.postal_code,
+    bedrijf_plaats: companyAddressParts.city,
+    bedrijf_land: companyAddressParts.country,
     medewerker_adres: values.medewerker_adres_volledig,
-    medewerker_straatnaam: compact(personnel.street_name || personnel.street),
-    medewerker_huisnummer: compact([personnel.house_number, personnel.house_number_addition].filter(Boolean).join(" ")),
-    medewerker_postcode: compact(personnel.postal_code),
-    medewerker_plaats: compact(personnel.city || personnel.place),
-    medewerker_woonplaats: compact(personnel.city || personnel.place),
-    medewerker_land: compact(personnel.country),
+    medewerker_straatnaam: employeeAddressParts.street_name,
+    medewerker_huisnummer: compact([employeeAddressParts.house_number, employeeAddressParts.house_number_addition].filter(Boolean).join(" ")),
+    medewerker_postcode: employeeAddressParts.postal_code,
+    medewerker_plaats: employeeAddressParts.city,
+    medewerker_woonplaats: employeeAddressParts.city,
+    medewerker_land: employeeAddressParts.country,
     startdatum: values.contract_startdatum,
     einddatum: values.contract_einddatum || "onbepaalde tijd",
     functie: values.hoofdfunctie,
