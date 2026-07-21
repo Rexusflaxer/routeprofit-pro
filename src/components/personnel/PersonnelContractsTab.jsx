@@ -11,7 +11,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
-import { uploadManagedFile } from "@/lib/managedFiles";
+import { downloadManagedFile, uploadManagedFile } from "@/lib/managedFiles";
 import {
   buildFunctionGroupsForWpbrLicenses,
   CAO_OPTIONS,
@@ -47,12 +47,12 @@ import {
   CheckCircle,
   ChevronLeft,
   ChevronRight,
+  Download,
   Eye,
   FileSignature,
   Pencil,
   Plus,
   RefreshCw,
-  Save,
   Upload,
   X,
 } from "lucide-react";
@@ -273,7 +273,7 @@ const INTERNSHIP_CONFIRMATION_FIELDS = [
 
 const DOCUMENT_STATUS_LABELS = {
   concept: "Concept",
-  generated: "Gegenereerd",
+  generated: "Wacht op ondertekening",
   signed: "Getekend - controle nodig",
   scheduled: "Ingepland",
   active: "Actief",
@@ -1893,6 +1893,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const [signedUploadId, setSignedUploadId] = useState(null);
   const [wageScaleFilter, setWageScaleFilter] = useState(null);
   const [durationTypeConfirmed, setDurationTypeConfirmed] = useState(false);
+  const [confirmedContract, setConfirmedContract] = useState(null);
+  const [paperSignedDate, setPaperSignedDate] = useState("");
+  const [paperSignedFile, setPaperSignedFile] = useState(null);
+  const [reviewDocumentUrl, setReviewDocumentUrl] = useState(null);
 
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
@@ -2145,19 +2149,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     return rows;
   }, [effectiveCaoConfiguration, form.cao_function_group, form.cao_key, isBblModel, wageTableYear]);
   const wageScaleOptions = useMemo(() => uniqueValues(wageRows.map(row => String(row.scale))).sort((a, b) => Number(a) - Number(b)), [wageRows]);
-  const wageScaleCards = useMemo(() => wageScaleOptions.map(scale => {
-    const rows = wageRows.filter(row => String(row.scale) === String(scale));
-    const rates = rows.map(row => Number(row.hourlyRate)).filter(Number.isFinite);
-    return {
-      scale,
-      periodCount: rows.length,
-      minimumRate: rates.length > 0 ? Math.min(...rates) : null,
-      maximumRate: rates.length > 0 ? Math.max(...rates) : null,
-    };
-  }), [wageRows, wageScaleOptions]);
   const visibleWageRows = useMemo(() => wageScaleFilter === null
     ? []
-    : wageRows.filter(row => String(row.scale) === String(wageScaleFilter)), [wageRows, wageScaleFilter]);
+    : wageRows
+      .filter(row => String(row.scale) === String(wageScaleFilter))
+      .sort((a, b) => Number(a.period) - Number(b.period)), [wageRows, wageScaleFilter]);
   const selectedWageRow = useMemo(() => wageRows.find(row => (
     String(row.scale) === String(form.cao_scale)
     && String(row.period) === String(form.cao_period)
@@ -2196,6 +2192,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     },
     enabled: wizardOpen
       && wizardStep === 10
+      && !confirmedContract
       && !!form.company_id
       && !!form.contract_start_date
       && selectedFunctionValues.length > 0,
@@ -2210,6 +2207,38 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     () => validateStandardContractTemplateContext({ personnel, form, company: selectedCompany || {}, template: selectedTemplate || {} }),
     [form, personnel, selectedCompany, selectedTemplate]
   );
+  const reviewDocument = useMemo(() => {
+    if (!wizardOpen || wizardStep !== 10 || confirmedContract) return { file: null, error: null };
+    if (form.source_type === "uploaded_existing") {
+      return { file: form.existing_contract_file || null, error: null };
+    }
+    if (form.source_type !== "generated") return { file: null, error: null };
+    try {
+      return {
+        file: makePdfFile({
+          personnel,
+          form,
+          company: selectedCompany,
+          template: selectedTemplate,
+          letterhead: selectedLetterhead,
+          clauses: selectedTemplateClauses,
+        }),
+        error: null,
+      };
+    } catch (error) {
+      return { file: null, error: error?.message || "De documentpreview kon niet worden opgebouwd." };
+    }
+  }, [
+    confirmedContract,
+    form,
+    personnel,
+    selectedCompany,
+    selectedLetterhead,
+    selectedTemplate,
+    selectedTemplateClauses,
+    wizardOpen,
+    wizardStep,
+  ]);
   const isPbParttimeModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     && ["parttime_fixed", "parttime_growth"].includes(form.employment_contract_model);
   const isPbGrowthParttime = isPbParttimeModel && form.employment_contract_model === "parttime_growth";
@@ -2378,7 +2407,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       letterhead_id: null,
       work_location: defaultWorkLocation,
       work_area: nextCompany?.country || "Nederland",
-      signing_place: nextCompany?.city || "",
+      signing_place: "",
     };
   });
 
@@ -2772,10 +2801,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       return { record, activated: false, evaluation: latestEvaluation };
     },
     onSuccess: (result) => {
-      setWizardOpen(false);
-      setWizardStep(1);
-      setEditingId(null);
-      setForm(initialForm(personnel));
+      setConfirmedContract(result?.record || null);
+      setEditingId(result?.record?.id || editingId);
+      setPaperSignedFile(null);
+      setPaperSignedDate(result?.record?.contract_agreed_at || "");
       setActionMessage({
         type: "success",
         text: firstNotificationMessage(result?.notifications)
@@ -2783,7 +2812,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           ? "Het getekende contract is gecontroleerd en actief gemaakt."
           : result?.record?.document_status === "signed"
             ? "Het getekende contract is opgeslagen en wacht op juridische controle."
-            : "Het contractdocument is gegenereerd. Upload na ondertekening de getekende versie om het te activeren."),
+            : "Het contract is bevestigd en staat klaar voor ondertekening."),
       });
       refresh();
     },
@@ -2817,7 +2846,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   });
 
   const signedUploadMutation = useMutation({
-    mutationFn: async ({ contract, file }) => {
+    mutationFn: async ({ contract, file, signedDate = null }) => {
       const result = await uploadManagedFile({
         file,
         ownerType: "personnel",
@@ -2845,12 +2874,17 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         signed_file_id: result.managed_file_id,
         signed_download_filename: result.download_filename,
         signed_logical_path: result.logical_path,
-        contract_agreed_at: contract.contract_agreed_at || contract.signing_date || new Date().toISOString().slice(0, 10),
+        contract_agreed_at: signedDate
+          || contract.contract_agreed_at
+          || contract.signing_date
+          || new Date().toISOString().slice(0, 10),
       });
       return data;
     },
-    onSuccess: (data) => {
+    onSuccess: (data, variables) => {
       setSignedUploadId(null);
+      setPaperSignedFile(null);
+      if (variables?.fromWizard && data?.contract) setConfirmedContract(data.contract);
       setActionMessage({
         type: "success",
         text: firstNotificationMessage(data?.notifications)
@@ -2869,11 +2903,30 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     },
   });
 
+  const downloadContractMutation = useMutation({
+    mutationFn: async (contract) => {
+      const descriptor = contractFileDescriptor(contract);
+      if (!descriptor) throw new Error("Er is nog geen contractdocument beschikbaar om te downloaden.");
+      await downloadManagedFile({
+        managedFileId: descriptor.managedFileId,
+        fileUrl: descriptor.fileUrl,
+        filename: descriptor.filename,
+      });
+    },
+    onError: (error) => setActionMessage({
+      type: "error",
+      text: error?.message || "Het contract kon niet worden gedownload.",
+    }),
+  });
+
   const openNew = () => {
     setEditingId(null);
     setForm(initialForm(personnel));
     setWageScaleFilter(null);
     setDurationTypeConfirmed(false);
+    setConfirmedContract(null);
+    setPaperSignedDate("");
+    setPaperSignedFile(null);
     setWizardStep(1);
     setActionMessage(null);
     setWizardOpen(true);
@@ -2884,6 +2937,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setForm(formFromContract(contract));
     setWageScaleFilter(contract.cao_scale === null || contract.cao_scale === undefined ? null : String(contract.cao_scale));
     setDurationTypeConfirmed(true);
+    setConfirmedContract(null);
+    setPaperSignedDate("");
+    setPaperSignedFile(null);
     setWizardStep(1);
     setActionMessage(null);
     setWizardOpen(true);
@@ -2900,6 +2956,17 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
 
   const nextStep = () => setWizardStep(step => Math.min(step + 1, 10));
   const previousStep = () => setWizardStep(step => Math.max(step - 1, 1));
+  const closeWizard = () => {
+    setWizardOpen(false);
+    setWizardStep(1);
+    setEditingId(null);
+    setForm(initialForm(personnel));
+    setWageScaleFilter(null);
+    setDurationTypeConfirmed(false);
+    setConfirmedContract(null);
+    setPaperSignedDate("");
+    setPaperSignedFile(null);
+  };
   const chooseDocumentSource = (sourceType) => {
     setForm(prev => ({
       ...prev,
@@ -2933,6 +3000,16 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setDurationTypeConfirmed(false);
     setWizardStep(6);
   };
+
+  useEffect(() => {
+    if (!reviewDocument.file) {
+      setReviewDocumentUrl(null);
+      return undefined;
+    }
+    const url = URL.createObjectURL(reviewDocument.file);
+    setReviewDocumentUrl(url);
+    return () => URL.revokeObjectURL(url);
+  }, [reviewDocument.file]);
 
   useEffect(() => {
     if (!wizardOpen || !form.company_id || companyCaoAssignmentsLoading) return;
@@ -3024,9 +3101,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const wageStepComplete = form.contract_form === "zzp"
     || (isPbNonOperationalRole
       ? numberOrNull(form.custom_hourly_rate) !== null
-      : (wageRows.length > 0
-        ? !!selectedWageRow && stepHourlyRate !== null
-        : numberOrNull(form.cao_scale) !== null && numberOrNull(form.cao_period) !== null && stepHourlyRate !== null));
+      : wageRows.length > 0 && !!selectedWageRow && stepHourlyRate !== null);
   const fixedWeeklyHoursComplete = !["fulltime", "parttime_fixed", "parttime_growth", "bbl"].includes(form.employment_contract_model)
     || (numberOrNull(form.contract_hours_per_week) ?? 0) > 0;
   const minMaxBand = getMinMaxBand(form);
@@ -3071,6 +3146,35 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     wageAndHoursStepComplete,
     true,
   ][wizardStep - 1];
+  const reviewDocumentName = reviewDocument.file?.name || "Contractdocument";
+  const reviewDocumentMime = String(reviewDocument.file?.type || "").toLowerCase();
+  const reviewDocumentIsPdf = reviewDocumentMime === "application/pdf" || reviewDocumentName.toLowerCase().endsWith(".pdf");
+  const reviewDocumentIsImage = reviewDocumentMime.startsWith("image/") || /\.(jpe?g|png|webp)$/i.test(reviewDocumentName);
+  const evaluationErrorMessage = contractEvaluationError?.response?.data?.error
+    || contractEvaluationError?.message
+    || null;
+  const reviewBlockingMessages = uniqueValues([
+    reviewDocument.error,
+    !reviewDocument.file ? "Het contractdocument is nog niet beschikbaar voor controle." : null,
+    ...missingFields.map(field => `Vul eerst ${field} in.`),
+    ...conflicts.issues,
+    ...(form.source_type === "generated" ? standardTemplateValidation.issues : []),
+    ...(form.source_type === "generated" && unresolvedTemplatePlaceholders.length > 0
+      ? [`Koppel eerst deze placeholders: ${unresolvedTemplatePlaceholders.join(", ")}.`]
+      : []),
+    evaluationErrorMessage,
+    ...(contractEvaluation?.blocking_reasons || []),
+    ...(form.source_type === "generated" ? (contractEvaluation?.manual_review_reasons || []) : []),
+  ]);
+  const reviewReady = !!reviewDocument.file
+    && !contractEvaluationLoading
+    && !evaluationErrorMessage
+    && reviewBlockingMessages.length === 0
+    && (form.source_type === "generated"
+      ? contractEvaluation?.status === "compliant"
+      : !!contractEvaluation && contractEvaluation.status !== "blocked");
+  const confirmedDocumentStatus = confirmedContract?.document_status || null;
+  const confirmedContractActivated = ["active", "scheduled", "expired"].includes(confirmedDocumentStatus);
 
   return (
     <div className="flex flex-col h-full">
@@ -3536,58 +3640,45 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 </div>
                 {wageRows.length > 0 ? (
                   <div className="space-y-4">
-                    <section className="space-y-2">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">1. Kies de loonschaal</p>
-                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
-                      {wageScaleCards.map(card => {
-                        const selected = String(form.cao_scale) === String(card.scale);
-                        const rateLabel = card.minimumRate === card.maximumRate
-                          ? `${formatCurrency(card.minimumRate)} per uur`
-                          : `${formatCurrency(card.minimumRate)} - ${formatCurrency(card.maximumRate)} per uur`;
-                        return (
-                        <button
-                          key={card.scale}
-                          type="button"
-                          onClick={() => selectWageScale(card.scale)}
-                          className={`flex min-h-20 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
+                    <div className="grid gap-4 md:grid-cols-2">
+                      <div className="space-y-1.5">
+                        <Label>Loonschaal *</Label>
+                        <Select
+                          value={form.cao_scale === "" || form.cao_scale === null || form.cao_scale === undefined ? "none" : String(form.cao_scale)}
+                          onValueChange={value => selectWageScale(value)}
                         >
-                          <span>
-                            <span className="block text-sm font-semibold text-foreground">Schaal {card.scale}</span>
-                            <span className="mt-1 block text-xs text-muted-foreground">{rateLabel}</span>
-                            <span className="mt-1 block text-xs text-muted-foreground">{card.periodCount} {card.periodCount === 1 ? "periodiek" : "periodieken"}</span>
-                          </span>
-                          {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
-                        </button>
-                        );
-                      })}
+                          <SelectTrigger><SelectValue placeholder="Kies loonschaal" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none" disabled>Kies loonschaal</SelectItem>
+                            {wageScaleOptions.map(scale => (
+                              <SelectItem key={scale} value={scale}>Schaal {scale}</SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
                       </div>
-                    </section>
-                    {wageScaleFilter !== null ? (
-                    <section className="space-y-2">
-                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">2. Kies de periodiek</p>
-                      <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
-                      {visibleWageRows.map((row, index) => {
-                        const selected = String(form.cao_scale) === String(row.scale) && String(form.cao_period) === String(row.period);
-                        return (
-                          <button
-                            key={`${row.scale}-${row.period}-${index}`}
-                            type="button"
-                            onClick={() => selectWageRow(row)}
-                            className={`flex min-h-14 items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
-                          >
-                            <div>
-                              <p className="text-sm font-semibold text-foreground">Periodiek {row.period ?? "-"}</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">{formatCurrency(row.hourlyRate)} bruto per uur</p>
-                            </div>
-                            {selected ? <Check className="h-4 w-4 text-primary" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
-                          </button>
-                        );
-                      })}
+                      <div className="space-y-1.5">
+                        <Label>Periodiek *</Label>
+                        <Select
+                          value={form.cao_period === "" || form.cao_period === null || form.cao_period === undefined ? "none" : String(form.cao_period)}
+                          onValueChange={value => {
+                            const row = visibleWageRows.find(item => String(item.period) === String(value));
+                            if (row) selectWageRow(row);
+                          }}
+                          disabled={wageScaleFilter === null}
+                        >
+                          <SelectTrigger><SelectValue placeholder="Kies periodiek" /></SelectTrigger>
+                          <SelectContent>
+                            <SelectItem value="none" disabled>Kies periodiek</SelectItem>
+                            {visibleWageRows.map((row, index) => (
+                              <SelectItem key={`${row.scale}-${row.period}-${index}`} value={String(row.period)}>
+                                Periodiek {row.period ?? "-"} - {formatCurrency(row.hourlyRate)} bruto per uur
+                              </SelectItem>
+                            ))}
+                          </SelectContent>
+                        </Select>
+                        <p className="text-xs text-muted-foreground">De beschikbare periodieken horen bij de geselecteerde schaal en de loontabel op de startdatum.</p>
                       </div>
-                    </section>
-                    ) : (
-                      <div className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">Selecteer een loonschaal om de bijbehorende periodieken te bekijken.</div>
-                    )}
+                    </div>
                     {selectedWageRow && (
                       <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 px-4 py-3">
                         <div>
@@ -3608,21 +3699,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   <section className="space-y-3 rounded-lg border border-amber-300 bg-amber-50/60 p-4 dark:border-amber-800 dark:bg-amber-950/20">
                     <div>
                       <p className="text-sm font-semibold text-foreground">Geen loontabel beschikbaar</p>
-                      <p className="mt-1 text-xs text-muted-foreground">Controleer de actieve CAO-configuratie. Totdat een loontabel beschikbaar is, moeten schaal, periodiek en bruto uurloon handmatig worden vastgelegd.</p>
-                    </div>
-                    <div className="grid gap-3 md:grid-cols-3">
-                      <div className="space-y-1">
-                        <Label>Loonschaal</Label>
-                        <Input type="number" min="0" value={form.cao_scale ?? ""} onChange={event => set("cao_scale", event.target.value)} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Periodiek</Label>
-                        <Input type="number" min="0" value={form.cao_period ?? ""} onChange={event => set("cao_period", event.target.value)} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Afgesproken bruto uurloon</Label>
-                        <Input type="number" min="0" step="0.01" value={form.custom_hourly_rate ?? ""} onChange={event => setManualHourlyRate(event.target.value)} />
-                      </div>
+                      <p className="mt-1 text-xs text-muted-foreground">Vul eerst de loonschalen en periodieken in de actieve CAO-configuratie aan. LOQ laat geen vrije schaal- of periodiekinvoer toe, omdat daarmee een onjuiste loonafspraak kan ontstaan.</p>
                     </div>
                   </section>
                 )}
@@ -3872,206 +3949,178 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             )}
 
             {wizardStep === 10 && (
-              <div className="grid gap-4 lg:grid-cols-[1fr_420px]">
-                <div className="space-y-3">
-                  {form.source_type === "generated" ? (
-                    <section className="space-y-3 rounded-lg border border-border p-4">
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">Documentopmaak</p>
-                        <p className="mt-1 text-xs text-muted-foreground">Controleer het gekozen sjabloon en kies het briefpapier voor het definitieve contract.</p>
+              confirmedContract ? (
+                <div className="mx-auto max-w-3xl py-6">
+                  <div className="text-center">
+                    <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
+                      <CheckCircle className="h-6 w-6" />
+                    </span>
+                    <h3 className="mt-3 text-lg font-semibold text-foreground">
+                      {confirmedContractActivated ? "Contract geregistreerd" : "Contract bevestigd"}
+                    </h3>
+                    <p className="mx-auto mt-1 max-w-xl text-sm text-muted-foreground">
+                      {confirmedDocumentStatus === "generated"
+                        ? "Het document staat klaar voor ondertekening en is nog niet actief voor planning of loonverwerking."
+                        : confirmedDocumentStatus === "signed"
+                          ? "Het getekende document is opgeslagen, maar blijft geblokkeerd totdat de juridische controlepunten zijn opgelost."
+                          : confirmedDocumentStatus === "scheduled"
+                            ? "Het volledig getekende contract is gecontroleerd en wordt actief op de overeengekomen startdatum."
+                            : confirmedDocumentStatus === "expired"
+                              ? "Het volledig getekende historische contract is gecontroleerd en geregistreerd."
+                              : "Het volledig getekende contract is gecontroleerd en actief gemaakt."}
+                    </p>
+                    <div className="mt-3">{documentStatusBadge(confirmedDocumentStatus)}</div>
+                  </div>
+
+                  {confirmedDocumentStatus === "generated" && (
+                    <div className="mt-6 space-y-4 border-t border-border pt-5">
+                      <div className="flex flex-wrap items-center justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">Ondertekenen op papier</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Download het document, laat alle vereiste partijen tekenen en plaats daarna het volledige exemplaar terug.</p>
+                        </div>
+                        <Button
+                          type="button"
+                          variant="outline"
+                          size="sm"
+                          onClick={() => downloadContractMutation.mutate(confirmedContract)}
+                          disabled={downloadContractMutation.isPending}
+                        >
+                          <Download className="mr-1.5 h-4 w-4" />
+                          {downloadContractMutation.isPending ? "Downloaden..." : "Contract downloaden"}
+                        </Button>
                       </div>
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Sjabloon</p>
-                        {selectedTemplate ? (
-                          <div className="flex min-h-12 w-full items-center justify-between rounded-lg border border-primary bg-accent px-3 py-2">
-                            <div className="min-w-0">
-                              <p className="text-sm font-medium text-foreground">Versie {selectedTemplate.version || 1}</p>
-                              {selectedTemplate.description && <p className="mt-0.5 line-clamp-2 text-xs text-muted-foreground">{selectedTemplate.description}</p>}
-                            </div>
-                            <Check className="h-4 w-4 text-primary" />
-                          </div>
-                        ) : (
-                          <p className="text-sm text-destructive">Er is geen contractsjabloon geselecteerd.</p>
-                        )}
-                      </div>
-                      <div className="space-y-2">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Briefpapier</p>
-                        <div className="grid grid-cols-1 gap-2 sm:grid-cols-2">
-                          <button
-                            type="button"
-                            onClick={() => set("letterhead_id", null)}
-                            className={`flex min-h-12 items-center justify-between rounded-lg border px-3 py-2 text-left ${!form.letterhead_id ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
-                          >
-                            <span className="text-sm font-medium text-foreground">Zonder briefpapier</span>
-                            {!form.letterhead_id && <Check className="h-4 w-4 text-primary" />}
-                          </button>
-                          {letterheadOptions.map(item => {
-                            const selected = form.letterhead_id === item.id;
-                            return (
-                              <button
-                                key={item.id}
-                                type="button"
-                                onClick={() => set("letterhead_id", item.id)}
-                                className={`flex min-h-12 items-center justify-between rounded-lg border px-3 py-2 text-left ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
-                              >
-                                <span className="text-sm font-medium text-foreground">{item.name}{item.is_default ? " (standaard)" : ""}</span>
-                                {selected && <Check className="h-4 w-4 text-primary" />}
-                              </button>
-                            );
-                          })}
+
+                      <div className="grid gap-4 md:grid-cols-[220px_1fr]">
+                        <div className="space-y-1.5">
+                          <Label>Datum laatste ondertekening *</Label>
+                          <Input
+                            type="date"
+                            max={new Date().toISOString().slice(0, 10)}
+                            value={paperSignedDate}
+                            onChange={event => setPaperSignedDate(event.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">De datum waarop alle vereiste partijen hebben getekend.</p>
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label>Volledig getekend contract *</Label>
+                          <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md border border-dashed border-primary/40 bg-primary/5 px-3 py-2 transition-colors hover:bg-primary/10">
+                            <Upload className="h-4 w-4 shrink-0 text-primary" />
+                            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
+                              {paperSignedFile?.name || "Kies PDF, JPG of PNG"}
+                            </span>
+                            <input
+                              type="file"
+                              accept="application/pdf,image/jpeg,image/png"
+                              className="hidden"
+                              onChange={event => setPaperSignedFile(event.target.files?.[0] || null)}
+                            />
+                          </label>
                         </div>
                       </div>
-                    </section>
-                  ) : (
-                    <section className="space-y-3 rounded-lg border border-border p-4">
-                      <p className="text-sm font-semibold text-foreground">Geüpload contract</p>
-                      <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-4 py-3 transition-colors hover:bg-primary/10">
-                        <Upload className="h-5 w-5 shrink-0 text-primary" />
-                        <span className="min-w-0 flex-1">
-                          <span className="block truncate text-sm font-medium text-foreground">{form.existing_contract_file?.name || (form.signed_file_id ? "Het bestaande contractbestand is gekoppeld" : "Selecteer het contractdocument")}</span>
-                          <span className="block text-xs text-muted-foreground">PDF, JPG of PNG</span>
-                        </span>
-                        <input
-                          type="file"
-                          accept=".pdf,image/*"
-                          className="hidden"
-                          onChange={event => set("existing_contract_file", event.target.files?.[0] || null)}
-                        />
-                      </label>
-                    </section>
-                  )}
-                  <div className="rounded-lg border border-border p-3">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Controle</p>
-                    {missingFields.length === 0
-                      && conflicts.issues.length === 0
-                      && standardTemplateValidation.issues.length === 0
-                      && unresolvedTemplatePlaceholders.length === 0 ? (
-                      <p className="mt-2 flex items-center gap-2 text-sm text-emerald-700">
-                        <CheckCircle className="h-4 w-4" /> Contractbasis compleet.
-                      </p>
-                    ) : (
-                      <div className="mt-2 space-y-2 text-sm text-amber-700">
-                        {missingFields.length > 0 && <p>Ontbreekt: {missingFields.join(", ")}.</p>}
-                        {conflicts.issues.map((issue, index) => <p key={index} className="text-destructive">{issue}</p>)}
-                      </div>
-                    )}
-                    {standardTemplateValidation.issues.map((issue, index) => (
-                      <p key={`template-issue-${index}`} className="mt-2 text-sm text-destructive">{issue}</p>
-                    ))}
-                    {unresolvedTemplatePlaceholders.length > 0 && (
-                      <p className="mt-2 text-sm text-destructive">
-                        Niet gekoppelde placeholders: {unresolvedTemplatePlaceholders.join(", ")}.
-                      </p>
-                    )}
-                    {conflicts.warnings.map((warning, index) => (
-                      <p key={index} className="mt-2 text-sm text-amber-700">{warning}</p>
-                    ))}
-                    {standardTemplateValidation.warnings.map((warning, index) => (
-                      <p key={`template-warning-${index}`} className="mt-2 text-sm text-amber-700">{warning}</p>
-                    ))}
-                  </div>
-                  <div className="rounded-lg border border-border p-4">
-                    <div className="flex items-start justify-between gap-3">
-                      <div>
-                        <p className="text-sm font-semibold text-foreground">Juridische contractcontrole</p>
-                        <p className="mt-1 text-xs text-muted-foreground">Servercontrole op keten, looptijd, functieconflicten, CAO-context en gezamenlijke contracturen.</p>
-                      </div>
-                      {contractEvaluationLoading ? (
-                        <Badge variant="outline">Controleren...</Badge>
-                      ) : contractEvaluation?.status === "compliant" ? (
-                        <Badge className="bg-emerald-100 text-emerald-700">Gereed</Badge>
-                      ) : contractEvaluation ? (
-                        <Badge className="bg-amber-100 text-amber-700">Aandacht nodig</Badge>
-                      ) : null}
-                    </div>
-                    {contractEvaluationError && (
-                      <p className="mt-3 flex items-center gap-2 text-sm text-destructive">
-                        <AlertTriangle className="h-4 w-4" /> {contractEvaluationError?.response?.data?.error || contractEvaluationError.message || "Controle kon niet worden uitgevoerd."}
-                      </p>
-                    )}
-                    {contractEvaluation && (
-                      <div className="mt-3 space-y-2 text-sm">
-                        {contractEvaluation.chain?.status !== "not_applicable" && (
-                          <div className="flex flex-wrap items-center gap-2 rounded-md bg-muted/40 px-3 py-2">
-                            <CalendarClock className="h-4 w-4 text-muted-foreground" />
-                            <span className="font-medium text-foreground">Keten {contractEvaluation.chain?.position || "-"} van {contractEvaluation.chain?.contract_limit || "-"}</span>
-                            <span className="text-muted-foreground">binnen {contractEvaluation.chain?.period_limit_months || "-"} maanden</span>
-                          </div>
-                        )}
-                        {contractEvaluation.blocking_reasons?.map((reason, index) => (
-                          <p key={`legal-block-${index}`} className="flex gap-2 text-destructive"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {reason}</p>
-                        ))}
-                        {contractEvaluation.manual_review_reasons?.map((reason, index) => (
-                          <p key={`legal-review-${index}`} className="flex gap-2 text-amber-700"><AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> {reason}</p>
-                        ))}
-                        {contractEvaluation.warnings?.map((warning, index) => (
-                          <p key={`legal-warning-${index}`} className="text-muted-foreground">{warning}</p>
-                        ))}
-                        {contractEvaluation.status === "compliant" && (
-                          <p className="flex items-center gap-2 text-emerald-700"><CheckCircle className="h-4 w-4" /> Geen blokkades gevonden. Een gegenereerd document wordt pas actief na upload en controle van de getekende versie.</p>
-                        )}
-                      </div>
-                    )}
-                  </div>
-                  {form.source_type === "generated" && (
-                    <div className="grid gap-3 md:grid-cols-2">
-                      <div className="space-y-1">
-                        <Label>Vertegenwoordiger werkgever</Label>
-                        <Input value={form.employer_representative_name || ""} onChange={event => set("employer_representative_name", event.target.value)} placeholder="Volledige naam" />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Functie vertegenwoordiger</Label>
-                        <Input value={form.employer_representative_function || ""} onChange={event => set("employer_representative_function", event.target.value)} placeholder="Bijv. directeur" />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Plaats ondertekening</Label>
-                        <Input value={form.signing_place || ""} onChange={event => set("signing_place", event.target.value)} />
-                      </div>
-                      <div className="space-y-1">
-                        <Label>Datum ondertekening</Label>
-                        <Input type="date" value={form.signing_date || ""} onChange={event => set("signing_date", event.target.value)} />
+
+                      <div className="flex justify-end">
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={!paperSignedDate || !paperSignedFile || signedUploadMutation.isPending}
+                          onClick={() => signedUploadMutation.mutate({
+                            contract: confirmedContract,
+                            file: paperSignedFile,
+                            signedDate: paperSignedDate,
+                            fromWizard: true,
+                          })}
+                        >
+                          <Upload className="mr-1.5 h-4 w-4" />
+                          {signedUploadMutation.isPending ? "Controleren..." : "Getekend contract uploaden"}
+                        </Button>
                       </div>
                     </div>
                   )}
-                  <div className="space-y-1">
-                    <Label>Interne notities</Label>
-                    <Textarea rows={4} value={form.notes || ""} onChange={event => set("notes", event.target.value)} />
+
+                  <div className="mt-6 flex justify-end border-t border-border pt-4">
+                    <Button type="button" size="sm" onClick={closeWizard}>Sluiten</Button>
                   </div>
                 </div>
-                <div className="rounded-lg border border-border bg-muted/20 p-3">
-                  <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Document</p>
-                  {form.source_type === "generated" ? (
-                    <pre className="mt-2 max-h-80 overflow-auto whitespace-pre-wrap text-xs text-muted-foreground">{generatedPreview}</pre>
-                  ) : (
-                    <p className="mt-2 text-sm text-muted-foreground">{form.existing_contract_file?.name || "Geen nieuw bestand geselecteerd."}</p>
+              ) : (
+                <div className="space-y-3">
+                  {form.source_type === "uploaded_existing" && !reviewDocument.file && (
+                    <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-4 py-3 transition-colors hover:bg-primary/10">
+                      <Upload className="h-5 w-5 shrink-0 text-primary" />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate text-sm font-medium text-foreground">Selecteer het volledige contractdocument</span>
+                        <span className="block text-xs text-muted-foreground">PDF, JPG of PNG</span>
+                      </span>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/jpeg,image/png"
+                        className="hidden"
+                        onChange={event => set("existing_contract_file", event.target.files?.[0] || null)}
+                      />
+                    </label>
+                  )}
+
+                  <div className="h-[68vh] min-h-[520px] overflow-hidden rounded-lg border border-border bg-muted/30">
+                    {reviewDocumentUrl && reviewDocumentIsPdf && (
+                      <iframe
+                        title="Contract controleren"
+                        src={`${reviewDocumentUrl}#toolbar=1&navpanes=0&view=FitH`}
+                        className="h-full w-full bg-background"
+                      />
+                    )}
+                    {reviewDocumentUrl && reviewDocumentIsImage && (
+                      <div className="flex h-full items-center justify-center overflow-auto p-4">
+                        <img src={reviewDocumentUrl} alt="Contract controleren" className="max-h-full max-w-full object-contain" />
+                      </div>
+                    )}
+                    {reviewDocumentUrl && !reviewDocumentIsPdf && !reviewDocumentIsImage && (
+                      <div className="flex h-full items-center justify-center p-6 text-center">
+                        <div>
+                          <FileSignature className="mx-auto h-7 w-7 text-muted-foreground" />
+                          <p className="mt-2 text-sm font-medium text-foreground">Voorbeeld niet beschikbaar</p>
+                          <p className="mt-1 text-xs text-muted-foreground">{reviewDocumentName}</p>
+                        </div>
+                      </div>
+                    )}
+                    {!reviewDocumentUrl && reviewDocument.file && (
+                      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Documentpreview wordt opgebouwd...</div>
+                    )}
+                    {!reviewDocument.file && (
+                      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">Selecteer of herstel eerst het contractdocument.</div>
+                    )}
+                  </div>
+
+                  {(contractEvaluationLoading || reviewBlockingMessages.length > 0) && (
+                    <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${reviewBlockingMessages.length > 0 ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border bg-muted/30 text-muted-foreground"}`}>
+                      {reviewBlockingMessages.length > 0 ? <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" /> : <RefreshCw className="mt-0.5 h-4 w-4 shrink-0 animate-spin" />}
+                      <span>{reviewBlockingMessages[0] || "LOQ controleert het contract..."}</span>
+                    </div>
                   )}
                 </div>
-              </div>
+              )
             )}
               </motion.div></AnimatePresence></div>
 
-          {wizardStep >= 6 && (
+          {wizardStep >= 6 && !confirmedContract && (
             <div className="flex items-center justify-between pt-3">
-              <Button type="button" variant="ghost" size="sm" onClick={previousStep}><ChevronLeft className="w-4 h-4 mr-1" /> Terug</Button>
+              <Button type="button" variant="ghost" size="sm" onClick={previousStep} disabled={saveMutation.isPending}>
+                <ChevronLeft className="w-4 h-4 mr-1" /> Terug
+              </Button>
               <div className="flex gap-2">
-                <Button type="button" variant="outline" size="sm" onClick={() => setWizardOpen(false)}>Annuleren</Button>
                 {wizardStep < 10 ? (
-                  <Button type="button" size="sm" onClick={nextStep} disabled={!currentStepComplete}>
-                  Volgende <ChevronRight className="w-4 h-4 ml-1" />
-                  </Button>
+                  <>
+                    <Button type="button" variant="outline" size="sm" onClick={closeWizard}>Annuleren</Button>
+                    <Button type="button" size="sm" onClick={nextStep} disabled={!currentStepComplete}>
+                      Volgende <ChevronRight className="w-4 h-4 ml-1" />
+                    </Button>
+                  </>
                 ) : (
                   <Button
                     type="button" size="sm"
                     onClick={() => saveMutation.mutate()}
-                    disabled={saveMutation.isPending
-                      || contractEvaluationLoading
-                      || missingFields.length > 0
-                      || conflicts.issues.length > 0
-                      || contractEvaluation?.status === "blocked"
-                      || contractEvaluation?.status === "manual_review_required"
-                      || (form.source_type === "generated" && (standardTemplateValidation.issues.length > 0 || unresolvedTemplatePlaceholders.length > 0))}
+                    disabled={saveMutation.isPending || !reviewReady}
                   >
-                    <Save className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Opslaan..." : "Contract opslaan"}
+                    <CheckCircle className="w-4 h-4 mr-1" /> {saveMutation.isPending ? "Bevestigen..." : "Bevestigen"}
                   </Button>
                 )}
               </div>

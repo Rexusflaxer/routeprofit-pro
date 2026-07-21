@@ -509,6 +509,17 @@ assert.deepEqual(objectSecurity.issues, []);
 assert.deepEqual(objectSecurity.unresolved, []);
 assert.match(objectSecurity.body, /144 uur per loonperiode van vier weken/);
 
+const pendingEmployerSignature = evaluate(operationalForm({
+  employer_representative_name: "",
+  employer_representative_function: "",
+  signing_place: "",
+  signing_date: "",
+}));
+assert.deepEqual(pendingEmployerSignature.issues, []);
+assert.ok(pendingEmployerSignature.warnings.some(warning => warning.includes("bij ondertekening ingevuld")));
+assert.match(pendingEmployerSignature.body, /Aldus overeengekomen en ondertekend te _{8,} op _{4}-_{4}-_{8}/);
+assert.match(pendingEmployerSignature.body, /Voor werkgever:\n_{8,}\n_{8,}/);
+
 const pac = evaluate(operationalForm({
   function_type: "centralist_pac",
   allowed_function_types_text: "centralist_pac",

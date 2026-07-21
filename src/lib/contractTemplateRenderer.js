@@ -830,6 +830,8 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
   const periodSalary = hourlyRate !== null && salaryHoursPerPeriod !== null ? hourlyRate * salaryHoursPerPeriod : null;
   const caoName = CAO_LABELS[form.cao_key] || compact(form.cao_key);
   const today = new Date().toISOString().slice(0, 10);
+  const pendingSignatureValue = "________________________";
+  const pendingSignatureDate = "____-____-________";
 
   const values = {
     bedrijf_statutaire_naam: compact(company.legal_name || company.display_name),
@@ -840,8 +842,8 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     bedrijf_btw_nummer: compact(company.btw_number),
     bedrijf_email: compact(company.email),
     bedrijf_telefoon: compact(company.phone),
-    bedrijf_vertegenwoordiger_naam: compact(form.employer_representative_name),
-    bedrijf_vertegenwoordiger_functie: compact(form.employer_representative_function),
+    bedrijf_vertegenwoordiger_naam: compact(form.employer_representative_name) || pendingSignatureValue,
+    bedrijf_vertegenwoordiger_functie: compact(form.employer_representative_function) || pendingSignatureValue,
     medewerker_volledige_naam: employeeName,
     medewerker_voornaam: firstName,
     medewerker_achternaam: lastName,
@@ -882,8 +884,8 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     contracturen_per_periode: isPbZeroHours(form) ? "" : ((isPbMinMax(form) ? minMaxHours.minHoursPerPeriod : hoursPerPeriod) ?? ""),
     pensioenregeling_naam: "Stichting Bedrijfstakpensioenfonds voor de Particuliere Beveiliging",
     meldpunt_privacy_datalekken: compact(company.privacy_email || company.email || company.phone),
-    contract_ondertekeningsplaats: compact(form.signing_place || company.city),
-    contract_ondertekeningsdatum: formatDate(form.signing_date || today),
+    contract_ondertekeningsplaats: compact(form.signing_place) || pendingSignatureValue,
+    contract_ondertekeningsdatum: form.signing_date ? formatDate(form.signing_date) : pendingSignatureDate,
     stage_instelling_naam: compact(form.internship_institution_name),
     stage_instelling_adres: compact(form.internship_institution_address),
     stage_instelling_vertegenwoordiger_naam: compact(form.internship_institution_representative_name),
@@ -1039,16 +1041,18 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (contractStart && presetValidUntil && contractStart > presetValidUntil) {
     issues.push(`Deze standaardtemplate is beoordeeld tot en met ${formatDate(preset.legal_basis.valid_until)}; publiceer eerst een bijgewerkte CAO-versie voor deze ingangsdatum.`);
   }
+  if (!compact(form.employer_representative_name)
+    || !compact(form.employer_representative_function)
+    || !compact(form.signing_place)
+    || !form.signing_date) {
+    warnings.push("Naam, functie, plaats, datum en handtekening van de werkgever worden bij ondertekening ingevuld. Controleer vóór activering dat het definitieve document volledig door alle vereiste partijen is ondertekend.");
+  }
   if (isInternshipPreset) {
     if (form.contract_form !== "stage") issues.push("Een artikel-14-stage moet als stageovereenkomst worden opgeslagen en niet als arbeidsovereenkomst.");
     if (durationType(form) !== "fixed") issues.push("Een stageovereenkomst moet een concrete begin- en einddatum hebben.");
     if (!form.contract_end_date) issues.push("De einddatum van de stage ontbreekt.");
     if (!form.function_type) issues.push("Kies één primaire praktijkfunctie voor de stage.");
     if (!compact(form.work_location)) issues.push("Vul de primaire stageplaats in.");
-    if (!compact(form.employer_representative_name)) issues.push("Vul de vertegenwoordiger van het stagebedrijf in.");
-    if (!compact(form.employer_representative_function)) issues.push("Vul de functie van de vertegenwoordiger van het stagebedrijf in.");
-    if (!compact(form.signing_place)) issues.push("Vul de plaats van ondertekening in.");
-    if (!form.signing_date) issues.push("Vul de datum van ondertekening in.");
     if (!compact(company.privacy_email || company.email || company.phone)) issues.push("Vul bij het stagebedrijf een meldpunt voor privacy- en beveiligingsincidenten in.");
     if (form.probation_agreed === true || form.probation_agreed === "true") issues.push("Een stageovereenkomst mag geen proeftijd bevatten.");
 
@@ -1125,10 +1129,6 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (durationType(form) === "fixed" && !form.contract_end_date) issues.push("De einddatum ontbreekt bij een arbeidsovereenkomst voor bepaalde tijd.");
   if (parseFunctionValues(form).length === 0) issues.push("Selecteer minimaal één inzetbare functie voor dit contract.");
   if (!compact(form.work_location)) issues.push("Vul de standplaats in.");
-  if (!compact(form.employer_representative_name)) issues.push("Vul de naam van de vertegenwoordiger van werkgever in.");
-  if (!compact(form.employer_representative_function)) issues.push("Vul de functie van de vertegenwoordiger van werkgever in.");
-  if (!compact(form.signing_place)) issues.push("Vul de plaats van ondertekening in.");
-  if (!form.signing_date) issues.push("Vul de datum van ondertekening in.");
   if (!compact(company.privacy_email || company.email || company.phone)) issues.push("Vul bij het bedrijf een e-mailadres of telefoonnummer in voor privacy- en beveiligingsmeldingen.");
   if (isBblPreset) {
     if (form.contract_form !== "bepaalde_tijd" || durationType(form) !== "fixed") {
