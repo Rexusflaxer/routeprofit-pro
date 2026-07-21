@@ -47,6 +47,7 @@ import {
 } from "../src/lib/letterheadDocumentSettings.js";
 import {
   DEFAULT_CONTRACT_PDF_MARGINS,
+  PDF_POINTS_PER_MM,
   normalizeContractPdfMargins,
 } from "../src/lib/contractPdfLetterhead.js";
 
@@ -349,6 +350,7 @@ assert.deepEqual(normalizeContractPdfMargins({
 assert.deepEqual(normalizeContractPdfMargins({
   metadata: { margins_mm: { top: -5, right: 110, bottom: 20, left: 14 } },
 }), { top: 0, right: 90, bottom: 20, left: 14 });
+assert.equal(PDF_POINTS_PER_MM, 72 / 25.4);
 
 const pbFulltimeDurations = durationOptionsForContractTemplate({
   template_type: "employment_contract",

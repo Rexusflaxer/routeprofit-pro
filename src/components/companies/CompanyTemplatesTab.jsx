@@ -78,6 +78,10 @@ import {
   pageNumberPositionLabel,
 } from "@/lib/letterheadDocumentSettings";
 import {
+  DEFAULT_CONTRACT_PDF_MARGINS,
+  normalizeContractPdfMargins,
+} from "@/lib/contractPdfLetterhead";
+import {
   Archive,
   ArrowDown,
   ArrowUp,
@@ -918,12 +922,7 @@ const LETTERHEAD_BACKGROUND_FITS = [
   { value: "cover", label: "Vullend", description: "Vult A4 volledig en snijdt randen af als het formaat afwijkt." },
   { value: "stretch", label: "Uitrekken", description: "Rekt de upload exact naar A4. Alleen gebruiken als de verhouding klopt." },
 ];
-const DEFAULT_LETTERHEAD_MARGINS = {
-  top: 25,
-  right: 20,
-  bottom: 25,
-  left: 20,
-};
+const DEFAULT_LETTERHEAD_MARGINS = DEFAULT_CONTRACT_PDF_MARGINS;
 const LETTERHEAD_MIN_TEXT_WIDTH_MM = 45;
 const LETTERHEAD_MIN_TEXT_HEIGHT_MM = 55;
 const DEFAULT_LETTERHEAD_BACKGROUND_FIT = "contain";
@@ -989,14 +988,7 @@ function clampMargin(value, fallback = 20) {
 }
 
 function normalizeLetterheadMargins(source = {}) {
-  const metadataMargins = source.metadata?.margins_mm || {};
-  const documentSettingsMargins = source.document_settings?.margins_mm || {};
-  return {
-    top: clampMargin(source.margin_top_mm ?? documentSettingsMargins.top ?? metadataMargins.top, DEFAULT_LETTERHEAD_MARGINS.top),
-    right: clampMargin(source.margin_right_mm ?? documentSettingsMargins.right ?? metadataMargins.right, DEFAULT_LETTERHEAD_MARGINS.right),
-    bottom: clampMargin(source.margin_bottom_mm ?? documentSettingsMargins.bottom ?? metadataMargins.bottom, DEFAULT_LETTERHEAD_MARGINS.bottom),
-    left: clampMargin(source.margin_left_mm ?? documentSettingsMargins.left ?? metadataMargins.left, DEFAULT_LETTERHEAD_MARGINS.left),
-  };
+  return normalizeContractPdfMargins(source);
 }
 
 function letterheadMarginPercentages(margins) {
@@ -2293,7 +2285,7 @@ const TEMPLATE_PREVIEW_ZOOM_STEP = 10;
 const TEMPLATE_PREVIEW_PAGE_WIDTH = 420;
 const TEMPLATE_PREVIEW_PAGE_HEIGHT = TEMPLATE_PREVIEW_PAGE_WIDTH * (297 / 210);
 const TEMPLATE_PREVIEW_HEIGHT_SAFETY_PX = 6;
-const TEMPLATE_PREVIEW_UNIT_CLASS = "relative -mx-1 mb-2 break-inside-avoid rounded-[2px] px-1 py-0.5 [page-break-inside:avoid]";
+const TEMPLATE_PREVIEW_UNIT_CLASS = "relative -mx-1 mb-2 break-inside-avoid rounded-[2px] px-1 [page-break-inside:avoid]";
 const TEMPLATE_PREVIEW_RICH_TEXT_CLASS = "[overflow-wrap:anywhere] [&_a]:underline [&_blockquote]:border-l-2 [&_blockquote]:border-slate-300 [&_blockquote]:pl-2 [&_h2]:font-bold [&_h3]:font-semibold [&_li]:mb-0.5 [&_ol]:ml-4 [&_ol]:list-decimal [&_p]:mb-1 [&_ul]:ml-4 [&_ul]:list-disc";
 
 function centerElementInScrollContainer(scrollContainer, target, behavior = "smooth") {

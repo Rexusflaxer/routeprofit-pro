@@ -6,6 +6,8 @@ const RASTER_WIDTH = 1680;
 const RASTER_HEIGHT = Math.round(RASTER_WIDTH * (A4_HEIGHT_MM / A4_WIDTH_MM));
 const PREVIEW_PAGE_WIDTH = 430;
 
+export const PDF_POINTS_PER_MM = 72 / 25.4;
+
 export const DEFAULT_CONTRACT_PDF_MARGINS = Object.freeze({
   top: 25,
   right: 20,

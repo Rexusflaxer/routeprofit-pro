@@ -38,7 +38,7 @@ import {
   normalizePageNumberSettings,
   pageNumberHorizontalAlignment,
 } from "@/lib/letterheadDocumentSettings";
-import { buildContractPdfLetterhead } from "@/lib/contractPdfLetterhead";
+import { buildContractPdfLetterhead, PDF_POINTS_PER_MM } from "@/lib/contractPdfLetterhead";
 import { groupContractTemplateVersions } from "@/lib/contractTemplateEditor";
 import { getOfficialPbWageRows, getOfficialPbWageTableYear } from "@/lib/caoPbWageTables";
 import {
@@ -1575,7 +1575,7 @@ async function makePdfFile({ personnel, form, company, template, letterhead, cla
   const { backgroundDataUrl, margins } = await buildContractPdfLetterhead(letterhead);
   const pageNumberSettings = normalizePageNumberSettings(letterhead || {});
   const pageNumberAlignment = pageNumberHorizontalAlignment(pageNumberSettings);
-  const millimeterToPoint = 72 / 25.4;
+  const millimeterToPoint = PDF_POINTS_PER_MM;
   const pageWidth = doc.internal.pageSize.getWidth();
   const pageHeight = doc.internal.pageSize.getHeight();
   const margin = margins.left * millimeterToPoint;
@@ -1616,6 +1616,10 @@ async function makePdfFile({ personnel, form, company, template, letterhead, cla
   doc.setFont("helvetica", "normal");
   doc.setFontSize(10);
   let y = continuationTop;
+  const drawLine = (line, height) => {
+    doc.text(line, margin, y, { baseline: "top" });
+    y += height;
+  };
   const paragraphs = body.split(/\n{2,}/).map(paragraph => paragraph.trim()).filter(Boolean);
   const paragraphLines = paragraphs.map(paragraph => doc.splitTextToSize(paragraph, textWidth));
 
@@ -1636,13 +1640,11 @@ async function makePdfFile({ personnel, form, company, template, letterhead, cla
     if (isDocumentHeading && ownHeight <= pageBottom - continuationTop) {
       doc.setFont("helvetica", "bold");
       doc.setFontSize(16);
-      doc.text(lines[0], margin, y);
-      y += documentTitleLineHeight;
+      drawLine(lines[0], documentTitleLineHeight);
       doc.setFont("helvetica", "normal");
       doc.setFontSize(10);
       lines.slice(1).forEach(line => {
-        doc.text(line, margin, y);
-        y += lineHeight;
+        drawLine(line, lineHeight);
       });
       y += paragraphGap;
       return;
@@ -1651,8 +1653,8 @@ async function makePdfFile({ personnel, form, company, template, letterhead, cla
     doc.setFontSize(10);
     doc.setFont("helvetica", isArticleHeading ? "bold" : "normal");
     if (ownHeight <= pageBottom - continuationTop) {
-      doc.text(lines, margin, y);
-      y += ownHeight;
+      lines.forEach(line => drawLine(line, lineHeight));
+      y += paragraphGap;
       return;
     }
 
@@ -1661,8 +1663,7 @@ async function makePdfFile({ personnel, form, company, template, letterhead, cla
         addPage();
         y = continuationTop;
       }
-      doc.text(line, margin, y);
-      y += lineHeight;
+      drawLine(line, lineHeight);
     });
     y += paragraphGap;
   });
