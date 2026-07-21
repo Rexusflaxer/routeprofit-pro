@@ -308,16 +308,29 @@ function numberOrNull(value) {
   return Number.isFinite(number) ? number : null;
 }
 
+function roundedHours(value) {
+  return Math.round(value * 100) / 100;
+}
+
+function payPeriodHoursFromWeekHours(weekHours, frequency) {
+  const hours = numberOrNull(weekHours);
+  if (hours === null) return null;
+  if (frequency === "week") return roundedHours(hours);
+  if (frequency === "month") return roundedHours((hours * 52) / 12);
+  if (frequency === "four_weeks") return roundedHours(hours * 4);
+  return null;
+}
+
 function getMinMaxBand(value) {
-  const minPayPeriod = numberOrNull(value?.min_hours_per_pay_period);
-  const maxPayPeriod = numberOrNull(value?.max_hours_per_pay_period);
-  if (minPayPeriod !== null && maxPayPeriod !== null) {
-    return { minimum: minPayPeriod, maximum: maxPayPeriod, period: "loonperiode" };
-  }
   const minWeek = numberOrNull(value?.min_hours_per_week);
   const maxWeek = numberOrNull(value?.max_hours_per_week);
   if (minWeek !== null && maxWeek !== null) {
     return { minimum: minWeek, maximum: maxWeek, period: "week" };
+  }
+  const minPayPeriod = numberOrNull(value?.min_hours_per_pay_period);
+  const maxPayPeriod = numberOrNull(value?.max_hours_per_pay_period);
+  if (minPayPeriod !== null && maxPayPeriod !== null) {
+    return { minimum: minPayPeriod, maximum: maxPayPeriod, period: "loonperiode" };
   }
   return { minimum: null, maximum: null, period: null };
 }
@@ -600,6 +613,19 @@ function getSalaryTables(option) {
 }
 
 function extractWageRows(option, targetYear) {
+  const normalizedOptions = Array.isArray(option?.wage_options) ? option.wage_options : [];
+  if (normalizedOptions.length > 0) {
+    const exactYearRows = normalizedOptions.filter(row => targetYear && Number(row.year) === Number(targetYear));
+    const unversionedRows = normalizedOptions.filter(row => !row.year);
+    const selectedRows = exactYearRows.length > 0 ? exactYearRows : unversionedRows;
+    return selectedRows.map(row => ({
+      year: row.year || targetYear,
+      scale: row.scale,
+      period: row.period,
+      hourlyRate: row.hourly_rate,
+      label: `Schaal ${row.scale ?? "-"} / periodiek ${row.period ?? "-"}`,
+    }));
+  }
   const rows = [];
   getSalaryTables(option).forEach(table => {
     const tableYear = Number(table.year || table.valid_year || table.period_year || table.effective_year || "");
@@ -741,7 +767,7 @@ function initialForm(personnel) {
     source_type: "",
     company_id: personnel.primary_company_id || null,
     cao_key: personnel.cao || null,
-    cao_configuration_id: personnel.cao_configuration_id || null,
+    cao_configuration_id: null,
     contract_model: inferredModel,
     contract_form: model?.contract_form || personnel.contract_form || "unknown",
     underlying_contract_form: model?.underlying_contract_form || personnel.underlying_contract_form || null,
@@ -1018,30 +1044,49 @@ function getMissingContractFields(form) {
   if (!form.contract_start_date) missing.push("startdatum");
   if (form.duration_type === "fixed" && !form.contract_end_date) missing.push("einddatum");
   if (!form.function_type && fromArrayText(form.allowed_function_types_text).length === 0) missing.push("minimaal één functie");
-  if (form.contract_form !== "zzp" && form.contract_form !== "stage" && !form.cao_scale && !form.cao_period && !form.custom_hourly_rate) {
-    missing.push("loonschaal/trede");
+  const wageRequired = form.contract_form !== "zzp" && form.contract_form !== "stage";
+  const hasScale = numberOrNull(form.cao_scale) !== null;
+  const hasPeriod = numberOrNull(form.cao_period) !== null;
+  const hasHourlyRate = (numberOrNull(form.hourly_rate_snapshot) ?? numberOrNull(form.custom_hourly_rate)) !== null;
+  const isPbNonSecurity = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    && (form.performs_security_work === "false" || form.cao_function_group === "non_security_staff");
+  if (wageRequired && isPbNonSecurity && numberOrNull(form.custom_hourly_rate) === null) {
+    missing.push("afgesproken bruto uurloon");
+  } else if (wageRequired && form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
+    if (!hasScale) missing.push("loonschaal");
+    if (!hasPeriod) missing.push("periodiek");
+    if (!hasHourlyRate) missing.push("CAO-uurloon");
+  } else if (wageRequired && !hasScale && !hasPeriod && !hasHourlyRate) {
+    missing.push("loonschaal/periodiek of bruto uurloon");
   }
   if (form.contract_form !== "zzp" && form.contract_form !== "stage" && form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY && !form.salary_payment_frequency) {
     missing.push("betaalperiode loon");
   }
   const pbParttimeModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     && ["parttime_fixed", "parttime_growth"].includes(form.employment_contract_model);
-  if (pbParttimeModel && !form.contract_hours_per_pay_period) {
-    missing.push("contracturen per loonperiode");
-  } else if (["fulltime", "parttime_fixed", "parttime_growth"].includes(form.employment_contract_model) && !form.contract_hours_per_week && !form.contract_hours_per_pay_period) {
-    missing.push("arbeidsduur");
+  if (["fulltime", "parttime_fixed", "parttime_growth"].includes(form.employment_contract_model)
+    && numberOrNull(form.contract_hours_per_week) === null) {
+    missing.push("contracturen per week");
+  }
+  const weeklyContractHours = numberOrNull(form.contract_hours_per_week);
+  if (pbParttimeModel && !isPbNonSecurity && weeklyContractHours !== null && (weeklyContractHours <= 0 || weeklyContractHours >= 36)) {
+    missing.push("parttime-uren tussen 0 en 36 uur per week");
   }
   if (pbParttimeModel && (form.performs_security_work === "false" || form.cao_function_group === "non_security_staff")
-    && !form.fulltime_reference_hours_per_week && !form.fulltime_reference_hours_per_pay_period) {
-    missing.push("fulltime referentienorm");
+    && numberOrNull(form.fulltime_reference_hours_per_week) === null) {
+    missing.push("fulltime referentienorm per week");
   }
-  if (form.employment_contract_model === "min_max" && (!form.min_hours_per_pay_period || !form.max_hours_per_pay_period)) {
-    missing.push("min-max uren");
+  if (form.employment_contract_model === "min_max"
+    && (numberOrNull(form.min_hours_per_week) === null || numberOrNull(form.max_hours_per_week) === null)) {
+    missing.push("min-max uren per week");
   }
   if (form.employment_contract_model === "min_max") {
     const band = getMinMaxBand(form);
     if (band.minimum !== null && band.minimum <= 0) missing.push("minimumuren groter dan nul");
     if (band.minimum !== null && band.maximum !== null && band.maximum < band.minimum) missing.push("maximumuren minimaal gelijk aan minimumuren");
+    if (form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY && band.maximum !== null && band.maximum > 36) {
+      missing.push("maximumuren maximaal 36 uur per week");
+    }
   }
   if (["min_max", "zero_hours", "call_agreement"].includes(form.employment_contract_model)
     && normalizeAvailabilityWindows(form.availability_windows).length === 0) {
@@ -1097,7 +1142,7 @@ function getMissingContractFields(form) {
       missing.push("BBL-contract voor bepaalde tijd");
     }
     if (form.source_type === "generated" && !["pok_end_date", "free"].includes(form.duration_option)) missing.push("bron van de BBL-einddatum");
-    if (!form.contract_hours_per_week && !form.contract_hours_per_pay_period) missing.push("arbeidsduur BBL");
+    if (numberOrNull(form.contract_hours_per_week) === null) missing.push("arbeidsduur BBL per week");
     if (!form.bbl_institution_name) missing.push("onderwijsinstelling BBL");
     if (!form.bbl_education_name) missing.push("BBL-opleiding");
     if (!form.bbl_practice_agreement_reference) missing.push("praktijkovereenkomst BBL");
@@ -1171,6 +1216,21 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
   const isCallAgreement = ["zero_hours", "min_max"].includes(employmentModel);
   const hasFixedHours = ["fulltime", "parttime_fixed", "parttime_growth", "bbl"].includes(employmentModel);
   const isMinMax = employmentModel === "min_max";
+  const salaryPaymentFrequency = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    ? "four_weeks"
+    : (form.salary_payment_frequency || null);
+  const contractHoursPerWeek = numberOrNull(form.contract_hours_per_week);
+  const fulltimeReferenceHoursPerWeek = numberOrNull(form.fulltime_reference_hours_per_week);
+  const minHoursPerWeek = numberOrNull(form.min_hours_per_week);
+  const maxHoursPerWeek = numberOrNull(form.max_hours_per_week);
+  const contractHoursPerPayPeriod = payPeriodHoursFromWeekHours(contractHoursPerWeek, salaryPaymentFrequency)
+    ?? numberOrNull(form.contract_hours_per_pay_period);
+  const fulltimeReferenceHoursPerPayPeriod = payPeriodHoursFromWeekHours(fulltimeReferenceHoursPerWeek, salaryPaymentFrequency)
+    ?? numberOrNull(form.fulltime_reference_hours_per_pay_period);
+  const minHoursPerPayPeriod = payPeriodHoursFromWeekHours(minHoursPerWeek, salaryPaymentFrequency)
+    ?? numberOrNull(form.min_hours_per_pay_period);
+  const maxHoursPerPayPeriod = payPeriodHoursFromWeekHours(maxHoursPerWeek, salaryPaymentFrequency)
+    ?? numberOrNull(form.max_hours_per_pay_period);
   const isStatutoryBandwidth = isStatutoryBandwidthModel({ ...form, employment_contract_model: employmentModel });
   const persistedContractForm = isStatutoryBandwidth
     ? (form.underlying_contract_form || (form.duration_type === "indefinite" ? "onbepaalde_tijd" : "bepaalde_tijd"))
@@ -1229,8 +1289,8 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     cao_period: numberOrNull(form.cao_period),
     custom_hourly_rate: numberOrNull(form.custom_hourly_rate),
     wage_table_year: numberOrNull(form.wage_table_year),
-    hourly_rate_snapshot: numberOrNull(form.hourly_rate_snapshot || form.custom_hourly_rate),
-    salary_payment_frequency: form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? "four_weeks" : (form.salary_payment_frequency || null),
+    hourly_rate_snapshot: numberOrNull(form.hourly_rate_snapshot) ?? numberOrNull(form.custom_hourly_rate),
+    salary_payment_frequency: salaryPaymentFrequency,
     template_name_snapshot: generated ? (form.template_name_snapshot || null) : null,
     letterhead_name_snapshot: generated ? (form.letterhead_name_snapshot || null) : null,
     written_scale_period_notice_confirmed: generated && numberOrNull(form.cao_scale) !== null
@@ -1266,14 +1326,14 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     works_cash_value_logistics: boolOrNull(form.works_cash_value_logistics),
     works_event_or_hospitality_security: boolOrNull(form.works_event_or_hospitality_security),
     event_hospitality_cao_applies: boolOrNull(form.event_hospitality_cao_applies),
-    contract_hours_per_week: hasFixedHours ? numberOrNull(form.contract_hours_per_week) : null,
-    contract_hours_per_pay_period: hasFixedHours ? numberOrNull(form.contract_hours_per_pay_period) : null,
-    fulltime_reference_hours_per_week: ["parttime_fixed", "parttime_growth"].includes(employmentModel) ? numberOrNull(form.fulltime_reference_hours_per_week) : null,
-    fulltime_reference_hours_per_pay_period: ["parttime_fixed", "parttime_growth"].includes(employmentModel) ? numberOrNull(form.fulltime_reference_hours_per_pay_period) : null,
-    min_hours_per_week: isMinMax ? numberOrNull(form.min_hours_per_week) : null,
-    max_hours_per_week: isMinMax ? numberOrNull(form.max_hours_per_week) : null,
-    min_hours_per_pay_period: isMinMax ? numberOrNull(form.min_hours_per_pay_period) : null,
-    max_hours_per_pay_period: isMinMax ? numberOrNull(form.max_hours_per_pay_period) : null,
+    contract_hours_per_week: hasFixedHours ? contractHoursPerWeek : null,
+    contract_hours_per_pay_period: hasFixedHours ? contractHoursPerPayPeriod : null,
+    fulltime_reference_hours_per_week: ["parttime_fixed", "parttime_growth"].includes(employmentModel) ? fulltimeReferenceHoursPerWeek : null,
+    fulltime_reference_hours_per_pay_period: ["parttime_fixed", "parttime_growth"].includes(employmentModel) ? fulltimeReferenceHoursPerPayPeriod : null,
+    min_hours_per_week: isMinMax ? minHoursPerWeek : null,
+    max_hours_per_week: isMinMax ? maxHoursPerWeek : null,
+    min_hours_per_pay_period: isMinMax ? minHoursPerPayPeriod : null,
+    max_hours_per_pay_period: isMinMax ? maxHoursPerPayPeriod : null,
     availability_windows: isCallAgreement
       ? normalizeAvailabilityWindows(form.availability_windows)
       : [],
@@ -1893,6 +1953,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     queryFn: async () => {
       const { data } = await base44.functions.invoke("listCaoConfigurationOptions", {
         include_ids: selectedCaoConfigurationIds,
+        include_wage_options: true,
       });
       return data?.options || [];
     },
@@ -2066,9 +2127,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     () => uniqueValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]),
     [form.allowed_function_types_text, form.function_type]
   );
-  const expectedPbSalaryScale = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
-    ? pbSalaryScaleForFunctionLevel(form.cao_function_level)
-    : null;
   const visibleCaoConfigurationOptions = filterCaoConfigurationOptions(caoConfigurationOptions, form);
   const activeCaoAssignmentConfigurationIds = useMemo(() => companyCaoAssignments
     .filter(assignment => isDateWithinOptionRange(assignment, form.contract_start_date))
@@ -2083,13 +2141,27 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     const rows = extractWageRows(effectiveCaoConfiguration, wageTableYear);
     if (form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY) return rows;
     if (form.cao_function_group === "non_security_staff") return [];
-    if (!expectedPbSalaryScale) return rows;
-    return rows.filter(row => Number(row.scale) === expectedPbSalaryScale);
-  }, [effectiveCaoConfiguration, expectedPbSalaryScale, form.cao_function_group, form.cao_key, wageTableYear]);
+    if (isBblModel) return rows.filter(row => Number(row.scale) === 2);
+    return rows;
+  }, [effectiveCaoConfiguration, form.cao_function_group, form.cao_key, isBblModel, wageTableYear]);
   const wageScaleOptions = useMemo(() => uniqueValues(wageRows.map(row => String(row.scale))).sort((a, b) => Number(a) - Number(b)), [wageRows]);
+  const wageScaleCards = useMemo(() => wageScaleOptions.map(scale => {
+    const rows = wageRows.filter(row => String(row.scale) === String(scale));
+    const rates = rows.map(row => Number(row.hourlyRate)).filter(Number.isFinite);
+    return {
+      scale,
+      periodCount: rows.length,
+      minimumRate: rates.length > 0 ? Math.min(...rates) : null,
+      maximumRate: rates.length > 0 ? Math.max(...rates) : null,
+    };
+  }), [wageRows, wageScaleOptions]);
   const visibleWageRows = useMemo(() => wageScaleFilter === null
-    ? wageRows
+    ? []
     : wageRows.filter(row => String(row.scale) === String(wageScaleFilter)), [wageRows, wageScaleFilter]);
+  const selectedWageRow = useMemo(() => wageRows.find(row => (
+    String(row.scale) === String(form.cao_scale)
+    && String(row.period) === String(form.cao_period)
+  )) || null, [form.cao_period, form.cao_scale, wageRows]);
   const conflicts = validateConflicts(form, contracts, editingId, companies);
   const missingFields = getMissingContractFields(form);
   const evaluationContract = useMemo(() => buildContractPayload(personnel, {
@@ -2141,11 +2213,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const isPbParttimeModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     && ["parttime_fixed", "parttime_growth"].includes(form.employment_contract_model);
   const isPbGrowthParttime = isPbParttimeModel && form.employment_contract_model === "parttime_growth";
-  const isPbMinMaxModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
-    && form.employment_contract_model === "min_max";
-  const isPbZeroHoursModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
-    && ["zero_hours", "call_agreement"].includes(form.employment_contract_model);
-  const isPbCallModel = isPbMinMaxModel || isPbZeroHoursModel;
   const isPbNonOperationalRole = form.performs_security_work === "false"
     || form.cao_function_group === "non_security_staff";
   const probationMonths = probationMaximumMonths(form);
@@ -2206,19 +2273,19 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.contract_hours_per_week = "36";
         next.contract_hours_per_pay_period = "144";
       } else if (["parttime_fixed", "parttime_growth"].includes(prev.employment_contract_model)) {
-        const periodHours = numberOrNull(prev.contract_hours_per_pay_period)
-          ?? (numberOrNull(prev.contract_hours_per_week) !== null ? numberOrNull(prev.contract_hours_per_week) * 4 : null);
-        next.contract_hours_per_pay_period = periodHours === null ? "" : String(periodHours);
-        next.contract_hours_per_week = periodHours === null ? "" : String(Math.round((periodHours / 4) * 100) / 100);
+        const weekHours = numberOrNull(prev.contract_hours_per_week)
+          ?? (numberOrNull(prev.contract_hours_per_pay_period) !== null ? numberOrNull(prev.contract_hours_per_pay_period) / 4 : null);
+        next.contract_hours_per_week = weekHours === null ? "" : String(roundedHours(weekHours));
+        next.contract_hours_per_pay_period = weekHours === null ? "" : String(roundedHours(weekHours * 4));
       } else if (prev.employment_contract_model === "min_max") {
-        const minPeriodHours = numberOrNull(prev.min_hours_per_pay_period)
-          ?? (numberOrNull(prev.min_hours_per_week) !== null ? numberOrNull(prev.min_hours_per_week) * 4 : null);
-        const maxPeriodHours = numberOrNull(prev.max_hours_per_pay_period)
-          ?? (numberOrNull(prev.max_hours_per_week) !== null ? numberOrNull(prev.max_hours_per_week) * 4 : null);
-        next.min_hours_per_pay_period = minPeriodHours === null ? "" : String(minPeriodHours);
-        next.max_hours_per_pay_period = maxPeriodHours === null ? "" : String(maxPeriodHours);
-        next.min_hours_per_week = minPeriodHours === null ? "" : String(Math.round((minPeriodHours / 4) * 100) / 100);
-        next.max_hours_per_week = maxPeriodHours === null ? "" : String(Math.round((maxPeriodHours / 4) * 100) / 100);
+        const minWeekHours = numberOrNull(prev.min_hours_per_week)
+          ?? (numberOrNull(prev.min_hours_per_pay_period) !== null ? numberOrNull(prev.min_hours_per_pay_period) / 4 : null);
+        const maxWeekHours = numberOrNull(prev.max_hours_per_week)
+          ?? (numberOrNull(prev.max_hours_per_pay_period) !== null ? numberOrNull(prev.max_hours_per_pay_period) / 4 : null);
+        next.min_hours_per_week = minWeekHours === null ? "" : String(roundedHours(minWeekHours));
+        next.max_hours_per_week = maxWeekHours === null ? "" : String(roundedHours(maxWeekHours));
+        next.min_hours_per_pay_period = minWeekHours === null ? "" : String(roundedHours(minWeekHours * 4));
+        next.max_hours_per_pay_period = maxWeekHours === null ? "" : String(roundedHours(maxWeekHours * 4));
       } else if (["zero_hours", "call_agreement"].includes(prev.employment_contract_model)) {
         next.contract_hours_per_week = "";
         next.contract_hours_per_pay_period = "";
@@ -2230,31 +2297,42 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     }
     return next;
   });
-  const setPbParttimePeriodHours = (value) => setForm(prev => {
-    const periodHours = numberOrNull(value);
+  const setWeeklyContractHours = (value) => setForm(prev => {
+    const frequency = prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? "four_weeks" : prev.salary_payment_frequency;
+    const periodHours = payPeriodHoursFromWeekHours(value, frequency);
     return {
       ...prev,
-      contract_hours_per_pay_period: value,
-      contract_hours_per_week: periodHours === null ? "" : String(Math.round((periodHours / 4) * 100) / 100),
+      contract_hours_per_week: value,
+      contract_hours_per_pay_period: periodHours === null ? "" : String(periodHours),
     };
   });
-  const setPbFulltimeReferencePeriodHours = (value) => setForm(prev => {
-    const periodHours = numberOrNull(value);
+  const setWeeklyFulltimeReferenceHours = (value) => setForm(prev => {
+    const frequency = prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? "four_weeks" : prev.salary_payment_frequency;
+    const periodHours = payPeriodHoursFromWeekHours(value, frequency);
     return {
       ...prev,
-      fulltime_reference_hours_per_pay_period: value,
-      fulltime_reference_hours_per_week: periodHours === null ? "" : String(Math.round((periodHours / 4) * 100) / 100),
+      fulltime_reference_hours_per_week: value,
+      fulltime_reference_hours_per_pay_period: periodHours === null ? "" : String(periodHours),
     };
   });
-  const setPbMinMaxPeriodHours = (field, value) => setForm(prev => {
-    const periodHours = numberOrNull(value);
-    const weekField = field === "min_hours_per_pay_period" ? "min_hours_per_week" : "max_hours_per_week";
+  const setWeeklyMinMaxHours = (field, value) => setForm(prev => {
+    const frequency = prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? "four_weeks" : prev.salary_payment_frequency;
+    const periodHours = payPeriodHoursFromWeekHours(value, frequency);
+    const periodField = field === "min_hours_per_week" ? "min_hours_per_pay_period" : "max_hours_per_pay_period";
     return {
       ...prev,
       [field]: value,
-      [weekField]: periodHours === null ? "" : String(Math.round((periodHours / 4) * 100) / 100),
+      [periodField]: periodHours === null ? "" : String(periodHours),
     };
   });
+  const setSalaryPaymentFrequency = (value) => setForm(prev => ({
+    ...prev,
+    salary_payment_frequency: value,
+    contract_hours_per_pay_period: payPeriodHoursFromWeekHours(prev.contract_hours_per_week, value) ?? "",
+    fulltime_reference_hours_per_pay_period: payPeriodHoursFromWeekHours(prev.fulltime_reference_hours_per_week, value) ?? "",
+    min_hours_per_pay_period: payPeriodHoursFromWeekHours(prev.min_hours_per_week, value) ?? "",
+    max_hours_per_pay_period: payPeriodHoursFromWeekHours(prev.max_hours_per_week, value) ?? "",
+  }));
   const toggleMinMaxAvailabilityDay = (weekday) => setForm(prev => {
     const windows = normalizeAvailabilityWindows(prev.availability_windows);
     const exists = windows.some(window => window.weekday === weekday);
@@ -2324,20 +2402,20 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.contract_hours_per_pay_period = "144";
         next.salary_payment_frequency = "four_weeks";
       } else if (["parttime_fixed", "parttime_growth"].includes(model?.employment_model) && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
-        const periodHours = numberOrNull(prev.contract_hours_per_pay_period)
-          ?? (numberOrNull(prev.contract_hours_per_week) !== null ? numberOrNull(prev.contract_hours_per_week) * 4 : null);
-        next.contract_hours_per_pay_period = periodHours === null ? "" : String(periodHours);
-        next.contract_hours_per_week = periodHours === null ? "" : String(Math.round((periodHours / 4) * 100) / 100);
+        const weekHours = numberOrNull(prev.contract_hours_per_week)
+          ?? (numberOrNull(prev.contract_hours_per_pay_period) !== null ? numberOrNull(prev.contract_hours_per_pay_period) / 4 : null);
+        next.contract_hours_per_week = weekHours === null ? "" : String(roundedHours(weekHours));
+        next.contract_hours_per_pay_period = weekHours === null ? "" : String(roundedHours(weekHours * 4));
         next.salary_payment_frequency = "four_weeks";
       } else if (model?.employment_model === "min_max" && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
-        const minPeriodHours = numberOrNull(prev.min_hours_per_pay_period)
-          ?? (numberOrNull(prev.min_hours_per_week) !== null ? numberOrNull(prev.min_hours_per_week) * 4 : null);
-        const maxPeriodHours = numberOrNull(prev.max_hours_per_pay_period)
-          ?? (numberOrNull(prev.max_hours_per_week) !== null ? numberOrNull(prev.max_hours_per_week) * 4 : null);
-        next.min_hours_per_pay_period = minPeriodHours === null ? "" : String(minPeriodHours);
-        next.max_hours_per_pay_period = maxPeriodHours === null ? "" : String(maxPeriodHours);
-        next.min_hours_per_week = minPeriodHours === null ? "" : String(Math.round((minPeriodHours / 4) * 100) / 100);
-        next.max_hours_per_week = maxPeriodHours === null ? "" : String(Math.round((maxPeriodHours / 4) * 100) / 100);
+        const minWeekHours = numberOrNull(prev.min_hours_per_week)
+          ?? (numberOrNull(prev.min_hours_per_pay_period) !== null ? numberOrNull(prev.min_hours_per_pay_period) / 4 : null);
+        const maxWeekHours = numberOrNull(prev.max_hours_per_week)
+          ?? (numberOrNull(prev.max_hours_per_pay_period) !== null ? numberOrNull(prev.max_hours_per_pay_period) / 4 : null);
+        next.min_hours_per_week = minWeekHours === null ? "" : String(roundedHours(minWeekHours));
+        next.max_hours_per_week = maxWeekHours === null ? "" : String(roundedHours(maxWeekHours));
+        next.min_hours_per_pay_period = minWeekHours === null ? "" : String(roundedHours(minWeekHours * 4));
+        next.max_hours_per_pay_period = maxWeekHours === null ? "" : String(roundedHours(maxWeekHours * 4));
         next.salary_payment_frequency = "four_weeks";
         next.contract_hours_per_week = "";
         next.contract_hours_per_pay_period = "";
@@ -2486,6 +2564,27 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     }));
   };
 
+  const selectWageScale = (scale) => {
+    setWageScaleFilter(String(scale));
+    setForm(prev => {
+      const selectedRow = wageRows.find(row => (
+        String(row.scale) === String(scale)
+        && String(row.period) === String(prev.cao_period)
+      ));
+      return {
+        ...prev,
+        cao_scale: scale,
+        cao_period: selectedRow?.period ?? "",
+        custom_hourly_rate: selectedRow?.hourlyRate ?? "",
+        hourly_rate_snapshot: selectedRow?.hourlyRate ?? "",
+        wage_table_year: selectedRow?.year || wageTableYear,
+        cao_function_level: prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+          ? (pbFunctionLevelForSalaryScale(scale) || prev.cao_function_level)
+          : prev.cao_function_level,
+      };
+    });
+  };
+
   const selectWageRow = (row) => {
     setForm(prev => ({
       ...prev,
@@ -2499,6 +2598,12 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         : prev.cao_function_level,
     }));
   };
+
+  const setManualHourlyRate = (value) => setForm(prev => ({
+    ...prev,
+    custom_hourly_rate: value,
+    hourly_rate_snapshot: value,
+  }));
 
   const toggleAllowedFunction = (value) => {
     setForm(prev => {
@@ -2767,6 +2872,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const openNew = () => {
     setEditingId(null);
     setForm(initialForm(personnel));
+    setWageScaleFilter(null);
     setDurationTypeConfirmed(false);
     setWizardStep(1);
     setActionMessage(null);
@@ -2776,6 +2882,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const openEdit = (contract) => {
     setEditingId(contract.id);
     setForm(formFromContract(contract));
+    setWageScaleFilter(contract.cao_scale === null || contract.cao_scale === undefined ? null : String(contract.cao_scale));
     setDurationTypeConfirmed(true);
     setWizardStep(1);
     setActionMessage(null);
@@ -2882,11 +2989,24 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       return;
     }
     const selectedScale = form.cao_scale ? String(form.cao_scale) : null;
-    const nextScale = selectedScale && wageScaleOptions.includes(selectedScale)
-      ? selectedScale
-      : (wageScaleFilter && wageScaleOptions.includes(String(wageScaleFilter)) ? String(wageScaleFilter) : wageScaleOptions[0]);
+    const nextScale = selectedScale && wageScaleOptions.includes(selectedScale) ? selectedScale : null;
     if (String(wageScaleFilter || "") !== String(nextScale || "")) setWageScaleFilter(nextScale);
   }, [form.cao_scale, wageScaleFilter, wageScaleOptions]);
+
+  useEffect(() => {
+    if (!selectedWageRow) return;
+    const selectedRate = numberOrNull(selectedWageRow.hourlyRate);
+    if (selectedRate === null) return;
+    if (numberOrNull(form.hourly_rate_snapshot) === selectedRate
+      && numberOrNull(form.custom_hourly_rate) === selectedRate
+      && Number(form.wage_table_year || wageTableYear) === Number(selectedWageRow.year || wageTableYear)) return;
+    setForm(prev => ({
+      ...prev,
+      custom_hourly_rate: selectedRate,
+      hourly_rate_snapshot: selectedRate,
+      wage_table_year: selectedWageRow.year || wageTableYear,
+    }));
+  }, [form.custom_hourly_rate, form.hourly_rate_snapshot, form.wage_table_year, selectedWageRow, wageTableYear]);
 
   const stepItems = [
     "Documentbron",
@@ -2900,6 +3020,42 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     isArticle14Internship ? "Stageafspraken" : (isBblModel ? "Loon, uren & BBL" : "Loon & uren"),
     "Controle",
   ];
+  const stepHourlyRate = numberOrNull(form.hourly_rate_snapshot) ?? numberOrNull(form.custom_hourly_rate);
+  const wageStepComplete = form.contract_form === "zzp"
+    || (isPbNonOperationalRole
+      ? numberOrNull(form.custom_hourly_rate) !== null
+      : (wageRows.length > 0
+        ? !!selectedWageRow && stepHourlyRate !== null
+        : numberOrNull(form.cao_scale) !== null && numberOrNull(form.cao_period) !== null && stepHourlyRate !== null));
+  const fixedWeeklyHoursComplete = !["fulltime", "parttime_fixed", "parttime_growth", "bbl"].includes(form.employment_contract_model)
+    || (numberOrNull(form.contract_hours_per_week) ?? 0) > 0;
+  const minMaxBand = getMinMaxBand(form);
+  const minMaxHoursComplete = form.employment_contract_model !== "min_max"
+    || (minMaxBand.minimum !== null
+      && minMaxBand.maximum !== null
+      && minMaxBand.minimum > 0
+      && minMaxBand.maximum >= minMaxBand.minimum
+      && (form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY || minMaxBand.maximum <= 36));
+  const nonOperationalReferenceComplete = !isPbParttimeModel
+    || !isPbNonOperationalRole
+    || (numberOrNull(form.fulltime_reference_hours_per_week) ?? 0) > 0;
+  const callDetailsComplete = !isLegacyCallModel
+    || (!!form.call_channel && normalizeAvailabilityWindows(form.availability_windows).length > 0);
+  const bblDetailsComplete = !isBblModel || !!(
+    form.bbl_institution_name
+    && form.bbl_education_name
+    && form.bbl_practice_agreement_reference
+    && form.bbl_learning_company_recognition_number
+    && form.bbl_practice_trainer_name
+  );
+  const wageAndHoursStepComplete = isArticle14Internship || (
+    wageStepComplete
+    && fixedWeeklyHoursComplete
+    && minMaxHoursComplete
+    && nonOperationalReferenceComplete
+    && callDetailsComplete
+    && bblDetailsComplete
+  );
   const currentStepComplete = [
     !!form.source_type,
     !!form.company_id,
@@ -2912,7 +3068,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         || (!!form.duration_option && (form.duration_option === "pok_end_date" || !!form.contract_end_date))),
     selectedFunctionValues.length > 0,
     isArticle14Internship || ["true", "false", "not_applicable"].includes(form.probation_agreed),
-    true,
+    wageAndHoursStepComplete,
     true,
   ][wizardStep - 1];
 
@@ -3375,25 +3531,41 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   <>
                 {isBblModel && <BblLearningFields form={form} set={set} />}
                 <div>
-                  <p className="text-sm font-medium text-foreground">Loon en arbeidsomvang</p>
-                  <p className="mt-1 text-xs text-muted-foreground">De salaristabel en betaalperiode worden automatisch gekozen op basis van de CAO en contractstartdatum.</p>
+                  <p className="text-sm font-medium text-foreground">Loon</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Kies eerst de schaal en daarna de periodiek. LOQ toont het bruto uurloon uit de loontabel die op de startdatum geldt.</p>
                 </div>
                 {wageRows.length > 0 ? (
-                  <div className="space-y-3">
-                    <div className="flex flex-wrap items-center gap-2">
-                      <span className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Schaal</span>
-                      {wageScaleOptions.map(scale => (
+                  <div className="space-y-4">
+                    <section className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">1. Kies de loonschaal</p>
+                      <div className="grid grid-cols-1 gap-2 sm:grid-cols-2 xl:grid-cols-3">
+                      {wageScaleCards.map(card => {
+                        const selected = String(form.cao_scale) === String(card.scale);
+                        const rateLabel = card.minimumRate === card.maximumRate
+                          ? `${formatCurrency(card.minimumRate)} per uur`
+                          : `${formatCurrency(card.minimumRate)} - ${formatCurrency(card.maximumRate)} per uur`;
+                        return (
                         <button
-                          key={scale}
+                          key={card.scale}
                           type="button"
-                          onClick={() => setWageScaleFilter(scale)}
-                          className={`rounded-full border px-3 py-1.5 text-xs font-medium transition-colors ${String(wageScaleFilter) === String(scale) ? "border-primary bg-primary text-primary-foreground" : "border-border bg-card text-foreground hover:border-primary/40"}`}
+                          onClick={() => selectWageScale(card.scale)}
+                          className={`flex min-h-20 items-center justify-between rounded-lg border px-4 py-3 text-left transition-all active:scale-[0.99] ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
                         >
-                          Schaal {scale}
+                          <span>
+                            <span className="block text-sm font-semibold text-foreground">Schaal {card.scale}</span>
+                            <span className="mt-1 block text-xs text-muted-foreground">{rateLabel}</span>
+                            <span className="mt-1 block text-xs text-muted-foreground">{card.periodCount} {card.periodCount === 1 ? "periodiek" : "periodieken"}</span>
+                          </span>
+                          {selected ? <Check className="h-4 w-4 shrink-0 text-primary" /> : <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />}
                         </button>
-                      ))}
-                    </div>
-                    <div className="grid max-h-72 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2">
+                        );
+                      })}
+                      </div>
+                    </section>
+                    {wageScaleFilter !== null ? (
+                    <section className="space-y-2">
+                      <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">2. Kies de periodiek</p>
+                      <div className="grid max-h-64 grid-cols-1 gap-2 overflow-y-auto pr-1 sm:grid-cols-2 xl:grid-cols-3">
                       {visibleWageRows.map((row, index) => {
                         const selected = String(form.cao_scale) === String(row.scale) && String(form.cao_period) === String(row.period);
                         return (
@@ -3404,154 +3576,148 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                             className={`flex min-h-14 items-center justify-between rounded-lg border px-4 py-3 text-left transition-colors ${selected ? "border-primary bg-accent" : "border-border bg-card hover:border-primary hover:bg-accent"}`}
                           >
                             <div>
-                              <p className="text-sm font-semibold text-foreground">Trede {row.period ?? "-"}</p>
-                              <p className="mt-0.5 text-xs text-muted-foreground">{formatCurrency(row.hourlyRate)} per uur</p>
+                              <p className="text-sm font-semibold text-foreground">Periodiek {row.period ?? "-"}</p>
+                              <p className="mt-0.5 text-xs text-muted-foreground">{formatCurrency(row.hourlyRate)} bruto per uur</p>
                             </div>
                             {selected ? <Check className="h-4 w-4 text-primary" /> : <ChevronRight className="h-4 w-4 text-muted-foreground" />}
                           </button>
                         );
                       })}
-                    </div>
+                      </div>
+                    </section>
+                    ) : (
+                      <div className="rounded-lg border border-dashed border-border px-4 py-3 text-sm text-muted-foreground">Selecteer een loonschaal om de bijbehorende periodieken te bekijken.</div>
+                    )}
+                    {selectedWageRow && (
+                      <div className="flex flex-wrap items-center justify-between gap-3 rounded-lg border border-primary/40 bg-primary/5 px-4 py-3">
+                        <div>
+                          <p className="text-sm font-semibold text-foreground">Schaal {selectedWageRow.scale} · periodiek {selectedWageRow.period}</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Loontabel {selectedWageRow.year || wageTableYear}</p>
+                        </div>
+                        <p className="text-sm font-semibold text-primary">{formatCurrency(selectedWageRow.hourlyRate)} bruto per uur</p>
+                      </div>
+                    )}
                   </div>
-                ) : form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY && form.cao_function_group === "non_security_staff" ? (
-                  <div className="max-w-sm space-y-1">
-                    <Label>Bruto uurloon</Label>
-                    <Input type="number" min="0" step="0.01" value={form.hourly_rate_snapshot ?? form.custom_hourly_rate ?? ""} onChange={event => {
-                      set("hourly_rate_snapshot", event.target.value);
-                      set("custom_hourly_rate", event.target.value);
-                    }} />
-                    <p className="text-xs text-muted-foreground">Voor deze niet-operationele functie geldt de CAO-functie- en salarisschaalindeling niet automatisch.</p>
-                  </div>
+                ) : form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY && isPbNonOperationalRole ? (
+                  <section className="max-w-lg space-y-2 rounded-lg border border-border p-4">
+                    <Label>Afgesproken bruto uurloon</Label>
+                    <Input type="number" min="0" step="0.01" value={form.custom_hourly_rate ?? ""} onChange={event => setManualHourlyRate(event.target.value)} />
+                    <p className="text-xs text-muted-foreground">Voor niet-operationeel personeel is de salarisschaal uit de beveiligingsfuncties niet automatisch van toepassing. Leg daarom het overeengekomen bruto uurloon vast.</p>
+                  </section>
                 ) : (
-                  <div className="grid gap-4 md:grid-cols-3">
-                    <div className="space-y-1">
-                      <Label>Loonschaal</Label>
-                      <Input type="number" min="0" value={form.cao_scale ?? ""} onChange={event => set("cao_scale", event.target.value)} />
+                  <section className="space-y-3 rounded-lg border border-amber-300 bg-amber-50/60 p-4 dark:border-amber-800 dark:bg-amber-950/20">
+                    <div>
+                      <p className="text-sm font-semibold text-foreground">Geen loontabel beschikbaar</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Controleer de actieve CAO-configuratie. Totdat een loontabel beschikbaar is, moeten schaal, periodiek en bruto uurloon handmatig worden vastgelegd.</p>
                     </div>
-                    <div className="space-y-1">
-                      <Label>Trede / periodiek</Label>
-                      <Input type="number" min="0" value={form.cao_period ?? ""} onChange={event => set("cao_period", event.target.value)} />
+                    <div className="grid gap-3 md:grid-cols-3">
+                      <div className="space-y-1">
+                        <Label>Loonschaal</Label>
+                        <Input type="number" min="0" value={form.cao_scale ?? ""} onChange={event => set("cao_scale", event.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Periodiek</Label>
+                        <Input type="number" min="0" value={form.cao_period ?? ""} onChange={event => set("cao_period", event.target.value)} />
+                      </div>
+                      <div className="space-y-1">
+                        <Label>Afgesproken bruto uurloon</Label>
+                        <Input type="number" min="0" step="0.01" value={form.custom_hourly_rate ?? ""} onChange={event => setManualHourlyRate(event.target.value)} />
+                      </div>
                     </div>
-                    <div className="space-y-1">
-                      <Label>Uurloon snapshot</Label>
-                      <Input type="number" min="0" step="0.01" value={form.hourly_rate_snapshot ?? form.custom_hourly_rate ?? ""} onChange={event => {
-                        set("hourly_rate_snapshot", event.target.value);
-                        set("custom_hourly_rate", event.target.value);
-                      }} />
-                    </div>
-                  </div>
+                  </section>
                 )}
 
-                <div className="grid gap-4 md:grid-cols-3">
+                <div className="border-t border-border pt-5">
+                  <p className="text-sm font-medium text-foreground">Arbeidsomvang</p>
+                  <p className="mt-1 text-xs text-muted-foreground">Vul alleen de gemiddelde contracturen per week in. LOQ verwerkt op de achtergrond de juiste loonperiode voor de gekozen CAO.</p>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
                   {isPbParttimeModel ? (
                     <>
                       <div className="space-y-1">
-                        <Label>Vaste contracturen per loonperiode (4 weken)</Label>
+                        <Label>{isPbGrowthParttime ? "Gegarandeerde uren per week" : "Contracturen per week"}</Label>
                         <Input
                           type="number"
                           min="0"
-                          max="143.99"
+                          max={isPbNonOperationalRole ? undefined : "35.99"}
                           step="0.25"
-                          value={form.contract_hours_per_pay_period ?? ""}
-                          onChange={event => setPbParttimePeriodHours(event.target.value)}
+                          value={form.contract_hours_per_week ?? ""}
+                          onChange={event => setWeeklyContractHours(event.target.value)}
                         />
                         <p className="text-xs text-muted-foreground">
                           {isPbGrowthParttime
-                            ? "Dit is de gegarandeerde vaste arbeidsduur. Extra inzet blijft gebonden aan de rooster- en urenregels van de cao."
-                            : "Dit is de juridische arbeidsduur voor het vaste parttimemodel."}
-                        </p>
-                      </div>
-                      <div className="rounded-lg border border-border bg-muted/20 p-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-                          {isPbGrowthParttime ? "Groeimodel" : "Gemiddeld per week"}
-                        </p>
-                        <p className="mt-1 text-sm text-foreground">{form.contract_hours_per_week || "-"} uur</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {isPbGrowthParttime
-                            ? "Gemiddeld per week. Geen oproepcontract; boven 144 uur kan alleen met instemming worden gewerkt."
-                            : "Automatisch: periode-uren gedeeld door vier."}
+                            ? "Dit is de gegarandeerde gemiddelde arbeidsduur. Extra inzet blijft gebonden aan de rooster- en urenregels van de CAO."
+                            : "Dit is de gemiddelde arbeidsduur voor het vaste parttimemodel."}
                         </p>
                       </div>
                       {isPbNonOperationalRole && (
-                        <>
-                          <div className="space-y-1">
-                            <Label>Fulltime referentienorm per 4 weken</Label>
-                            <Input
-                              type="number"
-                              min="0"
-                              step="0.25"
-                              value={form.fulltime_reference_hours_per_pay_period ?? ""}
-                              onChange={event => setPbFulltimeReferencePeriodHours(event.target.value)}
-                            />
-                            <p className="text-xs text-muted-foreground">Alleen nodig omdat 144 uur niet automatisch geldt voor niet-operationele functies.</p>
-                          </div>
-                          <div className="rounded-lg border border-border bg-muted/20 p-3">
-                            <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Fulltime norm per week</p>
-                            <p className="mt-1 text-sm text-foreground">{form.fulltime_reference_hours_per_week || "-"} uur</p>
-                            <p className="mt-1 text-xs text-muted-foreground">Automatisch afgeleid uit de bedrijfsnorm.</p>
-                          </div>
-                        </>
+                        <div className="space-y-1">
+                          <Label>Fulltime referentienorm per week</Label>
+                          <Input
+                            type="number"
+                            min="0"
+                            step="0.25"
+                            value={form.fulltime_reference_hours_per_week ?? ""}
+                            onChange={event => setWeeklyFulltimeReferenceHours(event.target.value)}
+                          />
+                          <p className="text-xs text-muted-foreground">Alleen nodig omdat de standaardnorm voor operationele beveiligers niet automatisch geldt.</p>
+                        </div>
                       )}
                     </>
                   ) : (
                     <>
-                      {["fulltime", "parttime_fixed", "parttime_growth", "bbl"].includes(form.employment_contract_model) && (
-                        <div className="space-y-1">
-                          <Label>Uren per week</Label>
-                          <Input type="number" min="0" value={form.contract_hours_per_week ?? ""} onChange={event => set("contract_hours_per_week", event.target.value)} />
+                      {form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+                        && form.employment_contract_model === "fulltime"
+                        && !isPbNonOperationalRole ? (
+                        <div className="rounded-lg border border-primary/30 bg-primary/5 p-4">
+                          <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contracturen per week</p>
+                          <p className="mt-1 text-lg font-semibold text-foreground">36 uur</p>
+                          <p className="mt-1 text-xs text-muted-foreground">Automatisch bepaald voor een fulltime operationele medewerker onder de CAO Particuliere Beveiliging.</p>
                         </div>
-                      )}
-                      {["fulltime", "parttime_fixed", "parttime_growth", "bbl"].includes(form.employment_contract_model) && (
+                      ) : ["fulltime", "parttime_fixed", "parttime_growth", "bbl"].includes(form.employment_contract_model) && (
                         <div className="space-y-1">
-                          <Label>Uren per loonperiode</Label>
-                          <Input type="number" min="0" value={form.contract_hours_per_pay_period ?? ""} onChange={event => set("contract_hours_per_pay_period", event.target.value)} />
+                          <Label>Contracturen per week</Label>
+                          <Input type="number" min="0" step="0.25" value={form.contract_hours_per_week ?? ""} onChange={event => setWeeklyContractHours(event.target.value)} />
                         </div>
                       )}
                     </>
                   )}
-                  {isPbMinMaxModel && (
+                  {form.employment_contract_model === "min_max" && (
                     <>
                       <div className="space-y-1">
-                        <Label>Garantie-uren per loonperiode (4 weken)</Label>
+                        <Label>Garantie-uren per week</Label>
                         <Input
                           type="number"
                           min="0.25"
-                          max="143.75"
+                          max={form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? "35.75" : undefined}
                           step="0.25"
-                          value={form.min_hours_per_pay_period ?? ""}
-                          onChange={event => setPbMinMaxPeriodHours("min_hours_per_pay_period", event.target.value)}
+                          value={form.min_hours_per_week ?? ""}
+                          onChange={event => setWeeklyMinMaxHours("min_hours_per_week", event.target.value)}
                         />
-                        <p className="text-xs text-muted-foreground">Dit minimum wordt in iedere loonperiode betaald.</p>
+                        <p className="text-xs text-muted-foreground">Dit is de gegarandeerde gemiddelde arbeidsduur.</p>
                       </div>
                       <div className="space-y-1">
-                        <Label>Maximumuren per loonperiode (4 weken)</Label>
+                        <Label>Maximumuren per week</Label>
                         <Input
                           type="number"
                           min="0.5"
-                          max="144"
+                          max={form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? "36" : undefined}
                           step="0.25"
-                          value={form.max_hours_per_pay_period ?? ""}
-                          onChange={event => setPbMinMaxPeriodHours("max_hours_per_pay_period", event.target.value)}
+                          value={form.max_hours_per_week ?? ""}
+                          onChange={event => setWeeklyMinMaxHours("max_hours_per_week", event.target.value)}
                         />
-                        <p className="text-xs text-muted-foreground">Binnen dit maximum kan tijdig worden opgeroepen.</p>
-                      </div>
-                      <div className="rounded-lg border border-border bg-muted/20 p-3">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Gemiddeld per week</p>
-                        <p className="mt-1 text-sm text-foreground">
-                          {form.min_hours_per_week || "-"} tot {form.max_hours_per_week || "-"} uur
-                        </p>
-                        <p className="mt-1 text-xs text-muted-foreground">Automatisch afgeleid uit de vierweekse bandbreedte.</p>
+                        <p className="text-xs text-muted-foreground">Binnen dit gemiddelde maximum kan de medewerker worden ingezet.</p>
                       </div>
                     </>
                   )}
-                  {isPbZeroHoursModel && (
+                  {["zero_hours", "call_agreement"].includes(form.employment_contract_model) && (
                     <div className="rounded-lg border border-border bg-muted/20 p-3 md:col-span-2">
                       <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Geen vaste arbeidsomvang</p>
                       <p className="mt-1 text-sm text-foreground">Geen vaste, minimum-, maximum- of garantie-uren</p>
                       <p className="mt-1 text-xs text-muted-foreground">De gewerkte en anderszins rechtens verschuldigde oproepuren worden per loonperiode betaald.</p>
                     </div>
                   )}
-                  {isPbCallModel && (
+                  {isLegacyCallModel && (
                     <div className="space-y-1">
                       <Label>Oproepkanaal</Label>
                       <Select value={form.call_channel || "none"} onValueChange={value => set("call_channel", value === "none" ? "" : value)}>
@@ -3575,7 +3741,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   ) : (
                     <div className="space-y-1">
                       <Label>Uitbetaling loon</Label>
-                      <Select value={form.salary_payment_frequency || "none"} onValueChange={value => set("salary_payment_frequency", value === "none" ? "" : value)}>
+                      <Select value={form.salary_payment_frequency || "none"} onValueChange={value => setSalaryPaymentFrequency(value === "none" ? "" : value)}>
                         <SelectTrigger><SelectValue /></SelectTrigger>
                         <SelectContent>
                           <SelectItem value="none">Kies betaalperiode</SelectItem>
@@ -3645,7 +3811,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       </div>
                     </div>
                   )}
-                  {isPbCallModel && (
+                  {isLegacyCallModel && (
                     <div className="space-y-3 rounded-lg border border-border p-4 md:col-span-3">
                       <div>
                         <Label>Referentiedagen en beschikbaarheid</Label>

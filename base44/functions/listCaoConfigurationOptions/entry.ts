@@ -61,7 +61,44 @@ function isActiveCaoConfiguration(config) {
     config.is_active === true;
 }
 
-function buildCaoConfigurationOption(config, includeIds = []) {
+function normalizedWageOptionRows(config) {
+  const rows = [];
+  const seen = new Set();
+
+  const addTables = (tables, year = null) => {
+    for (const [scale, periods] of Object.entries(tables || {})) {
+      for (const [period, entry] of Object.entries(periods || {})) {
+        const hourlyRate = typeof entry === 'object'
+          ? (entry?.hourly_rate ?? entry?.hourlyRate ?? entry?.rate ?? entry?.amount ?? entry?.value)
+          : entry;
+        const numericRate = Number(hourlyRate);
+        if (!Number.isFinite(numericRate) || numericRate <= 0) continue;
+        const key = `${year || 'current'}:${scale}:${period}`;
+        if (seen.has(key)) continue;
+        seen.add(key);
+        rows.push({
+          year: year ? Number(year) : null,
+          scale: Number.isFinite(Number(scale)) ? Number(scale) : scale,
+          period: Number.isFinite(Number(period)) ? Number(period) : period,
+          hourly_rate: numericRate
+        });
+      }
+    }
+  };
+
+  for (const [year, tables] of Object.entries(config?.wage_scales_detailed_by_year || {})) addTables(tables, year);
+  for (const [year, tables] of Object.entries(config?.wage_scales_by_year || {})) addTables(tables, year);
+  if (rows.length === 0) addTables(config?.wage_scales_detailed);
+  if (rows.length === 0) addTables(config?.wage_scales);
+
+  return rows.sort((a, b) => (
+    Number(a.year || 0) - Number(b.year || 0)
+    || Number(a.scale) - Number(b.scale)
+    || Number(a.period) - Number(b.period)
+  ));
+}
+
+function buildCaoConfigurationOption(config, includeIds = [], { includeWageOptions = false } = {}) {
   const includedInactive = includeIds.includes(config?.id) && !isActiveCaoConfiguration(config);
   const option = {};
   for (const field of PUBLIC_CAO_CONFIGURATION_OPTION_FIELDS) {
@@ -73,6 +110,7 @@ function buildCaoConfigurationOption(config, includeIds = []) {
   option.warning = includedInactive
     ? 'Deze CAO-configuratie is niet actief en wordt alleen getoond omdat dit bedrijf er al aan gekoppeld is.'
     : null;
+  if (includeWageOptions) option.wage_options = normalizedWageOptionRows(config);
   return option;
 }
 
@@ -181,6 +219,7 @@ Deno.serve(async (req) => {
     const includeIds = uniqueStrings(body.include_ids || body.includeIds || []);
     const includeInactiveSelected = body.include_inactive_selected !== false;
     const groupByCaoKey = body.group_by_cao_key === true || body.groupByCaoKey === true;
+    const includeWageOptions = body.include_wage_options === true || body.includeWageOptions === true;
     const base44 = createClientFromRequest(req);
     const user = await base44.auth.me();
     if (!user) return Response.json({ success: false, error: 'Unauthorized' }, { status: 401 });
@@ -191,7 +230,7 @@ Deno.serve(async (req) => {
     const options = groupByCaoKey
       ? buildGroupedCaoKeyOptions(visibleConfigs, includeIds)
       : visibleConfigs
-        .map(config => buildCaoConfigurationOption(config, includeIds))
+        .map(config => buildCaoConfigurationOption(config, includeIds, { includeWageOptions }))
         .filter(option => assertNoSensitiveCaoConfigurationFields(option).passed)
         .sort(sortCaoConfigurationOptions);
 

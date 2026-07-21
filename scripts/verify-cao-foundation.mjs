@@ -2068,6 +2068,14 @@ function runCaoGovernanceUiOptionScenarios() {
   assert.equal(option.pension_rules, undefined, 'Company CAO dropdown options must not expose pension parameters');
   assert.equal(option.rule_engine_metadata, undefined, 'Company CAO dropdown options must not expose rule-engine metadata');
 
+  const wageOption = caoConfigurationOptions.buildCaoConfigurationOption(activeConfig, [], { includeWageOptions: true });
+  assert.equal(wageOption.wage_options.length, 1, 'Contract wizard must receive one normalized wage choice');
+  assert.equal(wageOption.wage_options[0].year, null);
+  assert.equal(wageOption.wage_options[0].scale, 3);
+  assert.equal(wageOption.wage_options[0].period, 0);
+  assert.equal(wageOption.wage_options[0].hourly_rate, 16.02);
+  assert.equal(wageOption.wage_scales, undefined, 'Normalized wage choices must not expose the raw wage scale object');
+
   const inactiveConfig = {
     ...activeConfig,
     id: 'cao-config-archived',
