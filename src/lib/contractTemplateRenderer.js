@@ -656,16 +656,16 @@ function contractPaymentPeriodClause(form = {}) {
 function contractFunctionClassificationClause(form = {}) {
   const securityWork = resolveSecurityWork(form);
   if (securityWork === false) {
-    return "De overeengekomen werkzaamheden zijn niet-operationeel. De cao-onderdelen die artikel 3 van de CAO Particuliere Beveiliging voor niet-beveiligingswerk uitzondert, zijn niet automatisch op werknemer van toepassing; de overeengekomen beloning en arbeidsduur staan in deze arbeidsovereenkomst.";
+    return "De overeengekomen werkzaamheden zijn niet-operationeel. Op de functie- en loonafspraken zijn de cao-bepalingen van toepassing die voor deze functie gelden.";
   }
   if (securityWork === true) {
     const functions = parseFunctionValues(form);
     const mappedGroups = pbFunctionGroupsForFunctions(functions);
-    const salarySentence = `Voor de beloning zijn functieniveau ${pbFunctionLevelLabel(form.cao_function_level)}, salarisschaal ${compact(form.cao_scale)} en periodiek ${compact(form.cao_period)} vastgelegd.`;
+    const functionGroup = pbFunctionGroupLabel(form.cao_function_group);
     if (mappedGroups.length > 1) {
-      return `Werkgever legt bij aanvang één functiegroep vast op basis van de werkzaamheden die naar verwachting structureel 50% of meer van de arbeidstijd omvatten: functiegroep ${pbFunctionGroupLabel(form.cao_function_group)}. LOQ bewaakt daarna op basis van geregistreerde diensten of de feitelijke inzet aanleiding geeft tot herbeoordeling. Werkgever beoordeelt en bevestigt een gewijzigde functiegroep schriftelijk of elektronisch overeenkomstig de cao; de registratie alleen wijzigt de functie-indeling niet automatisch. ${salarySentence} Een gewijzigde functiegroep kan gevolgen hebben voor de toepasselijke cao-rechten en loonindeling en wordt daarom vanaf de rechtens juiste datum verwerkt.`;
+      return `Werknemer wordt bij aanvang ingedeeld in functiegroep ${functionGroup}. Bij werkzaamheden uit meerdere functiegroepen is voor de indeling bepalend welke werkzaamheden werknemer structureel gedurende 50% of meer van de arbeidsduur verricht.`;
     }
-    return `Werkgever deelt werknemer bij aanvang schriftelijk mee dat de overeengekomen werkzaamheden worden ingedeeld in functiegroep ${pbFunctionGroupLabel(form.cao_function_group)}. ${salarySentence}`;
+    return `Werknemer wordt bij aanvang ingedeeld in functiegroep ${functionGroup}, overeenkomstig de cao.`;
   }
   return "";
 }

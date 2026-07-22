@@ -3,6 +3,7 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { jsPDF } from "jspdf";
 import { base44 } from "@/api/base44Client";
+import A4PdfPreview from "@/components/files/A4PdfPreview";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -4270,40 +4271,41 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     </label>
                   )}
 
-                  <div className="h-[68vh] min-h-[520px] overflow-hidden rounded-lg border border-border bg-muted/30">
-                    {reviewDocumentUrl && reviewDocumentIsPdf && (
-                      <iframe
-                        title="Contract controleren"
-                        src={`${reviewDocumentUrl}#toolbar=1&navpanes=0&view=FitH`}
-                        className="h-full w-full bg-background"
-                      />
-                    )}
-                    {reviewDocumentUrl && reviewDocumentIsImage && (
-                      <div className="flex h-full items-center justify-center overflow-auto p-4">
-                        <img src={reviewDocumentUrl} alt="Contract controleren" className="max-h-full max-w-full object-contain" />
-                      </div>
-                    )}
-                    {reviewDocumentUrl && !reviewDocumentIsPdf && !reviewDocumentIsImage && (
-                      <div className="flex h-full items-center justify-center p-6 text-center">
-                        <div>
-                          <FileSignature className="mx-auto h-7 w-7 text-muted-foreground" />
-                          <p className="mt-2 text-sm font-medium text-foreground">Voorbeeld niet beschikbaar</p>
-                          <p className="mt-1 text-xs text-muted-foreground">{reviewDocumentName}</p>
+                  {reviewDocumentUrl && reviewDocumentIsPdf ? (
+                    <A4PdfPreview
+                      url={reviewDocumentUrl}
+                      filename={reviewDocumentName || "Contract"}
+                      className="h-[68vh] min-h-[520px]"
+                    />
+                  ) : (
+                    <div className="h-[68vh] min-h-[520px] overflow-hidden rounded-lg border border-border bg-muted/30">
+                      {reviewDocumentUrl && reviewDocumentIsImage && (
+                        <div className="flex h-full items-center justify-center overflow-auto p-4">
+                          <img src={reviewDocumentUrl} alt="Contract controleren" className="max-h-full max-w-full object-contain" />
                         </div>
-                      </div>
-                    )}
-                    {!reviewDocumentUrl && reviewDocument.file && (
-                      <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Documentpreview wordt opgebouwd...</div>
-                    )}
-                    {reviewDocument.loading && !reviewDocument.file && (
-                      <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
-                        <RefreshCw className="h-4 w-4 animate-spin" /> Contract en briefpapier worden opgebouwd...
-                      </div>
-                    )}
-                    {!reviewDocument.loading && !reviewDocument.file && (
-                      <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">Selecteer of herstel eerst het contractdocument.</div>
-                    )}
-                  </div>
+                      )}
+                      {reviewDocumentUrl && !reviewDocumentIsImage && (
+                        <div className="flex h-full items-center justify-center p-6 text-center">
+                          <div>
+                            <FileSignature className="mx-auto h-7 w-7 text-muted-foreground" />
+                            <p className="mt-2 text-sm font-medium text-foreground">Voorbeeld niet beschikbaar</p>
+                            <p className="mt-1 text-xs text-muted-foreground">{reviewDocumentName}</p>
+                          </div>
+                        </div>
+                      )}
+                      {!reviewDocumentUrl && reviewDocument.file && (
+                        <div className="flex h-full items-center justify-center text-sm text-muted-foreground">Documentpreview wordt opgebouwd...</div>
+                      )}
+                      {reviewDocument.loading && !reviewDocument.file && (
+                        <div className="flex h-full items-center justify-center gap-2 text-sm text-muted-foreground">
+                          <RefreshCw className="h-4 w-4 animate-spin" /> Contract en briefpapier worden opgebouwd...
+                        </div>
+                      )}
+                      {!reviewDocument.loading && !reviewDocument.file && (
+                        <div className="flex h-full items-center justify-center p-6 text-center text-sm text-muted-foreground">Selecteer of herstel eerst het contractdocument.</div>
+                      )}
+                    </div>
+                  )}
 
                   {(reviewDocument.loading || contractEvaluationLoading || reviewBlockingMessages.length > 0) && (
                     <div className={`flex items-start gap-2 rounded-lg border px-3 py-2 text-sm ${reviewBlockingMessages.length > 0 ? "border-destructive/40 bg-destructive/10 text-destructive" : "border-border bg-muted/30 text-muted-foreground"}`}>

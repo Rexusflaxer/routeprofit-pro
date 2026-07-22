@@ -165,7 +165,7 @@ export const PB_FULLTIME_STANDARD_TEMPLATE_BODY = [
   "4.3 Werknemer verricht de werkzaamheden die bij de overeengekomen functie of functies horen en andere redelijke werkzaamheden die passen bij opleiding, ervaring, bevoegdheden, vakbekwaamheid en cao-indeling.",
   "4.4 Werknemer wordt niet ingezet voor werkzaamheden waarvoor de vereiste toestemming, legitimatie, opleiding, certificering of wettelijke bevoegdheid ontbreekt.",
   "4.5 {$contract_werkplek_bepaling}",
-  "4.6 Als werknemer structureel andere werkzaamheden gaat verrichten, leggen partijen de gewijzigde functie en eventuele gevolgen voor de cao-indeling schriftelijk vast.",
+  "4.6 Als de feitelijke werkzaamheden wijzigen, past werkgever de functie-indeling zo nodig aan overeenkomstig de cao en informeert werkgever werknemer daarover schriftelijk of elektronisch.",
   "",
   "Artikel 5 - Arbeidsduur, rooster en werktijden",
   "5.1 {$contract_arbeidsduur_bepaling}",

@@ -7,6 +7,7 @@ import ReactQuill from "react-quill"; import "react-quill/dist/quill.snow.css";
 import LetterheadTabPanel from "@/components/companies/LetterheadTabPanel";
 import { base44 } from "@/api/base44Client";
 import ManagedFilePreviewDialog from "@/components/files/ManagedFilePreviewDialog";
+import DocumentPreviewZoomControls from "@/components/files/DocumentPreviewZoomControls";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Input } from "@/components/ui/input";
@@ -117,8 +118,6 @@ import {
   Type,
   Unlock,
   X, Check,
-  ZoomIn,
-  ZoomOut,
 } from "lucide-react";
 
 const TEMPLATE_STATUS = {
@@ -2447,13 +2446,6 @@ function TemplateDocumentPreview({ body, blocks, letterhead, clauses, highlighte
     };
   }, [highlightedBlockId, previewPageStructure, previewZoom]);
 
-  const changeZoom = (direction) => {
-    setPreviewZoom(current => Math.min(
-      TEMPLATE_PREVIEW_ZOOM_MAX,
-      Math.max(TEMPLATE_PREVIEW_ZOOM_MIN, current + (direction * TEMPLATE_PREVIEW_ZOOM_STEP)),
-    ));
-  };
-
   return (
     <div className="rounded-lg border border-border bg-muted/20 p-4 xl:sticky xl:top-3 xl:self-start">
       <div
@@ -2471,57 +2463,13 @@ function TemplateDocumentPreview({ body, blocks, letterhead, clauses, highlighte
           <span className="font-semibold uppercase tracking-wider">PDF-preview</span>
           <span className="ml-2">{letterhead?.name || "Zonder briefpapier"} · {pages.length} pagina{pages.length === 1 ? "" : "'s"}</span>
         </div>
-        <TooltipProvider delayDuration={250}>
-          <div className="flex shrink-0 items-center rounded-md border border-border bg-background p-0.5 shadow-sm">
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => changeZoom(-1)}
-                  disabled={previewZoom <= TEMPLATE_PREVIEW_ZOOM_MIN}
-                  aria-label="PDF-preview uitzoomen"
-                >
-                  <ZoomOut className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Uitzoomen</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="sm"
-                  className="h-7 min-w-[54px] px-2 font-mono text-[11px]"
-                  onClick={() => setPreviewZoom(100)}
-                  aria-label={`Zoom herstellen naar 100 procent, huidige zoom ${previewZoom} procent`}
-                >
-                  {previewZoom}%
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Herstel naar 100%</TooltipContent>
-            </Tooltip>
-            <Tooltip>
-              <TooltipTrigger asChild>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-7 w-7"
-                  onClick={() => changeZoom(1)}
-                  disabled={previewZoom >= TEMPLATE_PREVIEW_ZOOM_MAX}
-                  aria-label="PDF-preview inzoomen"
-                >
-                  <ZoomIn className="h-3.5 w-3.5" />
-                </Button>
-              </TooltipTrigger>
-              <TooltipContent>Inzoomen</TooltipContent>
-            </Tooltip>
-          </div>
-        </TooltipProvider>
+        <DocumentPreviewZoomControls
+          zoom={previewZoom}
+          onZoomChange={setPreviewZoom}
+          minimum={TEMPLATE_PREVIEW_ZOOM_MIN}
+          maximum={TEMPLATE_PREVIEW_ZOOM_MAX}
+          step={TEMPLATE_PREVIEW_ZOOM_STEP}
+        />
       </div>
       <div ref={previewScrollRef} className="max-h-[760px] overflow-auto overscroll-contain rounded-lg bg-slate-950/5 p-3 dark:bg-black/25">
         <div

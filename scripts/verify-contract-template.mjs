@@ -671,10 +671,13 @@ const multipleFunctions = evaluate(operationalForm({
   primary_function_source: "provisional_contract_start",
 }));
 assert.deepEqual(multipleFunctions.warnings, []);
-assert.match(multipleFunctions.body, /structureel 50% of meer van de arbeidstijd/);
-assert.match(multipleFunctions.body, /Werkgever beoordeelt en bevestigt een gewijzigde functiegroep schriftelijk of elektronisch/);
-assert.match(multipleFunctions.body, /registratie alleen wijzigt de functie-indeling niet automatisch/);
-assert.match(multipleFunctions.body, /kan gevolgen hebben voor de toepasselijke cao-rechten en loonindeling/);
+assert.match(multipleFunctions.body, /structureel gedurende 50% of meer van de arbeidsduur/);
+assert.match(multipleFunctions.body, /past werkgever de functie-indeling zo nodig aan overeenkomstig de cao/);
+assert.doesNotMatch(multipleFunctions.body, /LOQ bewaakt|geregistreerde diensten|registratie alleen|salarisschaal 3 en periodiek 4 vastgelegd/);
+const multipleFunctionsArticleFour = multipleFunctions.body.match(/Artikel 4[\s\S]*?(?=\n\nArtikel 5)/)?.[0] || "";
+assert.match(multipleFunctionsArticleFour, /functiegroep Objectbeveiliger \/ receptionist/);
+assert.doesNotMatch(multipleFunctionsArticleFour, /LOQ|salarisschaal|periodiek/);
+assert.match(multipleFunctions.body, /Artikel 6[\s\S]*?salarisschaal 3, periodiek 1/);
 
 const cashValue = evaluate(operationalForm({
   function_type: "geld_waardetransporteur",

@@ -59,7 +59,7 @@ function looksLikePdf(source = {}) {
     || /\.pdf$/i.test(String(source.download_filename || ""));
 }
 
-async function loadPdfRenderer() {
+export async function loadPdfRenderer() {
   if (typeof window === "undefined") throw new Error("PDF-briefpapier kan alleen in de browser worden verwerkt.");
   if (window.__loqPdfRenderer) return window.__loqPdfRenderer;
   const pdfjs = await import(/* @vite-ignore */ PDFJS_CDN_URL);
