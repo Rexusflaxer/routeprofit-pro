@@ -503,12 +503,13 @@ export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_BODY = [
   "16.2 Bij BOL maken de geldige praktijkovereenkomst en het onderwijs- of leerplan onderdeel uit van het stagedossier. Bij re-integratie maken het besluit, plan, de toestemming en toepasselijke voorwaarden van de instelling daarvan onderdeel uit.",
   "16.3 Dwingend recht gaat voor. Daarna geldt de voor de route verplichte officiële overeenkomst of toestemming, vervolgens deze stageovereenkomst en daarna de overige bijlagen.",
   "",
-  "Artikel 17 - Slotbepalingen en ondertekening",
+  "Artikel 17 - Slotbepalingen",
   "17.1 Wijzigingen zijn alleen geldig wanneer zij schriftelijk of elektronisch aantoonbaar door de vereiste partijen zijn vastgelegd.",
   "17.2 Op deze overeenkomst is Nederlands recht van toepassing. Partijen bespreken een geschil eerst gezamenlijk voordat zij zich tot een bevoegde instantie of rechter wenden.",
   "17.3 Iedere partij verklaart een exemplaar van deze overeenkomst en de bijlagen te hebben ontvangen.",
   "17.4 {$stage_minderjarigheid_bepaling}",
   "",
+  "Ondertekening",
   "Aldus overeengekomen en ondertekend te {$contract_ondertekeningsplaats} op {$contract_ondertekeningsdatum}.",
   "",
   "Voor het stagebedrijf:",
@@ -878,7 +879,7 @@ export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
 
 export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE = {
   id: PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_ID,
-  version: 5,
+  version: 6,
   name: "Stageovereenkomst (BOL / re-integratie) - CAO Particuliere Beveiliging",
   description: "Stageovereenkomst voor relevante praktijkervaring als beveiliger via BOL, UWV-proefplaatsing, een re-integratiemaatregel of tweede spoor. Dit is geen arbeidsovereenkomst en niet geschikt voor BBL of een algemene kantoorstage.",
   template_type: "employment_contract",

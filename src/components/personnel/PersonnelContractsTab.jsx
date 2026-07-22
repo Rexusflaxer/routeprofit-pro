@@ -1,4 +1,5 @@
-import React, { useEffect, useMemo, useState } from "react";
+import React, { useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { jsPDF } from "jspdf";
@@ -12,7 +13,7 @@ import { Label } from "@/components/ui/label";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Textarea } from "@/components/ui/textarea";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
-import { downloadManagedFile, uploadManagedFile } from "@/lib/managedFiles";
+import { uploadManagedFile } from "@/lib/managedFiles";
 import {
   buildFunctionGroupsForWpbrLicenses,
   CAO_OPTIONS,
@@ -40,7 +41,14 @@ import {
   pageNumberHorizontalAlignment,
 } from "@/lib/letterheadDocumentSettings";
 import { buildContractPdfLetterhead, PDF_POINTS_PER_MM } from "@/lib/contractPdfLetterhead";
-import { groupContractTemplateVersions } from "@/lib/contractTemplateEditor";
+import {
+  CONTRACT_SIGNATURE_LAYOUTS,
+  contractBlockHtmlToPlainText,
+  contractTemplateBodyFromBlocks,
+  groupContractTemplateVersions,
+  normalizeContractTemplateBlocks,
+  parseContractSignatureContent,
+} from "@/lib/contractTemplateEditor";
 import { getOfficialPbWageRows, getOfficialPbWageTableYear } from "@/lib/caoPbWageTables";
 import {
   AlertTriangle,
@@ -50,7 +58,6 @@ import {
   CheckCircle,
   ChevronLeft,
   ChevronRight,
-  Download,
   Eye,
   FileSignature,
   Pencil,
@@ -1635,8 +1642,27 @@ async function makePdfFile({ personnel, form, company, template, letterhead, cla
   const signatureMarker = "[[LOQ_SIGNATURE_LINE]]";
   const signatureBlankHeight = 84;
   const isInternshipAgreement = form.employment_contract_model === "internship";
-  const body = renderContractBody(personnel, form, company, template, clauses)
+  const templateBlocks = template?.body
+    ? normalizeContractTemplateBlocks(template.editor_blocks || template.metadata?.editor_blocks, template.body)
+    : [];
+  const signatureBlock = templateBlocks.find(block => (
+    block.kind === "closing" && parseContractSignatureContent(block.content_html).parties.length > 0
+  )) || null;
+  const bodyTemplate = signatureBlock
+    ? {
+      ...template,
+      body: contractTemplateBodyFromBlocks(templateBlocks.filter(block => block.id !== signatureBlock.id)),
+    }
+    : template;
+  const body = renderContractBody(personnel, form, company, bodyTemplate, clauses)
     .replace(/Handtekening:\s*_{4,}/gi, `Handtekening:\n\n${signatureMarker}`);
+  const signatureContent = signatureBlock
+    ? renderContractTemplateBody(
+      contractBlockHtmlToPlainText(signatureBlock.content_html),
+      { personnel, form, company },
+    )
+    : "";
+  const signature = signatureBlock ? parseContractSignatureContent(signatureContent) : null;
   const values = contractRenderValues(personnel, form, company);
   if (textWidth < 120 || pageBottom - continuationTop < 180) {
     throw new Error("De ingestelde briefpapiermarges laten onvoldoende ruimte over voor de contracttekst.");
@@ -1669,6 +1695,86 @@ async function makePdfFile({ personnel, form, company, template, letterhead, cla
   const drawLine = (line, height) => {
     doc.text(line, margin, y, { baseline: "top" });
     y += height;
+  };
+  const drawSignatureBlock = (signatureData) => {
+    if (!signatureData?.parties?.length) return;
+
+    const columnCount = signatureBlock?.layout === CONTRACT_SIGNATURE_LAYOUTS.columns ? 2 : 1;
+    const columnGap = columnCount === 2 ? 28 : 0;
+    const columnWidth = (textWidth - (columnGap * (columnCount - 1))) / columnCount;
+    const signatureLineLabelWidth = 68;
+    const signatureSpace = 72;
+    const signatureLineHeight = 16;
+    const introLines = doc.splitTextToSize(signatureData.intro.join(" "), textWidth);
+    const parties = signatureData.parties.map(party => ({
+      ...party,
+      renderedLines: party.lines.flatMap(line => doc.splitTextToSize(line, columnWidth)),
+    }));
+    const rows = [];
+    for (let index = 0; index < parties.length; index += columnCount) {
+      rows.push(parties.slice(index, index + columnCount));
+    }
+    const rowHeights = rows.map(row => (
+      Math.max(...row.map(party => party.renderedLines.length), 0) * lineHeight
+      + lineHeight
+      + signatureSpace
+      + signatureLineHeight
+      + paragraphGap
+    ));
+    const headingHeight = lineHeight + paragraphGap;
+    const introHeight = introLines.length > 0 ? introLines.length * lineHeight + paragraphGap : 0;
+    const totalHeight = headingHeight + introHeight + rowHeights.reduce((sum, height) => sum + height, 0);
+    const availablePageHeight = pageBottom - continuationTop;
+
+    if (y > continuationTop && totalHeight <= availablePageHeight && y + totalHeight > pageBottom) {
+      addPage();
+      y = continuationTop;
+    } else if (y > continuationTop && y + headingHeight + introHeight + rowHeights[0] > pageBottom) {
+      addPage();
+      y = continuationTop;
+    }
+
+    doc.setFont("helvetica", "bold");
+    doc.setFontSize(11);
+    drawLine(signatureBlock?.title || "Ondertekening", lineHeight);
+    y += paragraphGap;
+    doc.setFont("helvetica", "normal");
+    doc.setFontSize(10);
+    introLines.forEach(line => drawLine(line, lineHeight));
+    if (introLines.length > 0) y += paragraphGap;
+
+    rows.forEach((row, rowIndex) => {
+      const rowHeight = rowHeights[rowIndex];
+      if (y > continuationTop && y + rowHeight > pageBottom) {
+        addPage();
+        y = continuationTop;
+      }
+      const rowTop = y;
+      row.forEach((party, columnIndex) => {
+        const x = margin + (columnIndex * (columnWidth + columnGap));
+        let partyY = rowTop;
+        doc.setFont("helvetica", "bold");
+        doc.text(`${party.label}:`, x, partyY, { baseline: "top" });
+        partyY += lineHeight;
+        doc.setFont("helvetica", "normal");
+        party.renderedLines.forEach(line => {
+          doc.text(line, x, partyY, { baseline: "top" });
+          partyY += lineHeight;
+        });
+        const signatureY = rowTop + rowHeight - paragraphGap - signatureLineHeight;
+        doc.text("Handtekening:", x, signatureY, { baseline: "middle" });
+        doc.setDrawColor(100, 116, 139);
+        doc.setLineWidth(0.6);
+        doc.line(
+          x + signatureLineLabelWidth,
+          signatureY + 2,
+          x + columnWidth,
+          signatureY + 2,
+        );
+        doc.setDrawColor(0, 0, 0);
+      });
+      y += rowHeight;
+    });
   };
   const paragraphs = body.split(/\n{2,}/).map(paragraph => paragraph.trim()).filter(Boolean);
   const paragraphLines = paragraphs.map(paragraph => (
@@ -1736,6 +1842,8 @@ async function makePdfFile({ personnel, form, company, template, letterhead, cla
     y += paragraphGap;
   });
   doc.setFont("helvetica", "normal");
+
+  if (signature) drawSignatureBlock(signature);
 
   const pageCount = doc.getNumberOfPages();
   for (let page = 1; page <= pageCount; page += 1) {
@@ -2103,13 +2211,37 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const [previewFile, setPreviewFile] = useState(null);
   const [actionMessage, setActionMessage] = useState(null);
   const [showArchive, setShowArchive] = useState(false);
-  const [expandedContractId, setExpandedContractId] = useState(null);
+  const [contractContextMenu, setContractContextMenu] = useState(null);
+  const contractContextMenuRef = useRef(null);
   const [signedUploadWizard, setSignedUploadWizard] = useState(null);
   const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [wageScaleFilter, setWageScaleFilter] = useState(null);
   const [durationTypeConfirmed, setDurationTypeConfirmed] = useState(false);
   const [reviewDocument, setReviewDocument] = useState({ file: null, error: null, loading: false });
   const [reviewDocumentUrl, setReviewDocumentUrl] = useState(null);
+
+  useEffect(() => {
+    if (!contractContextMenu) return undefined;
+    const closeOnOutsideClick = (event) => {
+      if (contractContextMenuRef.current && !contractContextMenuRef.current.contains(event.target)) {
+        setContractContextMenu(null);
+      }
+    };
+    const closeOnEscape = (event) => {
+      if (event.key === "Escape") setContractContextMenu(null);
+    };
+    const closeOnViewportChange = () => setContractContextMenu(null);
+    document.addEventListener("mousedown", closeOnOutsideClick);
+    document.addEventListener("keydown", closeOnEscape);
+    window.addEventListener("resize", closeOnViewportChange);
+    window.addEventListener("scroll", closeOnViewportChange, true);
+    return () => {
+      document.removeEventListener("mousedown", closeOnOutsideClick);
+      document.removeEventListener("keydown", closeOnEscape);
+      window.removeEventListener("resize", closeOnViewportChange);
+      window.removeEventListener("scroll", closeOnViewportChange, true);
+    };
+  }, [contractContextMenu]);
 
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
@@ -3032,7 +3164,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             : "Het contract is bevestigd en staat klaar voor ondertekening."),
       });
       setShowArchive(false);
-      setExpandedContractId(result?.record?.id || null);
+      setContractContextMenu(null);
       closeWizard();
       refresh();
     },
@@ -3057,6 +3189,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           : "Hercontrole afgerond; het contract vraagt nog aandacht.",
       };
       setActionMessage({ type: "success", text: labels[variables.action] || "Contract bijgewerkt." });
+      setContractContextMenu(null);
       refresh();
     },
     onError: (error) => setActionMessage({
@@ -3101,10 +3234,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       });
       return data;
     },
-    onSuccess: (data, variables) => {
+    onSuccess: (data) => {
       setSignedUploadWizard(null);
       setShowArchive(false);
-      setExpandedContractId(data?.contract?.id || variables?.contract?.id || null);
+      setContractContextMenu(null);
       setActionMessage({
         type: "success",
         text: firstNotificationMessage(data?.notifications)
@@ -3137,29 +3270,13 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     },
     onSuccess: () => {
       setDeleteCandidate(null);
-      setExpandedContractId(null);
+      setContractContextMenu(null);
       setActionMessage({ type: "success", text: "Het gearchiveerde contract is definitief verwijderd." });
       refresh();
     },
     onError: (error) => setActionMessage({
       type: "error",
       text: error?.message || "Het gearchiveerde contract kon niet definitief worden verwijderd.",
-    }),
-  });
-
-  const downloadContractMutation = useMutation({
-    mutationFn: async (contract) => {
-      const descriptor = contractFileDescriptor(contract);
-      if (!descriptor) throw new Error("Er is nog geen contractdocument beschikbaar om te downloaden.");
-      await downloadManagedFile({
-        managedFileId: descriptor.managedFileId,
-        fileUrl: descriptor.fileUrl,
-        filename: descriptor.filename,
-      });
-    },
-    onError: (error) => setActionMessage({
-      type: "error",
-      text: error?.message || "Het contract kon niet worden gedownload.",
     }),
   });
 
@@ -3196,7 +3313,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
 
   const openSignedUploadWizard = (contract) => {
     setWizardOpen(false);
-    setExpandedContractId(null);
+    setContractContextMenu(null);
     setSignedUploadWizard({
       contract,
       step: 1,
@@ -4537,21 +4654,33 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               .join(", ")
             : storedFunctionValues.map(readableFunctionLabel).join(", ");
           const storedPrimaryFunction = selectableFunctionValue(contract.function_type);
-          const expanded = expandedContractId === contract.id;
+          const contextMenuOpen = contractContextMenu?.contractId === contract.id;
+          const openContractContextMenu = (event, fromKeyboard = false) => {
+            const rect = event.currentTarget.getBoundingClientRect();
+            const menuWidth = 230;
+            const menuHeight = 150;
+            const requestedX = fromKeyboard ? rect.left + (rect.width / 2) : event.clientX;
+            const requestedY = fromKeyboard ? rect.top + (rect.height / 2) : event.clientY;
+            setContractContextMenu({
+              contractId: contract.id,
+              x: Math.max(8, Math.min(requestedX, window.innerWidth - menuWidth - 8)),
+              y: Math.max(8, Math.min(requestedY, window.innerHeight - menuHeight - 8)),
+            });
+          };
           return (
             <React.Fragment key={contract.id}>
               <div
                 role="button"
                 tabIndex={0}
-                aria-expanded={expanded}
-                onClick={() => setExpandedContractId(current => current === contract.id ? null : contract.id)}
+                aria-expanded={contextMenuOpen}
+                onClick={event => openContractContextMenu(event)}
                 onKeyDown={event => {
                   if (event.key === "Enter" || event.key === " ") {
                     event.preventDefault();
-                    setExpandedContractId(current => current === contract.id ? null : contract.id);
+                    openContractContextMenu(event, true);
                   }
                 }}
-                className={`grid min-w-[1120px] w-full cursor-pointer grid-cols-[minmax(260px,1.6fr)_minmax(170px,1fr)_minmax(190px,1.1fr)_minmax(190px,1fr)_minmax(120px,.7fr)_270px] items-center px-4 py-4 text-left text-sm transition-colors hover:bg-muted/30 ${expanded ? "bg-muted/30" : ""}`}
+                className={`relative grid min-w-[1120px] w-full cursor-pointer grid-cols-[minmax(260px,1.6fr)_minmax(170px,1fr)_minmax(190px,1.1fr)_minmax(190px,1fr)_minmax(120px,.7fr)_270px] items-center px-4 py-4 text-left text-sm transition-colors hover:bg-muted/30 ${contextMenuOpen ? "bg-muted/30" : ""}`}
               >
                 <div className="min-w-0">
                   <div className="flex min-w-0 items-center gap-2">
@@ -4618,61 +4747,74 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     </Button>
                   )}
                 </div>
-              </div>
 
-              <AnimatePresence initial={false}>
-                {expanded && (
-                  <motion.div
-                    initial={{ opacity: 0, height: 0 }}
-                    animate={{ opacity: 1, height: "auto" }}
-                    exit={{ opacity: 0, height: 0 }}
-                    transition={{ duration: 0.18, ease: "easeOut" }}
-                    className="min-w-[1120px] overflow-hidden bg-muted/15"
-                  >
-                    <div className="flex items-center justify-between gap-4 border-t border-border/70 px-4 py-3">
-                      <div className="min-w-0">
-                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contractdossier</p>
-                        <p className="mt-1 text-xs text-muted-foreground">
-                          {contract.document_status === "generated"
-                            ? "Het document wacht op ondertekening en telt nog niet mee voor planning of loonverwerking."
-                            : contract.document_status === "signed"
-                              ? "De getekende versie is opgeslagen en wacht op afronding van de juridische controle."
-                              : contract.document_status === "archived"
-                                ? "Dit contract staat in het archief en is uitgesloten van planning en loonverwerking."
-                                : "Open het beveiligde document of download een lokaal exemplaar."}
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 flex-wrap justify-end gap-2" onClick={event => event.stopPropagation()}>
-                        {fileDescriptor && (
-                          <>
-                            <Button type="button" variant="outline" size="sm" onClick={() => openPreview(contract)}>
-                              <Eye className="mr-1.5 h-4 w-4" /> Document openen
-                            </Button>
-                            <Button type="button" variant="outline" size="sm" disabled={downloadContractMutation.isPending} onClick={() => downloadContractMutation.mutate(contract)}>
-                              <Download className="mr-1.5 h-4 w-4" /> Downloaden
-                            </Button>
-                          </>
-                        )}
-                        {!showArchive && ["concept", "generated"].includes(contract.document_status) && (
-                          <Button type="button" size="sm" onClick={() => openSignedUploadWizard(contract)}>
-                            <FileSignature className="mr-1.5 h-4 w-4" /> Getekend contract uploaden
-                          </Button>
-                        )}
-                        {!showArchive && contract.document_status === "signed" && (
-                          <Button type="button" size="sm" disabled={lifecycleMutation.isPending} onClick={() => lifecycleMutation.mutate({ action: "revalidate", contract })}>
-                            <RefreshCw className={`mr-1.5 h-4 w-4 ${lifecycleMutation.isPending ? "animate-spin" : ""}`} /> Opnieuw controleren
-                          </Button>
-                        )}
-                        {!fileDescriptor && !showArchive && (
-                          <Button type="button" size="sm" onClick={() => openEdit(contract)}>
-                            <Pencil className="mr-1.5 h-4 w-4" /> Contract afmaken
-                          </Button>
-                        )}
-                      </div>
-                    </div>
-                  </motion.div>
-                )}
-              </AnimatePresence>
+                <AnimatePresence>
+                  {contextMenuOpen && createPortal(
+                    <motion.div
+                      ref={contractContextMenuRef}
+                      initial={{ opacity: 0, scale: 0.95 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.95 }}
+                      transition={{ duration: 0.1 }}
+                      style={{ left: contractContextMenu.x, top: contractContextMenu.y }}
+                      className="fixed z-[100] min-w-[220px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg"
+                      onClick={event => event.stopPropagation()}
+                    >
+                      {fileDescriptor && (
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+                          onClick={() => {
+                            setContractContextMenu(null);
+                            openPreview(contract);
+                          }}
+                        >
+                          <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+                          Document openen
+                        </button>
+                      )}
+                      {!showArchive && ["concept", "generated"].includes(contract.document_status) && (
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+                          onClick={() => openSignedUploadWizard(contract)}
+                        >
+                          <FileSignature className="h-3.5 w-3.5 text-primary" />
+                          Getekend contract uploaden
+                        </button>
+                      )}
+                      {!showArchive && contract.document_status === "signed" && (
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+                          disabled={lifecycleMutation.isPending}
+                          onClick={() => {
+                            setContractContextMenu(null);
+                            lifecycleMutation.mutate({ action: "revalidate", contract });
+                          }}
+                        >
+                          <RefreshCw className={`h-3.5 w-3.5 text-muted-foreground ${lifecycleMutation.isPending ? "animate-spin" : ""}`} />
+                          Opnieuw controleren
+                        </button>
+                      )}
+                      {!fileDescriptor && !showArchive && (
+                        <button
+                          type="button"
+                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+                          onClick={() => {
+                            setContractContextMenu(null);
+                            openEdit(contract);
+                          }}
+                        >
+                          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                          Contract afmaken
+                        </button>
+                      )}
+                    </motion.div>,
+                    document.body,
+                  )}
+                </AnimatePresence>
+              </div>
             </React.Fragment>
           );
         })}
@@ -4686,7 +4828,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         fileUrl={previewFile?.fileUrl}
         filename={previewFile?.filename}
         title={previewFile?.title || "Contract bekijken"}
-        description="Versleuteld opgeslagen en alleen tijdelijk in deze sessie ontsleuteld."
         renderPdfAsA4
       />
     </div>

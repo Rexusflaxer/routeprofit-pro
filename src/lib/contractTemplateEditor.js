@@ -1,5 +1,10 @@
 const ARTICLE_HEADING_PATTERN = /^Artikel\s+(\d+)\s*[-\u2013\u2014]\s*(.+)$/i;
 
+export const CONTRACT_SIGNATURE_LAYOUTS = {
+  columns: "signature_columns",
+  stacked: "signature_stacked",
+};
+
 const ALLOWED_BLOCK_TAGS = new Set([
   "A",
   "BLOCKQUOTE",
@@ -246,6 +251,43 @@ export function contractBlockHtmlToPlainText(value) {
     .trim();
 }
 
+export function normalizeContractSignatureLayout(value) {
+  return value === CONTRACT_SIGNATURE_LAYOUTS.stacked
+    ? CONTRACT_SIGNATURE_LAYOUTS.stacked
+    : CONTRACT_SIGNATURE_LAYOUTS.columns;
+}
+
+export function parseContractSignatureContent(value) {
+  const text = /<[^>]+>/.test(String(value || ""))
+    ? contractBlockHtmlToPlainText(value)
+    : String(value || "").replace(/\r\n/g, "\n").trim();
+  const lines = text.split("\n").map(line => line.trim()).filter(Boolean);
+  const parties = [];
+  const intro = [];
+  let current = null;
+
+  const isPartyLabel = line => /^(?:voor\s+.+|werkgever|werknemer|stagiair|opdrachtgever|opdrachtnemer|wettelijke vertegenwoordiger(?:\s+indien vereist)?)\s*:\s*$/i.test(line);
+  lines.forEach(line => {
+    if (isPartyLabel(line)) {
+      if (current) parties.push(current);
+      current = { label: line.replace(/\s*:\s*$/, ""), lines: [] };
+      return;
+    }
+    if (/^Handtekening\s*:/i.test(line)) {
+      if (current) {
+        parties.push(current);
+        current = null;
+      }
+      return;
+    }
+    if (current) current.lines.push(line);
+    else intro.push(line);
+  });
+  if (current) parties.push(current);
+
+  return { intro, parties };
+}
+
 export function nextContractArticleSectionNumber(value) {
   const content = contractBlockHtmlToPlainText(normalizeContractArticleSectionHtml(value));
   const sectionNumbers = [...content.matchAll(/(?:^|\n)\s*x\.(\d+)(?=\s|$)/gim)]
@@ -262,7 +304,7 @@ function createBlockId(index, kind, title) {
   return `template-block-${index + 1}-${kind}-${slug || "zonder-titel"}`;
 }
 
-function createBlock({ index, kind, title, content, articleNumber = null }) {
+function createBlock({ index, kind, title, content, articleNumber = null, layout = null }) {
   const contentHtml = textToBlockHtml(content);
   return {
     id: createBlockId(index, kind, title),
@@ -270,6 +312,7 @@ function createBlock({ index, kind, title, content, articleNumber = null }) {
     title: compact(title),
     content_html: kind === "article" ? normalizeContractArticleSectionHtml(contentHtml) : contentHtml,
     article_number: articleNumber,
+    layout: kind === "closing" ? normalizeContractSignatureLayout(layout) : null,
   };
 }
 
@@ -280,6 +323,28 @@ export function createEmptyContractTemplateBlock(index = 0) {
     title: "Nieuw artikel",
     content_html: "<p>x.1 Nieuwe bepaling</p>",
     article_number: null,
+  };
+}
+
+export function createContractTemplateSignatureBlock(index = 0) {
+  return {
+    id: `template-block-signature-${Date.now()}-${index}`,
+    kind: "closing",
+    title: "Ondertekening",
+    content_html: textToBlockHtml([
+      "Aldus overeengekomen en ondertekend te {$contract_ondertekeningsplaats} op {$contract_ondertekeningsdatum}.",
+      "",
+      "Voor werkgever:",
+      "{$bedrijf_vertegenwoordiger_naam}",
+      "{$bedrijf_vertegenwoordiger_functie}",
+      "Handtekening: ______________________________",
+      "",
+      "Werknemer:",
+      "{$medewerker_juridische_volledige_naam}",
+      "Handtekening: ______________________________",
+    ].join("\n")),
+    article_number: null,
+    layout: CONTRACT_SIGNATURE_LAYOUTS.columns,
   };
 }
 
@@ -306,6 +371,7 @@ export function contractTemplateBlocksFromBody(body) {
       title,
       content,
       articleNumber: current.articleNumber,
+      layout: current.layout,
     }));
   };
 
@@ -323,7 +389,13 @@ export function contractTemplateBlocksFromBody(body) {
     }
     if (/^Ondertekening$/i.test(compact(line))) {
       flush();
-      current = { kind: "closing", title: "Ondertekening", articleNumber: null, lines: [] };
+      current = {
+        kind: "closing",
+        title: "Ondertekening",
+        articleNumber: null,
+        lines: [],
+        layout: CONTRACT_SIGNATURE_LAYOUTS.columns,
+      };
       return;
     }
     current.lines.push(line);
@@ -348,6 +420,7 @@ export function normalizeContractTemplateBlocks(blocks, fallbackBody = "") {
         ? normalizeContractArticleSectionHtml(contentHtml)
         : contentHtml,
       article_number: kind === "article" ? articleNumber : null,
+      layout: kind === "closing" ? normalizeContractSignatureLayout(block.layout) : null,
     };
   });
 }
@@ -416,6 +489,22 @@ function estimatePreviewUnits(html, includesHeading = false) {
 export function paginateContractTemplateBlocks(blocks, maxUnits = 57) {
   const units = [];
   renderedContractTemplateBlocks(blocks).forEach(block => {
+    if (block.kind === "closing") {
+      const signature = parseContractSignatureContent(block.rendered_content_html);
+      if (signature.parties.length > 0) {
+        const columnCount = block.layout === CONTRACT_SIGNATURE_LAYOUTS.columns ? 2 : 1;
+        units.push({
+          id: `${block.id}-signature`,
+          block_id: block.id,
+          block_kind: block.kind,
+          block_layout: block.layout,
+          heading: block.rendered_title,
+          html: block.rendered_content_html,
+          estimated_units: Math.max(13, 5 + signature.intro.length + (Math.ceil(signature.parties.length / columnCount) * 9)),
+        });
+        return;
+      }
+    }
     const segments = htmlTopLevelSegments(block.rendered_content_html);
     const showHeading = true;
     segments.forEach((html, index) => {
@@ -423,6 +512,7 @@ export function paginateContractTemplateBlocks(blocks, maxUnits = 57) {
         id: `${block.id}-segment-${index}`,
         block_id: block.id,
         block_kind: block.kind,
+        block_layout: block.layout,
         heading: index === 0 && showHeading ? block.rendered_title : "",
         html,
         estimated_units: estimatePreviewUnits(html, index === 0 && showHeading)

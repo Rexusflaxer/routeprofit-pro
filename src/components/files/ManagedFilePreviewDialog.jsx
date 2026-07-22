@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Download, FileText, Image as ImageIcon, Loader2, LockKeyhole } from "lucide-react";
+import { AlertTriangle, Download, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
 import A4PdfPreview from "@/components/files/A4PdfPreview";
 import { Button } from "@/components/ui/button";
 import {
@@ -45,6 +45,7 @@ export default function ManagedFilePreviewDialog({
   description = null,
   renderPdfAsA4 = false,
 }) {
+  const descriptionId = React.useId();
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState(null);
@@ -109,7 +110,10 @@ export default function ManagedFilePreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className={`h-[90vh] max-h-[90vh] w-[calc(100vw-1rem)] sm:w-[calc(100vw-2rem)] grid-rows-[auto,1fr] overflow-hidden p-4 sm:p-6 ${renderPdfAsA4 ? "max-w-6xl" : "max-w-2xl"}`}>
+      <DialogContent
+        aria-describedby={description ? descriptionId : undefined}
+        className={`h-[90vh] max-h-[90vh] w-[calc(100vw-1rem)] sm:w-[calc(100vw-2rem)] grid-rows-[auto,1fr] overflow-hidden p-4 sm:p-6 ${renderPdfAsA4 ? "max-w-6xl" : "max-w-2xl"}`}
+      >
         <DialogHeader className="min-w-0 pr-12">
           <div className="flex min-w-0 items-start justify-between gap-4">
             <div className="min-w-0 space-y-1">
@@ -117,14 +121,9 @@ export default function ManagedFilePreviewDialog({
                 <FileText className="h-4 w-4 text-primary" />
                 <span className="truncate">{title}</span>
               </DialogTitle>
-              <DialogDescription className="flex min-w-0 items-center gap-1.5 truncate">
-                {preview?.encrypted && <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-emerald-600" />}
-                <span className="truncate">
-                  {description || (preview?.encrypted
-                    ? "Versleuteld opgeslagen en alleen tijdelijk in deze sessie ontsleuteld."
-                    : resolvedFilename)}
-                </span>
-              </DialogDescription>
+              {description && (
+                <DialogDescription id={descriptionId} className="truncate">{description}</DialogDescription>
+              )}
             </div>
             <Button
               type="button"

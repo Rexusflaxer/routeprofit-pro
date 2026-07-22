@@ -41,19 +41,23 @@ import {
   getStandardContractTemplatePreset,
 } from "@/lib/contractTemplateCatalog";
 import {
+  CONTRACT_SIGNATURE_LAYOUTS,
   contractBlockHtmlToPlainText,
   contractTemplateBodyFromBlocks,
   contractTemplateBlocksFromBody,
   contractTemplateFamilyKey,
   contractTemplateScopeKey,
   centeredScrollOffset,
+  createContractTemplateSignatureBlock,
   createEmptyContractTemplateBlock,
   durationOptionsForContractTemplate,
   groupContractTemplateVersions,
   nextContractTemplateVersion,
   nextContractArticleSectionNumber,
   normalizeContractArticleSectionHtml,
+  normalizeContractSignatureLayout,
   normalizeContractTemplateBlocks,
+  parseContractSignatureContent,
   paginateContractTemplateBlocks,
   paginateContractTemplateUnitsByHeight,
   resequenceContractTemplateVersions,
@@ -95,6 +99,7 @@ import {
   Edit,
   Eye,
   EyeOff,
+  FileSignature,
   FilePlus2,
   HelpCircle,
   Image as ImageIcon,
@@ -2315,6 +2320,10 @@ function centerElementInScrollContainer(scrollContainer, target, behavior = "smo
 function TemplatePreviewUnit({ item, highlightedBlockId, measurement = false }) {
   const isHighlighted = !measurement && item.block_id === highlightedBlockId;
   const isDocumentHeading = item.block_kind === "preamble";
+  const signature = item.block_kind === "closing"
+    ? parseContractSignatureContent(item.html)
+    : null;
+  const signatureUsesColumns = item.block_layout === CONTRACT_SIGNATURE_LAYOUTS.columns;
   return (
     <div
       data-template-block-id={measurement ? undefined : item.block_id}
@@ -2330,10 +2339,27 @@ function TemplatePreviewUnit({ item, highlightedBlockId, measurement = false }) 
           {item.heading}
         </p>
       )}
-      <div
-        className={TEMPLATE_PREVIEW_RICH_TEXT_CLASS}
-        dangerouslySetInnerHTML={{ __html: sanitizeContractBlockHtml(item.html) }}
-      />
+      {signature?.parties?.length > 0 ? (
+        <div className="space-y-2 text-slate-950">
+          {signature.intro.length > 0 && (
+            <p className="leading-relaxed">{signature.intro.join(" ")}</p>
+          )}
+          <div className={`grid gap-x-5 gap-y-3 ${signatureUsesColumns ? "grid-cols-2" : "grid-cols-1"}`}>
+            {signature.parties.map((party, index) => (
+              <div key={`${party.label}-${index}`} className="min-w-0">
+                <p className="font-semibold">{party.label}:</p>
+                {party.lines.map((line, lineIndex) => <p key={`${line}-${lineIndex}`} className="break-words">{line}</p>)}
+                <div className="mt-8 border-t border-slate-500 pt-1 text-[8px] text-slate-500">Handtekening</div>
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : (
+        <div
+          className={TEMPLATE_PREVIEW_RICH_TEXT_CLASS}
+          dangerouslySetInnerHTML={{ __html: sanitizeContractBlockHtml(item.html) }}
+        />
+      )}
     </div>
   );
 }
@@ -2371,7 +2397,7 @@ function TemplateDocumentPreview({ body, blocks, letterhead, clauses, highlighte
   const paginationSignature = useMemo(() => JSON.stringify({
     measurementContentWidth,
     availableContentHeight,
-    units: previewUnits.map(item => [item.id, item.block_kind, item.heading, item.html]),
+    units: previewUnits.map(item => [item.id, item.block_kind, item.block_layout, item.heading, item.html]),
   }), [availableContentHeight, measurementContentWidth, previewUnits]);
   const fallbackPages = useMemo(
     () => paginateContractTemplateBlocks(
@@ -3225,7 +3251,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
           version_source_id: versionSourceId,
           version,
           editor_blocks: editorBlocks,
-          template_editor_version: 1,
+          template_editor_version: 2,
         },
       };
       return editingTemplateId && !createNewVersion
@@ -3779,6 +3805,7 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       content_html: block.kind === "article"
         ? normalizeContractArticleSectionHtml(block.content_html)
         : (block.content_html || "<p><br></p>"),
+      layout: block.kind === "closing" ? normalizeContractSignatureLayout(block.layout) : null,
     });
     setPlaceholderSearch("");
   };
@@ -3807,7 +3834,14 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
     }
     updateTemplateBlocks(blocks => blocks.map(block => (
       block.id === editingTemplateBlockId
-        ? { ...block, title: templateBlockDraft.title.trim(), content_html: contentHtml }
+        ? {
+          ...block,
+          title: templateBlockDraft.title.trim(),
+          content_html: contentHtml,
+          layout: block.kind === "closing"
+            ? normalizeContractSignatureLayout(templateBlockDraft.layout)
+            : null,
+        }
         : block
     )));
     setEditingTemplateBlockId(null);
@@ -3825,6 +3859,18 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
       title: "Nieuw artikel",
       content_html: "<p>x.1 Nieuwe bepaling</p>",
     };
+    updateTemplateBlocks([...blocks, block]);
+    openTemplateBlockEditor(block);
+  };
+
+  const addTemplateSignatureBlock = () => {
+    const blocks = normalizeContractTemplateBlocks(templateForm.editor_blocks, templateForm.body);
+    const existingSignatureBlock = blocks.find(block => block.kind === "closing");
+    if (existingSignatureBlock) {
+      openTemplateBlockEditor(existingSignatureBlock);
+      return;
+    }
+    const block = createContractTemplateSignatureBlock(blocks.length);
     updateTemplateBlocks([...blocks, block]);
     openTemplateBlockEditor(block);
   };
@@ -5347,6 +5393,9 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
             ...block,
             title: templateBlockDraft.title,
             content_html: templateBlockDraft.content_html,
+            layout: block.kind === "closing"
+              ? normalizeContractSignatureLayout(templateBlockDraft.layout)
+              : null,
           }
           : block
       ))
@@ -5606,6 +5655,23 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                             onChange={event => setTemplateBlockDraft(prev => ({ ...prev, title: event.target.value }))}
                             placeholder="Bijvoorbeeld Functie, werkzaamheden en werkplek"
                           />
+                          {editingTemplateBlock.kind === "closing" && (
+                            <div className="space-y-1.5 pt-1">
+                              <Label htmlFor="template-signature-layout">Handtekeninglayout</Label>
+                              <Select
+                                value={normalizeContractSignatureLayout(templateBlockDraft.layout)}
+                                onValueChange={value => setTemplateBlockDraft(prev => ({ ...prev, layout: value }))}
+                              >
+                                <SelectTrigger id="template-signature-layout">
+                                  <SelectValue />
+                                </SelectTrigger>
+                                <SelectContent>
+                                  <SelectItem value={CONTRACT_SIGNATURE_LAYOUTS.columns}>Naast elkaar</SelectItem>
+                                  <SelectItem value={CONTRACT_SIGNATURE_LAYOUTS.stacked}>Onder elkaar</SelectItem>
+                                </SelectContent>
+                              </Select>
+                            </div>
+                          )}
                           <p className="text-[11px] leading-relaxed text-muted-foreground">
                             {editingTemplateBlock.kind === "article"
                               ? "Gebruik x.n voor leden; de actuele artikelnummering wordt automatisch toegepast."
@@ -5750,10 +5816,25 @@ export default function CompanyTemplatesTab({ companyId, company, subTab }) {
                             <p className="text-sm font-semibold text-foreground">Artikelblokken</p>
                             <p className="mt-1 text-xs text-muted-foreground">Sleep om de volgorde te wijzigen. Nummering wordt automatisch bijgewerkt.</p>
                           </div>
-                          <Button type="button" variant="outline" size="sm" onClick={addTemplateArticleBlock}>
-                            <Plus className="mr-1 h-4 w-4" />
-                            Artikel
-                          </Button>
+                          <div className="flex shrink-0 items-center gap-2">
+                            <Button type="button" variant="outline" size="sm" onClick={addTemplateArticleBlock}>
+                              <Plus className="mr-1 h-4 w-4" />
+                              Artikel
+                            </Button>
+                            {isEmploymentTemplate && (
+                              <Button
+                                type="button"
+                                variant="outline"
+                                size="sm"
+                                onClick={addTemplateSignatureBlock}
+                                disabled={templateBlocks.some(block => block.kind === "closing")}
+                                title={templateBlocks.some(block => block.kind === "closing") ? "Deze template bevat al een ondertekeningsblok" : "Ondertekeningsblok toevoegen"}
+                              >
+                                <FileSignature className="mr-1 h-4 w-4" />
+                                Ondertekening
+                              </Button>
+                            )}
+                          </div>
                         </div>
                         <DragDropContext onDragEnd={handleTemplateBlockDragEnd}>
                           <Droppable droppableId="template-article-blocks">

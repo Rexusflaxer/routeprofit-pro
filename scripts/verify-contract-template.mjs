@@ -29,6 +29,7 @@ import {
   normalizeAddressParts,
 } from "../src/lib/addressFormatting.js";
 import {
+  CONTRACT_SIGNATURE_LAYOUTS,
   contractTemplateBodyFromBlocks,
   contractTemplateBlocksFromBody,
   contractTemplateFamilyKey,
@@ -38,6 +39,7 @@ import {
   nextContractArticleSectionNumber,
   nextContractTemplateVersion,
   normalizeContractTemplateBlocks,
+  parseContractSignatureContent,
   paginateContractTemplateBlocks,
   paginateContractTemplateUnitsByHeight,
   resequenceContractTemplateVersions,
@@ -119,6 +121,25 @@ const template = {
   metadata: { standard_template_id: preset.id },
   employment_model_scope: "fulltime",
 };
+
+const fulltimeEditorBlocks = contractTemplateBlocksFromBody(preset.body);
+const fulltimeSignatureBlock = fulltimeEditorBlocks.find(block => block.kind === "closing");
+assert.equal(fulltimeSignatureBlock?.layout, CONTRACT_SIGNATURE_LAYOUTS.columns);
+assert.equal(parseContractSignatureContent(fulltimeSignatureBlock?.content_html).parties.length, 2);
+assert.match(contractTemplateBodyFromBlocks(fulltimeEditorBlocks), /Ondertekening\n\nAldus overeengekomen/);
+
+const internshipSignatureBlock = contractTemplateBlocksFromBody(internshipPreset.body)
+  .find(block => block.kind === "closing");
+assert.equal(internshipSignatureBlock?.layout, CONTRACT_SIGNATURE_LAYOUTS.columns);
+assert.equal(parseContractSignatureContent(internshipSignatureBlock?.content_html).parties.length, 4);
+
+const stackedSignatureBlocks = fulltimeEditorBlocks.map(block => (
+  block.kind === "closing" ? { ...block, layout: CONTRACT_SIGNATURE_LAYOUTS.stacked } : block
+));
+const stackedSignatureUnit = paginateContractTemplateBlocks(stackedSignatureBlocks)
+  .flat()
+  .find(unit => unit.block_kind === "closing");
+assert.equal(stackedSignatureUnit?.block_layout, CONTRACT_SIGNATURE_LAYOUTS.stacked);
 
 const pollutedCompanyAddress = {
   street_name: "Ir. R.R. van der Zeelaan 1, 8191JH Wapenveld",
