@@ -1,5 +1,4 @@
 import React, { useEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import { jsPDF } from "jspdf";
@@ -303,6 +302,8 @@ const DOCUMENT_STATUS_STYLES = {
   expired: "bg-amber-100 text-amber-700 dark:bg-amber-950 dark:text-amber-200",
 };
 
+const CONTRACT_TABLE_GRID = "grid min-w-[1080px] grid-cols-[minmax(190px,1.4fr)_minmax(150px,1fr)_minmax(130px,155px)_minmax(145px,175px)_minmax(120px,150px)_minmax(120px,150px)_minmax(72px,max-content)] gap-3 xl:gap-4";
+
 function toArrayText(value) {
   return Array.isArray(value) ? value.join(", ") : "";
 }
@@ -341,6 +342,21 @@ function payPeriodHoursFromWeekHours(weekHours, frequency) {
   if (frequency === "month") return roundedHours((hours * 52) / 12);
   if (frequency === "four_weeks") return roundedHours(hours * 4);
   return null;
+}
+
+function weekHoursFromPayPeriodHours(payPeriodHours, frequency) {
+  const hours = numberOrNull(payPeriodHours);
+  if (hours === null) return null;
+  if (frequency === "week") return roundedHours(hours);
+  if (frequency === "month") return roundedHours((hours * 12) / 52);
+  if (frequency === "four_weeks") return roundedHours(hours / 4);
+  return null;
+}
+
+function formatHours(value) {
+  const hours = numberOrNull(value);
+  if (hours === null) return null;
+  return roundedHours(hours).toLocaleString("nl-NL", { maximumFractionDigits: 2 });
 }
 
 function getMinMaxBand(value) {
@@ -2230,16 +2246,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     const closeOnEscape = (event) => {
       if (event.key === "Escape") setContractContextMenu(null);
     };
-    const closeOnViewportChange = () => setContractContextMenu(null);
     document.addEventListener("mousedown", closeOnOutsideClick);
     document.addEventListener("keydown", closeOnEscape);
-    window.addEventListener("resize", closeOnViewportChange);
-    window.addEventListener("scroll", closeOnViewportChange, true);
     return () => {
       document.removeEventListener("mousedown", closeOnOutsideClick);
       document.removeEventListener("keydown", closeOnEscape);
-      window.removeEventListener("resize", closeOnViewportChange);
-      window.removeEventListener("scroll", closeOnViewportChange, true);
     };
   }, [contractContextMenu]);
 
@@ -4606,31 +4617,43 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       </AnimatePresence>
 
       <div className="overflow-x-auto">
-      <div className="grid min-w-[1120px] grid-cols-[minmax(260px,1.6fr)_minmax(170px,1fr)_minmax(190px,1.1fr)_minmax(190px,1fr)_minmax(120px,.7fr)_270px] items-center border-b border-border bg-muted/30 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground">
-        <span className="truncate">Contract / functie</span><span className="truncate">Bedrijf</span><span className="truncate">CAO / schaal</span><span className="truncate">Uren / model</span><span className="truncate">Door</span>
-        <div className="flex items-center justify-end gap-2">
+      <div className={`${CONTRACT_TABLE_GRID} items-center border-b border-border bg-muted/30 px-4 py-2 text-xs font-semibold uppercase tracking-wider text-muted-foreground`}>
+        <span className="min-w-0 truncate">Contract</span>
+        <span className="min-w-0 truncate">Bedrijf</span>
+        <span className="min-w-0 truncate">Status</span>
+        <span className="min-w-0 truncate">Schaal</span>
+        <span className="min-w-0 truncate">Uren</span>
+        <span className="min-w-0 truncate">Door</span>
+        <div className="min-w-0 flex flex-nowrap items-center justify-end gap-2">
           {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
-          {!actionPanelOpen && (showArchive ? <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs whitespace-nowrap"><ChevronLeft className="w-3 h-3 mr-1" /> Actieve contracten</Button> : <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs whitespace-nowrap"><Archive className="w-3 h-3 mr-1" /> Archief {archivedContracts.length > 0 ? `(${archivedContracts.length})` : ""}</Button>)}
-          {!actionPanelOpen && !showArchive && <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs whitespace-nowrap"><Plus className="w-3 h-3 mr-1" /> Nieuw contract</Button>}
+          {!actionPanelOpen && (showArchive ? <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap"><ChevronLeft className="w-3 h-3 mr-1" /> Actieve contracten</Button> : <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap"><Archive className="w-3 h-3 mr-1" /> Archief {archivedContracts.length > 0 ? `(${archivedContracts.length})` : ""}</Button>)}
+          {!actionPanelOpen && !showArchive && <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs font-medium normal-case tracking-normal whitespace-nowrap"><Plus className="w-3 h-3 mr-1" /> Nieuw contract</Button>}
         </div>
       </div>
-      {isLoading && <div className="p-6 text-sm text-muted-foreground">Contracten laden...</div>}
-      {!isLoading && visibleContracts.length === 0 && <div className="p-8 text-center text-sm text-muted-foreground">{showArchive ? "Geen contracten in het archief." : "Nog geen contracten geregistreerd."}</div>}
+      {isLoading && <div className="min-w-[1080px] px-4 py-3 text-sm text-muted-foreground">Contracten laden...</div>}
+      {!isLoading && visibleContracts.length === 0 && <div className={`min-w-[1080px] px-4 text-sm text-muted-foreground ${showArchive ? "py-6 text-center" : "py-3"}`}>{showArchive ? "Geen contracten in het archief." : "Nog geen contracten geregistreerd."}</div>}
       <div className="divide-y divide-border">
       {!isLoading && visibleContracts.map(contract => {
           const fileDescriptor = contractFileDescriptor(contract);
-          const minPeriodHours = contract.min_hours_per_pay_period
-            ?? (contract.min_hours_per_week !== null && contract.min_hours_per_week !== undefined ? Number(contract.min_hours_per_week) * 4 : null);
-          const maxPeriodHours = contract.max_hours_per_pay_period
-            ?? (contract.max_hours_per_week !== null && contract.max_hours_per_week !== undefined ? Number(contract.max_hours_per_week) * 4 : null);
+          const salaryPaymentFrequency = contract.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+            ? "four_weeks"
+            : contract.salary_payment_frequency;
+          const minWeeklyHours = numberOrNull(contract.min_hours_per_week)
+            ?? weekHoursFromPayPeriodHours(contract.min_hours_per_pay_period, salaryPaymentFrequency);
+          const maxWeeklyHours = numberOrNull(contract.max_hours_per_week)
+            ?? weekHoursFromPayPeriodHours(contract.max_hours_per_pay_period, salaryPaymentFrequency);
+          const fixedWeeklyHours = numberOrNull(contract.contract_hours_per_week)
+            ?? weekHoursFromPayPeriodHours(contract.contract_hours_per_pay_period, salaryPaymentFrequency);
           const persistedEmploymentModel = contract.employment_contract_model === "call_agreement"
-            ? (contract.call_agreement_type === "min_max" || minPeriodHours !== null ? "min_max" : "zero_hours")
+            ? (contract.call_agreement_type === "min_max" || minWeeklyHours !== null ? "min_max" : "zero_hours")
             : contract.employment_contract_model;
           const hoursLabel = persistedEmploymentModel === "zero_hours"
-            ? "Geen vaste uren"
-            : (persistedEmploymentModel === "min_max" && minPeriodHours !== null
-              ? `Min-max ${minPeriodHours || "-"}-${maxPeriodHours || "-"} u/4 weken`
-              : `${contract.contract_hours_per_week || contract.contract_hours_per_pay_period || "-"} u`);
+            ? "0 uur per week"
+            : (persistedEmploymentModel === "min_max"
+              ? (minWeeklyHours !== null && maxWeeklyHours !== null
+                ? `${formatHours(minWeeklyHours)}-${formatHours(maxWeeklyHours)} uur per week`
+                : "—")
+              : (fixedWeeklyHours !== null ? `${formatHours(fixedWeeklyHours)} uur per week` : "—"));
           const contractTypeLabel = contract.legal_document_type === "internship_agreement" || persistedEmploymentModel === "internship"
             ? "Stageovereenkomst (BOL / re-integratie)"
             : (persistedEmploymentModel === "bbl"
@@ -4642,87 +4665,80 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 min_max: "Min-maxcontract",
                 zero_hours: "Nulurencontract",
               }[persistedEmploymentModel] || CONTRACT_FORM_LABELS[contract.contract_form] || "Arbeidscontract"));
-          const visibleFunctionAssignments = (contract.function_assignments || [])
-            .filter(item => selectableFunctionValue(item.function_key));
-          const storedFunctionValues = selectableFunctionValues([
-            contract.function_type,
-            ...(contract.allowed_function_types || []),
-          ]);
-          const functionSummary = visibleFunctionAssignments.length > 0
-            ? visibleFunctionAssignments
-              .map(item => item.function_label || readableFunctionLabel(item.function_key))
-              .join(", ")
-            : storedFunctionValues.map(readableFunctionLabel).join(", ");
-          const storedPrimaryFunction = selectableFunctionValue(contract.function_type);
+          const effectiveEndDate = effectiveEndForContract(contract);
+          const periodicValuePresent = contract.cao_period !== null && contract.cao_period !== undefined && contract.cao_period !== "";
+          const scaleLabel = contract.cao_scale
+            ? `Schaal ${contract.cao_scale}${periodicValuePresent ? ` · periodiek ${contract.cao_period}` : ""}`
+            : (periodicValuePresent ? `Periodiek ${contract.cao_period}` : "—");
           const contextMenuOpen = contractContextMenu?.contractId === contract.id;
+          const actionRequired = !showArchive && (
+            ["concept", "generated", "signed"].includes(contract.document_status)
+            || !fileDescriptor
+          );
+          const rowIsInteractive = actionRequired || Boolean(fileDescriptor);
           const openContractContextMenu = (event, fromKeyboard = false) => {
             const rect = event.currentTarget.getBoundingClientRect();
             const menuWidth = 230;
-            const menuHeight = 150;
-            const requestedX = fromKeyboard ? rect.left + (rect.width / 2) : event.clientX;
-            const requestedY = fromKeyboard ? rect.top + (rect.height / 2) : event.clientY;
+            const requestedX = fromKeyboard ? (rect.width / 2) - (menuWidth / 2) : event.clientX - rect.left;
+            const requestedY = fromKeyboard ? rect.height / 2 : event.clientY - rect.top;
             setContractContextMenu({
               contractId: contract.id,
-              x: Math.max(8, Math.min(requestedX, window.innerWidth - menuWidth - 8)),
-              y: Math.max(8, Math.min(requestedY, window.innerHeight - menuHeight - 8)),
+              x: Math.max(8, Math.min(requestedX, rect.width - menuWidth - 8)),
+              y: Math.max(8, requestedY),
             });
           };
+          const handleContractRowClick = (event, fromKeyboard = false) => {
+            if (actionRequired) {
+              openContractContextMenu(event, fromKeyboard);
+            } else if (fileDescriptor) {
+              openPreview(contract);
+            }
+          };
           return (
-            <React.Fragment key={contract.id}>
-              <div
-                role="button"
-                tabIndex={0}
-                aria-expanded={contextMenuOpen}
-                onClick={event => openContractContextMenu(event)}
-                onKeyDown={event => {
-                  if (event.key === "Enter" || event.key === " ") {
-                    event.preventDefault();
-                    openContractContextMenu(event, true);
-                  }
-                }}
-                className={`relative grid min-w-[1120px] w-full cursor-pointer grid-cols-[minmax(260px,1.6fr)_minmax(170px,1fr)_minmax(190px,1.1fr)_minmax(190px,1fr)_minmax(120px,.7fr)_270px] items-center px-4 py-4 text-left text-sm transition-colors hover:bg-muted/30 ${contextMenuOpen ? "bg-muted/30" : ""}`}
-              >
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <p className="truncate font-semibold text-foreground">{contractTypeLabel}</p>
-                    {(showArchive || contract.document_status !== "active") && documentStatusBadge(contract.document_status)}
-                    {contract.statutory_conversion_applies === true && <Badge className="shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200">Van rechtswege onbepaalde tijd</Badge>}
-                  </div>
-                  <p className="truncate text-xs text-muted-foreground">
-                    {functionSummary || contract.cao_function_group || "Functie nog niet vastgelegd"}
-                  </p>
-                  {!showArchive && contract.primary_function_status === "pending_work_history" && (
-                    <p
-                      className="mt-0.5 truncate text-xs text-sky-600 dark:text-sky-300"
-                      title="LOQ bepaalt de hoofdfunctie per contract zodra voldoende gewerkte diensten zijn geregistreerd"
-                    >
-                      Hoofdfunctie: automatisch na voldoende geregistreerde inzet
-                    </p>
-                  )}
-                  {!showArchive && contract.primary_function_status !== "pending_work_history" && storedPrimaryFunction && (
-                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                      Hoofdfunctie: {readableFunctionLabel(storedPrimaryFunction)}
-                    </p>
-                  )}
-                  <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    {formatDate(contract.contract_start_date)}{effectiveEndForContract(contract) ? ` - ${formatDate(effectiveEndForContract(contract))}` : " - onbepaalde tijd"}
-                  </p>
+            <div
+              key={contract.id}
+              role={rowIsInteractive ? "button" : undefined}
+              tabIndex={rowIsInteractive ? 0 : undefined}
+              aria-haspopup={actionRequired ? "menu" : undefined}
+              aria-expanded={actionRequired ? contextMenuOpen : undefined}
+              onClick={rowIsInteractive ? event => handleContractRowClick(event) : undefined}
+              onKeyDown={rowIsInteractive ? event => {
+                if (event.key === "Enter" || event.key === " ") {
+                  event.preventDefault();
+                  handleContractRowClick(event, true);
+                }
+              } : undefined}
+              className={`relative ${CONTRACT_TABLE_GRID} group w-full items-center px-4 py-3 text-left text-sm transition-colors ${
+                actionRequired
+                  ? "cursor-pointer hover:bg-accent/30"
+                  : fileDescriptor
+                    ? "cursor-pointer hover:bg-accent/50"
+                    : "hover:bg-accent/30"
+              } ${contextMenuOpen ? "bg-accent/30" : ""}`}
+            >
+              <div className="min-w-0">
+                <p className="truncate font-semibold text-foreground">{contractTypeLabel}</p>
+                <div className="mt-0.5 flex min-w-0 flex-wrap gap-x-3 gap-y-0.5 text-xs text-muted-foreground">
+                  {contract.contract_start_date && <span>Vanaf: <strong className="font-medium text-foreground">{formatDate(contract.contract_start_date)}</strong></span>}
+                  <span>Tot: <strong className="font-medium text-foreground">{effectiveEndDate ? formatDate(effectiveEndDate) : "Onbepaalde tijd"}</strong></span>
                 </div>
-                <div className="truncate text-muted-foreground">{getCompanyLabel(companies, contract.company_id)}</div>
-                <div className="truncate text-muted-foreground">{CAO_OPTION_LABELS[contract.cao_key] || contract.cao_key || "-"}{contract.cao_scale ? ` / ${contract.cao_scale}.${contract.cao_period || 0}` : ""}</div>
-                <div className="truncate text-muted-foreground">{hoursLabel} · {EMPLOYMENT_MODEL_LABELS[persistedEmploymentModel] || persistedEmploymentModel || "-"}</div>
-                <div className="truncate text-muted-foreground">{getAuditActorLabel(contract, auditActors)}</div>
-                <div className="flex justify-end gap-1" onClick={event => event.stopPropagation()}>
+              </div>
+              <span className="min-w-0 truncate text-muted-foreground">{getCompanyLabel(companies, contract.company_id)}</span>
+              <div className="min-w-0">{documentStatusBadge(contract.document_status)}</div>
+              <span className="min-w-0 truncate text-muted-foreground">{scaleLabel}</span>
+              <span className="min-w-0 truncate text-muted-foreground">{hoursLabel}</span>
+              <span className="min-w-0 truncate text-muted-foreground">{getAuditActorLabel(contract, auditActors)}</span>
+              <div className="min-w-0 flex justify-end gap-1 opacity-0 transition-opacity group-hover:opacity-100" onClick={event => event.stopPropagation()}>
                   {!showArchive ? (
                     <>
-                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Contract bewerken" onClick={() => openEdit(contract)}>
-                        <Pencil className="h-4 w-4" />
+                      <Button type="button" variant="ghost" size="icon" className="h-7 w-7" title="Contract bewerken" onClick={() => openEdit(contract)}>
+                        <Pencil className="h-3.5 w-3.5" />
                       </Button>
                       <Button
                         type="button"
                         variant="ghost"
                         size="icon"
-                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        className="h-7 w-7 text-muted-foreground hover:bg-destructive/10 hover:text-destructive"
                         title="Contract archiveren"
                         disabled={lifecycleMutation.isPending}
                         onClick={() => {
@@ -4731,7 +4747,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                           }
                         }}
                       >
-                        <Archive className="h-4 w-4" />
+                        <Archive className="h-3.5 w-3.5" />
                       </Button>
                     </>
                   ) : (
@@ -4739,83 +4755,81 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                       type="button"
                       variant="ghost"
                       size="icon"
-                      className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      className="h-7 w-7 text-destructive hover:bg-destructive/10 hover:text-destructive"
                       title="Contract definitief verwijderen"
                       onClick={() => setDeleteCandidate(contract)}
                     >
-                      <Trash2 className="h-4 w-4" />
+                      <Trash2 className="h-3.5 w-3.5" />
                     </Button>
                   )}
-                </div>
-
-                <AnimatePresence>
-                  {contextMenuOpen && createPortal(
-                    <motion.div
-                      ref={contractContextMenuRef}
-                      initial={{ opacity: 0, scale: 0.95 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.95 }}
-                      transition={{ duration: 0.1 }}
-                      style={{ left: contractContextMenu.x, top: contractContextMenu.y }}
-                      className="fixed z-[100] min-w-[220px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg"
-                      onClick={event => event.stopPropagation()}
-                    >
-                      {fileDescriptor && (
-                        <button
-                          type="button"
-                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
-                          onClick={() => {
-                            setContractContextMenu(null);
-                            openPreview(contract);
-                          }}
-                        >
-                          <Eye className="h-3.5 w-3.5 text-muted-foreground" />
-                          Document openen
-                        </button>
-                      )}
-                      {!showArchive && ["concept", "generated"].includes(contract.document_status) && (
-                        <button
-                          type="button"
-                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
-                          onClick={() => openSignedUploadWizard(contract)}
-                        >
-                          <FileSignature className="h-3.5 w-3.5 text-primary" />
-                          Getekend contract uploaden
-                        </button>
-                      )}
-                      {!showArchive && contract.document_status === "signed" && (
-                        <button
-                          type="button"
-                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent disabled:opacity-50"
-                          disabled={lifecycleMutation.isPending}
-                          onClick={() => {
-                            setContractContextMenu(null);
-                            lifecycleMutation.mutate({ action: "revalidate", contract });
-                          }}
-                        >
-                          <RefreshCw className={`h-3.5 w-3.5 text-muted-foreground ${lifecycleMutation.isPending ? "animate-spin" : ""}`} />
-                          Opnieuw controleren
-                        </button>
-                      )}
-                      {!fileDescriptor && !showArchive && (
-                        <button
-                          type="button"
-                          className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
-                          onClick={() => {
-                            setContractContextMenu(null);
-                            openEdit(contract);
-                          }}
-                        >
-                          <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
-                          Contract afmaken
-                        </button>
-                      )}
-                    </motion.div>,
-                    document.body,
-                  )}
-                </AnimatePresence>
               </div>
-            </React.Fragment>
+
+              <AnimatePresence>
+                {contextMenuOpen && actionRequired && (
+                  <motion.div
+                    ref={contractContextMenuRef}
+                    initial={{ opacity: 0, scale: 0.95 }}
+                    animate={{ opacity: 1, scale: 1 }}
+                    exit={{ opacity: 0, scale: 0.95 }}
+                    transition={{ duration: 0.1 }}
+                    style={{ left: contractContextMenu.x, top: contractContextMenu.y }}
+                    className="absolute z-50 min-w-[220px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg"
+                    onClick={event => event.stopPropagation()}
+                  >
+                    {fileDescriptor && (
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+                        onClick={() => {
+                          setContractContextMenu(null);
+                          openPreview(contract);
+                        }}
+                      >
+                        <Eye className="h-3.5 w-3.5 text-muted-foreground" />
+                        Document openen
+                      </button>
+                    )}
+                    {["concept", "generated"].includes(contract.document_status) && (
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+                        onClick={() => openSignedUploadWizard(contract)}
+                      >
+                        <FileSignature className="h-3.5 w-3.5 text-primary" />
+                        Getekend contract uploaden
+                      </button>
+                    )}
+                    {contract.document_status === "signed" && (
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent disabled:opacity-50"
+                        disabled={lifecycleMutation.isPending}
+                        onClick={() => {
+                          setContractContextMenu(null);
+                          lifecycleMutation.mutate({ action: "revalidate", contract });
+                        }}
+                      >
+                        <RefreshCw className={`h-3.5 w-3.5 text-muted-foreground ${lifecycleMutation.isPending ? "animate-spin" : ""}`} />
+                        Opnieuw controleren
+                      </button>
+                    )}
+                    {!fileDescriptor && (
+                      <button
+                        type="button"
+                        className="flex w-full items-center gap-2.5 px-3 py-2 text-left text-foreground transition-colors hover:bg-accent"
+                        onClick={() => {
+                          setContractContextMenu(null);
+                          openEdit(contract);
+                        }}
+                      >
+                        <Pencil className="h-3.5 w-3.5 text-muted-foreground" />
+                        Contract afmaken
+                      </button>
+                    )}
+                  </motion.div>
+                )}
+              </AnimatePresence>
+            </div>
           );
         })}
       </div>
