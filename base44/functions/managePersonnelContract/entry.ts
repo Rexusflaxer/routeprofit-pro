@@ -99,7 +99,7 @@ function contractFunctionKeys(contract) {
     normalizeToken(contract?.function_type),
     ...normalizeArray(contract?.allowed_function_types).map(normalizeToken)
   ].filter(Boolean);
-  return unique([...assignments, ...legacy]).filter(value => !['unknown', 'all'].includes(value));
+  return unique([...assignments, ...legacy]).filter(value => !['unknown', 'all', 'not_applicable'].includes(value));
 }
 
 function normalizePrimaryFunctionState(contract) {
@@ -164,7 +164,7 @@ function buildFunctionAssignments(contract) {
       cao_function_level: item?.cao_function_level || contract?.cao_function_level || null,
       cao_scale: item?.cao_scale ?? contract?.cao_scale ?? null
     }))
-    .filter(item => item.function_key && !['unknown', 'all'].includes(item.function_key));
+    .filter(item => item.function_key && !['unknown', 'all', 'not_applicable'].includes(item.function_key));
   const byKey = new Map(existing.map(item => [item.function_key, item]));
   contractFunctionKeys(contract).forEach(functionKey => {
     const previous = byKey.get(functionKey) || {};

@@ -94,7 +94,8 @@ const EMPLOYMENT_MODEL_OPTIONS = [
   { value: "unknown", label: "Onbekend" },
 ];
 
-const FUNCTION_TYPES = FUNCTION_CATALOG_OPTIONS;
+const NON_SELECTABLE_FUNCTION_VALUES = new Set(["unknown", "all", "not_applicable"]);
+const FUNCTION_TYPES = FUNCTION_CATALOG_OPTIONS.filter(option => !NON_SELECTABLE_FUNCTION_VALUES.has(option.value));
 
 const FUNCTION_TYPE_LABELS = Object.fromEntries(FUNCTION_TYPES.map(option => [option.value, option.label]));
 const CONTRACT_FORM_LABELS = Object.fromEntries(CONTRACT_FORM_OPTIONS.map(option => [option.value, option.label]));
@@ -367,8 +368,17 @@ function uniqueValues(values) {
   return [...new Set((values || []).filter(Boolean))];
 }
 
+function selectableFunctionValues(values) {
+  return uniqueValues((values || []).map(value => String(value || "").trim()))
+    .filter(value => !NON_SELECTABLE_FUNCTION_VALUES.has(value.toLowerCase()));
+}
+
+function selectableFunctionValue(value) {
+  return selectableFunctionValues([value])[0] || null;
+}
+
 function deriveAutomaticPrimaryFunctionState(functionValues, caoKey, current = {}) {
-  const functions = uniqueValues(functionValues);
+  const functions = selectableFunctionValues(functionValues);
   if (functions.length === 0) {
     return {
       functionType: null,
@@ -591,11 +601,11 @@ function buildCompanyFunctionOptions(assignments, referenceDate, caoKey, caoOpti
   if (!caoKey) return [];
   const activeAssignments = (assignments || []).filter(assignment => isDateWithinOptionRange(assignment, referenceDate));
   const scopedAssignments = activeAssignments.filter(assignment => resolveAssignmentCaoKey(assignment, caoOptions) === caoKey);
-  const configuredFunctions = uniqueValues(scopedAssignments.flatMap(assignment => assignment.applies_to_activities || []))
-    .filter(value => value !== "all");
+  const configuredFunctions = selectableFunctionValues(scopedAssignments.flatMap(assignment => assignment.applies_to_activities || []));
   const values = configuredFunctions;
-  const withSelected = selectedValue && !values.includes(selectedValue)
-    ? [...values, selectedValue]
+  const validSelectedValue = selectableFunctionValue(selectedValue);
+  const withSelected = validSelectedValue && !values.includes(validSelectedValue)
+    ? [...values, validSelectedValue]
     : values;
   return withSelected.map(value => ({ value, label: readableFunctionLabel(value) }));
 }
@@ -824,6 +834,7 @@ function initialForm(personnel) {
     min_hours_per_week: personnel.min_hours,
   });
   const model = getContractModel(inferredModel);
+  const initialFunctionType = selectableFunctionValue(personnel.function_type);
   return {
     source_type: "",
     company_id: personnel.primary_company_id || null,
@@ -862,10 +873,10 @@ function initialForm(personnel) {
     salary_payment_frequency: personnel.salary_payment_frequency || (personnel.cao === CAO_PARTICULIERE_BEVEILIGING_KEY ? "four_weeks" : ""),
     written_scale_period_notice_confirmed: boolToSelect(personnel.written_scale_period_notice_confirmed),
     periodic_increase_due_confirmed: boolToSelect(personnel.periodic_increase_due_confirmed),
-    function_type: personnel.function_type || null,
-    allowed_function_types_text: personnel.function_type ? personnel.function_type : "",
-    primary_function_status: personnel.function_type ? "determined" : null,
-    primary_function_source: personnel.function_type ? "single_contract_function" : null,
+    function_type: initialFunctionType,
+    allowed_function_types_text: initialFunctionType || "",
+    primary_function_status: initialFunctionType ? "determined" : null,
+    primary_function_source: initialFunctionType ? "single_contract_function" : null,
     cao_function_group: personnel.cao_function_group || null,
     allowed_cao_function_groups_text: personnel.cao_function_group ? personnel.cao_function_group : "",
     cao_function_level: personnel.cao_function_level || null,
@@ -970,6 +981,13 @@ function formFromContract(contract) {
       || (employmentModel === "min_max" ? "min_max" : (employmentModel === "zero_hours" ? "zero_hours" : "not_applicable")),
   });
   const isStoredStatutoryBandwidth = contract.call_agreement_type === "statutory_bandwidth";
+  const storedFunctionValues = selectableFunctionValues([
+    contract.function_type,
+    ...(contract.allowed_function_types || []),
+  ]);
+  const storedPrimaryFunction = storedFunctionValues.includes(contract.function_type)
+    ? contract.function_type
+    : (storedFunctionValues[0] || null);
   return {
     source_type: contract.source_type || (contract.generated_file_id ? "generated" : "uploaded_existing"),
     company_id: contract.company_id || null,
@@ -1009,10 +1027,10 @@ function formFromContract(contract) {
     salary_payment_frequency: contract.salary_payment_frequency || "",
     written_scale_period_notice_confirmed: boolToSelect(contract.written_scale_period_notice_confirmed),
     periodic_increase_due_confirmed: boolToSelect(contract.periodic_increase_due_confirmed),
-    function_type: contract.function_type || null,
-    allowed_function_types_text: toArrayText(contract.allowed_function_types),
-    primary_function_status: contract.primary_function_status || (contract.function_type ? "determined" : null),
-    primary_function_source: contract.primary_function_source || (contract.function_type ? "legacy_contract" : null),
+    function_type: storedPrimaryFunction,
+    allowed_function_types_text: storedFunctionValues.join(", "),
+    primary_function_status: contract.primary_function_status || (storedPrimaryFunction ? "determined" : null),
+    primary_function_source: contract.primary_function_source || (storedPrimaryFunction ? "legacy_contract" : null),
     cao_function_group: contract.cao_function_group || null,
     allowed_cao_function_groups_text: toArrayText(contract.allowed_cao_function_groups),
     cao_function_level: contract.cao_function_level || null,
@@ -1108,7 +1126,7 @@ function getMissingContractFields(form) {
   if (!form.cao_key && form.contract_form !== "zzp") missing.push("CAO");
   if (!form.contract_start_date) missing.push("startdatum");
   if (form.duration_type === "fixed" && !form.contract_end_date) missing.push("einddatum");
-  if (!form.function_type && fromArrayText(form.allowed_function_types_text).length === 0) missing.push("minimaal één functie");
+  if (selectableFunctionValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]).length === 0) missing.push("minimaal één functie");
   const wageRequired = form.contract_form !== "zzp" && form.contract_form !== "stage";
   const hasScale = numberOrNull(form.cao_scale) !== null;
   const hasPeriod = numberOrNull(form.cao_period) !== null;
@@ -1249,11 +1267,11 @@ function validateConflicts(form, contracts, editingId, companies) {
   const warnings = [];
   if (!form.company_id || !form.contract_start_date) return { issues, warnings };
 
-  const nextFunctions = uniqueValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]);
+  const nextFunctions = selectableFunctionValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]);
   const activeCandidates = (contracts || []).filter(contract => contract.id !== editingId && isActiveContract(contract));
   activeCandidates.forEach(contract => {
     if (!rangesOverlap(form.contract_start_date, form.contract_end_date, contract.contract_start_date, effectiveEndForContract(contract))) return;
-    const otherFunctions = uniqueValues([contract.function_type, ...(contract.allowed_function_types || [])]);
+    const otherFunctions = selectableFunctionValues([contract.function_type, ...(contract.allowed_function_types || [])]);
     const duplicateFunctions = nextFunctions.filter(value => otherFunctions.includes(value));
     if (companyLegalKey(contract.company_id, companies) === companyLegalKey(form.company_id, companies)) {
       issues.push(`Er bestaat in deze periode al een contract bij dezelfde juridische werkgever. Voeg meerdere functies samen in één contract in plaats van overlappende contracten te maken.`);
@@ -1274,7 +1292,7 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
   const contextReady = missing.length === 0;
   const generated = form.source_type === "generated";
   const documentStatus = "concept";
-  const allowedFunctionTypes = uniqueValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]);
+  const allowedFunctionTypes = selectableFunctionValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]);
   const automaticFunctionState = deriveAutomaticPrimaryFunctionState(allowedFunctionTypes, form.cao_key, form);
   const allowedGroups = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     ? automaticFunctionState.functionGroups
@@ -2259,7 +2277,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     ];
   }, [companyWpbrLicenses, form.cao_key, wizardFunctionOptions]);
   const selectedFunctionValues = useMemo(
-    () => uniqueValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]),
+    () => selectableFunctionValues([form.function_type, ...fromArrayText(form.allowed_function_types_text)]),
     [form.allowed_function_types_text, form.function_type]
   );
   const visibleCaoConfigurationOptions = filterCaoConfigurationOptions(caoConfigurationOptions, form);
@@ -2585,7 +2603,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.max_hours_per_pay_period = "";
         next.salary_payment_frequency = "four_weeks";
       } else if (model?.employment_model === "internship") {
-        const securityFunctions = uniqueValues([
+        const securityFunctions = selectableFunctionValues([
           prev.function_type,
           ...fromArrayText(prev.allowed_function_types_text),
         ]).filter(functionValue => {
@@ -2614,7 +2632,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         next.duration_option = next.internship_type === "bol" ? "pok_end_date" : "free";
         next.contract_end_date = "";
       } else if (model?.employment_model === "bbl" && prev.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY) {
-        const securityFunctions = uniqueValues([
+        const securityFunctions = selectableFunctionValues([
           prev.function_type,
           ...fromArrayText(prev.allowed_function_types_text),
         ]).filter(functionValue => {
@@ -2764,7 +2782,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
 
   const toggleAllowedFunction = (value) => {
     setForm(prev => {
-      const selected = uniqueValues([prev.function_type, ...fromArrayText(prev.allowed_function_types_text)]);
+      const selected = selectableFunctionValues([prev.function_type, ...fromArrayText(prev.allowed_function_types_text)]);
       const alreadySelected = selected.includes(value);
       const nextFunctions = alreadySelected
         ? selected.filter(item => item !== value)
@@ -4364,6 +4382,18 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                 min_max: "Min-maxcontract",
                 zero_hours: "Nulurencontract",
               }[persistedEmploymentModel] || CONTRACT_FORM_LABELS[contract.contract_form] || "Arbeidscontract"));
+          const visibleFunctionAssignments = (contract.function_assignments || [])
+            .filter(item => selectableFunctionValue(item.function_key));
+          const storedFunctionValues = selectableFunctionValues([
+            contract.function_type,
+            ...(contract.allowed_function_types || []),
+          ]);
+          const functionSummary = visibleFunctionAssignments.length > 0
+            ? visibleFunctionAssignments
+              .map(item => item.function_label || readableFunctionLabel(item.function_key))
+              .join(", ")
+            : storedFunctionValues.map(readableFunctionLabel).join(", ");
+          const storedPrimaryFunction = selectableFunctionValue(contract.function_type);
           return (
             <div
               key={contract.id}
@@ -4382,9 +4412,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                   {contract.statutory_conversion_applies === true && <Badge className="shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200">Van rechtswege onbepaalde tijd</Badge>}
                 </div>
                 <p className="truncate text-xs text-muted-foreground">
-                  {(contract.function_assignments?.length
-                    ? contract.function_assignments.map(item => item.function_label || readableFunctionLabel(item.function_key)).join(", ")
-                    : readableFunctionLabel(contract.function_type)) || contract.cao_function_group || "Functie onbekend"}
+                  {functionSummary || contract.cao_function_group || "Functie nog niet vastgelegd"}
                 </p>
                 {!showArchive && contract.primary_function_status === "pending_work_history" && (
                   <p
@@ -4394,9 +4422,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     Hoofdfunctie: automatisch na voldoende geregistreerde inzet
                   </p>
                 )}
-                {!showArchive && contract.primary_function_status !== "pending_work_history" && contract.function_type && (
+                {!showArchive && contract.primary_function_status !== "pending_work_history" && storedPrimaryFunction && (
                   <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    Hoofdfunctie: {readableFunctionLabel(contract.function_type)}
+                    Hoofdfunctie: {readableFunctionLabel(storedPrimaryFunction)}
                   </p>
                 )}
                 <p className="mt-0.5 truncate text-xs text-muted-foreground">

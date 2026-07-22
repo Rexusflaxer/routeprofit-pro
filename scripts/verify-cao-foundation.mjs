@@ -350,6 +350,16 @@ function runContractResolverScenarios() {
   assert.equal(officeActivation.required, true, 'The company license must determine Wpbr scope server-side');
   assert.equal(officeActivation.activation_allowed, true, 'A complete current permission and company license should allow activation');
 
+  assert.deepEqual(
+    [...contractManager.contractFunctionKeys({
+      function_type: 'unknown',
+      allowed_function_types: ['unknown', 'objectbeveiliger', 'not_applicable'],
+      function_assignments: [{ function_key: 'centralist_pac' }, { function_key: 'all' }]
+    })],
+    ['centralist_pac', 'objectbeveiliger'],
+    'Technical placeholder values must never be persisted as contract functions'
+  );
+
   const expiredCompanyLicenseActivation = contractManager.evaluateWpbrActivation(
     {
       cao_key: 'cao_evenementen_horecabeveiliging',

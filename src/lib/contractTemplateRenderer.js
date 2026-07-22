@@ -361,7 +361,8 @@ function parseFunctionValues(form = {}) {
     .split(",")
     .map(value => value.trim())
     .filter(Boolean);
-  return uniqueStrings([form.function_type, ...configured]);
+  return uniqueStrings([form.function_type, ...configured])
+    .filter(value => !["unknown", "all", "not_applicable"].includes(String(value).trim().toLowerCase()));
 }
 
 function readableFunctionValues(form = {}) {
@@ -903,10 +904,14 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
   const companyAddressParts = normalizeAddressParts(company);
   const employeeAddress = formatAddress(employeeAddressParts);
   const companyAddress = formatAddress(companyAddressParts);
-  const functions = readableFunctionValues(form);
+  const functionKeys = parseFunctionValues(form);
+  const functions = functionKeys.map(value => functionLabel(value));
+  const storedPrimaryFunction = functionKeys.includes(form.function_type)
+    ? functionLabel(form.function_type)
+    : "";
   const primaryFunction = form.primary_function_status === "pending_work_history" && functions.length > 1
     ? "een van de overeengekomen inzetbare functies"
-    : (functionLabel(form.function_type) || functions[0] || "");
+    : (storedPrimaryFunction || functions[0] || "");
   const additionalFunctions = functions.filter(value => value !== primaryFunction);
   const { hoursPerWeek, hoursPerPeriod } = resolvedContractHours(form);
   const minMaxHours = resolvedMinMaxHours(form);
@@ -1085,6 +1090,14 @@ export function renderContractTemplateBody(templateBody, context = {}) {
     .replace(
       "10.5 Ontbreekt of vervalt een vereist document, dan zet werkgever werknemer niet in voor werkzaamheden waarvoor dat document nodig is. Partijen beoordelen eerst voortzetting of aanpassing van opleiding, werk en praktijkovereenkomst volgens wet en cao; deze bepaling veroorzaakt geen automatische beëindiging.",
       "10.5 {$contract_wpbr_gevolgen_bepaling}\n10.6 Ontbreekt of vervalt uitsluitend een opleidings- of praktijkdocument dat niet de Wpbr-toestemming betreft, dan zet werkgever werknemer niet in voor werkzaamheden waarvoor dat document nodig is en beoordelen partijen voortzetting of aanpassing van opleiding, werk en praktijkovereenkomst volgens wet en cao.",
+    )
+    .replace(
+      "12.4 Werknemer meldt verlies, onbevoegde toegang, verkeerde verzending of een mogelijk datalek direct bij {$meldpunt_privacy_datalekken}.",
+      "12.4 Werknemer meldt verlies, onbevoegde toegang, verkeerde verzending of een mogelijk datalek direct bij werkgever volgens de op dat moment geldende interne meldprocedure voor privacy- en beveiligingsincidenten.",
+    )
+    .replace(
+      "12.4 Verlies, onbevoegde toegang, verkeerde verzending of een mogelijk datalek wordt direct gemeld bij {$meldpunt_privacy_datalekken} en de praktijkopleider.",
+      "12.4 Verlies, onbevoegde toegang, verkeerde verzending of een mogelijk datalek wordt direct gemeld bij het stagebedrijf volgens de op dat moment geldende interne meldprocedure voor privacy- en beveiligingsincidenten en bij de praktijkopleider.",
     );
   return replaceContractTemplatePlaceholders(legallyMigratedBody, buildContractTemplateValues(context));
 }
@@ -1156,9 +1169,8 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     if (form.contract_form !== "stage") issues.push("Een artikel-14-stage moet als stageovereenkomst worden opgeslagen en niet als arbeidsovereenkomst.");
     if (durationType(form) !== "fixed") issues.push("Een stageovereenkomst moet een concrete begin- en einddatum hebben.");
     if (!form.contract_end_date) issues.push("De einddatum van de stage ontbreekt.");
-    if (!form.function_type) issues.push("Kies één primaire praktijkfunctie voor de stage.");
+    if (parseFunctionValues(form).length === 0) issues.push("Kies minimaal één praktijkfunctie voor de stage.");
     if (!compact(form.work_location)) issues.push("Vul de primaire stageplaats in.");
-    if (!compact(company.privacy_email || company.email || company.phone)) issues.push("Vul bij het stagebedrijf een meldpunt voor privacy- en beveiligingsincidenten in.");
     if (form.probation_agreed === true || form.probation_agreed === "true") issues.push("Een stageovereenkomst mag geen proeftijd bevatten.");
 
     const route = compact(form.internship_type).toLowerCase();
@@ -1237,7 +1249,6 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (durationType(form) === "fixed" && !form.contract_end_date) issues.push("De einddatum ontbreekt bij een arbeidsovereenkomst voor bepaalde tijd.");
   if (parseFunctionValues(form).length === 0) issues.push("Selecteer minimaal één inzetbare functie voor dit contract.");
   if (!compact(form.work_location)) issues.push("Vul de standplaats in.");
-  if (!compact(company.privacy_email || company.email || company.phone)) issues.push("Vul bij het bedrijf een e-mailadres of telefoonnummer in voor privacy- en beveiligingsmeldingen.");
   if (isBblPreset) {
     if (form.contract_form !== "bepaalde_tijd" || durationType(form) !== "fixed") {
       issues.push("Deze universele BBL-standaardtemplate is uitsluitend ingericht voor een leerarbeidsovereenkomst voor bepaalde tijd. Een overeenkomst voor onbepaalde tijd is niet categorisch verboden, maar vereist maatwerkafspraken over voortzetting na de opleiding en juridische beoordeling.");
@@ -1426,9 +1437,13 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   }
   if (toNumber(form.hourly_rate_snapshot ?? form.custom_hourly_rate) === null) issues.push("Het bruto uurloon ontbreekt.");
 
-  const expectedPrimaryGroup = suggestPbCaoFunctionGroup(form.function_type);
+  const selectedFunctionKeys = parseFunctionValues(form);
+  const primaryFunctionKey = selectedFunctionKeys.includes(form.function_type)
+    ? form.function_type
+    : selectedFunctionKeys[0];
+  const expectedPrimaryGroup = suggestPbCaoFunctionGroup(primaryFunctionKey);
   if (expectedPrimaryGroup && form.cao_function_group !== expectedPrimaryGroup) {
-    issues.push(`De automatisch afgeleide startindeling voor ${functionLabel(form.function_type)} hoort bij CAO-functiegroep ${pbFunctionGroupLabel(expectedPrimaryGroup)}.`);
+    issues.push(`De automatisch afgeleide startindeling voor ${functionLabel(primaryFunctionKey)} hoort bij CAO-functiegroep ${pbFunctionGroupLabel(expectedPrimaryGroup)}.`);
   }
   if (toBoolean(form.event_hospitality_cao_applies) === true) {
     issues.push("Voor deze medewerker is een evenementen- of horecabeveiligings-CAO gemarkeerd; gebruik daarom niet de CAO-PB-standaardtemplate.");

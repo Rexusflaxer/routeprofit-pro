@@ -210,7 +210,7 @@ export const PB_FULLTIME_STANDARD_TEMPLATE_BODY = [
   "12.1 Werknemer houdt alle niet-openbare informatie geheim waarvan werknemer door het werk kennisneemt en waarvan de vertrouwelijke aard bekend is of redelijkerwijs duidelijk behoort te zijn.",
   "12.2 Daaronder valt in ieder geval bedrijfs-, klant-, personeels-, object-, alarm-, beeld-, transport-, onderzoeks- en systeeminformatie die werknemer via de functie, opdrachtgever, locatie of gebruikte systemen ontvangt.",
   "12.3 Werknemer gebruikt deze informatie uitsluitend voor het werk, deelt haar alleen met bevoegde personen die haar voor hun taak nodig hebben en gebruikt uitsluitend door werkgever goedgekeurde systemen en communicatiemiddelen.",
-  "12.4 Werknemer meldt verlies, onbevoegde toegang, verkeerde verzending of een mogelijk datalek direct bij {$meldpunt_privacy_datalekken}.",
+  "12.4 Werknemer meldt verlies, onbevoegde toegang, verkeerde verzending of een mogelijk datalek direct bij werkgever volgens de op dat moment geldende interne meldprocedure voor privacy- en beveiligingsincidenten.",
   "12.5 De geheimhoudingsplicht blijft na het einde van de arbeidsovereenkomst gelden zolang de informatie niet rechtmatig openbaar is geworden. Zij beperkt geen wettelijk toegestane melding bij een bevoegde instantie, vakbond, juridisch adviseur of meldpunt voor misstanden.",
   "",
   "Artikel 13 - Bedrijfsmiddelen",
@@ -478,7 +478,7 @@ export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_BODY = [
   "12.1 Stagiair houdt tijdens en na de stage alle niet-openbare informatie geheim waarvan de vertrouwelijke aard bekend is of redelijkerwijs duidelijk behoort te zijn.",
   "12.2 Daaronder valt bedrijfs-, klant-, personeels-, object-, alarm-, beeld-, transport-, onderzoeks- en systeeminformatie die stagiair via de functie, opdrachtgever, locatie of gebruikte systemen ontvangt.",
   "12.3 Stagiair gebruikt deze informatie uitsluitend voor de stageopdracht, deelt haar alleen met bevoegde personen die haar voor hun taak nodig hebben en gebruikt uitsluitend goedgekeurde systemen en communicatiemiddelen.",
-  "12.4 Verlies, onbevoegde toegang, verkeerde verzending of een mogelijk datalek wordt direct gemeld bij {$meldpunt_privacy_datalekken} en de praktijkopleider.",
+  "12.4 Verlies, onbevoegde toegang, verkeerde verzending of een mogelijk datalek wordt direct gemeld bij het stagebedrijf volgens de op dat moment geldende interne meldprocedure voor privacy- en beveiligingsincidenten en bij de praktijkopleider.",
   "12.5 De geheimhoudingsplicht beperkt geen wettelijk toegestane melding bij de instelling, een bevoegde instantie, juridisch adviseur of meldpunt voor misstanden.",
   "",
   "Artikel 13 - Bedrijfsmiddelen",
@@ -696,7 +696,6 @@ export const PB_FULLTIME_REQUIRED_PLACEHOLDERS = [
   "contract_wpbr_gevolgen_bepaling",
   "functie_lijst",
   "pensioenregeling_naam",
-  "meldpunt_privacy_datalekken",
   "contract_ondertekeningsplaats",
   "contract_ondertekeningsdatum",
 ];
@@ -743,7 +742,6 @@ export const PB_ARTICLE_14_INTERNSHIP_REQUIRED_PLACEHOLDERS = [
   "stage_beeindiging_bepaling",
   "stage_bijlagen_lijst",
   "stage_minderjarigheid_bepaling",
-  "meldpunt_privacy_datalekken",
   "contract_ondertekeningsplaats",
   "contract_ondertekeningsdatum",
 ];
@@ -763,7 +761,7 @@ export function getContractTemplatePlaceholderDefinition(key) {
 
 export const PB_FULLTIME_STANDARD_TEMPLATE = {
   id: PB_FULLTIME_STANDARD_TEMPLATE_ID,
-  version: 4,
+  version: 5,
   name: "Fulltime dienstverband - CAO Particuliere Beveiliging",
   description: "Fulltime basismodel voor situaties waarin de CAO Particuliere Beveiliging daadwerkelijk van toepassing is, met slimme looptijd-, proeftijd-, arbeidsduur-, vakantie-, Wpbr- en opzegbepalingen.",
   template_type: "employment_contract",
@@ -794,7 +792,7 @@ export const PB_FULLTIME_STANDARD_TEMPLATE = {
 
 export const PB_PARTTIME_STANDARD_TEMPLATE = {
   id: PB_PARTTIME_STANDARD_TEMPLATE_ID,
-  version: 4,
+  version: 5,
   name: "Parttime dienstverband - CAO Particuliere Beveiliging",
   description: "Parttime basismodel volgens het vaste model van de CAO Particuliere Beveiliging. De overeengekomen uren gelden per loonperiode van vier weken; oproep-, min-max- en groeimodellen vallen buiten deze template.",
   template_type: "employment_contract",
@@ -811,7 +809,7 @@ export const PB_PARTTIME_STANDARD_TEMPLATE = {
 
 export const PB_PARTTIME_GROWTH_STANDARD_TEMPLATE = {
   id: PB_PARTTIME_GROWTH_STANDARD_TEMPLATE_ID,
-  version: 4,
+  version: 5,
   name: "Parttime groeimodel - CAO Particuliere Beveiliging",
   description: "Parttime basismodel volgens het groeimodel van de CAO Particuliere Beveiliging. De contracturen staan vast per loonperiode van vier weken; inzet boven die uren blijft gebonden aan rooster-, instemmings-, meeruren-, overwerk- en minurenregels.",
   template_type: "employment_contract",
@@ -828,7 +826,7 @@ export const PB_PARTTIME_GROWTH_STANDARD_TEMPLATE = {
 
 export const PB_MIN_MAX_STANDARD_TEMPLATE = {
   id: PB_MIN_MAX_STANDARD_TEMPLATE_ID,
-  version: 4,
+  version: 5,
   name: "Min-maxcontract - CAO Particuliere Beveiliging",
   description: "Min-maxmodel volgens de CAO Particuliere Beveiliging, met garantie-uren en een maximale oproepomvang per loonperiode van vier weken, vaste beschikbaarheidsafspraken en slimme oproepregels.",
   template_type: "employment_contract",
@@ -854,7 +852,7 @@ export const PB_MIN_MAX_STANDARD_TEMPLATE = {
 
 export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
   id: PB_ZERO_HOURS_STANDARD_TEMPLATE_ID,
-  version: 4,
+  version: 5,
   name: "Nulurencontract - CAO Particuliere Beveiliging",
   description: "Nulurenmodel volgens de CAO Particuliere Beveiliging, zonder vaste, minimum- of garantie-uren en met vaste beschikbaarheidsafspraken, slimme oproepregels en een veilige standaard zonder loonuitsluiting.",
   template_type: "employment_contract",
@@ -880,7 +878,7 @@ export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
 
 export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE = {
   id: PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_ID,
-  version: 4,
+  version: 5,
   name: "Stageovereenkomst (BOL / re-integratie) - CAO Particuliere Beveiliging",
   description: "Stageovereenkomst voor relevante praktijkervaring als beveiliger via BOL, UWV-proefplaatsing, een re-integratiemaatregel of tweede spoor. Dit is geen arbeidsovereenkomst en niet geschikt voor BBL of een algemene kantoorstage.",
   template_type: "employment_contract",
@@ -914,7 +912,7 @@ export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE = {
 
 export const PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE = {
   id: PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE_ID,
-  version: 5,
+  version: 6,
   name: "Leerarbeidsovereenkomst (BBL) - CAO Particuliere Beveiliging",
   description: "Arbeidsovereenkomst voor bepaalde tijd voor een aspirant-beveiliger in de beroepsbegeleidende leerweg. De werknemer ontvangt loon en sluit daarnaast met school en erkend leerbedrijf een afzonderlijke praktijkovereenkomst.",
   template_type: "employment_contract",

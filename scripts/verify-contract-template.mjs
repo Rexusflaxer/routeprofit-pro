@@ -598,6 +598,25 @@ assert.match(objectSecurity.body, /schriftelijk besluit van de korpschef/);
 assert.doesNotMatch(objectSecurity.body, /veroorzaakt geen automatische beëindiging/);
 assert.match(objectSecurity.body, /tijdelijke arbeidsovereenkomst eindigt van rechtswege/);
 assert.match(objectSecurity.body, /toestemming van UWV.*kantonrechter/);
+assert.match(objectSecurity.body, /direct bij werkgever volgens de op dat moment geldende interne meldprocedure/);
+assert.doesNotMatch(objectSecurity.body, /privacy@voorbeeld\.nl/);
+
+const legacyUnknownFunction = evaluate(operationalForm({
+  function_type: "unknown",
+  allowed_function_types_text: "unknown, objectbeveiliger, centralist_pac",
+  primary_function_status: "pending_work_history",
+  primary_function_source: "provisional_contract_start",
+}));
+assert.deepEqual(legacyUnknownFunction.issues, []);
+assert.match(legacyUnknownFunction.body, /Objectbeveiliger, Centralist PAC/);
+assert.doesNotMatch(legacyUnknownFunction.body, /Onbekend/);
+
+const migratedLegacyPrivacyClause = renderContractTemplateBody(
+  "12.4 Werknemer meldt verlies, onbevoegde toegang, verkeerde verzending of een mogelijk datalek direct bij {$meldpunt_privacy_datalekken}.",
+  { personnel, form: operationalForm(), company },
+);
+assert.match(migratedLegacyPrivacyClause, /direct bij werkgever volgens de op dat moment geldende interne meldprocedure/);
+assert.doesNotMatch(migratedLegacyPrivacyClause, /privacy@voorbeeld\.nl/);
 
 const indefiniteObjectSecurity = evaluate(operationalForm({
   duration_type: "indefinite",
