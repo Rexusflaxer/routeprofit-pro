@@ -27,6 +27,13 @@
       ],
       "description": "Specifieke CAO-configuratie voor dit contract. Als leeg: resolve via CompanyCaoAssignment/company default op referentiedatum."
     },
+    "cao_version_snapshot": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Leesbare snapshot van de CAO-versie die bij het opstellen van het contract op de startdatum is gebruikt."
+    },
     "contract_form": {
       "type": "string",
       "enum": [
@@ -142,11 +149,12 @@
         "first_contract",
         "successive_new_skills",
         "successive_same_work",
+        "uwv_trial_placement_same_work",
         "unknown",
         "not_applicable",
         null
       ],
-      "description": "Context voor de geldigheid van een proeftijd: eerste contract of een opvolgend contract met dezelfde dan wel wezenlijk andere vaardigheden/verantwoordelijkheden."
+      "description": "Context voor de geldigheid van een proeftijd: eerste contract, opvolgend contract of voorafgaande UWV-proefplaatsing voor hetzelfde of vergelijkbaar werk."
     },
     "duration_type": {
       "type": [
@@ -545,7 +553,7 @@
     "wpbr_required": {
       "type": "boolean",
       "default": false,
-      "description": "True als voor dit contract toestemming van de overheid/WPBR vereist is omdat de werknemer beveiligingswerk verricht."
+      "description": "True als voor het werken bij deze particuliere beveiligingsorganisatie of dit recherchebureau overheidstoestemming op grond van de Wpbr vereist is. Dit geldt ook voor personeel dat zelf geen beveiligings- of recherchewerk verricht."
     },
     "wpbr_status": {
       "type": [
@@ -561,7 +569,7 @@
         "expired",
         null
       ],
-      "description": "Status van de overheidstoestemming/WPBR voor beveiligingswerk."
+      "description": "Status van de vereiste overheidstoestemming/Wpbr voor het werken bij de organisatie."
     },
     "wpbr_authority": {
       "type": [
@@ -1891,6 +1899,11 @@
         "null"
       ],
       "description": "Referentie van UWV-toestemming, re-integratiebesluit of tweede-spoorplan."
+    },
+    "internship_uwv_employment_intent_confirmed": {
+      "type": "boolean",
+      "default": false,
+      "description": "Bevestigt dat werkgever voor aanvang van een UWV-proefplaatsing schriftelijk de intentie heeft vastgelegd om bij voldoende functioneren aansluitend ten minste zes maanden werk aan te bieden voor ten minste hetzelfde aantal uren."
     },
     "internship_assignment_description": {
       "type": [

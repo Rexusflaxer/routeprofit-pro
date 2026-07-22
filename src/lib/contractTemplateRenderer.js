@@ -1,5 +1,6 @@
 import { functionLabel } from "./securityCaoCatalog.js";
 import { formatAddress, normalizeAddressParts } from "./addressFormatting.js";
+import { getOfficialPbWageRows } from "./caoPbWageTables.js";
 import {
   CAO_PARTICULIERE_BEVEILIGING_KEY,
   PB_CAO_FUNCTION_GROUP_OPTIONS,
@@ -124,25 +125,8 @@ function compact(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
 }
 
-const REGISTERED_COMPANY_NAME_PATTERN = /(?:\bb\.?\s*v\.?\b|\bn\.?\s*v\.?\b|\bv\.?\s*o\.?\s*f\.?\b|\bcv\b|\bmaatschap\b|\bstichting\b|\bvereniging\b|\bco[oö]peratie\b|\beenmanszaak\b)/i;
-
-function looksLikeRegisteredCompanyName(value) {
-  return REGISTERED_COMPANY_NAME_PATTERN.test(compact(value));
-}
-
 function resolveCompanyLegalName(company = {}) {
-  const explicitRegisteredName = compact(company.statutory_name || company.registered_name);
-  const legalName = compact(company.legal_name);
-  const displayName = compact(company.display_name);
-  const tradeName = compact(company.trade_name);
-
-  if (explicitRegisteredName) return explicitRegisteredName;
-  if (legalName && (looksLikeRegisteredCompanyName(legalName) || (!displayName && legalName !== tradeName))) return legalName;
-
-  // Older LOQ profiles stored the trade name in legal_name and the registered
-  // name in display_name. Prefer the name with an explicit legal form there.
-  if (displayName && (looksLikeRegisteredCompanyName(displayName) || legalName === tradeName)) return displayName;
-  return legalName || displayName;
+  return compact(company.statutory_name || company.registered_name || company.legal_name);
 }
 
 function resolveEmployeeLegalName(personnel = {}) {
@@ -165,6 +149,27 @@ function resolveEmployeeLegalName(personnel = {}) {
 
 function uniqueStrings(values = []) {
   return [...new Set(values.map(value => compact(value)).filter(Boolean))];
+}
+
+function wpbrEvidenceWarnings(personnel = {}, form = {}) {
+  const status = compact(personnel.wpbr_status || form.wpbr_status);
+  const authority = compact(personnel.wpbr_authority || form.wpbr_authority);
+  const permissionNumber = compact(personnel.wpbr_permission_number || form.wpbr_permission_number);
+  const validFrom = personnel.wpbr_permission_valid_from || form.wpbr_permission_valid_from;
+  const validUntil = personnel.wpbr_permission_valid_until || form.wpbr_permission_valid_until;
+  const warnings = [];
+
+  if (status !== "approved") {
+    warnings.push(status
+      ? `De Wpbr-toestemming staat op '${status}'. Het contract kan als concept worden voorbereid, maar mag niet worden geactiveerd en werknemer mag niet worden ingezet zolang de vereiste toestemming niet is goedgekeurd en geldig is.`
+      : "De status van de Wpbr-toestemming ontbreekt. Het contract kan als concept worden voorbereid, maar mag niet worden geactiveerd en werknemer mag niet worden ingezet zolang de vereiste toestemming niet is goedgekeurd en geldig is.");
+    return warnings;
+  }
+
+  if (!authority || !permissionNumber || !validFrom || !validUntil) {
+    warnings.push("De Wpbr-toestemming staat op goedgekeurd, maar bevoegde instantie, bewijsnummer of geldigheidsdatums zijn onvolledig. Activering en inzet blijven geblokkeerd totdat het volledige bewijs is vastgelegd.");
+  }
+  return warnings;
 }
 
 function toBoolean(value) {
@@ -332,6 +337,15 @@ function formatDate(value, fallback = "") {
   return date.toLocaleDateString("nl-NL", { day: "2-digit", month: "long", year: "numeric" });
 }
 
+function todayInAmsterdam() {
+  return new Intl.DateTimeFormat("en-CA", {
+    timeZone: "Europe/Amsterdam",
+    year: "numeric",
+    month: "2-digit",
+    day: "2-digit",
+  }).format(new Date());
+}
+
 function formatCurrency(value, fallback = "") {
   const number = toNumber(value);
   if (number === null) return fallback;
@@ -448,7 +462,9 @@ function contractDurationClause(form = {}) {
 
 function contractAanzegClause(form = {}) {
   if (durationType(form) !== "fixed") return "De wettelijke aanzegplicht is bij deze arbeidsovereenkomst voor onbepaalde tijd niet van toepassing.";
-  if (!hasSixMonthAanzegThreshold(form)) return "Voor deze contractduur geldt geen wettelijke aanzegtermijn van één maand.";
+  if (!hasSixMonthAanzegThreshold(form)) {
+    return "Voor deze contractduur geldt geen wettelijke aanzegplicht op grond van artikel 7:668 BW. Werkgever deelt werknemer op grond van de CAO Particuliere Beveiliging niettemin uiterlijk één maand voor de einddatum schriftelijk mee of de arbeidsovereenkomst wordt voortgezet en, zo ja, onder welke voorwaarden.";
+  }
   return "Werkgever informeert werknemer uiterlijk één maand voor de einddatum schriftelijk of de arbeidsovereenkomst wordt voortgezet en, zo ja, onder welke voorwaarden. De gevolgen van niet of te laat aanzeggen volgen uit de wet en de cao.";
 }
 
@@ -459,6 +475,9 @@ function contractProbationClause(form = {}) {
   if (form.probation_agreed !== "true" && form.probation_agreed !== true) return "";
   if (form.probation_context === "successive_same_work") {
     return "Partijen komen geen nieuwe proeftijd overeen, omdat sprake is van een opvolgend contract voor hetzelfde of vergelijkbaar werk.";
+  }
+  if (form.probation_context === "uwv_trial_placement_same_work") {
+    return "Partijen komen geen proeftijd overeen, omdat werknemer onmiddellijk voorafgaand aan deze arbeidsovereenkomst via een UWV-proefplaatsing hetzelfde of vergelijkbaar werk bij werkgever heeft verricht.";
   }
   if (durationType(form) === "fixed" && !isLongerThanSixMonths(form)) {
     return "Partijen komen geen proeftijd overeen, omdat de tijdelijke arbeidsovereenkomst zes maanden of korter duurt.";
@@ -587,7 +606,10 @@ function contractSalaryClause(form = {}) {
 function contractSalaryClassificationClause(form = {}) {
   const scale = compact(form.cao_scale);
   const period = compact(form.cao_period);
-  if (!scale || !period) return "";
+  if (resolveSecurityWork(form) === false) {
+    return "Voor deze niet-operationele functie is geen operationele CAO-PB-salarisschaal van toepassing. Het overeengekomen bruto basisuurloon en de betaalperiode zijn in de volgende leden vastgelegd.";
+  }
+  if (!scale || !period) return "De salarisschaal en periodiek moeten vóór ondertekening overeenkomstig de op de startdatum geldende loontabel schriftelijk worden vastgelegd.";
   return `Werknemer wordt bij aanvang voor de beloning ingedeeld in salarisschaal ${scale}, periodiek ${period}, overeenkomstig de op de startdatum geldende loontabel van de CAO Particuliere Beveiliging.`;
 }
 
@@ -640,9 +662,9 @@ function contractFunctionClassificationClause(form = {}) {
     const mappedGroups = pbFunctionGroupsForFunctions(functions);
     const salarySentence = `Voor de beloning zijn functieniveau ${pbFunctionLevelLabel(form.cao_function_level)}, salarisschaal ${compact(form.cao_scale)} en periodiek ${compact(form.cao_period)} vastgelegd.`;
     if (mappedGroups.length > 1) {
-      return `Bij aanvang wordt voor de administratieve functie-indeling voorlopig uitgegaan van functiegroep ${pbFunctionGroupLabel(form.cao_function_group)}. Werkgever laat de functie-indeling daarna periodiek automatisch herberekenen op basis van de per functie geregistreerde gewerkte diensten. Zodra voldoende representatieve inzetgegevens beschikbaar zijn, bepaalt het cao-criterium van 50% of meer welke functiegroep van toepassing is. Een gewijzigde indeling wordt werknemer overeenkomstig de cao automatisch schriftelijk of elektronisch meegedeeld. ${salarySentence} Een wijziging van de hoofdfunctie wijzigt de overeengekomen salarisschaal of periodiek niet automatisch, tenzij wet of cao anders voorschrijft.`;
+      return `Werkgever legt bij aanvang één functiegroep vast op basis van de werkzaamheden die naar verwachting structureel 50% of meer van de arbeidstijd omvatten: functiegroep ${pbFunctionGroupLabel(form.cao_function_group)}. LOQ bewaakt daarna op basis van geregistreerde diensten of de feitelijke inzet aanleiding geeft tot herbeoordeling. Werkgever beoordeelt en bevestigt een gewijzigde functiegroep schriftelijk of elektronisch overeenkomstig de cao; de registratie alleen wijzigt de functie-indeling niet automatisch. ${salarySentence} Een gewijzigde functiegroep kan gevolgen hebben voor de toepasselijke cao-rechten en loonindeling en wordt daarom vanaf de rechtens juiste datum verwerkt.`;
     }
-    return `De overeengekomen functies vallen bij aanvang onder functiegroep ${pbFunctionGroupLabel(form.cao_function_group)}. ${salarySentence}`;
+    return `Werkgever deelt werknemer bij aanvang schriftelijk mee dat de overeengekomen werkzaamheden worden ingedeeld in functiegroep ${pbFunctionGroupLabel(form.cao_function_group)}. ${salarySentence}`;
   }
   return "";
 }
@@ -676,8 +698,11 @@ function contractVacationClause(form = {}) {
 function contractWpbrClause(form = {}) {
   const securityWork = resolveSecurityWork(form);
   const base = "Werknemer mag uitsluitend werkzaamheden voor werkgever verrichten indien en zolang werknemer beschikt over de vereiste toestemming van de korpschef en is voldaan aan de voor werknemer en de werkzaamheden geldende screening en betrouwbaarheidseisen op grond van de Wpbr en daarop gebaseerde regels.";
-  if (securityWork !== true) return `${base} Werknemer verricht geen operationele beveiligingswerkzaamheden zonder de daarvoor vereiste opleiding, vakbekwaamheid en legitimatie.`;
-  return `${base} Voor beveiligingswerkzaamheden draagt werknemer het vereiste legitimatiebewijs tijdens het werk bij zich en levert werknemer dit bij het einde van de inzet of op eerste verzoek van werkgever in.`;
+  const leadership = form.security_role_status === "leidinggevende"
+    ? " Voor zover werknemer als leidinggevende of beleidsbepaler in de zin van de Wpbr optreedt, beschikt werknemer daarnaast over de daarvoor vereiste toestemming van de minister van Justitie en Veiligheid. Verricht werknemer tevens operationele werkzaamheden, dan blijven beide toestemmingsvereisten naast elkaar gelden."
+    : "";
+  if (securityWork !== true) return `${base}${leadership} Werknemer verricht geen operationele beveiligingswerkzaamheden zonder de daarvoor vereiste opleiding, vakbekwaamheid en legitimatie.`;
+  return `${base}${leadership} Voor beveiligingswerkzaamheden draagt werknemer het vereiste legitimatiebewijs tijdens het werk bij zich en levert werknemer dit bij het einde van de inzet of op eerste verzoek van werkgever in.`;
 }
 
 function contractWpbrConsequencesClause() {
@@ -695,7 +720,7 @@ function stageRouteClause(form = {}) {
     return `De stage vindt plaats binnen de beroepsopleidende leerweg${education ? ` van ${education}` : ""}. ${institution || "De onderwijsinstelling"}, het stagebedrijf en stagiair voeren de stage uit overeenkomstig de geldige praktijkovereenkomst${pok ? ` met kenmerk ${pok}` : ""}. Het stagebedrijf is voor deze opleiding erkend als leerbedrijf${recognition ? ` onder nummer ${recognition}` : ""}.`;
   }
   if (route === "uwv_trial_placement") {
-    return `De stage vindt plaats als door UWV goedgekeurde proefplaatsing${reference ? ` onder referentie ${reference}` : ""}. De proefplaatsing duurt op grond van artikel 14 van de cao maximaal twee maanden en wordt uitgevoerd volgens de UWV-toestemming, voorwaarden en intentieverklaring. Deze overeenkomst garandeert geen aansluitende arbeidsovereenkomst.`;
+    return `De stage vindt plaats als door UWV goedgekeurde proefplaatsing${reference ? ` onder referentie ${reference}` : ""}. De proefplaatsing duurt op grond van artikel 14 van de cao maximaal twee maanden en wordt uitgevoerd volgens de UWV-toestemming en voorwaarden. Werkgever heeft vóór aanvang schriftelijk de intentie vastgelegd om stagiair bij voldoende functioneren aansluitend een arbeidsovereenkomst van ten minste zes maanden aan te bieden voor ten minste hetzelfde aantal uren als tijdens de proefplaatsing, voor zover ook aan de overige wettelijke en functievereisten is voldaan.`;
   }
   if (route === "reintegration_measure") {
     return `De stage vindt plaats als re-integratiemaatregel${institution ? ` onder begeleiding van ${institution}` : ""}${reference ? ` onder referentie ${reference}` : ""}. Doel, duur en uitvoering sluiten aan op het schriftelijke re-integratieplan en de voorwaarden van de betrokken instelling.`;
@@ -871,7 +896,8 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
   form = form || {};
   company = company || {};
   const employeeLegalName = resolveEmployeeLegalName(personnel);
-  const firstName = compact(personnel.first_name || personnel.call_name || personnel.legal_first_names);
+  const legalFirstNames = compact(personnel.legal_first_names);
+  const firstName = compact(personnel.call_name || personnel.first_name || legalFirstNames);
   const lastName = compact([personnel.name_prefix, personnel.last_name].filter(Boolean).join(" "));
   const employeeAddressParts = normalizeAddressParts(personnel);
   const companyAddressParts = normalizeAddressParts(company);
@@ -890,7 +916,7 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     : (isPbMinMax(form) ? minMaxHours.minHoursPerPeriod : hoursPerPeriod);
   const periodSalary = hourlyRate !== null && salaryHoursPerPeriod !== null ? hourlyRate * salaryHoursPerPeriod : null;
   const caoName = CAO_LABELS[form.cao_key] || compact(form.cao_key);
-  const today = new Date().toISOString().slice(0, 10);
+  const today = todayInAmsterdam();
   const pendingSignatureValue = "________________________";
   const pendingSignatureDate = "____-____-________";
 
@@ -906,6 +932,7 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     bedrijf_vertegenwoordiger_naam: compact(form.employer_representative_name) || pendingSignatureValue,
     bedrijf_vertegenwoordiger_functie: compact(form.employer_representative_function) || pendingSignatureValue,
     medewerker_juridische_volledige_naam: employeeLegalName,
+    medewerker_juridische_voornamen: legalFirstNames,
     medewerker_volledige_naam: employeeLegalName,
     medewerker_voornaam: firstName,
     medewerker_achternaam: lastName,
@@ -916,7 +943,8 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     medewerker_email: compact(personnel.email),
     medewerker_telefoon: compact(personnel.phone),
     cao_naam: caoName,
-    cao_versie: form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? "Versie 3 - juli 2026" : "",
+    cao_versie: compact(form.cao_version_snapshot || form.cao_version_label)
+      || (form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY ? "Versie 3 - juli 2026" : ""),
     cao_functiegroep: pbFunctionGroupLabel(form.cao_function_group),
     cao_functieniveau: pbFunctionLevelLabel(form.cao_function_level),
     salarisschaal: compact(form.cao_scale),
@@ -925,6 +953,9 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     bruto_salaris_per_loonperiode: formatCurrency(periodSalary),
     contract_startdatum: formatDate(form.contract_start_date),
     contract_einddatum: formatDate(form.contract_end_date),
+    contract_einddatum_of_onbepaalde_tijd: durationType(form) === "indefinite"
+      ? "onbepaalde tijd"
+      : formatDate(form.contract_end_date),
     contract_duursoort: durationType(form) === "indefinite" ? "onbepaalde tijd" : "bepaalde tijd",
     contract_duur_omschrijving: durationDescription(form),
     contract_duur_bepaling: contractDurationClause(form),
@@ -1001,7 +1032,7 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     "medewerker.email": values.medewerker_email,
     "bedrijf.naam": values.bedrijf_statutaire_naam,
     "contract.startdatum": values.contract_startdatum,
-    "contract.einddatum": values.contract_einddatum || "onbepaalde tijd",
+    "contract.einddatum": values.contract_einddatum,
     "contract.functie": values.hoofdfunctie,
     "contract.cao": values.cao_naam,
     "contract.schaal": values.salarisschaal,
@@ -1021,7 +1052,7 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     medewerker_woonplaats: employeeAddressParts.city,
     medewerker_land: employeeAddressParts.country,
     startdatum: values.contract_startdatum,
-    einddatum: values.contract_einddatum || "onbepaalde tijd",
+    einddatum: values.contract_einddatum,
     functie: values.hoofdfunctie,
     cao: values.cao_naam,
     schaal: values.salarisschaal,
@@ -1036,7 +1067,7 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     employeeEmail: values.medewerker_email,
     companyName: values.bedrijf_statutaire_naam,
     startDate: values.contract_startdatum,
-    endDate: values.contract_einddatum || "onbepaalde tijd",
+    endDate: values.contract_einddatum,
     functionName: values.hoofdfunctie,
     scale: values.salarisschaal,
     period: values.periodiek,
@@ -1155,6 +1186,9 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
       if (lastAllowedDay && endDate && endDate > lastAllowedDay) {
         issues.push(`Een UWV-proefplaatsing binnen artikel 14 mag maximaal twee maanden duren. De laatste toegestane dag is ${formatDate(lastAllowedDay.toISOString())}.`);
       }
+      if (toBoolean(form.internship_uwv_employment_intent_confirmed) !== true) {
+        issues.push("Bevestig dat werkgever voor aanvang schriftelijk de intentie heeft vastgelegd om bij voldoende functioneren aansluitend ten minste zes maanden werk aan te bieden voor ten minste hetzelfde aantal uren als tijdens de UWV-proefplaatsing.");
+      }
     }
     if (!compact(form.internship_assignment_description)) issues.push("Beschrijf de stageopdracht en werkzaamheden.");
     if (!compact(form.internship_learning_objectives)) issues.push("Leg de leerdoelen vast.");
@@ -1195,7 +1229,7 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     if (functions.some(value => ["centralist_pac", "centralist_vtc", "videosurveillant", "geld_waardetransporteur", "waardetransport_chauffeur", "waardetransport_bijrijder"].includes(value))) {
       warnings.push("De gekozen praktijkfunctie heeft aanvullende opleidings-, certificerings- of vergunningseisen. Controleer vóór iedere operationele inzet de specifieke Wpbr-route en begeleiding.");
     }
-    if (personnel.wpbr_status && personnel.wpbr_status !== "approved") warnings.push("De Wpbr-toestemming staat niet op goedgekeurd. Operationele inzet blijft geblokkeerd zolang de vereiste toestemming of opleidingsroute ontbreekt.");
+    warnings.push(...wpbrEvidenceWarnings(personnel, form));
     return { issues: uniqueStrings(issues), warnings: uniqueStrings(warnings) };
   }
 
@@ -1230,6 +1264,9 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     }
     if (form.probation_context === "successive_same_work") {
       issues.push("Bij een opvolgend contract voor hetzelfde of vergelijkbaar werk mag niet opnieuw een proeftijd worden opgenomen.");
+    }
+    if (form.probation_context === "uwv_trial_placement_same_work") {
+      issues.push("Na een UWV-proefplaatsing voor hetzelfde of vergelijkbaar werk mag niet alsnog een proeftijd worden opgenomen.");
     }
     if (form.probation_context === "successive_new_skills") {
       warnings.push("Een nieuwe proeftijd bij een opvolgend contract is alleen verdedigbaar als de functie aantoonbaar andere vaardigheden of verantwoordelijkheden vraagt. Leg die reden vast en laat dit bij twijfel controleren.");
@@ -1345,6 +1382,19 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
     } else if (toNumber(form.cao_scale) !== expectedSalaryScale) {
       issues.push(`CAO-functieniveau ${pbFunctionLevelLabel(form.cao_function_level)} hoort bij salarisschaal ${expectedSalaryScale}.`);
     }
+    const selectedScale = toNumber(form.cao_scale);
+    const selectedPeriod = toNumber(form.cao_period);
+    const selectedHourlyRate = toNumber(form.hourly_rate_snapshot ?? form.custom_hourly_rate);
+    if (selectedScale !== null && selectedPeriod !== null && selectedHourlyRate !== null) {
+      const officialWageRow = getOfficialPbWageRows(form.contract_start_date).find(row => (
+        row.scale === selectedScale && row.period === selectedPeriod
+      ));
+      if (!officialWageRow) {
+        issues.push("Voor de gekozen startdatum, salarisschaal en periodiek is geen officiële CAO-PB-loonregel beschikbaar. Publiceer of selecteer eerst de juiste loontabel.");
+      } else if (Math.abs(officialWageRow.hourly_rate - selectedHourlyRate) > 0.005) {
+        issues.push(`Het bruto basisuurloon hoort bij schaal ${selectedScale}, periodiek ${selectedPeriod} op de startdatum ${formatDate(form.contract_start_date)} ${formatCurrency(officialWageRow.hourly_rate)} te zijn.`);
+      }
+    }
   } else if (securityWork === false) {
     if (isFulltimePreset && hoursPerWeek === null && hoursPerPeriod === null) {
       issues.push("Vul voor de niet-operationele fulltime functie de overeengekomen arbeidsduur in.");
@@ -1383,9 +1433,7 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (toBoolean(form.event_hospitality_cao_applies) === true) {
     issues.push("Voor deze medewerker is een evenementen- of horecabeveiligings-CAO gemarkeerd; gebruik daarom niet de CAO-PB-standaardtemplate.");
   }
-  if (personnel.wpbr_status && personnel.wpbr_status !== "approved") {
-    warnings.push("De Wpbr-toestemming van de medewerker staat niet op goedgekeurd. De medewerker mag niet worden ingezet zolang de vereiste toestemming ontbreekt.");
-  }
+  warnings.push(...wpbrEvidenceWarnings(personnel, form));
 
   return { issues: uniqueStrings(issues), warnings: uniqueStrings(warnings) };
 }

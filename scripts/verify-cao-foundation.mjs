@@ -25,6 +25,7 @@ function loadFunctionModule(relativePath) {
 const schedule = loadFunctionModule('base44/functions/validateCaoScheduleRules/entry.ts');
 const taskContext = loadFunctionModule('base44/functions/validateTaskPlanningContext/entry.ts');
 const contractResolver = loadFunctionModule('base44/functions/resolvePersonnelContractForService/entry.ts');
+const contractManager = loadFunctionModule('base44/functions/managePersonnelContract/entry.ts');
 const contractRules = loadFunctionModule('base44/functions/applyCaoContractRules/entry.ts');
 const correctionQueue = loadFunctionModule('base44/functions/queueCaoPayrollCorrections/entry.ts');
 const reimbursements = loadFunctionModule('base44/functions/calculateCaoReimbursements/entry.ts');
@@ -304,6 +305,62 @@ function runContractResolverScenarios() {
   const securityScopeMatch = contractResolver.evaluateSecurityScopeMatch(nonSecurityContract, serviceContext);
   assert.equal(functionMatch.matched, true, 'Non-security service should match non-security contract function scope');
   assert.equal(securityScopeMatch.matched, true, 'Non-security service should match article 3 non-security contract scope');
+
+  const currentPersonnelPermission = {
+    wpbr_status: 'approved',
+    wpbr_authority: 'korpschef',
+    wpbr_permission_number: 'WPBR-2026-001',
+    wpbr_permission_valid_from: '2026-01-01',
+    wpbr_permission_valid_until: '2027-12-31'
+  };
+  const licensedCompanyPermissionCheck = contractResolver.evaluateWpbrPermissionForService(
+    { ...nonSecurityContract, wpbr_status: 'expired' },
+    currentPersonnelPermission,
+    { ...serviceContext, service_date: '2026-07-22' },
+    true
+  );
+  assert.equal(licensedCompanyPermissionCheck.required, true, 'All personnel at a licensed company must pass the Wpbr permission gate');
+  assert.equal(licensedCompanyPermissionCheck.planning_allowed, true, 'Current personnel permission must take precedence over an old contract snapshot');
+
+  const missingOfficePermission = contractResolver.evaluateWpbrPermissionForService(
+    nonSecurityContract,
+    { wpbr_status: 'not_started' },
+    { ...serviceContext, service_date: '2026-07-22' },
+    true
+  );
+  assert.equal(missingOfficePermission.required, true, 'Non-operational personnel at a licensed company must not bypass Wpbr permission');
+  assert.equal(missingOfficePermission.planning_allowed, false, 'Missing Wpbr permission must block planning for non-operational personnel');
+
+  const activeLicense = {
+    id: 'license-active',
+    license_type: 'ND',
+    status: 'active',
+    valid_from: '2025-01-01',
+    valid_until: '2028-12-31'
+  };
+  const officeActivation = contractManager.evaluateWpbrActivation(
+    {
+      cao_key: 'cao_evenementen_horecabeveiliging',
+      contract_start_date: '2026-08-01',
+      wpbr_required: false
+    },
+    currentPersonnelPermission,
+    [activeLicense]
+  );
+  assert.equal(officeActivation.required, true, 'The company license must determine Wpbr scope server-side');
+  assert.equal(officeActivation.activation_allowed, true, 'A complete current permission and company license should allow activation');
+
+  const expiredCompanyLicenseActivation = contractManager.evaluateWpbrActivation(
+    {
+      cao_key: 'cao_evenementen_horecabeveiliging',
+      contract_start_date: '2026-08-01',
+      wpbr_required: false
+    },
+    currentPersonnelPermission,
+    [{ ...activeLicense, status: 'expired', valid_until: '2026-01-01' }]
+  );
+  assert.equal(expiredCompanyLicenseActivation.required, true, 'An expired company license must remain a Wpbr context, not become not-applicable');
+  assert.equal(expiredCompanyLicenseActivation.activation_allowed, false, 'An expired company license must block contract activation');
 
   const securityOnlyContract = {
     function_type: 'objectbeveiliger',

@@ -10,7 +10,12 @@ const COMMITTED_DOCUMENT_STATUSES = new Set(['signed', 'scheduled', 'active', 'e
 const EHB_EXTENDED_CHAIN_LEVELS = new Set(['a', 'b', 'c', 'd']);
 
 function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Amsterdam',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
 }
 
 function nowIso() {
@@ -679,6 +684,81 @@ function requiredContext(candidate) {
   return missing;
 }
 
+function evaluateWpbrActivation(candidate, personnel, companyWpbrLicenses = []) {
+  const today = todayIsoDate();
+  const contractStart = dateKey(candidate?.contract_start_date, today);
+  const referenceDate = contractStart > today ? contractStart : today;
+  const configuredLicenses = (companyWpbrLicenses || []).filter(license => (
+    !!license?.license_type && normalizeToken(license?.status) !== 'superseded'
+  ));
+  const companyRequiresWpbr = configuredLicenses.length > 0;
+  const required = candidate?.wpbr_required === true
+    || candidate?.cao_key === CAO_PB_KEY
+    || companyRequiresWpbr;
+  const blockingReasons = [];
+  const warnings = [];
+
+  if (!required) {
+    return {
+      required: false,
+      activation_allowed: true,
+      reference_date: referenceDate,
+      blocking_reasons: [],
+      warnings: []
+    };
+  }
+
+  const activeCompanyLicense = configuredLicenses.find(license => (
+    normalizeToken(license?.status) !== 'expired'
+    && dateKey(license?.valid_from, '0000-01-01') <= referenceDate
+    && dateKey(license?.valid_until) >= referenceDate
+  )) || null;
+  if (!activeCompanyLicense) {
+    blockingReasons.push(`De werkgever heeft op ${referenceDate} geen aantoonbaar geldige Wpbr-vergunning. Het contract mag niet actief of planningsgeschikt worden gemaakt.`);
+  }
+
+  // De actuele toestemming in het personeelsdossier gaat voor op de contractsnapshot.
+  const status = personnel?.wpbr_status || candidate?.wpbr_status || null;
+  const authority = personnel?.wpbr_authority || candidate?.wpbr_authority || null;
+  const permissionNumber = personnel?.wpbr_permission_number || candidate?.wpbr_permission_number || null;
+  const validFrom = dateKey(personnel?.wpbr_permission_valid_from || candidate?.wpbr_permission_valid_from, '');
+  const validUntil = dateKey(personnel?.wpbr_permission_valid_until || candidate?.wpbr_permission_valid_until, '');
+
+  if (status !== 'approved') {
+    blockingReasons.push(status
+      ? `De Wpbr-toestemming van de medewerker staat op '${status}' en is niet goedgekeurd.`
+      : 'De status van de Wpbr-toestemming van de medewerker ontbreekt.');
+  }
+  if (!authority) blockingReasons.push('De bevoegde instantie van de Wpbr-toestemming ontbreekt.');
+  if (!permissionNumber) blockingReasons.push('Het bewijsnummer van de Wpbr-toestemming ontbreekt.');
+  if (!validFrom) blockingReasons.push('De ingangsdatum van de Wpbr-toestemming ontbreekt.');
+  if (!validUntil) blockingReasons.push('De einddatum van de Wpbr-toestemming ontbreekt.');
+  if (validFrom && validFrom > referenceDate) {
+    blockingReasons.push(`De Wpbr-toestemming is pas geldig vanaf ${validFrom}, terwijl activering wordt beoordeeld op ${referenceDate}.`);
+  }
+  if (validUntil && validUntil < referenceDate) {
+    blockingReasons.push(`De Wpbr-toestemming is verlopen op ${validUntil}, terwijl activering wordt beoordeeld op ${referenceDate}.`);
+  }
+  if (validUntil && validUntil >= referenceDate) {
+    warnings.push(`De Wpbr-toestemming is geldig tot en met ${validUntil}. Planning na die datum blijft geblokkeerd totdat een geldige verlenging is vastgelegd.`);
+  }
+
+  return {
+    required: true,
+    activation_allowed: blockingReasons.length === 0,
+    reference_date: referenceDate,
+    company_license_id: activeCompanyLicense?.id || null,
+    company_license_type: activeCompanyLicense?.license_type || null,
+    wpbr_status: status,
+    wpbr_authority: authority,
+    wpbr_permission_number: permissionNumber,
+    wpbr_permission_valid_from: validFrom || null,
+    wpbr_permission_valid_until: validUntil || null,
+    blocking_reasons: unique(blockingReasons),
+    warnings: unique(warnings)
+  };
+}
+
 async function evaluateContract(base44, candidateInput) {
   const primaryFunctionState = normalizePrimaryFunctionState(candidateInput);
   const normalizedInput = { ...candidateInput, ...primaryFunctionState };
@@ -688,12 +768,15 @@ async function evaluateContract(base44, candidateInput) {
     allowed_function_types: contractFunctionKeys(normalizedInput)
   };
 
-  const [contracts, companies, personnel, companyCaoAssignments] = await Promise.all([
+  const [contracts, companies, personnel, companyCaoAssignments, companyWpbrLicenses] = await Promise.all([
     base44.asServiceRole.entities.PersonnelContract.filter({ personnel_id: candidate.personnel_id }).catch(() => []),
     base44.asServiceRole.entities.Company.list().catch(() => []),
     base44.asServiceRole.entities.Personnel.get(candidate.personnel_id).catch(() => null),
     candidate.company_id
       ? base44.asServiceRole.entities.CompanyCaoAssignment.filter({ company_id: candidate.company_id }).catch(() => [])
+      : Promise.resolve([]),
+    candidate.company_id
+      ? base44.asServiceRole.entities.CompanyWpbrLicense.filter({ company_id: candidate.company_id }).catch(() => [])
       : Promise.resolve([])
   ]);
   const configurationIds = unique((companyCaoAssignments || [])
@@ -719,6 +802,7 @@ async function evaluateContract(base44, candidateInput) {
   const functionConflicts = evaluateFunctionConflicts(candidateWithEffectiveDuration, peers, companyById);
   const combinedHours = evaluateCombinedHours(candidateWithEffectiveDuration, peers);
   const flexRules = evaluateFutureFlexRules(candidate, personnel);
+  const wpbrActivation = evaluateWpbrActivation(candidate, personnel, companyWpbrLicenses);
   const blockingReasons = unique([
     ...missingFields.map(field => `Verplicht contractgegeven ontbreekt: ${field}.`),
     ...companyCaoScope.blocking_reasons,
@@ -735,7 +819,9 @@ async function evaluateContract(base44, candidateInput) {
     ...companyCaoScope.warnings,
     ...chain.warnings,
     ...combinedHours.warnings,
-    ...flexRules.warnings
+    ...flexRules.warnings,
+    ...wpbrActivation.warnings,
+    ...wpbrActivation.blocking_reasons.map(reason => `Activering geblokkeerd: ${reason}`)
   ]);
   const status = blockingReasons.length > 0
     ? 'blocked'
@@ -746,13 +832,16 @@ async function evaluateContract(base44, candidateInput) {
   return {
     status,
     can_generate: status === 'compliant',
-    can_activate: status === 'compliant' && !!(candidate.signed_file_id || candidate.signed_file_url),
+    can_activate: status === 'compliant'
+      && !!(candidate.signed_file_id || candidate.signed_file_url)
+      && wpbrActivation.activation_allowed,
     missing_fields: missingFields,
     blocking_reasons: blockingReasons,
     manual_review_reasons: manualReviewReasons,
     warnings,
     function_conflicts: functionConflicts,
     company_cao_scope: companyCaoScope,
+    wpbr_activation: wpbrActivation,
     chain,
     combined_hours: combinedHours,
     normalized_contract: {
@@ -772,6 +861,12 @@ async function evaluateContract(base44, candidateInput) {
       function_assignment_policy_version: FUNCTION_POLICY_VERSION,
       primary_function_status: candidate.primary_function_status || null,
       primary_function_source: candidate.primary_function_source || null,
+      wpbr_required: wpbrActivation.required,
+      wpbr_status: wpbrActivation.wpbr_status || null,
+      wpbr_authority: wpbrActivation.wpbr_authority || null,
+      wpbr_permission_number: wpbrActivation.wpbr_permission_number || null,
+      wpbr_permission_valid_from: wpbrActivation.wpbr_permission_valid_from || null,
+      wpbr_permission_valid_until: wpbrActivation.wpbr_permission_valid_until || null,
       routing_snapshot: {
         company_id: candidate.company_id || null,
         cao_key: candidate.cao_key || null,
@@ -808,6 +903,7 @@ function evaluationPersistence(evaluation) {
       warnings: evaluation.warnings,
       function_conflicts: evaluation.function_conflicts,
       company_cao_scope: evaluation.company_cao_scope,
+      wpbr_activation: evaluation.wpbr_activation,
       combined_hours: evaluation.combined_hours
     },
     contract_context_status: evaluation.status === 'compliant'
@@ -946,7 +1042,7 @@ async function revalidateLaterContractHistory(base44, changedContract) {
       || contract.cao_contract_rule_status === 'compliant'
       || contract.contract_final_allowed === true;
     const signedDocumentAvailable = !!(contract.signed_file_id || contract.signed_file_url || contract.signed_at);
-    const canActivate = evaluation.status === 'compliant' && signedDocumentAvailable && pbReady;
+    const canActivate = evaluation.can_activate && signedDocumentAvailable && pbReady;
     const lifecycleStatus = contract.document_status === 'archived'
       ? 'archived'
       : canActivate

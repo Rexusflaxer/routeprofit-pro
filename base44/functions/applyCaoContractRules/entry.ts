@@ -55,7 +55,12 @@ function asIsoDate(value) {
 }
 
 function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Amsterdam',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
 }
 
 function normalizeToken(value) {
@@ -1121,7 +1126,9 @@ function evaluateWpbrPermissionForContract(input, { isSecurityWorker, isScopeUnk
   const missingEvidence = [];
   const contractStartDate = asIsoDate(input.contract_start_date);
   const contractEndDate = asIsoDate(input.contract_end_date);
-  const wpbrRequired = isSecurityWorker || booleanOrNull(input.wpbr_required) === true;
+  const wpbrRequired = input.cao_key === CAO_PB_KEY
+    || isSecurityWorker
+    || booleanOrNull(input.wpbr_required) === true;
   const wpbrStatus = input.wpbr_status || null;
   const validFrom = asIsoDate(input.wpbr_permission_valid_from);
   const validUntil = asIsoDate(input.wpbr_permission_valid_until);
@@ -1165,14 +1172,14 @@ function evaluateWpbrPermissionForContract(input, { isSecurityWorker, isScopeUnk
     missingEvidence.push({
       rule_id: sourceRuleId,
       field: 'wpbr_status',
-      message: 'Beveiligingscontract mist status van de overheidstoestemming/WPBR.'
+      message: 'Het contract bij een Wpbr-vergunde organisatie mist de status van de vereiste overheidstoestemming.'
     });
   } else if (wpbrStatus !== 'approved') {
     violations.push({
       rule_id: sourceRuleId,
       severity: 'high',
       field: 'wpbr_status',
-      message: `Beveiligingscontract vereist overheidstoestemming/WPBR, maar status is ${wpbrStatus}. Werknemer mag niet definitief voor beveiligingswerk worden gepland of verloond.`,
+      message: `Voor het werken bij de Wpbr-vergunde organisatie is overheidstoestemming vereist, maar de status is ${wpbrStatus}. Het contract mag niet actief worden gemaakt en werknemer mag niet worden ingezet.`,
       wpbr_status: wpbrStatus
     });
   }
@@ -1227,14 +1234,7 @@ function evaluateWpbrPermissionForContract(input, { isSecurityWorker, isScopeUnk
       });
     }
     if (contractEndDate && validUntil && contractEndDate > validUntil) {
-      violations.push({
-        rule_id: sourceRuleId,
-        severity: 'high',
-        field: 'wpbr_permission_valid_until',
-        message: `Contract loopt tot ${contractEndDate}, maar WPBR/toestemming verloopt op ${validUntil}. Contract mag niet over de toestemmingsdatum heen final-ready zijn.`,
-        contract_end_date: contractEndDate,
-        wpbr_permission_valid_until: validUntil
-      });
+      warnings.push(`Het contract loopt tot ${contractEndDate}, terwijl de huidige Wpbr-toestemming op ${validUntil} verloopt. Het contract kan blijven bestaan, maar planning en inzet na ${validUntil} moeten blokkeren totdat een geldige verlenging is vastgelegd.`);
     }
     if (!contractEndDate && validUntil) {
       warnings.push(`WPBR/toestemming verloopt op ${validUntil}; planning/payroll moet per dienst na die datum blokkeren of hernieuwde toestemming eisen.`);
@@ -4828,6 +4828,7 @@ function getProbationSourceRuleId(result) {
 function buildContractRuleInput(body, personnel, contract) {
   const hasContractContext = !!contract;
   return {
+    cao_key: pickFirst(body.cao_key, contract?.cao_key, personnel?.cao, CAO_PB_KEY),
     contract_form: pickFirst(body.contract_form, contract?.contract_form, personnel?.contract_form),
     underlying_contract_form: pickFirst(
       body.underlying_contract_form,
@@ -4843,12 +4844,12 @@ function buildContractRuleInput(body, personnel, contract) {
     non_compete_clause_present: pickFirst(body.non_compete_clause_present, body.has_non_compete_clause, contract?.non_compete_clause_present, null),
     has_non_compete_clause: pickFirst(body.has_non_compete_clause, null),
     non_compete_clause_absent_confirmed: pickFirst(body.non_compete_clause_absent_confirmed, contract?.non_compete_clause_absent_confirmed, null),
-    wpbr_required: pickFirst(body.wpbr_required, contract?.wpbr_required, personnel?.wpbr_required, null),
-    wpbr_status: pickFirst(body.wpbr_status, contract?.wpbr_status, personnel?.wpbr_status, null),
-    wpbr_authority: pickFirst(body.wpbr_authority, contract?.wpbr_authority, personnel?.wpbr_authority, null),
-    wpbr_permission_number: pickFirst(body.wpbr_permission_number, contract?.wpbr_permission_number, personnel?.wpbr_permission_number, null),
-    wpbr_permission_valid_from: pickFirst(body.wpbr_permission_valid_from, contract?.wpbr_permission_valid_from, personnel?.wpbr_permission_valid_from, null),
-    wpbr_permission_valid_until: pickFirst(body.wpbr_permission_valid_until, contract?.wpbr_permission_valid_until, personnel?.wpbr_permission_valid_until, null),
+    wpbr_required: pickFirst(body.wpbr_required, personnel?.wpbr_required, contract?.wpbr_required, null),
+    wpbr_status: pickFirst(body.wpbr_status, personnel?.wpbr_status, contract?.wpbr_status, null),
+    wpbr_authority: pickFirst(body.wpbr_authority, personnel?.wpbr_authority, contract?.wpbr_authority, null),
+    wpbr_permission_number: pickFirst(body.wpbr_permission_number, personnel?.wpbr_permission_number, contract?.wpbr_permission_number, null),
+    wpbr_permission_valid_from: pickFirst(body.wpbr_permission_valid_from, personnel?.wpbr_permission_valid_from, contract?.wpbr_permission_valid_from, null),
+    wpbr_permission_valid_until: pickFirst(body.wpbr_permission_valid_until, personnel?.wpbr_permission_valid_until, contract?.wpbr_permission_valid_until, null),
     fixed_term_end_notice_sent_at: pickFirst(body.fixed_term_end_notice_sent_at, body.end_of_fixed_term_notice_sent_at, contract?.fixed_term_end_notice_sent_at, null),
     end_of_fixed_term_notice_sent_at: pickFirst(body.end_of_fixed_term_notice_sent_at, null),
     fixed_term_renewal_decision: pickFirst(body.fixed_term_renewal_decision, contract?.fixed_term_renewal_decision, null),

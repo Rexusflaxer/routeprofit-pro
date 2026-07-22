@@ -577,8 +577,9 @@ export const CONTRACT_TEMPLATE_PLACEHOLDERS = [
   { key: "bedrijf_vertegenwoordiger_naam", label: "Naam vertegenwoordiger", source: "Contractwizard" },
   { key: "bedrijf_vertegenwoordiger_functie", label: "Functie vertegenwoordiger", source: "Contractwizard" },
   { key: "medewerker_juridische_volledige_naam", label: "Juridische volledige naam medewerker", source: "Medewerkerprofiel" },
+  { key: "medewerker_juridische_voornamen", label: "Juridische voornamen medewerker", source: "Medewerkerprofiel" },
   { key: "medewerker_volledige_naam", label: "Volledige naam medewerker (compatibiliteit)", source: "Medewerkerprofiel" },
-  { key: "medewerker_voornaam", label: "Voornaam medewerker", source: "Medewerkerprofiel" },
+  { key: "medewerker_voornaam", label: "Roepnaam medewerker", source: "Medewerkerprofiel" },
   { key: "medewerker_achternaam", label: "Achternaam medewerker", source: "Medewerkerprofiel" },
   { key: "medewerker_geboortedatum", label: "Geboortedatum", source: "Medewerkerprofiel" },
   { key: "medewerker_geboorteplaats", label: "Geboorteplaats", source: "Medewerkerprofiel" },
@@ -595,6 +596,7 @@ export const CONTRACT_TEMPLATE_PLACEHOLDERS = [
   { key: "bruto_salaris_per_loonperiode", label: "Bruto salaris per loonperiode", source: "Afgeleid" },
   { key: "contract_startdatum", label: "Startdatum", source: "Contractwizard" },
   { key: "contract_einddatum", label: "Einddatum", source: "Contractwizard" },
+  { key: "contract_einddatum_of_onbepaalde_tijd", label: "Einddatum of tekst onbepaalde tijd", source: "Afgeleid" },
   { key: "contract_duursoort", label: "Bepaalde of onbepaalde tijd", source: "Afgeleid" },
   { key: "contract_duur_omschrijving", label: "Leesbare contractduur", source: "Afgeleid" },
   { key: "contract_duur_bepaling", label: "Volledige looptijdbepaling", source: "Slim afgeleid" },
@@ -761,7 +763,7 @@ export function getContractTemplatePlaceholderDefinition(key) {
 
 export const PB_FULLTIME_STANDARD_TEMPLATE = {
   id: PB_FULLTIME_STANDARD_TEMPLATE_ID,
-  version: 3,
+  version: 4,
   name: "Fulltime dienstverband - CAO Particuliere Beveiliging",
   description: "Fulltime basismodel voor situaties waarin de CAO Particuliere Beveiliging daadwerkelijk van toepassing is, met slimme looptijd-, proeftijd-, arbeidsduur-, vakantie-, Wpbr- en opzegbepalingen.",
   template_type: "employment_contract",
@@ -781,6 +783,8 @@ export const PB_FULLTIME_STANDARD_TEMPLATE = {
       "https://www.beveiligingsbranche.nl/v-personeelswijzer/",
       "https://www.rijksoverheid.nl/vraag-en-antwoord/arbeidsovereenkomst-en-cao/wat-staat-er-in-een-arbeidsovereenkomst",
       "https://www.justis.nl/producten/particuliere-beveiliging-en-recherche/wat-is-de-wet-particuliere-beveiligingsorganisaties-en-recherchebureaus-wpbr",
+      "https://www.justis.nl/producten/particuliere-beveiliging-en-recherche/toestemming-medewerkers",
+      "https://www.justis.nl/producten/particuliere-beveiliging-en-recherche/toestemming-leidinggevenden",
       "https://wetten.overheid.nl/BWBR0008973/#Paragraaf3_Artikel7",
       "https://uitspraken.rechtspraak.nl/details?id=ECLI:NL:GHDHA:2021:1084",
       "https://www.rijksoverheid.nl/vraag-en-antwoord/arbeidsovereenkomst-en-cao/wat-is-het-verschil-tussen-een-tijdelijk-contract-en-een-vast-contract",
@@ -790,7 +794,7 @@ export const PB_FULLTIME_STANDARD_TEMPLATE = {
 
 export const PB_PARTTIME_STANDARD_TEMPLATE = {
   id: PB_PARTTIME_STANDARD_TEMPLATE_ID,
-  version: 3,
+  version: 4,
   name: "Parttime dienstverband - CAO Particuliere Beveiliging",
   description: "Parttime basismodel volgens het vaste model van de CAO Particuliere Beveiliging. De overeengekomen uren gelden per loonperiode van vier weken; oproep-, min-max- en groeimodellen vallen buiten deze template.",
   template_type: "employment_contract",
@@ -807,7 +811,7 @@ export const PB_PARTTIME_STANDARD_TEMPLATE = {
 
 export const PB_PARTTIME_GROWTH_STANDARD_TEMPLATE = {
   id: PB_PARTTIME_GROWTH_STANDARD_TEMPLATE_ID,
-  version: 3,
+  version: 4,
   name: "Parttime groeimodel - CAO Particuliere Beveiliging",
   description: "Parttime basismodel volgens het groeimodel van de CAO Particuliere Beveiliging. De contracturen staan vast per loonperiode van vier weken; inzet boven die uren blijft gebonden aan rooster-, instemmings-, meeruren-, overwerk- en minurenregels.",
   template_type: "employment_contract",
@@ -824,7 +828,7 @@ export const PB_PARTTIME_GROWTH_STANDARD_TEMPLATE = {
 
 export const PB_MIN_MAX_STANDARD_TEMPLATE = {
   id: PB_MIN_MAX_STANDARD_TEMPLATE_ID,
-  version: 3,
+  version: 4,
   name: "Min-maxcontract - CAO Particuliere Beveiliging",
   description: "Min-maxmodel volgens de CAO Particuliere Beveiliging, met garantie-uren en een maximale oproepomvang per loonperiode van vier weken, vaste beschikbaarheidsafspraken en slimme oproepregels.",
   template_type: "employment_contract",
@@ -850,7 +854,7 @@ export const PB_MIN_MAX_STANDARD_TEMPLATE = {
 
 export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
   id: PB_ZERO_HOURS_STANDARD_TEMPLATE_ID,
-  version: 3,
+  version: 4,
   name: "Nulurencontract - CAO Particuliere Beveiliging",
   description: "Nulurenmodel volgens de CAO Particuliere Beveiliging, zonder vaste, minimum- of garantie-uren en met vaste beschikbaarheidsafspraken, slimme oproepregels en een veilige standaard zonder loonuitsluiting.",
   template_type: "employment_contract",
@@ -876,7 +880,7 @@ export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
 
 export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE = {
   id: PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_ID,
-  version: 3,
+  version: 4,
   name: "Stageovereenkomst (BOL / re-integratie) - CAO Particuliere Beveiliging",
   description: "Stageovereenkomst voor relevante praktijkervaring als beveiliger via BOL, UWV-proefplaatsing, een re-integratiemaatregel of tweede spoor. Dit is geen arbeidsovereenkomst en niet geschikt voor BBL of een algemene kantoorstage.",
   template_type: "employment_contract",
@@ -910,7 +914,7 @@ export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE = {
 
 export const PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE = {
   id: PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE_ID,
-  version: 4,
+  version: 5,
   name: "Leerarbeidsovereenkomst (BBL) - CAO Particuliere Beveiliging",
   description: "Arbeidsovereenkomst voor bepaalde tijd voor een aspirant-beveiliger in de beroepsbegeleidende leerweg. De werknemer ontvangt loon en sluit daarnaast met school en erkend leerbedrijf een afzonderlijke praktijkovereenkomst.",
   template_type: "employment_contract",

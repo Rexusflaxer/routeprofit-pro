@@ -59,7 +59,7 @@ import {
 
 const company = {
   display_name: "Voorbeeld Objectbeveiliging B.V.",
-  legal_name: "Voorbeeld Beveiliging",
+  legal_name: "Voorbeeld Objectbeveiliging B.V.",
   trade_name: "Voorbeeld Beveiliging",
   street_name: "Hoofdstraat",
   house_number: "1",
@@ -84,6 +84,10 @@ const personnel = {
   city: "Zeist",
   country: "Nederland",
   wpbr_status: "approved",
+  wpbr_authority: "korpschef",
+  wpbr_permission_number: "WPBR-MW-2026-001",
+  wpbr_permission_valid_from: "2025-12-01",
+  wpbr_permission_valid_until: "2027-12-01",
 };
 
 const baseForm = {
@@ -101,7 +105,7 @@ const baseForm = {
   cao_function_level: "a",
   cao_scale: "3",
   cao_period: "1",
-  hourly_rate_snapshot: "18.50",
+  hourly_rate_snapshot: "17.37",
   work_location: "Utrecht",
   work_area: "Nederland",
   employer_representative_name: "P. Directeur",
@@ -588,7 +592,7 @@ assert.match(objectSecurity.body, /Werkgever: Voorbeeld Objectbeveiliging B\.V\.
 assert.match(objectSecurity.body, /Werknemer: Jan Martino Jansen/);
 assert.match(objectSecurity.body, /Stichting Bedrijfstakpensioenfonds voor de Particuliere Beveiliging \(Pensioenfonds Particuliere Beveiliging\)/);
 assert.match(objectSecurity.body, /salarisschaal 3, periodiek 1/);
-assert.match(objectSecurity.body, /€\s*18,50 per uur/);
+assert.match(objectSecurity.body, /€\s*17,37 per uur/);
 assert.match(objectSecurity.body, /ontbindende voorwaarde.*artikel 7 Wpbr/);
 assert.match(objectSecurity.body, /schriftelijk besluit van de korpschef/);
 assert.doesNotMatch(objectSecurity.body, /veroorzaakt geen automatische beëindiging/);
@@ -603,6 +607,17 @@ const indefiniteObjectSecurity = evaluate(operationalForm({
 assert.deepEqual(indefiniteObjectSecurity.issues, []);
 assert.match(indefiniteObjectSecurity.body, /opzegtermijn van twee loonperioden van in totaal acht weken/);
 assert.match(indefiniteObjectSecurity.body, /Werkgever kan de arbeidsovereenkomst alleen beëindigen.*toestemming van UWV.*kantonrechter/);
+const indefiniteValues = buildContractTemplateValues({
+  personnel,
+  company,
+  form: operationalForm({
+    duration_type: "indefinite",
+    contract_form: "onbepaalde_tijd",
+    contract_end_date: "",
+  }),
+});
+assert.equal(indefiniteValues.contract_einddatum, "");
+assert.equal(indefiniteValues.contract_einddatum_of_onbepaalde_tijd, "onbepaalde tijd");
 
 const legacyWpbrBody = renderContractTemplateBody([
   "10.1 {$contract_wpbr_bepaling}",
@@ -637,9 +652,10 @@ const multipleFunctions = evaluate(operationalForm({
   primary_function_source: "provisional_contract_start",
 }));
 assert.deepEqual(multipleFunctions.warnings, []);
-assert.match(multipleFunctions.body, /periodiek automatisch herberekenen/);
-assert.match(multipleFunctions.body, /automatisch schriftelijk of elektronisch meegedeeld/);
-assert.match(multipleFunctions.body, /wijzigt de overeengekomen salarisschaal of periodiek niet automatisch, tenzij wet of cao anders voorschrijft/);
+assert.match(multipleFunctions.body, /structureel 50% of meer van de arbeidstijd/);
+assert.match(multipleFunctions.body, /Werkgever beoordeelt en bevestigt een gewijzigde functiegroep schriftelijk of elektronisch/);
+assert.match(multipleFunctions.body, /registratie alleen wijzigt de functie-indeling niet automatisch/);
+assert.match(multipleFunctions.body, /kan gevolgen hebben voor de toepasselijke cao-rechten en loonindeling/);
 
 const cashValue = evaluate(operationalForm({
   function_type: "geld_waardetransporteur",
@@ -664,10 +680,21 @@ const office = evaluate({
 });
 assert.deepEqual(office.issues, []);
 assert.match(office.body, /20 wettelijke en 4 bovenwettelijke vakantiedagen/);
+assert.match(office.body, /geen operationele CAO-PB-salarisschaal van toepassing/);
+assert.match(office.body, /uitsluitend werkzaamheden voor werkgever verrichten indien en zolang werknemer beschikt over de vereiste toestemming van de korpschef/);
+
+const operationalLeader = evaluate(operationalForm({ security_role_status: "leidinggevende" }));
+assert.match(operationalLeader.body, /toestemming van de minister van Justitie en Veiligheid/);
+assert.match(operationalLeader.body, /beide toestemmingsvereisten naast elkaar gelden/);
 
 const sixMonths = evaluate(operationalForm({ contract_end_date: "2026-06-30" }));
 assert.ok(sixMonths.issues.some(issue => issue.includes("zes maanden of korter")));
 assert.match(sixMonths.body, /geen proeftijd overeen/);
+assert.match(sixMonths.body, /uiterlijk één maand voor de einddatum schriftelijk/);
+
+const shorterThanSixMonths = evaluate(operationalForm({ contract_end_date: "2026-05-31" }));
+assert.match(shorterThanSixMonths.body, /geen wettelijke aanzegplicht op grond van artikel 7:668 BW/);
+assert.match(shorterThanSixMonths.body, /CAO Particuliere Beveiliging niettemin uiterlijk één maand voor de einddatum schriftelijk/);
 
 const twoYears = evaluate(operationalForm({ contract_end_date: "2027-12-31" }));
 assert.deepEqual(twoYears.issues, []);
@@ -677,6 +704,7 @@ const aspirant = evaluate(operationalForm({
   contract_end_date: "2027-12-31",
   cao_function_level: "aspirant",
   cao_scale: "2",
+  hourly_rate_snapshot: "17.00",
   security_role_status: "aspirant_beveiliger",
 }));
 assert.deepEqual(aspirant.issues, []);
@@ -688,6 +716,35 @@ assert.match(successive.body, /geen nieuwe proeftijd overeen/);
 
 const wrongScale = evaluate(operationalForm({ cao_scale: "4" }));
 assert.ok(wrongScale.issues.some(issue => issue.includes("hoort bij salarisschaal 3")));
+
+const wrongOfficialHourlyRate = evaluate(operationalForm({ hourly_rate_snapshot: "18.50" }));
+assert.ok(wrongOfficialHourlyRate.issues.some(issue => issue.includes("€ 17,37")));
+
+const missingLegalCompanyName = validateStandardContractTemplateContext({
+  personnel,
+  form: operationalForm(),
+  company: {
+    ...company,
+    legal_name: "",
+    display_name: "Alleen Handelsnaam",
+  },
+  template,
+});
+assert.ok(missingLegalCompanyName.issues.some(issue => issue.includes("juridische bedrijfsnaam")));
+
+const incompleteWpbrEvidence = validateStandardContractTemplateContext({
+  personnel: {
+    ...personnel,
+    wpbr_authority: "",
+    wpbr_permission_number: "",
+    wpbr_permission_valid_from: "",
+    wpbr_permission_valid_until: "",
+  },
+  form: operationalForm(),
+  company,
+  template,
+});
+assert.ok(incompleteWpbrEvidence.warnings.some(warning => warning.includes("bewijsnummer of geldigheidsdatums zijn onvolledig")));
 
 const expiredVersion = evaluate(operationalForm({
   contract_start_date: "2027-01-01",
@@ -705,7 +762,7 @@ assert.deepEqual(operationalParttime.unresolved, []);
 assert.match(operationalParttime.body, /vaste parttimemodel/);
 assert.match(operationalParttime.body, /96 uur per loonperiode/);
 assert.match(operationalParttime.body, /133,33 uur per loonperiode/);
-assert.match(operationalParttime.body, /1\.776,00 bruto per loonperiode/);
+assert.match(operationalParttime.body, /1\.667,52 bruto per loonperiode/);
 assert.match(operationalParttime.body, /naar rato van de betaalde arbeidstijd/);
 assert.doesNotMatch(operationalParttime.body, /9,24%/);
 
@@ -778,7 +835,7 @@ assert.match(operationalGrowthParttime.body, /tot en met 152 uur zijn meeruren/)
 assert.match(operationalGrowthParttime.body, /boven 152 uur zijn overuren/);
 assert.match(operationalGrowthParttime.body, /maximaal 24 nieuwe minuren/);
 assert.match(operationalGrowthParttime.body, /dertien weken/);
-assert.match(operationalGrowthParttime.body, /1\.776,00 bruto per loonperiode/);
+assert.match(operationalGrowthParttime.body, /1\.667,52 bruto per loonperiode/);
 assert.doesNotMatch(operationalGrowthParttime.body, /parttimepercentage maal 200/);
 assert.doesNotMatch(operationalGrowthParttime.body, /9,24%/);
 
@@ -870,7 +927,7 @@ assert.match(operationalMinMax.body, /medewerkersapp en e-mail/);
 assert.match(operationalMinMax.body, /ten minste vier kalenderdagen/);
 assert.match(operationalMinMax.body, /ten minste drie uur loon/);
 assert.match(operationalMinMax.body, /periode van twaalf maanden/);
-assert.match(operationalMinMax.body, /1\.184,00 bruto per loonperiode van vier weken over de garantie-uren/);
+assert.match(operationalMinMax.body, /1\.111,68 bruto per loonperiode van vier weken over de garantie-uren/);
 assert.match(operationalMinMax.body, /9,24%/);
 assert.match(operationalMinMax.body, /8% vakantiebijslag/);
 assert.match(operationalMinMax.body, /geen verschuivingstoeslag/);
@@ -1055,8 +1112,22 @@ const tooLongUwvInternship = evaluateInternship({
   duration_option: "free",
   contract_start_date: "2026-01-01",
   contract_end_date: "2026-03-01",
+  internship_uwv_employment_intent_confirmed: "true",
 });
 assert.ok(tooLongUwvInternship.issues.some(issue => issue.includes("maximaal twee maanden")));
+
+const missingUwvEmploymentIntent = evaluateInternship({
+  ...bolInternshipForm,
+  internship_type: "uwv_trial_placement",
+  internship_bpv_reference: "",
+  internship_learning_company_recognition_number: "",
+  internship_route_reference: "UWV-TOESTEMMING-2026-45",
+  duration_option: "free",
+  contract_start_date: "2026-01-01",
+  contract_end_date: "2026-02-28",
+  internship_uwv_employment_intent_confirmed: "false",
+});
+assert.ok(missingUwvEmploymentIntent.issues.some(issue => issue.includes("schriftelijk de intentie")));
 
 const officeInternship = evaluateInternship({
   ...bolInternshipForm,
@@ -1079,6 +1150,7 @@ const bblForm = operationalForm({
   cao_function_level: "aspirant",
   cao_scale: "2",
   cao_period: "0",
+  hourly_rate_snapshot: "16.63",
   security_role_status: "aspirant_beveiliger",
   bbl_institution_name: "Veiligheidsacademie Midden",
   bbl_education_name: "Mbo Beveiliger niveau 2 (BBL)",

@@ -30,7 +30,12 @@ function getCaoRuntimeSupport(caoKey, functionName) {
 }
 
 function todayIsoDate() {
-  return new Date().toISOString().slice(0, 10);
+  return new Intl.DateTimeFormat('en-CA', {
+    timeZone: 'Europe/Amsterdam',
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit'
+  }).format(new Date());
 }
 
 function isWithinDateRange(record, date, startField = 'valid_from', endField = 'valid_until') {
@@ -342,8 +347,10 @@ function serviceRequiresSecurityScope(serviceContext) {
     SECURITY_FUNCTION_TYPES.includes(functionType);
 }
 
-function contractOrPersonnelRequiresWpbr(contract, personnel, serviceContext) {
-  return serviceRequiresSecurityScope(serviceContext) ||
+function contractOrPersonnelRequiresWpbr(contract, personnel, serviceContext, companyRequiresWpbr = false) {
+  return companyRequiresWpbr === true ||
+    serviceRequiresSecurityScope(serviceContext) ||
+    contract?.cao_key === CAO_PB_KEY ||
     contract?.wpbr_required === true ||
     personnel?.wpbr_required === true ||
     SECURITY_ROLE_STATUSES.includes(normalizeToken(contract?.security_role_status)) ||
@@ -357,15 +364,15 @@ function pickFirst(...values) {
   return null;
 }
 
-function evaluateWpbrPermissionForService(contract, personnel, serviceContext) {
+function evaluateWpbrPermissionForService(contract, personnel, serviceContext, companyRequiresWpbr = false) {
   const sourceRuleIds = ['CAO-PB-2024-R0312'];
   const serviceDate = asIsoDate(serviceContext?.service_date || todayIsoDate());
-  const required = contractOrPersonnelRequiresWpbr(contract, personnel, serviceContext);
-  const status = pickFirst(contract?.wpbr_status, personnel?.wpbr_status, null);
-  const validFrom = asIsoDate(pickFirst(contract?.wpbr_permission_valid_from, personnel?.wpbr_permission_valid_from, null));
-  const validUntil = asIsoDate(pickFirst(contract?.wpbr_permission_valid_until, personnel?.wpbr_permission_valid_until, null));
-  const permissionNumber = pickFirst(contract?.wpbr_permission_number, personnel?.wpbr_permission_number, null);
-  const authority = pickFirst(contract?.wpbr_authority, personnel?.wpbr_authority, null);
+  const required = contractOrPersonnelRequiresWpbr(contract, personnel, serviceContext, companyRequiresWpbr);
+  const status = pickFirst(personnel?.wpbr_status, contract?.wpbr_status, null);
+  const validFrom = asIsoDate(pickFirst(personnel?.wpbr_permission_valid_from, contract?.wpbr_permission_valid_from, null));
+  const validUntil = asIsoDate(pickFirst(personnel?.wpbr_permission_valid_until, contract?.wpbr_permission_valid_until, null));
+  const permissionNumber = pickFirst(personnel?.wpbr_permission_number, contract?.wpbr_permission_number, null);
+  const authority = pickFirst(personnel?.wpbr_authority, contract?.wpbr_authority, null);
   const blockingReasons = [];
   const manualReviewReasons = [];
   const warnings = [];
@@ -386,9 +393,9 @@ function evaluateWpbrPermissionForService(contract, personnel, serviceContext) {
   }
 
   if (!status) {
-    manualReviewReasons.push('CAO artikel 9 lid 1d: beveiligingsdienst vereist overheidstoestemming/WPBR, maar status ontbreekt.');
+    manualReviewReasons.push('Voor het werken bij de Wpbr-vergunde organisatie is overheidstoestemming vereist, maar de status ontbreekt.');
   } else if (status !== 'approved') {
-    blockingReasons.push(`CAO artikel 9 lid 1d: beveiligingsdienst vereist goedgekeurde overheidstoestemming/WPBR; huidige status is ${status}.`);
+    blockingReasons.push(`Voor het werken bij de Wpbr-vergunde organisatie is goedgekeurde overheidstoestemming vereist; de huidige status is ${status}.`);
   }
   if (!permissionNumber) {
     manualReviewReasons.push('CAO artikel 9 lid 1d: bewijsnummer van overheidstoestemming/WPBR ontbreekt.');
@@ -2121,6 +2128,28 @@ Deno.serve(async (req) => {
       blockingReasons.push(`Medewerker heeft geen actieve personeelskoppeling met bedrijf ${companyId} op ${serviceContext.service_date}.`);
     }
 
+    let companyWpbrLicenseFetchError = null;
+    const companyWpbrLicenses = companyId
+      ? await base44.asServiceRole.entities.CompanyWpbrLicense
+          .filter({ company_id: companyId })
+          .catch(error => {
+            companyWpbrLicenseFetchError = error;
+            return [];
+          })
+      : [];
+    const configuredCompanyWpbrLicenses = companyWpbrLicenses.filter(license => (
+      !!license?.license_type
+      && normalizeToken(license?.status) !== 'superseded'
+    ));
+    const companyRequiresWpbr = configuredCompanyWpbrLicenses.length > 0;
+    const activeCompanyWpbrLicense = configuredCompanyWpbrLicenses.find(license => (
+      normalizeToken(license?.status) !== 'expired'
+      && isWithinDateRange(license, serviceContext.service_date)
+    )) || null;
+    if (companyWpbrLicenseFetchError) {
+      manualReviewReasons.push('De actuele Wpbr-vergunningen van het bedrijf konden niet worden gecontroleerd. Planning en definitieve loonverwerking blijven geblokkeerd totdat deze controle slaagt.');
+    }
+
     const activeContracts = contracts.filter(c => isContractActive(c, serviceContext.service_date));
     const companyScopedContracts = resolveCompanyScopedContractCandidates({
       activeContracts,
@@ -2151,10 +2180,22 @@ Deno.serve(async (req) => {
       }
     }
 
+    const contractScopeRequiresWpbr = contractCandidates.some(contract => (
+      contractOrPersonnelRequiresWpbr(contract, personnel, serviceContext, companyRequiresWpbr)
+    ));
+    if (contractScopeRequiresWpbr && !activeCompanyWpbrLicense && !companyWpbrLicenseFetchError) {
+      blockingReasons.push(`Het bedrijf heeft op ${serviceContext.service_date} geen aantoonbaar geldige Wpbr-vergunning. De medewerker mag daarom niet voor deze dienst worden ingepland.`);
+    }
+
     const evaluatedContracts = contractCandidates.map(contract => {
       const functionMatch = evaluateFunctionMatch(contract, serviceContext);
       const securityScopeMatch = evaluateSecurityScopeMatch(contract, serviceContext);
-      const wpbrPermission = evaluateWpbrPermissionForService(contract, personnel, serviceContext);
+      const wpbrPermission = evaluateWpbrPermissionForService(
+        contract,
+        personnel,
+        serviceContext,
+        companyRequiresWpbr
+      );
       const qualificationCheck = evaluateCaoPbQualificationForService(
         contract,
         personnelQualifications,

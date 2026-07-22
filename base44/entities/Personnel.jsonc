@@ -345,7 +345,8 @@
     },
     "wpbr_required": {
       "type": "boolean",
-      "default": false
+      "default": false,
+      "description": "Of voor het werken bij de gekoppelde particuliere beveiligingsorganisatie of het recherchebureau toestemming op grond van de Wpbr vereist is. Dit kan ook gelden voor niet-operationeel personeel."
     },
     "wpbr_status": {
       "type": [
@@ -360,7 +361,8 @@
         "rejected",
         "expired",
         null
-      ]
+      ],
+      "description": "Actuele status van de vereiste overheidstoestemming/Wpbr voor het werken bij de organisatie."
     },
     "wpbr_authority": {
       "type": [

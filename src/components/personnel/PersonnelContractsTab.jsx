@@ -829,6 +829,7 @@ function initialForm(personnel) {
     company_id: personnel.primary_company_id || null,
     cao_key: personnel.cao || null,
     cao_configuration_id: null,
+    cao_version_snapshot: null,
     contract_model: inferredModel,
     contract_form: model?.contract_form || personnel.contract_form || "unknown",
     underlying_contract_form: model?.underlying_contract_form || personnel.underlying_contract_form || null,
@@ -898,6 +899,7 @@ function initialForm(personnel) {
     internship_bpv_reference: "",
     internship_learning_company_recognition_number: "",
     internship_route_reference: "",
+    internship_uwv_employment_intent_confirmed: "false",
     internship_assignment_description: "",
     internship_learning_objectives: "",
     internship_practice_trainer_name: "",
@@ -973,6 +975,7 @@ function formFromContract(contract) {
     company_id: contract.company_id || null,
     cao_key: contract.cao_key || null,
     cao_configuration_id: contract.cao_configuration_id || null,
+    cao_version_snapshot: contract.cao_version_snapshot || null,
     contract_model: inferredModel,
     contract_form: isStoredStatutoryBandwidth ? "oproep" : (contract.contract_form || "unknown"),
     underlying_contract_form: isStoredStatutoryBandwidth
@@ -1043,6 +1046,7 @@ function formFromContract(contract) {
     internship_bpv_reference: contract.internship_bpv_reference || "",
     internship_learning_company_recognition_number: contract.internship_learning_company_recognition_number || "",
     internship_route_reference: contract.internship_route_reference || "",
+    internship_uwv_employment_intent_confirmed: boolToSelect(contract.internship_uwv_employment_intent_confirmed),
     internship_assignment_description: contract.internship_assignment_description || "",
     internship_learning_objectives: contract.internship_learning_objectives || "",
     internship_practice_trainer_name: contract.internship_practice_trainer_name || contract.internship_mentor_name || "",
@@ -1182,6 +1186,9 @@ function getMissingContractFields(form) {
     if (form.internship_type === "bol" && !form.internship_bpv_reference) missing.push("POK/BPV-kenmerk");
     if (form.internship_type === "bol" && !form.internship_learning_company_recognition_number) missing.push("SBB-erkenning");
     if (["uwv_trial_placement", "reintegration_measure", "second_track_reintegration"].includes(form.internship_type) && !form.internship_route_reference) missing.push("routebesluit of toestemming");
+    if (form.internship_type === "uwv_trial_placement" && form.internship_uwv_employment_intent_confirmed !== "true") {
+      missing.push("schriftelijke indiensttredingsintentie na UWV-proefplaatsing");
+    }
     if (!form.internship_assignment_description) missing.push("stageopdracht");
     if (!form.internship_learning_objectives) missing.push("leerdoelen");
     if (!form.internship_practice_trainer_name) missing.push("praktijkopleider");
@@ -1312,7 +1319,8 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     letterhead_id: generated ? form.letterhead_id || null : null,
     document_status: documentStatus,
     cao_key: form.cao_key || null,
-    cao_configuration_id: null,
+    cao_configuration_id: form.cao_configuration_id || null,
+    cao_version_snapshot: form.cao_version_snapshot || null,
     contract_model: form.contract_model || null,
     legal_document_type: employmentModel === "internship" ? "internship_agreement" : "employment_agreement",
     learning_route: employmentModel === "bbl" ? "bbl" : (employmentModel === "internship" ? "article_14_internship" : null),
@@ -1410,6 +1418,12 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
       ? false
       : previous.no_work_no_pay_first_6_months === true,
     payslip_call_agreement_indicator_required: isCallAgreement && !isStatutoryBandwidth,
+    wpbr_required: form.wpbr_required === true || form.wpbr_required === "true",
+    wpbr_status: form.wpbr_status || personnel.wpbr_status || null,
+    wpbr_authority: form.wpbr_authority || personnel.wpbr_authority || null,
+    wpbr_permission_number: form.wpbr_permission_number || personnel.wpbr_permission_number || null,
+    wpbr_permission_valid_from: form.wpbr_permission_valid_from || personnel.wpbr_permission_valid_from || null,
+    wpbr_permission_valid_until: form.wpbr_permission_valid_until || personnel.wpbr_permission_valid_until || null,
     fixed_hours_offer_due_at: fixedHoursOfferDueAt,
     fixed_hours_offer_deadline_at: fixedHoursOfferDeadlineAt,
     fixed_hours_offer_status: isCallAgreement ? (previous.fixed_hours_offer_status || "not_due") : null,
@@ -1424,6 +1438,9 @@ function buildContractPayload(personnel, form, currentUser, auditActors, previou
     internship_bpv_reference: employmentModel === "internship" ? (form.internship_bpv_reference || null) : null,
     internship_learning_company_recognition_number: employmentModel === "internship" ? (form.internship_learning_company_recognition_number || null) : null,
     internship_route_reference: employmentModel === "internship" ? (form.internship_route_reference || null) : null,
+    internship_uwv_employment_intent_confirmed: employmentModel === "internship"
+      ? boolOrNull(form.internship_uwv_employment_intent_confirmed)
+      : null,
     internship_assignment_description: employmentModel === "internship" ? (form.internship_assignment_description || null) : null,
     internship_learning_objectives: employmentModel === "internship" ? (form.internship_learning_objectives || null) : null,
     internship_practice_trainer_name: employmentModel === "internship" ? (form.internship_practice_trainer_name || null) : null,
@@ -1827,6 +1844,20 @@ function Article14InternshipFields({ form, set }) {
               {form.internship_type === "uwv_trial_placement" && <p className="text-xs text-amber-700">Binnen deze CAO-preset mag de proefplaatsing maximaal twee maanden duren.</p>}
             </div>
           )}
+          {form.internship_type === "uwv_trial_placement" && (
+            <label className={`flex min-h-14 cursor-pointer items-start gap-3 border px-3 py-3 text-sm md:col-span-2 xl:col-span-3 ${form.internship_uwv_employment_intent_confirmed === "true" ? "border-primary bg-primary/5 text-foreground" : "border-amber-400 bg-amber-50/60 text-foreground dark:bg-amber-950/20"}`}>
+              <input
+                className="mt-0.5"
+                type="checkbox"
+                checked={form.internship_uwv_employment_intent_confirmed === "true"}
+                onChange={event => set("internship_uwv_employment_intent_confirmed", event.target.checked ? "true" : "false")}
+              />
+              <span>
+                <span className="block font-medium">Schriftelijke indiensttredingsintentie vastgelegd *</span>
+                <span className="mt-1 block text-xs text-muted-foreground">Werkgever heeft voor aanvang vastgelegd dat bij voldoende functioneren aansluitend ten minste zes maanden werk wordt aangeboden voor ten minste hetzelfde aantal uren als tijdens de proefplaatsing.</span>
+              </span>
+            </label>
+          )}
         </div>
       </section>
 
@@ -2169,7 +2200,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       && companyTemplates.some(template => templateSupportsContractKind(template, caoKey, option.value))
     )));
     const missing = [];
-    if (!compact(company.legal_name || company.display_name)) missing.push("juridische bedrijfsnaam");
+    if (!compact(company.statutory_name || company.registered_name || company.legal_name)) missing.push("juridische bedrijfsnaam");
     if (!compact(company.kvk_number)) missing.push("KvK-nummer");
     if (!compact(company.street_name || company.street) || !compact(company.postal_code) || !compact(company.city)) missing.push("volledig adres");
     if (activeLicenses.length === 0) missing.push("actieve WPBR-vergunning");
@@ -2241,6 +2272,36 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     activeCaoAssignmentConfigurationIds.includes(option.id)
     && isDateWithinOptionRange(option, form.contract_start_date)
   )) || visibleCaoConfigurationOptions[0] || null;
+  const selectedCompanyRequiresWpbr = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
+    || companyWpbrLicenses.some(license => (
+      !!license.license_type && !["expired", "superseded"].includes(license.status)
+    ));
+  const effectiveCaoVersionSnapshot = compact(
+    effectiveCaoConfiguration?.version_label || effectiveCaoConfiguration?.version
+  )
+    || selectedTemplate?.metadata?.standard_template_legal_basis?.cao_version
+    || null;
+  const effectiveContractForm = useMemo(() => ({
+    ...form,
+    cao_configuration_id: effectiveCaoConfiguration?.id || null,
+    cao_version_snapshot: effectiveCaoVersionSnapshot,
+    wpbr_required: selectedCompanyRequiresWpbr,
+    wpbr_status: personnel.wpbr_status || null,
+    wpbr_authority: personnel.wpbr_authority || null,
+    wpbr_permission_number: personnel.wpbr_permission_number || null,
+    wpbr_permission_valid_from: personnel.wpbr_permission_valid_from || null,
+    wpbr_permission_valid_until: personnel.wpbr_permission_valid_until || null,
+  }), [
+    effectiveCaoConfiguration?.id,
+    effectiveCaoVersionSnapshot,
+    form,
+    personnel.wpbr_authority,
+    personnel.wpbr_permission_number,
+    personnel.wpbr_permission_valid_from,
+    personnel.wpbr_permission_valid_until,
+    personnel.wpbr_status,
+    selectedCompanyRequiresWpbr,
+  ]);
   const wageRows = useMemo(() => {
     const rows = extractWageRows(effectiveCaoConfiguration, wageReferenceDate, form.cao_key);
     if (form.cao_key !== CAO_PARTICULIERE_BEVEILIGING_KEY) return rows;
@@ -2262,8 +2323,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const conflicts = validateConflicts(form, contracts, editingId, companies);
   const missingFields = getMissingContractFields(form);
   const evaluationContract = useMemo(() => buildContractPayload(personnel, {
-    ...form,
-    cao_configuration_id: effectiveCaoConfiguration?.id || null,
+    ...effectiveContractForm,
     template_version: selectedTemplate?.version || null,
     template_name_snapshot: selectedTemplate?.name || null,
     letterhead_name_snapshot: selectedLetterhead?.name || null,
@@ -2273,9 +2333,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     contracts,
     currentUser,
     editingId,
-    form,
+    effectiveContractForm,
     personnel,
-    effectiveCaoConfiguration?.id,
     selectedLetterhead?.name,
     selectedTemplate?.name,
     selectedTemplate?.version,
@@ -2299,14 +2358,14 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       && selectedFunctionValues.length > 0,
     retry: false,
   });
-  const generatedPreview = useMemo(() => renderContractBody(personnel, form, selectedCompany, selectedTemplate, selectedTemplateClauses), [form, personnel, selectedCompany, selectedTemplate, selectedTemplateClauses]);
+  const generatedPreview = useMemo(() => renderContractBody(personnel, effectiveContractForm, selectedCompany, selectedTemplate, selectedTemplateClauses), [effectiveContractForm, personnel, selectedCompany, selectedTemplate, selectedTemplateClauses]);
   const unresolvedTemplatePlaceholders = useMemo(
     () => form.source_type === "generated" ? getUnresolvedContractTemplatePlaceholders(generatedPreview) : [],
     [form.source_type, generatedPreview]
   );
   const standardTemplateValidation = useMemo(
-    () => validateStandardContractTemplateContext({ personnel, form, company: selectedCompany || {}, template: selectedTemplate || {} }),
-    [form, personnel, selectedCompany, selectedTemplate]
+    () => validateStandardContractTemplateContext({ personnel, form: effectiveContractForm, company: selectedCompany || {}, template: selectedTemplate || {} }),
+    [effectiveContractForm, personnel, selectedCompany, selectedTemplate]
   );
   const isPbParttimeModel = form.cao_key === CAO_PARTICULIERE_BEVEILIGING_KEY
     && ["parttime_fixed", "parttime_growth"].includes(form.employment_contract_model);
@@ -2760,8 +2819,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
 
       const previous = editingId ? contracts.find(contract => contract.id === editingId) || {} : {};
       const payload = buildContractPayload(personnel, {
-        ...form,
-        cao_configuration_id: effectiveCaoConfiguration?.id || null,
+        ...effectiveContractForm,
         template_version: selectedTemplate?.version || null,
         template_name_snapshot: selectedTemplate?.name || null,
         letterhead_name_snapshot: selectedLetterhead?.name || null,
@@ -2791,7 +2849,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       if (form.source_type === "generated") {
         const pdfFile = reviewDocument.file || await makePdfFile({
           personnel,
-          form,
+          form: effectiveContractForm,
           company: selectedCompany,
           template: selectedTemplate,
           letterhead: selectedLetterhead,
@@ -3101,7 +3159,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setReviewDocument({ file: null, error: null, loading: true });
     makePdfFile({
       personnel,
-      form,
+      form: effectiveContractForm,
       company: selectedCompany,
       template: selectedTemplate,
       letterhead: selectedLetterhead,
@@ -3122,6 +3180,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     };
   }, [
     confirmedContract,
+    effectiveContractForm,
     form,
     personnel,
     selectedCompany,
