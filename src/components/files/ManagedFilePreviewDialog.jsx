@@ -1,5 +1,6 @@
 import React, { useEffect, useMemo, useState } from "react";
-import { AlertTriangle, Download, FileText, Image as ImageIcon, Loader2 } from "lucide-react";
+import { AlertTriangle, Download, FileText, Image as ImageIcon, Loader2, LockKeyhole } from "lucide-react";
+import A4PdfPreview from "@/components/files/A4PdfPreview";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -41,7 +42,8 @@ export default function ManagedFilePreviewDialog({
   fileUrl,
   filename,
   title = "Document bekijken",
-  description = null
+  description = null,
+  renderPdfAsA4 = false,
 }) {
   const [preview, setPreview] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -107,7 +109,7 @@ export default function ManagedFilePreviewDialog({
 
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="h-[90vh] max-h-[90vh] w-[calc(100vw-1rem)] max-w-2xl sm:w-[calc(100vw-2rem)] grid-rows-[auto,1fr] overflow-hidden p-4 sm:p-6">
+      <DialogContent className={`h-[90vh] max-h-[90vh] w-[calc(100vw-1rem)] sm:w-[calc(100vw-2rem)] grid-rows-[auto,1fr] overflow-hidden p-4 sm:p-6 ${renderPdfAsA4 ? "max-w-6xl" : "max-w-2xl"}`}>
         <DialogHeader className="min-w-0 pr-12">
           <div className="flex min-w-0 items-start justify-between gap-4">
             <div className="min-w-0 space-y-1">
@@ -115,11 +117,14 @@ export default function ManagedFilePreviewDialog({
                 <FileText className="h-4 w-4 text-primary" />
                 <span className="truncate">{title}</span>
               </DialogTitle>
-              {description && (
-                <DialogDescription className="truncate">
-                  {description}
-                </DialogDescription>
-              )}
+              <DialogDescription className="flex min-w-0 items-center gap-1.5 truncate">
+                {preview?.encrypted && <LockKeyhole className="h-3.5 w-3.5 shrink-0 text-emerald-600" />}
+                <span className="truncate">
+                  {description || (preview?.encrypted
+                    ? "Versleuteld opgeslagen en alleen tijdelijk in deze sessie ontsleuteld."
+                    : resolvedFilename)}
+                </span>
+              </DialogDescription>
             </div>
             <Button
               type="button"
@@ -153,7 +158,15 @@ export default function ManagedFilePreviewDialog({
             </div>
           )}
 
-          {!loading && !error && preview && canPreviewPdf && (
+          {!loading && !error && preview && canPreviewPdf && renderPdfAsA4 && (
+            <A4PdfPreview
+              url={preview.url}
+              filename={resolvedFilename}
+              className="h-full min-h-0 border-0 bg-transparent p-0"
+            />
+          )}
+
+          {!loading && !error && preview && canPreviewPdf && !renderPdfAsA4 && (
             <div className="flex h-full min-h-[22rem] overflow-auto bg-muted/30 p-2">
               <iframe
                 title={resolvedFilename}

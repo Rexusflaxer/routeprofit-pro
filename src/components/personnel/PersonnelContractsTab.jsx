@@ -56,6 +56,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Trash2,
   Upload,
   X,
 } from "lucide-react";
@@ -310,6 +311,16 @@ function numberOrNull(value) {
   if (value === "" || value === null || value === undefined) return null;
   const number = Number(value);
   return Number.isFinite(number) ? number : null;
+}
+
+function validateSignedContractFile(file) {
+  if (!file) return "Selecteer eerst het volledig getekende contract.";
+  const extension = String(file.name || "").split(".").pop()?.toLowerCase();
+  const allowedType = ["application/pdf", "image/jpeg", "image/png"].includes(file.type)
+    || ["pdf", "jpg", "jpeg", "png"].includes(extension);
+  if (!allowedType) return "Gebruik een PDF-, JPG- of PNG-bestand.";
+  if (file.size > 25 * 1024 * 1024) return "Het bestand mag maximaal 25 MB groot zijn.";
+  return null;
 }
 
 function roundedHours(value) {
@@ -1621,8 +1632,11 @@ async function makePdfFile({ personnel, form, company, template, letterhead, cla
   const lineHeight = 16;
   const documentTitleLineHeight = 22;
   const paragraphGap = 7;
+  const signatureMarker = "[[LOQ_SIGNATURE_LINE]]";
+  const signatureBlankHeight = 84;
   const isInternshipAgreement = form.employment_contract_model === "internship";
-  const body = renderContractBody(personnel, form, company, template, clauses);
+  const body = renderContractBody(personnel, form, company, template, clauses)
+    .replace(/Handtekening:\s*_{4,}/gi, `Handtekening:\n\n${signatureMarker}`);
   const values = contractRenderValues(personnel, form, company);
   if (textWidth < 120 || pageBottom - continuationTop < 180) {
     throw new Error("De ingestelde briefpapiermarges laten onvoldoende ruimte over voor de contracttekst.");
@@ -1657,20 +1671,38 @@ async function makePdfFile({ personnel, form, company, template, letterhead, cla
     y += height;
   };
   const paragraphs = body.split(/\n{2,}/).map(paragraph => paragraph.trim()).filter(Boolean);
-  const paragraphLines = paragraphs.map(paragraph => doc.splitTextToSize(paragraph, textWidth));
+  const paragraphLines = paragraphs.map(paragraph => (
+    paragraph === signatureMarker ? [] : doc.splitTextToSize(paragraph, textWidth)
+  ));
 
   paragraphLines.forEach((lines, index) => {
+    const isSignatureLine = paragraphs[index] === signatureMarker;
     const isArticleHeading = /^Artikel\s+\d+\b/i.test(paragraphs[index]);
     const isDocumentHeading = index === 0;
-    const ownHeight = isDocumentHeading
+    const ownHeight = isSignatureLine
+      ? signatureBlankHeight + paragraphGap
+      : isDocumentHeading
       ? documentTitleLineHeight + Math.max(0, lines.length - 1) * lineHeight + paragraphGap
       : lines.length * lineHeight + paragraphGap;
-    const nextHeight = isArticleHeading && paragraphLines[index + 1]
-      ? paragraphLines[index + 1].length * lineHeight + paragraphGap
-      : 0;
+    const nextIsSignatureLine = paragraphs[index + 1] === signatureMarker;
+    const nextHeight = nextIsSignatureLine
+      ? signatureBlankHeight + paragraphGap
+      : (isArticleHeading && paragraphLines[index + 1]
+        ? paragraphLines[index + 1].length * lineHeight + paragraphGap
+        : 0);
     if (y > continuationTop && y + ownHeight + nextHeight > pageBottom) {
       addPage();
       y = continuationTop;
+    }
+
+    if (isSignatureLine) {
+      y += signatureBlankHeight;
+      doc.setDrawColor(100, 116, 139);
+      doc.setLineWidth(0.6);
+      doc.line(margin, y, Math.min(margin + 220, margin + textWidth), y);
+      doc.setDrawColor(0, 0, 0);
+      y += paragraphGap;
+      return;
     }
 
     if (isDocumentHeading && ownHeight <= pageBottom - continuationTop) {
@@ -1759,6 +1791,48 @@ function contractFileDescriptor(contract) {
 function documentStatusBadge(status) {
   const key = status || "concept";
   return <Badge className={`${DOCUMENT_STATUS_STYLES[key] || DOCUMENT_STATUS_STYLES.concept} text-xs`}>{DOCUMENT_STATUS_LABELS[key] || key}</Badge>;
+}
+
+function ContractDeleteConfirmation({ contract, onCancel, onConfirm, isPending }) {
+  const [confirmation, setConfirmation] = useState("");
+  const confirmationWord = "verwijder";
+  const valid = confirmation.trim().toLowerCase() === confirmationWord;
+
+  return (
+    <div className="border-b border-destructive/30 bg-destructive/5 p-5">
+      <div className="flex items-start gap-3">
+        <AlertTriangle className="mt-0.5 h-5 w-5 shrink-0 text-destructive" />
+        <div className="min-w-0 flex-1">
+          <p className="text-sm font-semibold text-foreground">Gearchiveerd contract definitief verwijderen?</p>
+          <p className="mt-1 text-xs text-muted-foreground">
+            Het contract en de versleutelde documentbestanden worden definitief verwijderd. Deze actie kan niet ongedaan worden gemaakt.
+          </p>
+          <p className="mt-2 truncate text-xs font-medium text-foreground">
+            {EMPLOYMENT_MODEL_LABELS[contract?.employment_contract_model] || "Arbeidscontract"} · {formatDate(contract?.contract_start_date)}
+          </p>
+          <div className="mt-4 flex flex-wrap items-end gap-2">
+            <div className="space-y-1">
+              <Label htmlFor="contract-delete-confirmation" className="text-xs text-muted-foreground">
+                Typ <span className="font-mono font-semibold text-foreground">{confirmationWord}</span> om te bevestigen
+              </Label>
+              <Input
+                id="contract-delete-confirmation"
+                value={confirmation}
+                onChange={event => setConfirmation(event.target.value)}
+                className="h-8 w-48 font-mono text-sm"
+                autoFocus
+              />
+            </div>
+            <Button type="button" variant="destructive" size="sm" disabled={!valid || isPending} onClick={onConfirm}>
+              <Trash2 className="mr-1.5 h-4 w-4" />
+              {isPending ? "Verwijderen..." : "Definitief verwijderen"}
+            </Button>
+            <Button type="button" variant="ghost" size="sm" disabled={isPending} onClick={onCancel}>Annuleren</Button>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
 }
 
 function firstNotificationMessage(notifications) {
@@ -2029,12 +2103,11 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const [previewFile, setPreviewFile] = useState(null);
   const [actionMessage, setActionMessage] = useState(null);
   const [showArchive, setShowArchive] = useState(false);
-  const [signedUploadId, setSignedUploadId] = useState(null);
+  const [expandedContractId, setExpandedContractId] = useState(null);
+  const [signedUploadWizard, setSignedUploadWizard] = useState(null);
+  const [deleteCandidate, setDeleteCandidate] = useState(null);
   const [wageScaleFilter, setWageScaleFilter] = useState(null);
   const [durationTypeConfirmed, setDurationTypeConfirmed] = useState(false);
-  const [confirmedContract, setConfirmedContract] = useState(null);
-  const [paperSignedDate, setPaperSignedDate] = useState("");
-  const [paperSignedFile, setPaperSignedFile] = useState(null);
   const [reviewDocument, setReviewDocument] = useState({ file: null, error: null, loading: false });
   const [reviewDocumentUrl, setReviewDocumentUrl] = useState(null);
 
@@ -2058,8 +2131,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
   const sortedContracts = useMemo(() => [...contracts].sort((a, b) =>
     String(b.contract_start_date || "").localeCompare(String(a.contract_start_date || ""))
   ), [contracts]);
-  const activeContracts = useMemo(() => sortedContracts.filter(c => c.document_status === "active"), [sortedContracts]);
-  const archivedContracts = useMemo(() => sortedContracts.filter(c => c.document_status !== "active"), [sortedContracts]);
+  const activeContracts = useMemo(() => sortedContracts.filter(c => c.document_status !== "archived"), [sortedContracts]);
+  const archivedContracts = useMemo(() => sortedContracts.filter(c => c.document_status === "archived"), [sortedContracts]);
   const visibleContracts = showArchive ? archivedContracts : activeContracts;
   const activeCompanies = useMemo(
     () => companies.filter(company => (company.status || "active") === "active"),
@@ -2371,7 +2444,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     },
     enabled: wizardOpen
       && wizardStep === 10
-      && !confirmedContract
       && !!form.company_id
       && !!form.contract_start_date
       && selectedFunctionValues.length > 0,
@@ -2950,10 +3022,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       return { record, activated: false, evaluation: latestEvaluation };
     },
     onSuccess: (result) => {
-      setConfirmedContract(result?.record || null);
-      setEditingId(result?.record?.id || editingId);
-      setPaperSignedFile(null);
-      setPaperSignedDate(result?.record?.contract_agreed_at || "");
       setActionMessage({
         type: "success",
         text: firstNotificationMessage(result?.notifications)
@@ -2963,6 +3031,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             ? "Het getekende contract is opgeslagen en wacht op juridische controle."
             : "Het contract is bevestigd en staat klaar voor ondertekening."),
       });
+      setShowArchive(false);
+      setExpandedContractId(result?.record?.id || null);
+      closeWizard();
       refresh();
     },
     onError: (error) => {
@@ -3031,9 +3102,9 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       return data;
     },
     onSuccess: (data, variables) => {
-      setSignedUploadId(null);
-      setPaperSignedFile(null);
-      if (variables?.fromWizard && data?.contract) setConfirmedContract(data.contract);
+      setSignedUploadWizard(null);
+      setShowArchive(false);
+      setExpandedContractId(data?.contract?.id || variables?.contract?.id || null);
       setActionMessage({
         type: "success",
         text: firstNotificationMessage(data?.notifications)
@@ -3044,12 +3115,36 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       refresh();
     },
     onError: (error) => {
-      setSignedUploadId(null);
       setActionMessage({
         type: "error",
         text: error?.response?.data?.error || error?.message || "De getekende versie kon niet worden verwerkt.",
       });
     },
+  });
+
+  const deleteArchivedContractMutation = useMutation({
+    mutationFn: async (contract) => {
+      if (!contract?.id || contract.document_status !== "archived") {
+        throw new Error("Alleen een contract uit het archief kan definitief worden verwijderd.");
+      }
+      const managedFileIds = uniqueValues([
+        contract.generated_file_id,
+        contract.signed_file_id,
+      ].filter(Boolean));
+      await Promise.all(managedFileIds.map(fileId => base44.entities.ManagedFile.delete(fileId)));
+      await base44.entities.PersonnelContract.delete(contract.id);
+      return contract;
+    },
+    onSuccess: () => {
+      setDeleteCandidate(null);
+      setExpandedContractId(null);
+      setActionMessage({ type: "success", text: "Het gearchiveerde contract is definitief verwijderd." });
+      refresh();
+    },
+    onError: (error) => setActionMessage({
+      type: "error",
+      text: error?.message || "Het gearchiveerde contract kon niet definitief worden verwijderd.",
+    }),
   });
 
   const downloadContractMutation = useMutation({
@@ -3073,9 +3168,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setForm(initialForm(personnel));
     setWageScaleFilter(null);
     setDurationTypeConfirmed(false);
-    setConfirmedContract(null);
-    setPaperSignedDate("");
-    setPaperSignedFile(null);
+    setSignedUploadWizard(null);
     setWizardStep(1);
     setActionMessage(null);
     setWizardOpen(true);
@@ -3086,9 +3179,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setForm(formFromContract(contract));
     setWageScaleFilter(contract.cao_scale === null || contract.cao_scale === undefined ? null : String(contract.cao_scale));
     setDurationTypeConfirmed(true);
-    setConfirmedContract(null);
-    setPaperSignedDate("");
-    setPaperSignedFile(null);
+    setSignedUploadWizard(null);
     setWizardStep(1);
     setActionMessage(null);
     setWizardOpen(true);
@@ -3103,6 +3194,19 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setPreviewFile(descriptor);
   };
 
+  const openSignedUploadWizard = (contract) => {
+    setWizardOpen(false);
+    setExpandedContractId(null);
+    setSignedUploadWizard({
+      contract,
+      step: 1,
+      file: null,
+      signedDate: "",
+    });
+  };
+
+  const closeSignedUploadWizard = () => setSignedUploadWizard(null);
+
   const nextStep = () => setWizardStep(step => Math.min(step + 1, 10));
   const previousStep = () => setWizardStep(step => Math.max(step - 1, 1));
   const closeWizard = () => {
@@ -3112,9 +3216,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     setForm(initialForm(personnel));
     setWageScaleFilter(null);
     setDurationTypeConfirmed(false);
-    setConfirmedContract(null);
-    setPaperSignedDate("");
-    setPaperSignedFile(null);
   };
   const chooseDocumentSource = (sourceType) => {
     setForm(prev => ({
@@ -3154,7 +3255,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
 
   useEffect(() => {
     let cancelled = false;
-    if (!wizardOpen || wizardStep !== 10 || confirmedContract) {
+    if (!wizardOpen || wizardStep !== 10) {
       setReviewDocument({ file: null, error: null, loading: false });
       return undefined;
     }
@@ -3198,7 +3299,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
       cancelled = true;
     };
   }, [
-    confirmedContract,
     effectiveContractForm,
     form,
     personnel,
@@ -3381,9 +3481,7 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
     && (form.source_type === "generated"
       ? contractEvaluation?.status === "compliant"
       : !!contractEvaluation && contractEvaluation.status !== "blocked");
-  const confirmedDocumentStatus = confirmedContract?.document_status || null;
-  const confirmedContractActivated = ["active", "scheduled", "expired"].includes(confirmedDocumentStatus);
-
+  const actionPanelOpen = wizardOpen || !!signedUploadWizard || !!deleteCandidate;
   return (
     <div className="flex flex-col h-full">
       {actionMessage && (
@@ -3391,6 +3489,144 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           {actionMessage.text}
         </div>
       )}
+
+      <AnimatePresence initial={false}>
+        {deleteCandidate && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.16 }}
+          >
+            <ContractDeleteConfirmation
+              contract={deleteCandidate}
+              isPending={deleteArchivedContractMutation.isPending}
+              onCancel={() => setDeleteCandidate(null)}
+              onConfirm={() => deleteArchivedContractMutation.mutate(deleteCandidate)}
+            />
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      <AnimatePresence initial={false}>
+        {signedUploadWizard && (
+          <motion.div
+            initial={{ opacity: 0, y: -8 }}
+            animate={{ opacity: 1, y: 0 }}
+            exit={{ opacity: 0, y: -8 }}
+            transition={{ duration: 0.2 }}
+            className="overflow-hidden border-b border-primary/30 bg-muted/20 p-5"
+          >
+            <p className="mb-3 text-xs font-semibold uppercase tracking-wider text-primary">Getekend contract registreren</p>
+            <div className="mb-4 flex items-center gap-1">
+              {["Document", "Ondertekening"].map((label, index) => {
+                const step = index + 1;
+                return (
+                  <React.Fragment key={label}>
+                    <div className={`flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-medium ${step === signedUploadWizard.step ? "bg-primary text-primary-foreground" : "bg-green-100 text-green-700 dark:bg-green-950 dark:text-green-300"}`}>
+                      <span className={`flex h-4 w-4 items-center justify-center rounded-full text-[10px] font-bold ${step === signedUploadWizard.step ? "bg-primary-foreground text-primary" : "text-green-700 dark:text-green-300"}`}>
+                        {step < signedUploadWizard.step ? "✓" : step}
+                      </span>
+                      {label}
+                    </div>
+                    {step === 1 && <div className={`h-px flex-1 ${signedUploadWizard.step > 1 ? "bg-green-200 dark:bg-green-900" : "bg-border"}`} />}
+                  </React.Fragment>
+                );
+              })}
+            </div>
+
+            <AnimatePresence mode="wait" initial={false}>
+              <motion.div
+                key={signedUploadWizard.step}
+                initial={{ opacity: 0, y: 6 }}
+                animate={{ opacity: 1, y: 0 }}
+                exit={{ opacity: 0, y: -6 }}
+                transition={{ duration: 0.18, ease: "easeOut" }}
+              >
+                {signedUploadWizard.step === 1 ? (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Upload het volledig getekende exemplaar</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Gebruik één compleet PDF-, JPG- of PNG-bestand van maximaal 25 MB.</p>
+                    </div>
+                    <label className="flex min-h-28 cursor-pointer flex-col items-center justify-center gap-2 rounded-lg border-2 border-dashed border-border px-5 py-6 text-center transition-colors hover:border-primary hover:bg-primary/5">
+                      <Upload className="h-6 w-6 text-primary" />
+                      <span className="text-sm font-medium text-foreground">Selecteer het getekende contract</span>
+                      <span className="text-xs text-muted-foreground">Het bestand wordt versleuteld opgeslagen.</span>
+                      <input
+                        type="file"
+                        accept="application/pdf,image/jpeg,image/png"
+                        className="hidden"
+                        onChange={event => {
+                          const file = event.target.files?.[0] || null;
+                          event.target.value = "";
+                          const validationError = validateSignedContractFile(file);
+                          if (validationError) {
+                            setActionMessage({ type: "error", text: validationError });
+                            return;
+                          }
+                          setActionMessage(null);
+                          setSignedUploadWizard(current => ({ ...current, file, step: 2 }));
+                        }}
+                      />
+                    </label>
+                    <div className="flex justify-end">
+                      <Button type="button" variant="ghost" size="sm" onClick={closeSignedUploadWizard}>
+                        <X className="mr-1 h-4 w-4" /> Annuleren
+                      </Button>
+                    </div>
+                  </div>
+                ) : (
+                  <div className="space-y-4">
+                    <div>
+                      <p className="text-sm font-medium text-foreground">Leg de laatste ondertekeningsdatum vast</p>
+                      <p className="mt-1 text-xs text-muted-foreground">Gebruik de datum waarop alle vereiste partijen het contract hebben ondertekend.</p>
+                    </div>
+                    <div className="grid gap-4 md:grid-cols-[minmax(0,1fr)_240px]">
+                      <div className="rounded-lg border border-border bg-card px-4 py-3">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Geselecteerd document</p>
+                        <p className="mt-1 truncate text-sm font-medium text-foreground">{signedUploadWizard.file?.name}</p>
+                        <p className="mt-1 text-xs text-muted-foreground">{Math.max(0.01, (signedUploadWizard.file?.size || 0) / 1024 / 1024).toFixed(2)} MB</p>
+                      </div>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="signed-contract-date">Datum laatste ondertekening *</Label>
+                        <Input
+                          id="signed-contract-date"
+                          type="date"
+                          max={new Date().toISOString().slice(0, 10)}
+                          value={signedUploadWizard.signedDate}
+                          onChange={event => setSignedUploadWizard(current => ({ ...current, signedDate: event.target.value }))}
+                        />
+                      </div>
+                    </div>
+                    <div className="flex items-center justify-between pt-1">
+                      <Button type="button" variant="ghost" size="sm" disabled={signedUploadMutation.isPending} onClick={() => setSignedUploadWizard(current => ({ ...current, step: 1 }))}>
+                        <ChevronLeft className="mr-1 h-4 w-4" /> Terug
+                      </Button>
+                      <div className="flex gap-2">
+                        <Button type="button" variant="outline" size="sm" disabled={signedUploadMutation.isPending} onClick={closeSignedUploadWizard}>Annuleren</Button>
+                        <Button
+                          type="button"
+                          size="sm"
+                          disabled={!signedUploadWizard.signedDate || !signedUploadWizard.file || signedUploadMutation.isPending}
+                          onClick={() => signedUploadMutation.mutate({
+                            contract: signedUploadWizard.contract,
+                            file: signedUploadWizard.file,
+                            signedDate: signedUploadWizard.signedDate,
+                          })}
+                        >
+                          <Check className="mr-1.5 h-4 w-4" />
+                          {signedUploadMutation.isPending ? "Controleren..." : "Bevestigen"}
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </motion.div>
+            </AnimatePresence>
+          </motion.div>
+        )}
+      </AnimatePresence>
 
       <AnimatePresence initial={false}>
       {wizardOpen && (
@@ -4160,100 +4396,6 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
             )}
 
             {wizardStep === 10 && (
-              confirmedContract ? (
-                <div className="mx-auto max-w-3xl py-6">
-                  <div className="text-center">
-                    <span className="mx-auto flex h-12 w-12 items-center justify-center rounded-full bg-emerald-100 text-emerald-700 dark:bg-emerald-950 dark:text-emerald-300">
-                      <CheckCircle className="h-6 w-6" />
-                    </span>
-                    <h3 className="mt-3 text-lg font-semibold text-foreground">
-                      {confirmedContractActivated ? "Contract geregistreerd" : "Contract bevestigd"}
-                    </h3>
-                    <p className="mx-auto mt-1 max-w-xl text-sm text-muted-foreground">
-                      {confirmedDocumentStatus === "generated"
-                        ? "Het document staat klaar voor ondertekening en is nog niet actief voor planning of loonverwerking."
-                        : confirmedDocumentStatus === "signed"
-                          ? "Het getekende document is opgeslagen, maar blijft geblokkeerd totdat de juridische controlepunten zijn opgelost."
-                          : confirmedDocumentStatus === "scheduled"
-                            ? "Het volledig getekende contract is gecontroleerd en wordt actief op de overeengekomen startdatum."
-                            : confirmedDocumentStatus === "expired"
-                              ? "Het volledig getekende historische contract is gecontroleerd en geregistreerd."
-                              : "Het volledig getekende contract is gecontroleerd en actief gemaakt."}
-                    </p>
-                    <div className="mt-3">{documentStatusBadge(confirmedDocumentStatus)}</div>
-                  </div>
-
-                  {confirmedDocumentStatus === "generated" && (
-                    <div className="mt-6 space-y-4 border-t border-border pt-5">
-                      <div className="flex flex-wrap items-center justify-between gap-3">
-                        <div>
-                          <p className="text-sm font-semibold text-foreground">Ondertekenen op papier</p>
-                          <p className="mt-1 text-xs text-muted-foreground">Download het document, laat alle vereiste partijen tekenen en plaats daarna het volledige exemplaar terug.</p>
-                        </div>
-                        <Button
-                          type="button"
-                          variant="outline"
-                          size="sm"
-                          onClick={() => downloadContractMutation.mutate(confirmedContract)}
-                          disabled={downloadContractMutation.isPending}
-                        >
-                          <Download className="mr-1.5 h-4 w-4" />
-                          {downloadContractMutation.isPending ? "Downloaden..." : "Contract downloaden"}
-                        </Button>
-                      </div>
-
-                      <div className="grid gap-4 md:grid-cols-[220px_1fr]">
-                        <div className="space-y-1.5">
-                          <Label>Datum laatste ondertekening *</Label>
-                          <Input
-                            type="date"
-                            max={new Date().toISOString().slice(0, 10)}
-                            value={paperSignedDate}
-                            onChange={event => setPaperSignedDate(event.target.value)}
-                          />
-                          <p className="text-xs text-muted-foreground">De datum waarop alle vereiste partijen hebben getekend.</p>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label>Volledig getekend contract *</Label>
-                          <label className="flex min-h-10 cursor-pointer items-center gap-3 rounded-md border border-dashed border-primary/40 bg-primary/5 px-3 py-2 transition-colors hover:bg-primary/10">
-                            <Upload className="h-4 w-4 shrink-0 text-primary" />
-                            <span className="min-w-0 flex-1 truncate text-sm text-foreground">
-                              {paperSignedFile?.name || "Kies PDF, JPG of PNG"}
-                            </span>
-                            <input
-                              type="file"
-                              accept="application/pdf,image/jpeg,image/png"
-                              className="hidden"
-                              onChange={event => setPaperSignedFile(event.target.files?.[0] || null)}
-                            />
-                          </label>
-                        </div>
-                      </div>
-
-                      <div className="flex justify-end">
-                        <Button
-                          type="button"
-                          size="sm"
-                          disabled={!paperSignedDate || !paperSignedFile || signedUploadMutation.isPending}
-                          onClick={() => signedUploadMutation.mutate({
-                            contract: confirmedContract,
-                            file: paperSignedFile,
-                            signedDate: paperSignedDate,
-                            fromWizard: true,
-                          })}
-                        >
-                          <Upload className="mr-1.5 h-4 w-4" />
-                          {signedUploadMutation.isPending ? "Controleren..." : "Getekend contract uploaden"}
-                        </Button>
-                      </div>
-                    </div>
-                  )}
-
-                  <div className="mt-6 flex justify-end border-t border-border pt-4">
-                    <Button type="button" size="sm" onClick={closeWizard}>Sluiten</Button>
-                  </div>
-                </div>
-              ) : (
                 <div className="space-y-3">
                   {form.source_type === "uploaded_existing" && !reviewDocument.file && (
                     <label className="flex cursor-pointer items-center gap-3 rounded-lg border border-dashed border-primary/40 bg-primary/5 px-4 py-3 transition-colors hover:bg-primary/10">
@@ -4314,11 +4456,10 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     </div>
                   )}
                 </div>
-              )
             )}
               </motion.div></AnimatePresence></div>
 
-          {wizardStep >= 6 && !confirmedContract && (
+          {wizardStep >= 6 && (
             <div className="flex items-center justify-between pt-3">
               <Button type="button" variant="ghost" size="sm" onClick={previousStep} disabled={saveMutation.isPending}>
                 <ChevronLeft className="w-4 h-4 mr-1" /> Terug
@@ -4352,8 +4493,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         <span className="truncate">Contract / functie</span><span className="truncate">Bedrijf</span><span className="truncate">CAO / schaal</span><span className="truncate">Uren / model</span><span className="truncate">Door</span>
         <div className="flex items-center justify-end gap-2">
           {showArchive && <Badge className="bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300 animate-pulse">Archief</Badge>}
-          {showArchive ? <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs whitespace-nowrap"><ChevronLeft className="w-3 h-3 mr-1" /> Actieve contracten</Button> : <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs whitespace-nowrap"><Archive className="w-3 h-3 mr-1" /> Archief {archivedContracts.length > 0 ? `(${archivedContracts.length})` : ""}</Button>}
-          {!showArchive && <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs whitespace-nowrap"><Plus className="w-3 h-3 mr-1" /> Nieuw contract</Button>}
+          {!actionPanelOpen && (showArchive ? <Button size="sm" variant="outline" onClick={() => setShowArchive(false)} className="h-7 px-2 text-xs whitespace-nowrap"><ChevronLeft className="w-3 h-3 mr-1" /> Actieve contracten</Button> : <Button size="sm" variant="outline" onClick={() => setShowArchive(true)} className="h-7 px-2 text-xs whitespace-nowrap"><Archive className="w-3 h-3 mr-1" /> Archief {archivedContracts.length > 0 ? `(${archivedContracts.length})` : ""}</Button>)}
+          {!actionPanelOpen && !showArchive && <Button size="sm" variant="outline" onClick={openNew} className="h-7 px-2 text-xs whitespace-nowrap"><Plus className="w-3 h-3 mr-1" /> Nieuw contract</Button>}
         </div>
       </div>
       {isLoading && <div className="p-6 text-sm text-muted-foreground">Contracten laden...</div>}
@@ -4396,113 +4537,143 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
               .join(", ")
             : storedFunctionValues.map(readableFunctionLabel).join(", ");
           const storedPrimaryFunction = selectableFunctionValue(contract.function_type);
+          const expanded = expandedContractId === contract.id;
           return (
-            <div
-              key={contract.id}
-              role="button"
-              tabIndex={0}
-              onClick={() => openPreview(contract)}
-              onKeyDown={event => {
-                if (event.key === "Enter" || event.key === " ") openPreview(contract);
-              }}
-              className="grid min-w-[1120px] w-full cursor-pointer grid-cols-[minmax(260px,1.6fr)_minmax(170px,1fr)_minmax(190px,1.1fr)_minmax(190px,1fr)_minmax(120px,.7fr)_270px] items-center px-4 py-4 text-left text-sm hover:bg-muted/30"
-            >
-              <div className="min-w-0">
-                <div className="flex min-w-0 items-center gap-2">
-                  <p className="truncate font-semibold text-foreground">{contractTypeLabel}</p>
-                  {showArchive && documentStatusBadge(contract.document_status)}
-                  {contract.statutory_conversion_applies === true && <Badge className="shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200">Van rechtswege onbepaalde tijd</Badge>}
-                </div>
-                <p className="truncate text-xs text-muted-foreground">
-                  {functionSummary || contract.cao_function_group || "Functie nog niet vastgelegd"}
-                </p>
-                {!showArchive && contract.primary_function_status === "pending_work_history" && (
-                  <p
-                    className="mt-0.5 truncate text-xs text-sky-600 dark:text-sky-300"
-                    title="LOQ bepaalt de hoofdfunctie per contract zodra voldoende gewerkte diensten zijn geregistreerd"
-                  >
-                    Hoofdfunctie: automatisch na voldoende geregistreerde inzet
+            <React.Fragment key={contract.id}>
+              <div
+                role="button"
+                tabIndex={0}
+                aria-expanded={expanded}
+                onClick={() => setExpandedContractId(current => current === contract.id ? null : contract.id)}
+                onKeyDown={event => {
+                  if (event.key === "Enter" || event.key === " ") {
+                    event.preventDefault();
+                    setExpandedContractId(current => current === contract.id ? null : contract.id);
+                  }
+                }}
+                className={`grid min-w-[1120px] w-full cursor-pointer grid-cols-[minmax(260px,1.6fr)_minmax(170px,1fr)_minmax(190px,1.1fr)_minmax(190px,1fr)_minmax(120px,.7fr)_270px] items-center px-4 py-4 text-left text-sm transition-colors hover:bg-muted/30 ${expanded ? "bg-muted/30" : ""}`}
+              >
+                <div className="min-w-0">
+                  <div className="flex min-w-0 items-center gap-2">
+                    <p className="truncate font-semibold text-foreground">{contractTypeLabel}</p>
+                    {(showArchive || contract.document_status !== "active") && documentStatusBadge(contract.document_status)}
+                    {contract.statutory_conversion_applies === true && <Badge className="shrink-0 bg-amber-100 text-amber-800 dark:bg-amber-950 dark:text-amber-200">Van rechtswege onbepaalde tijd</Badge>}
+                  </div>
+                  <p className="truncate text-xs text-muted-foreground">
+                    {functionSummary || contract.cao_function_group || "Functie nog niet vastgelegd"}
                   </p>
-                )}
-                {!showArchive && contract.primary_function_status !== "pending_work_history" && storedPrimaryFunction && (
+                  {!showArchive && contract.primary_function_status === "pending_work_history" && (
+                    <p
+                      className="mt-0.5 truncate text-xs text-sky-600 dark:text-sky-300"
+                      title="LOQ bepaalt de hoofdfunctie per contract zodra voldoende gewerkte diensten zijn geregistreerd"
+                    >
+                      Hoofdfunctie: automatisch na voldoende geregistreerde inzet
+                    </p>
+                  )}
+                  {!showArchive && contract.primary_function_status !== "pending_work_history" && storedPrimaryFunction && (
+                    <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                      Hoofdfunctie: {readableFunctionLabel(storedPrimaryFunction)}
+                    </p>
+                  )}
                   <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                    Hoofdfunctie: {readableFunctionLabel(storedPrimaryFunction)}
+                    {formatDate(contract.contract_start_date)}{effectiveEndForContract(contract) ? ` - ${formatDate(effectiveEndForContract(contract))}` : " - onbepaalde tijd"}
                   </p>
-                )}
-                <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                  {formatDate(contract.contract_start_date)}{effectiveEndForContract(contract) ? ` - ${formatDate(effectiveEndForContract(contract))}` : " - onbepaalde tijd"}
-                </p>
+                </div>
+                <div className="truncate text-muted-foreground">{getCompanyLabel(companies, contract.company_id)}</div>
+                <div className="truncate text-muted-foreground">{CAO_OPTION_LABELS[contract.cao_key] || contract.cao_key || "-"}{contract.cao_scale ? ` / ${contract.cao_scale}.${contract.cao_period || 0}` : ""}</div>
+                <div className="truncate text-muted-foreground">{hoursLabel} · {EMPLOYMENT_MODEL_LABELS[persistedEmploymentModel] || persistedEmploymentModel || "-"}</div>
+                <div className="truncate text-muted-foreground">{getAuditActorLabel(contract, auditActors)}</div>
+                <div className="flex justify-end gap-1" onClick={event => event.stopPropagation()}>
+                  {!showArchive ? (
+                    <>
+                      <Button type="button" variant="ghost" size="icon" className="h-8 w-8" title="Contract bewerken" onClick={() => openEdit(contract)}>
+                        <Pencil className="h-4 w-4" />
+                      </Button>
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="icon"
+                        className="h-8 w-8 text-muted-foreground hover:text-destructive"
+                        title="Contract archiveren"
+                        disabled={lifecycleMutation.isPending}
+                        onClick={() => {
+                          if (window.confirm("Wilt u dit contract archiveren? Het wordt direct uitgesloten van planning en loonverwerking.")) {
+                            lifecycleMutation.mutate({ action: "archive", contract });
+                          }
+                        }}
+                      >
+                        <Archive className="h-4 w-4" />
+                      </Button>
+                    </>
+                  ) : (
+                    <Button
+                      type="button"
+                      variant="ghost"
+                      size="icon"
+                      className="h-8 w-8 text-destructive hover:bg-destructive/10 hover:text-destructive"
+                      title="Contract definitief verwijderen"
+                      onClick={() => setDeleteCandidate(contract)}
+                    >
+                      <Trash2 className="h-4 w-4" />
+                    </Button>
+                  )}
+                </div>
               </div>
-              <div className="truncate text-muted-foreground">{getCompanyLabel(companies, contract.company_id)}</div>
-              <div className="truncate text-muted-foreground">{CAO_OPTION_LABELS[contract.cao_key] || contract.cao_key || "-"}{contract.cao_scale ? ` / ${contract.cao_scale}.${contract.cao_period || 0}` : ""}</div>
-              <div className="truncate text-muted-foreground">{hoursLabel} · {EMPLOYMENT_MODEL_LABELS[persistedEmploymentModel] || persistedEmploymentModel || "-"}</div>
-              <div className="truncate text-muted-foreground">{getAuditActorLabel(contract, auditActors)}</div>
-              <div className="flex justify-end gap-1" onClick={event => event.stopPropagation()}>
-                <Button
-                  type="button"
-                  variant="ghost"
-                  size="icon"
-                  className="h-8 w-8"
-                  title={fileDescriptor ? "Contract bekijken" : "Concept bewerken"}
-                  onClick={() => fileDescriptor ? openPreview(contract) : openEdit(contract)}
-                >
-                  {fileDescriptor ? <Eye className="h-4 w-4" /> : <Pencil className="h-4 w-4" />}
-                </Button>
-                {["concept", "generated"].includes(contract.document_status) && (
-                  <label
-                    className="inline-flex h-8 w-8 cursor-pointer items-center justify-center rounded-md text-muted-foreground hover:bg-muted hover:text-foreground"
-                    title="Getekende versie uploaden"
+
+              <AnimatePresence initial={false}>
+                {expanded && (
+                  <motion.div
+                    initial={{ opacity: 0, height: 0 }}
+                    animate={{ opacity: 1, height: "auto" }}
+                    exit={{ opacity: 0, height: 0 }}
+                    transition={{ duration: 0.18, ease: "easeOut" }}
+                    className="min-w-[1120px] overflow-hidden bg-muted/15"
                   >
-                    {signedUploadMutation.isPending && signedUploadId === contract.id
-                      ? <RefreshCw className="h-4 w-4 animate-spin" />
-                      : <FileSignature className="h-4 w-4" />}
-                    <input
-                      type="file"
-                      accept=".pdf,image/*"
-                      className="hidden"
-                      disabled={signedUploadMutation.isPending}
-                      onChange={event => {
-                        const file = event.target.files?.[0];
-                        event.target.value = "";
-                        if (!file) return;
-                        setSignedUploadId(contract.id);
-                        signedUploadMutation.mutate({ contract, file });
-                      }}
-                    />
-                  </label>
+                    <div className="flex items-center justify-between gap-4 border-t border-border/70 px-4 py-3">
+                      <div className="min-w-0">
+                        <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Contractdossier</p>
+                        <p className="mt-1 text-xs text-muted-foreground">
+                          {contract.document_status === "generated"
+                            ? "Het document wacht op ondertekening en telt nog niet mee voor planning of loonverwerking."
+                            : contract.document_status === "signed"
+                              ? "De getekende versie is opgeslagen en wacht op afronding van de juridische controle."
+                              : contract.document_status === "archived"
+                                ? "Dit contract staat in het archief en is uitgesloten van planning en loonverwerking."
+                                : "Open het beveiligde document of download een lokaal exemplaar."}
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 flex-wrap justify-end gap-2" onClick={event => event.stopPropagation()}>
+                        {fileDescriptor && (
+                          <>
+                            <Button type="button" variant="outline" size="sm" onClick={() => openPreview(contract)}>
+                              <Eye className="mr-1.5 h-4 w-4" /> Document openen
+                            </Button>
+                            <Button type="button" variant="outline" size="sm" disabled={downloadContractMutation.isPending} onClick={() => downloadContractMutation.mutate(contract)}>
+                              <Download className="mr-1.5 h-4 w-4" /> Downloaden
+                            </Button>
+                          </>
+                        )}
+                        {!showArchive && ["concept", "generated"].includes(contract.document_status) && (
+                          <Button type="button" size="sm" onClick={() => openSignedUploadWizard(contract)}>
+                            <FileSignature className="mr-1.5 h-4 w-4" /> Getekend contract uploaden
+                          </Button>
+                        )}
+                        {!showArchive && contract.document_status === "signed" && (
+                          <Button type="button" size="sm" disabled={lifecycleMutation.isPending} onClick={() => lifecycleMutation.mutate({ action: "revalidate", contract })}>
+                            <RefreshCw className={`mr-1.5 h-4 w-4 ${lifecycleMutation.isPending ? "animate-spin" : ""}`} /> Opnieuw controleren
+                          </Button>
+                        )}
+                        {!fileDescriptor && !showArchive && (
+                          <Button type="button" size="sm" onClick={() => openEdit(contract)}>
+                            <Pencil className="mr-1.5 h-4 w-4" /> Contract afmaken
+                          </Button>
+                        )}
+                      </div>
+                    </div>
+                  </motion.div>
                 )}
-                {contract.document_status === "signed" && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8"
-                    title="Juridische controle opnieuw uitvoeren"
-                    disabled={lifecycleMutation.isPending}
-                    onClick={() => lifecycleMutation.mutate({ action: "revalidate", contract })}
-                  >
-                    <RefreshCw className={`h-4 w-4 ${lifecycleMutation.isPending ? "animate-spin" : ""}`} />
-                  </Button>
-                )}
-                {contract.document_status !== "archived" && (
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    size="icon"
-                    className="h-8 w-8 text-muted-foreground hover:text-destructive"
-                    title="Contract archiveren"
-                    disabled={lifecycleMutation.isPending}
-                    onClick={() => {
-                      if (window.confirm("Wilt u dit contract archiveren? Het wordt direct uitgesloten van planning en payroll.")) {
-                        lifecycleMutation.mutate({ action: "archive", contract });
-                      }
-                    }}
-                  >
-                    <Archive className="h-4 w-4" />
-                  </Button>
-                )}
-              </div>
-            </div>
+              </AnimatePresence>
+            </React.Fragment>
           );
         })}
       </div>
@@ -4515,6 +4686,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
         fileUrl={previewFile?.fileUrl}
         filename={previewFile?.filename}
         title={previewFile?.title || "Contract bekijken"}
+        description="Versleuteld opgeslagen en alleen tijdelijk in deze sessie ontsleuteld."
+        renderPdfAsA4
       />
     </div>
   );
