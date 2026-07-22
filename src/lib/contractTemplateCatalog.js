@@ -142,7 +142,7 @@ export const PB_FULLTIME_STANDARD_TEMPLATE_BODY = [
   "Partijen",
   "Werkgever: {$bedrijf_statutaire_naam}, gevestigd aan {$bedrijf_adres_volledig}, ingeschreven bij de Kamer van Koophandel onder nummer {$bedrijf_kvk}, rechtsgeldig vertegenwoordigd door {$bedrijf_vertegenwoordiger_naam} in de functie van {$bedrijf_vertegenwoordiger_functie}, hierna: werkgever;",
   "",
-  "Werknemer: {$medewerker_volledige_naam}, geboren op {$medewerker_geboortedatum} te {$medewerker_geboorteplaats}, wonende aan {$medewerker_adres_volledig}, hierna: werknemer;",
+  "Werknemer: {$medewerker_juridische_volledige_naam}, geboren op {$medewerker_geboortedatum} te {$medewerker_geboorteplaats}, wonende aan {$medewerker_adres_volledig}, hierna: werknemer;",
   "",
   "Werkgever en werknemer worden hierna gezamenlijk aangeduid als partijen en komen het volgende overeen.",
   "",
@@ -174,10 +174,11 @@ export const PB_FULLTIME_STANDARD_TEMPLATE_BODY = [
   "5.4 Een wijziging van de structurele arbeidsduur wordt schriftelijk vastgelegd.",
   "",
   "Artikel 6 - Beloning",
-  "6.1 {$contract_beloning_bepaling}",
-  "6.2 {$contract_loonperiode_bepaling}",
-  "6.3 Toeslagen voor bijzondere uren, feestdagen, overwerk, functiewaarneming en overige vergoedingen worden toegekend volgens de {$cao_naam} en de feitelijke werkzaamheden.",
-  "6.4 Wijzigingen in loon, schaal of periodiek worden toegepast volgens de geldende cao en loontabel.",
+  "6.1 {$contract_loonindeling_bepaling}",
+  "6.2 {$contract_basisuurloon_bepaling}",
+  "6.3 {$contract_loonperiode_bepaling}",
+  "6.4 Toeslagen voor bijzondere uren, feestdagen, overwerk, functiewaarneming en overige vergoedingen worden toegekend volgens de {$cao_naam} en de feitelijke werkzaamheden.",
+  "6.5 Wijzigingen in loon, schaal, periodiek of basisuurloon worden toegepast volgens de geldende cao en loontabel en blijken uit de loonstrook of een afzonderlijke schriftelijke of elektronische mededeling.",
   "",
   "Artikel 7 - Vakantie, vakantiebijslag en verlof",
   "7.1 {$contract_vakantie_bepaling}",
@@ -197,7 +198,8 @@ export const PB_FULLTIME_STANDARD_TEMPLATE_BODY = [
   "Artikel 10 - Wpbr-toestemming, legitimatie en vakbekwaamheid",
   "10.1 {$contract_wpbr_bepaling}",
   "10.2 Werknemer informeert werkgever direct over feiten of omstandigheden die de vereiste toestemming, betrouwbaarheid, legitimatie, vakbekwaamheid of inzetbaarheid kunnen beïnvloeden.",
-  "10.3 Ontbreekt of vervalt een vereiste toestemming, legitimatie of vakbekwaamheid, dan zet werkgever werknemer niet in voor werkzaamheden waarvoor die eis geldt. Partijen beoordelen de gevolgen volgens de wet, de {$cao_naam} en de omstandigheden; deze bepaling veroorzaakt geen automatische beëindiging van de arbeidsovereenkomst.",
+  "10.3 {$contract_wpbr_gevolgen_bepaling}",
+  "10.4 Werknemer staakt de betrokken werkzaamheden direct en levert het legitimatiebewijs en andere Wpbr-gebonden middelen op eerste verzoek bij werkgever in.",
   "",
   "Artikel 11 - Instructies, integriteit en veilige uitvoering",
   "11.1 Werknemer voert de werkzaamheden zorgvuldig, integer, betrouwbaar en professioneel uit en volgt redelijke bedrijfs-, veiligheids-, locatie- en objectinstructies op.",
@@ -244,7 +246,7 @@ export const PB_FULLTIME_STANDARD_TEMPLATE_BODY = [
   "Handtekening: ______________________________",
   "",
   "Werknemer:",
-  "{$medewerker_volledige_naam}",
+  "{$medewerker_juridische_volledige_naam}",
   "Handtekening: ______________________________",
 ].join("\n");
 
@@ -296,20 +298,22 @@ export const PB_MIN_MAX_STANDARD_TEMPLATE_BODY = PB_FULLTIME_STANDARD_TEMPLATE_B
   .replace(
     [
       "Artikel 6 - Beloning",
-      "6.1 {$contract_beloning_bepaling}",
-      "6.2 {$contract_loonperiode_bepaling}",
-      "6.3 Toeslagen voor bijzondere uren, feestdagen, overwerk, functiewaarneming en overige vergoedingen worden toegekend volgens de {$cao_naam} en de feitelijke werkzaamheden.",
-      "6.4 Wijzigingen in loon, schaal of periodiek worden toegepast volgens de geldende cao en loontabel.",
+      "6.1 {$contract_loonindeling_bepaling}",
+      "6.2 {$contract_basisuurloon_bepaling}",
+      "6.3 {$contract_loonperiode_bepaling}",
+      "6.4 Toeslagen voor bijzondere uren, feestdagen, overwerk, functiewaarneming en overige vergoedingen worden toegekend volgens de {$cao_naam} en de feitelijke werkzaamheden.",
+      "6.5 Wijzigingen in loon, schaal, periodiek of basisuurloon worden toegepast volgens de geldende cao en loontabel en blijken uit de loonstrook of een afzonderlijke schriftelijke of elektronische mededeling.",
     ].join("\n"),
     [
       "Artikel 6 - Beloning en toeslagen",
-      "6.1 {$contract_beloning_bepaling}",
-      "6.2 {$contract_loonperiode_bepaling}",
-      "6.3 Werkgever vermeldt op de loonstrook dat sprake is van een oproepovereenkomst en specificeert garantie-uren, aanvullende uren en toeslagen afzonderlijk.",
-      "6.4 Uren boven de garantie-uren worden betaald volgens de {$cao_naam}. Uren boven 152 uur per loonperiode gelden als overuren; werknemer kan niet zonder instemming worden verplicht meer dan 144 uur per loonperiode te werken.",
-      "6.5 Een oproepkracht ontvangt geen verschuivingstoeslag voor zover de {$cao_naam} dit bepaalt.",
-      "6.6 Voor arbeid op een in de {$cao_naam} aangewezen feestdag ontvangt de oproepkracht een toeslag van 100% van het basisuurloon. Voor dezelfde uren worden geen looncomponenten gestapeld die de cao voor oproepkrachten uitsluit.",
-      "6.7 Overige toeslagen en vergoedingen worden uitsluitend toegekend voor zover de {$cao_naam} en de feitelijke werkzaamheden daarop aanspraak geven.",
+      "6.1 {$contract_loonindeling_bepaling}",
+      "6.2 {$contract_basisuurloon_bepaling}",
+      "6.3 {$contract_loonperiode_bepaling}",
+      "6.4 Werkgever vermeldt op de loonstrook dat sprake is van een oproepovereenkomst en specificeert garantie-uren, aanvullende uren en toeslagen afzonderlijk.",
+      "6.5 Uren boven de garantie-uren worden betaald volgens de {$cao_naam}. Uren boven 152 uur per loonperiode gelden als overuren; werknemer kan niet zonder instemming worden verplicht meer dan 144 uur per loonperiode te werken.",
+      "6.6 Een oproepkracht ontvangt geen verschuivingstoeslag voor zover de {$cao_naam} dit bepaalt.",
+      "6.7 Voor arbeid op een in de {$cao_naam} aangewezen feestdag ontvangt de oproepkracht een toeslag van 100% van het basisuurloon. Voor dezelfde uren worden geen looncomponenten gestapeld die de cao voor oproepkrachten uitsluit.",
+      "6.8 Overige toeslagen en vergoedingen worden uitsluitend toegekend voor zover de {$cao_naam} en de feitelijke werkzaamheden daarop aanspraak geven.",
     ].join("\n"),
   )
   .replace(
@@ -357,21 +361,23 @@ export const PB_ZERO_HOURS_STANDARD_TEMPLATE_BODY = PB_FULLTIME_STANDARD_TEMPLAT
   .replace(
     [
       "Artikel 6 - Beloning",
-      "6.1 {$contract_beloning_bepaling}",
-      "6.2 {$contract_loonperiode_bepaling}",
-      "6.3 Toeslagen voor bijzondere uren, feestdagen, overwerk, functiewaarneming en overige vergoedingen worden toegekend volgens de {$cao_naam} en de feitelijke werkzaamheden.",
-      "6.4 Wijzigingen in loon, schaal of periodiek worden toegepast volgens de geldende cao en loontabel.",
+      "6.1 {$contract_loonindeling_bepaling}",
+      "6.2 {$contract_basisuurloon_bepaling}",
+      "6.3 {$contract_loonperiode_bepaling}",
+      "6.4 Toeslagen voor bijzondere uren, feestdagen, overwerk, functiewaarneming en overige vergoedingen worden toegekend volgens de {$cao_naam} en de feitelijke werkzaamheden.",
+      "6.5 Wijzigingen in loon, schaal, periodiek of basisuurloon worden toegepast volgens de geldende cao en loontabel en blijken uit de loonstrook of een afzonderlijke schriftelijke of elektronische mededeling.",
     ].join("\n"),
     [
       "Artikel 6 - Beloning en toeslagen",
-      "6.1 {$contract_beloning_bepaling}",
-      "6.2 {$contract_loonperiode_bepaling}",
-      "6.3 Werkgever vermeldt op de loonstrook dat sprake is van een oproepovereenkomst en specificeert de gewerkte en anderszins loongerechtigde uren en toeslagen afzonderlijk.",
-      "6.4 Partijen sluiten het recht op loon bij niet-werken in deze standaardovereenkomst niet uit. Of en over welke uren loon is verschuldigd, wordt bepaald door de wet, de {$cao_naam}, vastgestelde oproepen en een eventueel aantoonbaar structureel arbeidspatroon.",
-      "6.5 Werknemer kan niet zonder instemming worden verplicht meer dan 144 uur per loonperiode te werken. Uren boven 152 uur per loonperiode gelden als overuren volgens de {$cao_naam}.",
-      "6.6 Een oproepkracht ontvangt geen verschuivingstoeslag voor zover de {$cao_naam} dit bepaalt.",
-      "6.7 Voor arbeid op een in de {$cao_naam} aangewezen feestdag ontvangt de oproepkracht een toeslag van 100% van het basisuurloon. Voor dezelfde uren worden geen looncomponenten gestapeld die de cao voor oproepkrachten uitsluit.",
-      "6.8 Overige toeslagen en vergoedingen worden uitsluitend toegekend voor zover de {$cao_naam} en de feitelijke werkzaamheden daarop aanspraak geven.",
+      "6.1 {$contract_loonindeling_bepaling}",
+      "6.2 {$contract_basisuurloon_bepaling}",
+      "6.3 {$contract_loonperiode_bepaling}",
+      "6.4 Werkgever vermeldt op de loonstrook dat sprake is van een oproepovereenkomst en specificeert de gewerkte en anderszins loongerechtigde uren en toeslagen afzonderlijk.",
+      "6.5 Partijen sluiten het recht op loon bij niet-werken in deze standaardovereenkomst niet uit. Of en over welke uren loon is verschuldigd, wordt bepaald door de wet, de {$cao_naam}, vastgestelde oproepen en een eventueel aantoonbaar structureel arbeidspatroon.",
+      "6.6 Werknemer kan niet zonder instemming worden verplicht meer dan 144 uur per loonperiode te werken. Uren boven 152 uur per loonperiode gelden als overuren volgens de {$cao_naam}.",
+      "6.7 Een oproepkracht ontvangt geen verschuivingstoeslag voor zover de {$cao_naam} dit bepaalt.",
+      "6.8 Voor arbeid op een in de {$cao_naam} aangewezen feestdag ontvangt de oproepkracht een toeslag van 100% van het basisuurloon. Voor dezelfde uren worden geen looncomponenten gestapeld die de cao voor oproepkrachten uitsluit.",
+      "6.9 Overige toeslagen en vergoedingen worden uitsluitend toegekend voor zover de {$cao_naam} en de feitelijke werkzaamheden daarop aanspraak geven.",
     ].join("\n"),
   )
   .replace(
@@ -398,7 +404,7 @@ export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_BODY = [
   "Partijen",
   "Stagebedrijf: {$bedrijf_statutaire_naam}, gevestigd aan {$bedrijf_adres_volledig}, ingeschreven bij de Kamer van Koophandel onder nummer {$bedrijf_kvk}, rechtsgeldig vertegenwoordigd door {$bedrijf_vertegenwoordiger_naam} in de functie van {$bedrijf_vertegenwoordiger_functie}, hierna: stagebedrijf;",
   "",
-  "Stagiair: {$medewerker_volledige_naam}, geboren op {$medewerker_geboortedatum} te {$medewerker_geboorteplaats}, wonende aan {$medewerker_adres_volledig}, hierna: stagiair;",
+  "Stagiair: {$medewerker_juridische_volledige_naam}, geboren op {$medewerker_geboortedatum} te {$medewerker_geboorteplaats}, wonende aan {$medewerker_adres_volledig}, hierna: stagiair;",
   "",
   "Instelling: {$stage_instelling_naam}, gevestigd aan {$stage_instelling_adres}, rechtsgeldig vertegenwoordigd door {$stage_instelling_vertegenwoordiger_naam} in de functie van {$stage_instelling_vertegenwoordiger_functie}, hierna: instelling;",
   "",
@@ -510,7 +516,7 @@ export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_BODY = [
   "Handtekening: ______________________________",
   "",
   "Stagiair:",
-  "{$medewerker_volledige_naam}",
+  "{$medewerker_juridische_volledige_naam}",
   "Handtekening: ______________________________",
   "",
   "Voor de instelling:",
@@ -532,7 +538,8 @@ export const PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE_BODY = PB_FULLTIME_STANDARD_TEM
       "Artikel 10 - Wpbr-toestemming, legitimatie en vakbekwaamheid",
       "10.1 {$contract_wpbr_bepaling}",
       "10.2 Werknemer informeert werkgever direct over feiten of omstandigheden die de vereiste toestemming, betrouwbaarheid, legitimatie, vakbekwaamheid of inzetbaarheid kunnen beïnvloeden.",
-      "10.3 Ontbreekt of vervalt een vereiste toestemming, legitimatie of vakbekwaamheid, dan zet werkgever werknemer niet in voor werkzaamheden waarvoor die eis geldt. Partijen beoordelen de gevolgen volgens de wet, de {$cao_naam} en de omstandigheden; deze bepaling veroorzaakt geen automatische beëindiging van de arbeidsovereenkomst.",
+      "10.3 {$contract_wpbr_gevolgen_bepaling}",
+      "10.4 Werknemer staakt de betrokken werkzaamheden direct en levert het legitimatiebewijs en andere Wpbr-gebonden middelen op eerste verzoek bij werkgever in.",
     ].join("\n"),
     [
       "Artikel 10 - BBL, praktijkovereenkomst en Wpbr",
@@ -540,7 +547,8 @@ export const PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE_BODY = PB_FULLTIME_STANDARD_TEM
       "10.2 {$bbl_praktijkovereenkomst_bepaling}",
       "10.3 {$contract_wpbr_bepaling}",
       "10.4 Werknemer informeert werkgever direct over feiten of omstandigheden die de opleiding, praktijkovereenkomst, toestemming, betrouwbaarheid, legitimatie, vakbekwaamheid of inzetbaarheid kunnen beïnvloeden.",
-      "10.5 Ontbreekt of vervalt een vereist document, dan zet werkgever werknemer niet in voor werkzaamheden waarvoor dat document nodig is. Partijen beoordelen eerst voortzetting of aanpassing van opleiding, werk en praktijkovereenkomst volgens wet en cao; deze bepaling veroorzaakt geen automatische beëindiging.",
+      "10.5 {$contract_wpbr_gevolgen_bepaling}",
+      "10.6 Ontbreekt of vervalt uitsluitend een opleidings- of praktijkdocument dat niet de Wpbr-toestemming betreft, dan zet werkgever werknemer niet in voor werkzaamheden waarvoor dat document nodig is en beoordelen partijen voortzetting of aanpassing van opleiding, werk en praktijkovereenkomst volgens wet en cao.",
     ].join("\n"),
   )
   .replace(
@@ -568,7 +576,8 @@ export const CONTRACT_TEMPLATE_PLACEHOLDERS = [
   { key: "bedrijf_telefoon", label: "Telefoonnummer bedrijf", source: "Bedrijfsprofiel" },
   { key: "bedrijf_vertegenwoordiger_naam", label: "Naam vertegenwoordiger", source: "Contractwizard" },
   { key: "bedrijf_vertegenwoordiger_functie", label: "Functie vertegenwoordiger", source: "Contractwizard" },
-  { key: "medewerker_volledige_naam", label: "Volledige naam medewerker", source: "Medewerkerprofiel" },
+  { key: "medewerker_juridische_volledige_naam", label: "Juridische volledige naam medewerker", source: "Medewerkerprofiel" },
+  { key: "medewerker_volledige_naam", label: "Volledige naam medewerker (compatibiliteit)", source: "Medewerkerprofiel" },
   { key: "medewerker_voornaam", label: "Voornaam medewerker", source: "Medewerkerprofiel" },
   { key: "medewerker_achternaam", label: "Achternaam medewerker", source: "Medewerkerprofiel" },
   { key: "medewerker_geboortedatum", label: "Geboortedatum", source: "Medewerkerprofiel" },
@@ -596,10 +605,13 @@ export const CONTRACT_TEMPLATE_PLACEHOLDERS = [
   { key: "contract_oproepvoorwaarden_bepaling", label: "Beschikbaarheid en oproepwijze", source: "Slim afgeleid" },
   { key: "contract_functie_indeling_bepaling", label: "Functie- en loonindeling", source: "Slim afgeleid" },
   { key: "contract_werkplek_bepaling", label: "Werkplek en werkgebied", source: "Contractwizard" },
-  { key: "contract_beloning_bepaling", label: "Beloningsbepaling", source: "Slim afgeleid" },
+  { key: "contract_beloning_bepaling", label: "Beloningsbepaling (compatibiliteit)", source: "Slim afgeleid" },
+  { key: "contract_loonindeling_bepaling", label: "Schaal- en periodiekindeling", source: "Slim afgeleid" },
+  { key: "contract_basisuurloon_bepaling", label: "Bruto basisuurloon in euro's", source: "Slim afgeleid" },
   { key: "contract_loonperiode_bepaling", label: "Betaalperiode van het loon", source: "Slim afgeleid" },
   { key: "contract_vakantie_bepaling", label: "Vakantiebepaling", source: "Slim afgeleid" },
   { key: "contract_wpbr_bepaling", label: "Wpbr-bepaling", source: "Slim afgeleid" },
+  { key: "contract_wpbr_gevolgen_bepaling", label: "Gevolgen ontbreken Wpbr-toestemming", source: "Slim afgeleid" },
   { key: "hoofdfunctie", label: "Automatisch afgeleide hoofdfunctie", source: "Slim afgeleid" },
   { key: "functie_lijst", label: "Alle overeengekomen functies", source: "Contractwizard" },
   { key: "nevenfuncties_lijst", label: "Aanvullende functies", source: "Contractwizard" },
@@ -661,7 +673,7 @@ export const PB_FULLTIME_REQUIRED_PLACEHOLDERS = [
   "bedrijf_kvk",
   "bedrijf_vertegenwoordiger_naam",
   "bedrijf_vertegenwoordiger_functie",
-  "medewerker_volledige_naam",
+  "medewerker_juridische_volledige_naam",
   "medewerker_geboortedatum",
   "medewerker_geboorteplaats",
   "medewerker_adres_volledig",
@@ -674,10 +686,12 @@ export const PB_FULLTIME_REQUIRED_PLACEHOLDERS = [
   "contract_arbeidsduur_bepaling",
   "contract_functie_indeling_bepaling",
   "contract_werkplek_bepaling",
-  "contract_beloning_bepaling",
+  "contract_loonindeling_bepaling",
+  "contract_basisuurloon_bepaling",
   "contract_loonperiode_bepaling",
   "contract_vakantie_bepaling",
   "contract_wpbr_bepaling",
+  "contract_wpbr_gevolgen_bepaling",
   "functie_lijst",
   "pensioenregeling_naam",
   "meldpunt_privacy_datalekken",
@@ -701,7 +715,7 @@ export const PB_ARTICLE_14_INTERNSHIP_REQUIRED_PLACEHOLDERS = [
   "bedrijf_kvk",
   "bedrijf_vertegenwoordiger_naam",
   "bedrijf_vertegenwoordiger_functie",
-  "medewerker_volledige_naam",
+  "medewerker_juridische_volledige_naam",
   "medewerker_geboortedatum",
   "medewerker_geboorteplaats",
   "medewerker_adres_volledig",
@@ -747,7 +761,7 @@ export function getContractTemplatePlaceholderDefinition(key) {
 
 export const PB_FULLTIME_STANDARD_TEMPLATE = {
   id: PB_FULLTIME_STANDARD_TEMPLATE_ID,
-  version: 2,
+  version: 3,
   name: "Fulltime dienstverband - CAO Particuliere Beveiliging",
   description: "Fulltime basismodel voor situaties waarin de CAO Particuliere Beveiliging daadwerkelijk van toepassing is, met slimme looptijd-, proeftijd-, arbeidsduur-, vakantie-, Wpbr- en opzegbepalingen.",
   template_type: "employment_contract",
@@ -760,20 +774,23 @@ export const PB_FULLTIME_STANDARD_TEMPLATE = {
     cao_version: "Versie 3 - juli 2026",
     valid_from: "2024-12-18",
     valid_until: "2026-12-27",
-    reviewed_at: "2026-07-21",
+    reviewed_at: "2026-07-22",
     applicability_note: "De vergunning bepaalt niet zelfstandig de cao. De werkingssfeer omvat volgens artikel 2 in beginsel ND/HND als Wpbr artikel 3 sub a, PAC, PGW en VTC, met cao-uitzonderingen voor onder meer bepaalde evenementen- en horecabeveiliging. BD, HBD en POB vallen niet alleen op grond van hun vergunning onder deze cao.",
     sources: [
       "https://www.beveiligingsbranche.nl/wp-content/uploads/CAO-PB-18-dec-2024-27-dec-2026-versie-3-juli-2026-.pdf",
       "https://www.beveiligingsbranche.nl/v-personeelswijzer/",
       "https://www.rijksoverheid.nl/vraag-en-antwoord/arbeidsovereenkomst-en-cao/wat-staat-er-in-een-arbeidsovereenkomst",
       "https://www.justis.nl/producten/particuliere-beveiliging-en-recherche/wat-is-de-wet-particuliere-beveiligingsorganisaties-en-recherchebureaus-wpbr",
+      "https://wetten.overheid.nl/BWBR0008973/#Paragraaf3_Artikel7",
+      "https://uitspraken.rechtspraak.nl/details?id=ECLI:NL:GHDHA:2021:1084",
+      "https://www.rijksoverheid.nl/vraag-en-antwoord/arbeidsovereenkomst-en-cao/wat-is-het-verschil-tussen-een-tijdelijk-contract-en-een-vast-contract",
     ],
   },
 };
 
 export const PB_PARTTIME_STANDARD_TEMPLATE = {
   id: PB_PARTTIME_STANDARD_TEMPLATE_ID,
-  version: 2,
+  version: 3,
   name: "Parttime dienstverband - CAO Particuliere Beveiliging",
   description: "Parttime basismodel volgens het vaste model van de CAO Particuliere Beveiliging. De overeengekomen uren gelden per loonperiode van vier weken; oproep-, min-max- en groeimodellen vallen buiten deze template.",
   template_type: "employment_contract",
@@ -783,14 +800,14 @@ export const PB_PARTTIME_STANDARD_TEMPLATE = {
   required_placeholders: PB_PARTTIME_REQUIRED_PLACEHOLDERS,
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
-    reviewed_at: "2026-07-21",
+    reviewed_at: "2026-07-22",
     applicability_note: `${PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.applicability_note} Deze preset past uitsluitend bij het vaste parttimemodel uit artikel 11; het groeimodel en oproepovereenkomsten vereisen een eigen template.`,
   },
 };
 
 export const PB_PARTTIME_GROWTH_STANDARD_TEMPLATE = {
   id: PB_PARTTIME_GROWTH_STANDARD_TEMPLATE_ID,
-  version: 2,
+  version: 3,
   name: "Parttime groeimodel - CAO Particuliere Beveiliging",
   description: "Parttime basismodel volgens het groeimodel van de CAO Particuliere Beveiliging. De contracturen staan vast per loonperiode van vier weken; inzet boven die uren blijft gebonden aan rooster-, instemmings-, meeruren-, overwerk- en minurenregels.",
   template_type: "employment_contract",
@@ -800,14 +817,14 @@ export const PB_PARTTIME_GROWTH_STANDARD_TEMPLATE = {
   required_placeholders: PB_PARTTIME_GROWTH_REQUIRED_PLACEHOLDERS,
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
-    reviewed_at: "2026-07-21",
+    reviewed_at: "2026-07-22",
     applicability_note: `${PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.applicability_note} Deze preset past uitsluitend bij het parttime groeimodel uit artikel 11. Het vaste parttimemodel, min-maxcontract en overige oproepovereenkomsten vereisen een eigen template.`,
   },
 };
 
 export const PB_MIN_MAX_STANDARD_TEMPLATE = {
   id: PB_MIN_MAX_STANDARD_TEMPLATE_ID,
-  version: 2,
+  version: 3,
   name: "Min-maxcontract - CAO Particuliere Beveiliging",
   description: "Min-maxmodel volgens de CAO Particuliere Beveiliging, met garantie-uren en een maximale oproepomvang per loonperiode van vier weken, vaste beschikbaarheidsafspraken en slimme oproepregels.",
   template_type: "employment_contract",
@@ -817,7 +834,7 @@ export const PB_MIN_MAX_STANDARD_TEMPLATE = {
   required_placeholders: PB_MIN_MAX_REQUIRED_PLACEHOLDERS,
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
-    reviewed_at: "2026-07-21",
+    reviewed_at: "2026-07-22",
     applicability_note: `${PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.applicability_note} Deze preset is uitsluitend bedoeld voor een oproepovereenkomst in de vorm van een min-maxcontract. Minimum en maximum worden per loonperiode van vier weken vastgelegd; een minimum van nul hoort bij een nulurenmodel en gelijke minimum- en maximumuren horen bij een vaste arbeidsomvang.`,
     sources: [
       ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.sources,
@@ -833,7 +850,7 @@ export const PB_MIN_MAX_STANDARD_TEMPLATE = {
 
 export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
   id: PB_ZERO_HOURS_STANDARD_TEMPLATE_ID,
-  version: 2,
+  version: 3,
   name: "Nulurencontract - CAO Particuliere Beveiliging",
   description: "Nulurenmodel volgens de CAO Particuliere Beveiliging, zonder vaste, minimum- of garantie-uren en met vaste beschikbaarheidsafspraken, slimme oproepregels en een veilige standaard zonder loonuitsluiting.",
   template_type: "employment_contract",
@@ -843,7 +860,7 @@ export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
   required_placeholders: PB_ZERO_HOURS_REQUIRED_PLACEHOLDERS,
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
-    reviewed_at: "2026-07-21",
+    reviewed_at: "2026-07-22",
     applicability_note: `${PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.applicability_note} Deze preset is uitsluitend bedoeld voor een nulurenovereenkomst zonder vaste, minimum-, maximum- of garantie-uren. Een voorovereenkomst, min-maxcontract of contract met vaste arbeidsomvang vereist een ander model. De standaard sluit het recht op loon bij niet-werken niet uit. De vakantieclausule past de cao-betaling van 9,24% alleen toe voor zover artikel 59 lid 3 werkgever en werknemer rechtsgeldig bindt en waarborgt anders de toepasselijke vakantieopbouw en opname.`,
     sources: [
       ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.sources,
@@ -859,7 +876,7 @@ export const PB_ZERO_HOURS_STANDARD_TEMPLATE = {
 
 export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE = {
   id: PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE_ID,
-  version: 2,
+  version: 3,
   name: "Stageovereenkomst (BOL / re-integratie) - CAO Particuliere Beveiliging",
   description: "Stageovereenkomst voor relevante praktijkervaring als beveiliger via BOL, UWV-proefplaatsing, een re-integratiemaatregel of tweede spoor. Dit is geen arbeidsovereenkomst en niet geschikt voor BBL of een algemene kantoorstage.",
   template_type: "employment_contract",
@@ -876,7 +893,7 @@ export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE = {
   required_placeholders: PB_ARTICLE_14_INTERNSHIP_REQUIRED_PLACEHOLDERS,
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
-    reviewed_at: "2026-07-19",
+    reviewed_at: "2026-07-22",
     applicability_note: "Uitsluitend voor relevante praktijkervaring als beveiliger volgens artikel 14 CAO PB via BOL, een UWV-proefplaatsing van maximaal twee maanden, een andere re-integratiemaatregel of tweede spoor. Stagiair wordt bovenformatief, niet doorbelast, in het rooster en dagelijks 1-op-1 begeleid ingezet en is herkenbaar als stagiair. Alleen hoofdstuk 3 van de cao geldt naast artikel 14. BBL is een arbeidsovereenkomst en vereist de afzonderlijke BBL-template plus een praktijkovereenkomst.",
     sources: [
       "https://www.beveiligingsbranche.nl/wp-content/uploads/CAO-PB-18-dec-2024-27-dec-2026-versie-3-juli-2026-.pdf",
@@ -893,7 +910,7 @@ export const PB_ARTICLE_14_INTERNSHIP_STANDARD_TEMPLATE = {
 
 export const PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE = {
   id: PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE_ID,
-  version: 3,
+  version: 4,
   name: "Leerarbeidsovereenkomst (BBL) - CAO Particuliere Beveiliging",
   description: "Arbeidsovereenkomst voor bepaalde tijd voor een aspirant-beveiliger in de beroepsbegeleidende leerweg. De werknemer ontvangt loon en sluit daarnaast met school en erkend leerbedrijf een afzonderlijke praktijkovereenkomst.",
   template_type: "employment_contract",
@@ -908,7 +925,7 @@ export const PB_BBL_EMPLOYMENT_STANDARD_TEMPLATE = {
   required_placeholders: PB_BBL_EMPLOYMENT_REQUIRED_PLACEHOLDERS,
   legal_basis: {
     ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis,
-    reviewed_at: "2026-07-21",
+    reviewed_at: "2026-07-22",
     applicability_note: "Uitsluitend voor BBL: een arbeidsovereenkomst met loon voor een aspirant in combinatie met een afzonderlijke praktijkovereenkomst tussen werknemer, erkend leerbedrijf en onderwijsinstelling. Deze universele standaardpreset wordt alleen voor bepaalde tijd aangeboden en de einddatum moet worden afgestemd op de praktijkovereenkomst. Een BBL-arbeidsovereenkomst voor onbepaalde tijd is niet categorisch verboden, maar vereist aanvullende afspraken over voortzetting na het einde van de opleiding en valt daarom buiten deze standaardpreset. Niet gebruiken voor een BOL-stage, proefplaatsing of andere artikel-14-stage.",
     sources: [
       ...PB_FULLTIME_STANDARD_TEMPLATE.legal_basis.sources,

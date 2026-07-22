@@ -124,6 +124,45 @@ function compact(value) {
   return String(value || "").trim().replace(/\s+/g, " ");
 }
 
+const REGISTERED_COMPANY_NAME_PATTERN = /(?:\bb\.?\s*v\.?\b|\bn\.?\s*v\.?\b|\bv\.?\s*o\.?\s*f\.?\b|\bcv\b|\bmaatschap\b|\bstichting\b|\bvereniging\b|\bco[oö]peratie\b|\beenmanszaak\b)/i;
+
+function looksLikeRegisteredCompanyName(value) {
+  return REGISTERED_COMPANY_NAME_PATTERN.test(compact(value));
+}
+
+function resolveCompanyLegalName(company = {}) {
+  const explicitRegisteredName = compact(company.statutory_name || company.registered_name);
+  const legalName = compact(company.legal_name);
+  const displayName = compact(company.display_name);
+  const tradeName = compact(company.trade_name);
+
+  if (explicitRegisteredName) return explicitRegisteredName;
+  if (legalName && (looksLikeRegisteredCompanyName(legalName) || (!displayName && legalName !== tradeName))) return legalName;
+
+  // Older LOQ profiles stored the trade name in legal_name and the registered
+  // name in display_name. Prefer the name with an explicit legal form there.
+  if (displayName && (looksLikeRegisteredCompanyName(displayName) || legalName === tradeName)) return displayName;
+  return legalName || displayName;
+}
+
+function resolveEmployeeLegalName(personnel = {}) {
+  const legalNameFromParts = compact([
+    personnel.legal_first_names,
+    personnel.name_prefix,
+    personnel.last_name,
+  ].filter(Boolean).join(" "));
+
+  return legalNameFromParts
+    || compact(personnel.legal_full_name)
+    || compact(personnel.full_name)
+    || compact(personnel.name)
+    || compact([
+      personnel.first_name || personnel.call_name,
+      personnel.name_prefix,
+      personnel.last_name,
+    ].filter(Boolean).join(" "));
+}
+
 function uniqueStrings(values = []) {
   return [...new Set(values.map(value => compact(value)).filter(Boolean))];
 }
@@ -432,15 +471,16 @@ function contractProbationClause(form = {}) {
 function contractTerminationClause(form = {}) {
   if (isPbZeroHours(form)) {
     const employeeNotice = "Werknemer kan schriftelijk opzeggen tegen iedere dag met een opzegtermijn van vier kalenderdagen, of een kortere termijn als de toepasselijke cao die rechtsgeldig bepaalt.";
+    const employerRoute = "Werkgever kan de arbeidsovereenkomst alleen beëindigen met schriftelijke instemming van werknemer, na toestemming van UWV, door ontbinding door de kantonrechter of via een andere wettelijk toegestane route. Daarbij zijn een geldige ontslaggrond, de toepasselijke herplaatsingsverplichtingen en de wettelijke en cao-opzegregels vereist, voor zover de wet daarop geen uitzondering maakt.";
     if (durationType(form) === "fixed") {
-      return `${employeeNotice} Deze tijdelijke arbeidsovereenkomst kan tussentijds worden opgezegd. Werkgever kan uitsluitend opzeggen met inachtneming van de wettelijke ontslaggrond en -procedure en de toepasselijke cao-opzegtermijn.`;
+      return `Deze tijdelijke arbeidsovereenkomst eindigt van rechtswege op de in artikel 1 vastgelegde einddatum. Partijen komen uitdrukkelijk overeen dat tussentijdse opzegging mogelijk is. ${employeeNotice} ${employerRoute}`;
     }
-    return `${employeeNotice} Werkgever kan uitsluitend opzeggen met inachtneming van de wettelijke ontslaggrond en -procedure en de toepasselijke cao-opzegtermijn.`;
+    return `${employeeNotice} ${employerRoute}`;
   }
   if (durationType(form) === "fixed") {
-    return "De arbeidsovereenkomst kan door ieder van de partijen schriftelijk tussentijds worden opgezegd tegen iedere dag, met inachtneming van de wettelijke opzeggingsregels en de cao-opzegtermijn van één loonperiode van vier weken.";
+    return "Deze tijdelijke arbeidsovereenkomst eindigt van rechtswege op de in artikel 1 vastgelegde einddatum. Partijen komen uitdrukkelijk overeen dat tussentijdse opzegging mogelijk is. Werknemer kan schriftelijk opzeggen tegen iedere dag met een opzegtermijn van één loonperiode van vier weken. Werkgever kan vóór de einddatum alleen beëindigen met schriftelijke instemming van werknemer, na toestemming van UWV, door ontbinding door de kantonrechter of via een andere wettelijk toegestane route. Daarbij zijn een geldige ontslaggrond, de toepasselijke herplaatsingsverplichtingen en de wettelijke en cao-opzegregels vereist, voor zover de wet daarop geen uitzondering maakt.";
   }
-  return "De arbeidsovereenkomst kan door ieder van de partijen schriftelijk worden opgezegd tegen iedere dag, met inachtneming van de wettelijke opzeggingsregels en de cao-opzegtermijn van twee loonperioden van in totaal acht weken, tenzij partijen rechtsgeldig schriftelijk een gelijke langere termijn overeenkomen.";
+  return "Werknemer kan schriftelijk opzeggen tegen iedere dag met een opzegtermijn van twee loonperioden van in totaal acht weken, tenzij partijen rechtsgeldig schriftelijk een gelijke langere termijn overeenkomen. Werkgever kan de arbeidsovereenkomst alleen beëindigen met schriftelijke instemming van werknemer, na toestemming van UWV, door ontbinding door de kantonrechter of via een andere wettelijk toegestane route. Daarbij zijn een geldige ontslaggrond, de toepasselijke herplaatsingsverplichtingen en de wettelijke en cao-opzegregels vereist, voor zover de wet daarop geen uitzondering maakt.";
 }
 
 function contractHoursClause(form = {}) {
@@ -531,7 +571,7 @@ function contractSalaryClause(form = {}) {
     const periodPart = periodSalary !== null
       ? ` Bij 100% van het basisuurloon komt dit bij de overeengekomen arbeidsduur overeen met ${formatCurrency(periodSalary)} bruto per loonperiode van vier weken.`
       : "";
-    return `Het voor werknemer geldende bruto basisuurloon bedraagt ${formatCurrency(hourlyRate)}, exclusief vakantiebijslag en toepasselijke toeslagen.${classification} Gedurende de eerste vier weken van de praktijkovereenkomst ontvangt werknemer overeenkomstig artikel 55 van de cao 50% van het voor de indeling geldende basisuurloon en vanaf de vijfde week 100%, tenzij dwingend recht of een gunstiger toepasselijke bepaling een hoger loon voorschrijft.${periodPart}`;
+    return `Het voor werknemer geldende bruto basisuurloon bedraagt ${formatCurrency(hourlyRate)} per uur, exclusief vakantiebijslag en toepasselijke toeslagen.${classification} Gedurende de eerste vier weken van de praktijkovereenkomst ontvangt werknemer overeenkomstig artikel 55 van de cao 50% van het voor de indeling geldende basisuurloon en vanaf de vijfde week 100%, tenzij dwingend recht of een gunstiger toepasselijke bepaling een hoger loon voorschrijft.${periodPart}`;
   }
   const periodPart = periodSalary !== null
     ? `, overeenkomend met ${formatCurrency(periodSalary)} bruto per loonperiode ${isPbMinMax(form) ? "over de garantie-uren" : "bij de overeengekomen arbeidsduur"}`
@@ -541,7 +581,42 @@ function contractSalaryClause(form = {}) {
     : isPbMinMax(form)
     ? " Gewerkte of anderszins loongerechtigde uren boven de garantie-uren worden aanvullend betaald volgens de cao en de wet."
     : "";
-  return `Het bruto basisuurloon bedraagt bij aanvang ${formatCurrency(hourlyRate)}${periodPart}, exclusief vakantiebijslag en toepasselijke toeslagen.${additionalHours}${classification}`;
+  return `Het bruto basisuurloon bedraagt bij aanvang ${formatCurrency(hourlyRate)} per uur${periodPart}, exclusief vakantiebijslag en toepasselijke toeslagen.${additionalHours}${classification}`;
+}
+
+function contractSalaryClassificationClause(form = {}) {
+  const scale = compact(form.cao_scale);
+  const period = compact(form.cao_period);
+  if (!scale || !period) return "";
+  return `Werknemer wordt bij aanvang voor de beloning ingedeeld in salarisschaal ${scale}, periodiek ${period}, overeenkomstig de op de startdatum geldende loontabel van de CAO Particuliere Beveiliging.`;
+}
+
+function contractBaseHourlyWageClause(form = {}) {
+  const hourlyRate = toNumber(form.hourly_rate_snapshot ?? form.custom_hourly_rate);
+  const periodHours = isPbZeroHours(form)
+    ? null
+    : isPbMinMax(form)
+    ? resolvedMinMaxHours(form).minHoursPerPeriod
+    : resolvedContractHours(form).hoursPerPeriod;
+  const periodSalary = hourlyRate !== null && periodHours !== null ? hourlyRate * periodHours : null;
+  if (hourlyRate === null) return "";
+
+  if (isPbBbl(form)) {
+    const periodPart = periodSalary !== null
+      ? ` Bij 100% van het basisuurloon komt dit bij de overeengekomen arbeidsduur overeen met ${formatCurrency(periodSalary)} bruto per loonperiode van vier weken.`
+      : "";
+    return `Het voor de indeling geldende bruto basisuurloon bedraagt bij aanvang ${formatCurrency(hourlyRate)} per uur, exclusief vakantiebijslag en toepasselijke toeslagen. Gedurende de eerste vier weken van de praktijkovereenkomst ontvangt werknemer overeenkomstig artikel 55 van de cao 50% van dit basisuurloon en vanaf de vijfde week 100%, tenzij dwingend recht of een gunstiger toepasselijke bepaling een hoger loon voorschrijft.${periodPart}`;
+  }
+
+  const periodPart = periodSalary !== null
+    ? ` Dit komt overeen met ${formatCurrency(periodSalary)} bruto per loonperiode van vier weken ${isPbMinMax(form) ? "over de garantie-uren" : "bij de overeengekomen arbeidsduur"}.`
+    : "";
+  const additionalHours = isPbZeroHours(form)
+    ? " Werkgever betaalt alle daadwerkelijk gewerkte en anderszins rechtens verschuldigde oproepuren volgens de cao en de wet; er geldt geen gegarandeerd periodeloon."
+    : isPbMinMax(form)
+    ? " Gewerkte of anderszins loongerechtigde uren boven de garantie-uren worden aanvullend betaald volgens de cao en de wet."
+    : "";
+  return `Het bruto basisuurloon bedraagt bij aanvang ${formatCurrency(hourlyRate)} per uur, exclusief vakantiebijslag en toepasselijke toeslagen.${periodPart}${additionalHours}`;
 }
 
 function contractPaymentPeriodClause(form = {}) {
@@ -603,6 +678,10 @@ function contractWpbrClause(form = {}) {
   const base = "Werknemer mag uitsluitend werkzaamheden voor werkgever verrichten indien en zolang werknemer beschikt over de vereiste toestemming van de korpschef en is voldaan aan de voor werknemer en de werkzaamheden geldende screening en betrouwbaarheidseisen op grond van de Wpbr en daarop gebaseerde regels.";
   if (securityWork !== true) return `${base} Werknemer verricht geen operationele beveiligingswerkzaamheden zonder de daarvoor vereiste opleiding, vakbekwaamheid en legitimatie.`;
   return `${base} Voor beveiligingswerkzaamheden draagt werknemer het vereiste legitimatiebewijs tijdens het werk bij zich en levert werknemer dit bij het einde van de inzet of op eerste verzoek van werkgever in.`;
+}
+
+function contractWpbrConsequencesClause() {
+  return "Deze arbeidsovereenkomst is aangegaan onder de ontbindende voorwaarde dat de op grond van artikel 7 Wpbr vereiste toestemming voor werknemer wordt verleend en tijdens het dienstverband geldig blijft. Zodra werkgever uit een schriftelijk besluit van de korpschef of een andere bevoegde instantie objectief kan vaststellen dat de vereiste toestemming is geweigerd, ingetrokken of niet verlengd, treedt deze voorwaarde in en eindigt de arbeidsovereenkomst van rechtswege op de datum waarop dat besluit werking heeft, zonder dat opzegging nodig is. Dit geldt alleen voor zover werkgever geen beslissende invloed heeft gehad op het intreden van de voorwaarde en toepassing daarvan in de concrete omstandigheden rechtsgeldig is. Werkgever bevestigt de grond en einddatum schriftelijk aan werknemer. Wordt het besluit later herroepen of vernietigd, dan worden de gevolgen beoordeeld volgens de wet en de uitspraak of het besluit. Voor zover de ontbindende voorwaarde in het concrete geval geen rechtsgevolg heeft, blijft inzet verboden en volgt werkgever de toepasselijke wettelijke beëindigingsroute; deze bepaling sluit een wettelijke loonaanspraak niet op voorhand uit.";
 }
 
 function stageRouteClause(form = {}) {
@@ -791,8 +870,7 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
   personnel = personnel || {};
   form = form || {};
   company = company || {};
-  const employeeName = compact(personnel.full_name || personnel.display_name || personnel.name
-    || [personnel.legal_first_names || personnel.first_name, personnel.name_prefix, personnel.last_name].filter(Boolean).join(" "));
+  const employeeLegalName = resolveEmployeeLegalName(personnel);
   const firstName = compact(personnel.first_name || personnel.call_name || personnel.legal_first_names);
   const lastName = compact([personnel.name_prefix, personnel.last_name].filter(Boolean).join(" "));
   const employeeAddressParts = normalizeAddressParts(personnel);
@@ -817,7 +895,7 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
   const pendingSignatureDate = "____-____-________";
 
   const values = {
-    bedrijf_statutaire_naam: compact(company.legal_name || company.display_name),
+    bedrijf_statutaire_naam: resolveCompanyLegalName(company),
     bedrijf_handelsnaam: compact(company.trade_name || company.display_name || company.legal_name),
     bedrijf_rechtsvorm: compact(company.legal_form),
     bedrijf_adres_volledig: companyAddress,
@@ -827,7 +905,8 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     bedrijf_telefoon: compact(company.phone),
     bedrijf_vertegenwoordiger_naam: compact(form.employer_representative_name) || pendingSignatureValue,
     bedrijf_vertegenwoordiger_functie: compact(form.employer_representative_function) || pendingSignatureValue,
-    medewerker_volledige_naam: employeeName,
+    medewerker_juridische_volledige_naam: employeeLegalName,
+    medewerker_volledige_naam: employeeLegalName,
     medewerker_voornaam: firstName,
     medewerker_achternaam: lastName,
     medewerker_aanhef: deriveSalutation(personnel.gender),
@@ -857,15 +936,18 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
     contract_functie_indeling_bepaling: contractFunctionClassificationClause(form),
     contract_werkplek_bepaling: contractWorkplaceClause(form, company),
     contract_beloning_bepaling: contractSalaryClause(form),
+    contract_loonindeling_bepaling: contractSalaryClassificationClause(form),
+    contract_basisuurloon_bepaling: contractBaseHourlyWageClause(form),
     contract_loonperiode_bepaling: contractPaymentPeriodClause(form),
     contract_vakantie_bepaling: contractVacationClause(form),
     contract_wpbr_bepaling: contractWpbrClause(form),
+    contract_wpbr_gevolgen_bepaling: contractWpbrConsequencesClause(),
     hoofdfunctie: primaryFunction,
     functie_lijst: functions.join(", "),
     nevenfuncties_lijst: additionalFunctions.join(", "),
     contracturen_per_week: isPbZeroHours(form) ? "" : ((isPbMinMax(form) ? minMaxHours.minHoursPerWeek : hoursPerWeek) ?? ""),
     contracturen_per_periode: isPbZeroHours(form) ? "" : ((isPbMinMax(form) ? minMaxHours.minHoursPerPeriod : hoursPerPeriod) ?? ""),
-    pensioenregeling_naam: "Stichting Bedrijfstakpensioenfonds voor de Particuliere Beveiliging",
+    pensioenregeling_naam: "Stichting Bedrijfstakpensioenfonds voor de Particuliere Beveiliging (Pensioenfonds Particuliere Beveiliging)",
     meldpunt_privacy_datalekken: compact(company.privacy_email || company.email || company.phone),
     contract_ondertekeningsplaats: compact(form.signing_place) || pendingSignatureValue,
     contract_ondertekeningsdatum: form.signing_date ? formatDate(form.signing_date) : pendingSignatureDate,
@@ -964,7 +1046,16 @@ export function buildContractTemplateValues({ personnel = {}, form = {}, company
 }
 
 export function renderContractTemplateBody(templateBody, context = {}) {
-  return replaceContractTemplatePlaceholders(templateBody, buildContractTemplateValues(context));
+  const legallyMigratedBody = String(templateBody || "")
+    .replace(
+      "10.3 Ontbreekt of vervalt een vereiste toestemming, legitimatie of vakbekwaamheid, dan zet werkgever werknemer niet in voor werkzaamheden waarvoor die eis geldt. Partijen beoordelen de gevolgen volgens de wet, de {$cao_naam} en de omstandigheden; deze bepaling veroorzaakt geen automatische beëindiging van de arbeidsovereenkomst.",
+      "10.3 {$contract_wpbr_gevolgen_bepaling}\n10.4 Werknemer staakt de betrokken werkzaamheden direct en levert het legitimatiebewijs en andere Wpbr-gebonden middelen op eerste verzoek bij werkgever in.",
+    )
+    .replace(
+      "10.5 Ontbreekt of vervalt een vereist document, dan zet werkgever werknemer niet in voor werkzaamheden waarvoor dat document nodig is. Partijen beoordelen eerst voortzetting of aanpassing van opleiding, werk en praktijkovereenkomst volgens wet en cao; deze bepaling veroorzaakt geen automatische beëindiging.",
+      "10.5 {$contract_wpbr_gevolgen_bepaling}\n10.6 Ontbreekt of vervalt uitsluitend een opleidings- of praktijkdocument dat niet de Wpbr-toestemming betreft, dan zet werkgever werknemer niet in voor werkzaamheden waarvoor dat document nodig is en beoordelen partijen voortzetting of aanpassing van opleiding, werk en praktijkovereenkomst volgens wet en cao.",
+    );
+  return replaceContractTemplatePlaceholders(legallyMigratedBody, buildContractTemplateValues(context));
 }
 
 /** @param {LooseRecord} template */
@@ -1007,10 +1098,10 @@ export function validateStandardContractTemplateContext({ personnel = {}, form =
   if (isBblPreset && resolvedEmploymentModel(form) !== "bbl") issues.push("Deze standaardtemplate is alleen geschikt voor een leerarbeidsovereenkomst (BBL); BOL en re-integratiestages vereisen de aparte stageovereenkomst.");
   const missingRequiredPlaceholders = getMissingStandardTemplatePlaceholders(template.body, preset.required_placeholders);
   if (missingRequiredPlaceholders.length > 0) issues.push(`In de standaardtemplate ontbreken verplichte placeholders: ${missingRequiredPlaceholders.join(", ")}.`);
-  if (!compact(company.legal_name || company.display_name)) issues.push("De juridische bedrijfsnaam ontbreekt.");
+  if (!resolveCompanyLegalName(company)) issues.push("De juridische bedrijfsnaam ontbreekt.");
   if (!compact(company.kvk_number)) issues.push("Het KvK-nummer van de werkgever ontbreekt.");
   if (!compact(company.street_name || company.street) || !compact(company.postal_code) || !compact(company.city)) issues.push("Het volledige adres van de werkgever ontbreekt.");
-  if (!compact(personnel.full_name || personnel.display_name || personnel.name || personnel.first_name)) issues.push("De volledige naam van de medewerker ontbreekt.");
+  if (!compact(personnel.legal_first_names) || !compact(personnel.last_name)) issues.push("Vul de volledige juridische voornamen en achternaam van de medewerker in. Een roepnaam is voor de partij-aanduiding niet voldoende.");
   if (!personnel.date_of_birth && !personnel.birth_date) issues.push("De geboortedatum van de medewerker ontbreekt.");
   if (!personnel.place_of_birth && !personnel.birth_place) issues.push("De geboorteplaats van de medewerker ontbreekt.");
   if (!compact(personnel.street_name || personnel.street) || !compact(personnel.postal_code) || !compact(personnel.city)) issues.push("Het volledige adres van de medewerker ontbreekt.");

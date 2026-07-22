@@ -75,15 +75,54 @@ function DeleteGuardLoadingState() {
   );
 }
 
+const REGISTERED_COMPANY_NAME_PATTERN = /(?:\bb\.?\s*v\.?\b|\bn\.?\s*v\.?\b|\bv\.?\s*o\.?\s*f\.?\b|\bcv\b|\bmaatschap\b|\bstichting\b|\bvereniging\b|\bcooperatie\b|\beenmanszaak\b)/i;
+
+function looksLikeRegisteredCompanyName(value) {
+  return REGISTERED_COMPANY_NAME_PATTERN.test(String(value || "").trim());
+}
+
+function displayedCompanyNames(company = {}) {
+  const displayName = company.display_name || "";
+  const storedLegalName = company.legal_name || "";
+  const storedTradeName = company.trade_name || "";
+  const hasLegacyMapping = displayName
+    && storedLegalName
+    && !storedTradeName
+    && looksLikeRegisteredCompanyName(displayName)
+    && !looksLikeRegisteredCompanyName(storedLegalName);
+
+  return {
+    legalName: hasLegacyMapping ? displayName : storedLegalName,
+    tradeName: hasLegacyMapping ? storedLegalName : storedTradeName,
+  };
+}
+
 function editableCompanyForm(company, blankPlaceholder = false) {
   const shouldBlank = blankPlaceholder && company.display_name === NEW_COMPANY_PLACEHOLDER && company.legal_name === NEW_COMPANY_PLACEHOLDER;
   const address = normalizeAddressParts(company);
+  const displayName = shouldBlank ? "" : company.display_name || "";
+  let legalName = shouldBlank ? "" : company.legal_name || "";
+  let tradeName = company.trade_name || "";
+
+  // Migrate the former CompanyDetail field mapping in the edit form. That UI
+  // stored the trade name in legal_name while display_name often contained the
+  // registered name including its legal form.
+  if (!shouldBlank
+    && displayName
+    && legalName
+    && !tradeName
+    && looksLikeRegisteredCompanyName(displayName)
+    && !looksLikeRegisteredCompanyName(legalName)) {
+    tradeName = legalName;
+    legalName = displayName;
+  }
+
   return {
     ...company,
     ...address,
-    display_name: shouldBlank ? "" : company.display_name || "",
-    legal_name: shouldBlank ? "" : company.legal_name || "",
-    trade_name: company.trade_name || "",
+    display_name: displayName,
+    legal_name: legalName,
+    trade_name: tradeName,
     status: company.status || "active",
     company_role: company.company_role || "operating_company",
     country: address.country || "Nederland",
@@ -827,6 +866,7 @@ export default function CompanyDetail() {
 
   const data = editing ? form : company;
   const isArchived = company.status === "archived";
+  const shownCompanyNames = displayedCompanyNames(company);
 
   const address = formatAddress(data, { omitDefaultCountry: true });
 
@@ -860,14 +900,18 @@ export default function CompanyDetail() {
           </div>
           <div className="flex-1 min-w-0">
             {editing ? (
-              <div className="flex flex-col gap-2 max-w-md">
+              <div className="grid max-w-2xl grid-cols-1 gap-2 md:grid-cols-2">
                 <div>
-                  <span className="text-xs text-muted-foreground">Bedrijfsnaam</span>
-                  <Input value={data.display_name || ""} onChange={e => set("display_name", e.target.value)} className="text-lg font-bold h-9 mt-0.5" placeholder="Bedrijfsnaam" />
+                  <span className="text-xs text-muted-foreground">Weergavenaam</span>
+                  <Input value={data.display_name || ""} onChange={e => set("display_name", e.target.value)} className="text-lg font-bold h-9 mt-0.5" placeholder="Naam in LOQ" />
                 </div>
                 <div>
+                  <span className="text-xs text-muted-foreground">Juridische bedrijfsnaam</span>
+                  <Input value={data.legal_name || ""} onChange={e => set("legal_name", e.target.value)} className="text-sm h-9 mt-0.5" placeholder="Naam volgens KvK, inclusief rechtsvorm" />
+                </div>
+                <div className="md:col-span-2">
                   <span className="text-xs text-muted-foreground">Handelsnaam</span>
-                  <Input value={data.legal_name || ""} onChange={e => set("legal_name", e.target.value)} className="text-sm h-8 mt-0.5" placeholder="Handelsnaam" />
+                  <Input value={data.trade_name || ""} onChange={e => set("trade_name", e.target.value)} className="text-sm h-9 mt-0.5" placeholder="Optionele handelsnaam" />
                 </div>
               </div>
             ) : (
@@ -884,8 +928,11 @@ export default function CompanyDetail() {
                     </Badge>
                   )}
                 </div>
-                {company.legal_name && company.legal_name !== company.display_name && (
-                  <p className="text-sm text-muted-foreground mt-0.5">Handelsnaam: {company.legal_name}</p>
+                {shownCompanyNames.legalName && shownCompanyNames.legalName !== company.display_name && (
+                  <p className="text-sm text-muted-foreground mt-0.5">Juridische naam: {shownCompanyNames.legalName}</p>
+                )}
+                {shownCompanyNames.tradeName && shownCompanyNames.tradeName !== company.display_name && shownCompanyNames.tradeName !== shownCompanyNames.legalName && (
+                  <p className="text-sm text-muted-foreground mt-0.5">Handelsnaam: {shownCompanyNames.tradeName}</p>
                 )}
               </div>
             )}

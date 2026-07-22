@@ -58,7 +58,9 @@ import {
 } from "../src/lib/contractPdfLetterhead.js";
 
 const company = {
-  legal_name: "Voorbeeld Beveiliging B.V.",
+  display_name: "Voorbeeld Objectbeveiliging B.V.",
+  legal_name: "Voorbeeld Beveiliging",
+  trade_name: "Voorbeeld Beveiliging",
   street_name: "Hoofdstraat",
   house_number: "1",
   postal_code: "1234 AB",
@@ -69,8 +71,10 @@ const company = {
 };
 
 const personnel = {
-  legal_first_names: "Jan",
+  legal_first_names: "Jan Martino",
   first_name: "Jan",
+  call_name: "Jan",
+  full_name: "Jan Jansen",
   last_name: "Jansen",
   date_of_birth: "1990-01-02",
   place_of_birth: "Utrecht",
@@ -580,6 +584,33 @@ const objectSecurity = evaluate(operationalForm());
 assert.deepEqual(objectSecurity.issues, []);
 assert.deepEqual(objectSecurity.unresolved, []);
 assert.match(objectSecurity.body, /144 uur per loonperiode van vier weken/);
+assert.match(objectSecurity.body, /Werkgever: Voorbeeld Objectbeveiliging B\.V\./);
+assert.match(objectSecurity.body, /Werknemer: Jan Martino Jansen/);
+assert.match(objectSecurity.body, /Stichting Bedrijfstakpensioenfonds voor de Particuliere Beveiliging \(Pensioenfonds Particuliere Beveiliging\)/);
+assert.match(objectSecurity.body, /salarisschaal 3, periodiek 1/);
+assert.match(objectSecurity.body, /€\s*18,50 per uur/);
+assert.match(objectSecurity.body, /ontbindende voorwaarde.*artikel 7 Wpbr/);
+assert.match(objectSecurity.body, /schriftelijk besluit van de korpschef/);
+assert.doesNotMatch(objectSecurity.body, /veroorzaakt geen automatische beëindiging/);
+assert.match(objectSecurity.body, /tijdelijke arbeidsovereenkomst eindigt van rechtswege/);
+assert.match(objectSecurity.body, /toestemming van UWV.*kantonrechter/);
+
+const indefiniteObjectSecurity = evaluate(operationalForm({
+  duration_type: "indefinite",
+  contract_form: "onbepaalde_tijd",
+  contract_end_date: "",
+}));
+assert.deepEqual(indefiniteObjectSecurity.issues, []);
+assert.match(indefiniteObjectSecurity.body, /opzegtermijn van twee loonperioden van in totaal acht weken/);
+assert.match(indefiniteObjectSecurity.body, /Werkgever kan de arbeidsovereenkomst alleen beëindigen.*toestemming van UWV.*kantonrechter/);
+
+const legacyWpbrBody = renderContractTemplateBody([
+  "10.1 {$contract_wpbr_bepaling}",
+  "10.2 Meldplicht.",
+  "10.3 Ontbreekt of vervalt een vereiste toestemming, legitimatie of vakbekwaamheid, dan zet werkgever werknemer niet in voor werkzaamheden waarvoor die eis geldt. Partijen beoordelen de gevolgen volgens de wet, de {$cao_naam} en de omstandigheden; deze bepaling veroorzaakt geen automatische beëindiging van de arbeidsovereenkomst.",
+].join("\n"), { personnel, form: operationalForm(), company });
+assert.match(legacyWpbrBody, /ontbindende voorwaarde/);
+assert.doesNotMatch(legacyWpbrBody, /veroorzaakt geen automatische beëindiging/);
 
 const pendingEmployerSignature = evaluate(operationalForm({
   employer_representative_name: "",
@@ -839,7 +870,7 @@ assert.match(operationalMinMax.body, /medewerkersapp en e-mail/);
 assert.match(operationalMinMax.body, /ten minste vier kalenderdagen/);
 assert.match(operationalMinMax.body, /ten minste drie uur loon/);
 assert.match(operationalMinMax.body, /periode van twaalf maanden/);
-assert.match(operationalMinMax.body, /1\.184,00 bruto per loonperiode over de garantie-uren/);
+assert.match(operationalMinMax.body, /1\.184,00 bruto per loonperiode van vier weken over de garantie-uren/);
 assert.match(operationalMinMax.body, /9,24%/);
 assert.match(operationalMinMax.body, /8% vakantiebijslag/);
 assert.match(operationalMinMax.body, /geen verschuivingstoeslag/);
