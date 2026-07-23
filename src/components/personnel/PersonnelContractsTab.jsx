@@ -4679,12 +4679,12 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
           const openContractContextMenu = (event, fromKeyboard = false) => {
             const rect = event.currentTarget.getBoundingClientRect();
             const menuWidth = 230;
-            const requestedX = fromKeyboard ? (rect.width / 2) - (menuWidth / 2) : event.clientX - rect.left;
-            const requestedY = fromKeyboard ? rect.height / 2 : event.clientY - rect.top;
+            const vx = fromKeyboard ? rect.left + rect.width / 2 : event.clientX;
+            const vy = fromKeyboard ? rect.top + rect.height / 2 : event.clientY;
             setContractContextMenu({
               contractId: contract.id,
-              x: Math.max(8, Math.min(requestedX, rect.width - menuWidth - 8)),
-              y: Math.max(8, requestedY),
+              x: Math.max(8, Math.min(vx, window.innerWidth - menuWidth - 8)),
+              y: Math.max(8, Math.min(vy, window.innerHeight - 220 - 8)),
             });
           };
           const handleContractRowClick = (event, fromKeyboard = false) => {
@@ -4772,8 +4772,8 @@ export default function PersonnelContractsTab({ personnel, companies = [] }) {
                     animate={{ opacity: 1, scale: 1 }}
                     exit={{ opacity: 0, scale: 0.95 }}
                     transition={{ duration: 0.1 }}
-                    style={{ left: contractContextMenu.x, top: contractContextMenu.y }}
-                    className="absolute z-50 min-w-[220px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg"
+                    style={{ position: "fixed", left: contractContextMenu.x, top: contractContextMenu.y }}
+                    className="z-50 min-w-[220px] overflow-hidden rounded-lg border border-border bg-popover py-1 text-sm shadow-lg"
                     onClick={event => event.stopPropagation()}
                   >
                     {fileDescriptor && (
