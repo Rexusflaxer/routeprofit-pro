@@ -12,6 +12,7 @@ import {
   buildBusinessCaoOptions,
   normalizeWpbrLicenseType
 } from '../src/lib/securityCaoCatalog.js';
+import { resolveContractWageRows } from '../src/lib/contractWageTableResolver.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -2009,6 +2010,26 @@ function runFunctionClassificationScenarios() {
     officialRows2026.find(row => row.scale === 7 && row.period === 16)?.hourly_rate,
     24.80,
     'Official PB 2026 scale 7 period 16 rate mismatch'
+  );
+  const contractWizardRowsWithoutTechnicalConfig = resolveContractWageRows(
+    null,
+    '2026-07-23',
+    'cao_particuliere_beveiliging'
+  );
+  assert.equal(
+    contractWizardRowsWithoutTechnicalConfig.length,
+    54,
+    'The contract wizard must retain the official PB wage table when a company assignment has no technical configuration id'
+  );
+  assertAlmostEqual(
+    contractWizardRowsWithoutTechnicalConfig.find(row => row.scale === 3 && row.period === 3)?.hourlyRate,
+    18.11,
+    'The contract wizard PB fallback must expose the official hourly rate'
+  );
+  assert.equal(
+    resolveContractWageRows(null, '2026-07-23', 'cao_veiligheidsdomein').length,
+    0,
+    'Unknown non-PB wage data must remain fail-closed'
   );
 
   const officialFallbackConfig = { cao_key: 'cao_particuliere_beveiliging' };
