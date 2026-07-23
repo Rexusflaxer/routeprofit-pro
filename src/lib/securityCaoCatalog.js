@@ -27,6 +27,8 @@ export const WPBR_TYPES = [
 
 export const WPBR_TYPE_LABELS = Object.fromEntries(WPBR_TYPES.map(type => [type.key, `${type.label} - ${type.desc}`]));
 
+const WPBR_TYPE_KEYS = new Set(WPBR_TYPES.map(type => type.key));
+
 export const FUNCTION_LABELS = {
   unknown: "Onbekend",
   objectbeveiliger: "Objectbeveiliger",
@@ -182,6 +184,49 @@ export function uniqueStrings(values) {
   return [...new Set((values || []).map(value => String(value || "").trim()).filter(Boolean))];
 }
 
+export function normalizeWpbrLicenseType(value) {
+  const normalized = String(value || "").trim().toUpperCase();
+  if (WPBR_TYPE_KEYS.has(normalized)) return normalized;
+  const tokens = normalized.match(/[A-Z]+/g) || [];
+  return tokens.find(token => WPBR_TYPE_KEYS.has(token)) || null;
+}
+
+export function buildBusinessCaoOptions(configurationOptions = []) {
+  const configuredByKey = new Map();
+  for (const option of configurationOptions || []) {
+    const caoKey = option?.cao_key || option?.value || null;
+    if (caoKey && !configuredByKey.has(caoKey)) configuredByKey.set(caoKey, option);
+  }
+
+  const catalogOptions = CAO_OPTIONS.map(catalogOption => {
+    const configured = configuredByKey.get(catalogOption.value) || null;
+    configuredByKey.delete(catalogOption.value);
+    return {
+      ...(configured || {}),
+      id: configured?.id || `cao-key:${catalogOption.value}`,
+      value: catalogOption.value,
+      cao_key: catalogOption.value,
+      name: configured?.name || catalogOption.label,
+      display_name: configured?.display_name || catalogOption.label,
+      label: configured?.label || configured?.display_name || configured?.name || catalogOption.label,
+      selectable: true,
+      technical_configuration_available: !!configured && (
+        configured.selectable === true
+        || configured.is_active === true
+        || Number(configured.active_configuration_count || 0) > 0
+      ),
+    };
+  });
+
+  const additionalOptions = [...configuredByKey.values()].map(option => ({
+    ...option,
+    value: option.cao_key || option.value,
+    selectable: true,
+    technical_configuration_available: option.selectable === true || option.is_active === true,
+  }));
+  return [...catalogOptions, ...additionalOptions];
+}
+
 export function functionLabel(value) {
   return FUNCTION_LABELS[value] || String(value || "").replace(/[_-]+/g, " ");
 }
@@ -201,7 +246,7 @@ export function isExpiredWpbrLicense(license) {
 
 export function getActiveWpbrLicenses(licenses = []) {
   return (licenses || []).filter(license =>
-    license?.license_type &&
+    normalizeWpbrLicenseType(license?.license_type) &&
     license.status !== "superseded" &&
     license.status !== "expired" &&
     !isExpiredWpbrLicense(license)
@@ -209,17 +254,19 @@ export function getActiveWpbrLicenses(licenses = []) {
 }
 
 export function allowedCaoKeysForWpbrLicenses(licenses = []) {
-  return uniqueStrings(getActiveWpbrLicenses(licenses).flatMap(license => WPBR_ALLOWED_CAO_KEYS[license.license_type] || []));
+  return uniqueStrings(getActiveWpbrLicenses(licenses).flatMap(license => (
+    WPBR_ALLOWED_CAO_KEYS[normalizeWpbrLicenseType(license.license_type)] || []
+  )));
 }
 
 export function wpbrLicenseAllowsCao(licenseType, caoKey) {
   if (!licenseType || !caoKey) return false;
-  return (WPBR_ALLOWED_CAO_KEYS[licenseType] || []).includes(caoKey);
+  return (WPBR_ALLOWED_CAO_KEYS[normalizeWpbrLicenseType(licenseType)] || []).includes(caoKey);
 }
 
 export function activeWpbrLicenseTypesForCao(licenses = [], caoKey = null) {
   return uniqueStrings(getActiveWpbrLicenses(licenses)
-    .map(license => license.license_type)
+    .map(license => normalizeWpbrLicenseType(license.license_type))
     .filter(licenseType => !caoKey || wpbrLicenseAllowsCao(licenseType, caoKey)));
 }
 
@@ -242,7 +289,7 @@ export function buildFunctionGroupsForWpbrLicenses(licenses = [], caoKey = null)
   const seen = new Set();
   const licenseTypes = activeWpbrLicenseTypesForCao(licenses, caoKey);
   const operationGroups = getActiveWpbrLicenses(licenses).flatMap(license => {
-    const licenseType = license.license_type;
+    const licenseType = normalizeWpbrLicenseType(license.license_type);
     if (!licenseTypes.includes(licenseType)) return [];
     return (WPBR_FUNCTION_GROUPS[licenseType] || []).filter(group => functionGroupAllowsCao(group, caoKey)).map(group => {
       const functions = group.functions.filter(value => {

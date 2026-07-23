@@ -7,6 +7,11 @@ import {
   getOfficialPbWageRows,
   getOfficialPbWageTableYear
 } from '../src/lib/caoPbWageTables.js';
+import {
+  allowedCaoKeysForWpbrLicenses,
+  buildBusinessCaoOptions,
+  normalizeWpbrLicenseType
+} from '../src/lib/securityCaoCatalog.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const repoRoot = path.resolve(__dirname, '..');
@@ -2151,6 +2156,30 @@ function runFunctionClassificationScenarios() {
 }
 
 function runCaoGovernanceUiOptionScenarios() {
+  const activeNdLicense = {
+    id: 'license-nd',
+    license_type: 'ND - Particuliere beveiligingsorganisatie',
+    status: 'active',
+    valid_until: '2099-12-31'
+  };
+  assert.equal(normalizeWpbrLicenseType(activeNdLicense.license_type), 'ND');
+  assertSameValues(
+    allowedCaoKeysForWpbrLicenses([activeNdLicense]),
+    [
+      'cao_particuliere_beveiliging',
+      'cao_evenementen_horecabeveiliging',
+      'cao_veiligheidsdomein'
+    ],
+    'An active ND licence must always expose all supported business-level CAO choices'
+  );
+  const catalogOnlyOptions = buildBusinessCaoOptions([]);
+  const ndCatalogOptions = catalogOnlyOptions.filter(option => (
+    allowedCaoKeysForWpbrLicenses([activeNdLicense]).includes(option.cao_key)
+  ));
+  assert.equal(ndCatalogOptions.length, 3, 'ND CAO choices must remain available when no technical CAO configuration has been loaded');
+  assert.equal(ndCatalogOptions.every(option => option.selectable === true), true);
+  assert.equal(ndCatalogOptions.every(option => option.technical_configuration_available === false), true);
+
   const activeConfig = {
     id: 'cao-config-active',
     cao_key: 'cao_particuliere_beveiliging',
@@ -2257,6 +2286,16 @@ function runCaoGovernanceUiOptionScenarios() {
     'Grouped company CAO option must retain the technical period ids for backwards-compatible labels'
   );
   assert.equal(caoConfigurationOptions.assertNoSensitiveCaoConfigurationFields(groupedOptions[0]).passed, true);
+
+  const mergedBusinessOptions = buildBusinessCaoOptions(groupedOptions);
+  const mergedPbOption = mergedBusinessOptions.find(option => option.cao_key === 'cao_particuliere_beveiliging');
+  assert.equal(mergedPbOption.id, 'cao-key:cao_particuliere_beveiliging');
+  assert.equal(mergedPbOption.technical_configuration_available, true);
+  assert.equal(
+    mergedBusinessOptions.filter(option => option.cao_key === 'cao_particuliere_beveiliging').length,
+    1,
+    'Configured and catalog CAO choices must merge without duplicates'
+  );
 }
 
 function listFilesRecursive(rootDir, extensions) {

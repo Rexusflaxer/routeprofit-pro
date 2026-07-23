@@ -11,10 +11,12 @@ import {
   CAO_OPTION_LABELS,
   WPBR_TYPE_LABELS,
   allowedCaoKeysForWpbrLicenses,
+  buildBusinessCaoOptions,
   buildFunctionGroupsForWpbrLicenses,
   functionLabel,
   getActiveWpbrLicenses,
   isSecurityEmploymentCao,
+  normalizeWpbrLicenseType,
   uniqueStrings,
 } from "@/lib/securityCaoCatalog";
 
@@ -152,7 +154,7 @@ export default function CaoTab({ companyId }) {
   });
 
   const selectedCaoConfigurationIds = uniqueStrings(assignments.map(a => a.cao_configuration_id));
-  const { data: caoOptions = [] } = useQuery({
+  const { data: configuredCaoOptions = [] } = useQuery({
     queryKey: ["company-cao-key-options", selectedCaoConfigurationIds],
     queryFn: async () => {
       const { data } = await base44.functions.invoke("listCaoConfigurationOptions", {
@@ -162,6 +164,7 @@ export default function CaoTab({ companyId }) {
       return data?.options || [];
     },
   });
+  const caoOptions = buildBusinessCaoOptions(configuredCaoOptions);
 
   const saveMutation = useMutation({
     mutationFn: async (data) => {
@@ -318,7 +321,7 @@ export default function CaoTab({ companyId }) {
                        <div className="flex flex-wrap gap-1.5">
                          {activeWpbrLicenses.map(license => (
                            <Badge key={license.id || `${license.license_type}-${license.license_number}`} variant="outline" className="text-xs">
-                             {WPBR_TYPE_LABELS[license.license_type] || license.license_type}
+                             {WPBR_TYPE_LABELS[normalizeWpbrLicenseType(license.license_type)] || license.license_type}
                            </Badge>
                          ))}
                        </div>
