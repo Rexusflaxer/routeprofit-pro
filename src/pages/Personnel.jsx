@@ -36,7 +36,6 @@ import {
   Pencil,
   Plus,
   Search,
-  ShieldCheck,
   Trash2,
   Upload,
   Users,
@@ -1084,7 +1083,6 @@ const PERSONNEL_DETAIL_MENU_ITEMS = [
   { key: "payroll", label: "Loonheffing", icon: Banknote },
   { key: "identity", label: "Identiteit", icon: BadgeCheck },
   { key: "documents", label: "Documenten", icon: FileText },
-  { key: "compliance", label: "Compliance", icon: ShieldCheck },
   { key: "bank-mobility", label: "Bank & mobiliteit", icon: CreditCard },
   { key: "ice", label: "ICE", icon: Users },
   { key: "contracts", label: "Contracten", icon: BriefcaseBusiness },
@@ -1148,51 +1146,6 @@ function PersonnelDetailTabs({ person, companies, dossier, onAddRecord }) {
             ]}
           />
         </SectionPanel>
-      );
-    }
-
-    if (active === "compliance") {
-      return (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <SectionPanel
-            title="WPBR en beveiligingspassen"
-            icon={ShieldCheck}
-            action={<Button size="sm" variant="outline" onClick={() => onAddRecord("securityPass")}><Plus className="mr-1 h-4 w-4" />Pas</Button>}
-          >
-            <FieldRow label="WPBR vereist">{person.wpbr_required ? "Ja" : "Nee"}</FieldRow>
-            <FieldRow label="WPBR status">{person.wpbr_status || "-"}</FieldRow>
-            <FieldRow label="Autoriteit">{person.wpbr_authority || "-"}</FieldRow>
-            <FieldRow label="Toestemmingsnummer">{person.wpbr_permission_number || "-"}</FieldRow>
-            <div className="mt-4">
-              <MiniTable
-                emptyText="Nog geen beveiligingspassen geregistreerd."
-                rows={dossier.securityPasses}
-                columns={[
-                  { key: "pass_type", label: "Pas" },
-                  { key: "pass_number", label: "Nummer" },
-                  { key: "status", label: "Status" },
-                  { key: "valid_until", label: "Geldig tot", render: row => formatDate(row.valid_until) },
-                ]}
-              />
-            </div>
-          </SectionPanel>
-          <SectionPanel
-            title="Diploma's en VOG"
-            icon={FileBadge}
-            action={<Button size="sm" variant="outline" onClick={() => onAddRecord("qualification")}><Plus className="mr-1 h-4 w-4" />Diploma</Button>}
-          >
-            <MiniTable
-              emptyText="Nog geen diploma's of certificaten vastgelegd."
-              rows={dossier.qualifications}
-              columns={[
-                { key: "name", label: "Opleiding" },
-                { key: "issuer", label: "Uitgever" },
-                { key: "valid_until", label: "Geldig tot", render: row => formatDate(row.valid_until) },
-                { key: "verification_status", label: "Status", render: row => VERIFICATION_LABELS[row.verification_status] || row.verification_status },
-              ]}
-            />
-          </SectionPanel>
-        </div>
       );
     }
 

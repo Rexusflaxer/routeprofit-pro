@@ -23,15 +23,14 @@ import {
   ChevronRight,
   ClipboardCheck,
   Eye,
-  FileBadge,
   FileText,
   Handshake,
+  IdCard,
   MessageSquareText,
   Package,
   Pencil,
   Plus,
   RefreshCw,
-  ShieldCheck,
   Trash2,
   Users,
   X,
@@ -44,10 +43,15 @@ import PhotoCropUpload from "@/components/personnel/PhotoCropUpload";
 import IdentityDocumentWizard from "@/components/personnel/IdentityDocumentWizard";
 import PayrollTab from "@/components/personnel/PayrollTab";
 import PersonnelBankTab from "@/components/personnel/PersonnelBankTab";
+import PersonnelKorpschefTab from "@/components/personnel/PersonnelKorpschefTab";
 import AddressAutocomplete from "@/components/ui-custom/AddressAutocomplete";
 import { formatAddress, normalizeAddressParts } from "@/lib/addressFormatting";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
 import { FUNCTION_LABELS } from "@/lib/securityCaoCatalog";
+import {
+  buildKorpschefCompanyOptions,
+  isKorpschefDocument,
+} from "@/lib/korpschefRules";
 
 // ─── Constants ───────────────────────────────────────────────────────────────
 
@@ -183,7 +187,7 @@ const PERSONNEL_TABS = [
   { key: "payroll", label: "Loonheffing", icon: Banknote },
   { key: "bank", label: "Bank", icon: Banknote },
   { key: "contracts", label: "Contracten", icon: BriefcaseBusiness },
-  { key: "compliance", label: "Compliance", icon: ShieldCheck },
+  { key: "korpschef", label: "Korpschef", icon: IdCard },
   { key: "documents", label: "Documenten", icon: FileText },
   { key: "planning", label: "Planning/restricties", icon: CalendarDays },
   { key: "ice", label: "ICE", icon: Users },
@@ -1263,7 +1267,41 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
     staleTime: 5 * 60 * 1000,
   });
 
-  const generalDocuments = dossier.documents.filter(d => !["identity_document","drivers_license","vog","cv","bank_account_proof","payroll_tax_statement"].includes(d.category));
+  const { data: wpbrLicenses = [] } = useQuery({
+    queryKey: ["company-wpbr-licenses", "personnel-korpschef"],
+    queryFn: () => safeList("CompanyWpbrLicense", "-created_date"),
+  });
+
+  const korpschefDocuments = useMemo(
+    () => dossier.documents.filter(isKorpschefDocument),
+    [dossier.documents]
+  );
+  const korpschefCompanyOptions = useMemo(
+    () => buildKorpschefCompanyOptions(companies, wpbrLicenses),
+    [companies, wpbrLicenses]
+  );
+  const showKorpschef = korpschefCompanyOptions.length > 0
+    || korpschefDocuments.length > 0
+    || dossier.securityPasses.length > 0;
+  const visibleTabs = useMemo(
+    () => PERSONNEL_TABS.filter(item => item.key !== "korpschef" || showKorpschef),
+    [showKorpschef]
+  );
+
+  useEffect(() => {
+    if (active === "korpschef" && !showKorpschef) setActive("identity");
+  }, [active, showKorpschef]);
+
+  const generalDocuments = dossier.documents.filter(d => ![
+    "identity_document",
+    "drivers_license",
+    "vog",
+    "cv",
+    "bank_account_proof",
+    "payroll_tax_statement",
+    "wpbr_permission",
+    "wpbr_badge",
+  ].includes(d.category));
   const identityAllDocs = useMemo(() => dossier.documents.filter(isIdentityLikeDocument), [dossier.documents]);
   const identitySplit = useMemo(() => splitIdentityDocumentsByActiveState(identityAllDocs), [identityAllDocs]);
   const identityOrder = Object.fromEntries(IDENTITY_DOCUMENT_KINDS.map((item, index) => [item.key, index]));
@@ -1549,25 +1587,16 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
           ]} />
         </SectionPanel>
       );
-      case "compliance": return (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <SectionPanel title="WPBR en beveiligingspassen" icon={ShieldCheck} action={<Button size="sm" variant="outline" onClick={() => onAddRecord("securityPass")}><Plus className="mr-1 h-4 w-4" />Pas</Button>}>
-            <FieldRow label="WPBR vereist">{person.wpbr_required ? "Ja" : "Nee"}</FieldRow>
-            <FieldRow label="WPBR status">{person.wpbr_status || "-"}</FieldRow>
-            <FieldRow label="Toestemmingsnummer">{person.wpbr_permission_number || "-"}</FieldRow>
-            <div className="mt-4"><MiniTable emptyText="Nog geen beveiligingspassen." rows={dossier.securityPasses} columns={[
-              { key: "pass_type", label: "Pas" }, { key: "pass_number", label: "Nummer" },
-              { key: "status", label: "Status" }, { key: "valid_until", label: "Geldig tot", render: r => formatDate(r.valid_until) },
-            ]} /></div>
-          </SectionPanel>
-          <SectionPanel title="Diploma's en VOG" icon={FileBadge} action={<Button size="sm" variant="outline" onClick={() => onAddRecord("qualification")}><Plus className="mr-1 h-4 w-4" />Diploma</Button>}>
-            <MiniTable emptyText="Nog geen diploma's." rows={dossier.qualifications} columns={[
-              { key: "name", label: "Opleiding" }, { key: "issuer", label: "Uitgever" },
-              { key: "valid_until", label: "Geldig tot", render: r => formatDate(r.valid_until) },
-              { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
-            ]} />
-          </SectionPanel>
-        </div>
+      case "korpschef": return (
+        <PersonnelKorpschefTab
+          personnel={person}
+          companies={companies}
+          companyOptions={korpschefCompanyOptions}
+          licenses={wpbrLicenses}
+          documents={korpschefDocuments}
+          securityPasses={dossier.securityPasses}
+          auditActors={auditActors}
+        />
       );
       case "bank": return <PersonnelBankTab person={person} bankAccounts={dossier.bankAccounts} auditActors={auditActors} />;
       case "ice": return (
@@ -1651,7 +1680,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
     <div className="mt-4 flex min-h-[200px] overflow-visible rounded-xl border border-border bg-card shadow-sm">
       <div className="w-52 shrink-0 border-r border-border bg-muted/20 py-2">
         <p className="px-4 pb-1 pt-2 text-[10px] font-semibold uppercase tracking-widest text-muted-foreground/60">Dossier</p>
-        {PERSONNEL_TABS.map(item => {
+        {visibleTabs.map(item => {
           const needsAttention = item.key === "identity" && identityNeedsAttention;
           return (
             <button
@@ -1672,7 +1701,7 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
           );
         })}
       </div>
-      <div className={`min-w-0 flex-1 ${["identity", "payroll", "bank", "contracts"].includes(active) ? "" : "p-5 overflow-hidden"}`}>{renderTab()}</div>
+      <div className={`min-w-0 flex-1 ${["identity", "payroll", "bank", "contracts", "korpschef"].includes(active) ? "" : "p-5 overflow-hidden"}`}>{renderTab()}</div>
     </div>
   );
 }
