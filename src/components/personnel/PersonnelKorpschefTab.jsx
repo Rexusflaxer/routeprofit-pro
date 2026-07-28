@@ -6,8 +6,6 @@ import {
   Archive,
   ArrowLeft,
   Eye,
-  FileCheck2,
-  IdCard,
   MoreHorizontal,
   Plus,
   RefreshCw,
@@ -29,6 +27,7 @@ import {
   isKorpschefDocument,
   korpschefDocumentLabel,
   korpschefRecordStatus,
+  korpschefRecordType,
   KORPSCHEF_RECORD_STATUSES,
   licenseSnapshotLabel,
 } from "@/lib/korpschefRules";
@@ -221,22 +220,17 @@ function KorpschefRow({
       className={`${TABLE_GRID} group relative items-center px-5 py-2.5 transition-colors hover:bg-accent/35 ${files.length || archived ? "cursor-pointer" : ""}`}
       onClick={openRow}
     >
-      <div className="flex min-w-0 items-center gap-2.5">
-        {document.category === "wpbr_badge"
-          ? <IdCard className="h-4 w-4 shrink-0 text-primary" />
-          : <FileCheck2 className="h-4 w-4 shrink-0 text-primary" />}
-        <div className="min-w-0">
-          <p className="truncate text-sm font-semibold text-foreground">{korpschefDocumentLabel(document)}</p>
-          {document.document_number && (
-            <p className="truncate text-xs text-muted-foreground">#{document.document_number}</p>
-          )}
-        </div>
+      <div className="min-w-0">
+        <p className="truncate text-sm font-semibold text-foreground">
+          {korpschefRecordType(document) === "permission" ? korpschefDocumentLabel(document) : "Legitimatie"}
+        </p>
       </div>
       <span className="min-w-0 truncate text-sm text-foreground">{companyLabelFor(document, companyMap)}</span>
-      <span className="min-w-0 truncate text-sm text-muted-foreground">{licenseSnapshotLabel(document)}</span>
+      <span className="min-w-0 truncate text-sm text-muted-foreground">
+        {document.document_number ? `#${document.document_number}` : licenseSnapshotLabel(document)}
+      </span>
       <div className="min-w-0 text-xs text-muted-foreground">
-        <span>Van: <strong className="font-medium text-foreground">{formatDate(document.valid_from)}</strong></span>
-        <span className="ml-3">Tot: <strong className="font-medium text-foreground">{formatDate(document.valid_until)}</strong></span>
+        <strong className="font-medium text-foreground">{formatDate(document.valid_until)}</strong>
       </div>
       <div className="min-w-0"><StatusBadge document={document} /></div>
       <span className="min-w-0 truncate text-sm text-muted-foreground">
