@@ -3,15 +3,12 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
-  Building2,
   Check,
   CheckCircle2,
   ChevronLeft,
   ChevronRight,
-  FileCheck2,
   FileText,
   FileUp,
-  IdCard,
   Loader2,
   X,
 } from "lucide-react";
@@ -195,15 +192,57 @@ function SingleDocumentUpload({ file, previewUrl, onFile, disabled }) {
 function PassGuide({ side }) {
   const front = side === "front";
   return (
-    <div className="flex min-h-[120px] items-center justify-center rounded-lg border border-border bg-white p-2">
-      <img
-        src={front
-          ? "/korpschef-guides/wpbr-id-front-example.png"
-          : "/korpschef-guides/wpbr-id-back-example.png"}
-        alt={front ? "Voorbeeld voorkant Wpbr-legitimatiebewijs" : "Voorbeeld achterkant Wpbr-legitimatiebewijs"}
-        className="max-h-40 w-full object-contain"
-        draggable="false"
-      />
+    <div className="flex min-h-[120px] flex-1 items-center justify-center p-2">
+      <div className="aspect-[1.57/1] w-full max-w-[320px] overflow-hidden rounded border border-border bg-white shadow-sm">
+        <img
+          src={front
+            ? "/korpschef-guides/wpbr-id-front-example.png"
+            : "/korpschef-guides/wpbr-id-back-example.png"}
+          alt={front ? "Voorbeeld voorkant Wpbr-legitimatiebewijs" : "Voorbeeld achterkant Wpbr-legitimatiebewijs"}
+          className="h-full w-full object-cover"
+          draggable="false"
+        />
+      </div>
+    </div>
+  );
+}
+
+function PassUploadGuideCard({ frontUpload, backUpload }) {
+  const rows = [
+    {
+      key: "front",
+      title: "Voorkant",
+      upload: frontUpload,
+      description: "Voorzijde met persoonsgegevens, pasnummer, organisatie en geldigheid.",
+    },
+    {
+      key: "back",
+      title: "Achterkant",
+      upload: backUpload,
+      description: "Achterzijde met toestemming, ontheffingen en eventuele beperkingen.",
+    },
+  ];
+
+  return (
+    <div className="flex w-full flex-col gap-3 rounded-lg border border-border bg-card p-4">
+      {rows.map((row, index) => (
+        <React.Fragment key={row.key}>
+          {index > 0 && <div className="h-px bg-border" />}
+          <div className="flex items-stretch gap-4">
+            <div className="flex w-1/2 min-w-0 flex-col gap-1.5">
+              <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">{row.title}</p>
+              {row.upload}
+            </div>
+            <div className="w-px self-stretch bg-border" />
+            <div className="flex w-1/2 min-w-0 flex-col">
+              <PassGuide side={row.key} />
+              <div className="px-2 py-1.5">
+                <p className="text-[11px] leading-snug text-muted-foreground">{row.description}</p>
+              </div>
+            </div>
+          </div>
+        </React.Fragment>
+      ))}
     </div>
   );
 }
@@ -252,11 +291,11 @@ export default function KorpschefDocumentWizard({
   const [frontPreviewUrl, setFrontPreviewUrl] = useState("");
   const [backFile, setBackFile] = useState(null);
   const [backPreviewUrl, setBackPreviewUrl] = useState("");
-  const [recognizing, setRecognizing] = useState(false);
-  const [recognitionProgress, setRecognitionProgress] = useState(null);
   const [recognizedKey, setRecognizedKey] = useState("");
   const [scanQuality, setScanQuality] = useState(null);
   const [errors, setErrors] = useState({});
+  const latestUploadKeyRef = useRef("");
+  const recognitionInFlightKeyRef = useRef("");
 
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
@@ -271,6 +310,7 @@ export default function KorpschefDocumentWizard({
     .map(file => `${file.name}:${file.size}:${file.lastModified}`)
     .join("|");
   const isPass = form.record_type === "wpbr_id";
+  const scanPending = Boolean(isPass && frontFile && backFile && recognizedKey !== uploadKey);
 
   const setField = (field, value) => {
     setForm(current => ({ ...current, [field]: value }));
@@ -283,20 +323,26 @@ export default function KorpschefDocumentWizard({
   }, [permissionPreviewUrl]);
 
   useEffect(() => {
-    if (!isPass || !frontFile || !backFile || !uploadKey || recognizedKey === uploadKey || recognizing) return;
-    let active = true;
-    setRecognizing(true);
-    setRecognitionProgress({ status: "OCR voorbereiden", progress: 0 });
-    import("@/lib/wpbrPassOcr")
-      .then(({ recognizeWpbrPass }) => recognizeWpbrPass({
-        frontFile,
-        backFile,
-        onProgress: progress => {
-          if (active) setRecognitionProgress(progress);
-        },
-      }))
-      .then(result => {
-        if (!active) return;
+    latestUploadKeyRef.current = uploadKey;
+  }, [uploadKey]);
+
+  useEffect(() => {
+    if (
+      !isPass
+      || !frontFile
+      || !backFile
+      || !uploadKey
+      || recognizedKey === uploadKey
+      || recognitionInFlightKeyRef.current === uploadKey
+    ) return;
+    const currentUploadKey = uploadKey;
+    recognitionInFlightKeyRef.current = currentUploadKey;
+
+    const runRecognition = async () => {
+      try {
+        const { recognizeWpbrPass } = await import("@/lib/wpbrPassOcr");
+        const result = await recognizeWpbrPass({ frontFile, backFile });
+        if (latestUploadKeyRef.current !== currentUploadKey) return;
         setForm(current => ({
           ...current,
           organization_name: result.organization_name || current.organization_name,
@@ -315,11 +361,10 @@ export default function KorpschefDocumentWizard({
           restriction_text: result.restriction_text || current.restriction_text,
         }));
         setScanQuality(result.upload_quality || null);
-        setRecognizedKey(uploadKey);
-      })
-      .catch(error => {
+        setRecognizedKey(currentUploadKey);
+      } catch (error) {
         console.error("Wpbr-pass OCR failed", error);
-        if (!active) return;
+        if (latestUploadKeyRef.current !== currentUploadKey) return;
         setScanQuality({
           status: "review",
           score: 0,
@@ -327,17 +372,16 @@ export default function KorpschefDocumentWizard({
           summary: "De pas is ontvangen, maar de automatische herkenning kon niet volledig worden afgerond.",
           checks: [],
         });
-        setRecognizedKey(uploadKey);
-      })
-      .finally(() => {
-        if (!active) return;
-        setRecognizing(false);
-        setRecognitionProgress(null);
-      });
-    return () => {
-      active = false;
+        setRecognizedKey(currentUploadKey);
+      } finally {
+        if (recognitionInFlightKeyRef.current === currentUploadKey) {
+          recognitionInFlightKeyRef.current = "";
+        }
+      }
     };
-  }, [backFile, frontFile, isPass, recognizedKey, recognizing, uploadKey]);
+
+    runRecognition();
+  }, [backFile, frontFile, isPass, recognizedKey, uploadKey]);
 
   const licenseMatch = useMemo(() => {
     if (!selectedCompany) return { license: null, status: "company_only", explanation: "" };
@@ -427,7 +471,6 @@ export default function KorpschefDocumentWizard({
     if (isPass) {
       if (!frontFile) nextErrors.front = "Upload de voorkant.";
       if (!backFile) nextErrors.back = "Upload de achterkant.";
-      if (recognizing || recognizedKey !== uploadKey) nextErrors.ocr = "Wacht tot de documentcontrole is afgerond.";
     } else if (!permissionFile) {
       nextErrors.permission = "Upload de toestemmingsbrief.";
     }
@@ -692,12 +735,9 @@ export default function KorpschefDocumentWizard({
                   onClick={() => chooseType("permission")}
                   className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]"
                 >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <FileCheck2 className="h-5 w-5 shrink-0 text-primary" />
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">Toestemmingsbrief korpschef</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">Besluit waarmee toestemming is verleend om voor het bedrijf te werken.</p>
-                    </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">Toestemmingsbrief korpschef</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Besluit waarmee toestemming is verleend om voor het bedrijf te werken.</p>
                   </div>
                   <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </button>
@@ -706,12 +746,9 @@ export default function KorpschefDocumentWizard({
                   onClick={() => chooseType("wpbr_id")}
                   className="flex items-center justify-between rounded-lg border border-border bg-card px-4 py-3 text-left transition-all hover:border-primary hover:bg-accent active:scale-[0.99]"
                 >
-                  <div className="flex min-w-0 items-center gap-3">
-                    <IdCard className="h-5 w-5 shrink-0 text-primary" />
-                    <div>
-                      <p className="text-sm font-semibold text-foreground">Wpbr-legitimatiebewijs</p>
-                      <p className="mt-0.5 text-xs text-muted-foreground">Voor- en achterkant van de beveiligings- of recherchepas, inclusief OCR-controle.</p>
-                    </div>
+                  <div className="min-w-0">
+                    <p className="text-sm font-semibold text-foreground">Wpbr-legitimatiebewijs</p>
+                    <p className="mt-0.5 text-xs text-muted-foreground">Voor- en achterkant van de beveiligings- of recherchepas, inclusief OCR-controle.</p>
                   </div>
                   <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
                 </button>
@@ -741,16 +778,13 @@ export default function KorpschefDocumentWizard({
                         : "cursor-not-allowed border-border bg-muted/40 opacity-60"
                     }`}
                   >
-                    <div className="flex min-w-0 items-center gap-3">
-                      <Building2 className="h-5 w-5 shrink-0 text-primary" />
-                      <div className="min-w-0">
-                        <p className="truncate text-sm font-semibold text-foreground">{companyKorpschefLabel(option.company)}</p>
-                        <p className="mt-0.5 truncate text-xs text-muted-foreground">
-                          {option.selectable
-                            ? `${option.activeLicenses.length} actieve Wpbr-${option.activeLicenses.length === 1 ? "vergunning" : "vergunningen"}`
-                            : `Aanvullen: ${option.missing.join(", ")}`}
-                        </p>
-                      </div>
+                    <div className="min-w-0">
+                      <p className="truncate text-sm font-semibold text-foreground">{companyKorpschefLabel(option.company)}</p>
+                      <p className="mt-0.5 truncate text-xs text-muted-foreground">
+                        {option.selectable
+                          ? `${option.activeLicenses.length} actieve Wpbr-${option.activeLicenses.length === 1 ? "vergunning" : "vergunningen"}`
+                          : `Aanvullen: ${option.missing.join(", ")}`}
+                      </p>
                     </div>
                     {option.selectable
                       ? <ChevronRight className="h-4 w-4 shrink-0 text-muted-foreground" />
@@ -782,42 +816,44 @@ export default function KorpschefDocumentWizard({
               </div>
 
               {isPass ? (
-                <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Voorkant</p>
-                    <DocumentSideUpload
-                      label="Voorkant uploaden"
-                      hint="Zorg dat persoonsgegevens, pasnummer en geldigheid leesbaar zijn."
-                      previewUrl={frontPreviewUrl}
-                      onFileSelected={(file, previewUrl) => {
-                        setFrontFile(file);
-                        setFrontPreviewUrl(previewUrl);
-                        setRecognizedKey("");
-                      }}
-                      uploading={false}
-                      required
-                    />
-                    <PassGuide side="front" />
-                    {errors.front && <p className="text-xs text-destructive">{errors.front}</p>}
-                  </div>
-                  <div className="space-y-2">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-muted-foreground">Achterkant</p>
-                    <DocumentSideUpload
-                      label="Achterkant uploaden"
-                      hint="Zorg dat ontheffingen, beperkingen en toestemming leesbaar zijn."
-                      previewUrl={backPreviewUrl}
-                      onFileSelected={(file, previewUrl) => {
-                        setBackFile(file);
-                        setBackPreviewUrl(previewUrl);
-                        setRecognizedKey("");
-                      }}
-                      uploading={false}
-                      required
-                    />
-                    <PassGuide side="back" />
-                    {errors.back && <p className="text-xs text-destructive">{errors.back}</p>}
-                  </div>
-                </div>
+                <PassUploadGuideCard
+                  frontUpload={(
+                    <>
+                      <DocumentSideUpload
+                        label="Voorkant uploaden"
+                        hint="Zorg dat persoonsgegevens, pasnummer en geldigheid leesbaar zijn."
+                        previewUrl={frontPreviewUrl}
+                        onFileSelected={(file, previewUrl) => {
+                          setFrontFile(file);
+                          setFrontPreviewUrl(previewUrl);
+                          setRecognizedKey("");
+                          setScanQuality(null);
+                        }}
+                        uploading={false}
+                        required
+                      />
+                      {errors.front && <p className="text-xs text-destructive">{errors.front}</p>}
+                    </>
+                  )}
+                  backUpload={(
+                    <>
+                      <DocumentSideUpload
+                        label="Achterkant uploaden"
+                        hint="Zorg dat ontheffingen, beperkingen en toestemming leesbaar zijn."
+                        previewUrl={backPreviewUrl}
+                        onFileSelected={(file, previewUrl) => {
+                          setBackFile(file);
+                          setBackPreviewUrl(previewUrl);
+                          setRecognizedKey("");
+                          setScanQuality(null);
+                        }}
+                        uploading={false}
+                        required
+                      />
+                      {errors.back && <p className="text-xs text-destructive">{errors.back}</p>}
+                    </>
+                  )}
+                />
               ) : (
                 <SingleDocumentUpload
                   file={permissionFile}
@@ -831,30 +867,7 @@ export default function KorpschefDocumentWizard({
                 />
               )}
 
-              {recognizing && (
-                <div className="flex items-center gap-3 rounded-md border border-primary/20 bg-primary/5 px-3 py-2 text-xs text-foreground">
-                  <Loader2 className="h-4 w-4 animate-spin text-primary" />
-                  <span>{recognitionProgress?.status || "Document uitlezen"}{typeof recognitionProgress?.progress === "number" ? ` · ${recognitionProgress.progress}%` : ""}</span>
-                </div>
-              )}
-              {!recognizing && scanQuality && (
-                <div className={`flex items-start gap-3 rounded-md border px-3 py-2 text-xs ${
-                  scanQuality.status === "ok"
-                    ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-800 dark:text-emerald-200"
-                    : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
-                }`}>
-                  {scanQuality.status === "ok"
-                    ? <CheckCircle2 className="mt-0.5 h-4 w-4 shrink-0" />
-                    : <AlertTriangle className="mt-0.5 h-4 w-4 shrink-0" />}
-                  <div>
-                    <p className="font-medium">{scanQuality.title}</p>
-                    <p className="mt-0.5">{scanQuality.summary}</p>
-                  </div>
-                </div>
-              )}
-              {(errors.permission || errors.ocr) && (
-                <p className="text-xs text-destructive">{errors.permission || errors.ocr}</p>
-              )}
+              {errors.permission && <p className="text-xs text-destructive">{errors.permission}</p>}
 
               <div className="flex items-center justify-between pt-1">
                 <Button variant="ghost" size="sm" onClick={() => setStep(2)}>
@@ -862,7 +875,7 @@ export default function KorpschefDocumentWizard({
                 </Button>
                 <div className="flex items-center gap-2">
                   <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
-                  <Button size="sm" onClick={goToReview} disabled={recognizing}>
+                  <Button size="sm" onClick={goToReview}>
                     Controleren <ChevronRight className="ml-1 h-4 w-4" />
                   </Button>
                 </div>
@@ -870,7 +883,25 @@ export default function KorpschefDocumentWizard({
             </div>
           )}
 
-          {step === 4 && (
+          {step === 4 && scanPending && (
+            <div className="space-y-4">
+              <div className="flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-border bg-card px-6 py-12 text-center">
+                <Loader2 className="mb-4 h-8 w-8 animate-spin text-primary" />
+                <p className="text-sm font-medium text-foreground">Scan verwerken</p>
+                <p className="mt-1 max-w-md text-xs text-muted-foreground">
+                  De upload wordt gelezen. Zodra dit klaar is, opent de controle automatisch.
+                </p>
+              </div>
+              <div className="flex items-center justify-between pt-1">
+                <Button variant="ghost" size="sm" onClick={() => setStep(3)}>
+                  <ChevronLeft className="mr-1 h-4 w-4" /> Terug
+                </Button>
+                <Button variant="outline" size="sm" onClick={onClose}>Annuleren</Button>
+              </div>
+            </div>
+          )}
+
+          {step === 4 && !scanPending && (
             <div className="space-y-4">
               <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
                 <div className="space-y-4">

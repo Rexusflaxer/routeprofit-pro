@@ -505,40 +505,47 @@ export default function PersonnelKorpschefTab({
         <span>Geldigheid</span>
         <span>Status</span>
         <span>Door</span>
-        {!wizard && (
-          <div className="col-span-1 flex items-center justify-end gap-2">
-            {showArchive ? (
+        <div className="col-span-1 flex items-center justify-end gap-2">
+          {showArchive && (
+            <Badge className="shrink-0 animate-pulse bg-purple-200 text-purple-800 dark:bg-purple-900/50 dark:text-purple-300">
+              Archief
+            </Badge>
+          )}
+          {!wizard && (
+            <>
+              {showArchive ? (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 whitespace-nowrap px-2 text-xs font-medium normal-case tracking-normal"
+                  onClick={() => setShowArchive(false)}
+                >
+                  <ArrowLeft className="mr-1 h-3 w-3" /> Actief
+                </Button>
+              ) : (
+                <Button
+                  size="sm"
+                  variant="outline"
+                  className="h-7 whitespace-nowrap px-2 text-xs font-medium normal-case tracking-normal"
+                  onClick={() => setShowArchive(true)}
+                >
+                  <Archive className="mr-1 h-3 w-3" /> Archief {archivedDocuments.length ? `(${archivedDocuments.length})` : ""}
+                </Button>
+              )}
               <Button
                 size="sm"
                 variant="outline"
                 className="h-7 whitespace-nowrap px-2 text-xs font-medium normal-case tracking-normal"
-                onClick={() => setShowArchive(false)}
+                onClick={() => setWizard({ archiveMode: showArchive })}
+                disabled={!canAdd}
+                title={canAdd ? "Nieuw document toevoegen" : "Rond eerst een Wpbr-bedrijfsprofiel af"}
               >
-                <ArrowLeft className="mr-1 h-3 w-3" /> Actief
+                <Plus className="mr-1 h-3 w-3" />
+                {showArchive ? "Oud document" : "Nieuw document"}
               </Button>
-            ) : (
-              <Button
-                size="sm"
-                variant="outline"
-                className="h-7 whitespace-nowrap px-2 text-xs font-medium normal-case tracking-normal"
-                onClick={() => setShowArchive(true)}
-              >
-                <Archive className="mr-1 h-3 w-3" /> Archief {archivedDocuments.length ? `(${archivedDocuments.length})` : ""}
-              </Button>
-            )}
-            <Button
-              size="sm"
-              variant="outline"
-              className="h-7 whitespace-nowrap px-2 text-xs font-medium normal-case tracking-normal"
-              onClick={() => setWizard({ archiveMode: showArchive })}
-              disabled={!canAdd}
-              title={canAdd ? "Nieuw document toevoegen" : "Rond eerst een Wpbr-bedrijfsprofiel af"}
-            >
-              <Plus className="mr-1 h-3 w-3" />
-              {showArchive ? "Oud document" : "Nieuw document"}
-            </Button>
-          </div>
-        )}
+            </>
+          )}
+        </div>
       </div>
 
       {message && !wizard && (
