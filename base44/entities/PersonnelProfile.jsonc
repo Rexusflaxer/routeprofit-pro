@@ -1,0 +1,81 @@
+{
+  "name": "PersonnelProfile",
+  "type": "object",
+  "properties": {
+    "personnel_id": {
+      "type": "string",
+      "description": "ID van de medewerker"
+    },
+    "languages": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Talen die de medewerker spreekt"
+    },
+    "software_skills": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "software": {
+            "type": "string",
+            "description": "Software-sleutel"
+          },
+          "level": {
+            "type": "string",
+            "enum": [
+              "none",
+              "basic",
+              "intermediate",
+              "advanced"
+            ],
+            "default": "none"
+          }
+        }
+      },
+      "default": [],
+      "description": "Vaardigheidsniveau per programma"
+    },
+    "cv_file_url": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "CV bestand URL"
+    },
+    "cv_file_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "ManagedFile ID van de CV"
+    },
+    "cv_download_filename": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Downloadbestandsnaam voor de CV"
+    },
+    "cv_uploaded_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time",
+      "description": "Wanneer de CV is ge\u00fcpload"
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Opmerkingen"
+    }
+  },
+  "required": [
+    "personnel_id"
+  ]
+}

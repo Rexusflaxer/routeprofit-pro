@@ -31,6 +31,7 @@ import {
   Pencil,
   Plus,
   RefreshCw,
+  Sparkles,
   Trash2,
   Users,
   X,
@@ -44,6 +45,7 @@ import IdentityDocumentWizard from "@/components/personnel/IdentityDocumentWizar
 import PayrollTab from "@/components/personnel/PayrollTab";
 import PersonnelBankTab from "@/components/personnel/PersonnelBankTab";
 import PersonnelKorpschefTab from "@/components/personnel/PersonnelKorpschefTab";
+import PersonnelPropertiesTab from "@/components/personnel/PersonnelPropertiesTab";
 import AddressAutocomplete from "@/components/ui-custom/AddressAutocomplete";
 import { formatAddress, normalizeAddressParts } from "@/lib/addressFormatting";
 import { buildAuditMetadata, getAuditActorLabel } from "@/lib/auditTrail";
@@ -188,6 +190,7 @@ const PERSONNEL_TABS = [
   { key: "bank", label: "Bank", icon: Banknote },
   { key: "contracts", label: "Contracten", icon: BriefcaseBusiness },
   { key: "korpschef", label: "Korpschef", icon: IdCard },
+  { key: "properties", label: "Eigenschappen", icon: Sparkles },
   { key: "documents", label: "Documenten", icon: FileText },
   { key: "planning", label: "Planning/restricties", icon: CalendarDays },
   { key: "ice", label: "ICE", icon: Users },
@@ -1599,23 +1602,20 @@ function PersonnelSidebarTabs({ person, companies, dossier, onAddRecord, auditAc
         />
       );
       case "bank": return <PersonnelBankTab person={person} bankAccounts={dossier.bankAccounts} auditActors={auditActors} />;
+      case "properties": return (
+        <PersonnelPropertiesTab
+          person={person}
+          profile={dossier.profiles[0] || null}
+          auditActors={auditActors}
+        />
+      );
       case "ice": return (
-        <div className="grid grid-cols-1 gap-4 xl:grid-cols-2">
-          <SectionPanel title="ICE-contactpersonen" icon={Users} action={<Button size="sm" variant="outline" onClick={() => onAddRecord("emergencyContact")}><Plus className="mr-1 h-4 w-4" />Contact</Button>}>
-            <MiniTable emptyText="Nog geen noodcontacten." rows={dossier.emergencyContacts} columns={[
-              { key: "name", label: "Naam" }, { key: "relationship", label: "Relatie" },
-              { key: "phone_1", label: "Telefoon 1" }, { key: "email", label: "E-mail" },
-            ]} />
-          </SectionPanel>
-          <SectionPanel title="CV" icon={FileText} action={<Button size="sm" variant="outline" onClick={() => onAddRecord("document")}><Plus className="mr-1 h-4 w-4" />Document</Button>}>
-            <MiniTable emptyText="Nog geen CV." rows={cvDocs} columns={[
-              { key: "document_type", label: "Omschrijving" },
-              { key: "valid_from", label: "Datum", render: r => formatDate(r.valid_from) },
-              { key: "verification_status", label: "Status", render: r => VERIFICATION_LABELS[r.verification_status] || r.verification_status },
-              { key: "audit_actor", label: "Door", render: getAuditActorLabel },
-            ]} />
-          </SectionPanel>
-        </div>
+        <SectionPanel title="ICE-contactpersonen" icon={Users} action={<Button size="sm" variant="outline" onClick={() => onAddRecord("emergencyContact")}><Plus className="mr-1 h-4 w-4" />Contact</Button>}>
+          <MiniTable emptyText="Nog geen noodcontacten." rows={dossier.emergencyContacts} columns={[
+            { key: "name", label: "Naam" }, { key: "relationship", label: "Relatie" },
+            { key: "phone_1", label: "Telefoon 1" }, { key: "email", label: "E-mail" },
+          ]} />
+        </SectionPanel>
       );
       case "contracts": return <PersonnelContractsTab personnel={person} companies={companies} />;
       case "planning": return (
@@ -1731,6 +1731,7 @@ export default function PersonnelDetail() {
   const { data: notes = [] } = useQuery({ queryKey: ["personnel-notes"], queryFn: () => safeList("PersonnelNote", "-created_date") });
   const { data: reviews = [] } = useQuery({ queryKey: ["personnel-reviews"], queryFn: () => safeList("PersonnelPerformanceReview", "-created_date") });
   const { data: absences = [] } = useQuery({ queryKey: ["personnel-absences"], queryFn: () => safeList("PersonnelAbsence", "-created_date") });
+  const { data: personnelProfiles = [] } = useQuery({ queryKey: ["personnel-profiles"], queryFn: () => safeList("PersonnelProfile", "-created_date") });
   const { data: routeExecutions = [] } = useQuery({ queryKey: ["route-executions"], queryFn: () => safeList("RouteExecution", "-service_date") });
   const { data: currentUser = null } = useQuery({ queryKey: ["current-user"], queryFn: () => base44.auth.me(), staleTime: 5 * 60 * 1000 });
 
@@ -1789,6 +1790,7 @@ export default function PersonnelDetail() {
     notes: byPersonnel(notes),
     reviews: byPersonnel(reviews),
     absences: byPersonnel(absences),
+    profiles: byPersonnel(personnelProfiles),
     routeExecutions,
   };
 
