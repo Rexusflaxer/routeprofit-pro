@@ -15,6 +15,7 @@
     "audit:cao-runtime": "node scripts/audit-cao-runtime-readiness.mjs",
     "verify:contract-template": "node scripts/verify-contract-template.mjs",
     "verify:korpschef-pass": "node scripts/verify-korpschef-pass.mjs",
+    "verify:korpschef-permission": "node scripts/verify-korpschef-permission.mjs",
     "preview": "vite preview"
   },
   "dependencies": {

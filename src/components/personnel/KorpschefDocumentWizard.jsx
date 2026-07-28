@@ -12,6 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
+import A4PdfPreview from "@/components/files/A4PdfPreview";
 import { DocumentPhotoViewer, DocumentSideUpload } from "@/components/personnel/IdentityDocumentWizard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -237,10 +238,14 @@ export default function KorpschefDocumentWizard({
   const [backPreviewUrl, setBackPreviewUrl] = useState("");
   const [recognizedKey, setRecognizedKey] = useState("");
   const [recognizedPass, setRecognizedPass] = useState(null);
+  const [recognizedPermissionKey, setRecognizedPermissionKey] = useState("");
+  const [recognizedPermission, setRecognizedPermission] = useState(null);
   const [scanQuality, setScanQuality] = useState(null);
   const [errors, setErrors] = useState({});
-  const latestUploadKeyRef = useRef("");
-  const recognitionInFlightKeyRef = useRef("");
+  const latestPassUploadKeyRef = useRef("");
+  const passRecognitionInFlightKeyRef = useRef("");
+  const latestPermissionUploadKeyRef = useRef("");
+  const permissionRecognitionInFlightKeyRef = useRef("");
 
   const { data: currentUser = null } = useQuery({
     queryKey: ["current-user"],
@@ -250,12 +255,21 @@ export default function KorpschefDocumentWizard({
 
   const selectedOption = companyOptions.find(option => option.company.id === form.company_id) || null;
   const selectedCompany = selectedOption?.company || null;
-  const uploadKey = [frontFile, backFile]
+  const passUploadKey = [frontFile, backFile]
     .filter(Boolean)
     .map(file => `${file.name}:${file.size}:${file.lastModified}`)
     .join("|");
+  const permissionUploadKey = permissionFile
+    ? `${permissionFile.name}:${permissionFile.size}:${permissionFile.lastModified}`
+    : "";
   const isPass = form.record_type === "wpbr_id";
-  const scanPending = Boolean(isPass && frontFile && backFile && recognizedKey !== uploadKey);
+  const permissionIsPdf = !isPass && (
+    permissionFile?.type === "application/pdf"
+    || /\.pdf$/i.test(permissionFile?.name || "")
+  );
+  const scanPending = isPass
+    ? Boolean(frontFile && backFile && recognizedKey !== passUploadKey)
+    : Boolean(permissionFile && recognizedPermissionKey !== permissionUploadKey);
 
   const setField = (field, value) => {
     setForm(current => ({ ...current, [field]: value }));
@@ -268,26 +282,30 @@ export default function KorpschefDocumentWizard({
   }, [permissionPreviewUrl]);
 
   useEffect(() => {
-    latestUploadKeyRef.current = uploadKey;
-  }, [uploadKey]);
+    latestPassUploadKeyRef.current = passUploadKey;
+  }, [passUploadKey]);
+
+  useEffect(() => {
+    latestPermissionUploadKeyRef.current = permissionUploadKey;
+  }, [permissionUploadKey]);
 
   useEffect(() => {
     if (
       !isPass
       || !frontFile
       || !backFile
-      || !uploadKey
-      || recognizedKey === uploadKey
-      || recognitionInFlightKeyRef.current === uploadKey
+      || !passUploadKey
+      || recognizedKey === passUploadKey
+      || passRecognitionInFlightKeyRef.current === passUploadKey
     ) return;
-    const currentUploadKey = uploadKey;
-    recognitionInFlightKeyRef.current = currentUploadKey;
+    const currentUploadKey = passUploadKey;
+    passRecognitionInFlightKeyRef.current = currentUploadKey;
 
     const runRecognition = async () => {
       try {
         const { recognizeWpbrPass } = await import("@/lib/wpbrPassOcr");
         const result = await recognizeWpbrPass({ frontFile, backFile });
-        if (latestUploadKeyRef.current !== currentUploadKey) return;
+        if (latestPassUploadKeyRef.current !== currentUploadKey) return;
         setRecognizedPass(result);
         setForm(current => ({
           ...current,
@@ -305,7 +323,7 @@ export default function KorpschefDocumentWizard({
         setRecognizedKey(currentUploadKey);
       } catch (error) {
         console.error("Wpbr-pass OCR failed", error);
-        if (latestUploadKeyRef.current !== currentUploadKey) return;
+        if (latestPassUploadKeyRef.current !== currentUploadKey) return;
         setScanQuality({
           status: "review",
           score: 0,
@@ -316,14 +334,69 @@ export default function KorpschefDocumentWizard({
         setRecognizedPass(null);
         setRecognizedKey(currentUploadKey);
       } finally {
-        if (recognitionInFlightKeyRef.current === currentUploadKey) {
-          recognitionInFlightKeyRef.current = "";
+        if (passRecognitionInFlightKeyRef.current === currentUploadKey) {
+          passRecognitionInFlightKeyRef.current = "";
         }
       }
     };
 
     runRecognition();
-  }, [backFile, frontFile, isPass, recognizedKey, uploadKey]);
+  }, [backFile, frontFile, isPass, passUploadKey, recognizedKey]);
+
+  useEffect(() => {
+    if (
+      isPass
+      || !permissionFile
+      || !permissionUploadKey
+      || recognizedPermissionKey === permissionUploadKey
+      || permissionRecognitionInFlightKeyRef.current === permissionUploadKey
+    ) return;
+    const currentUploadKey = permissionUploadKey;
+    permissionRecognitionInFlightKeyRef.current = currentUploadKey;
+
+    const runRecognition = async () => {
+      try {
+        const { recognizeWpbrPermission } = await import("@/lib/wpbrPermissionOcr");
+        const result = await recognizeWpbrPermission({ file: permissionFile });
+        if (latestPermissionUploadKeyRef.current !== currentUploadKey) return;
+        setRecognizedPermission(result);
+        setForm(current => ({
+          ...current,
+          document_reference: result.decision_number
+            || result.correspondence_reference
+            || current.document_reference,
+          decision_date: result.decision_date || current.decision_date,
+          valid_from: result.valid_from || current.valid_from,
+          valid_until: result.valid_until || current.valid_until,
+        }));
+        setScanQuality(result.upload_quality || null);
+        setRecognizedPermissionKey(currentUploadKey);
+      } catch (error) {
+        console.error("Korpschef permission OCR failed", error);
+        if (latestPermissionUploadKeyRef.current !== currentUploadKey) return;
+        setRecognizedPermission(null);
+        setScanQuality({
+          status: "review",
+          score: 0,
+          title: "Handmatige controle nodig",
+          summary: "De brief is ontvangen, maar de automatische herkenning kon niet volledig worden afgerond.",
+          checks: [],
+        });
+        setRecognizedPermissionKey(currentUploadKey);
+      } finally {
+        if (permissionRecognitionInFlightKeyRef.current === currentUploadKey) {
+          permissionRecognitionInFlightKeyRef.current = "";
+        }
+      }
+    };
+
+    runRecognition();
+  }, [
+    isPass,
+    permissionFile,
+    permissionUploadKey,
+    recognizedPermissionKey,
+  ]);
 
   const licenseMatch = useMemo(() => {
     if (!selectedCompany) return { license: null, status: "company_only", explanation: "" };
@@ -335,22 +408,24 @@ export default function KorpschefDocumentWizard({
   }, [licenses, recognizedPass?.license_number, selectedCompany]);
 
   const reviewIssues = useMemo(() => {
-    if (!isPass || !selectedCompany) return [];
+    if (!selectedCompany) return [];
     const issues = [];
-    const lastNameMatch = korpschefValuesMatch(expectedLastName(personnel), recognizedPass?.last_name);
+    const recognizedDocument = isPass ? recognizedPass : recognizedPermission;
+    const documentLabel = isPass ? "pas" : "brief";
+    const lastNameMatch = korpschefValuesMatch(expectedLastName(personnel), recognizedDocument?.last_name);
     const givenNamesMatch = korpschefValuesMatch(
       personnel?.legal_first_names || personnel?.first_name || personnel?.call_name,
-      recognizedPass?.given_names
+      recognizedDocument?.given_names
     );
-    const birthDateMatch = korpschefDatesMatch(personnel?.date_of_birth, recognizedPass?.birth_date);
-    const organizationMatch = companyKorpschefNameMatches(selectedCompany, recognizedPass?.organization_name);
+    const birthDateMatch = korpschefDatesMatch(personnel?.date_of_birth, recognizedDocument?.birth_date);
+    const organizationMatch = companyKorpschefNameMatches(selectedCompany, recognizedDocument?.organization_name);
 
     if (lastNameMatch === false) {
       issues.push({
         severity: "warning",
         group: "identity",
         label: "Achternaam komt niet overeen",
-        detail: `Personeelsprofiel: ${expectedLastName(personnel)}. Pas: ${recognizedPass?.last_name}.`,
+        detail: `Personeelsprofiel: ${expectedLastName(personnel)}. Document: ${recognizedDocument?.last_name}.`,
       });
     }
     if (givenNamesMatch === false) {
@@ -358,7 +433,7 @@ export default function KorpschefDocumentWizard({
         severity: "warning",
         group: "identity",
         label: "Voornamen lijken af te wijken",
-        detail: `Controleer of de pas bij ${fullPersonnelName(personnel)} hoort.`,
+        detail: `Controleer of de ${documentLabel} bij ${fullPersonnelName(personnel)} hoort.`,
       });
     }
     if (birthDateMatch === false) {
@@ -366,7 +441,7 @@ export default function KorpschefDocumentWizard({
         severity: "warning",
         group: "identity",
         label: "Geboortedatum komt niet overeen",
-        detail: `Personeelsprofiel: ${personnel.date_of_birth}. Pas: ${recognizedPass.birth_date}.`,
+        detail: `Personeelsprofiel: ${personnel.date_of_birth}. Document: ${recognizedDocument.birth_date}.`,
       });
     }
     if (organizationMatch === false) {
@@ -374,24 +449,24 @@ export default function KorpschefDocumentWizard({
         severity: "warning",
         group: "company",
         label: "Organisatie komt niet overeen",
-        detail: `De pas noemt ${recognizedPass?.organization_name}; gekozen is ${companyKorpschefLabel(selectedCompany)}.`,
+        detail: `De ${documentLabel} noemt ${recognizedDocument?.organization_name}; gekozen is ${companyKorpschefLabel(selectedCompany)}.`,
       });
     }
-    if (licenseMatch.status === "mismatch") {
+    if (isPass && licenseMatch.status === "mismatch") {
       issues.push({
         severity: "warning",
         group: "company",
         label: "Vergunningnummer komt niet overeen",
         detail: licenseMatch.explanation,
       });
-    } else if (licenseMatch.status === "probable") {
+    } else if (isPass && licenseMatch.status === "probable") {
       issues.push({
         severity: "warning",
         group: "company",
         label: "Vergunningnummer met OCR-correctie gekoppeld",
         detail: licenseMatch.explanation,
       });
-    } else if (licenseMatch.status === "company_only") {
+    } else if (isPass && licenseMatch.status === "company_only") {
       issues.push({
         severity: "warning",
         group: "company",
@@ -406,6 +481,14 @@ export default function KorpschefDocumentWizard({
         detail: scanQuality.summary,
       });
     }
+    if (!isPass && recognizedPermission?.conditional_permission) {
+      issues.push({
+        severity: "warning",
+        group: "condition",
+        label: "Voorwaardelijke toestemming",
+        detail: recognizedPermission.condition_summary,
+      });
+    }
 
     const scanIsReliable = scanQuality?.status === "ok" && Number(scanQuality?.score || 0) >= 80;
     if (!scanIsReliable) return issues;
@@ -417,7 +500,7 @@ export default function KorpschefDocumentWizard({
     ].filter(Boolean).length;
     const companyMismatchCount = [
       organizationMatch === false,
-      licenseMatch.status === "mismatch",
+      isPass && licenseMatch.status === "mismatch",
     ].filter(Boolean).length;
 
     return issues.map(issue => ({
@@ -432,13 +515,14 @@ export default function KorpschefDocumentWizard({
     licenseMatch,
     personnel,
     recognizedPass,
+    recognizedPermission,
     scanQuality,
     selectedCompany,
   ]);
 
   const hasCriticalIssue = reviewIssues.some(issue => issue.severity === "critical");
   const verificationNeedsReview = reviewIssues.some(issue => issue.severity !== "critical")
-    || licenseMatch.status === "company_only";
+    || (isPass && licenseMatch.status === "company_only");
 
   const validateUpload = () => {
     const nextErrors = {};
@@ -459,15 +543,19 @@ export default function KorpschefDocumentWizard({
       if (!form.valid_until) nextErrors.valid_until = "Einddatum is verplicht.";
       if (form.valid_from && form.valid_until && form.valid_until < form.valid_from) nextErrors.valid_until = "De einddatum ligt voor de begindatum.";
       if (!compactKorpschefValue(form.card_number)) nextErrors.card_number = "Pasnummer is verplicht.";
-    } else if (!form.decision_date && !form.valid_from) {
-      nextErrors.decision_date = "Vul de besluitdatum of ingangsdatum in.";
+    } else {
+      if (!compactKorpschefValue(form.document_reference)) nextErrors.document_reference = "Besluitnummer is verplicht.";
+      if (!form.decision_date) nextErrors.decision_date = "Besluitdatum is verplicht.";
+      if (!form.valid_from) nextErrors.valid_from = "Ingangsdatum is verplicht.";
+      if (!form.valid_until) nextErrors.valid_until = "Einddatum is verplicht.";
+      if (form.valid_from && form.valid_until && form.valid_until < form.valid_from) nextErrors.valid_until = "De einddatum ligt voor de ingangsdatum.";
     }
     if (hasCriticalIssue) {
       const labels = reviewIssues
         .filter(issue => issue.severity === "critical")
         .map(issue => issue.label.toLowerCase())
         .join(" en ");
-      nextErrors.general = `De pas bevat meerdere duidelijke afwijkingen: ${labels}.`;
+      nextErrors.general = `Het document bevat meerdere duidelijke afwijkingen: ${labels}.`;
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -560,9 +648,9 @@ export default function KorpschefDocumentWizard({
         license_match_status: licenseMatch.status,
         card_color: isPass ? form.card_color : null,
         card_role: isPass ? recognizedPass?.card_role || form.card_role || null : null,
-        holder_last_name: isPass ? holderLastName : null,
-        holder_given_names: isPass ? holderGivenNames : null,
-        holder_birth_date: isPass ? personnel?.date_of_birth || null : null,
+        holder_last_name: holderLastName || null,
+        holder_given_names: holderGivenNames || null,
+        holder_birth_date: personnel?.date_of_birth || null,
         personal_security: isPass ? form.personal_security : null,
         retail_surveillance: isPass ? form.retail_surveillance : null,
         uniform_exemption: isPass ? form.uniform_exemption : null,
@@ -580,12 +668,36 @@ export default function KorpschefDocumentWizard({
           severity: issue.severity,
           code: issue.label,
         })),
-        ocr_organization_name: isPass ? recognizedPass?.organization_name || null : null,
+        permission_is_conditional: !isPass && recognizedPermission?.conditional_permission === true,
+        permission_condition_type: !isPass ? recognizedPermission?.condition_type || null : null,
+        permission_condition_summary: !isPass ? recognizedPermission?.condition_summary || null : null,
+        permission_condition_review_required: !isPass && recognizedPermission?.conditional_permission === true,
+        permission_correspondence_reference: !isPass
+          ? recognizedPermission?.correspondence_reference || null
+          : null,
+        permission_police_unit: !isPass ? recognizedPermission?.police_unit || null : null,
+        permission_subject: !isPass ? recognizedPermission?.subject || null : null,
+        permission_application_date: !isPass ? recognizedPermission?.application_date || null : null,
+        ocr_organization_name: isPass
+          ? recognizedPass?.organization_name || null
+          : recognizedPermission?.organization_name || null,
+        ocr_organization_address: !isPass ? recognizedPermission?.organization_address || null : null,
         ocr_license_number: isPass ? recognizedPass?.license_number || null : null,
-        ocr_holder_last_name: isPass ? recognizedPass?.last_name || null : null,
-        ocr_holder_given_names: isPass ? recognizedPass?.given_names || null : null,
-        ocr_holder_birth_date: isPass ? recognizedPass?.birth_date || null : null,
-        ocr_quality_score: isPass ? scanQuality?.score ?? null : null,
+        ocr_holder_last_name: isPass
+          ? recognizedPass?.last_name || null
+          : recognizedPermission?.last_name || null,
+        ocr_holder_given_names: isPass
+          ? recognizedPass?.given_names || null
+          : recognizedPermission?.given_names || null,
+        ocr_holder_birth_date: isPass
+          ? recognizedPass?.birth_date || null
+          : recognizedPermission?.birth_date || null,
+        ocr_holder_birth_place: !isPass ? recognizedPermission?.birth_place || null : null,
+        ocr_decision_number: !isPass ? recognizedPermission?.decision_number || null : null,
+        ocr_decision_date: !isPass ? recognizedPermission?.decision_date || null : null,
+        ocr_valid_from: !isPass ? recognizedPermission?.valid_from || null : null,
+        ocr_valid_until: !isPass ? recognizedPermission?.valid_until || null : null,
+        ocr_quality_score: scanQuality?.score ?? null,
       }, auditActors);
 
       if (!archived) {
@@ -663,6 +775,17 @@ export default function KorpschefDocumentWizard({
 
   const chooseType = recordType => {
     setForm({ ...EMPTY_FORM, record_type: recordType });
+    setPermissionFile(null);
+    setPermissionPreviewUrl("");
+    setFrontFile(null);
+    setFrontPreviewUrl("");
+    setBackFile(null);
+    setBackPreviewUrl("");
+    setRecognizedKey("");
+    setRecognizedPass(null);
+    setRecognizedPermissionKey("");
+    setRecognizedPermission(null);
+    setScanQuality(null);
     setStep(2);
     setErrors({});
   };
@@ -852,7 +975,10 @@ export default function KorpschefDocumentWizard({
                   disabled={false}
                   onFile={file => {
                     setPermissionFile(file);
-                    setPermissionPreviewUrl(file.type.startsWith("image/") ? URL.createObjectURL(file) : "");
+                    setPermissionPreviewUrl(URL.createObjectURL(file));
+                    setRecognizedPermissionKey("");
+                    setRecognizedPermission(null);
+                    setScanQuality(null);
                     setErrors(current => ({ ...current, permission: undefined }));
                   }}
                 />
@@ -878,9 +1004,11 @@ export default function KorpschefDocumentWizard({
             <div className="space-y-4">
               <div className="flex min-h-[360px] flex-col items-center justify-center rounded-lg border border-border bg-card px-6 py-12 text-center">
                 <Loader2 className="mb-4 h-8 w-8 animate-spin text-primary" />
-                <p className="text-sm font-medium text-foreground">Scan verwerken</p>
+                <p className="text-sm font-medium text-foreground">
+                  {isPass ? "Pas uitlezen" : "Toestemmingsbrief uitlezen"}
+                </p>
                 <p className="mt-1 max-w-md text-xs text-muted-foreground">
-                  De upload wordt gelezen. Zodra dit klaar is, opent de controle automatisch.
+                  LOQ leest de upload en controleert de gegevens met het personeelsprofiel en het gekozen bedrijf.
                 </p>
               </div>
               <div className="flex items-center justify-between pt-1">
@@ -895,8 +1023,10 @@ export default function KorpschefDocumentWizard({
           {step === 4 && !scanPending && (
             <div className="space-y-4">
               <div className={`grid grid-cols-1 gap-5 ${
-                isPass || permissionPreviewUrl
+                isPass
                   ? "xl:grid-cols-[minmax(0,1fr)_360px]"
+                  : permissionPreviewUrl
+                    ? "xl:grid-cols-[minmax(0,1fr)_minmax(460px,0.85fr)]"
                   : ""
               }`}>
                 <div className="space-y-4">
@@ -947,24 +1077,66 @@ export default function KorpschefDocumentWizard({
                   ) : (
                     <>
                       <div className="space-y-1.5">
-                        <Label htmlFor="permission-reference">Kenmerk of besluitnummer</Label>
+                        <Label htmlFor="permission-reference">Besluitnummer *</Label>
                         <Input id="permission-reference" value={form.document_reference} onChange={event => setField("document_reference", event.target.value)} />
+                        {errors.document_reference && <p className="text-xs text-destructive">{errors.document_reference}</p>}
                       </div>
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                         <div className="space-y-1.5">
-                          <Label htmlFor="decision-date">Besluitdatum</Label>
+                          <Label htmlFor="decision-date">Besluitdatum *</Label>
                           <Input id="decision-date" type="date" value={form.decision_date} onChange={event => setField("decision_date", event.target.value)} />
                           {errors.decision_date && <p className="text-xs text-destructive">{errors.decision_date}</p>}
                         </div>
                         <div className="space-y-1.5">
-                          <Label htmlFor="permission-valid-from">Geldig vanaf</Label>
+                          <Label htmlFor="permission-valid-from">Geldig vanaf *</Label>
                           <Input id="permission-valid-from" type="date" value={form.valid_from} onChange={event => setField("valid_from", event.target.value)} />
+                          {errors.valid_from && <p className="text-xs text-destructive">{errors.valid_from}</p>}
                         </div>
                         <div className="space-y-1.5">
-                          <Label htmlFor="permission-valid-until">Geldig tot</Label>
+                          <Label htmlFor="permission-valid-until">Geldig tot en met *</Label>
                           <Input id="permission-valid-until" type="date" value={form.valid_until} onChange={event => setField("valid_until", event.target.value)} />
+                          {errors.valid_until && <p className="text-xs text-destructive">{errors.valid_until}</p>}
                         </div>
                       </div>
+
+                      {scanQuality && (
+                        <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
+                          scanQuality.status === "ok"
+                            ? "border-emerald-500/30 bg-emerald-500/10 text-emerald-700 dark:text-emerald-300"
+                            : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-300"
+                        }`}>
+                          {scanQuality.status === "ok"
+                            ? <Check className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                            : <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />}
+                          <span>
+                            <strong>{scanQuality.title}.</strong>{" "}
+                            {scanQuality.summary}
+                          </span>
+                        </div>
+                      )}
+
+                      {recognizedPermission?.conditional_permission && (
+                        <div className="flex items-start gap-2 rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                          <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                          <span>
+                            <strong>Voorwaardelijke toestemming.</strong>{" "}
+                            {recognizedPermission.condition_summary}
+                          </span>
+                        </div>
+                      )}
+
+                      {reviewIssues.some(issue => ["identity", "company"].includes(issue.group)) && (
+                        <div className="rounded-md border border-amber-500/30 bg-amber-500/10 px-3 py-2 text-xs text-amber-800 dark:text-amber-300">
+                          <p className="font-semibold">Controleer de koppeling</p>
+                          <ul className="mt-1 space-y-1">
+                            {reviewIssues
+                              .filter(issue => ["identity", "company"].includes(issue.group))
+                              .map(issue => (
+                                <li key={issue.label}>{issue.label}: {issue.detail}</li>
+                              ))}
+                          </ul>
+                        </div>
+                      )}
                     </>
                   )}
 
@@ -972,7 +1144,7 @@ export default function KorpschefDocumentWizard({
                     <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
                       <span>
-                        De pas bevat meerdere duidelijke afwijkingen:{" "}
+                        Het document bevat meerdere duidelijke afwijkingen:{" "}
                         {reviewIssues
                           .filter(issue => issue.severity === "critical")
                           .map(issue => issue.label.toLowerCase())
@@ -991,9 +1163,17 @@ export default function KorpschefDocumentWizard({
                   />
                 )}
                 {!isPass && permissionPreviewUrl && (
-                  <DocumentPhotoViewer
-                    images={[{ src: permissionPreviewUrl, label: "Toestemmingsbrief" }]}
-                  />
+                  permissionIsPdf ? (
+                    <A4PdfPreview
+                      url={permissionPreviewUrl}
+                      filename={permissionFile?.name || "Toestemmingsbrief"}
+                      initialZoom={60}
+                    />
+                  ) : (
+                    <DocumentPhotoViewer
+                      images={[{ src: permissionPreviewUrl, label: "Toestemmingsbrief" }]}
+                    />
+                  )
                 )}
               </div>
 

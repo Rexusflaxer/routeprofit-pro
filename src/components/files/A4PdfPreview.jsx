@@ -75,8 +75,13 @@ function A4PdfPage({ document, pageNumber, zoom }) {
   );
 }
 
-export default function A4PdfPreview({ url, filename = "Contract", className = "" }) {
-  const [zoom, setZoom] = useState(100);
+export default function A4PdfPreview({
+  url,
+  filename = "Contract",
+  className = "",
+  initialZoom = 100,
+}) {
+  const [zoom, setZoom] = useState(initialZoom);
   const [pdfDocument, setPdfDocument] = useState(null);
   const [status, setStatus] = useState("loading");
   const [error, setError] = useState("");
