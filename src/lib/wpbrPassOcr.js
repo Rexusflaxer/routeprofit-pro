@@ -23,20 +23,79 @@ function linesOf(value) {
     .filter(Boolean);
 }
 
+const KNOWN_FIELD_LABELS = [
+  "Naam organisatie",
+  "Organisatie",
+  "Vergunningnummer",
+  "Vergunning nummer",
+  "Telefoonnummer",
+  "Geldig van",
+  "Geldig tot",
+  "Valid from",
+  "Valid until",
+  "tot en met",
+  "Naam",
+  "Voornamen",
+  "Geboortedatum",
+  "Geboren",
+  "Pasnummer",
+  "Pas nummer",
+  "Persoonsbeveiliger",
+  "Winkelsurveillant",
+  "Ontheffing Uniformdraagplicht",
+  "Beperking",
+];
+
+function escapeRegExp(value) {
+  return String(value).replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+}
+
+function labelPattern(label) {
+  return escapeRegExp(label)
+    .split(/\s+/)
+    .join("\\s+");
+}
+
+function matchLeadingLabel(line, label) {
+  const pattern = labelPattern(label);
+  const delimited = String(line).match(
+    new RegExp(`^\\s*${pattern}\\s*(?::|;|\\||=|\\.{2,}|-{1,}|–|—)\\s*(.*)$`, "i")
+  );
+  if (delimited) return { value: cleanFieldValue(delimited[1]), matched: true };
+
+  if (normalize(line) === normalize(label)) return { value: "", matched: true };
+
+  const spaced = String(line).match(new RegExp(`^\\s*${pattern}\\s{2,}(.+)$`, "i"));
+  if (spaced) return { value: cleanFieldValue(spaced[1]), matched: true };
+
+  return { value: "", matched: false };
+}
+
+function isKnownLabelLine(line) {
+  return KNOWN_FIELD_LABELS.some(label => matchLeadingLabel(line, label).matched);
+}
+
+function isUsefulFieldValue(value) {
+  const cleaned = cleanFieldValue(value);
+  return Boolean(cleaned && /[A-Z0-9]{2}/i.test(cleaned) && !isKnownLabelLine(cleaned));
+}
+
 function fieldAfterLabel(text, labels, { maxNextLines = 2 } = {}) {
   const lines = linesOf(text);
   for (let index = 0; index < lines.length; index += 1) {
-    const normalizedLine = normalize(lines[index]);
-    const label = labels.find(candidate => normalizedLine.includes(normalize(candidate)));
-    if (!label) continue;
+    const match = [...labels]
+      .sort((left, right) => right.length - left.length)
+      .map(label => matchLeadingLabel(lines[index], label))
+      .find(candidate => candidate.matched);
+    if (!match) continue;
 
-    const labelIndex = normalizedLine.indexOf(normalize(label));
-    const sameLineValue = cleanFieldValue(lines[index].slice(labelIndex + label.length));
-    if (sameLineValue) return sameLineValue;
+    if (isUsefulFieldValue(match.value)) return match.value;
 
     for (let offset = 1; offset <= maxNextLines; offset += 1) {
-      const candidate = cleanFieldValue(lines[index + offset]);
-      if (candidate) return candidate;
+      const nextLine = lines[index + offset];
+      if (!nextLine || isKnownLabelLine(nextLine)) break;
+      const candidate = cleanFieldValue(nextLine);
+      if (isUsefulFieldValue(candidate)) return candidate;
     }
   }
   return "";

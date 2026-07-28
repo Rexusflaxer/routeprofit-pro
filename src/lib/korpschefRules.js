@@ -47,6 +47,17 @@ export function normalizeKorpschefMatchValue(value) {
     .replace(/[^A-Z0-9]/g, "");
 }
 
+const WPBR_LICENSE_PREFIXES = ["HND", "HBD", "PAC", "VTC", "PGW", "POB", "ND", "BD"];
+
+export function parseKorpschefLicenseNumber(value, fallbackType = "") {
+  const normalized = normalizeKorpschefMatchValue(value);
+  const detectedType = WPBR_LICENSE_PREFIXES.find(prefix => normalized.startsWith(prefix)) || "";
+  return {
+    type: detectedType || normalizeWpbrLicenseType(fallbackType),
+    number: detectedType ? normalized.slice(detectedType.length) : normalized,
+  };
+}
+
 export function companyKorpschefLabel(company) {
   return compactKorpschefValue(
     company?.legal_name
@@ -159,11 +170,13 @@ export function licenseSnapshotLabel(document) {
 export function findMatchingWpbrLicense({ company, licenses = [], recognizedLicenseNumber = "" }) {
   const companyLicenses = companyWpbrLicenses(company, licenses);
   const activeLicenses = companyLicenses.filter(isLicenseActiveOn);
-  const normalizedNumber = normalizeKorpschefMatchValue(recognizedLicenseNumber);
-  const exact = normalizedNumber
-    ? companyLicenses.find(license => (
-        normalizeKorpschefMatchValue(license.license_number) === normalizedNumber
-      ))
+  const recognized = parseKorpschefLicenseNumber(recognizedLicenseNumber);
+  const exact = recognized.number
+    ? companyLicenses.find(license => {
+        const stored = parseKorpschefLicenseNumber(license.license_number, license.license_type);
+        const typeMatches = !recognized.type || !stored.type || recognized.type === stored.type;
+        return typeMatches && stored.number === recognized.number;
+      })
     : null;
 
   if (exact) {
@@ -174,7 +187,7 @@ export function findMatchingWpbrLicense({ company, licenses = [], recognizedLice
     };
   }
 
-  if (!normalizedNumber && activeLicenses.length === 1) {
+  if (!recognized.number && activeLicenses.length === 1) {
     return {
       license: activeLicenses[0],
       status: "inferred",
@@ -184,8 +197,8 @@ export function findMatchingWpbrLicense({ company, licenses = [], recognizedLice
 
   return {
     license: null,
-    status: normalizedNumber ? "mismatch" : "company_only",
-    explanation: normalizedNumber
+    status: recognized.number ? "mismatch" : "company_only",
+    explanation: recognized.number
       ? "Het vergunningnummer op het document komt niet overeen met een vergunning van het gekozen bedrijf."
       : "De vergunningcontext blijft op bedrijfsniveau omdat geen uniek vergunningnummer kon worden afgeleid.",
   };

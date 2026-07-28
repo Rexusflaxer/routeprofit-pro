@@ -4,7 +4,6 @@ import { AnimatePresence, motion } from "framer-motion";
 import {
   AlertTriangle,
   Check,
-  CheckCircle2,
   ChevronLeft,
   ChevronRight,
   FileText,
@@ -13,7 +12,7 @@ import {
   X,
 } from "lucide-react";
 import { base44 } from "@/api/base44Client";
-import { DocumentSideUpload } from "@/components/personnel/IdentityDocumentWizard";
+import { DocumentPhotoViewer, DocumentSideUpload } from "@/components/personnel/IdentityDocumentWizard";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Checkbox } from "@/components/ui/checkbox";
@@ -37,16 +36,10 @@ const TODAY = () => new Date().toISOString().slice(0, 10);
 const EMPTY_FORM = {
   record_type: "",
   company_id: "",
-  authority: "korpschef",
   document_reference: "",
   decision_date: "",
   valid_from: "",
   valid_until: "",
-  organization_name: "",
-  license_number: "",
-  holder_last_name: "",
-  holder_given_names: "",
-  holder_birth_date: "",
   card_color: "grey",
   card_number: "",
   card_role: "",
@@ -55,8 +48,6 @@ const EMPTY_FORM = {
   uniform_exemption: null,
   restriction_applies: null,
   restriction_text: "",
-  notes: "",
-  manual_confirmed: false,
 };
 
 function fullPersonnelName(personnel) {
@@ -247,23 +238,6 @@ function PassUploadGuideCard({ frontUpload, backUpload }) {
   );
 }
 
-function ReviewMessage({ issue }) {
-  const blocked = issue.severity === "critical";
-  return (
-    <div className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
-      blocked
-        ? "border-destructive/30 bg-destructive/10 text-destructive"
-        : "border-amber-500/30 bg-amber-500/10 text-amber-800 dark:text-amber-200"
-    }`}>
-      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-      <div>
-        <p className="font-medium">{issue.label}</p>
-        {issue.detail && <p className="mt-0.5 opacity-85">{issue.detail}</p>}
-      </div>
-    </div>
-  );
-}
-
 function BooleanField({ id, checked, onCheckedChange, label }) {
   return (
     <label htmlFor={id} className="flex cursor-pointer items-center gap-2 text-sm text-foreground">
@@ -292,6 +266,7 @@ export default function KorpschefDocumentWizard({
   const [backFile, setBackFile] = useState(null);
   const [backPreviewUrl, setBackPreviewUrl] = useState("");
   const [recognizedKey, setRecognizedKey] = useState("");
+  const [recognizedPass, setRecognizedPass] = useState(null);
   const [scanQuality, setScanQuality] = useState(null);
   const [errors, setErrors] = useState({});
   const latestUploadKeyRef = useRef("");
@@ -343,15 +318,11 @@ export default function KorpschefDocumentWizard({
         const { recognizeWpbrPass } = await import("@/lib/wpbrPassOcr");
         const result = await recognizeWpbrPass({ frontFile, backFile });
         if (latestUploadKeyRef.current !== currentUploadKey) return;
+        setRecognizedPass(result);
         setForm(current => ({
           ...current,
-          organization_name: result.organization_name || current.organization_name,
-          license_number: result.license_number || current.license_number,
           valid_from: result.valid_from || current.valid_from,
           valid_until: result.valid_until || current.valid_until,
-          holder_last_name: result.last_name || current.holder_last_name,
-          holder_given_names: result.given_names || current.holder_given_names,
-          holder_birth_date: result.birth_date || current.holder_birth_date,
           card_number: result.card_number || current.card_number,
           card_role: result.card_role || current.card_role,
           personal_security: result.personal_security ?? current.personal_security,
@@ -372,6 +343,7 @@ export default function KorpschefDocumentWizard({
           summary: "De pas is ontvangen, maar de automatische herkenning kon niet volledig worden afgerond.",
           checks: [],
         });
+        setRecognizedPass(null);
         setRecognizedKey(currentUploadKey);
       } finally {
         if (recognitionInFlightKeyRef.current === currentUploadKey) {
@@ -388,25 +360,25 @@ export default function KorpschefDocumentWizard({
     return findMatchingWpbrLicense({
       company: selectedCompany,
       licenses,
-      recognizedLicenseNumber: form.license_number,
+      recognizedLicenseNumber: recognizedPass?.license_number || "",
     });
-  }, [form.license_number, licenses, selectedCompany]);
+  }, [licenses, recognizedPass?.license_number, selectedCompany]);
 
   const reviewIssues = useMemo(() => {
     if (!isPass || !selectedCompany) return [];
     const issues = [];
-    const lastNameMatch = valuesOverlap(expectedLastName(personnel), form.holder_last_name);
+    const lastNameMatch = valuesOverlap(expectedLastName(personnel), recognizedPass?.last_name);
     const givenNamesMatch = valuesOverlap(
       personnel?.legal_first_names || personnel?.first_name || personnel?.call_name,
-      form.holder_given_names
+      recognizedPass?.given_names
     );
-    const organizationMatch = companyNameMatches(selectedCompany, form.organization_name);
+    const organizationMatch = companyNameMatches(selectedCompany, recognizedPass?.organization_name);
 
     if (lastNameMatch === false) {
       issues.push({
         severity: "critical",
         label: "Achternaam komt niet overeen",
-        detail: `Personeelsprofiel: ${expectedLastName(personnel)}. Pas: ${form.holder_last_name}.`,
+        detail: `Personeelsprofiel: ${expectedLastName(personnel)}. Pas: ${recognizedPass?.last_name}.`,
       });
     }
     if (givenNamesMatch === false) {
@@ -416,18 +388,22 @@ export default function KorpschefDocumentWizard({
         detail: `Controleer of de pas bij ${fullPersonnelName(personnel)} hoort.`,
       });
     }
-    if (personnel?.date_of_birth && form.holder_birth_date && personnel.date_of_birth !== form.holder_birth_date) {
+    if (
+      personnel?.date_of_birth
+      && recognizedPass?.birth_date
+      && personnel.date_of_birth !== recognizedPass.birth_date
+    ) {
       issues.push({
         severity: "critical",
         label: "Geboortedatum komt niet overeen",
-        detail: `Personeelsprofiel: ${personnel.date_of_birth}. Pas: ${form.holder_birth_date}.`,
+        detail: `Personeelsprofiel: ${personnel.date_of_birth}. Pas: ${recognizedPass.birth_date}.`,
       });
     }
     if (organizationMatch === false) {
       issues.push({
         severity: "critical",
         label: "Organisatie komt niet overeen",
-        detail: `De pas noemt ${form.organization_name}; gekozen is ${companyKorpschefLabel(selectedCompany)}.`,
+        detail: `De pas noemt ${recognizedPass?.organization_name}; gekozen is ${companyKorpschefLabel(selectedCompany)}.`,
       });
     }
     if (licenseMatch.status === "mismatch") {
@@ -452,19 +428,17 @@ export default function KorpschefDocumentWizard({
     }
     return issues;
   }, [
-    form.holder_birth_date,
-    form.holder_given_names,
-    form.holder_last_name,
-    form.organization_name,
     isPass,
     licenseMatch,
     personnel,
+    recognizedPass,
     scanQuality,
     selectedCompany,
   ]);
 
   const hasCriticalIssue = reviewIssues.some(issue => issue.severity === "critical");
-  const needsManualConfirmation = reviewIssues.some(issue => issue.severity !== "critical");
+  const verificationNeedsReview = reviewIssues.some(issue => issue.severity !== "critical")
+    || licenseMatch.status === "company_only";
 
   const validateUpload = () => {
     const nextErrors = {};
@@ -480,23 +454,16 @@ export default function KorpschefDocumentWizard({
 
   const validateReview = () => {
     const nextErrors = {};
-    if (!form.authority) nextErrors.authority = "Kies de bevoegde autoriteit.";
     if (isPass) {
-      if (!compactKorpschefValue(form.organization_name)) nextErrors.organization_name = "Organisatienaam is verplicht.";
-      if (!compactKorpschefValue(form.license_number)) nextErrors.license_number = "Vergunningnummer is verplicht.";
       if (!form.valid_from) nextErrors.valid_from = "Begindatum is verplicht.";
       if (!form.valid_until) nextErrors.valid_until = "Einddatum is verplicht.";
       if (form.valid_from && form.valid_until && form.valid_until < form.valid_from) nextErrors.valid_until = "De einddatum ligt voor de begindatum.";
-      if (!compactKorpschefValue(form.holder_last_name)) nextErrors.holder_last_name = "Achternaam is verplicht.";
-      if (!compactKorpschefValue(form.holder_given_names)) nextErrors.holder_given_names = "Voornamen zijn verplicht.";
-      if (!form.holder_birth_date) nextErrors.holder_birth_date = "Geboortedatum is verplicht.";
       if (!compactKorpschefValue(form.card_number)) nextErrors.card_number = "Pasnummer is verplicht.";
     } else if (!form.decision_date && !form.valid_from) {
       nextErrors.decision_date = "Vul de besluitdatum of ingangsdatum in.";
     }
-    if (hasCriticalIssue) nextErrors.general = "Los de afwijkingen op voordat je het document opslaat.";
-    if (needsManualConfirmation && !form.manual_confirmed) {
-      nextErrors.manual_confirmed = "Bevestig dat je het originele document handmatig hebt gecontroleerd.";
+    if (hasCriticalIssue) {
+      nextErrors.general = "De pas sluit niet aan op de gekozen medewerker of het bedrijf. Controleer de uploads of ga terug naar Bedrijf.";
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -514,6 +481,11 @@ export default function KorpschefDocumentWizard({
       const documentNumber = isPass ? form.card_number : form.document_reference;
       const ownerLabel = fullPersonnelName(personnel);
       const selectedLicense = licenseMatch.license;
+      const holderLastName = expectedLastName(personnel);
+      const holderGivenNames = personnel?.legal_first_names
+        || personnel?.first_name
+        || personnel?.call_name
+        || "";
 
       const existing = await base44.entities.PersonnelDocument.filter({ personnel_id: personnel.id }, "-created_date");
       const duplicate = existing.find(document => (
@@ -571,23 +543,22 @@ export default function KorpschefDocumentWizard({
         });
       }
 
-      const verificationNeedsReview = needsManualConfirmation || licenseMatch.status === "company_only";
       const metadata = buildAuditMetadata(currentUser, archived ? "gearchiveerd" : "toegevoegd", {
         korpschef_record: true,
         record_type: form.record_type,
         record_status: recordStatus,
-        authority: form.authority,
+        authority: "korpschef",
         decision_date: form.decision_date || null,
-        organization_name: form.organization_name || companyKorpschefLabel(company),
+        organization_name: companyKorpschefLabel(company),
         license_id: selectedLicense?.id || null,
         license_type: selectedLicense?.license_type || null,
-        license_number: form.license_number || selectedLicense?.license_number || null,
+        license_number: selectedLicense?.license_number || recognizedPass?.license_number || null,
         license_match_status: licenseMatch.status,
         card_color: isPass ? form.card_color : null,
-        card_role: isPass ? form.card_role || null : null,
-        holder_last_name: isPass ? form.holder_last_name : null,
-        holder_given_names: isPass ? form.holder_given_names : null,
-        holder_birth_date: isPass ? form.holder_birth_date : null,
+        card_role: isPass ? recognizedPass?.card_role || form.card_role || null : null,
+        holder_last_name: isPass ? holderLastName : null,
+        holder_given_names: isPass ? holderGivenNames : null,
+        holder_birth_date: isPass ? personnel?.date_of_birth || null : null,
         personal_security: isPass ? form.personal_security : null,
         retail_surveillance: isPass ? form.retail_surveillance : null,
         uniform_exemption: isPass ? form.uniform_exemption : null,
@@ -595,7 +566,21 @@ export default function KorpschefDocumentWizard({
         restriction_text: isPass ? form.restriction_text || null : null,
         archived,
         archived_at: archived ? new Date().toISOString() : null,
-        manual_document_check: Boolean(form.manual_confirmed),
+        manual_document_check: false,
+        background_verification_status: hasCriticalIssue
+          ? "mismatch"
+          : verificationNeedsReview
+            ? "review"
+            : "matched",
+        background_verification_issues: reviewIssues.map(issue => ({
+          severity: issue.severity,
+          code: issue.label,
+        })),
+        ocr_organization_name: isPass ? recognizedPass?.organization_name || null : null,
+        ocr_license_number: isPass ? recognizedPass?.license_number || null : null,
+        ocr_holder_last_name: isPass ? recognizedPass?.last_name || null : null,
+        ocr_holder_given_names: isPass ? recognizedPass?.given_names || null : null,
+        ocr_holder_birth_date: isPass ? recognizedPass?.birth_date || null : null,
         ocr_quality_score: isPass ? scanQuality?.score ?? null : null,
       }, auditActors);
 
@@ -639,7 +624,7 @@ export default function KorpschefDocumentWizard({
         back_logical_path: backUpload?.logical_path || null,
         verification_status: archived ? "expired" : verificationNeedsReview ? "pending_review" : "verified",
         is_sensitive: true,
-        notes: form.notes || null,
+        notes: null,
         metadata,
       });
 
@@ -727,7 +712,7 @@ export default function KorpschefDocumentWizard({
             <div className="space-y-3">
               <div>
                 <p className="text-sm font-medium text-foreground">Welk document wil je toevoegen?</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">Kies het document dat al door politie of Koninklijke Marechaussee is afgegeven.</p>
+                <p className="mt-0.5 text-xs text-muted-foreground">Kies het document dat door de korpschef van politie is afgegeven.</p>
               </div>
               <div className="grid grid-cols-1 gap-2">
                 <button
@@ -827,6 +812,7 @@ export default function KorpschefDocumentWizard({
                           setFrontFile(file);
                           setFrontPreviewUrl(previewUrl);
                           setRecognizedKey("");
+                          setRecognizedPass(null);
                           setScanQuality(null);
                         }}
                         uploading={false}
@@ -845,6 +831,7 @@ export default function KorpschefDocumentWizard({
                           setBackFile(file);
                           setBackPreviewUrl(previewUrl);
                           setRecognizedKey("");
+                          setRecognizedPass(null);
                           setScanQuality(null);
                         }}
                         uploading={false}
@@ -903,43 +890,15 @@ export default function KorpschefDocumentWizard({
 
           {step === 4 && !scanPending && (
             <div className="space-y-4">
-              <div className="grid grid-cols-1 gap-5 xl:grid-cols-[minmax(0,1fr)_360px]">
+              <div className={`grid grid-cols-1 gap-5 ${
+                isPass || permissionPreviewUrl
+                  ? "xl:grid-cols-[minmax(0,1fr)_360px]"
+                  : ""
+              }`}>
                 <div className="space-y-4">
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                    <div className="space-y-1.5">
-                      <Label htmlFor="korpschef-authority">Bevoegde autoriteit *</Label>
-                      <Select value={form.authority} onValueChange={value => setField("authority", value)}>
-                        <SelectTrigger id="korpschef-authority"><SelectValue /></SelectTrigger>
-                        <SelectContent>
-                          <SelectItem value="korpschef">Korpschef van politie</SelectItem>
-                          <SelectItem value="kmar">Commandant Koninklijke Marechaussee</SelectItem>
-                        </SelectContent>
-                      </Select>
-                      {errors.authority && <p className="text-xs text-destructive">{errors.authority}</p>}
-                    </div>
-                    {!isPass && (
-                      <div className="space-y-1.5">
-                        <Label htmlFor="permission-reference">Kenmerk of besluitnummer</Label>
-                        <Input id="permission-reference" value={form.document_reference} onChange={event => setField("document_reference", event.target.value)} />
-                      </div>
-                    )}
-                  </div>
-
                   {isPass ? (
                     <>
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
-                        <div className="space-y-1.5">
-                          <Label htmlFor="pass-organization">Naam organisatie *</Label>
-                          <Input id="pass-organization" value={form.organization_name} onChange={event => setField("organization_name", event.target.value)} />
-                          {errors.organization_name && <p className="text-xs text-destructive">{errors.organization_name}</p>}
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label htmlFor="pass-license">Vergunningnummer op pas *</Label>
-                          <Input id="pass-license" value={form.license_number} onChange={event => setField("license_number", event.target.value)} />
-                          {errors.license_number && <p className="text-xs text-destructive">{errors.license_number}</p>}
-                        </div>
-                      </div>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
                         <div className="space-y-1.5">
                           <Label htmlFor="pass-number">Pasnummer *</Label>
                           <Input id="pass-number" value={form.card_number} onChange={event => setField("card_number", event.target.value)} />
@@ -953,50 +912,9 @@ export default function KorpschefDocumentWizard({
                               {WPBR_CARD_COLORS.map(option => <SelectItem key={option.value} value={option.value}>{option.label}</SelectItem>)}
                             </SelectContent>
                           </Select>
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label htmlFor="pass-role">Aanduiding op pas</Label>
-                          <Input id="pass-role" value={form.card_role} onChange={event => setField("card_role", event.target.value)} placeholder="Bijv. Beveiliger" />
+                          <p className="text-xs text-muted-foreground">Controleer de kleur op de originele pas.</p>
                         </div>
                       </div>
-                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                        <div className="space-y-1.5">
-                          <Label htmlFor="holder-last-name">Achternaam *</Label>
-                          <Input id="holder-last-name" value={form.holder_last_name} onChange={event => setField("holder_last_name", event.target.value)} />
-                          {errors.holder_last_name && <p className="text-xs text-destructive">{errors.holder_last_name}</p>}
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label htmlFor="holder-given-names">Voornamen *</Label>
-                          <Input id="holder-given-names" value={form.holder_given_names} onChange={event => setField("holder_given_names", event.target.value)} />
-                          {errors.holder_given_names && <p className="text-xs text-destructive">{errors.holder_given_names}</p>}
-                        </div>
-                        <div className="space-y-1.5">
-                          <Label htmlFor="holder-birth-date">Geboortedatum *</Label>
-                          <Input id="holder-birth-date" type="date" value={form.holder_birth_date} onChange={event => setField("holder_birth_date", event.target.value)} />
-                          {errors.holder_birth_date && <p className="text-xs text-destructive">{errors.holder_birth_date}</p>}
-                        </div>
-                      </div>
-                    </>
-                  ) : (
-                    <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-                      <div className="space-y-1.5">
-                        <Label htmlFor="decision-date">Besluitdatum</Label>
-                        <Input id="decision-date" type="date" value={form.decision_date} onChange={event => setField("decision_date", event.target.value)} />
-                        {errors.decision_date && <p className="text-xs text-destructive">{errors.decision_date}</p>}
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="permission-valid-from">Geldig vanaf</Label>
-                        <Input id="permission-valid-from" type="date" value={form.valid_from} onChange={event => setField("valid_from", event.target.value)} />
-                      </div>
-                      <div className="space-y-1.5">
-                        <Label htmlFor="permission-valid-until">Geldig tot</Label>
-                        <Input id="permission-valid-until" type="date" value={form.valid_until} onChange={event => setField("valid_until", event.target.value)} />
-                      </div>
-                    </div>
-                  )}
-
-                  {isPass && (
-                    <>
                       <div className="grid grid-cols-1 gap-3 sm:grid-cols-2">
                         <div className="space-y-1.5">
                           <Label htmlFor="pass-valid-from">Geldig vanaf *</Label>
@@ -1022,57 +940,51 @@ export default function KorpschefDocumentWizard({
                         </div>
                       )}
                     </>
-                  )}
-
-                  <div className="space-y-1.5">
-                    <Label htmlFor="korpschef-notes">Notitie</Label>
-                    <Textarea id="korpschef-notes" value={form.notes} onChange={event => setField("notes", event.target.value)} rows={2} />
-                  </div>
-                </div>
-
-                <div className="space-y-3">
-                  <div className="rounded-lg border border-border bg-muted/20 p-4">
-                    <p className="text-xs font-semibold uppercase tracking-wider text-muted-foreground">Automatische controle</p>
-                    <div className="mt-3 space-y-2 text-xs">
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted-foreground">Medewerker</span>
-                        <span className="text-right font-medium text-foreground">{fullPersonnelName(personnel)}</span>
+                  ) : (
+                    <>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="permission-reference">Kenmerk of besluitnummer</Label>
+                        <Input id="permission-reference" value={form.document_reference} onChange={event => setField("document_reference", event.target.value)} />
                       </div>
-                      <div className="flex items-center justify-between gap-3">
-                        <span className="text-muted-foreground">Bedrijf</span>
-                        <span className="text-right font-medium text-foreground">{companyKorpschefLabel(selectedCompany)}</span>
-                      </div>
-                      {isPass && (
-                        <div className="flex items-center justify-between gap-3">
-                          <span className="text-muted-foreground">Vergunning</span>
-                          <span className="text-right font-medium text-foreground">
-                            {licenseMatch.license
-                              ? `${licenseMatch.license.license_type}${licenseMatch.license.license_number ? ` #${licenseMatch.license.license_number}` : ""}`
-                              : "Bedrijfsniveau"}
-                          </span>
+                      <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+                        <div className="space-y-1.5">
+                          <Label htmlFor="decision-date">Besluitdatum</Label>
+                          <Input id="decision-date" type="date" value={form.decision_date} onChange={event => setField("decision_date", event.target.value)} />
+                          {errors.decision_date && <p className="text-xs text-destructive">{errors.decision_date}</p>}
                         </div>
-                      )}
-                    </div>
-                  </div>
-                  {reviewIssues.map((issue, index) => <ReviewMessage key={`${issue.label}-${index}`} issue={issue} />)}
-                  {reviewIssues.length === 0 && (
-                    <div className="flex items-start gap-2 rounded-md border border-emerald-500/30 bg-emerald-500/10 px-3 py-2 text-xs text-emerald-800 dark:text-emerald-200">
-                      <CheckCircle2 className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      <span>De ingevulde gegevens sluiten aan op medewerker en bedrijf.</span>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="permission-valid-from">Geldig vanaf</Label>
+                          <Input id="permission-valid-from" type="date" value={form.valid_from} onChange={event => setField("valid_from", event.target.value)} />
+                        </div>
+                        <div className="space-y-1.5">
+                          <Label htmlFor="permission-valid-until">Geldig tot</Label>
+                          <Input id="permission-valid-until" type="date" value={form.valid_until} onChange={event => setField("valid_until", event.target.value)} />
+                        </div>
+                      </div>
+                    </>
+                  )}
+
+                  {hasCriticalIssue && (
+                    <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+                      <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
+                      <span>De pas kan niet aan de gekozen medewerker of het bedrijf worden gekoppeld. Upload een duidelijkere scan of controleer je eerdere keuzes.</span>
                     </div>
                   )}
-                  {needsManualConfirmation && !hasCriticalIssue && (
-                    <label className="flex cursor-pointer items-start gap-2 rounded-md border border-border p-3 text-xs text-foreground">
-                      <Checkbox
-                        className="mt-0.5"
-                        checked={form.manual_confirmed}
-                        onCheckedChange={value => setField("manual_confirmed", value === true)}
-                      />
-                      <span>Ik heb het originele document handmatig gecontroleerd en bevestig dat het bij deze medewerker en dit bedrijf hoort.</span>
-                    </label>
-                  )}
-                  {errors.manual_confirmed && <p className="text-xs text-destructive">{errors.manual_confirmed}</p>}
                 </div>
+
+                {isPass && (frontPreviewUrl || backPreviewUrl) && (
+                  <DocumentPhotoViewer
+                    images={[
+                      ...(frontPreviewUrl ? [{ src: frontPreviewUrl, label: "Voorkant" }] : []),
+                      ...(backPreviewUrl ? [{ src: backPreviewUrl, label: "Achterkant" }] : []),
+                    ]}
+                  />
+                )}
+                {!isPass && permissionPreviewUrl && (
+                  <DocumentPhotoViewer
+                    images={[{ src: permissionPreviewUrl, label: "Toestemmingsbrief" }]}
+                  />
+                )}
               </div>
 
               {errors.general && (
