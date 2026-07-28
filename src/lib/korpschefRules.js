@@ -48,13 +48,105 @@ export function normalizeKorpschefMatchValue(value) {
 }
 
 const WPBR_LICENSE_PREFIXES = ["HND", "HBD", "PAC", "VTC", "PGW", "POB", "ND", "BD"];
+const COMPANY_LEGAL_FORM_TOKENS = new Set(["BV", "NV", "VOF", "CV"]);
+
+function normalizeKorpschefTokens(value) {
+  return compactKorpschefValue(value)
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .toUpperCase()
+    .replace(/[^A-Z0-9]+/g, " ")
+    .trim()
+    .split(/\s+/)
+    .filter(token => token.length > 1);
+}
+
+function editDistance(left, right) {
+  const a = String(left || "");
+  const b = String(right || "");
+  const previous = Array.from({ length: b.length + 1 }, (_, index) => index);
+  for (let row = 1; row <= a.length; row += 1) {
+    let diagonal = previous[0];
+    previous[0] = row;
+    for (let column = 1; column <= b.length; column += 1) {
+      const above = previous[column];
+      previous[column] = Math.min(
+        previous[column] + 1,
+        previous[column - 1] + 1,
+        diagonal + (a[row - 1] === b[column - 1] ? 0 : 1)
+      );
+      diagonal = above;
+    }
+  }
+  return previous[b.length];
+}
+
+function tokenProbablyMatches(left, right) {
+  if (left === right) return true;
+  const longest = Math.max(left.length, right.length);
+  if (longest < 5) return false;
+  const allowedDistance = longest >= 10 ? 2 : 1;
+  return editDistance(left, right) <= allowedDistance;
+}
+
+export function korpschefValuesMatch(left, right, { ignoreLegalForms = false } = {}) {
+  let leftTokens = normalizeKorpschefTokens(left);
+  let rightTokens = normalizeKorpschefTokens(right);
+  if (!leftTokens.length || !rightTokens.length) return null;
+
+  if (ignoreLegalForms) {
+    leftTokens = leftTokens.filter(token => !COMPANY_LEGAL_FORM_TOKENS.has(token));
+    rightTokens = rightTokens.filter(token => !COMPANY_LEGAL_FORM_TOKENS.has(token));
+  }
+  if (!leftTokens.length || !rightTokens.length) return null;
+
+  const leftText = leftTokens.join(" ");
+  const rightText = rightTokens.join(" ");
+  if (leftText.includes(rightText) || rightText.includes(leftText)) return true;
+
+  const shortest = leftTokens.length <= rightTokens.length ? leftTokens : rightTokens;
+  const longest = shortest === leftTokens ? rightTokens : leftTokens;
+  return shortest.every(token => longest.some(candidate => tokenProbablyMatches(token, candidate)));
+}
+
+export function companyKorpschefNameMatches(company, recognizedName) {
+  if (!compactKorpschefValue(recognizedName)) return null;
+  return [
+    company?.legal_name,
+    company?.statutory_name,
+    company?.registered_name,
+    company?.display_name,
+    company?.trade_name,
+  ].filter(Boolean).some(name => (
+    korpschefValuesMatch(name, recognizedName, { ignoreLegalForms: true }) === true
+  ));
+}
+
+export function korpschefDatesMatch(left, right) {
+  if (!left || !right) return null;
+  const normalizeDate = value => {
+    const date = String(value).match(/\d{4}-\d{2}-\d{2}/)?.[0];
+    return date || String(value).trim();
+  };
+  return normalizeDate(left) === normalizeDate(right);
+}
+
+function normalizeLicenseNumberPart(value) {
+  return String(value || "")
+    .replace(/[OQD]/g, "0")
+    .replace(/[IL]/g, "1")
+    .replace(/Z/g, "2")
+    .replace(/S/g, "5")
+    .replace(/B/g, "8");
+}
 
 export function parseKorpschefLicenseNumber(value, fallbackType = "") {
   const normalized = normalizeKorpschefMatchValue(value);
   const detectedType = WPBR_LICENSE_PREFIXES.find(prefix => normalized.startsWith(prefix)) || "";
+  const rawNumber = detectedType ? normalized.slice(detectedType.length) : normalized;
   return {
     type: detectedType || normalizeWpbrLicenseType(fallbackType),
-    number: detectedType ? normalized.slice(detectedType.length) : normalized,
+    number: normalizeLicenseNumberPart(rawNumber),
   };
 }
 
@@ -187,6 +279,23 @@ export function findMatchingWpbrLicense({ company, licenses = [], recognizedLice
     };
   }
 
+  const activeTypeMatches = activeLicenses.filter(license => (
+    !recognized.type
+    || normalizeWpbrLicenseType(license.license_type) === recognized.type
+  ));
+  if (recognized.number && activeTypeMatches.length === 1) {
+    const candidate = activeTypeMatches[0];
+    const stored = parseKorpschefLicenseNumber(candidate.license_number, candidate.license_type);
+    const longest = Math.max(stored.number.length, recognized.number.length);
+    if (longest >= 4 && editDistance(stored.number, recognized.number) <= 1) {
+      return {
+        license: candidate,
+        status: "probable",
+        explanation: "Het vergunningnummer bevat waarschijnlijk één OCR-leesfout en is gekoppeld aan de enige passende actieve vergunning.",
+      };
+    }
+  }
+
   if (!recognized.number && activeLicenses.length === 1) {
     return {
       license: activeLicenses[0],
@@ -196,7 +305,7 @@ export function findMatchingWpbrLicense({ company, licenses = [], recognizedLice
   }
 
   return {
-    license: null,
+    license: activeTypeMatches.length === 1 ? activeTypeMatches[0] : null,
     status: recognized.number ? "mismatch" : "company_only",
     explanation: recognized.number
       ? "Het vergunningnummer op het document komt niet overeen met een vergunning van het gekozen bedrijf."

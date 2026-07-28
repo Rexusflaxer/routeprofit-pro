@@ -22,9 +22,12 @@ import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@
 import { Textarea } from "@/components/ui/textarea";
 import { buildAuditMetadata } from "@/lib/auditTrail";
 import {
+  companyKorpschefNameMatches,
   companyKorpschefLabel,
   compactKorpschefValue,
   findMatchingWpbrLicense,
+  korpschefDatesMatch,
+  korpschefValuesMatch,
   normalizeKorpschefMatchValue,
   WPBR_CARD_COLORS,
 } from "@/lib/korpschefRules";
@@ -64,39 +67,6 @@ function expectedLastName(personnel) {
     || personnel?.last_name
     || personnel?.name
     || "";
-}
-
-function normalizedTokens(value) {
-  return compactKorpschefValue(value)
-    .normalize("NFD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .toUpperCase()
-    .replace(/[^A-Z0-9]+/g, " ")
-    .trim()
-    .split(/\s+/)
-    .filter(token => token.length > 1);
-}
-
-function valuesOverlap(left, right) {
-  const leftTokens = normalizedTokens(left);
-  const rightTokens = normalizedTokens(right);
-  if (!leftTokens.length || !rightTokens.length) return null;
-  const leftText = leftTokens.join(" ");
-  const rightText = rightTokens.join(" ");
-  if (leftText.includes(rightText) || rightText.includes(leftText)) return true;
-  return leftTokens.every(token => rightTokens.includes(token))
-    || rightTokens.every(token => leftTokens.includes(token));
-}
-
-function companyNameMatches(company, recognizedName) {
-  if (!compactKorpschefValue(recognizedName)) return null;
-  return [
-    company?.legal_name,
-    company?.statutory_name,
-    company?.registered_name,
-    company?.display_name,
-    company?.trade_name,
-  ].filter(Boolean).some(name => valuesOverlap(name, recognizedName));
 }
 
 function WizardSteps({ step }) {
@@ -367,16 +337,18 @@ export default function KorpschefDocumentWizard({
   const reviewIssues = useMemo(() => {
     if (!isPass || !selectedCompany) return [];
     const issues = [];
-    const lastNameMatch = valuesOverlap(expectedLastName(personnel), recognizedPass?.last_name);
-    const givenNamesMatch = valuesOverlap(
+    const lastNameMatch = korpschefValuesMatch(expectedLastName(personnel), recognizedPass?.last_name);
+    const givenNamesMatch = korpschefValuesMatch(
       personnel?.legal_first_names || personnel?.first_name || personnel?.call_name,
       recognizedPass?.given_names
     );
-    const organizationMatch = companyNameMatches(selectedCompany, recognizedPass?.organization_name);
+    const birthDateMatch = korpschefDatesMatch(personnel?.date_of_birth, recognizedPass?.birth_date);
+    const organizationMatch = companyKorpschefNameMatches(selectedCompany, recognizedPass?.organization_name);
 
     if (lastNameMatch === false) {
       issues.push({
-        severity: "critical",
+        severity: "warning",
+        group: "identity",
         label: "Achternaam komt niet overeen",
         detail: `Personeelsprofiel: ${expectedLastName(personnel)}. Pas: ${recognizedPass?.last_name}.`,
       });
@@ -384,37 +356,45 @@ export default function KorpschefDocumentWizard({
     if (givenNamesMatch === false) {
       issues.push({
         severity: "warning",
+        group: "identity",
         label: "Voornamen lijken af te wijken",
         detail: `Controleer of de pas bij ${fullPersonnelName(personnel)} hoort.`,
       });
     }
-    if (
-      personnel?.date_of_birth
-      && recognizedPass?.birth_date
-      && personnel.date_of_birth !== recognizedPass.birth_date
-    ) {
+    if (birthDateMatch === false) {
       issues.push({
-        severity: "critical",
+        severity: "warning",
+        group: "identity",
         label: "Geboortedatum komt niet overeen",
         detail: `Personeelsprofiel: ${personnel.date_of_birth}. Pas: ${recognizedPass.birth_date}.`,
       });
     }
     if (organizationMatch === false) {
       issues.push({
-        severity: "critical",
+        severity: "warning",
+        group: "company",
         label: "Organisatie komt niet overeen",
         detail: `De pas noemt ${recognizedPass?.organization_name}; gekozen is ${companyKorpschefLabel(selectedCompany)}.`,
       });
     }
     if (licenseMatch.status === "mismatch") {
       issues.push({
-        severity: "critical",
+        severity: "warning",
+        group: "company",
         label: "Vergunningnummer komt niet overeen",
+        detail: licenseMatch.explanation,
+      });
+    } else if (licenseMatch.status === "probable") {
+      issues.push({
+        severity: "warning",
+        group: "company",
+        label: "Vergunningnummer met OCR-correctie gekoppeld",
         detail: licenseMatch.explanation,
       });
     } else if (licenseMatch.status === "company_only") {
       issues.push({
         severity: "warning",
+        group: "company",
         label: "Vergunningcontext niet uniek afgeleid",
         detail: licenseMatch.explanation,
       });
@@ -426,7 +406,27 @@ export default function KorpschefDocumentWizard({
         detail: scanQuality.summary,
       });
     }
-    return issues;
+
+    const scanIsReliable = scanQuality?.status === "ok" && Number(scanQuality?.score || 0) >= 80;
+    if (!scanIsReliable) return issues;
+
+    const identityMismatchCount = [
+      lastNameMatch === false,
+      givenNamesMatch === false,
+      birthDateMatch === false,
+    ].filter(Boolean).length;
+    const companyMismatchCount = [
+      organizationMatch === false,
+      licenseMatch.status === "mismatch",
+    ].filter(Boolean).length;
+
+    return issues.map(issue => ({
+      ...issue,
+      severity: (
+        (issue.group === "identity" && identityMismatchCount >= 2)
+        || (issue.group === "company" && companyMismatchCount >= 2)
+      ) ? "critical" : issue.severity,
+    }));
   }, [
     isPass,
     licenseMatch,
@@ -463,7 +463,11 @@ export default function KorpschefDocumentWizard({
       nextErrors.decision_date = "Vul de besluitdatum of ingangsdatum in.";
     }
     if (hasCriticalIssue) {
-      nextErrors.general = "De pas sluit niet aan op de gekozen medewerker of het bedrijf. Controleer de uploads of ga terug naar Bedrijf.";
+      const labels = reviewIssues
+        .filter(issue => issue.severity === "critical")
+        .map(issue => issue.label.toLowerCase())
+        .join(" en ");
+      nextErrors.general = `De pas bevat meerdere duidelijke afwijkingen: ${labels}.`;
     }
     setErrors(nextErrors);
     return Object.keys(nextErrors).length === 0;
@@ -967,7 +971,13 @@ export default function KorpschefDocumentWizard({
                   {hasCriticalIssue && (
                     <div className="flex items-start gap-2 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
                       <AlertTriangle className="mt-0.5 h-3.5 w-3.5 shrink-0" />
-                      <span>De pas kan niet aan de gekozen medewerker of het bedrijf worden gekoppeld. Upload een duidelijkere scan of controleer je eerdere keuzes.</span>
+                      <span>
+                        De pas bevat meerdere duidelijke afwijkingen:{" "}
+                        {reviewIssues
+                          .filter(issue => issue.severity === "critical")
+                          .map(issue => issue.label.toLowerCase())
+                          .join(" en ")}.
+                      </span>
                     </div>
                   )}
                 </div>

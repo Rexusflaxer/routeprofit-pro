@@ -56,19 +56,42 @@ function labelPattern(label) {
     .join("\\s+");
 }
 
+function trimAtNextKnownLabel(value) {
+  const text = cleanFieldValue(value);
+  let nextLabelIndex = text.length;
+  for (const label of KNOWN_FIELD_LABELS) {
+    const match = text.match(new RegExp(
+      `\\s+${labelPattern(label)}\\s*(?::|;|\\||=|\\.{2,}|-{1,}|–|—)`,
+      "i"
+    ));
+    if (match?.index !== undefined) nextLabelIndex = Math.min(nextLabelIndex, match.index);
+  }
+  return cleanFieldValue(text.slice(0, nextLabelIndex));
+}
+
 function matchLeadingLabel(line, label) {
   const pattern = labelPattern(label);
   const delimited = String(line).match(
     new RegExp(`^\\s*${pattern}\\s*(?::|;|\\||=|\\.{2,}|-{1,}|–|—)\\s*(.*)$`, "i")
   );
-  if (delimited) return { value: cleanFieldValue(delimited[1]), matched: true };
+  if (delimited) return { value: trimAtNextKnownLabel(delimited[1]), matched: true };
 
   if (normalize(line) === normalize(label)) return { value: "", matched: true };
 
   const spaced = String(line).match(new RegExp(`^\\s*${pattern}\\s{2,}(.+)$`, "i"));
-  if (spaced) return { value: cleanFieldValue(spaced[1]), matched: true };
+  if (spaced) return { value: trimAtNextKnownLabel(spaced[1]), matched: true };
 
   return { value: "", matched: false };
+}
+
+function matchInlineLabel(line, label) {
+  const pattern = labelPattern(label);
+  const match = String(line).match(
+    new RegExp(`(?:^|\\s)${pattern}\\s*(?::|;|\\||=|\\.{2,}|-{1,}|–|—)\\s*(.*)$`, "i")
+  );
+  return match
+    ? { value: trimAtNextKnownLabel(match[1]), matched: true }
+    : { value: "", matched: false };
 }
 
 function isKnownLabelLine(line) {
@@ -85,7 +108,10 @@ function fieldAfterLabel(text, labels, { maxNextLines = 2 } = {}) {
   for (let index = 0; index < lines.length; index += 1) {
     const match = [...labels]
       .sort((left, right) => right.length - left.length)
-      .map(label => matchLeadingLabel(lines[index], label))
+      .map(label => {
+        const leading = matchLeadingLabel(lines[index], label);
+        return leading.matched ? leading : matchInlineLabel(lines[index], label);
+      })
       .find(candidate => candidate.matched);
     if (!match) continue;
 
@@ -94,7 +120,7 @@ function fieldAfterLabel(text, labels, { maxNextLines = 2 } = {}) {
     for (let offset = 1; offset <= maxNextLines; offset += 1) {
       const nextLine = lines[index + offset];
       if (!nextLine || isKnownLabelLine(nextLine)) break;
-      const candidate = cleanFieldValue(nextLine);
+      const candidate = trimAtNextKnownLabel(nextLine);
       if (isUsefulFieldValue(candidate)) return candidate;
     }
   }
