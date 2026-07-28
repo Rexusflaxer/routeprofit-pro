@@ -6,13 +6,50 @@
       "type": "string",
       "description": "ID van de medewerker"
     },
+    "competencies": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "key": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "category": {
+            "type": "string"
+          },
+          "level": {
+            "type": "number",
+            "minimum": 1,
+            "maximum": 5
+          },
+          "source": {
+            "type": "string",
+            "enum": [
+              "catalog",
+              "custom"
+            ]
+          }
+        },
+        "required": [
+          "key",
+          "label",
+          "category",
+          "level"
+        ]
+      },
+      "default": [],
+      "description": "Vaardigheden, talen en persoonlijke competenties met beheersingsniveau"
+    },
     "languages": {
       "type": "array",
       "items": {
         "type": "string"
       },
       "default": [],
-      "description": "Talen die de medewerker spreekt"
+      "description": "Legacy talenveld"
     },
     "software_skills": {
       "type": "array",
@@ -20,23 +57,15 @@
         "type": "object",
         "properties": {
           "software": {
-            "type": "string",
-            "description": "Software-sleutel"
+            "type": "string"
           },
           "level": {
-            "type": "string",
-            "enum": [
-              "none",
-              "basic",
-              "intermediate",
-              "advanced"
-            ],
-            "default": "none"
+            "type": "string"
           }
         }
       },
       "default": [],
-      "description": "Vaardigheidsniveau per programma"
+      "description": "Legacy softwarevaardighedenveld"
     },
     "cv_file_url": {
       "type": [
