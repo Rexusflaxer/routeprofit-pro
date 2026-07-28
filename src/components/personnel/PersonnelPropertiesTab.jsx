@@ -3,7 +3,7 @@ import { useMutation, useQueryClient } from "@tanstack/react-query";
 import { Check, Download, FileText, Pencil, Plus, Trash2, Upload, X } from "lucide-react";
 import { base44 } from "@/api/base44Client";
 import { Button } from "@/components/ui/button";
-import CompetencyCatalogDialog, { COMPETENCY_CATEGORIES } from "@/components/personnel/CompetencyCatalogDialog";
+import CompetencyCatalogDialog, { COMPETENCY_CATEGORIES, getSoftwareLogo } from "@/components/personnel/CompetencyCatalogDialog";
 import CompetencyRating from "@/components/personnel/CompetencyRating";
 
 function formatDate(value) {
@@ -162,7 +162,12 @@ export default function PersonnelPropertiesTab({ person, profile = null }) {
                 <div className="grid grid-cols-1 gap-2 lg:grid-cols-2">
                   {category.items.map(item => (
                     <div key={item.key} className="flex min-w-0 items-center justify-between gap-3 rounded-md border border-border px-3 py-2.5">
-                      <span className="min-w-0 flex-1 truncate text-sm font-medium text-foreground">{item.label}</span>
+                      <div className="flex min-w-0 flex-1 items-center gap-2.5">
+                        {getSoftwareLogo(item.key) && (
+                          <img src={getSoftwareLogo(item.key)} alt="" className="h-5 w-5 shrink-0 object-contain" />
+                        )}
+                        <span className="truncate text-sm font-medium text-foreground">{item.label}</span>
+                      </div>
                       <CompetencyRating value={item.level} editable={editing} onChange={level => updateLevel(item.key, level)} />
                       {editing && (
                         <Button variant="ghost" size="icon" className="h-7 w-7 shrink-0 text-muted-foreground hover:text-destructive" onClick={() => removeCompetency(item.key)} title="Verwijderen">

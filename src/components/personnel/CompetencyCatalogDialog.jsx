@@ -17,6 +17,20 @@ export const COMPETENCY_CATEGORIES = [
   { key: "practical", label: "Praktische vaardigheden" },
 ];
 
+const SOFTWARE_LOGOS = {
+  word: "https://cdn.simpleicons.org/microsoftword/2B579A",
+  excel: "https://cdn.simpleicons.org/microsoftexcel/217346",
+  outlook: "https://cdn.simpleicons.org/microsoftoutlook/0078D4",
+  teams: "https://cdn.simpleicons.org/microsoftteams/6264A7",
+  powerpoint: "https://cdn.simpleicons.org/microsoftpowerpoint/B7472A",
+  google: "https://cdn.simpleicons.org/googleworkspace/4285F4",
+  adobe: "https://cdn.simpleicons.org/adobeacrobatreader/EC1C24",
+};
+
+export function getSoftwareLogo(key) {
+  return SOFTWARE_LOGOS[key] || null;
+}
+
 export const COMPETENCY_CATALOG = [
   ["nl", "Nederlands", "languages"], ["en", "Engels", "languages"], ["de", "Duits", "languages"],
   ["fr", "Frans", "languages"], ["es", "Spaans", "languages"], ["ar", "Arabisch", "languages"],
@@ -91,9 +105,14 @@ export default function CompetencyCatalogDialog({ open, onOpenChange, existingKe
             const added = existingKeys.includes(item.key);
             return (
               <div key={item.key} className="flex items-center justify-between gap-3 border-b border-border px-3 py-2.5 last:border-0">
-                <div>
-                  <p className="text-sm font-medium text-foreground">{item.label}</p>
-                  <p className="text-xs text-muted-foreground">{COMPETENCY_CATEGORIES.find(c => c.key === item.category)?.label}</p>
+                <div className="flex min-w-0 items-center gap-3">
+                  {getSoftwareLogo(item.key) && (
+                    <img src={getSoftwareLogo(item.key)} alt="" className="h-6 w-6 shrink-0 object-contain" />
+                  )}
+                  <div className="min-w-0">
+                    <p className="truncate text-sm font-medium text-foreground">{item.label}</p>
+                    <p className="text-xs text-muted-foreground">{COMPETENCY_CATEGORIES.find(c => c.key === item.category)?.label}</p>
+                  </div>
                 </div>
                 <Button size="sm" variant={added ? "ghost" : "outline"} disabled={added} onClick={() => onAdd({ ...item, source: "catalog" })}>
                   {added ? "Toegevoegd" : <><Plus className="mr-1 h-3.5 w-3.5" /> Toevoegen</>}
