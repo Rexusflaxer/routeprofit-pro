@@ -1,4 +1,4 @@
-import React from "react";
+import React, { useEffect, useMemo } from "react";
 import { useQuery } from "@tanstack/react-query";
 import {
   AlertCircle,
@@ -36,6 +36,11 @@ import {
 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
+import CustomerContactWizard from "./CustomerContactWizard";
+import {
+  contactMatchesObject,
+  formatContactObjectScope,
+} from "./customerContactScope";
 import {
   Sheet,
   SheetContent,
@@ -52,14 +57,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import {
-  ADDRESS_TYPE_LABELS,
-  CONTACT_ROLE_LABELS,
   CUSTOMER_TABS,
   RECORD_STATUS_LABELS,
   contactPointValue,
-  contactRoleKeys,
   filterEntity,
-  formatAddress,
   formatCurrencyCents,
   formatDate,
   formatDateTime,
@@ -317,11 +318,10 @@ function QueryGate({ queries, children }) {
   return children;
 }
 
-function onboardingItems({ customer, accounts, contacts, addresses, objects, contracts }) {
+function onboardingItems({ customer, accounts, contacts, objects, contracts }) {
   return [
     { label: "Primaire bedrijfsrelatie", complete: accounts.some(item => item.is_primary) || accounts.length > 0, tab: "manage" },
     { label: "Hoofdcontact", complete: contacts.some(item => item.is_primary) || Boolean(customer.primary_contact_id), tab: "contacts" },
-    { label: "Bezoek- of factuuradres", complete: addresses.length > 0, tab: "contacts" },
     { label: "Eerste object", complete: objects.length > 0, tab: "objects" },
     { label: "Contract en tarief", complete: contracts.some(item => ["active", "signed"].includes(getRecordStatus(item))), tab: "commercial" },
   ];
@@ -347,7 +347,6 @@ function OverviewTab({ customer, customerId, core, onTabChange }) {
           customer,
           accounts: core.accounts,
           contacts: core.contacts,
-          addresses: core.addresses,
           objects,
           contracts,
         });
@@ -408,7 +407,7 @@ function OverviewTab({ customer, customerId, core, onTabChange }) {
                         <div className="flex items-center gap-2 text-muted-foreground"><Mail className="h-3.5 w-3.5" /><span className="truncate">{email || "Geen e-mailadres"}</span></div>
                         <div className="flex items-center gap-2 text-muted-foreground"><Phone className="h-3.5 w-3.5" /><span>{phone || "Geen telefoonnummer"}</span></div>
                       </div>
-                      <Button size="sm" variant="outline" onClick={() => onTabChange("contacts")}>Contactgegevens openen</Button>
+                      <Button size="sm" variant="outline" onClick={() => onTabChange("contacts")}>Contacten openen</Button>
                     </div>
                   );
                 })()}
@@ -442,27 +441,53 @@ function OverviewTab({ customer, customerId, core, onTabChange }) {
   );
 }
 
-function ContactsTab({ core, companies, onAddContact, onAddAddress, selectedRow, onSelectRow }) {
+export function ContactsTab({
+  core,
+  objects = [],
+  activeObjectId = "all",
+  onObjectChange,
+  onAddContact,
+  wizardOpen,
+  onCloseWizard,
+  onSaveContact,
+  contactSaving,
+  contactError,
+  selectedRow,
+  onSelectRow,
+}) {
+  const activeObjects = useMemo(
+    () => objects.filter(object => object.is_active_customer_object !== false && object.status !== "archived"),
+    [objects],
+  );
+  const normalizedObjectId = activeObjects.some(object => object.id === activeObjectId)
+    ? activeObjectId
+    : "all";
+  const contacts = useMemo(
+    () => core.contacts
+      .filter(contact => contact.status !== "archived")
+      .filter(contact => contactMatchesObject(core.contactRoles, contact.id, normalizedObjectId)),
+    [core.contactRoles, core.contacts, normalizedObjectId],
+  );
+
+  useEffect(() => {
+    if (activeObjectId !== normalizedObjectId) onObjectChange?.(normalizedObjectId);
+  }, [activeObjectId, normalizedObjectId, onObjectChange]);
+
   const contactColumns = [
     {
       key: "name",
-      label: "Contactpersoon",
+      label: "Naam",
       render: contact => (
         <div>
           <p className="font-medium text-foreground">{getContactName(contact)}</p>
-          <p className="text-xs text-muted-foreground">{contact.job_title || contact.department || "Functie niet vastgelegd"}</p>
+          {contact.is_primary && <p className="text-xs text-primary">Hoofdcontact</p>}
         </div>
       ),
     },
     {
-      key: "roles",
-      label: "Rollen",
-      render: contact => {
-        const roles = contactRoleKeys(core.contactRoles, contact.id);
-        return roles.length
-          ? <div className="flex max-w-[300px] flex-wrap gap-1">{roles.slice(0, 3).map(role => <Badge key={role} variant="outline" className="text-[10px]">{CONTACT_ROLE_LABELS[role] || role}</Badge>)}</div>
-          : <span className="text-muted-foreground">—</span>;
-      },
+      key: "job_title",
+      label: "Functie",
+      render: contact => contact.job_title || contact.department || <span className="text-muted-foreground">—</span>,
     },
     {
       key: "email",
@@ -481,9 +506,25 @@ function ContactsTab({ core, companies, onAddContact, onAddAddress, selectedRow,
       },
     },
     {
+      key: "scope",
+      label: "Bevoegd voor",
+      render: contact => (
+        <div className="flex max-w-[260px] items-center gap-2">
+          <Building2 className="h-3.5 w-3.5 shrink-0 text-muted-foreground" />
+          <span className="truncate text-sm">
+            {formatContactObjectScope(core.contactRoles, contact.id, activeObjects)}
+          </span>
+        </div>
+      ),
+    },
+    {
       key: "portal",
       label: "Portaal",
-      render: contact => <StatusBadge status={contact.portal_status || "not_invited"} />,
+      render: contact => (
+        <Badge variant="outline" className="whitespace-nowrap text-[11px] font-medium">
+          {contact.portal_status === "active" ? "Actief" : contact.portal_status === "invited" ? "Uitgenodigd" : "Geen toegang"}
+        </Badge>
+      ),
     },
     {
       key: "changed",
@@ -492,76 +533,101 @@ function ContactsTab({ core, companies, onAddContact, onAddAddress, selectedRow,
     },
   ];
 
-  const addressColumns = [
-    {
-      key: "type",
-      label: "Gebruik",
-      render: address => (
-        <div>
-          <p className="font-medium text-foreground">{ADDRESS_TYPE_LABELS[address.address_type] || address.address_type || "Adres"}</p>
-          {address.label && <p className="text-xs text-muted-foreground">{address.label}</p>}
-        </div>
-      ),
-    },
-    { key: "address", label: "Adres", render: address => <span>{formatAddress(address)}</span> },
-    {
-      key: "account",
-      label: "Bedrijfsrelatie",
-      render: address => {
-        const account = core.accounts.find(item => item.id === address.customer_account_id);
-        const company = companies.find(item => item.id === account?.company_id);
-        return account ? getCompanyName(company) : <span className="text-muted-foreground">Klantbreed</span>;
-      },
-    },
-    {
-      key: "status",
-      label: "Status",
-      render: address => <StatusBadge status={address.status || "active"} />,
-    },
-  ];
-
   const selectedContact = selectedRow?.startsWith("contact:")
     ? core.contacts.find(item => `contact:${item.id}` === selectedRow)
     : null;
-  const selectedAddress = selectedRow?.startsWith("address:")
-    ? core.addresses.find(item => `address:${item.id}` === selectedRow)
-    : null;
 
   return (
-    <div className="space-y-4 p-4 lg:p-5">
-      <SectionPanel
-        title="Contactpersonen"
-        description="Functie, verantwoordelijkheden en contactkanalen zijn afzonderlijk vastgelegd."
-        action={<Button size="sm" onClick={onAddContact}><Plus className="h-4 w-4" /> Contactpersoon</Button>}
+    <div className="flex min-h-[520px] flex-col bg-card">
+      <div
+        role="tablist"
+        aria-label="Contacten per object"
+        className="flex overflow-x-auto border-b border-border bg-muted/15"
       >
+        <button
+          type="button"
+          role="tab"
+          aria-selected={normalizedObjectId === "all"}
+          onClick={() => onObjectChange?.("all")}
+          className={`shrink-0 border-b-2 px-4 py-3 text-xs font-medium transition-colors ${
+            normalizedObjectId === "all"
+              ? "border-primary text-primary"
+              : "border-transparent text-muted-foreground hover:text-foreground"
+          }`}
+        >
+          Alle
+        </button>
+        {activeObjects.map(object => (
+          <button
+            key={object.id}
+            type="button"
+            role="tab"
+            aria-selected={normalizedObjectId === object.id}
+            title={object.name || object.object_code || "Object"}
+            onClick={() => onObjectChange?.(object.id)}
+            className={`max-w-[240px] shrink-0 truncate border-b-2 px-4 py-3 text-xs font-medium transition-colors ${
+              normalizedObjectId === object.id
+                ? "border-primary text-primary"
+                : "border-transparent text-muted-foreground hover:text-foreground"
+            }`}
+          >
+            {object.name || object.object_code || "Naamloos object"}
+          </button>
+        ))}
+      </div>
+
+      {wizardOpen && (
+        <CustomerContactWizard
+          objects={activeObjects}
+          onCancel={onCloseWizard}
+          onSave={onSaveContact}
+          saving={contactSaving}
+          error={contactError}
+        />
+      )}
+
+      <div className="flex flex-col gap-3 border-b border-border bg-muted/10 px-4 py-3 sm:flex-row sm:items-center sm:justify-between">
+        <div>
+          <h3 className="text-sm font-semibold text-foreground">
+            {normalizedObjectId === "all"
+              ? "Alle contacten"
+              : `Contacten voor ${activeObjects.find(object => object.id === normalizedObjectId)?.name || "object"}`}
+          </h3>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            {contacts.length} contact{contacts.length === 1 ? "" : "en"} in deze selectie
+          </p>
+        </div>
+        {!wizardOpen && (
+          <Button size="sm" onClick={onAddContact}>
+            <Plus className="h-4 w-4" /> Contact toevoegen
+          </Button>
+        )}
+      </div>
+
+      <div className="min-h-0 flex-1">
         <ResponsiveTable
-          rows={core.contacts.filter(contact => contact.status !== "archived")}
+          rows={contacts}
           columns={contactColumns}
           getRowKey={contact => `contact:${contact.id}`}
           selectedRowKey={selectedRow}
           onRowClick={contact => onSelectRow(`contact:${contact.id}`)}
-          empty={<EmptyState icon={ContactRound} title="Geen contactpersonen" description="Voeg een hoofdcontact of functionele ontvanger toe." action={<Button size="sm" onClick={onAddContact}><Plus className="h-4 w-4" /> Contactpersoon toevoegen</Button>} />}
+          empty={(
+            <EmptyState
+              icon={ContactRound}
+              title={normalizedObjectId === "all" ? "Nog geen contacten" : "Geen contacten voor dit object"}
+              description={normalizedObjectId === "all"
+                ? "Voeg het eerste contact toe en bepaal voor welke objecten deze persoon bevoegd is."
+                : "Contacten met klantbrede bevoegdheid of toegang tot dit object verschijnen hier."}
+              action={!wizardOpen ? <Button size="sm" onClick={onAddContact}><Plus className="h-4 w-4" /> Contact toevoegen</Button> : null}
+            />
+          )}
         />
-      </SectionPanel>
+      </div>
 
-      <SectionPanel
-        title="Adressen"
-        description="Bezoek-, post- en factuuradres blijven functioneel gescheiden."
-        action={<Button size="sm" variant="outline" onClick={onAddAddress}><Plus className="h-4 w-4" /> Adres</Button>}
-      >
-        <ResponsiveTable
-          rows={core.addresses.filter(address => address.status !== "archived")}
-          columns={addressColumns}
-          getRowKey={address => `address:${address.id}`}
-          selectedRowKey={selectedRow}
-          onRowClick={address => onSelectRow(`address:${address.id}`)}
-          empty={<EmptyState icon={MapPin} title="Geen adressen" description="Voeg minimaal een bezoek- of factuuradres toe." action={<Button size="sm" onClick={onAddAddress}><Plus className="h-4 w-4" /> Adres toevoegen</Button>} />}
-        />
-      </SectionPanel>
       <RecordInspector
-        record={selectedContact || selectedAddress}
-        title={selectedContact ? getContactName(selectedContact) : selectedAddress ? ADDRESS_TYPE_LABELS[selectedAddress.address_type] : ""}
-        open={Boolean(selectedContact || selectedAddress)}
+        record={selectedContact}
+        title={selectedContact ? getContactName(selectedContact) : ""}
+        open={Boolean(selectedContact)}
         onOpenChange={open => !open && onSelectRow(null)}
       />
     </div>
@@ -1251,7 +1317,13 @@ export default function CustomerDossierTabs({
   personnel,
   coreQueries,
   onAddContact,
-  onAddAddress,
+  contactWizardOpen,
+  onCloseContactWizard,
+  onSaveContact,
+  contactSaving,
+  contactError,
+  activeContactObjectId,
+  onContactObjectChange,
   onAddAccount,
   onAddRequest,
   onEditCustomer,
@@ -1259,6 +1331,13 @@ export default function CustomerDossierTabs({
   onRestore,
   archivePending,
 }) {
+  const contactObjectsQuery = useCustomerRecords(
+    "SurveillanceObject",
+    customerId,
+    activeTab === "contacts",
+    "name",
+  );
+
   const renderTab = () => {
     if (coreQueries.some(query => query.isLoading)) return <LoadingState label="Klantdossier laden..." />;
     const coreError = coreQueries.find(query => query.isError);
@@ -1266,7 +1345,24 @@ export default function CustomerDossierTabs({
 
     switch (activeTab) {
       case "contacts":
-        return <ContactsTab core={core} companies={companies} onAddContact={onAddContact} onAddAddress={onAddAddress} selectedRow={selectedRow} onSelectRow={onSelectRow} />;
+        return (
+          <QueryGate queries={[contactObjectsQuery]}>
+            <ContactsTab
+              core={core}
+              objects={contactObjectsQuery.data || []}
+              activeObjectId={activeContactObjectId}
+              onObjectChange={onContactObjectChange}
+              onAddContact={onAddContact}
+              wizardOpen={contactWizardOpen}
+              onCloseWizard={onCloseContactWizard}
+              onSaveContact={onSaveContact}
+              contactSaving={contactSaving}
+              contactError={contactError}
+              selectedRow={selectedRow}
+              onSelectRow={onSelectRow}
+            />
+          </QueryGate>
+        );
       case "objects":
         return <ObjectsTab customerId={customerId} navigate={navigate} selectedRow={selectedRow} onSelectRow={onSelectRow} />;
       case "commercial":

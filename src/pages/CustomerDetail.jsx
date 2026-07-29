@@ -27,6 +27,7 @@ import {
   CustomerBasisDialog,
   CustomerRecordDialog,
 } from "@/components/customers/CustomerRecordDialogs";
+import { createCustomerContactRecords } from "@/components/customers/customerContactWorkflow";
 import {
   CUSTOMER_STATUS_CLASSES,
   CUSTOMER_STATUS_LABELS,
@@ -172,7 +173,7 @@ function NewCustomerBanner({ customer, onDismiss, onOpenTab }) {
           <p className="text-sm font-semibold">{getCustomerName(customer)} is aangemaakt</p>
           <p className="mt-1 text-xs leading-relaxed opacity-80">Het dossier staat als concept klaar. Vul de ontbrekende contact-, object- en contractgegevens aan wanneer deze beschikbaar zijn.</p>
           <div className="mt-3 flex flex-wrap gap-2">
-            <Button size="sm" onClick={() => onOpenTab("contacts")}>Contactgegevens</Button>
+            <Button size="sm" onClick={() => onOpenTab("contacts")}>Contacten</Button>
             <Button size="sm" variant="outline" onClick={() => onOpenTab("objects")}>Objecten</Button>
             <Button size="sm" variant="ghost" onClick={onDismiss}>Melding sluiten</Button>
           </div>
@@ -224,9 +225,12 @@ export default function CustomerDetail() {
   const isNewFlow = searchParams.get("new") === "1";
   const [basisOpen, setBasisOpen] = useState(false);
   const [recordDialog, setRecordDialog] = useState(null);
+  const [contactWizardOpen, setContactWizardOpen] = useState(false);
   const [archiveOpen, setArchiveOpen] = useState(false);
   const [restoreOpen, setRestoreOpen] = useState(false);
   const initializedEdit = useRef(false);
+  const contactMutationKeyRef = useRef(null);
+  const activeContactObjectId = searchParams.get("contact_object") || "all";
 
   const customersQuery = useQuery({
     queryKey: ["customers"],
@@ -349,77 +353,14 @@ export default function CustomerDetail() {
       }
 
       if (type === "contact") {
-        const displayName = [form.first_name, form.name_prefix, form.last_name].filter(Boolean).join(" ").replace(/\s+/g, " ").trim();
-        const makePrimary = Boolean(form.is_primary || core.contacts.length === 0);
-        const contactResult = await invokeCustomerPlatformMutation({
-          action: "create_customer_contact",
-          idempotency_key: `${idempotencyKey}:contact`,
-          expected_version: 0,
-          customer_id: customerId,
-          data: {
-            display_name: displayName,
-            first_name: form.first_name?.trim() || null,
-            middle_name: form.name_prefix?.trim() || null,
-            last_name: form.last_name?.trim() || null,
-            job_title: form.job_title?.trim() || null,
-            preferred_language: customer?.preferred_language || "nl",
-            preferred_channel: form.email ? "email" : form.phone ? "phone" : null,
-            is_primary: makePrimary,
-            status: "active",
-          },
+        return createCustomerContactRecords({
+          invoke: invokeCustomerPlatformMutation,
+          customerId,
+          customer,
+          existingContacts: core.contacts,
+          form,
+          idempotencyKey,
         });
-        const contact = contactResult.contact;
-        const pointResults = [];
-        if (form.email?.trim()) {
-          pointResults.push(await invokeCustomerPlatformMutation({
-            action: "create_contact_point",
-            idempotency_key: `${idempotencyKey}:email`,
-            expected_version: 0,
-            contact_id: contact.id,
-            data: {
-              point_type: "email",
-              label: "Zakelijk",
-              value: form.email.trim(),
-              is_primary: true,
-              purposes: form.roles || [],
-              status: "active",
-            },
-          }));
-        }
-        if (form.phone?.trim()) {
-          pointResults.push(await invokeCustomerPlatformMutation({
-            action: "create_contact_point",
-            idempotency_key: `${idempotencyKey}:phone`,
-            expected_version: 0,
-            contact_id: contact.id,
-            data: {
-              point_type: "phone",
-              label: "Zakelijk",
-              value: form.phone.trim(),
-              is_primary: true,
-              purposes: form.roles || [],
-              status: "active",
-            },
-          }));
-        }
-        const roles = new Set(form.roles || []);
-        if (makePrimary) roles.add("primary");
-        const roleResults = [];
-        for (const [index, role] of [...roles].entries()) {
-          roleResults.push(await invokeCustomerPlatformMutation({
-            action: "create_contact_role",
-            idempotency_key: `${idempotencyKey}:role:${index}`,
-            expected_version: 0,
-            contact_id: contact.id,
-            data: {
-              role,
-              object_ids: [],
-              is_primary: role === "primary",
-              status: "active",
-            },
-          }));
-        }
-        return { contact, pointResults, roleResults };
       }
 
       if (type === "address") {
@@ -473,7 +414,17 @@ export default function CustomerDetail() {
     },
     onSuccess: async (_result, variables) => {
       await invalidateCustomer();
-      setRecordDialog(null);
+      if (variables.type === "contact") {
+        setContactWizardOpen(false);
+        contactMutationKeyRef.current = null;
+        const next = new URLSearchParams(searchParams);
+        next.delete("contact_object");
+        next.delete("row");
+        next.delete("view");
+        setSearchParams(next);
+      } else {
+        setRecordDialog(null);
+      }
       const labels = {
         account: "Bedrijfsrelatie toegevoegd",
         contact: "Contactpersoon toegevoegd",
@@ -510,7 +461,37 @@ export default function CustomerDetail() {
     next.set("tab", tab);
     next.delete("row");
     next.delete("view");
+    if (tab !== "contacts") {
+      next.delete("contact_object");
+      setContactWizardOpen(false);
+      contactMutationKeyRef.current = null;
+    }
     setSearchParams(next);
+  };
+
+  const setContactObject = objectId => {
+    const next = new URLSearchParams(searchParams);
+    if (objectId && objectId !== "all") next.set("contact_object", objectId);
+    else next.delete("contact_object");
+    next.delete("row");
+    next.delete("view");
+    setSearchParams(next);
+  };
+
+  const openContactWizard = () => {
+    recordMutation.reset();
+    if (!contactMutationKeyRef.current) {
+      contactMutationKeyRef.current = createCustomerMutationKey("create_customer_contact");
+    }
+    setContactWizardOpen(true);
+    setTab("contacts");
+  };
+
+  const closeContactWizard = () => {
+    if (recordMutation.isPending) return;
+    setContactWizardOpen(false);
+    contactMutationKeyRef.current = null;
+    recordMutation.reset();
   };
 
   const setSelectedRow = row => {
@@ -578,7 +559,7 @@ export default function CustomerDetail() {
         companies={companies}
         personnel={personnel}
         onEdit={() => setBasisOpen(true)}
-        onAddContact={() => setRecordDialog("contact")}
+        onAddContact={openContactWizard}
       />
 
       <CustomerDossierTabs
@@ -593,8 +574,23 @@ export default function CustomerDetail() {
         companies={companies}
         personnel={personnel}
         coreQueries={coreQueries}
-        onAddContact={() => setRecordDialog("contact")}
-        onAddAddress={() => setRecordDialog("address")}
+        onAddContact={openContactWizard}
+        contactWizardOpen={contactWizardOpen}
+        onCloseContactWizard={closeContactWizard}
+        onSaveContact={form => {
+          if (!contactMutationKeyRef.current) {
+            contactMutationKeyRef.current = createCustomerMutationKey("create_customer_contact");
+          }
+          recordMutation.mutate({
+            type: "contact",
+            form,
+            idempotencyKey: contactMutationKeyRef.current,
+          });
+        }}
+        contactSaving={recordMutation.isPending}
+        contactError={recordMutation.error}
+        activeContactObjectId={activeContactObjectId}
+        onContactObjectChange={setContactObject}
         onAddAccount={() => setRecordDialog("account")}
         onAddRequest={openRequestDialog}
         onEditCustomer={() => setBasisOpen(true)}

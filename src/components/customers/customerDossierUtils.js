@@ -17,7 +17,7 @@ import { base44 } from "@/api/base44Client";
 
 export const CUSTOMER_TABS = [
   { key: "overview", label: "Overzicht", icon: LayoutDashboard },
-  { key: "contacts", label: "Contactgegevens", icon: ContactRound },
+  { key: "contacts", label: "Contacten", icon: ContactRound },
   { key: "objects", label: "Objecten", icon: MapPinned },
   { key: "commercial", label: "Commercieel", icon: Handshake },
   { key: "planning", label: "Planning & aanvragen", icon: CalendarDays },
