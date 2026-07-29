@@ -2,7 +2,6 @@ import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 
 declare const Deno: {
   env: { get(name: string): string | undefined };
-  serve(handler: (request: Request) => Response | Promise<Response>): void;
 };
 
 type LooseRecord = Record<string, any>;
@@ -2143,6 +2142,4 @@ export async function handleCommercialAutomationRequest(req: Request) {
   }
 }
 
-if (import.meta.main) {
-  Deno.serve(handleCommercialAutomationRequest);
-}
+export default handleCommercialAutomationRequest;

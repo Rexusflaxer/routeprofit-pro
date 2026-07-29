@@ -1,7 +1,6 @@
 import { createClientFromRequest } from 'npm:@base44/sdk@0.8.40';
 
 type LooseRecord = Record<string, any>;
-declare const Deno: { serve(handler: (request: Request) => Response | Promise<Response>): void };
 
 class ApiError extends Error {
   status: number;
@@ -4720,6 +4719,4 @@ export async function handleCustomerPlatformRequest(req: Request) {
   }
 }
 
-if (import.meta.main) {
-  Deno.serve(handleCustomerPlatformRequest);
-}
+export default handleCustomerPlatformRequest;

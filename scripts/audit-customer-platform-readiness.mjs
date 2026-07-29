@@ -276,6 +276,16 @@ assert.match(integrationApi, /STORECOVE_WEBHOOK_SECRET/);
 assert.match(integrationApi, /idempotencyGuid|idempotency_guid/);
 
 const customerPlatformApi = read("base44/functions/customerPlatformApi/entry.ts");
+assert.match(
+  customerPlatformApi,
+  /export\s+default\s+handleCustomerPlatformRequest\s*;/,
+  "customerPlatformApi moet een Base44-compatibele default request-handler exporteren",
+);
+assert.doesNotMatch(
+  customerPlatformApi,
+  /if\s*\(\s*import\.meta\.main\s*\)/,
+  "customerPlatformApi mag runtime-registratie niet van import.meta.main laten afhangen",
+);
 for (const action of [
   "create_customer",
   "list_commercial",
@@ -291,6 +301,16 @@ assert.ok(customerPlatformApi.includes(`'${action}'`), `customerPlatformApi mist
 assert.match(customerPlatformApi, /\$inc/, "Factuurnummering moet een atomaire increment gebruiken");
 
 const commercialAutomation = read("base44/functions/commercialAutomation/entry.ts");
+assert.match(
+  commercialAutomation,
+  /export\s+default\s+handleCommercialAutomationRequest\s*;/,
+  "commercialAutomation moet een Base44-compatibele default request-handler exporteren",
+);
+assert.doesNotMatch(
+  commercialAutomation,
+  /if\s*\(\s*import\.meta\.main\s*\)/,
+  "commercialAutomation mag runtime-registratie niet van import.meta.main laten afhangen",
+);
 for (const action of [
   "run_due_work",
   "expire_quotes",

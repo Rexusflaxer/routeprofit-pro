@@ -126,4 +126,15 @@ describe("CustomerContactWizard", () => {
     fireEvent.change(screen.getByLabelText(/E-mailadres/i), { target: { value: "noor@example.nl" } });
     expect(screen.getByRole("button", { name: /Volgende/i })).toBeEnabled();
   });
+
+  it("toont het backendbericht en de requestreferentie bij een opslagfout", () => {
+    const error = Object.assign(new Error("Objectscope kon niet worden opgeslagen."), {
+      requestId: "request-123",
+    });
+
+    render(<CustomerContactWizard onSave={vi.fn()} onCancel={vi.fn()} error={error} />);
+
+    expect(screen.getByRole("alert")).toHaveTextContent("Objectscope kon niet worden opgeslagen.");
+    expect(screen.getByRole("alert")).toHaveTextContent("Referentie: request-123");
+  });
 });

@@ -492,7 +492,10 @@ export function CustomerContactWizard({
 
         {error && (
           <div className="mt-5 rounded-md border border-destructive/30 bg-destructive/10 px-3 py-2 text-sm text-destructive" role="alert">
-            {error.message || "Het contact kon niet worden toegevoegd."}
+            <p>{error.message || "Het contact kon niet worden toegevoegd."}</p>
+            {error.requestId && (
+              <p className="mt-1 text-xs opacity-80">Referentie: {error.requestId}</p>
+            )}
           </div>
         )}
 

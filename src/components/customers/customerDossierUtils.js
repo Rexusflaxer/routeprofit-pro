@@ -163,17 +163,35 @@ export function createCustomerMutationKey(action) {
   return `${action}:${globalThis.crypto.randomUUID()}`;
 }
 
+function customerPlatformError(error, action) {
+  const responseData = error?.response?.data;
+  const payload = responseData?.data || responseData;
+  const serverError = typeof payload === "string"
+    ? payload.trim()
+    : typeof payload?.error === "string"
+      ? payload.error
+      : payload?.error?.message || payload?.message;
+  const normalized = new Error(serverError || error?.message || "De klantplatformactie is mislukt.");
+  normalized.status = Number(error?.response?.status || error?.status) || null;
+  normalized.details = payload?.details || payload?.error?.details || null;
+  normalized.requestId = payload?.request_id || null;
+  normalized.action = action || null;
+  return normalized;
+}
+
 export async function invokeCustomerPlatformMutation(payload) {
-  const response = await base44.functions.invoke("customerPlatformApi", payload);
-  const result = response?.data?.data || response?.data || {};
-  if (result?.error) {
-    const error = new Error(typeof result.error === "string" ? result.error : result.error.message || "De klantplatformactie is mislukt.");
-    error.details = result.details || result.error.details || null;
-    error.requestId = result.request_id || null;
-    throw error;
+  try {
+    const response = await base44.functions.invoke("customerPlatformApi", payload);
+    const result = response?.data?.data || response?.data || {};
+    if (result?.error) {
+      throw customerPlatformError({ response: { data: result } }, payload?.action);
+    }
+    if (result?.ok === false) throw new Error(result.message || "De klantplatformactie is mislukt.");
+    return result;
+  } catch (error) {
+    if (error?.action || error?.requestId || error?.details) throw error;
+    throw customerPlatformError(error, payload?.action);
   }
-  if (result?.ok === false) throw new Error(result.message || "De klantplatformactie is mislukt.");
-  return result;
 }
 
 export function getRecordStatus(record) {
