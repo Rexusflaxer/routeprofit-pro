@@ -35,6 +35,198 @@
         "null"
       ]
     },
+    "selling_company_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Verkopende/facturerende BV zoals vastgelegd voor deze uitvoering."
+    },
+    "customer_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Klant-snapshotrelatie op uitvoeringsmoment; niet achteraf herleiden uit het object."
+    },
+    "customer_account_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "BV/debiteurenrelatie op uitvoeringsmoment."
+    },
+    "customer_contract_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_contract_line_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_contract_rate_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Immutable allowlisted klant- en accountgegevens op uitvoeringsmoment."
+    },
+    "operating_company_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "selling_company_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "commercial_contract_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "commercial_rate_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "customer_billable": {
+      "type": "boolean",
+      "default": false
+    },
+    "billable_quantity_minor": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Factureerbare hoeveelheid in duizendsten van de gekozen eenheid."
+    },
+    "billable_unit": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "fixed",
+        "execution",
+        "minute",
+        "hour",
+        "unit",
+        "kilometer",
+        null
+      ]
+    },
+    "billable_unit_price_cents": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "billable_subtotal_cents": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "billable_vat_rate_basis_points": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "billable_tax_cents": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "billable_total_cents": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "billing_currency": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "financial_review_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "not_reviewed",
+        "pending",
+        "approved",
+        "rejected",
+        "blocked",
+        null
+      ]
+    },
+    "financial_review_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "financial_reviewed_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "financial_reviewed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "billing_candidate_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "billing_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "not_applicable",
+        "not_ready",
+        "candidate_pending",
+        "candidate_blocked",
+        "candidate_approved",
+        "invoiced",
+        "credited",
+        null
+      ]
+    },
     "personnel_contract_id": {
       "type": [
         "string",
@@ -316,6 +508,11 @@
         "null"
       ],
       "additionalProperties": true
+    },
+    "version": {
+      "type": "number",
+      "default": 1,
+      "description": "Optimistic concurrency-versie voor operationele en financiële mutaties."
     }
   },
   "required": [
@@ -330,5 +527,27 @@
     "duration_minutes",
     "latitude",
     "longitude"
-  ]
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
 }

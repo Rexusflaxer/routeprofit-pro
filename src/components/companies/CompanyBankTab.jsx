@@ -108,7 +108,7 @@ export default function CompanyBankTab({ companies }) {
     if (!cleanIban || cleanIban.length < 15) return;
     setLookingUpIban(true);
     try {
-      const res = await base44.functions.invoke('lookupIbanBic', { iban: cleanIban });
+      const res = await base44.functions.invoke('lookupService', { action: 'lookup_iban_bic', iban: cleanIban });
       if (res.data?.status === 'found' || res.data?.status === 'partial') {
         if (res.data.bic) setForm((f) => ({ ...f, bic: res.data.bic }));
         if (res.data.bankName) setForm((f) => ({ ...f, bank_name: res.data.bankName }));

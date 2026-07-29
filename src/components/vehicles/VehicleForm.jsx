@@ -92,8 +92,9 @@ export default function VehicleForm({ vehicle, onSave, onCancel }) {
     if (!form.license_plate) return;
     setLookingUp(true);
     try {
-      const { data } = await base44.functions.invoke('lookupLicensePlate', { 
-        license_plate: form.license_plate 
+      const { data } = await base44.functions.invoke('lookupService', {
+        action: 'lookup_license_plate',
+        licensePlate: form.license_plate
       });
       if (data.brand) setForm(prev => ({ 
         ...prev, 

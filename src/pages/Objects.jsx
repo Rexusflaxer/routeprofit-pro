@@ -11,15 +11,16 @@ import EmptyState from "../components/ui-custom/EmptyState";
 import ObjectForm from "../components/objects/ObjectForm";
 import ObjectTable from "../components/objects/ObjectTable";
 import ObjectDetailView from "../components/objects/ObjectDetailView";
+import { useSearchParams } from "react-router-dom";
 
 export default function Objects() {
   const [showForm, setShowForm] = useState(false);
   const [editing, setEditing] = useState(null);
-  const [selectedObject, setSelectedObject] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
+  const [searchParams, setSearchParams] = useSearchParams();
   const queryClient = useQueryClient();
 
-  const { data: objects = [], isLoading } = useQuery({
+  const { data: objects = [] } = useQuery({
     queryKey: ["objects"],
     queryFn: () => base44.entities.SurveillanceObject.list(),
   });
@@ -64,11 +65,27 @@ export default function Objects() {
     setShowForm(true);
   };
 
-  const filteredObjects = objects.filter(obj =>
-    obj.object_code?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    obj.name?.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    obj.address?.toLowerCase().includes(searchTerm.toLowerCase())
-  );
+  const selectedObjectId = searchParams.get("id");
+  const customerFilter = searchParams.get("customer");
+  const selectedObject = objects.find(object => object.id === selectedObjectId);
+  const filteredObjects = objects.filter(obj => {
+    if (customerFilter && obj.customer_id !== customerFilter) return false;
+    return obj.object_code?.toLowerCase().includes(searchTerm.toLowerCase())
+      || obj.name?.toLowerCase().includes(searchTerm.toLowerCase())
+      || obj.address?.toLowerCase().includes(searchTerm.toLowerCase());
+  });
+
+  const selectObject = object => {
+    const next = new URLSearchParams(searchParams);
+    next.set("id", object.id);
+    setSearchParams(next);
+  };
+
+  const closeObject = () => {
+    const next = new URLSearchParams(searchParams);
+    next.delete("id");
+    setSearchParams(next);
+  };
 
   const objectFormDialog = (
     <Dialog open={showForm} onOpenChange={setShowForm}>
@@ -82,13 +99,12 @@ export default function Objects() {
   );
 
   if (selectedObject) {
-    const currentObject = objects.find(obj => obj.id === selectedObject.id) || selectedObject;
     return (
       <>
         {objectFormDialog}
         <ObjectDetailView
-          object={currentObject}
-          onBack={() => setSelectedObject(null)}
+          object={selectedObject}
+          onBack={closeObject}
           onEditObject={handleEdit}
         />
       </>
@@ -131,7 +147,7 @@ export default function Objects() {
            {filteredObjects.length === 0 ? (
              <EmptyState icon={MapPin} title="Geen resultaten" description={`Geen objecten gevonden met "${searchTerm}".`} />
            ) : (
-             <ObjectTable objects={filteredObjects} onSelect={setSelectedObject} onEdit={handleEdit} onDelete={(id) => deleteMutation.mutate(id)} />
+             <ObjectTable objects={filteredObjects} onSelect={selectObject} onEdit={handleEdit} onDelete={(id) => deleteMutation.mutate(id)} />
            )}
          </div>
        ) : !showForm && (

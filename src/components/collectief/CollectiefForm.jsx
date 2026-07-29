@@ -73,7 +73,7 @@ export default function CollectiefForm({ collectief, customers, objects, collect
     if (value.length < 3) { setAddressSuggestions([]); setShowSuggestions(false); return; }
     addressDebounceRef.current = setTimeout(async () => {
       setAddressLoading(true);
-      const res = await base44.functions.invoke("searchAddress", { query: value });
+      const res = await base44.functions.invoke("lookupService", { action: "search_address", query: value });
       setAddressSuggestions(res.data?.suggestions || []);
       setShowSuggestions(true);
       setAddressLoading(false);

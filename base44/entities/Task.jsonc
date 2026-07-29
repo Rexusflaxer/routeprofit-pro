@@ -310,7 +310,7 @@
     },
     "is_free": {
       "type": "boolean",
-      "description": "Gratis service \u2014 niet in rekening brengen bij klant",
+      "description": "Gratis service — niet in rekening brengen bij klant",
       "default": false
     },
     "selected_object_ids": {
@@ -402,5 +402,27 @@
   "required": [
     "task_type",
     "duration_minutes"
-  ]
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
 }

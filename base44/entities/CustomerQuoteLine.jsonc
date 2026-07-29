@@ -1,0 +1,157 @@
+{
+  "name": "CustomerQuoteLine",
+  "type": "object",
+  "properties": {
+    "quote_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": "string"
+    },
+    "sequence": {
+      "type": "number"
+    },
+    "line_type": {
+      "type": "string",
+      "enum": [
+        "service",
+        "product",
+        "text",
+        "discount"
+      ],
+      "default": "service"
+    },
+    "service_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "object_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "collective_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "description": {
+      "type": "string"
+    },
+    "quantity_minor": {
+      "type": "number",
+      "default": 1000,
+      "description": "Hoeveelheid in duizendsten van de gekozen eenheid."
+    },
+    "unit": {
+      "type": "string",
+      "enum": [
+        "fixed",
+        "each",
+        "minute",
+        "hour",
+        "kilometer",
+        "day",
+        "week",
+        "month",
+        "year",
+        "custom"
+      ],
+      "default": "each"
+    },
+    "unit_price_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "discount_basis_points": {
+      "type": "number",
+      "default": 0
+    },
+    "vat_rate_basis_points": {
+      "type": "number",
+      "default": 2100
+    },
+    "subtotal_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "tax_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "total_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "quote_id",
+    "company_id",
+    "customer_id",
+    "customer_account_id",
+    "sequence",
+    "line_type",
+    "description",
+    "quantity_minor",
+    "unit",
+    "unit_price_cents",
+    "vat_rate_basis_points"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

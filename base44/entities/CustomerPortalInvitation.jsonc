@@ -1,0 +1,193 @@
+{
+  "name": "CustomerPortalInvitation",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "contact_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "email": {
+      "type": "string"
+    },
+    "normalized_email": {
+      "type": "string"
+    },
+    "token_hash": {
+      "type": "string",
+      "description": "Hash van het eenmalige uitnodigingstoken; nooit het ruwe token opslaan."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "accepted",
+        "declined",
+        "expired",
+        "revoked",
+        "delivery_failed"
+      ],
+      "default": "pending"
+    },
+    "role_template": {
+      "type": "string",
+      "enum": [
+        "portal_admin",
+        "viewer",
+        "operations",
+        "reports",
+        "finance",
+        "custom"
+      ],
+      "default": "custom"
+    },
+    "invited_by_user_id": {
+      "type": "string"
+    },
+    "invited_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "created_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "expires_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "accepted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "accepted_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "declined_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "revoked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "revoked_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "revoke_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "delivery_failed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "delivery_failure_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "delivery_error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "resend_count": {
+      "type": "number",
+      "default": 0
+    },
+    "last_sent_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "type": "number",
+      "default": 1,
+      "description": "Optimistic concurrency-versie voor roteren, accepteren en intrekken."
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "company_id",
+    "customer_id",
+    "email",
+    "normalized_email",
+    "token_hash",
+    "status",
+    "role_template",
+    "invited_by_user_id",
+    "expires_at"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

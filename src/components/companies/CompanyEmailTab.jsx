@@ -725,7 +725,7 @@ export default function CompanyEmailTab({ companyId, company }) {
   const testMailMutation = useMutation({
     mutationFn: async ({ recipient }) => {
       const payload = buildTestMailPayload({ companyId, company, settings, recipient });
-      await base44.functions.invoke("sendCompanyEmail", payload);
+      await base44.functions.invoke("companyEmailService", { ...payload, action: "send" });
       const now = new Date().toISOString();
       const saved = settings?.id
         ? await base44.entities.CompanyEmailSettings.update(settings.id, {
@@ -767,7 +767,8 @@ export default function CompanyEmailTab({ companyId, company }) {
     try {
       setErrors(current => ({ ...current, oauth: undefined }));
       const redirectUri = `${window.location.origin}/email-oauth/callback`;
-      const { data } = await base44.functions.invoke("startCompanyEmailOAuth", {
+      const { data } = await base44.functions.invoke("companyEmailService", {
+        action: "start_oauth",
         company_id: companyId,
         provider: providerKey,
         redirect_uri: redirectUri,

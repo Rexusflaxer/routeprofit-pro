@@ -1,0 +1,234 @@
+{
+  "name": "DocumentSignature",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": "string"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "CustomerQuote",
+        "CustomerContract",
+        "customer_quote",
+        "customer_contract",
+        "other"
+      ]
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "source_version": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "Ondertekende commerciële documentversie."
+    },
+    "provider": {
+      "type": "string",
+      "enum": [
+        "signhost",
+        "manual"
+      ],
+      "default": "signhost"
+    },
+    "provider_transaction_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "creating",
+        "queued",
+        "pending",
+        "sent",
+        "in_progress",
+        "evidence_pending",
+        "signed",
+        "rejected",
+        "expired",
+        "cancelled",
+        "failed"
+      ],
+      "default": "draft"
+    },
+    "provider_status": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signer_snapshots": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "default": []
+    },
+    "unsigned_managed_file_id": {
+      "type": "string"
+    },
+    "signed_managed_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "receipt_managed_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_checksum": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signed_checksum": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_webhook_checksum": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_webhook_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "sent_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "signed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "rejected_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "expired_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "cancelled_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "failure_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "manual_import_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "created_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "company_id",
+    "customer_id",
+    "customer_account_id",
+    "source_type",
+    "source_id",
+    "provider",
+    "status",
+    "unsigned_managed_file_id",
+    "document_checksum",
+    "idempotency_key"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

@@ -178,7 +178,7 @@
         "object",
         "null"
       ],
-      "description": "Loonperiodes per jaar \u2014 object met jaarkeys: { '2025': [...], '2026': [...] }. Elk item: { period_number, start_date, end_date, is_extra_period }.",
+      "description": "Loonperiodes per jaar — object met jaarkeys: { '2025': [...], '2026': [...] }. Elk item: { period_number, start_date, end_date, is_extra_period }.",
       "additionalProperties": true
     },
     "surcharges": {
@@ -458,5 +458,27 @@
   },
   "required": [
     "name"
-  ]
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
 }

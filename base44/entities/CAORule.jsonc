@@ -287,7 +287,7 @@
       "items": {
         "type": "string"
       },
-      "description": "Lijst van functies/componenten waar deze regel is ge\u00efmplementeerd"
+      "description": "Lijst van functies/componenten waar deze regel is geïmplementeerd"
     },
     "runtime_binding_status": {
       "type": [
@@ -364,5 +364,27 @@
   "required": [
     "rule_id",
     "cao_key"
-  ]
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
 }

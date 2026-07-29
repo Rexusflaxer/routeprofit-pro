@@ -1,0 +1,149 @@
+{
+  "name": "CustomerPortalGrant",
+  "type": "object",
+  "properties": {
+    "membership_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "scope_type": {
+      "type": "string",
+      "enum": [
+        "customer_wide",
+        "all_objects",
+        "customer_all_objects",
+        "selected_objects"
+      ],
+      "default": "selected_objects"
+    },
+    "object_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "module": {
+      "type": "string",
+      "enum": [
+        "overview",
+        "objects",
+        "planning",
+        "requests",
+        "reports",
+        "documents",
+        "commercial",
+        "billing",
+        "access_management"
+      ]
+    },
+    "actions": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "read",
+          "create",
+          "manage",
+          "publish",
+          "view",
+          "download",
+          "create_request",
+          "accept",
+          "sign",
+          "manage_access"
+        ]
+      },
+      "default": [
+        "read"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "revoked",
+        "expired"
+      ],
+      "default": "active"
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "granted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "granted_by_user_id": {
+      "type": "string"
+    },
+    "revoked_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "revoked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "membership_id",
+    "company_id",
+    "customer_id",
+    "scope_type",
+    "module",
+    "actions",
+    "status",
+    "granted_by_user_id"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

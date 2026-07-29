@@ -72,7 +72,7 @@ export default function CompanyForm({ company, companies = [], caoConfigurations
     if (!kvkSearch.trim()) return;
     setKvkLoading(true);
     try {
-      const { data } = await base44.functions.invoke("searchKvK", { query: kvkSearch });
+      const { data } = await base44.functions.invoke("lookupService", { action: "search_kvk", query: kvkSearch });
       setKvkResults(data.results || []);
     } finally {
       setKvkLoading(false);

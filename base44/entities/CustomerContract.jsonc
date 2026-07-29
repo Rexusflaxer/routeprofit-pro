@@ -1,0 +1,256 @@
+{
+  "name": "CustomerContract",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": "string"
+    },
+    "source_quote_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "contract_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "number_reservation_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "type": "number",
+      "default": 1,
+      "description": "Optimistic concurrency-versie."
+    },
+    "document_version": {
+      "type": "number",
+      "default": 1,
+      "description": "Contractdocumentversie; statuswijzigingen verhogen alleen version."
+    },
+    "supersedes_contract_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "review",
+        "approved",
+        "sent_for_signature",
+        "signed",
+        "active",
+        "suspended",
+        "ended",
+        "superseded",
+        "archived"
+      ],
+      "default": "draft"
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "currency": {
+      "type": "string",
+      "default": "EUR"
+    },
+    "start_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "end_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "notice_period_days": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "auto_renew": {
+      "type": "boolean",
+      "default": false
+    },
+    "billing_frequency": {
+      "type": "string",
+      "enum": [
+        "weekly",
+        "four_weekly",
+        "monthly",
+        "quarterly",
+        "annually",
+        "on_completion",
+        "manual"
+      ],
+      "default": "monthly"
+    },
+    "customer_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "company_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "template_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "unsigned_managed_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signed_managed_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_signature_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signature_lock_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Idempotente lock voor het starten of hervatten van een ondertekenflow."
+    },
+    "signature_lock_started_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "signature_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "approved_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "approved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "signed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "activated_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "ended_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "end_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "company_id",
+    "customer_id",
+    "customer_account_id",
+    "title",
+    "status",
+    "currency"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

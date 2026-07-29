@@ -1,0 +1,473 @@
+{
+  "name": "SalesInvoice",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": "string"
+    },
+    "invoice_run_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_type": {
+      "type": "string",
+      "enum": [
+        "invoice",
+        "credit_note"
+      ],
+      "default": "invoice"
+    },
+    "original_invoice_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Verplicht voor een creditnota."
+    },
+    "invoice_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "number_reservation_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "draft",
+        "review",
+        "approved",
+        "issue_pending",
+        "issued",
+        "issue_failed",
+        "cancelled",
+        null
+      ],
+      "description": "Compatibele statusalias; lifecycle_status is canoniek."
+    },
+    "lifecycle_status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "review",
+        "approved",
+        "issue_pending",
+        "issued",
+        "issue_failed",
+        "cancelled"
+      ],
+      "default": "draft",
+      "description": "Canonieke factuurlifecycle, los van aflevering en betaling."
+    },
+    "delivery_status": {
+      "type": "string",
+      "enum": [
+        "not_scheduled",
+        "queued",
+        "sent",
+        "processing",
+        "delivered",
+        "accepted",
+        "rejected",
+        "partially_paid",
+        "paid",
+        "cleared",
+        "failed"
+      ],
+      "default": "not_scheduled"
+    },
+    "payment_status": {
+      "type": "string",
+      "enum": [
+        "not_due",
+        "open",
+        "partially_paid",
+        "paid",
+        "overpaid",
+        "overdue",
+        "written_off"
+      ],
+      "default": "not_due"
+    },
+    "dispute_hold": {
+      "type": "boolean",
+      "default": false
+    },
+    "dispute_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "invoice_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "issue_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "due_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "currency": {
+      "type": "string",
+      "default": "EUR"
+    },
+    "customer_reference": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "purchase_order_reference": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "billing_address_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payment_reference": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "company_snapshot": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "customer_snapshot": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "billing_address_snapshot": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "bank_account_snapshot": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "subtotal_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "tax_total_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "total_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "total_excluding_tax_cents": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "total_including_tax_cents": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "paid_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "open_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "tax_summary": {
+      "type": "array",
+      "items": {
+        "type": "object"
+      },
+      "default": []
+    },
+    "tax_breakdown": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object"
+      }
+    },
+    "payment_iban": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Openbare betaal-IBAN uit de immutable factuursnapshot."
+    },
+    "notes": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "pdf_managed_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "ubl_managed_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "storecove",
+        "email",
+        "portal",
+        "manual",
+        null
+      ]
+    },
+    "provider_submission_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider_idempotency_guid": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Canonieke idempotentiesleutel voor providerindiening en crashherstel."
+    },
+    "provider_event": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "last_delivery_event_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Laatst volledig verwerkt Storecove-event; ondersteunt veilig hervatten na een workercrash."
+    },
+    "provider_status": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "provider_details": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "provider_response_document": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Niet-geheime, onveranderlijke providerresponse of verwijzing naar het exacte responsebestand."
+    },
+    "delivery_evidence": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "delivery_evidence_managed_file_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "delivery_evidence_status": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "pending",
+        "stored",
+        "failed",
+        null
+      ]
+    },
+    "delivery_evidence_error": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "submitted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "last_delivery_event_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "sent_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "issued_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "delivered_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "accepted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "rejected_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "paid_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "failure_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "company_id",
+    "customer_id",
+    "customer_account_id",
+    "document_type",
+    "lifecycle_status",
+    "delivery_status",
+    "payment_status",
+    "currency",
+    "company_snapshot",
+    "customer_snapshot",
+    "billing_address_snapshot",
+    "bank_account_snapshot",
+    "subtotal_cents",
+    "tax_total_cents",
+    "total_cents",
+    "paid_cents",
+    "open_cents",
+    "idempotency_key"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

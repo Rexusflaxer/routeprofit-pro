@@ -1,0 +1,119 @@
+{
+  "name": "CommercialNumberSequence",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "document_type": {
+      "type": "string",
+      "enum": [
+        "customer",
+        "request",
+        "quote",
+        "contract",
+        "invoice",
+        "credit_note"
+      ]
+    },
+    "fiscal_year": {
+      "type": "number"
+    },
+    "prefix": {
+      "type": "string"
+    },
+    "padding": {
+      "type": "number",
+      "default": 6
+    },
+    "next_number": {
+      "type": "number",
+      "default": 1,
+      "description": "Volgende atomaire tellerwaarde; nooit verlagen of hergebruiken."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "closed"
+      ],
+      "default": "active"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "last_reserved_number": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "last_reserved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "last_issue_token_hash": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Hash van het laatste eenmalige uitgiftetoken voor crash-reconciliatie."
+    },
+    "last_idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Laatste idempotency key die samen met de CAS-teller is vastgelegd."
+    },
+    "last_resource_type": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Documenttype van de laatste claim; voorkomt hergebruik van een idempotency key voor een ander document."
+    },
+    "last_resource_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Document-ID van de laatste claim; wordt atomair met de teller opgeslagen voor veilige crashreconciliatie."
+    }
+  },
+  "required": [
+    "company_id",
+    "document_type",
+    "fiscal_year",
+    "prefix",
+    "padding",
+    "next_number",
+    "status"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

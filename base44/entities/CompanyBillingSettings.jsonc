@@ -1,0 +1,237 @@
+{
+  "name": "CompanyBillingSettings",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "inactive"
+      ],
+      "default": "draft"
+    },
+    "currency": {
+      "type": "string",
+      "default": "EUR"
+    },
+    "timezone": {
+      "type": "string",
+      "default": "Europe/Amsterdam"
+    },
+    "default_vat_rate_bps": {
+      "type": "number",
+      "default": 2100
+    },
+    "payment_term_days": {
+      "type": "number",
+      "default": 30
+    },
+    "default_bank_account_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "invoice_bank_account_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "invoice_letterhead_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "invoice_sequence_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "credit_note_sequence_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "default_payment_term_days": {
+      "type": "number",
+      "default": 30
+    },
+    "default_vat_rate_basis_points": {
+      "type": "number",
+      "default": 2100
+    },
+    "billing_mode": {
+      "type": "string",
+      "enum": [
+        "disabled",
+        "shadow",
+        "live"
+      ],
+      "default": "disabled"
+    },
+    "auto_issue": {
+      "type": "boolean",
+      "default": false
+    },
+    "auto_send": {
+      "type": "boolean",
+      "default": false
+    },
+    "review_required": {
+      "type": "boolean",
+      "default": true
+    },
+    "delivery_channels": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "enum": [
+          "email",
+          "portal",
+          "peppol",
+          "manual"
+        ]
+      },
+      "default": [
+        "email"
+      ]
+    },
+    "commercial_contracts_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "billing_shadow_mode": {
+      "type": "boolean",
+      "default": false
+    },
+    "invoice_issue_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "auto_send_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "collections_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "peppol_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "peppol_provider": {
+      "type": "string",
+      "enum": [
+        "storecove",
+        "none"
+      ],
+      "default": "none"
+    },
+    "customer_portal_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "storecove_legal_entity_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signhost_enabled": {
+      "type": "boolean",
+      "default": false
+    },
+    "peppol_sender_scheme_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "peppol_sender_identifier": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "invoice_email_settings_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "feature_flags": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true,
+      "description": "Per-BV flags voor commercial_contracts, billing_shadow, invoice_issue, auto_send, collections, peppol en customer_portal."
+    },
+    "reminder_schedule": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "retention_years": {
+      "type": "number",
+      "default": 7
+    },
+    "next_invoice_run_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "company_id",
+    "status",
+    "currency",
+    "billing_mode"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

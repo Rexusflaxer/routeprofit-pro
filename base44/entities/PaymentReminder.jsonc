@@ -1,0 +1,140 @@
+{
+  "name": "PaymentReminder",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": "string"
+    },
+    "invoice_id": {
+      "type": "string"
+    },
+    "sequence": {
+      "type": "number"
+    },
+    "reminder_type": {
+      "type": "string",
+      "enum": [
+        "friendly",
+        "first",
+        "second",
+        "final",
+        "wik14",
+        "collection"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "scheduled",
+        "sent",
+        "failed",
+        "cancelled",
+        "paid"
+      ],
+      "default": "draft"
+    },
+    "channel": {
+      "type": "string",
+      "enum": [
+        "email",
+        "portal",
+        "post",
+        "manual"
+      ],
+      "default": "email"
+    },
+    "scheduled_for": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "due_date_snapshot": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "open_amount_cents": {
+      "type": "number"
+    },
+    "additional_costs_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "recipient_snapshot": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "document_managed_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sent_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "failure_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "company_id",
+    "customer_id",
+    "customer_account_id",
+    "invoice_id",
+    "sequence",
+    "reminder_type",
+    "status",
+    "channel",
+    "open_amount_cents",
+    "recipient_snapshot",
+    "idempotency_key"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

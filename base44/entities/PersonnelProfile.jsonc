@@ -94,7 +94,7 @@
         "null"
       ],
       "format": "date-time",
-      "description": "Wanneer de CV is ge\u00fcpload"
+      "description": "Wanneer de CV is geüpload"
     },
     "notes": {
       "type": [
@@ -106,5 +106,27 @@
   },
   "required": [
     "personnel_id"
-  ]
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
 }

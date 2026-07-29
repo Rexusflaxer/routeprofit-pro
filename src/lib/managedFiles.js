@@ -209,7 +209,8 @@ async function encryptFileForUpload({
   const plaintextSha256 = await sha256Base64(plaintext);
   const ciphertextSha256 = await sha256Base64(ciphertext);
 
-  const { data } = await base44.functions.invoke("wrapManagedFileKey", {
+  const { data } = await base44.functions.invoke("managedFileCrypto", {
+    action: "wrap_key",
     raw_key_b64: bytesToBase64(rawKey),
     context: {
       owner_type: ownerType,
@@ -452,6 +453,8 @@ export async function uploadManagedFile(input) {
     ownerType,
     ownerId = null,
     companyId = null,
+    customerAccountId = null,
+    objectId = null,
     uploadSessionId = null,
     ownerLabel,
     domain,
@@ -471,7 +474,8 @@ export async function uploadManagedFile(input) {
     auditActors = [],
     auditAction = "toegevoegd",
     folderSegments = [],
-    version = 1
+    version = 1,
+    privateStorage = ownerType === "customer" || domain === "commercial"
   } = input;
 
   const descriptor = buildDescriptor({
@@ -525,7 +529,12 @@ export async function uploadManagedFile(input) {
     encryption = encrypted.encryption;
   }
 
-  const { file_url } = await base44.integrations.Core.UploadFile({ file: uploadFile });
+  const uploadResult = privateStorage
+    ? await base44.integrations.Core.UploadPrivateFile({ file: uploadFile })
+    : await base44.integrations.Core.UploadFile({ file: uploadFile });
+  const fileUri = uploadResult.file_uri || null;
+  const file_url = uploadResult.file_url || (fileUri ? `private://${fileUri}` : null);
+  if (!file_url) throw new Error("Bestand kon niet veilig worden opgeslagen.");
   const security = sensitivityDefaults(isSensitive);
   const uploadedByLabel = formatAuditActorLabel(uploadedBy, auditActors);
   const auditMetadata = uploadedBy
@@ -535,6 +544,9 @@ export async function uploadManagedFile(input) {
   const managed = await base44.entities.ManagedFile.create({
     owner_type: ownerType,
     owner_id: ownerId || null,
+    customer_id: ownerType === "customer" ? ownerId : null,
+    customer_account_id: customerAccountId || null,
+    object_id: objectId || null,
     company_id: companyId || (ownerType === "company" ? ownerId : null) || null,
     upload_session_id: uploadSessionId || null,
     tenant_container_key: descriptor.tenant_container_key,
@@ -546,6 +558,9 @@ export async function uploadManagedFile(input) {
     source_entity_id: sourceEntityId,
     source_field: sourceField,
     file_url,
+    file_uri: fileUri,
+    storage_visibility: privateStorage ? "private" : "public",
+    portal_visible: false,
     storage_filename: encryption.storage_filename,
     original_filename: file.name || null,
     display_filename: descriptor.display_filename,
@@ -602,7 +617,8 @@ export async function prepareManagedFilePreview({ managedFileId, fileUrl = null,
     return createPlainManagedFilePreview({ fileUrl, filename });
   }
 
-  const { data } = await base44.functions.invoke("unwrapManagedFileKey", {
+  const { data } = await base44.functions.invoke("managedFileCrypto", {
+    action: "unwrap_key",
     managed_file_id: managedFileId
   });
 
@@ -656,7 +672,8 @@ export async function downloadManagedFile({ managedFileId, fileUrl = null, filen
       return;
     }
 
-    const { data } = await base44.functions.invoke("unwrapManagedFileKey", {
+    const { data } = await base44.functions.invoke("managedFileCrypto", {
+      action: "unwrap_key",
       managed_file_id: managedFileId
     });
 

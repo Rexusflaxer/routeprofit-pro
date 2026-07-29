@@ -1,0 +1,115 @@
+{
+  "name": "CustomerContactPoint",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "contact_id": {
+      "type": "string"
+    },
+    "point_type": {
+      "type": "string",
+      "enum": [
+        "email",
+        "phone",
+        "mobile",
+        "other"
+      ]
+    },
+    "label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "value": {
+      "type": "string"
+    },
+    "normalized_value": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "is_primary": {
+      "type": "boolean",
+      "default": false
+    },
+    "purposes": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": [],
+      "description": "Bijv. general, billing, reports, planning of emergency."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "unverified",
+        "invalid",
+        "inactive",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "consent_status": {
+      "type": "string",
+      "enum": [
+        "not_required",
+        "unknown",
+        "granted",
+        "withdrawn"
+      ],
+      "default": "not_required"
+    },
+    "verified_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "customer_id",
+    "contact_id",
+    "point_type",
+    "value"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

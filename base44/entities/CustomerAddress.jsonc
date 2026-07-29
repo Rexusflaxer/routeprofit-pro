@@ -1,0 +1,193 @@
+{
+  "name": "CustomerAddress",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Alleen gevuld als dit adres specifiek voor één eigen BV/debiteurenrelatie geldt."
+    },
+    "address_type": {
+      "type": "string",
+      "enum": [
+        "visiting",
+        "postal",
+        "billing",
+        "invoice",
+        "registered",
+        "service",
+        "other"
+      ]
+    },
+    "label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "recipient_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "street_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "street_and_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "address_line_1": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "line1": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "house_number_addition": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "address_line_2": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "line2": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "postal_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "zip": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "city": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "region": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "country_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "default": "NL"
+    },
+    "country_name": {
+      "type": "string",
+      "default": "Nederland"
+    },
+    "formatted_address": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "is_primary": {
+      "type": "boolean",
+      "default": false
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "customer_id",
+    "address_type"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

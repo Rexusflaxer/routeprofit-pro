@@ -1,0 +1,143 @@
+{
+  "name": "CustomerContractRate",
+  "type": "object",
+  "properties": {
+    "contract_id": {
+      "type": "string"
+    },
+    "contract_line_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": "string"
+    },
+    "rate_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "unit": {
+      "type": "string",
+      "enum": [
+        "fixed",
+        "execution",
+        "minute",
+        "hour",
+        "unit",
+        "kilometer"
+      ]
+    },
+    "amount_cents": {
+      "type": "number",
+      "description": "Geheel aantal centen per eenheid."
+    },
+    "currency": {
+      "type": "string",
+      "default": "EUR"
+    },
+    "vat_rate_basis_points": {
+      "type": "number",
+      "default": 2100
+    },
+    "minimum_quantity_minor": {
+      "type": "number",
+      "default": 0
+    },
+    "rounding_increment_minor": {
+      "type": "number",
+      "default": 1
+    },
+    "priority": {
+      "type": "number",
+      "default": 0
+    },
+    "price_index_profile_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_rate_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Voorgaand tarief bij indexatie of correctie."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "superseded",
+        "ended",
+        "archived"
+      ],
+      "default": "draft"
+    },
+    "valid_from": {
+      "type": "string",
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "contract_id",
+    "contract_line_id",
+    "company_id",
+    "customer_id",
+    "customer_account_id",
+    "unit",
+    "amount_cents",
+    "currency",
+    "vat_rate_basis_points",
+    "status",
+    "valid_from"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

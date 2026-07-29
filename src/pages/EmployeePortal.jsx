@@ -17,7 +17,7 @@ export default function EmployeePortal() {
     if (!isAuthed) { setLoading(false); return; }
     const me = await base44.auth.me();
     setUser(me);
-    const res = await base44.functions.invoke("employeeContext", { action: "get" });
+    const res = await base44.functions.invoke("employeePortalApi", { action: "context" });
     setCtx(res.data?.employee_context || null);
     setLoading(false);
   };
@@ -26,7 +26,11 @@ export default function EmployeePortal() {
 
   const handleInvitation = async (invitationId, action) => {
     setActionLoading(invitationId + action);
-    await base44.functions.invoke("employeeInvitationAction", { action, invitation_id: invitationId });
+    await base44.functions.invoke("employeePortalApi", {
+      action: "invitation",
+      operation: action,
+      invitation_id: invitationId,
+    });
     await fetchContext();
     setActionLoading(null);
   };

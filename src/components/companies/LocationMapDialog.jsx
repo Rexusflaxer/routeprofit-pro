@@ -29,7 +29,7 @@ function normalizeCoordinates(latitude, longitude) {
 }
 
 async function geocodeAddressWithPdok(address) {
-  const { data } = await base44.functions.invoke("searchAddress", { query: address });
+  const { data } = await base44.functions.invoke("lookupService", { action: "search_address", query: address });
   const suggestion = data?.suggestions?.find((item) => item.latitude && item.longitude);
 
   if (!suggestion) return null;

@@ -53,14 +53,14 @@
         "string",
         "null"
       ],
-      "description": "Ge\u00fcploade vergunning (PDF/afbeelding)"
+      "description": "Geüploade vergunning (PDF/afbeelding)"
     },
     "document_filename": {
       "type": [
         "string",
         "null"
       ],
-      "description": "Bestandsnaam van het ge\u00fcploade document"
+      "description": "Bestandsnaam van het geüploade document"
     },
     "document_file_id": {
       "type": [
@@ -110,5 +110,27 @@
   },
   "required": [
     "company_id"
-  ]
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
 }

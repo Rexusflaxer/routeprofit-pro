@@ -8,7 +8,8 @@ export default function MobileRoutePublishButton({ route, dateKey, existingExecu
   const queryClient = useQueryClient();
 
   const publishMutation = useMutation({
-    mutationFn: () => base44.functions.invoke("createMobileRouteExecution", {
+    mutationFn: () => base44.functions.invoke("mobileApi", {
+      action: "create_route_execution",
       route_id: route.id,
       service_date: dateKey,
     }),

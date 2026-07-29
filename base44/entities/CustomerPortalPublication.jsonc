@@ -1,0 +1,218 @@
+{
+  "name": "CustomerPortalPublication",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "object_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "MobileReport",
+        "Planning",
+        "ManagedFile",
+        "CustomerQuote",
+        "CustomerContract",
+        "SalesInvoice",
+        "PaymentReminder",
+        "mobile_report",
+        "planning",
+        "managed_file",
+        "customer_quote",
+        "customer_contract",
+        "sales_invoice",
+        "payment_reminder",
+        "other"
+      ]
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "publication_type": {
+      "type": "string",
+      "enum": [
+        "report",
+        "planning",
+        "document",
+        "quote",
+        "contract",
+        "invoice",
+        "credit_note",
+        "reminder",
+        "other"
+      ]
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "supersedes_publication_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "submitted",
+        "review",
+        "correction_requested",
+        "approved",
+        "published",
+        "withdrawn",
+        "superseded",
+        "expired"
+      ],
+      "default": "draft"
+    },
+    "safe_payload": {
+      "type": "object",
+      "additionalProperties": true,
+      "description": "Immutable, allowlisted portalsnapshot zonder interne velden."
+    },
+    "attachment_managed_file_ids": {
+      "type": "array",
+      "items": {
+        "type": "string"
+      },
+      "default": []
+    },
+    "reviewed_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reviewed_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reviewed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "published_by": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "published_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "published_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "checksum": {
+      "type": "string",
+      "description": "Checksum van safe_payload plus bijlageverwijzingen."
+    },
+    "record_version": {
+      "type": "number",
+      "default": 1,
+      "description": "Optimistic concurrency-versie; staat los van de onveranderlijke publicatieversie."
+    },
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "withdrawal_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "superseded_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "superseded_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "company_id",
+    "customer_id",
+    "source_type",
+    "source_id",
+    "publication_type",
+    "version",
+    "status",
+    "safe_payload",
+    "checksum"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

@@ -40,7 +40,7 @@ export default function AddressAutocomplete({ value = {}, onAddressSelect, place
     timeoutRef.current = setTimeout(async () => {
       setLoading(true);
       try {
-        const { data } = await base44.functions.invoke("searchAddress", { query: nextQuery.trim() });
+        const { data } = await base44.functions.invoke("lookupService", { action: "search_address", query: nextQuery.trim() });
         if (requestRef.current !== requestId) return;
         const results = data?.suggestions || data?.results || [];
         setSuggestions(results.slice(0, 8));

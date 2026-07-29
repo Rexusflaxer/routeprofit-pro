@@ -1,0 +1,272 @@
+{
+  "name": "CustomerQuote",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": "string"
+    },
+    "quote_number": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Pas gevuld zodra een commerciële nummerreservering is uitgegeven."
+    },
+    "number_reservation_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "type": "number",
+      "default": 1,
+      "description": "Optimistic concurrency-versie."
+    },
+    "document_version": {
+      "type": "number",
+      "default": 1,
+      "description": "Commerciële documentversie; alleen verhogen wanneer een nieuwe offerteversie wordt gemaakt."
+    },
+    "supersedes_quote_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "review",
+        "approved",
+        "sent",
+        "accepted",
+        "rejected",
+        "expired",
+        "withdrawn",
+        "converted"
+      ],
+      "default": "draft"
+    },
+    "title": {
+      "type": "string"
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "currency": {
+      "type": "string",
+      "default": "EUR"
+    },
+    "issue_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "customer_reference": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "company_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "billing_address_snapshot": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "subtotal_cents": {
+      "type": "number",
+      "default": 0,
+      "description": "Geheel aantal centen."
+    },
+    "discount_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "tax_total_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "total_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "tax_summary": {
+      "type": [
+        "array",
+        "null"
+      ],
+      "items": {
+        "type": "object"
+      }
+    },
+    "template_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_managed_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "document_signature_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signature_lock_key": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Idempotente lock voor het starten of hervatten van een ondertekenflow."
+    },
+    "signature_lock_started_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "signature_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "signed_managed_file_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reviewed_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reviewed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "sent_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "accepted_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "rejected_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "decision_note": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "converted_contract_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "idempotency_key": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "company_id",
+    "customer_id",
+    "customer_account_id",
+    "title",
+    "status",
+    "currency"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

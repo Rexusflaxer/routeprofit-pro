@@ -1,0 +1,204 @@
+{
+  "name": "SalesInvoiceLine",
+  "type": "object",
+  "properties": {
+    "invoice_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": "string"
+    },
+    "billing_candidate_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "original_invoice_line_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "sequence": {
+      "type": "number"
+    },
+    "line_number": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "line_type": {
+      "type": "string",
+      "enum": [
+        "service",
+        "product",
+        "text",
+        "discount",
+        "correction"
+      ],
+      "default": "service"
+    },
+    "description": {
+      "type": "string"
+    },
+    "service_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "period_start": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "period_end": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "quantity_minor": {
+      "type": "number"
+    },
+    "quantity_millis": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "quantity": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "unit": {
+      "type": "string",
+      "enum": [
+        "fixed",
+        "execution",
+        "minute",
+        "hour",
+        "unit",
+        "kilometer"
+      ]
+    },
+    "unit_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "UBL/Peppol eenheidscode, bijv. C62."
+    },
+    "unit_price_cents": {
+      "type": "number"
+    },
+    "subtotal_cents": {
+      "type": "number"
+    },
+    "total_excluding_tax_cents": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "vat_rate_basis_points": {
+      "type": "number"
+    },
+    "vat_rate_bps": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "tax_rate_bps": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "tax_cents": {
+      "type": "number"
+    },
+    "total_cents": {
+      "type": "number"
+    },
+    "source_snapshot": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "pricing_snapshot": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "invoice_id",
+    "company_id",
+    "customer_id",
+    "customer_account_id",
+    "sequence",
+    "line_type",
+    "description",
+    "quantity_minor",
+    "unit",
+    "unit_price_cents",
+    "subtotal_cents",
+    "vat_rate_basis_points",
+    "tax_cents",
+    "total_cents",
+    "source_snapshot",
+    "pricing_snapshot"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

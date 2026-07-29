@@ -51,7 +51,8 @@ export async function encryptSensitiveText(value, context = {}) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const ciphertext = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
 
-  const { data } = await base44.functions.invoke("wrapManagedFileKey", {
+  const { data } = await base44.functions.invoke("managedFileCrypto", {
+    action: "wrap_key",
     raw_key_b64: bytesToBase64(rawKey),
     context: {
       ...context,

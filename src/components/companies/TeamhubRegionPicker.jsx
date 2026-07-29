@@ -286,7 +286,7 @@ export default function TeamhubRegionPicker({ value = [], onChange }) {
     searchTimeout.current = setTimeout(async () => {
       setLoadingSearch(true);
       try {
-        const { data } = await base44.functions.invoke("searchAddress", { query: nextQuery });
+        const { data } = await base44.functions.invoke("lookupService", { action: "search_address", query: nextQuery });
         setSuggestions((data?.suggestions || []).filter(item => item.latitude && item.longitude).slice(0, 8));
       } finally {
         setLoadingSearch(false);

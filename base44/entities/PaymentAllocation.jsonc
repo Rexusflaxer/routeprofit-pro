@@ -1,0 +1,101 @@
+{
+  "name": "PaymentAllocation",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": "string"
+    },
+    "payment_id": {
+      "type": "string"
+    },
+    "invoice_id": {
+      "type": "string"
+    },
+    "amount_cents": {
+      "type": "number"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "reversed"
+      ],
+      "default": "active"
+    },
+    "allocated_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "allocated_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "reversed_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reversed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "reversal_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "company_id",
+    "customer_id",
+    "customer_account_id",
+    "payment_id",
+    "invoice_id",
+    "amount_cents",
+    "status",
+    "allocated_at",
+    "idempotency_key"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

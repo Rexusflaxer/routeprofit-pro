@@ -215,7 +215,7 @@
         "string",
         "null"
       ],
-      "description": "Ge\u00ebxtraheerde tekst"
+      "description": "Geëxtraheerde tekst"
     },
     "extraction_status": {
       "type": "string",
@@ -264,5 +264,27 @@
     "url",
     "first_seen_at",
     "last_checked_at"
-  ]
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
 }

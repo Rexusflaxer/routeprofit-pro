@@ -1,0 +1,119 @@
+{
+  "name": "PriceIndexProfile",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "name": {
+      "type": "string"
+    },
+    "method": {
+      "type": "string",
+      "enum": [
+        "fixed_percentage",
+        "cpi_manual",
+        "cpi_cbs",
+        "custom"
+      ]
+    },
+    "frequency": {
+      "type": "string",
+      "enum": [
+        "annual",
+        "manual"
+      ],
+      "default": "annual"
+    },
+    "default_percentage_basis_points": {
+      "type": [
+        "number",
+        "null"
+      ],
+      "description": "100 basispunten is 1 procent."
+    },
+    "effective_month": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "effective_day": {
+      "type": [
+        "number",
+        "null"
+      ]
+    },
+    "rounding_mode": {
+      "type": "string",
+      "enum": [
+        "half_up_cent",
+        "up_cent",
+        "down_cent"
+      ],
+      "default": "half_up_cent"
+    },
+    "source_reference": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "next_index_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "inactive",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "company_id",
+    "name",
+    "method",
+    "frequency",
+    "status"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

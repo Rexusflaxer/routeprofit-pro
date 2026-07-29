@@ -1,0 +1,170 @@
+{
+  "name": "Payment",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_account_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payment_reference": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "source": {
+      "type": "string",
+      "enum": [
+        "manual",
+        "csv_import",
+        "bank_import",
+        "provider",
+        "other"
+      ]
+    },
+    "external_transaction_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "import_fingerprint": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Deduplicatiesleutel voor bank- en CSV-import."
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "booked",
+        "partially_allocated",
+        "allocated",
+        "reversed",
+        "failed"
+      ],
+      "default": "pending"
+    },
+    "received_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "value_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "currency": {
+      "type": "string",
+      "default": "EUR"
+    },
+    "amount_cents": {
+      "type": "number"
+    },
+    "allocated_cents": {
+      "type": "number",
+      "default": 0
+    },
+    "unallocated_cents": {
+      "type": "number"
+    },
+    "payer_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "payer_iban_masked": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reversal_of_payment_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reversed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "reversal_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "company_id",
+    "source",
+    "status",
+    "received_at",
+    "currency",
+    "amount_cents",
+    "unallocated_cents",
+    "idempotency_key"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

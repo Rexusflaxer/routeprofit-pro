@@ -1,0 +1,123 @@
+{
+  "name": "CommercialNumberReservation",
+  "type": "object",
+  "properties": {
+    "sequence_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": "string"
+    },
+    "document_type": {
+      "type": "string",
+      "enum": [
+        "customer",
+        "request",
+        "quote",
+        "contract",
+        "invoice",
+        "credit_note"
+      ]
+    },
+    "fiscal_year": {
+      "type": "number"
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "issue_token_hash": {
+      "type": "string",
+      "description": "Hash van het eenmalige uitgiftetoken; nooit het ruwe token opslaan."
+    },
+    "reserved_number": {
+      "type": "number"
+    },
+    "formatted_number": {
+      "type": "string"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "reserved",
+        "issued",
+        "issue_failed",
+        "cancelled"
+      ],
+      "default": "reserved"
+    },
+    "resource_type": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "resource_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "reserved_at": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "issued_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "failed_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "failure_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "sequence_id",
+    "company_id",
+    "document_type",
+    "fiscal_year",
+    "idempotency_key",
+    "issue_token_hash",
+    "reserved_number",
+    "formatted_number",
+    "status",
+    "reserved_at"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

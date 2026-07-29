@@ -1,0 +1,163 @@
+{
+  "name": "CustomerContractLine",
+  "type": "object",
+  "properties": {
+    "contract_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": "string"
+    },
+    "sequence": {
+      "type": "number"
+    },
+    "service_code": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "name": {
+      "type": "string"
+    },
+    "description": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "scope_type": {
+      "type": "string",
+      "enum": [
+        "customer",
+        "object",
+        "collective"
+      ],
+      "default": "customer"
+    },
+    "object_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "collective_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "billing_model": {
+      "type": "string",
+      "enum": [
+        "fixed_period",
+        "per_execution",
+        "per_minute",
+        "per_hour",
+        "per_unit",
+        "per_kilometer"
+      ]
+    },
+    "billing_frequency": {
+      "type": "string",
+      "enum": [
+        "weekly",
+        "four_weekly",
+        "monthly",
+        "quarterly",
+        "annually",
+        "on_completion",
+        "manual"
+      ],
+      "default": "monthly"
+    },
+    "included_quantity_minor": {
+      "type": "number",
+      "default": 0
+    },
+    "currency": {
+      "type": "string",
+      "default": "EUR"
+    },
+    "vat_rate_basis_points": {
+      "type": "number",
+      "default": 2100
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "draft",
+        "active",
+        "suspended",
+        "ended",
+        "archived"
+      ],
+      "default": "draft"
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    }
+  },
+  "required": [
+    "contract_id",
+    "company_id",
+    "customer_id",
+    "customer_account_id",
+    "sequence",
+    "name",
+    "scope_type",
+    "billing_model",
+    "currency",
+    "status"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

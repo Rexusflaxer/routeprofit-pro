@@ -1,0 +1,134 @@
+{
+  "name": "CustomerPortalMembership",
+  "type": "object",
+  "properties": {
+    "invitation_id": {
+      "type": "string",
+      "description": "Oorspronkelijke uitnodiging voor idempotente acceptatie."
+    },
+    "user_id": {
+      "type": "string"
+    },
+    "company_id": {
+      "type": "string"
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "contact_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "active",
+        "suspended",
+        "revoked",
+        "expired"
+      ],
+      "default": "active"
+    },
+    "valid_from": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "role_template": {
+      "type": "string",
+      "enum": [
+        "portal_admin",
+        "viewer",
+        "operations",
+        "reports",
+        "finance",
+        "custom"
+      ],
+      "default": "custom"
+    },
+    "accepted_terms_version": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "accepted_terms_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "suspended_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "revoked_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "last_access_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "invitation_id",
+    "user_id",
+    "company_id",
+    "customer_id",
+    "status",
+    "valid_from",
+    "role_template"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

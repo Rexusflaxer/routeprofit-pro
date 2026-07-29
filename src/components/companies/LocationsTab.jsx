@@ -122,7 +122,7 @@ export default function LocationsTab({ companies, companyId = null, company = nu
     if (addrTimeout.current) clearTimeout(addrTimeout.current);
     if (val.length >= 3) {
       addrTimeout.current = setTimeout(async () => {
-        const { data } = await base44.functions.invoke("searchAddress", { query: val });
+        const { data } = await base44.functions.invoke("lookupService", { action: "search_address", query: val });
         setAddressSugg(data.suggestions || []);
         setShowSugg(true);
       }, 300);

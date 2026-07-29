@@ -30,7 +30,12 @@ export default function PersonnelAccessTab({ personnel }) {
   const createInvitation = async () => {
     if (!newEmail) return;
     setCreating(true);
-    await base44.functions.invoke("employeeInvitationAction", { action: "create_invitation", personnel_id: personnel.id, email: newEmail });
+    await base44.functions.invoke("employeePortalApi", {
+      action: "invitation",
+      operation: "create_invitation",
+      personnel_id: personnel.id,
+      email: newEmail,
+    });
     queryClient.invalidateQueries({ queryKey: ["employee_invitations", personnel.id] });
     setCreating(false);
   };
@@ -38,7 +43,11 @@ export default function PersonnelAccessTab({ personnel }) {
   const revokeLink = async () => {
     if (!confirm("Weet u zeker dat u de koppeling wilt intrekken? Het medewerkerdossier blijft behouden.")) return;
     setRevoking(true);
-    await base44.functions.invoke("employeeInvitationAction", { action: "revoke_link", personnel_id: personnel.id });
+    await base44.functions.invoke("employeePortalApi", {
+      action: "invitation",
+      operation: "revoke_link",
+      personnel_id: personnel.id,
+    });
     queryClient.invalidateQueries({ queryKey: ["personnel"] });
     setRevoking(false);
   };

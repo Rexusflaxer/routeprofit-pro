@@ -1,0 +1,228 @@
+{
+  "name": "BillingCandidate",
+  "type": "object",
+  "properties": {
+    "company_id": {
+      "type": "string",
+      "description": "Verkopende/facturerende BV."
+    },
+    "customer_id": {
+      "type": "string"
+    },
+    "customer_account_id": {
+      "type": "string"
+    },
+    "source_type": {
+      "type": "string",
+      "enum": [
+        "task_execution",
+        "contract_period",
+        "manual",
+        "correction"
+      ]
+    },
+    "source_id": {
+      "type": "string"
+    },
+    "task_execution_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_contract_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_contract_line_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "customer_contract_rate_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "candidate_type": {
+      "type": "string",
+      "enum": [
+        "charge",
+        "credit"
+      ],
+      "default": "charge"
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "blocked",
+        "ready",
+        "approved",
+        "invoiced",
+        "rejected",
+        "cancelled"
+      ],
+      "default": "pending"
+    },
+    "block_code": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "Bijv. missing_rate, overlapping_rate, company_mismatch of financial_review_required."
+    },
+    "block_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "service_date": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "period_start": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "period_end": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "description": {
+      "type": "string"
+    },
+    "quantity_minor": {
+      "type": "number",
+      "description": "Hoeveelheid in duizendsten van unit."
+    },
+    "unit": {
+      "type": "string",
+      "enum": [
+        "fixed",
+        "execution",
+        "minute",
+        "hour",
+        "unit",
+        "kilometer"
+      ]
+    },
+    "unit_price_cents": {
+      "type": "number"
+    },
+    "subtotal_cents": {
+      "type": "number"
+    },
+    "vat_rate_basis_points": {
+      "type": "number"
+    },
+    "tax_cents": {
+      "type": "number"
+    },
+    "total_cents": {
+      "type": "number"
+    },
+    "currency": {
+      "type": "string",
+      "default": "EUR"
+    },
+    "pricing_snapshot": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "customer_snapshot": {
+      "type": "object",
+      "additionalProperties": true
+    },
+    "approved_by_user_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "approved_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "invoice_line_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "idempotency_key": {
+      "type": "string"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "company_id",
+    "customer_id",
+    "customer_account_id",
+    "source_type",
+    "source_id",
+    "candidate_type",
+    "status",
+    "description",
+    "quantity_minor",
+    "unit",
+    "unit_price_cents",
+    "subtotal_cents",
+    "vat_rate_basis_points",
+    "tax_cents",
+    "total_cents",
+    "currency",
+    "pricing_snapshot",
+    "customer_snapshot",
+    "idempotency_key"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

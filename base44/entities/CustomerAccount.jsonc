@@ -1,0 +1,239 @@
+{
+  "name": "CustomerAccount",
+  "type": "object",
+  "properties": {
+    "customer_id": {
+      "type": "string",
+      "description": "Juridische/commerciële klant."
+    },
+    "company_id": {
+      "type": "string",
+      "description": "Eigen BV die verkoopt en factureert."
+    },
+    "debtor_number": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "status": {
+      "type": "string",
+      "enum": [
+        "pending",
+        "active",
+        "on_hold",
+        "ended",
+        "archived"
+      ],
+      "default": "active"
+    },
+    "is_primary": {
+      "type": "boolean",
+      "default": false
+    },
+    "account_manager_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "User- of Personnel-ID van de verantwoordelijke accountmanager."
+    },
+    "billing_name": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "billing_address_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "billing_contact_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "invoice_email": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "currency": {
+      "type": "string",
+      "default": "EUR"
+    },
+    "payment_term_days": {
+      "type": "number",
+      "default": 30
+    },
+    "billing_frequency": {
+      "type": "string",
+      "enum": [
+        "weekly",
+        "four_weekly",
+        "monthly",
+        "quarterly",
+        "annually",
+        "on_completion",
+        "manual"
+      ],
+      "default": "monthly"
+    },
+    "invoice_delivery_method": {
+      "type": "string",
+      "enum": [
+        "email",
+        "portal",
+        "email_and_portal",
+        "peppol",
+        "manual"
+      ],
+      "default": "email"
+    },
+    "invoice_delivery_channel": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "enum": [
+        "email",
+        "portal",
+        "email_and_portal",
+        "peppol",
+        "manual",
+        null
+      ],
+      "description": "Compatibele enkelvoudige afleverkeuze voor integratiecallers."
+    },
+    "peppol_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "peppol_scheme_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "peppol_participant_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "peppol_scheme": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "peppol_identifier": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "allow_email_fallback": {
+      "type": "boolean",
+      "default": true
+    },
+    "customer_reference_required": {
+      "type": "boolean",
+      "default": false
+    },
+    "customer_reference_label": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "default_company_bank_account_id": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "finance_hold": {
+      "type": "boolean",
+      "default": false
+    },
+    "finance_hold_reason": {
+      "type": [
+        "string",
+        "null"
+      ]
+    },
+    "dunning_profile": {
+      "type": "string",
+      "enum": [
+        "b2b_standard",
+        "b2c_wik14",
+        "manual",
+        "none"
+      ],
+      "default": "b2b_standard"
+    },
+    "valid_from": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "valid_until": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date"
+    },
+    "version": {
+      "type": "number",
+      "default": 1
+    },
+    "archived_at": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "format": "date-time"
+    },
+    "metadata": {
+      "type": [
+        "object",
+        "null"
+      ],
+      "additionalProperties": true
+    }
+  },
+  "required": [
+    "customer_id",
+    "company_id"
+  ],
+  "rls": {
+    "create": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "read": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "update": {
+      "user_condition": {
+        "role": "admin"
+      }
+    },
+    "delete": {
+      "user_condition": {
+        "role": "admin"
+      }
+    }
+  }
+}

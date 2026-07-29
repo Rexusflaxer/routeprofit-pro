@@ -84,7 +84,7 @@ export default function ObjectForm({ object, onSave, onCancel }) {
       addressTimeoutRef.current = setTimeout(async () => {
         setLoadingAddress(true);
         try {
-          const { data } = await base44.functions.invoke('searchAddress', { query: value });
+          const { data } = await base44.functions.invoke('lookupService', { action: 'search_address', query: value });
           setAddressSuggestions(data.suggestions || []);
           setShowSuggestions(true);
         } catch (error) {

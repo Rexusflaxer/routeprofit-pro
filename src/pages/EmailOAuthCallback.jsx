@@ -34,7 +34,8 @@ export default function EmailOAuthCallback() {
 
       try {
         const redirectUri = `${window.location.origin}/email-oauth/callback`;
-        const { data } = await base44.functions.invoke("completeCompanyEmailOAuth", {
+        const { data } = await base44.functions.invoke("companyEmailService", {
+          action: "complete_oauth",
           code,
           state,
           redirect_uri: redirectUri,

@@ -4536,6 +4536,7 @@ Deno.serve(async (req) => {
           calculation_status: 'blocked_contract_scope_mismatch'
         }, { status: 400 });
       }
+      }
       callAgreementContractMix = buildCallAgreementContractMix(contractResolutionResults);
       if (callAgreementContractMix.has_mixed_call_agreement_treatment) {
         return Response.json({
